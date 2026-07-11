@@ -9,7 +9,8 @@
 // Money is stored as Decimal(12, 2); quantities as Decimal(12, 3).
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {

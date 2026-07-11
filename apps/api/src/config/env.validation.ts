@@ -1,5 +1,5 @@
 import { plainToInstance, Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min, validateSync } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min, validateSync } from 'class-validator';
 
 export enum NodeEnv {
   Development = 'development',
@@ -25,6 +25,11 @@ export class EnvironmentVariables {
 
   @IsString()
   DATABASE_URL!: string;
+
+  /** How to reach the database: 'postgres' (built-in TCP driver) or 'neon'. */
+  @IsIn(['postgres', 'neon'])
+  @IsOptional()
+  DB_PROVIDER = 'postgres';
 
   @IsString()
   @IsOptional()
