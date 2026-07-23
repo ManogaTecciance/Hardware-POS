@@ -23,7 +23,7 @@ function initials(name: string): string {
 
 export function Header() {
   const { session, logout } = useAuth();
-  const { toggleCollapsed, openMobile } = useSidebar();
+  const { openMobile } = useSidebar();
   const router = useRouter();
   if (!session) return null;
 
@@ -32,30 +32,20 @@ export function Header() {
     router.replace('/login');
   };
 
-  // Below md the button opens the mobile drawer; at md and up it toggles the
-  // desktop rail's collapsed state.
-  const onToggleNav = () => {
-    if (window.matchMedia('(min-width: 768px)').matches) toggleCollapsed();
-    else openMobile();
-  };
-
   return (
     <header className="flex h-16 items-center justify-between gap-3 border-b border-border bg-surface px-4 md:px-6">
-      <div className="flex min-w-0 items-center gap-2 md:gap-4">
-        <Button variant="ghost" size="icon" onClick={onToggleNav} aria-label="Toggle navigation">
+      {/* Mobile-only drawer opener — on desktop the rail has its own collapse
+          control at the bottom of the sidebar. */}
+      <div className="flex min-w-0 items-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={openMobile}
+          aria-label="Open navigation"
+          className="md:hidden"
+        >
           <PanelLeft className="h-5 w-5" />
         </Button>
-        <div className="hidden items-center gap-3 text-sm text-muted-foreground lg:flex">
-          <span className="inline-flex items-center gap-1.5">
-            <Building2 className="h-4 w-4" />
-            {session.branchName}
-          </span>
-          <span className="h-4 w-px bg-border" aria-hidden />
-          <span className="inline-flex items-center gap-1.5">
-            <MonitorSmartphone className="h-4 w-4" />
-            {session.registerName}
-          </span>
-        </div>
       </div>
 
       <div className="flex min-w-0 items-center justify-end gap-2 md:gap-3">
