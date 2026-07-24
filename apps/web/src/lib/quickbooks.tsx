@@ -5,7 +5,12 @@ import * as React from 'react';
 import { api } from './api';
 import { useAuth, type Session } from './auth';
 import { fetchProducts } from './products-api';
-import { syncQuickBooksProducts, type SyncProductsSummary } from './quickbooks-api';
+import {
+  syncQuickBooksAll,
+  syncQuickBooksProducts,
+  type SyncAllSummary,
+  type SyncProductsSummary,
+} from './quickbooks-api';
 
 export type SyncState = 'SYNCED' | 'SYNCING' | 'FAILED' | 'PENDING' | 'NOT_SYNCED';
 
@@ -28,7 +33,13 @@ export interface QbProduct {
   lastSyncISO: string | null;
 }
 
-export type QbLogType = 'PRODUCT_PULL' | 'SALE_PUSH' | 'RETURN_PUSH' | 'CUSTOMER_PULL' | 'CONNECTION';
+export type QbLogType =
+  | 'PRODUCT_PULL'
+  | 'SALE_PUSH'
+  | 'RETURN_PUSH'
+  | 'CUSTOMER_PULL'
+  | 'VENDOR_PULL'
+  | 'CONNECTION';
 
 export interface QbLogEntry {
   id: string;
@@ -46,6 +57,14 @@ export interface QbState {
   lastSyncISO: string | null;
   productSync: { status: SyncState; count: number; lastSyncISO: string | null };
   salesSync: { status: SyncState; pushed: number; lastSyncISO: string | null };
+  customerSync: { status: SyncState; linked: number; total: number; lastSyncISO: string | null };
+  vendorSync: {
+    status: SyncState;
+    linked: number;
+    total: number;
+    attention: number;
+    lastSyncISO: string | null;
+  };
   errorsCount: number;
   log: QbLogEntry[];
   products: QbProduct[];
@@ -58,10 +77,18 @@ const DISCONNECTED_STATE: QbState = {
   lastSyncISO: null,
   productSync: { status: 'NOT_SYNCED', count: 0, lastSyncISO: null },
   salesSync: { status: 'NOT_SYNCED', pushed: 0, lastSyncISO: null },
+  customerSync: { status: 'NOT_SYNCED', linked: 0, total: 0, lastSyncISO: null },
+  vendorSync: { status: 'NOT_SYNCED', linked: 0, total: 0, attention: 0, lastSyncISO: null },
   errorsCount: 0,
   log: [],
   products: [],
 };
+
+/** Customer / vendor mapping counts from GET /quickbooks/party-sync-status. */
+interface PartySyncStatus {
+  customers: { linked: number; total: number; lastSyncedAt: string | null };
+  vendors: { linked: number; total: number; attention: number; lastSyncedAt: string | null };
+}
 
 // ── API response shapes ──────────────────────────────────────────────────────
 
@@ -97,6 +124,7 @@ const LOG_TYPE_BY_ENTITY: Record<string, QbLogType> = {
   SALE: 'SALE_PUSH',
   RETURN: 'RETURN_PUSH',
   CUSTOMER: 'CUSTOMER_PULL',
+  SUPPLIER: 'VENDOR_PULL',
   CONNECTION: 'CONNECTION',
 };
 
@@ -115,6 +143,7 @@ function buildState(
   queue: QueueStatus | null,
   logs: SyncLogRow[],
   products: QbProduct[],
+  parties: PartySyncStatus | null,
 ): QbState {
   if (!connection.connected || !connection.realmId) {
     return DISCONNECTED_STATE;
@@ -167,6 +196,24 @@ function buildState(
       pushed: queue?.pushedSalesCount ?? 0,
       lastSyncISO: queue?.lastSyncedAt ?? null,
     },
+    customerSync: {
+      status: (parties?.customers.linked ?? 0) > 0 ? 'SYNCED' : 'NOT_SYNCED',
+      linked: parties?.customers.linked ?? 0,
+      total: parties?.customers.total ?? 0,
+      lastSyncISO: parties?.customers.lastSyncedAt ?? null,
+    },
+    vendorSync: {
+      status:
+        (parties?.vendors.attention ?? 0) > 0
+          ? 'FAILED'
+          : (parties?.vendors.linked ?? 0) > 0
+            ? 'SYNCED'
+            : 'NOT_SYNCED',
+      linked: parties?.vendors.linked ?? 0,
+      total: parties?.vendors.total ?? 0,
+      attention: parties?.vendors.attention ?? 0,
+      lastSyncISO: parties?.vendors.lastSyncedAt ?? null,
+    },
     errorsCount: queue?.failedCount ?? 0,
     log,
     products,
@@ -183,6 +230,8 @@ interface QuickBooksContextValue {
   disconnect: () => Promise<void>;
   /** Trigger a product pull; resolves with the summary (null on failure). */
   syncProducts: () => Promise<SyncProductsSummary | null>;
+  /** Full sync: products + customer/vendor mapping reconciliation. */
+  syncAll: () => Promise<SyncAllSummary | null>;
 }
 
 const QuickBooksContext = React.createContext<QuickBooksContextValue | null>(null);
@@ -208,10 +257,11 @@ export function QuickBooksProvider({ children }: { children: React.ReactNode }) 
         return;
       }
       // Secondary data is best-effort: a failed piece degrades to empty, not a dead page.
-      const [queue, logs, products] = await Promise.allSettled([
+      const [queue, logs, products, parties] = await Promise.allSettled([
         api.get<QueueStatus>('/sync/status', auth(session)),
         api.get<{ items: SyncLogRow[] }>('/sync/logs?page=1&pageSize=50', auth(session)),
         fetchProducts(session, { pageSize: 200 }),
+        api.get<PartySyncStatus>('/quickbooks/party-sync-status', auth(session)),
       ]);
       setState(
         buildState(
@@ -232,6 +282,7 @@ export function QuickBooksProvider({ children }: { children: React.ReactNode }) 
                   lastSyncISO: p.lastSyncedAt,
                 }))
             : [],
+          parties.status === 'fulfilled' ? parties.value : null,
         ),
       );
       setError(null);
@@ -278,12 +329,34 @@ export function QuickBooksProvider({ children }: { children: React.ReactNode }) 
     }
   }, [session, refresh]);
 
+  const syncAll = React.useCallback(async (): Promise<SyncAllSummary | null> => {
+    if (!session) return null;
+    setSyncing(true);
+    try {
+      const summary = await syncQuickBooksAll(session);
+      await refresh();
+      return summary;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'QuickBooks sync failed');
+      return null;
+    } finally {
+      setSyncing(false);
+    }
+  }, [session, refresh]);
+
   const value = React.useMemo(() => {
+    // While a sync runs, every entity the combined sync touches shows as
+    // in-flight — not just products.
     const visibleState = syncing
-      ? { ...state, productSync: { ...state.productSync, status: 'SYNCING' as SyncState } }
+      ? {
+          ...state,
+          productSync: { ...state.productSync, status: 'SYNCING' as SyncState },
+          customerSync: { ...state.customerSync, status: 'SYNCING' as SyncState },
+          vendorSync: { ...state.vendorSync, status: 'SYNCING' as SyncState },
+        }
       : state;
-    return { state: visibleState, loading, error, refresh, connect, disconnect, syncProducts };
-  }, [state, syncing, loading, error, refresh, connect, disconnect, syncProducts]);
+    return { state: visibleState, loading, error, refresh, connect, disconnect, syncProducts, syncAll };
+  }, [state, syncing, loading, error, refresh, connect, disconnect, syncProducts, syncAll]);
 
   return <QuickBooksContext.Provider value={value}>{children}</QuickBooksContext.Provider>;
 }

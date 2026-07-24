@@ -24,8 +24,6 @@ export const Permission = {
   SUPPLIER_READ: 'supplier:read',
   SUPPLIER_MANAGE: 'supplier:manage',
   SUPPLIER_DELETE: 'supplier:delete',
-  SUPPLIER_BANK_VIEW: 'supplier:bank:view',
-  SUPPLIER_FINANCIALS_READ: 'supplier:financials:read',
   SUPPLIER_QB_MAP: 'supplier:qb:map',
   SYNC_READ: 'sync:read',
   QUICKBOOKS_READ: 'quickbooks:read',
@@ -66,7 +64,6 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     // view protected bank details.
     Permission.SUPPLIER_READ,
     Permission.SUPPLIER_MANAGE,
-    Permission.SUPPLIER_FINANCIALS_READ,
     Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
   ],
@@ -95,7 +92,6 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     // Accountant: read suppliers, view financial summaries and QuickBooks
     // mapping; no operational editing, delete, or bank access.
     Permission.SUPPLIER_READ,
-    Permission.SUPPLIER_FINANCIALS_READ,
     Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
   ],

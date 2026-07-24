@@ -10,6 +10,7 @@ import {
   type ReturnReasonCode,
 } from '@hardware-pos/shared';
 
+import { customerAddressLine } from '../../common/customer-display';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { DocumentSettings } from '../settings/settings.interfaces';
@@ -243,11 +244,11 @@ export class DocumentsService {
         sale.customer
           ? {
               name: sale.customer.name,
-              companyName: sale.customer.companyName,
+              companyName: sale.customer.company,
               phone: sale.customer.phone,
               email: sale.customer.email,
-              billingAddress: sale.customer.billingAddress,
-              taxNumber: sale.customer.taxNumber,
+              billingAddress: customerAddressLine(sale.customer),
+              taxNumber: sale.customer.resaleNumber,
             }
           : null,
         docs.showCustomerTaxNumber,
@@ -335,11 +336,11 @@ export class DocumentsService {
         ret.customer
           ? {
               name: ret.customer.name,
-              companyName: ret.customer.companyName,
+              companyName: ret.customer.company,
               phone: ret.customer.phone,
               email: ret.customer.email,
-              billingAddress: ret.customer.billingAddress,
-              taxNumber: ret.customer.taxNumber,
+              billingAddress: customerAddressLine(ret.customer),
+              taxNumber: ret.customer.resaleNumber,
             }
           : null,
         docs.showCustomerTaxNumber,

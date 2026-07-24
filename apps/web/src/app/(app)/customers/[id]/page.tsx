@@ -82,7 +82,7 @@ export default function CustomerDetailPage() {
           <h1 className="text-2xl font-semibold tracking-tight">{customer.name}</h1>
           <p className="text-sm text-muted-foreground">
             {CUSTOMER_TYPE_LABELS[customer.customerType]}
-            {customer.companyName ? ` · ${customer.companyName}` : ''}
+            {customer.company ? ` · ${customer.company}` : ''}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -111,34 +111,86 @@ export default function CustomerDetailPage() {
         <SyncBadge status={customer.quickbooksCustomerId ? 'SYNCED' : customer.syncStatus} />
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Details</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-          <Detail label="Phone" value={customer.phone ?? '—'} />
-          <Detail label="Email" value={customer.email ?? '—'} />
-          <Detail label="Tax / VAT number" value={customer.taxNumber ?? '—'} />
-          <Detail label="Credit" value={customer.creditAllowed ? 'Allowed' : 'Not allowed'} />
-          <Detail
-            label="Credit limit"
-            value={customer.creditAllowed ? (customer.creditLimit != null ? formatMoney(customer.creditLimit) : 'No limit') : '—'}
-          />
-          <Detail label="QuickBooks customer ID" value={customer.quickbooksCustomerId ?? 'Not synced'} />
-          {customer.billingAddress ? (
-            <div className="sm:col-span-2">
-              <div className="text-xs text-muted-foreground">Address</div>
-              <p className="mt-0.5 whitespace-pre-line font-medium">{customer.billingAddress}</p>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Customer details</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <Detail label="Company" value={customer.company ?? '—'} />
+            <Detail label="Customer type (QuickBooks)" value={customer.qbCustomerType ?? '—'} />
+            <Detail label="Email" value={customer.email ?? '—'} />
+            <Detail label="Phone" value={customer.phone ?? '—'} />
+            <Detail label="Mobile" value={customer.mobile ?? '—'} />
+            <Detail label="Fax" value={customer.fax ?? '—'} />
+            <Detail label="Website" value={customer.website ?? '—'} />
+            <Detail label="Resale number" value={customer.resaleNumber ?? '—'} />
+            <Detail label="QuickBooks customer ID" value={customer.quickbooksCustomerId ?? 'Not synced'} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Payments &amp; credit</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-y-3 text-sm">
+            <Detail label="POS customer type" value={CUSTOMER_TYPE_LABELS[customer.customerType]} />
+            <Detail label="Credit" value={customer.creditAllowed ? 'Allowed' : 'Not allowed'} />
+            <Detail
+              label="Credit limit"
+              value={
+                customer.creditAllowed
+                  ? customer.creditLimit != null
+                    ? formatMoney(customer.creditLimit)
+                    : 'No limit'
+                  : '—'
+              }
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Address</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <Detail label="Street" value={customer.street ?? '—'} />
+            <Detail label="City" value={customer.city ?? '—'} />
+            <Detail label="State / Province" value={customer.state ?? '—'} />
+            <Detail label="ZIP / Postal code" value={customer.zip ?? '—'} />
+            <Detail label="Country" value={customer.country ?? '—'} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Opening balance</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div>
+              <div className="text-xs text-muted-foreground">Amount (as entered)</div>
+              <div className="text-lg font-semibold tabular-nums">
+                {customer.openingBalance != null ? formatMoney(customer.openingBalance) : '—'}
+              </div>
             </div>
-          ) : null}
-          {customer.notes ? (
-            <div className="sm:col-span-2">
-              <div className="text-xs text-muted-foreground">Notes</div>
-              <p className="mt-0.5">{customer.notes}</p>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+            <Detail
+              label="As of"
+              value={
+                customer.openingBalanceDate
+                  ? new Date(customer.openingBalanceDate).toLocaleDateString('en-GB', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                    })
+                  : '—'
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              The live receivable balance lives in QuickBooks (Sales → Customers).
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

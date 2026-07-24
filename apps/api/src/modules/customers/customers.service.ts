@@ -39,15 +39,24 @@ export class CustomersService {
     const data: Prisma.CustomerUncheckedCreateInput = {
       tenantId,
       name: dto.name,
-      companyName: dto.companyName ?? null,
-      customerType: dto.customerType ?? 'RETAIL',
+      company: dto.company ?? null,
+      qbCustomerType: dto.qbCustomerType ?? null,
       email: dto.email ?? null,
       phone: dto.phone ?? null,
-      billingAddress: dto.billingAddress ?? null,
-      taxNumber: dto.taxNumber ?? null,
+      mobile: dto.mobile ?? null,
+      fax: dto.fax ?? null,
+      website: dto.website ?? null,
+      street: dto.street ?? null,
+      city: dto.city ?? null,
+      state: dto.state ?? null,
+      zip: dto.zip ?? null,
+      country: dto.country ?? null,
+      openingBalance: dto.openingBalance ?? null,
+      openingBalanceDate: dto.openingBalanceDate ? new Date(dto.openingBalanceDate) : null,
+      resaleNumber: dto.resaleNumber ?? null,
+      customerType: dto.customerType ?? 'RETAIL',
       creditAllowed: dto.creditAllowed ?? false,
       creditLimit: dto.creditLimit ?? null,
-      notes: dto.notes ?? null,
       isActive: dto.isActive ?? true,
       syncStatus: 'NOT_SYNCED',
     };
@@ -59,15 +68,29 @@ export class CustomersService {
     // Prisma treats `undefined` as "leave unchanged"; column names match the DTO.
     const data: Prisma.CustomerUncheckedUpdateInput = {
       name: dto.name,
-      companyName: dto.companyName,
-      customerType: dto.customerType,
+      company: dto.company,
+      qbCustomerType: dto.qbCustomerType,
       email: dto.email,
       phone: dto.phone,
-      billingAddress: dto.billingAddress,
-      taxNumber: dto.taxNumber,
+      mobile: dto.mobile,
+      fax: dto.fax,
+      website: dto.website,
+      street: dto.street,
+      city: dto.city,
+      state: dto.state,
+      zip: dto.zip,
+      country: dto.country,
+      openingBalance: dto.openingBalance,
+      openingBalanceDate:
+        dto.openingBalanceDate === undefined
+          ? undefined
+          : dto.openingBalanceDate === null
+            ? null
+            : new Date(dto.openingBalanceDate),
+      resaleNumber: dto.resaleNumber,
+      customerType: dto.customerType,
       creditAllowed: dto.creditAllowed,
       creditLimit: dto.creditLimit,
-      notes: dto.notes,
       isActive: dto.isActive,
     };
     return this.customersRepository.update(id, data);

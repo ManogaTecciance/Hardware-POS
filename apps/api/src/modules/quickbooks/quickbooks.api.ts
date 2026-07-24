@@ -146,6 +146,86 @@ export async function queryItemById(params: RequestParams, id: string): Promise<
   return json.QueryResponse?.Item?.[0] ?? null;
 }
 
+/** Postal address as QBO returns it. */
+export interface QboAddress {
+  Line1?: string;
+  Line2?: string;
+  City?: string;
+  /** State / province code. */
+  CountrySubDivisionCode?: string;
+  PostalCode?: string;
+  Country?: string;
+}
+
+/** A QuickBooks Vendor (the fields supplier mapping + pull-create need). */
+export interface QboVendor {
+  Id: string;
+  DisplayName: string;
+  CompanyName?: string;
+  PrimaryEmailAddr?: { Address?: string };
+  PrimaryPhone?: { FreeFormNumber?: string };
+  Mobile?: { FreeFormNumber?: string };
+  Fax?: { FreeFormNumber?: string };
+  WebAddr?: { URI?: string };
+  BillAddr?: QboAddress;
+  TaxIdentifier?: string;
+  Balance?: number;
+  Active?: boolean;
+}
+
+/** Search active vendors by display name (empty term returns the first page). */
+export async function queryVendors(params: RequestParams, term: string): Promise<QboVendor[]> {
+  const safe = term.replace(/'/g, "\\'");
+  const where = safe ? ` where DisplayName like '%${safe}%'` : '';
+  const json = await runQuery<{ QueryResponse?: { Vendor?: QboVendor[] } }>(
+    params,
+    `select Id, DisplayName, Balance, Active from Vendor${where} maxresults 50`,
+  );
+  return (json.QueryResponse?.Vendor ?? []).filter((v) => v.Active !== false);
+}
+
+/** List vendors with full detail for a reconciliation / pull-create pass. */
+export async function queryAllVendors(params: RequestParams): Promise<QboVendor[]> {
+  const json = await runQuery<{ QueryResponse?: { Vendor?: QboVendor[] } }>(
+    params,
+    'select * from Vendor maxresults 1000',
+  );
+  return json.QueryResponse?.Vendor ?? [];
+}
+
+/** A QuickBooks Customer (the fields party sync + pull-create need). */
+export interface QboCustomer {
+  Id: string;
+  DisplayName: string;
+  CompanyName?: string;
+  PrimaryEmailAddr?: { Address?: string };
+  PrimaryPhone?: { FreeFormNumber?: string };
+  Mobile?: { FreeFormNumber?: string };
+  Fax?: { FreeFormNumber?: string };
+  WebAddr?: { URI?: string };
+  BillAddr?: QboAddress;
+  ResaleNum?: string;
+  Active?: boolean;
+}
+
+/** List customers with full detail for a reconciliation / pull-create pass. */
+export async function queryAllCustomers(params: RequestParams): Promise<QboCustomer[]> {
+  const json = await runQuery<{ QueryResponse?: { Customer?: QboCustomer[] } }>(
+    params,
+    'select * from Customer maxresults 1000',
+  );
+  return json.QueryResponse?.Customer ?? [];
+}
+
+/** Fetch one Vendor by id. */
+export async function queryVendorById(params: RequestParams, id: string): Promise<QboVendor | null> {
+  const json = await runQuery<{ QueryResponse?: { Vendor?: QboVendor[] } }>(
+    params,
+    `select Id, DisplayName, Balance, Active from Vendor where Id = '${id.replace(/'/g, '')}'`,
+  );
+  return json.QueryResponse?.Vendor?.[0] ?? null;
+}
+
 /** List accounts (for resolving the Income / COGS / Inventory Asset refs). */
 export async function queryAccounts(params: RequestParams): Promise<QboAccount[]> {
   const json = await runQuery<{ QueryResponse?: { Account?: QboAccount[] } }>(

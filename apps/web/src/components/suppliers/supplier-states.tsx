@@ -1,8 +1,7 @@
-import { AlertCircle, FlaskConical, Inbox, RefreshCw, type LucideIcon } from 'lucide-react';
+import { AlertCircle, Inbox, RefreshCw, type LucideIcon } from 'lucide-react';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 /** Meaningful empty state with an optional primary action. */
@@ -78,26 +77,6 @@ export function SupplierTableSkeleton({ rows = 6 }: { rows?: number }) {
           <Skeleton className="h-6 w-16 rounded-full" />
         </div>
       ))}
-    </div>
-  );
-}
-
-/** Persistent, clearly-labelled banner shown while the module runs on demo data. */
-export function DemoDataBanner({ className }: { className?: string }) {
-  return (
-    <div
-      role="status"
-      className={cn(
-        'flex items-start gap-2 rounded-xl border border-warning/40 bg-warning-soft px-3 py-2 text-xs text-warning',
-        className,
-      )}
-    >
-      <FlaskConical className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-      <span>
-        <span className="font-semibold">Demo data.</span> The supplier backend isn’t connected yet, so
-        figures shown here are sample data — not live records. QuickBooks Online remains the source of
-        truth for financials.
-      </span>
     </div>
   );
 }

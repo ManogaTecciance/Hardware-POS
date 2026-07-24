@@ -39,6 +39,14 @@ export class QuickBooksRepository {
     });
   }
 
+  /** Mark the connection dead (e.g. the refresh token was revoked or expired). */
+  async deactivate(tenantId: string): Promise<void> {
+    await this.prisma.quickBooksConnection.updateMany({
+      where: { tenantId },
+      data: { isActive: false },
+    });
+  }
+
   /** Update just the rotated tokens after a refresh. */
   updateTokens(
     tenantId: string,

@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Drawer } from '@/components/ui/drawer';
 import { Input } from '@/components/ui/input';
 import type { Session } from '@/lib/auth';
-import { fetchQbVendors, mapQbVendor, type QbVendorOption } from '@/lib/suppliers/suppliers-api';
 import { formatBalance } from '@/lib/suppliers/format';
-import type { Supplier } from '@/lib/suppliers/types';
+import { fetchQbVendors, mapQbVendor } from '@/lib/suppliers/suppliers-api';
+import type { QbVendorOption, Supplier } from '@/lib/suppliers/types';
 import { cn } from '@/lib/utils';
 
 export function SupplierQuickBooksMappingDrawer({
@@ -20,7 +20,7 @@ export function SupplierQuickBooksMappingDrawer({
   onMapped,
 }: {
   open: boolean;
-  supplier: Pick<Supplier, 'id' | 'name' | 'code' | 'quickbooks'>;
+  supplier: Pick<Supplier, 'id' | 'name' | 'quickbooks'>;
   session: Session;
   onClose: () => void;
   onMapped: (updated: Supplier) => void;
@@ -32,7 +32,7 @@ export function SupplierQuickBooksMappingDrawer({
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const alreadyMapped = supplier.quickbooks.status !== 'NOT_CONNECTED' && !!supplier.quickbooks.quickbooksVendorId;
+  const alreadyMapped = supplier.quickbooks.vendorId != null;
 
   React.useEffect(() => {
     if (!open) return;
@@ -62,7 +62,7 @@ export function SupplierQuickBooksMappingDrawer({
     setBusy(true);
     setError(null);
     try {
-      const updated = await mapQbVendor(session, supplier.id, selected.id, selected.name);
+      const updated = await mapQbVendor(session, supplier.id, selected.id);
       onMapped(updated);
       onClose();
     } catch (err) {
@@ -76,7 +76,7 @@ export function SupplierQuickBooksMappingDrawer({
       open={open}
       onClose={onClose}
       title="QuickBooks vendor mapping"
-      description={`${supplier.name} · ${supplier.code}`}
+      description={supplier.name}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
@@ -97,7 +97,7 @@ export function SupplierQuickBooksMappingDrawer({
         {alreadyMapped ? (
           <div className="rounded-xl border border-border bg-muted/40 p-3 text-sm">
             <div className="text-xs text-muted-foreground">Currently mapped to</div>
-            <div className="font-medium">{supplier.quickbooks.quickbooksVendorName}</div>
+            <div className="font-medium">{supplier.quickbooks.vendorName}</div>
             <p className="mt-1 text-xs text-warning">
               Replacing this mapping will point AxloPOS at a different QuickBooks vendor. Confirm the new
               vendor is correct before saving.
@@ -125,7 +125,10 @@ export function SupplierQuickBooksMappingDrawer({
           {loading ? (
             <li className="px-1 py-6 text-center text-sm text-muted-foreground">Loading vendors…</li>
           ) : vendors.length === 0 ? (
-            <li className="px-1 py-6 text-center text-sm text-muted-foreground">No matching vendors found.</li>
+            <li className="px-1 py-6 text-center text-sm text-muted-foreground">
+              No matching vendors found. If QuickBooks isn’t connected, connect it from the QuickBooks
+              page first — vendors live under Expenses → Vendors in QuickBooks Online.
+            </li>
           ) : (
             vendors.map((v) => {
               const on = selected?.id === v.id;

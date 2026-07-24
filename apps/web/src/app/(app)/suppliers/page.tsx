@@ -2,48 +2,25 @@
 
 import Link from 'next/link';
 import * as React from 'react';
-import { Plus, Truck } from 'lucide-react';
+import { FileUp, Plus, Truck } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
-import { SupplierCard } from '@/components/suppliers/supplier-card';
+import { ImportSuppliersDialog } from '@/components/suppliers/import-suppliers-dialog';
 import { SupplierSearchFilters } from '@/components/suppliers/supplier-search-filters';
 import {
-  DemoDataBanner,
   SupplierEmptyState,
   SupplierErrorState,
   SupplierTableSkeleton,
 } from '@/components/suppliers/supplier-states';
-import { SupplierSummaryGrid } from '@/components/suppliers/supplier-summary-grid';
 import { SupplierTable } from '@/components/suppliers/supplier-table';
-import { useSupplierActionDialogs } from '@/components/suppliers/use-supplier-action-dialogs';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 import { deriveSupplierAccess } from '@/lib/suppliers/access';
-import { isDemoData } from '@/lib/suppliers/suppliers-api';
-import {
-  fetchSuppliers,
-  fetchSupplierSummary,
-  fetchSupplierCategories,
-} from '@/lib/suppliers/suppliers-api';
-import { activeFilterCount } from '@/lib/suppliers/view-models';
-import type {
-  SupplierCategoryRef,
-  SupplierListItem,
-  SupplierSummaryMetrics,
-  SuppliersQuery,
-} from '@/lib/suppliers/types';
+import { fetchSuppliers } from '@/lib/suppliers/suppliers-api';
+import type { Supplier, SuppliersQuery } from '@/lib/suppliers/types';
 
 const PAGE_SIZE = 20;
-
-type SummaryKey = 'active' | 'outstanding' | 'pending' | 'attention';
-
-const SUMMARY_FILTER: Record<SummaryKey, Partial<SuppliersQuery>> = {
-  active: { status: 'ACTIVE' },
-  outstanding: { hasOutstanding: true },
-  pending: { pendingActivity: true },
-  attention: { attention: true },
-};
 
 export default function SuppliersPage() {
   const { session } = useAuth();
@@ -54,22 +31,14 @@ export default function SuppliersPage() {
   const [filters, setFilters] = React.useState<SuppliersQuery>({ sort: 'name' });
   const [page, setPage] = React.useState(1);
 
-  const [rows, setRows] = React.useState<SupplierListItem[]>([]);
+  const [rows, setRows] = React.useState<Supplier[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-
-  const [metrics, setMetrics] = React.useState<SupplierSummaryMetrics | null>(null);
-  const [metricsLoading, setMetricsLoading] = React.useState(true);
-  const [categories, setCategories] = React.useState<SupplierCategoryRef[]>([]);
+  const [importOpen, setImportOpen] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
 
   const reload = React.useCallback(() => setReloadKey((k) => k + 1), []);
-
-  const { request, dialogs } = useSupplierActionDialogs(session, {
-    onChanged: reload,
-    onDeleted: reload,
-  });
 
   // Debounce search.
   React.useEffect(() => {
@@ -84,24 +53,6 @@ export default function SuppliersPage() {
     [filters, debouncedSearch, page],
   );
 
-  // Summary + categories (once per session / reload).
-  React.useEffect(() => {
-    if (!session || !access.canView) return;
-    let cancelled = false;
-    setMetricsLoading(true);
-    fetchSupplierSummary(session)
-      .then((m) => !cancelled && setMetrics(m))
-      .catch(() => !cancelled && setMetrics(null))
-      .finally(() => !cancelled && setMetricsLoading(false));
-    fetchSupplierCategories(session)
-      .then((c) => !cancelled && setCategories(c))
-      .catch(() => !cancelled && setCategories([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [session, access.canView, reloadKey]);
-
-  // List.
   React.useEffect(() => {
     if (!session || !access.canView) return;
     let cancelled = false;
@@ -115,7 +66,7 @@ export default function SuppliersPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Could not load suppliers.');
+        setError(err instanceof Error ? err.message : 'Could not load vendors.');
         setRows([]);
         setTotal(0);
       })
@@ -125,26 +76,8 @@ export default function SuppliersPage() {
     };
   }, [session, access.canView, query, reloadKey]);
 
-  const filterCount = activeFilterCount(filters);
+  const filterCount = (filters.isActive !== undefined ? 1 : 0) + (filters.qbStatus ? 1 : 0);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
-  const activeSummaryKey = (Object.keys(SUMMARY_FILTER) as SummaryKey[]).find((key) => {
-    const patch = SUMMARY_FILTER[key];
-    return Object.entries(patch).every(([k, v]) => filters[k as keyof SuppliersQuery] === v);
-  });
-
-  const onSelectSummary = (key: SummaryKey) => {
-    setFilters((f) => {
-      const patch = SUMMARY_FILTER[key];
-      const alreadyOn = Object.entries(patch).every(([k, v]) => f[k as keyof SuppliersQuery] === v);
-      if (alreadyOn) {
-        const next = { ...f };
-        for (const k of Object.keys(patch)) delete next[k as keyof SuppliersQuery];
-        return next;
-      }
-      return { ...f, ...patch };
-    });
-  };
 
   if (session && !access.canView) {
     return (
@@ -164,24 +97,21 @@ export default function SuppliersPage() {
     <div className="space-y-6">
       <PageHeader
         title="Suppliers"
-        description="Manage supplier contacts, product relationships, balances, and purchasing activity."
+        description="Vendors mirrored on the QuickBooks vendor record — import them in bulk or add them one at a time."
         actions={
           access.canManage ? (
-            <Link href="/suppliers/new" className={buttonVariants()}>
-              <Plus className="h-4 w-4" />
-              Add supplier
-            </Link>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                <FileUp className="h-4 w-4" />
+                Import
+              </Button>
+              <Link href="/suppliers/new" className={buttonVariants()}>
+                <Plus className="h-4 w-4" />
+                Add vendor
+              </Link>
+            </div>
           ) : undefined
         }
-      />
-
-      {isDemoData() ? <DemoDataBanner /> : null}
-
-      <SupplierSummaryGrid
-        metrics={metrics}
-        loading={metricsLoading}
-        activeKey={activeSummaryKey ?? null}
-        onSelect={onSelectSummary}
       />
 
       <SupplierSearchFilters
@@ -189,7 +119,6 @@ export default function SuppliersPage() {
         onSearchChange={setSearch}
         query={filters}
         onChange={(patch) => setFilters((f) => ({ ...f, ...patch }))}
-        categories={categories}
         activeCount={filterCount}
         onClear={() => {
           setFilters({ sort: filters.sort });
@@ -209,47 +138,55 @@ export default function SuppliersPage() {
         <Card>
           <SupplierEmptyState
             icon={Truck}
-            title={filterCount > 0 || debouncedSearch ? 'No suppliers match your filters' : 'No suppliers have been added yet'}
+            title={
+              filterCount > 0 || debouncedSearch
+                ? 'No vendors match your filters'
+                : 'No vendors have been added yet'
+            }
             description={
               filterCount > 0 || debouncedSearch
                 ? 'Try adjusting your search or clearing filters.'
-                : 'Add your first supplier to start tracking contacts, products, and purchasing activity.'
+                : 'Add your first vendor, or import them in bulk from the QuickBooks vendor template.'
             }
             action={
               access.canManage && filterCount === 0 && !debouncedSearch ? (
-                <Link href="/suppliers/new" className={buttonVariants()}>
-                  <Plus className="h-4 w-4" />
-                  Add supplier
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" onClick={() => setImportOpen(true)}>
+                    <FileUp className="h-4 w-4" />
+                    Import vendors
+                  </Button>
+                  <Link href="/suppliers/new" className={buttonVariants()}>
+                    <Plus className="h-4 w-4" />
+                    Add vendor
+                  </Link>
+                </div>
               ) : undefined
             }
           />
         </Card>
       ) : (
-        <>
-          {/* Desktop / laptop: data table. */}
-          <Card className="hidden overflow-hidden lg:block">
-            <div className="overflow-x-auto">
-              <SupplierTable rows={rows} access={access} request={request} />
-            </div>
-          </Card>
-
-          {/* Portrait tablet / mobile: cards. */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:hidden">
-            {rows.map((item) => (
-              <SupplierCard key={item.id} item={item} access={access} request={request} />
-            ))}
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <SupplierTable rows={rows} />
           </div>
-        </>
+        </Card>
       )}
 
       {!error && !showEmpty ? (
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
           <span className="text-muted-foreground">
-            {total === 0 ? '0' : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)}`} of {total}
+            {total === 0
+              ? '0'
+              : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)}`}{' '}
+            of {total}
           </span>
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
               Previous
             </Button>
             <Button
@@ -264,7 +201,14 @@ export default function SuppliersPage() {
         </div>
       ) : null}
 
-      {dialogs}
+      {session ? (
+        <ImportSuppliersDialog
+          session={session}
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          onImported={reload}
+        />
+      ) : null}
     </div>
   );
 }

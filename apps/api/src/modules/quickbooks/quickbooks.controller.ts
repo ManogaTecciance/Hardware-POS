@@ -14,6 +14,20 @@ import {
   QuickBooksSalesSyncService,
   type SaleSyncResult,
 } from './quickbooks-sales-sync.service';
+import {
+  QuickBooksPartiesSyncService,
+  type CustomerSyncSummary,
+  type PartySyncStatus,
+  type VendorSyncSummary,
+} from './quickbooks-parties-sync.service';
+import { QuickBooksVendorsService, type QbVendorOption } from './quickbooks-vendors.service';
+
+/** Everything the combined "Sync with QuickBooks" action reconciles. */
+export interface SyncAllSummary {
+  products: SyncProductsSummary;
+  customers: CustomerSyncSummary;
+  vendors: VendorSyncSummary;
+}
 
 @Controller('quickbooks')
 export class QuickBooksController {
@@ -21,7 +35,40 @@ export class QuickBooksController {
     private readonly quickBooksService: QuickBooksService,
     private readonly quickBooksSyncService: QuickBooksSyncService,
     private readonly quickBooksSalesSyncService: QuickBooksSalesSyncService,
+    private readonly quickBooksVendorsService: QuickBooksVendorsService,
+    private readonly quickBooksPartiesSyncService: QuickBooksPartiesSyncService,
   ) {}
+
+  /** Customer / vendor mapping counts for the overview cards. */
+  @Get('party-sync-status')
+  @RequirePermissions(Permission.QUICKBOOKS_READ)
+  partySyncStatus(@TenantId() tenantId: string): Promise<PartySyncStatus> {
+    return this.quickBooksPartiesSyncService.partyStatus(tenantId);
+  }
+
+  /**
+   * Full sync with the QuickBooks company: pull the product catalog, then
+   * reconcile customer and vendor mappings. Products remain QuickBooks-owned;
+   * party syncs maintain linkage without overwriting local field edits.
+   */
+  @Post('sync')
+  @RequirePermissions(Permission.QUICKBOOKS_MANAGE)
+  async syncAll(@TenantId() tenantId: string): Promise<SyncAllSummary> {
+    const products = await this.quickBooksSyncService.syncProducts(tenantId);
+    const customers = await this.quickBooksPartiesSyncService.syncCustomers(tenantId);
+    const vendors = await this.quickBooksPartiesSyncService.syncVendors(tenantId);
+    return { products, customers, vendors };
+  }
+
+  /** Search QuickBooks vendors for supplier mapping (empty when not connected). */
+  @Get('vendors')
+  @RequirePermissions(Permission.SUPPLIER_QB_MAP)
+  vendors(
+    @TenantId() tenantId: string,
+    @Query('search') search?: string,
+  ): Promise<QbVendorOption[]> {
+    return this.quickBooksVendorsService.searchVendors(tenantId, search ?? '');
+  }
 
   /**
    * The Intuit authorization URL for the frontend to navigate to. Returned as

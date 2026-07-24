@@ -185,7 +185,21 @@ export class QuickBooksService {
     }
 
     const refreshToken = decryptSecret(connection.refreshToken, cfg.encryptionKey);
-    const tokens = await this.refreshTokens(refreshToken);
+    let tokens: QuickBooksTokenResponse;
+    try {
+      tokens = await this.refreshTokens(refreshToken);
+    } catch (err) {
+      // A revoked/expired refresh token can't recover on its own — mark the
+      // connection dead so the UI shows "Not connected" instead of failing
+      // every sync with a raw OAuth error.
+      if (err instanceof BadRequestException && String(err.message).includes('invalid_grant')) {
+        await this.repository.deactivate(tenantId);
+        throw new BadRequestException(
+          'Your QuickBooks connection has expired. Reconnect from the QuickBooks page to resume syncing.',
+        );
+      }
+      throw err;
+    }
     const now = Date.now();
     await this.repository.updateTokens(tenantId, {
       accessTokenEnc: encryptSecret(tokens.access_token, cfg.encryptionKey),

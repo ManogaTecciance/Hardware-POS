@@ -15,7 +15,7 @@ import { formatQbTime, useQuickBooks } from '@/lib/quickbooks';
 import { cn } from '@/lib/utils';
 
 export default function QuickBooksOverviewPage() {
-  const { state, loading, error, disconnect, syncProducts } = useQuickBooks();
+  const { state, loading, error, disconnect, syncAll } = useQuickBooks();
   const { hasPermission } = useAuth();
   const canManage = hasPermission(Permission.QUICKBOOKS_MANAGE);
 
@@ -101,13 +101,13 @@ export default function QuickBooksOverviewPage() {
               </div>
               <div className="mt-6 flex flex-wrap gap-2">
                 <Button
-                  onClick={syncProducts}
+                  onClick={syncAll}
                   disabled={!canManage || state.productSync.status === 'SYNCING'}
                 >
                   <RefreshCw
                     className={cn('h-4 w-4', state.productSync.status === 'SYNCING' && 'animate-spin')}
                   />
-                  Sync Products
+                  Sync with QuickBooks
                 </Button>
                 <Link href="/quickbooks/sync-log" className={buttonVariants({ variant: 'outline' })}>
                   <ScrollText className="h-4 w-4" />
@@ -127,7 +127,8 @@ export default function QuickBooksOverviewPage() {
           ) : (
             <div className="flex flex-col items-start gap-4">
               <p className="text-sm text-muted-foreground">
-                Connect your QuickBooks Online company to sync products, prices, stock, and sales.
+                Connect your QuickBooks Online company to sync products, prices, stock, customers,
+                vendors, and sales.
               </p>
               <Link href="/quickbooks/connect" className={buttonVariants()}>
                 <Link2 className="h-4 w-4" />
@@ -139,13 +140,36 @@ export default function QuickBooksOverviewPage() {
       </Card>
 
       {/* Sync status */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Card>
           <CardContent className="space-y-2 p-5">
             <div className="text-sm text-muted-foreground">Product sync</div>
             <SyncBadge status={state.productSync.status} />
             <div className="text-sm text-muted-foreground">
               {state.productSync.count} products · {formatQbTime(state.productSync.lastSyncISO)}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="space-y-2 p-5">
+            <div className="text-sm text-muted-foreground">Customer sync</div>
+            <SyncBadge status={state.customerSync.status} />
+            <div className="text-sm text-muted-foreground">
+              {state.customerSync.linked} of {state.customerSync.total} linked ·{' '}
+              {formatQbTime(state.customerSync.lastSyncISO)}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="space-y-2 p-5">
+            <div className="text-sm text-muted-foreground">Vendor sync</div>
+            <SyncBadge status={state.vendorSync.status} />
+            <div className="text-sm text-muted-foreground">
+              {state.vendorSync.linked} of {state.vendorSync.total} mapped
+              {state.vendorSync.attention > 0 ? ` · ${state.vendorSync.attention} need attention` : ''}{' '}
+              · {formatQbTime(state.vendorSync.lastSyncISO)}
             </div>
           </CardContent>
         </Card>

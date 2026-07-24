@@ -64,7 +64,7 @@ export function QuickAddCustomerDialog({
         phone: phone.trim() || null,
         customerType,
         email: email.trim() || null,
-        billingAddress: address.trim() || null,
+        street: address.trim() || null,
       });
       onCreated(created);
     } catch (err) {

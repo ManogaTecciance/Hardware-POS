@@ -79,11 +79,15 @@ export interface QuotationListFilters {
 const customerSelect = {
   id: true,
   name: true,
-  companyName: true,
+  company: true,
   phone: true,
   email: true,
-  billingAddress: true,
-  taxNumber: true,
+  street: true,
+  city: true,
+  state: true,
+  zip: true,
+  country: true,
+  resaleNumber: true,
 } satisfies Prisma.CustomerSelect;
 
 const detailInclude = {
@@ -104,7 +108,7 @@ const detailInclude = {
 export type QuotationDetailRow = Prisma.QuotationGetPayload<{ include: typeof detailInclude }>;
 
 const listInclude = {
-  customer: { select: { id: true, name: true, phone: true, companyName: true } },
+  customer: { select: { id: true, name: true, phone: true, company: true } },
   createdBy: { select: { id: true, name: true } },
   revisions: {
     orderBy: { revisionNumber: 'desc' as const },
@@ -411,7 +415,7 @@ export class QuotationsRepository {
               { quotationNumber: { contains: filters.search, mode: 'insensitive' } },
               { customer: { name: { contains: filters.search, mode: 'insensitive' } } },
               { customer: { phone: { contains: filters.search, mode: 'insensitive' } } },
-              { customer: { companyName: { contains: filters.search, mode: 'insensitive' } } },
+              { customer: { company: { contains: filters.search, mode: 'insensitive' } } },
             ],
           }
         : {}),

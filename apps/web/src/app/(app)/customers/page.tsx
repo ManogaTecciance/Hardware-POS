@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import * as React from 'react';
-import { Search, UserPlus } from 'lucide-react';
+import { FileUp, Search, UserPlus } from 'lucide-react';
 
+import { ImportCustomersDialog } from '@/components/customers/import-customers-dialog';
 import { PageHeader } from '@/components/page-header';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
@@ -40,6 +41,8 @@ export default function CustomersPage() {
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [reloadKey, setReloadKey] = React.useState(0);
 
   React.useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -78,7 +81,7 @@ export default function CustomersPage() {
     return () => {
       cancelled = true;
     };
-  }, [session, page, pageSize, debouncedSearch, customerType, active]);
+  }, [session, page, pageSize, debouncedSearch, customerType, active, reloadKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -89,10 +92,16 @@ export default function CustomersPage() {
         description="Manage customers. New customers sync to QuickBooks on their first sale."
         actions={
           canManage ? (
-            <Link href="/customers/new" className={buttonVariants()}>
-              <UserPlus className="h-4 w-4" />
-              Add customer
-            </Link>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                <FileUp className="h-4 w-4" />
+                Import
+              </Button>
+              <Link href="/customers/new" className={buttonVariants()}>
+                <UserPlus className="h-4 w-4" />
+                Add customer
+              </Link>
+            </div>
           ) : undefined
         }
       />
@@ -168,8 +177,8 @@ export default function CustomersPage() {
                       >
                         {c.name}
                       </Link>
-                      {c.companyName ? (
-                        <div className="text-xs text-muted-foreground">{c.companyName}</div>
+                      {c.company ? (
+                        <div className="text-xs text-muted-foreground">{c.company}</div>
                       ) : null}
                       {!c.isActive ? (
                         <Badge variant="danger" className="mt-1">
@@ -262,6 +271,15 @@ export default function CustomersPage() {
           </div>
         </div>
       </div>
+
+      {session ? (
+        <ImportCustomersDialog
+          session={session}
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          onImported={() => setReloadKey((k) => k + 1)}
+        />
+      ) : null}
     </div>
   );
 }

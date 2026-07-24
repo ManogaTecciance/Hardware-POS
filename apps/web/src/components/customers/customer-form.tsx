@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import type { Session } from '@/lib/auth';
 import {
   CUSTOMER_TYPE_LABELS,
@@ -23,32 +22,56 @@ import { cn } from '@/lib/utils';
 
 const TYPE_OPTIONS = Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[];
 
+/**
+ * Customer form — the QuickBooks Customer template fields (identity, address,
+ * opening balance) plus the POS-side payment controls that drive credit
+ * enforcement and returns rules.
+ */
+
 interface FormState {
   name: string;
-  companyName: string;
-  customerType: CustomerType;
-  phone: string;
+  company: string;
+  qbCustomerType: string;
   email: string;
-  billingAddress: string;
-  taxNumber: string;
+  phone: string;
+  mobile: string;
+  fax: string;
+  website: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+  openingBalance: string;
+  openingBalanceDate: string;
+  resaleNumber: string;
+  customerType: CustomerType;
   creditAllowed: boolean;
   creditLimit: string;
-  notes: string;
   isActive: boolean;
 }
 
 function initialState(c?: ManagedCustomer): FormState {
   return {
     name: c?.name ?? '',
-    companyName: c?.companyName ?? '',
-    customerType: c?.customerType ?? 'RETAIL',
-    phone: c?.phone ?? '',
+    company: c?.company ?? '',
+    qbCustomerType: c?.qbCustomerType ?? '',
     email: c?.email ?? '',
-    billingAddress: c?.billingAddress ?? '',
-    taxNumber: c?.taxNumber ?? '',
+    phone: c?.phone ?? '',
+    mobile: c?.mobile ?? '',
+    fax: c?.fax ?? '',
+    website: c?.website ?? '',
+    street: c?.street ?? '',
+    city: c?.city ?? '',
+    state: c?.state ?? '',
+    zip: c?.zip ?? '',
+    country: c?.country ?? '',
+    openingBalance: c?.openingBalance != null ? String(c.openingBalance) : '',
+    openingBalanceDate: c?.openingBalanceDate ? c.openingBalanceDate.slice(0, 10) : '',
+    resaleNumber: c?.resaleNumber ?? '',
+    customerType: c?.customerType ?? 'RETAIL',
     creditAllowed: c?.creditAllowed ?? false,
     creditLimit: c?.creditLimit != null ? String(c.creditLimit) : '',
-    notes: c?.notes ?? '',
     isActive: c?.isActive ?? true,
   };
 }
@@ -56,15 +79,25 @@ function initialState(c?: ManagedCustomer): FormState {
 export function buildCustomerInput(form: FormState): CustomerInput {
   return {
     name: form.name.trim(),
-    companyName: form.companyName.trim() || null,
-    customerType: form.customerType,
-    phone: form.phone.trim() || null,
+    company: form.company.trim() || null,
+    qbCustomerType: form.qbCustomerType.trim() || null,
     email: form.email.trim() || null,
-    billingAddress: form.billingAddress.trim() || null,
-    taxNumber: form.taxNumber.trim() || null,
+    phone: form.phone.trim() || null,
+    mobile: form.mobile.trim() || null,
+    fax: form.fax.trim() || null,
+    website: form.website.trim() || null,
+    street: form.street.trim() || null,
+    city: form.city.trim() || null,
+    state: form.state.trim() || null,
+    zip: form.zip.trim() || null,
+    country: form.country.trim() || null,
+    openingBalance: form.openingBalance.trim() !== '' ? Number(form.openingBalance) : null,
+    openingBalanceDate: form.openingBalanceDate || null,
+    resaleNumber: form.resaleNumber.trim() || null,
+    customerType: form.customerType,
     creditAllowed: form.creditAllowed,
-    creditLimit: form.creditAllowed && form.creditLimit.trim() !== '' ? Number(form.creditLimit) : null,
-    notes: form.notes.trim() || null,
+    creditLimit:
+      form.creditAllowed && form.creditLimit.trim() !== '' ? Number(form.creditLimit) : null,
     isActive: form.isActive,
   };
 }
@@ -85,9 +118,16 @@ export function CustomerForm({
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  const openingBalanceInvalid =
+    form.openingBalance.trim() !== '' && !Number.isFinite(Number(form.openingBalance));
+
   const submit = async () => {
     if (!form.name.trim()) {
       setError('Customer name is required');
+      return;
+    }
+    if (openingBalanceInvalid) {
+      setError('Opening balance must be a number');
       return;
     }
     setSaving(true);
@@ -107,50 +147,117 @@ export function CustomerForm({
   };
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-3xl space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Customer details</CardTitle>
+          <CardTitle>Customer</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Full name" required className="sm:col-span-2">
+          <Field label="Name" required>
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Ravi Perera" />
           </Field>
-          <Field label="Business / company name">
-            <Input value={form.companyName} onChange={(e) => set('companyName', e.target.value)} placeholder="Optional" />
+          <Field label="Company">
+            <Input value={form.company} onChange={(e) => set('company', e.target.value)} placeholder="Optional" />
           </Field>
-          <Field label="Customer type">
-            <Select value={form.customerType} onChange={(e) => set('customerType', e.target.value as CustomerType)}>
-              {TYPE_OPTIONS.map((t) => (
-                <option key={t} value={t}>
-                  {CUSTOMER_TYPE_LABELS[t]}
-                </option>
-              ))}
-            </Select>
+          <Field label="Customer type (QuickBooks)">
+            <Input
+              value={form.qbCustomerType}
+              onChange={(e) => set('qbCustomerType', e.target.value)}
+              placeholder='e.g. "Retail Trade"'
+            />
+          </Field>
+          <Field label="Email">
+            <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="Optional" />
           </Field>
           <Field label="Phone">
             <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="e.g. 077 123 4567" />
           </Field>
-          <Field label="Email">
-            <Input value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="Optional" />
+          <Field label="Mobile">
+            <Input value={form.mobile} onChange={(e) => set('mobile', e.target.value)} placeholder="Optional" />
           </Field>
-          <Field label="Address" className="sm:col-span-2">
-            <Textarea value={form.billingAddress} onChange={(e) => set('billingAddress', e.target.value)} rows={2} placeholder="Optional" />
+          <Field label="Fax">
+            <Input value={form.fax} onChange={(e) => set('fax', e.target.value)} placeholder="Optional" />
           </Field>
-          <Field label="Tax / VAT number">
-            <Input value={form.taxNumber} onChange={(e) => set('taxNumber', e.target.value)} placeholder="Optional" />
+          <Field label="Website">
+            <Input value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="http://…" />
           </Field>
-          <Field label="Notes">
-            <Input value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Optional" />
+          <Field label="Resale number">
+            <Input value={form.resaleNumber} onChange={(e) => set('resaleNumber', e.target.value)} placeholder="Optional" />
           </Field>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Credit</CardTitle>
+          <CardTitle>Address</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <Field label="Street" className="sm:col-span-2">
+            <Input value={form.street} onChange={(e) => set('street', e.target.value)} placeholder="Optional" />
+          </Field>
+          <Field label="City">
+            <Input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Optional" />
+          </Field>
+          <Field label="State / Province">
+            <Input value={form.state} onChange={(e) => set('state', e.target.value)} placeholder="Optional" />
+          </Field>
+          <Field label="ZIP / Postal code">
+            <Input value={form.zip} onChange={(e) => set('zip', e.target.value)} placeholder="Optional" />
+          </Field>
+          <Field label="Country">
+            <Input value={form.country} onChange={(e) => set('country', e.target.value)} placeholder="Optional" />
+          </Field>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Opening balance</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <Field label="Opening balance">
+            <Input
+              inputMode="decimal"
+              value={form.openingBalance}
+              onChange={(e) => set('openingBalance', e.target.value)}
+              placeholder="As entered when added"
+            />
+          </Field>
+          <Field label="As of date">
+            <Input
+              type="date"
+              value={form.openingBalanceDate}
+              onChange={(e) => set('openingBalanceDate', e.target.value)}
+            />
+          </Field>
+          <p className="text-xs text-muted-foreground sm:col-span-2">
+            QuickBooks tracks the live receivable balance — this is only the balance entered when the
+            customer was added.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Payments &amp; credit</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <Field label="POS customer type">
+            <Select
+              value={form.customerType}
+              onChange={(e) => set('customerType', e.target.value as CustomerType)}
+            >
+              {TYPE_OPTIONS.map((t) => (
+                <option key={t} value={t}>
+                  {CUSTOMER_TYPE_LABELS[t]}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Drives POS behaviour (walk-in rules, credit-memo routing) — separate from the QuickBooks
+              customer-type label above.
+            </p>
+          </Field>
           <div className="flex items-start justify-between gap-4 rounded-xl border border-border p-3">
             <div>
               <div className="text-sm font-medium">Allow credit / pay-later</div>

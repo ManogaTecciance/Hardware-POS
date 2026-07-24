@@ -26,6 +26,10 @@ export enum Permission {
   PRODUCT_MANAGE = 'product:manage',
   CUSTOMER_READ = 'customer:read',
   CUSTOMER_MANAGE = 'customer:manage',
+  SUPPLIER_READ = 'supplier:read',
+  SUPPLIER_MANAGE = 'supplier:manage',
+  SUPPLIER_DELETE = 'supplier:delete',
+  SUPPLIER_QB_MAP = 'supplier:qb:map',
   SYNC_READ = 'sync:read',
   QUICKBOOKS_READ = 'quickbooks:read',
   QUICKBOOKS_MANAGE = 'quickbooks:manage',
@@ -59,6 +63,11 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.PRODUCT_MANAGE,
     Permission.CUSTOMER_READ,
     Permission.CUSTOMER_MANAGE,
+    // Purchasing Officer / Manager: manage vendors and map QuickBooks, but
+    // cannot permanently delete.
+    Permission.SUPPLIER_READ,
+    Permission.SUPPLIER_MANAGE,
+    Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
   ],
   CASHIER: [
@@ -83,6 +92,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.QUOTATION_READ,
     Permission.PRODUCT_READ,
     Permission.CUSTOMER_READ,
+    // Accountant: read vendors and their QuickBooks mapping; no editing.
+    Permission.SUPPLIER_READ,
+    Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
   ],
 };

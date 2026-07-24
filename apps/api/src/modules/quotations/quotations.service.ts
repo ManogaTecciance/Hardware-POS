@@ -9,6 +9,7 @@ import {
 import { DiscountType, QuotationStatus } from '@hardware-pos/database';
 import type { Paginated, QuotationStatusCode } from '@hardware-pos/shared';
 
+import { customerAddressLine } from '../../common/customer-display';
 import { paginate } from '../../common/pagination';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
@@ -660,15 +661,17 @@ export class QuotationsService {
       isExpired: this.isExpired(row.validUntil, row.status),
       notes: row.notes,
       termsAndConditions: row.termsAndConditions,
+      // Snapshot keeps its historical field names; the QB-shaped customer
+      // record is projected onto them (address parts → one billing line).
       customer: row.customer
         ? {
             id: row.customer.id,
             name: row.customer.name,
-            companyName: row.customer.companyName,
+            companyName: row.customer.company,
             phone: row.customer.phone,
             email: row.customer.email,
-            billingAddress: row.customer.billingAddress,
-            taxNumber: row.customer.taxNumber,
+            billingAddress: customerAddressLine(row.customer),
+            taxNumber: row.customer.resaleNumber,
           }
         : null,
       createdByName: row.createdBy?.name ?? null,

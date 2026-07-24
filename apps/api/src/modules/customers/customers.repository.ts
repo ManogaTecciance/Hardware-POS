@@ -25,9 +25,10 @@ export class CustomersRepository {
         ? {
             OR: [
               { name: { contains: filters.search, mode: 'insensitive' } },
-              { companyName: { contains: filters.search, mode: 'insensitive' } },
+              { company: { contains: filters.search, mode: 'insensitive' } },
               { email: { contains: filters.search, mode: 'insensitive' } },
               { phone: { contains: filters.search, mode: 'insensitive' } },
+              { mobile: { contains: filters.search, mode: 'insensitive' } },
             ],
           }
         : {}),

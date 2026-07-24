@@ -10,6 +10,8 @@ import { QuickBooksSalesSyncService } from './quickbooks-sales-sync.service';
 import { QuickBooksReturnsSyncService } from './quickbooks-returns-sync.service';
 import { QuickBooksProductSyncService } from './quickbooks-product-sync.service';
 import { QuickBooksAutoPullService } from './quickbooks-auto-pull.service';
+import { QuickBooksPartiesSyncService } from './quickbooks-parties-sync.service';
+import { QuickBooksVendorsService } from './quickbooks-vendors.service';
 
 @Module({
   imports: [SettingsModule],
@@ -21,6 +23,8 @@ import { QuickBooksAutoPullService } from './quickbooks-auto-pull.service';
     QuickBooksReturnsSyncService,
     QuickBooksProductSyncService,
     QuickBooksAutoPullService,
+    QuickBooksVendorsService,
+    QuickBooksPartiesSyncService,
     QuickBooksRepository,
     QuickBooksConfig,
   ],
@@ -30,6 +34,7 @@ import { QuickBooksAutoPullService } from './quickbooks-auto-pull.service';
     QuickBooksSalesSyncService,
     QuickBooksReturnsSyncService,
     QuickBooksProductSyncService,
+    QuickBooksVendorsService,
   ],
 })
 export class QuickBooksModule {}
