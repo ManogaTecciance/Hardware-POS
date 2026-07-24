@@ -21,6 +21,12 @@ export const Permission = {
   PRODUCT_MANAGE: 'product:manage',
   CUSTOMER_READ: 'customer:read',
   CUSTOMER_MANAGE: 'customer:manage',
+  SUPPLIER_READ: 'supplier:read',
+  SUPPLIER_MANAGE: 'supplier:manage',
+  SUPPLIER_DELETE: 'supplier:delete',
+  SUPPLIER_BANK_VIEW: 'supplier:bank:view',
+  SUPPLIER_FINANCIALS_READ: 'supplier:financials:read',
+  SUPPLIER_QB_MAP: 'supplier:qb:map',
   SYNC_READ: 'sync:read',
   QUICKBOOKS_READ: 'quickbooks:read',
   QUICKBOOKS_MANAGE: 'quickbooks:manage',
@@ -55,6 +61,13 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.PRODUCT_MANAGE,
     Permission.CUSTOMER_READ,
     Permission.CUSTOMER_MANAGE,
+    // Purchasing Officer / Manager: full operational supplier access, may map
+    // QuickBooks and view financial summaries, but cannot permanently delete or
+    // view protected bank details.
+    Permission.SUPPLIER_READ,
+    Permission.SUPPLIER_MANAGE,
+    Permission.SUPPLIER_FINANCIALS_READ,
+    Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
   ],
   CASHIER: [
@@ -79,6 +92,11 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.QUOTATION_READ,
     Permission.PRODUCT_READ,
     Permission.CUSTOMER_READ,
+    // Accountant: read suppliers, view financial summaries and QuickBooks
+    // mapping; no operational editing, delete, or bank access.
+    Permission.SUPPLIER_READ,
+    Permission.SUPPLIER_FINANCIALS_READ,
+    Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
   ],
 };

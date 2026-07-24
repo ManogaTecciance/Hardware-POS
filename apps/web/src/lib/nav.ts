@@ -5,6 +5,7 @@ import {
   ReceiptText,
   Settings,
   ShoppingCart,
+  Truck,
   Undo2,
   Users,
   Link2,
@@ -50,6 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Catalog',
     items: [
       { href: '/products', label: 'Products', icon: Package, permission: Permission.PRODUCT_READ },
+      { href: '/suppliers', label: 'Suppliers', icon: Truck, permission: Permission.SUPPLIER_READ },
       { href: '/customers', label: 'Customers', icon: Users, permission: Permission.CUSTOMER_READ },
     ],
   },
