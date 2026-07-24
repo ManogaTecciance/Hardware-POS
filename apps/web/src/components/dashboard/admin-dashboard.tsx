@@ -8,7 +8,6 @@ import {
   ArrowLeftRight,
   BarChart3,
   Boxes,
-  Building2,
   CalendarRange,
   CheckCircle2,
   Clock3,
@@ -19,7 +18,6 @@ import {
   Plus,
   Receipt,
   RotateCcw,
-  ShoppingCart,
   TrendingUp,
   Wallet,
   XCircle,
@@ -94,7 +92,8 @@ export function AdminDashboard({
 
   const netSales = data.stats?.todaySalesTotal ?? 0;
   const txns = data.stats?.todayTransactions ?? 0;
-  const aov = txns > 0 ? netSales / txns : 0;
+  const inventoryValue = data.stats?.inventoryValue ?? 0;
+  const stockedProducts = data.stats?.stockedProducts ?? 0;
   const summary = data.summary;
 
   const kpis: MetricSpec[] = [
@@ -153,16 +152,17 @@ export function AdminDashboard({
       },
     },
     {
-      icon: ShoppingCart,
+      icon: Boxes,
       metric: {
-        id: 'aov',
-        label: 'Average Order Value',
-        value: formatMoney(aov),
-        rawValue: aov,
+        id: 'inventory-value',
+        label: 'Total Inventory Value',
+        value: formatMoney(inventoryValue),
+        rawValue: inventoryValue,
         format: formatMoney,
-        helpText: "Today's sales divided by today's transactions.",
-        footnote: `Across ${count(txns)} sales today`,
-        destination: '/sales',
+        helpText:
+          'Stock on hand valued at cost across active inventory products (items without a cost price count as zero).',
+        footnote: `Across ${count(stockedProducts)} stocked products`,
+        destination: '/products',
         iconAccent: 'aqua',
       },
     },
@@ -200,7 +200,6 @@ export function AdminDashboard({
         name={firstNameOf(session.user.name)}
         subtitle="Here's what's happening across your business today."
         meta={[
-          { key: 'branch', icon: Building2, label: session.branchName },
           { key: 'window', icon: CalendarRange, label: 'Last 7 days' },
           ...(data.lastUpdatedLabel
             ? [{ key: 'updated', icon: Clock3, label: `Updated ${data.lastUpdatedLabel}` }]

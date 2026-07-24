@@ -82,10 +82,6 @@ export class DashboardService {
         series: salesSeries,
       },
       grossProfit: { value: profit, prevValue: prevProfit, series: salesSeries },
-      avgSale: {
-        value: cur.transactions > 0 ? cur.netSales / cur.transactions : 0,
-        prevValue: prv.transactions > 0 ? prv.netSales / prv.transactions : 0,
-      },
     };
   }
 

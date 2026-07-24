@@ -16,7 +16,6 @@ export interface DashboardSummary {
   transactions: RangedMetric;
   /** Revenue minus known product costs (upper bound while costs are partial). */
   grossProfit: RangedMetric;
-  avgSale: { value: number; prevValue: number };
 }
 
 export interface SeriesPoint {
@@ -71,4 +70,8 @@ export interface DashboardStats {
   productsCached: number;
   /** Completed sales not yet pushed to QuickBooks (pending, syncing, or failed). */
   pendingSyncs: number;
+  /** Stock on hand valued at cost across active Inventory products. */
+  inventoryValue: number;
+  /** Active Inventory products with stock on hand. */
+  stockedProducts: number;
 }

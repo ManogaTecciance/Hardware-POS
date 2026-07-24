@@ -175,7 +175,7 @@ export class DashboardRepository {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const [todayAgg, productsCached, pendingSyncs] = await Promise.all([
+    const [todayAgg, productsCached, pendingSyncs, inventoryRows] = await Promise.all([
       this.prisma.sale.aggregate({
         where: { tenantId, status: 'COMPLETED', completedAt: { gte: startOfToday } },
         _sum: { total: true },
@@ -185,6 +185,14 @@ export class DashboardRepository {
       this.prisma.sale.count({
         where: { tenantId, status: 'COMPLETED', syncStatus: { not: 'SYNCED' } },
       }),
+      // Column-by-column product of qty × cost needs raw SQL (no aggregate for it).
+      // Items without a cost price contribute nothing rather than a fake value.
+      this.prisma.$queryRaw<Array<{ value: number; stocked: number }>>`
+        SELECT
+          COALESCE(SUM("quantityOnHand" * COALESCE("costPrice", 0)), 0)::float AS value,
+          COUNT(*) FILTER (WHERE "quantityOnHand" > 0)::int AS stocked
+        FROM "Product"
+        WHERE "tenantId" = ${tenantId} AND "isActive" = true AND "type" = 'Inventory'`,
     ]);
 
     return {
@@ -192,6 +200,8 @@ export class DashboardRepository {
       todayTransactions: todayAgg._count._all,
       productsCached,
       pendingSyncs,
+      inventoryValue: Number(inventoryRows[0]?.value ?? 0),
+      stockedProducts: Number(inventoryRows[0]?.stocked ?? 0),
     };
   }
 }

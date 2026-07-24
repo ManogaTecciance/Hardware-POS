@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import {
   Banknote,
-  Building2,
   Clock3,
   FileText,
   MonitorSmartphone,
@@ -136,7 +135,6 @@ export function CashierDashboard({
         }
         meta={[
           { key: 'register', icon: MonitorSmartphone, label: session.registerName },
-          { key: 'branch', icon: Building2, label: session.branchName },
           ...(data.lastUpdatedLabel
             ? [{ key: 'updated', icon: Clock3, label: `Updated ${data.lastUpdatedLabel}` }]
             : []),

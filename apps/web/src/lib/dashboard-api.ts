@@ -7,11 +7,16 @@ export interface DashboardStats {
   todayTransactions: number;
   productsCached: number;
   pendingSyncs: number;
+  /** Stock on hand valued at cost across active Inventory products. */
+  inventoryValue: number;
+  /** Active Inventory products with stock on hand. */
+  stockedProducts: number;
 }
 
-/** Raw stats JSON (the sales total is a Prisma Decimal → may arrive as a string). */
-type ApiDashboardStats = Omit<DashboardStats, 'todaySalesTotal'> & {
+/** Raw stats JSON (Prisma Decimal totals may arrive as strings). */
+type ApiDashboardStats = Omit<DashboardStats, 'todaySalesTotal' | 'inventoryValue'> & {
   todaySalesTotal: string | number;
+  inventoryValue: string | number;
 };
 
 export async function fetchDashboardStats(session: Session): Promise<DashboardStats> {
@@ -19,7 +24,11 @@ export async function fetchDashboardStats(session: Session): Promise<DashboardSt
     token: session.token,
     tenantId: session.user.tenantId,
   });
-  return { ...s, todaySalesTotal: Number(s.todaySalesTotal) };
+  return {
+    ...s,
+    todaySalesTotal: Number(s.todaySalesTotal),
+    inventoryValue: Number(s.inventoryValue ?? 0),
+  };
 }
 
 // ── aggregation endpoints (real replacements for the old demo adapters) ──────
@@ -39,7 +48,6 @@ export interface DashboardSummary {
   netSales: RangedMetric;
   transactions: RangedMetric;
   grossProfit: RangedMetric;
-  avgSale: { value: number; prevValue: number };
 }
 
 export interface PaymentMethodTotal {
