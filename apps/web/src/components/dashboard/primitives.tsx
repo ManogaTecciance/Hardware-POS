@@ -214,9 +214,9 @@ export function KPIGrid({ metrics }: { metrics: MetricSpec[] }) {
       <div
         className={cn(
           'grid grid-cols-1 gap-4 @min-[640px]:grid-cols-2',
-          isFive
-            ? '@min-[1050px]:grid-cols-6 @min-[1400px]:grid-cols-5'
-            : '@min-[1100px]:grid-cols-4',
+          // Five KPIs go single-row from ~960px of container width so laptops
+          // keep one row whether the sidebar is expanded or collapsed.
+          isFive ? '@min-[960px]:grid-cols-5' : '@min-[1100px]:grid-cols-4',
         )}
       >
         {metrics.map((m, i) => (
@@ -236,12 +236,9 @@ export function KPIGrid({ metrics }: { metrics: MetricSpec[] }) {
 /** Per-card column spans that keep every breakpoint balanced (no orphan card). */
 function kpiCellClass(i: number, n: number): string {
   if (n === 5) {
-    const medium =
-      i < 3
-        ? '@min-[1050px]:col-span-2 @min-[1400px]:col-span-1'
-        : '@min-[1050px]:col-span-3 @min-[1400px]:col-span-1';
-    const tablet = i === 4 ? '@min-[640px]:col-span-2 @min-[1050px]:col-span-1' : '';
-    return cn(medium, tablet);
+    // Two-column band only: the fifth card spans the row; from 960px all five
+    // sit on one row.
+    return i === 4 ? '@min-[640px]:col-span-2 @min-[960px]:col-span-1' : '';
   }
   const lastOdd = n % 2 === 1 && i === n - 1;
   return lastOdd ? '@min-[640px]:col-span-2 @min-[1100px]:col-span-1' : '';

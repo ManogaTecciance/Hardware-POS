@@ -27,7 +27,7 @@ import { firstNameOf, greetingFor } from '@/lib/dashboard/roles';
 import type { ShiftSummary } from '@/lib/dashboard/types';
 import { useDashboardData } from '@/lib/dashboard/use-dashboard-data';
 import { Permission } from '@/lib/permissions';
-import { cn, formatMoney } from '@/lib/utils';
+import { cn, formatMoney, formatMoneyCompact } from '@/lib/utils';
 
 import { DashboardHero, type HeroAction } from './hero';
 import {
@@ -68,9 +68,9 @@ export function CashierDashboard({
       metric: {
         id: 'today-sales',
         label: 'Shift Sales',
-        value: formatMoney(todaySales),
+        value: formatMoneyCompact(todaySales),
         rawValue: todaySales,
-        format: formatMoney,
+        format: formatMoneyCompact,
         helpText: 'Total value of sales you completed today.',
         spark,
         destination: '/sales',
@@ -94,9 +94,9 @@ export function CashierDashboard({
       metric: {
         id: 'avg-bill',
         label: 'Average Bill',
-        value: formatMoney(avgBill),
+        value: formatMoneyCompact(avgBill),
         rawValue: avgBill,
-        format: formatMoney,
+        format: formatMoneyCompact,
         helpText: "Today's sales divided by your transactions.",
         footnote: `Across ${count(txns)} sales`,
       },
@@ -106,9 +106,9 @@ export function CashierDashboard({
       metric: {
         id: 'drawer',
         label: 'Expected Cash',
-        value: formatMoney(shift.expectedCash),
+        value: formatMoneyCompact(shift.expectedCash),
         rawValue: shift.expectedCash,
-        format: formatMoney,
+        format: formatMoneyCompact,
         helpText: 'Cash received today minus refunds (no drawer counts yet).',
         footnote: 'Cash in drawer, expected',
       },

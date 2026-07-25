@@ -47,7 +47,7 @@ import { firstNameOf, greetingFor } from '@/lib/dashboard/roles';
 import { useDashboardData } from '@/lib/dashboard/use-dashboard-data';
 import type { AlertItem } from '@/lib/dashboard/types';
 import { Permission, type UserRole } from '@/lib/permissions';
-import { cn, formatMoney } from '@/lib/utils';
+import { cn, formatMoney, formatMoneyCompact } from '@/lib/utils';
 
 import { AreaChart, type ChartPoint } from './charts';
 import { ChartDataTable, Doughnut, HorizontalBars, type RankBar } from './data-charts';
@@ -102,9 +102,9 @@ export function AdminDashboard({
       metric: {
         id: 'net-sales',
         label: 'Net Sales',
-        value: formatMoney(netSales),
+        value: formatMoneyCompact(netSales),
         rawValue: netSales,
-        format: formatMoney,
+        format: formatMoneyCompact,
         helpText: "Total value of today's completed sales.",
         comparison: summary
           ? buildComparison(summary.netSales.value, summary.netSales.prevValue)
@@ -121,9 +121,9 @@ export function AdminDashboard({
             metric: {
               id: 'gross-profit',
               label: 'Gross Profit',
-              value: formatMoney(summary?.grossProfit.value ?? 0),
+              value: formatMoneyCompact(summary?.grossProfit.value ?? 0),
               rawValue: summary?.grossProfit.value ?? 0,
-              format: formatMoney,
+              format: formatMoneyCompact,
               helpText:
                 'Last 7 days: revenue minus known product costs (items without a cost price count at full margin).',
               comparison: summary
@@ -156,9 +156,9 @@ export function AdminDashboard({
       metric: {
         id: 'inventory-value',
         label: 'Total Inventory Value',
-        value: formatMoney(inventoryValue),
+        value: formatMoneyCompact(inventoryValue),
         rawValue: inventoryValue,
-        format: formatMoney,
+        format: formatMoneyCompact,
         helpText:
           'Stock on hand valued at cost across active inventory products (items without a cost price count as zero).',
         footnote: `Across ${count(stockedProducts)} stocked products`,
@@ -220,7 +220,7 @@ export function AdminDashboard({
       {/* KPI band */}
       {data.loading && !data.stats ? (
         <div className="@container">
-          <div className="grid grid-cols-1 gap-4 @min-[640px]:grid-cols-2 @min-[1050px]:grid-cols-3 @min-[1400px]:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 @min-[640px]:grid-cols-2 @min-[960px]:grid-cols-5">
             <KpiSkeleton count={5} />
           </div>
         </div>
