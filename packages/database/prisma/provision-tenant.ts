@@ -9,11 +9,15 @@
  *   pnpm --filter @hardware-pos/database exec tsx prisma/provision-tenant.ts \
  *     --name "Colombawa Plantation Pvt Ltd" \
  *     --slug colombawa \
- *     --user "Colombawa1:colombawa1@example.com:OWNER" \
- *     --user "Colombawa2:colombawa2@example.com:MANAGER:TheirPassword123"
+ *     --user "Colombawa1:colombawa1@example.com:OWNER:TheirPassword123:9876" \
+ *     --user "Colombawa2:colombawa2@example.com:CASHIER::1234"
  *
- * Each --user is "Name:email:ROLE[:password]". When the password is omitted a
- * random one is generated and printed once at the end — record it immediately.
+ * Each --user is "Name:email:ROLE[:password[:pin]]". When the password is
+ * omitted (or left empty, as in "ROLE::1234") a random one is generated and
+ * printed once at the end — record it immediately. The optional PIN (4–6
+ * digits) feeds the in-POS approval prompts: any user whose role carries the
+ * approve permission (owner, admin, manager) can answer a "manager PIN"
+ * request with their own PIN.
  */
 import { randomBytes } from 'node:crypto';
 
@@ -29,6 +33,7 @@ interface UserSpec {
   role: UserRole;
   password: string;
   generated: boolean;
+  pin: string | null;
 }
 
 function fail(message: string): never {
@@ -54,20 +59,24 @@ function parseArgs(argv: string[]): { name: string; slug: string; branch: string
     else if (arg === '--branch') branch = next();
     else if (arg === '--user') {
       const raw = next();
-      const [userName, email, role, password] = raw.split(':');
+      const [userName, email, role, password, pin] = raw.split(':');
       if (!userName || !email || !role) {
-        fail(`--user must be "Name:email:ROLE[:password]" (got "${raw}")`);
+        fail(`--user must be "Name:email:ROLE[:password[:pin]]" (got "${raw}")`);
       }
       if (!(role in UserRole)) {
         fail(`Unknown role "${role}" — use one of ${Object.keys(UserRole).join(', ')}`);
       }
       if (!email.includes('@')) fail(`"${email}" does not look like an email address`);
+      if (pin && !/^\d{4,6}$/.test(pin)) {
+        fail(`PIN for ${userName} must be 4–6 digits (got "${pin}")`);
+      }
       users.push({
         name: userName,
         email: email.toLowerCase(),
         role: role as UserRole,
         password: password || randomBytes(9).toString('base64url'),
         generated: !password,
+        pin: pin || null,
       });
     } else {
       fail(`Unknown argument "${arg}"`);
@@ -81,6 +90,10 @@ function parseArgs(argv: string[]): { name: string; slug: string; branch: string
   if (users.length === 0) fail('At least one --user "Name:email:ROLE[:password]" is required');
   const emails = users.map((u) => u.email);
   if (new Set(emails).size !== emails.length) fail('User emails must be distinct');
+  // PIN lookups resolve to the first tenant user whose PIN matches, so shared
+  // PINs would be ambiguous.
+  const pins = users.map((u) => u.pin).filter(Boolean);
+  if (new Set(pins).size !== pins.length) fail('User PINs must be distinct');
   return { name, slug, branch, users };
 }
 
@@ -119,6 +132,7 @@ async function main(): Promise<void> {
           email: user.email,
           role: user.role,
           passwordHash: await bcrypt.hash(user.password, SALT_ROUNDS),
+          pinHash: user.pin ? await bcrypt.hash(user.pin, SALT_ROUNDS) : null,
         },
       });
     }
@@ -128,12 +142,14 @@ async function main(): Promise<void> {
   console.log('\n✔ Company provisioned — no sample data, ready for first login.\n');
   console.log(`  Tenant   ${tenant.name}  (id: ${tenant.id}, slug: ${tenant.slug})`);
   console.log(`  Branch   ${branch} (MAIN) · Register 1 (R1)\n`);
-  console.log('  Logins (email / password):');
+  console.log('  Logins (email / password / PIN):');
   for (const user of users) {
     const note = user.generated ? '  ← generated, record it now' : '';
-    console.log(`    ${user.role.padEnd(10)} ${user.email} / ${user.password}${note}`);
+    const pin = user.pin ? ` / PIN ${user.pin}` : '';
+    console.log(`    ${user.role.padEnd(10)} ${user.email} / ${user.password}${pin}${note}`);
   }
   console.log('\n  Sign in at the web app with the email + password above.');
+  console.log('  PINs answer the in-POS approval prompts (discounts, returns).');
 }
 
 main()
