@@ -267,6 +267,23 @@ export class ReturnsRepository {
         });
       }
 
+      // Eager local restock — symmetric with how a sale decrements stock on
+      // completion. GOOD items marked RETURN_TO_STOCK re-enter available
+      // inventory the instant the return completes; damaged / opened /
+      // non-resellable stock never restocks, and only Inventory-type products
+      // are stock-tracked. This is deliberately DECOUPLED from the QuickBooks
+      // push (which stays async/retryable) so local inventory is correct
+      // regardless of QuickBooks connectivity. QuickBooks remains the source of
+      // truth; the periodic product pull reconciles to its absolute quantities.
+      for (const it of input.items) {
+        if (it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK') {
+          await tx.product.updateMany({
+            where: { id: it.productId, tenantId: input.tenantId, type: 'Inventory' },
+            data: { quantityOnHand: { increment: Number(it.returnQuantity) } },
+          });
+        }
+      }
+
       // Per-sale return-status roll-up (recomputed from the fresh line states).
       const saleItems = await tx.saleItem.findMany({
         where: { saleId: input.originalSaleId },

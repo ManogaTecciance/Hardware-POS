@@ -46,9 +46,10 @@ const returnInclude = {
  * Mirrors {@link QuickBooksSalesSyncService}: same idempotency guard, mock
  * fallback when no company is connected, and persist-success/failure semantics.
  * On failure the return stays completed in the POS and is only marked FAILED
- * (never rolled back) — Rule 8. Inventory is QuickBooks' responsibility; the POS
- * only optimistically restocks GOOD items marked "return to stock" in its cache,
- * which a later product refresh reconciles to QuickBooks' absolute quantities.
+ * (never rolled back) — Rule 8. This worker pushes only the accounting document;
+ * local stock is restocked eagerly in the return-creation transaction (see
+ * returns.repository.ts), independent of QuickBooks connectivity. A later
+ * product refresh reconciles the local cache to QuickBooks' absolute quantities.
  */
 @Injectable()
 export class QuickBooksReturnsSyncService {
@@ -251,21 +252,10 @@ export class QuickBooksReturnsSyncService {
         data: { status: 'SYNCED', completedAt: new Date(), lastError: null },
       });
 
-      // Restock only GOOD items marked "return to stock" — damaged / opened /
-      // non-resellable stock never re-enters available inventory. This is an
-      // optimistic local-cache update; a QuickBooks product refresh later
-      // reconciles to QuickBooks' absolute on-hand quantities. Untracked products
-      // are skipped.
-      const restockable = ret.items.filter(
-        (it) => it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK',
-      );
-      for (const it of restockable) {
-        await tx.product.updateMany({
-          where: { id: it.productId, tenantId: ret.tenantId, type: 'Inventory' },
-          data: { quantityOnHand: { increment: Number(it.returnQuantity) } },
-        });
-      }
-
+      // NOTE: local stock restock is NOT done here. It happens eagerly in the
+      // return-creation transaction (returns.repository.ts) so local inventory
+      // is correct the instant a return completes, independent of QuickBooks
+      // connectivity. This worker only pushes the accounting document.
       await tx.syncLog.create({
         data: {
           tenantId: ret.tenantId,
@@ -278,7 +268,6 @@ export class QuickBooksReturnsSyncService {
           payload: {
             quickbooksDocumentType: ret.quickbooksDocumentType,
             quickbooksDocumentId: documentId,
-            restockedItems: restockable.length,
           } as Prisma.InputJsonValue,
         },
       });
