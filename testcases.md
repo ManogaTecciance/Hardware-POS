@@ -393,6 +393,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DOC-009 | Receipt record per sale + mark printed | Complete sale; GET /receipts/sale/:id; mark printed | Receipt exists; status flips to PRINTED | P | Not Run |
 | DOC-010 | Attach customer to a receipt | POST /receipts/:saleId/customer | Customer linked for the reprint | P | Not Run |
 | DOC-011 | Document template preview from settings | Settings → preview / sample PDF | Sample renders with current letterhead/toggles | P | Not Run |
+| DOC-012 | Four signature placeholders render | Enable signature fields, open any document | Authorized signature, Checked by, Approved by, Customer signature — in that order | P | Passed |
+| DOC-013 | Signature toggle hides all four | Disable signature fields, open a document | No sign-off row at all | N | Passed |
+| DOC-014 | Signature chain on every doc type | Open quotation, invoice, return, exchange | All four blocks present on each | P | Passed |
+| DOC-015 | Signature row fits A4 width | Print a document with signature fields on | Four equal columns on one row, no wrap or overflow | P | Not Run |
+| DOC-016 | Uploaded signature/stamp fit their column | Upload a wide signature image, print | Image scales to column width, does not overlap "Checked by" | P | Not Run |
 
 ## ADM — Administration & Multi-Tenancy
 

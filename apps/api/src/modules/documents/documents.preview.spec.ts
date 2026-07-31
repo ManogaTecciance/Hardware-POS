@@ -60,6 +60,34 @@ describe('DocumentsService — A4 template preview', () => {
     expect(svc.previewHtml(TENANT, 'invoice', { showCustomerTaxNumber: false })).not.toContain('134567890-7000');
   });
 
+  describe('signature blocks', () => {
+    it('renders the full sign-off chain in order', () => {
+      const html = service().previewHtml(TENANT, 'invoice', { signatureFields: true });
+      const labels = ['Authorized signature', 'Checked by', 'Approved by', 'Customer signature'];
+      const positions = labels.map((l) => html.indexOf(l));
+      expect(positions.every((p) => p >= 0)).toBe(true);
+      expect(positions).toEqual([...positions].sort((a, b) => a - b));
+      expect((html.match(/class="sign"/g) ?? []).length).toBe(4);
+    });
+
+    it('drops every block when signature fields are disabled', () => {
+      const html = service().previewHtml(TENANT, 'invoice', { signatureFields: false });
+      for (const l of ['Checked by', 'Approved by', 'Customer signature']) {
+        expect(html).not.toContain(l);
+      }
+      expect(html).not.toContain('class="signs"');
+    });
+
+    it('applies to every document type', () => {
+      const svc = service();
+      for (const type of ['quotation', 'invoice', 'return', 'exchange'] as const) {
+        const html = svc.previewHtml(TENANT, type, { signatureFields: true });
+        expect(html).toContain('Checked by');
+        expect(html).toContain('Approved by');
+      }
+    });
+  });
+
   describe('invoice note', () => {
     const NOTE = 'Items need to be returned within 7 days.';
 
