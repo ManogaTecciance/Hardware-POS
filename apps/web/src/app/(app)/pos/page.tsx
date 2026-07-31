@@ -5,7 +5,6 @@ import * as React from 'react';
 import {
   AlertTriangle,
   ArrowRight,
-  CheckCircle2,
   Clock,
   FileText,
   NotebookPen,
@@ -31,6 +30,7 @@ import { Card } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { Toast, type ToastTone } from '@/components/ui/toast';
 import { useAuth } from '@/lib/auth';
 import { computeLine, computeTotals, type LineDiscount, type OrderDiscount } from '@/lib/cart';
 import { useCheckoutData, type ClientProduct } from '@/lib/catalog';
@@ -47,9 +47,6 @@ interface PendingLineApproval {
   discount: LineDiscount;
   percent: number;
 }
-
-/** Toast intent — drives the semantic colours (never raw hex). */
-type ToastTone = 'success' | 'warning' | 'danger';
 
 export default function PosPage() {
   const { session, hasPermission } = useAuth();
@@ -902,30 +899,7 @@ export default function PosPage() {
         />
       ) : null}
 
-      {toast ? (
-        /* High-contrast surface in both themes (a soft tint + tinted text fell
-           below the WCAG AA 4.5:1 minimum in light mode). Tone is carried by
-           the icon and left accent, never by colour alone — WCAG 1.4.1. */
-        <div
-          role="status"
-          aria-live="polite"
-          className={cn(
-            'fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2.5 rounded-xl border border-l-4 border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground shadow-pop',
-            toast.tone === 'success' && 'border-l-success',
-            toast.tone === 'warning' && 'border-l-warning',
-            toast.tone === 'danger' && 'border-l-danger',
-          )}
-        >
-          {toast.tone === 'success' ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden />
-          ) : toast.tone === 'warning' ? (
-            <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden />
-          ) : (
-            <X className="h-4 w-4 shrink-0 text-danger" aria-hidden />
-          )}
-          {toast.message}
-        </div>
-      ) : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
     </div>
   );
 }

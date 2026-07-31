@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
@@ -254,11 +255,7 @@ export default function SettingsPage() {
         </div>
       ) : null}
 
-      {toast ? (
-        <div className="fixed bottom-20 left-1/2 z-40 -translate-x-1/2 rounded-xl bg-foreground px-4 py-2.5 text-sm text-white shadow-lg">
-          {toast}
-        </div>
-      ) : null}
+      {toast ? <Toast message={toast} className="bottom-20 z-40" /> : null}
     </div>
   );
 }

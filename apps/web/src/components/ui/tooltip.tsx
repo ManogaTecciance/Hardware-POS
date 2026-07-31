@@ -25,7 +25,10 @@ export function Tooltip({
         role="tooltip"
         className={cn(
           'pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap',
-          'rounded-lg bg-foreground px-2.5 py-1 text-xs font-medium text-white shadow-md',
+          // `foreground` on `canvas` is the page's own text/background pair
+          // inverted, so the chip stays readable in both themes. A literal
+          // text-white here was invisible in dark mode, where foreground IS white.
+          'rounded-lg bg-foreground px-2.5 py-1 text-xs font-medium text-canvas shadow-md',
           'opacity-0 transition-opacity delay-200 duration-150',
           'group-hover/tip:opacity-100 group-focus-within/tip:opacity-100',
         )}
