@@ -165,6 +165,7 @@ export class SettingsService implements OnModuleInit {
         signatureUrl: null,
         stampUrl: null,
         footerText: 'Thank you for your business!',
+        billNote: '',
         accentColor: '#1d4ed8',
         logoAlignment: 'LEFT',
         logoSize: 'MEDIUM',

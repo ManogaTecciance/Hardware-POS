@@ -9,6 +9,7 @@ import {
   IsString,
   Matches,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -125,6 +126,11 @@ export class UpdateDocumentSettingsDto {
   @IsString()
   @IsOptional()
   footerText?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  billNote?: string;
 
   @Matches(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, { message: 'accentColor must be a hex colour' })
   @IsOptional()

@@ -66,13 +66,17 @@ export function ReturnDraftProvider({ children }: { children: React.ReactNode })
     setHydrated(true);
   }, []);
 
+  // Guarded on `hydrated` for the same reason as the POS cart: an unguarded
+  // mount-time write would overwrite the saved draft with EMPTY before it is
+  // read back, discarding an in-progress return on a full page load.
   React.useEffect(() => {
+    if (!hydrated) return;
     try {
       window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
       /* ignore */
     }
-  }, [state]);
+  }, [state, hydrated]);
 
   const value = React.useMemo<ReturnDraftValue>(
     () => ({

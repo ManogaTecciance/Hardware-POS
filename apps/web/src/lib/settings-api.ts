@@ -29,6 +29,7 @@ export interface DocumentSettings {
   signatureUrl: string | null;
   stampUrl: string | null;
   footerText: string;
+  billNote: string;
   accentColor: string;
   logoAlignment: LogoAlignment;
   logoSize: LogoSize;

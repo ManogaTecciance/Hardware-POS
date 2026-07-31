@@ -42,6 +42,7 @@ export const DEFAULT_DOCUMENT_PROFILE: DocumentProfile = {
   signatureUrl: null,
   stampUrl: null,
   footerText: 'Thank you for your business!',
+  billNote: '',
   accentColor: '#006c68',
   logoAlignment: 'LEFT',
   logoSize: 'MEDIUM',

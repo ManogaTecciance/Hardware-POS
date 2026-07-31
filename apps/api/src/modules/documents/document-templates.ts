@@ -62,6 +62,8 @@ export interface A4Document {
   notes?: string | null;
   terms?: string | null;
   footerText?: string | null;
+  /** Note printed below the footer (e.g. return policy). */
+  billNote?: string | null;
   signatures?: boolean;
   statusBadge?: string | null;
   watermark?: string | null;
@@ -178,10 +180,11 @@ function styles(doc: A4Document): string {
   .blocks { margin-top: 18px; display: grid; gap: 12px; }
   .block h4 { margin: 0 0 3px; font-size: 11px; text-transform: uppercase; color: var(--muted); }
   .block p { margin: 0; font-size: 11px; line-height: 1.55; white-space: normal; }
-  .signs { display: flex; justify-content: space-between; gap: 40px; margin-top: 40px; page-break-inside: avoid; }
+  .signs { display: flex; justify-content: space-between; gap: 18px; margin-top: 40px; page-break-inside: avoid; }
   .sign { flex: 1; border-top: 1px solid var(--ink); padding-top: 6px; font-size: 11px; color: var(--muted); }
-  .sign img { display: block; max-height: 52px; max-width: 180px; object-fit: contain; margin-bottom: 4px; }
+  .sign img { display: block; max-height: 52px; max-width: 100%; object-fit: contain; margin-bottom: 4px; }
   .foot { margin-top: 22px; text-align: center; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .billnote { margin-top: 10px; text-align: center; color: var(--ink); font-size: 11px; line-height: 1.5; white-space: pre-line; }
   .foot .gen { display: block; margin-top: 3px; font-size: 9.5px; color: #94a3b8; }
   @page { size: A4 portrait; margin: ${pageMargin}; }
   ${pageNumberCss}
@@ -242,8 +245,12 @@ export function renderA4Document(doc: A4Document): string {
     (doc.signatureImageUrl ? `<img src="${esc(doc.signatureImageUrl)}" alt="Authorized signature" />` : '') +
     (doc.stampImageUrl ? `<img src="${esc(doc.stampImageUrl)}" alt="Company stamp" />` : '') +
     'Authorized signature';
+  // Sign-off chain runs internal-first (authorized -> checked -> approved), with
+  // the customer last as the party who receives the goods/document.
   const signatures = doc.signatures
-    ? `<div class="signs"><div class="sign">${authorizedInner}</div><div class="sign">Customer signature</div></div>`
+    ? `<div class="signs">${[authorizedInner, 'Checked by', 'Approved by', 'Customer signature']
+        .map((label) => `<div class="sign">${label}</div>`)
+        .join('')}</div>`
     : '';
 
   const meta = doc.meta.map((m) => `<div><span class="k">${esc(m.label)}</span>${esc(m.value)}</div>`).join('');
@@ -280,6 +287,7 @@ export function renderA4Document(doc: A4Document): string {
           }</div>`
         : ''
     }
+    ${doc.billNote ? `<div class="billnote">${multiline(doc.billNote)}</div>` : ''}
   </div>
 </body>
 </html>`;

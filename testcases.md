@@ -370,6 +370,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SET-007 | Non-admin cannot open settings | Cashier hits /settings | Blocked (permission gate) | N | Not Run |
 | SET-008 | Invalid tax rate rejected | −5 or 250 | Validation error | N | Not Run |
 | SET-009 | Quotation defaults applied | Configure default quotation validity/terms | New quotations pick both up (see QUO-020) | P | Not Run |
+| SET-010 | Invoice note saves and prints | Settings → Business → set Invoice note, save, open an invoice | Note appears below the footer line | P | Passed |
+| SET-011 | Blank invoice note prints nothing | Clear the note, save, open an invoice | No note block rendered; footer unchanged | P | Passed |
+| SET-012 | Invoice note is multi-line | Enter a 2-line note, save, open an invoice | Both lines render, line break preserved | P | Passed |
+| SET-013 | Invoice note only on invoices | Set a note, open quotation / return / exchange documents | Note absent on all three | N | Passed |
+| SET-014 | Invoice note escapes HTML | Enter `<script>alert(1)</script> A & B` | Rendered as literal text, no script execution | N | Passed |
+| SET-015 | Invoice note length capped | Submit a note over 500 characters | Validation error, not persisted | N | Not Run |
+| SET-016 | Existing tenant gets the new field | Load settings for a tenant saved before this field existed | Defaults merged in, note blank, no crash | P | Passed |
 
 ## DOC — Documents & Printing
 
@@ -386,6 +393,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DOC-009 | Receipt record per sale + mark printed | Complete sale; GET /receipts/sale/:id; mark printed | Receipt exists; status flips to PRINTED | P | Not Run |
 | DOC-010 | Attach customer to a receipt | POST /receipts/:saleId/customer | Customer linked for the reprint | P | Not Run |
 | DOC-011 | Document template preview from settings | Settings → preview / sample PDF | Sample renders with current letterhead/toggles | P | Not Run |
+| DOC-012 | Four signature placeholders render | Enable signature fields, open any document | Authorized signature, Checked by, Approved by, Customer signature — in that order | P | Passed |
+| DOC-013 | Signature toggle hides all four | Disable signature fields, open a document | No sign-off row at all | N | Passed |
+| DOC-014 | Signature chain on every doc type | Open quotation, invoice, return, exchange | All four blocks present on each | P | Passed |
+| DOC-015 | Signature row fits A4 width | Print a document with signature fields on | Four equal columns on one row, no wrap or overflow | P | Not Run |
+| DOC-016 | Uploaded signature/stamp fit their column | Upload a wide signature image, print | Image scales to column width, does not overlap "Checked by" | P | Not Run |
 
 ## ADM — Administration & Multi-Tenancy
 

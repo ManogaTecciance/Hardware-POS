@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
@@ -156,19 +157,35 @@ export default function SettingsPage() {
     );
   }
 
+  // Settings are owner/admin territory. The nav already hides this route, so
+  // reaching here means a direct URL — block the page outright rather than
+  // rendering it read-only.
+  if (!canManage) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Settings" description="Business, document and printing configuration." />
+        <Card>
+          <CardContent className="flex flex-col items-center gap-2 py-16 text-center">
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <AlertTriangle className="h-6 w-6" aria-hidden />
+            </span>
+            <p className="text-sm font-medium text-foreground">You don’t have access to settings</p>
+            <p className="max-w-sm text-sm text-muted-foreground">
+              Settings are available to owners and administrators. Ask an administrator if you need
+              a change made.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-24">
       <PageHeader
         title="Documents & Printing"
         description="Business letterhead, branding and A4 template settings applied to every quotation, invoice, bill and return."
       />
-
-      {!canManage ? (
-        <div className="flex items-center gap-2 rounded-xl bg-warning-soft px-4 py-3 text-sm font-medium text-warning">
-          <AlertTriangle className="h-4 w-4" /> You can view these settings but need the Settings
-          permission to change them.
-        </div>
-      ) : null}
 
       {/* Tabs */}
       <div className="flex gap-1 overflow-x-auto border-b border-border">
@@ -238,11 +255,7 @@ export default function SettingsPage() {
         </div>
       ) : null}
 
-      {toast ? (
-        <div className="fixed bottom-20 left-1/2 z-40 -translate-x-1/2 rounded-xl bg-foreground px-4 py-2.5 text-sm text-white shadow-lg">
-          {toast}
-        </div>
-      ) : null}
+      {toast ? <Toast message={toast} className="bottom-20 z-40" /> : null}
     </div>
   );
 }
@@ -292,6 +305,20 @@ function BusinessTab({ docs, set, disabled }: { docs: DocumentSettings; set: Set
         </Field>
         <Field label="Footer / thank-you line" hint="Printed at the bottom of every document." full>
           <Input value={docs.footerText} disabled={disabled} onChange={(e) => set('footerText', e.target.value)} />
+        </Field>
+        <Field
+          label="Invoice note"
+          hint="Printed below the footer on invoices only — e.g. a return policy. Leave blank to hide."
+          full
+        >
+          <Textarea
+            value={docs.billNote ?? ''}
+            disabled={disabled}
+            rows={2}
+            maxLength={500}
+            onChange={(e) => set('billNote', e.target.value)}
+            placeholder="Items need to be returned within 7 days with this invoice."
+          />
         </Field>
       </CardContent>
     </Card>

@@ -76,13 +76,18 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, []);
 
+  // Persist — but never before the stored cart has been read back. Without this
+  // guard the mount-time run writes the initial EMPTY state over a saved cart,
+  // and under StrictMode's double-invoked effects the second hydration then
+  // reads that empty value, losing the cart on every full page load.
   React.useEffect(() => {
+    if (!hydrated) return;
     try {
       window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
       /* ignore */
     }
-  }, [state]);
+  }, [state, hydrated]);
 
   const updateItem = React.useCallback(
     (productId: string, fn: (item: CartItem) => CartItem) =>
