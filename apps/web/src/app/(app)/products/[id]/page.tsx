@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as React from 'react';
-import { ArrowLeft, Pencil, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Pencil, Printer, RefreshCw } from 'lucide-react';
 
+import { PrintLabelsDialog } from '@/components/labels/print-labels-dialog';
 import { ProductImage } from '@/components/product-image';
 
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
@@ -31,6 +32,7 @@ export default function ProductDetailPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [labelOpen, setLabelOpen] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
 
   React.useEffect(() => {
@@ -91,6 +93,10 @@ export default function ProductDetailPage() {
               Sync to QuickBooks
             </Button>
           ) : null}
+          <Button variant="outline" onClick={() => setLabelOpen(true)}>
+            <Printer className="h-4 w-4" />
+            Print label
+          </Button>
           {canManage ? (
             <Link href={`/products/${product.id}/edit`} className={buttonVariants()}>
               <Pencil className="h-4 w-4" />
@@ -156,6 +162,22 @@ export default function ProductDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {session ? (
+        <PrintLabelsDialog
+          session={session}
+          open={labelOpen}
+          onClose={() => setLabelOpen(false)}
+          targets={[
+            {
+              id: product.id,
+              name: product.name,
+              sku: product.sku,
+              price: product.unitPrice,
+            },
+          ]}
+        />
+      ) : null}
     </div>
   );
 }

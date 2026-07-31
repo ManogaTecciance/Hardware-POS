@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import * as React from 'react';
-import { Ban, FileUp, FolderTree, PackagePlus, Pencil, RotateCcw, Search } from 'lucide-react';
+import { Ban, FileUp, FolderTree, PackagePlus, Pencil, Printer, RotateCcw, Search } from 'lucide-react';
 
 import { ProductImage } from '@/components/product-image';
 import { ImportProductsDialog } from '@/components/products/import-products-dialog';
 import { ExportMenu } from '@/components/sales/export-menu';
+import { PrintLabelsDialog } from '@/components/labels/print-labels-dialog';
 import { PageHeader } from '@/components/page-header';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
@@ -74,6 +75,8 @@ export default function ProductsPage() {
 
   const [categories, setCategories] = React.useState<CategoryNode[]>([]);
   const [rows, setRows] = React.useState<ManagedProduct[]>([]);
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [labelOpen, setLabelOpen] = React.useState(false);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -283,11 +286,44 @@ export default function ProductsPage() {
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
+      {selectedIds.size > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-brand-50 px-4 py-2.5 text-sm">
+          <span className="font-medium">
+            {selectedIds.size} product{selectedIds.size === 1 ? '' : 's'} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </Button>
+            <Button size="sm" onClick={() => setLabelOpen(true)}>
+              <Printer className="h-4 w-4" />
+              Print labels
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
+                <th className="w-10 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all products on this page"
+                    className="h-4 w-4 accent-[var(--color-primary)]"
+                    checked={rows.length > 0 && rows.every((r) => selectedIds.has(r.id))}
+                    onChange={(e) => {
+                      const next = new Set(selectedIds);
+                      for (const r of rows) {
+                        if (e.target.checked) next.add(r.id);
+                        else next.delete(r.id);
+                      }
+                      setSelectedIds(next);
+                    }}
+                  />
+                </th>
                 <th className="px-4 py-3 font-medium">Product</th>
                 <th className="px-4 py-3 font-medium">SKU</th>
                 <th className="px-4 py-3 text-right font-medium">Price</th>
@@ -300,19 +336,33 @@ export default function ProductsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
                     Loading products…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
                     No products found.
                   </td>
                 </tr>
               ) : (
                 rows.map((p) => (
                   <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${p.name}`}
+                        className="h-4 w-4 accent-[var(--color-primary)]"
+                        checked={selectedIds.has(p.id)}
+                        onChange={(e) => {
+                          const next = new Set(selectedIds);
+                          if (e.target.checked) next.add(p.id);
+                          else next.delete(p.id);
+                          setSelectedIds(next);
+                        }}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <ProductImage
@@ -451,6 +501,17 @@ export default function ProductsPage() {
           </div>
         </div>
       </div>
+      {session ? (
+        <PrintLabelsDialog
+          session={session}
+          open={labelOpen}
+          onClose={() => setLabelOpen(false)}
+          targets={rows
+            .filter((r) => selectedIds.has(r.id))
+            .map((r) => ({ id: r.id, name: r.name, sku: r.sku, price: r.unitPrice }))}
+        />
+      ) : null}
+
       {session ? (
         <ImportProductsDialog
           session={session}

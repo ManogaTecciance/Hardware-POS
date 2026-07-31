@@ -16,6 +16,7 @@ import { UsersModule } from './modules/users/users.module';
 import { ProductsModule } from './modules/products/products.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { LabelsModule } from './modules/labels/labels.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { ReturnsModule } from './modules/returns/returns.module';
@@ -43,6 +44,7 @@ import { BranchesModule } from './modules/branches/branches.module';
     CategoriesModule,
     CustomersModule,
     SuppliersModule,
+    LabelsModule,
     SalesModule,
     ReturnsModule,
     QuotationsModule,
