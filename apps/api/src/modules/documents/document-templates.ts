@@ -62,6 +62,8 @@ export interface A4Document {
   notes?: string | null;
   terms?: string | null;
   footerText?: string | null;
+  /** Note printed below the footer (e.g. return policy). */
+  billNote?: string | null;
   signatures?: boolean;
   statusBadge?: string | null;
   watermark?: string | null;
@@ -182,6 +184,7 @@ function styles(doc: A4Document): string {
   .sign { flex: 1; border-top: 1px solid var(--ink); padding-top: 6px; font-size: 11px; color: var(--muted); }
   .sign img { display: block; max-height: 52px; max-width: 180px; object-fit: contain; margin-bottom: 4px; }
   .foot { margin-top: 22px; text-align: center; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .billnote { margin-top: 10px; text-align: center; color: var(--ink); font-size: 11px; line-height: 1.5; white-space: pre-line; }
   .foot .gen { display: block; margin-top: 3px; font-size: 9.5px; color: #94a3b8; }
   @page { size: A4 portrait; margin: ${pageMargin}; }
   ${pageNumberCss}
@@ -280,6 +283,7 @@ export function renderA4Document(doc: A4Document): string {
           }</div>`
         : ''
     }
+    ${doc.billNote ? `<div class="billnote">${multiline(doc.billNote)}</div>` : ''}
   </div>
 </body>
 </html>`;

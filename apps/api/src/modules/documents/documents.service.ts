@@ -257,6 +257,7 @@ export class DocumentsService {
       rows: this.rows(lines, docs),
       summary,
       footerText: docs.footerText,
+      billNote: docs.billNote || null,
       signatures: docs.signatureFields,
       ...this.layout(docs),
     };
@@ -536,6 +537,7 @@ export class DocumentsService {
       notes: type === 'quotation' ? 'Delivery within 5 working days of confirmed order.' : null,
       terms: type === 'quotation' ? 'This quotation is valid until the date shown above. Prices subject to stock availability.' : null,
       footerText: docs.footerText,
+      billNote: type === 'invoice' ? docs.billNote || null : null,
       signatures: docs.signatureFields,
       ...this.layout(docs),
     };

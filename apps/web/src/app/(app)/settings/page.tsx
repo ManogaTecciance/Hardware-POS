@@ -306,6 +306,20 @@ function BusinessTab({ docs, set, disabled }: { docs: DocumentSettings; set: Set
         <Field label="Footer / thank-you line" hint="Printed at the bottom of every document." full>
           <Input value={docs.footerText} disabled={disabled} onChange={(e) => set('footerText', e.target.value)} />
         </Field>
+        <Field
+          label="Invoice note"
+          hint="Printed below the footer on invoices only — e.g. a return policy. Leave blank to hide."
+          full
+        >
+          <Textarea
+            value={docs.billNote ?? ''}
+            disabled={disabled}
+            rows={2}
+            maxLength={500}
+            onChange={(e) => set('billNote', e.target.value)}
+            placeholder="Items need to be returned within 7 days with this invoice."
+          />
+        </Field>
       </CardContent>
     </Card>
   );

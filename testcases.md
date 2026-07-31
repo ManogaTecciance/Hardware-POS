@@ -370,6 +370,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SET-007 | Non-admin cannot open settings | Cashier hits /settings | Blocked (permission gate) | N | Not Run |
 | SET-008 | Invalid tax rate rejected | −5 or 250 | Validation error | N | Not Run |
 | SET-009 | Quotation defaults applied | Configure default quotation validity/terms | New quotations pick both up (see QUO-020) | P | Not Run |
+| SET-010 | Invoice note saves and prints | Settings → Business → set Invoice note, save, open an invoice | Note appears below the footer line | P | Passed |
+| SET-011 | Blank invoice note prints nothing | Clear the note, save, open an invoice | No note block rendered; footer unchanged | P | Passed |
+| SET-012 | Invoice note is multi-line | Enter a 2-line note, save, open an invoice | Both lines render, line break preserved | P | Passed |
+| SET-013 | Invoice note only on invoices | Set a note, open quotation / return / exchange documents | Note absent on all three | N | Passed |
+| SET-014 | Invoice note escapes HTML | Enter `<script>alert(1)</script> A & B` | Rendered as literal text, no script execution | N | Passed |
+| SET-015 | Invoice note length capped | Submit a note over 500 characters | Validation error, not persisted | N | Not Run |
+| SET-016 | Existing tenant gets the new field | Load settings for a tenant saved before this field existed | Defaults merged in, note blank, no crash | P | Passed |
 
 ## DOC — Documents & Printing
 

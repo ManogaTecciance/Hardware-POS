@@ -216,6 +216,7 @@ export function SaleA4Document({
           {profile.footerText || 'Thank you for your business!'}
           <span className="a4-gen">Generated {formatDateTime(new Date().toISOString())}</span>
         </div>
+        {profile.billNote ? <div className="a4-billnote">{profile.billNote}</div> : null}
       </div>
     </>
   );
@@ -277,6 +278,7 @@ function css(accent: string, padding: string, align: string): string {
   .a4-sign img { display:block; max-height:52px; max-width:180px; object-fit:contain; margin-bottom:4px; }
   .a4-foot { margin-top:22px; text-align:center; color:#64748b; font-size:11px; border-top:1px solid #e2e8f0; padding-top:10px; }
   .a4-foot .a4-gen { display:block; margin-top:3px; font-size:9.5px; color:#94a3b8; }
+  .a4-billnote { margin-top:10px; text-align:center; color:#0f172a; font-size:11px; line-height:1.5; white-space:pre-line; }
   @page { size: A4 portrait; margin: 12mm; }
   @media print {
     html, body { background:#fff !important; margin:0; }

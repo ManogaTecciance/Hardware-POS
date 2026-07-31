@@ -60,6 +60,11 @@ export interface DocumentSettings {
   stampUrl: string | null;
   /** Footer/thank-you line on documents. */
   footerText: string;
+  /**
+   * Free-text note printed below the footer on invoices / bills — e.g. a
+   * return policy ("Items must be returned within 7 days"). Blank hides it.
+   */
+  billNote: string;
   /** Document accent colour (headings, rules, totals). Hex, e.g. `#1d4ed8`. */
   accentColor: string;
   /** Header logo alignment. */

@@ -59,4 +59,32 @@ describe('DocumentsService — A4 template preview', () => {
     expect(svc.previewHtml(TENANT, 'invoice', { showCustomerTaxNumber: true })).toContain('134567890-7000');
     expect(svc.previewHtml(TENANT, 'invoice', { showCustomerTaxNumber: false })).not.toContain('134567890-7000');
   });
+
+  describe('invoice note', () => {
+    const NOTE = 'Items need to be returned within 7 days.';
+
+    it('prints below the footer on invoices, and only when set', () => {
+      const svc = service();
+      const html = svc.previewHtml(TENANT, 'invoice', { billNote: NOTE });
+      expect(html).toContain(NOTE);
+      // Below the footer, not above it.
+      expect(html.indexOf('class="billnote"')).toBeGreaterThan(html.indexOf('class="foot"'));
+      // The stylesheet always carries the rule; only the div is conditional.
+      expect(svc.previewHtml(TENANT, 'invoice', { billNote: '' })).not.toContain('class="billnote"');
+    });
+
+    it('stays off non-invoice documents', () => {
+      const svc = service();
+      for (const type of ['quotation', 'return', 'exchange'] as const) {
+        expect(svc.previewHtml(TENANT, type, { billNote: NOTE })).not.toContain(NOTE);
+      }
+    });
+
+    it('escapes HTML and keeps author line breaks', () => {
+      const html = service().previewHtml(TENANT, 'invoice', { billNote: 'A & B\n<script>x</script>' });
+      expect(html).toContain('A &amp; B');
+      expect(html).not.toContain('<script>x</script>');
+      expect(html).toMatch(/class="billnote">[^<]*A &amp; B<br/);
+    });
+  });
 });
