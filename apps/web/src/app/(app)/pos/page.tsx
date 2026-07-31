@@ -5,6 +5,7 @@ import * as React from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  CheckCircle2,
   Clock,
   FileText,
   NotebookPen,
@@ -38,6 +39,7 @@ import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
 import { stockCap, usePosCart } from '@/lib/pos-cart';
+import { scanCandidates, useBarcodeScanner } from '@/lib/use-barcode-scanner';
 import { cn, formatMoney, round2 } from '@/lib/utils';
 
 const PAGE_SIZES = [20, 30, 40, 50];
@@ -46,6 +48,9 @@ interface PendingLineApproval {
   discount: LineDiscount;
   percent: number;
 }
+
+/** Toast intent — drives the semantic colours (never raw hex). */
+type ToastTone = 'success' | 'warning' | 'danger';
 
 export default function PosPage() {
   const { session, hasPermission } = useAuth();
@@ -70,15 +75,24 @@ export default function PosPage() {
     percent: number;
   } | null>(null);
   const [quickAddOpen, setQuickAddOpen] = React.useState(false);
-  const [toast, setToast] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<{ message: string; tone: ToastTone } | null>(null);
+  const toastTimer = React.useRef<number | undefined>(undefined);
   // Portrait / phone: the cart lives in a slide-up sheet instead of a fixed column.
   const [cartOpen, setCartOpen] = React.useState(false);
   const searchRef = React.useRef<HTMLInputElement>(null);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    window.setTimeout(() => setToast(null), 2400);
+  /**
+   * Transient confirmation at the bottom of the screen. Rapid scans replace the
+   * previous message, so the pending dismissal is cleared first — otherwise an
+   * earlier timer would cut the newest toast short.
+   */
+  const showToast = (message: string, tone: ToastTone = 'success') => {
+    setToast({ message, tone });
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2400);
   };
+
+  React.useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Keep the cart's product snapshots aligned with each fresh catalog load,
   // so stock warnings reflect sales made on other registers.
@@ -116,10 +130,61 @@ export default function PosPage() {
     showToast(`${product.name} added`);
   };
 
-  // Enter adds an exact SKU match, else the sole result.
+  /**
+   * Resolve a scanned / typed code to a product. Matches SKU across the WHOLE
+   * catalog, not the filtered page — a scan must work regardless of which
+   * category tab or search term is active. QR payloads that wrap the code in a
+   * URL or JSON are unwrapped by `scanCandidates`, so both 1D barcodes and QR
+   * codes resolve through the same path.
+   */
+  const findBySku = React.useCallback(
+    (code: string): ClientProduct | undefined => {
+      for (const candidate of scanCandidates(code)) {
+        const key = candidate.toLowerCase();
+        const hit = data.products.find((p) => (p.sku ?? '').trim().toLowerCase() === key);
+        if (hit) return hit;
+      }
+      return undefined;
+    },
+    [data.products],
+  );
+
+  /** Add a scanned product, or explain why it couldn't be added. */
+  const addByCode = React.useCallback(
+    (code: string) => {
+      const product = findBySku(code);
+      if (!product) {
+        showToast(`No product found for "${code}"`, 'danger');
+        return;
+      }
+      if (product.type === 'Inventory' && product.quantityOnHand <= 0) {
+        showToast(`${product.name} is out of stock`, 'warning');
+        return;
+      }
+      cart.addToCart(product);
+      showToast(`${product.name} added`);
+      setQuery('');
+    },
+    // showToast/cart are stable enough for this handler's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [findBySku],
+  );
+
+  // Hardware scanner works anywhere on the page — no need to focus the search
+  // box first. Suspended while a modal is open so scans can't fire behind it.
+  const modalOpen =
+    !!noteFor ||
+    !!discountFor ||
+    !!pendingApproval ||
+    orderDiscountOpen ||
+    !!pendingOrderApproval ||
+    quickAddOpen;
+  useBarcodeScanner({ onScan: addByCode, enabled: !modalOpen });
+
+  // Enter adds an exact SKU match (whole catalog), else the sole visible result.
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
-    const exact = filtered.find((p) => (p.sku ?? '').toLowerCase() === q);
+    const exact = findBySku(q);
     const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
     if (target) {
       addToCart(target);
@@ -853,8 +918,27 @@ export default function PosPage() {
       ) : null}
 
       {toast ? (
-        <div className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-xl bg-foreground px-4 py-2.5 text-sm text-white shadow-lg">
-          {toast}
+        /* High-contrast surface in both themes (a soft tint + tinted text fell
+           below the WCAG AA 4.5:1 minimum in light mode). Tone is carried by
+           the icon and left accent, never by colour alone — WCAG 1.4.1. */
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            'fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2.5 rounded-xl border border-l-4 border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground shadow-pop',
+            toast.tone === 'success' && 'border-l-success',
+            toast.tone === 'warning' && 'border-l-warning',
+            toast.tone === 'danger' && 'border-l-danger',
+          )}
+        >
+          {toast.tone === 'success' ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden />
+          ) : toast.tone === 'warning' ? (
+            <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden />
+          ) : (
+            <X className="h-4 w-4 shrink-0 text-danger" aria-hidden />
+          )}
+          {toast.message}
         </div>
       ) : null}
     </div>
