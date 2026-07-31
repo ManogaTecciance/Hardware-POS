@@ -25,7 +25,6 @@ import { ItemDiscountDialog } from '@/components/pos/item-discount-dialog';
 import { ItemNoteDialog } from '@/components/pos/item-note-dialog';
 import { ManagerApprovalDialog } from '@/components/pos/manager-approval-dialog';
 import { OrderDiscountDialog } from '@/components/pos/order-discount-dialog';
-import { QuickAddCustomerDialog } from '@/components/pos/quick-add-customer-dialog';
 import { ProductImage } from '@/components/product-image';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -74,7 +73,6 @@ export default function PosPage() {
     discount: OrderDiscount;
     percent: number;
   } | null>(null);
-  const [quickAddOpen, setQuickAddOpen] = React.useState(false);
   const [toast, setToast] = React.useState<{ message: string; tone: ToastTone } | null>(null);
   const toastTimer = React.useRef<number | undefined>(undefined);
   // Portrait / phone: the cart lives in a slide-up sheet instead of a fixed column.
@@ -177,8 +175,7 @@ export default function PosPage() {
     !!discountFor ||
     !!pendingApproval ||
     orderDiscountOpen ||
-    !!pendingOrderApproval ||
-    quickAddOpen;
+    !!pendingOrderApproval;
   useBarcodeScanner({ onScan: addByCode, enabled: !modalOpen });
 
   // Enter adds an exact SKU match (whole catalog), else the sole visible result.
@@ -343,7 +340,8 @@ export default function PosPage() {
             variant="outline"
             size="icon"
             aria-label="Add customer"
-            onClick={() => setQuickAddOpen(true)}
+            title="Add a customer"
+            onClick={() => router.push('/customers/new')}
           >
             <UserPlus className="h-4 w-4" />
           </Button>
@@ -901,19 +899,6 @@ export default function PosPage() {
           discountLabel={formatDiscountLabel(pendingOrderApproval.discount, currency)}
           onApprove={handleApproveOrder}
           onClose={() => setPendingOrderApproval(null)}
-        />
-      ) : null}
-
-      {canAddCustomer ? (
-        <QuickAddCustomerDialog
-          open={quickAddOpen}
-          session={session!}
-          onClose={() => setQuickAddOpen(false)}
-          onCreated={(customer) => {
-            cart.addCustomer({ id: customer.id, name: customer.name });
-            setQuickAddOpen(false);
-            showToast(`Customer "${customer.name}" added`);
-          }}
         />
       ) : null}
 
