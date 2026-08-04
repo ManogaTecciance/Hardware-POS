@@ -56,14 +56,29 @@ Specs authored against **unmodified** production code and proven green there, so
 they are a baseline rather than a description of a refactor. They pin the exact
 current behaviour that Slice 6 must preserve.
 
-### Slice 4 — platform data model *(awaiting approval)*
+### Slice 4 — platform data model ✅ *(implemented)*
 
 `TenantBusinessProfile`, `TenantModule`, and the four enums specified in
 [`01-platform-architecture.md`](./01-platform-architecture.md). One additive
-migration, no backfill. `platform/business-profile` module with three endpoints
-(`GET`/`PATCH /v1/platform/profile`, `GET /v1/platform/modules`) and
-`platform/modules` with `@RequireModule()` + `ModuleAccessGuard`. No cross-request
-cache on the authorization path (decision D11).
+migration (`20260804121830_add_tenant_platform_profile`), no backfill. A
+`platform` module with three endpoints (`GET`/`PATCH /v1/platform/profile`,
+`GET /v1/platform/modules`), `@RequireModule()` + `ModuleAccessGuard` registered
+globally after `PermissionsGuard`, and two permissions. No cross-request cache on
+the authorization path (decision D11).
+
+The migration was proven additive and reversible against **disposable** databases:
+a baseline database carrying only the 19 prior migrations was diffed against a
+fully migrated one (0 pre-existing objects changed, 59 added, all belonging to the
+two new tables and four new enums), then the rollback SQL in
+`packages/database/prisma/rollbacks/` was applied and the schema compared byte for
+byte against that baseline.
+
+`@RequireModule` is applied to exactly one live controller — `QuotationsController`
+— which is enough to prove the mechanism without inventing restaurant routes.
+
+Frontend scope was limited to the typed client `apps/web/src/lib/platform-api.ts`,
+which nothing imports yet. Tile Shop navigation is untouched; dynamic navigation is
+Slice 8.
 
 ### Slice 5 — provider ports *(awaiting approval)*
 

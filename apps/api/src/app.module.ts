@@ -8,6 +8,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
+import { ModuleAccessGuard } from './common/guards/module-access.guard';
 import { StorageModule } from './common/storage/storage.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
@@ -30,12 +31,17 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { BranchesModule } from './modules/branches/branches.module';
+import { PlatformModule } from './modules/platform/platform.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     StorageModule,
     PrismaModule,
+    // Global: ModuleAccessGuard and (from Slice 5) the provider factories resolve
+    // the tenant's business profile, so BusinessProfileService must be reachable
+    // without every feature module importing PlatformModule.
+    PlatformModule,
     HealthModule,
     AuthModule,
     UsersModule,
@@ -59,9 +65,13 @@ import { BranchesModule } from './modules/branches/branches.module';
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.
+    // ModuleAccessGuard runs last — it asks whether the tenant has the feature at
+    // all, which is only meaningful once the caller is known to be allowed to use
+    // it. Routes without @RequireModule() metadata pass through untouched.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: ModuleAccessGuard },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

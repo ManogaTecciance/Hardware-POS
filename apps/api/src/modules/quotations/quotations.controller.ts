@@ -11,8 +11,11 @@ import {
 } from '@nestjs/common';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { ModuleKey } from '@hardware-pos/database';
+
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
@@ -32,6 +35,22 @@ import { QueryQuotationsDto } from './dto/query-quotations.dto';
 import { UpdateQuotationDto } from './dto/update-quotation.dto';
 import { ShareEmailDto, ShareWhatsappDto } from '../sharing/dto/share.dto';
 
+/**
+ * Quotations are a retail/trade feature, so this is the one live controller where
+ * Slice 4 applies `@RequireModule` — enough to prove the mechanism end to end
+ * without inventing routes for a domain that does not exist yet.
+ *
+ * No behaviour change for existing tenants: `QUOTATIONS` is in
+ * `LEGACY_TENANT_DEFAULTS`, so a tenant with no business profile (every tenant
+ * today) still passes. A tenant that explicitly configures a RESTAURANT profile
+ * does not get `QUOTATIONS` by default and will receive 403 here, which is the
+ * intended outcome.
+ *
+ * Applied at class level deliberately: the public share-link routes live in the
+ * separate `PublicQuotationsController`, so nothing `@Public()` is gated by a
+ * guard that has no authenticated tenant to evaluate.
+ */
+@RequireModule(ModuleKey.QUOTATIONS)
 @Controller('quotations')
 export class QuotationsController {
   constructor(private readonly quotationsService: QuotationsService) {}

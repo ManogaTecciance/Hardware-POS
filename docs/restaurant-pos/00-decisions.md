@@ -221,6 +221,99 @@ application backstop.
 **Do not implement throttling during Slice 4.** Do not make unrelated
 authentication changes during Slice 4.
 
+### D21 — Slice 4 authorisation
+Slice 4 (platform data model and tenant module foundation) approved. Slice 5 and
+later still require separate approval.
+
+Authorised: `TenantBusinessProfile`, `TenantModule`, the business-profile enums,
+effective legacy defaults, the platform profile service and API, the module-access
+guard, permissions, one additive migration, and tests.
+
+Not authorised: provider ports, inventory providers, accounting providers,
+restaurant domain models, restaurant UI, and any refactor of sales, returns, or
+product logic.
+
+Database constraints for this slice:
+- The migration may create `TenantBusinessProfile` and `TenantModule` only.
+- No `DROP`, no column rename, no data deletion, no `UPDATE` of existing tenant
+  data, **no backfill of existing tenants**.
+- `Product.quantityOnHand` is not repurposed.
+- No restaurant operational tables.
+- **A tenant with no `TenantBusinessProfile` row is a first-class supported
+  state** that resolves to the legacy Tile Shop behaviour. Existing tenants must
+  not be made to run a setup wizard or reconnect QuickBooks.
+
+---
+
+## 2026-08-04 — Slice 4 review
+
+### D22 — Route and module guard strategy (resolves Risk Q)
+The single-controller module guard delivered in Slice 4 is **accepted as
+architectural proof**. **Do not add `@RequireModule` blindly to every existing
+controller.**
+
+Rules, recorded in full in
+[`01-platform-architecture.md`](./01-platform-architecture.md#route-classification-decision-d22):
+
+1. Shared AxloPOS core routes are controlled by authentication, tenant isolation,
+   and permissions — **not** by optional business-module flags.
+2. Business-specific workflow routes must require the relevant `ModuleKey`.
+3. A controller containing both shared and business-specific operations must be
+   mapped at route level, or split, **before** any controller-level guard.
+4. Every future Restaurant-specific controller must fail closed and declare its
+   required module explicitly.
+5. **No new Restaurant route may exist without backend module enforcement.**
+6. A complete route-to-module matrix must be produced and **approved before the
+   first real Restaurant tenant is onboarded**.
+7. **Do not perform the comprehensive guard rollout during Slice 5.**
+
+The matrix must inspect the actual repository and classify every controller and
+route as one of `SHARED_CORE` or a specific `ModuleKey`. **Route classifications
+must not be guessed without reading the route's business responsibility.**
+
+### D23 — Platform profile read access
+Effective-profile read access is **kept for CASHIER and every other authenticated
+role**. The front-end needs it for module-aware navigation and capability
+decisions. `GET /v1/platform/profile` may be used by any authenticated user.
+
+The user-safe response may contain `businessType`, `inventoryMode`,
+`accountingProvider`, `enabledModules`, the profile source, `version`, and safe
+presentation metadata where required.
+
+It must **not** expose QuickBooks access or refresh tokens, delivery-platform
+credentials, API secrets, encrypted credential values, internal infrastructure
+configuration, or any other tenant's data.
+
+`PATCH /v1/platform/profile` remains restricted to **OWNER** and **ADMIN**.
+CASHIER, MANAGER, and ACCOUNTANT must not update the profile. Backend permission
+enforcement is preserved.
+
+### D24 — Slice 5 authorisation
+Slice 5 (provider ports, implementations, and factories) approved. Slice 6 requires
+separate approval.
+
+Slice 5 is **structural and inert**: it must not change call sites in sales,
+returns, products, quotations, payments, the QuickBooks workers, or existing sync
+orchestration. The existing Tile Shop continues to use the exact current code paths.
+
+Required:
+- Contracts derived from **characterised existing behaviour**, not speculation.
+- No QuickBooks SDK types and no REST DTOs in provider interfaces — AxloPOS-owned
+  input and result types only.
+- Every mutating provider method accepts a caller-supplied
+  `Prisma.TransactionClient`; providers never open a nested transaction; the caller
+  keeps transaction boundaries; a failed provider mutation participates in the
+  caller's rollback.
+- `LocalInventoryProvider` must **not** claim multi-branch correctness using the
+  global `Product.quantityOnHand`; it fails closed with a typed error for
+  multi-branch tenants. `Product.quantityOnHand` stays preserved.
+- `NoInventoryProvider` / `NoAccountingProvider` write no `SyncJob` or `SyncLog`,
+  create no QuickBooks document ids, never call QuickBooks, and never pretend an
+  external sync occurred.
+- `EXTERNAL` inventory and `FUTURE_EXTERNAL` accounting **fail closed** with typed
+  unsupported-provider errors. **No silent fallback** to QuickBooks, Local, or None.
+- No Prisma migration. No `BranchInventory`. No restaurant domain models or UI.
+
 ---
 
 ## Open decisions

@@ -28,7 +28,7 @@ which is retained as historical reference and carries a superseded notice.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Repository and architecture audit | ✅ Complete — [`phase-00-audit.md`](./phase-00-audit.md) |
-| 1 | Platform modularisation, optional QuickBooks | 🟡 In progress — Slices 0-3 implemented, Slice 4+ awaiting approval |
+| 1 | Platform modularisation, optional QuickBooks | 🟡 In progress — Slices 0-4 implemented, Slice 5+ awaiting approval |
 | 2 | DB-backed permissions, restaurant roles, branch scoping | ⬜ Not started |
 | 2.5 | Branch-scoped inventory (`BranchInventory` + `StockMovement`) | ⬜ Not started |
 | 3 | Restaurant menu and modifiers | ⬜ Not started |

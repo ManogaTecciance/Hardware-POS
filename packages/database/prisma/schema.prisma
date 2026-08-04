@@ -187,6 +187,78 @@ enum ShareStatus {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Platform business profile (AxloPOS multi-profile support)
+// ─────────────────────────────────────────────────────────────
+
+/// What kind of business a tenant runs. Drives the default module set and the
+/// front-end profile, never the correctness of a shared code path.
+enum BusinessType {
+  TILE_SHOP
+  HARDWARE
+  RETAIL
+  RESTAURANT
+  CAFE
+  BAKERY
+  GENERAL
+}
+
+/// Where stock lives and who is authoritative for it.
+/// `QUICKBOOKS` is the current (and only) production behaviour.
+enum InventoryMode {
+  LOCAL
+  QUICKBOOKS
+  EXTERNAL
+  DISABLED
+}
+
+/// Which accounting system receives sales, payments, refunds, and credit notes.
+/// Named with the `Kind` suffix so the persisted enum does not collide with the
+/// `AccountingProvider` TypeScript port introduced in Slice 5.
+enum AccountingProviderKind {
+  NONE
+  QUICKBOOKS
+  FUTURE_EXTERNAL
+}
+
+/// Switchable feature modules.
+///
+/// These values are written to the database (`TenantModule.moduleKey`) and are
+/// STABLE IDENTIFIERS — renaming one is a data migration, not a refactor
+/// (decision D3).
+///
+/// `PAYMENTS` is deliberately absent: collecting payment is core to every
+/// business profile and must never be switchable off. Payment behaviour is
+/// controlled through payment-method settings, permissions, branch
+/// configuration, and provider configuration instead.
+enum ModuleKey {
+  // Retail + shared
+  RETAIL_POS
+  INVENTORY
+  CUSTOMERS
+  QUOTATIONS
+  RETURNS
+  EXCHANGES
+  SUPPLIERS
+  REPORTING
+  USERS
+  BRANCHES
+  SETTINGS
+  BRANDING
+  QUICKBOOKS
+
+  // Restaurant
+  MENU_MANAGEMENT
+  DINING
+  TABLE_MANAGEMENT
+  TAKEAWAY
+  KITCHEN
+  KITCHEN_DISPLAY
+  ONLINE_ORDERS
+  DELIVERY_INTEGRATIONS
+  RESERVATIONS
+}
+
+// ─────────────────────────────────────────────────────────────
 // Tenancy & locations
 // ─────────────────────────────────────────────────────────────
 
@@ -222,6 +294,66 @@ model Tenant {
   refreshTokens        RefreshToken[]
   settings             TenantSettings[]
   suppliers            Supplier[]
+  businessProfile      TenantBusinessProfile?
+  modules              TenantModule[]
+}
+
+/**
+ * Explicit platform configuration for one tenant: which kind of business it is,
+ * where inventory lives, and which accounting system (if any) receives its
+ * documents.
+ *
+ * A tenant may have NO row. That is a first-class, supported state: it resolves
+ * to the legacy Tile Shop configuration (TILE_SHOP / QUICKBOOKS / QUICKBOOKS and
+ * the full retail module set), which is exactly how every tenant behaved before
+ * this table existed. Existing tenants are therefore never backfilled and never
+ * have to run a setup wizard.
+ *
+ * `version` is an optimistic-concurrency counter incremented on every write, so
+ * two administrators editing the profile concurrently cannot silently overwrite
+ * one another once a compare-and-set caller is added.
+ */
+model TenantBusinessProfile {
+  id       String @id @default(cuid())
+  /// One profile per tenant, enforced by the database rather than convention.
+  tenantId String @unique
+
+  businessType       BusinessType
+  inventoryMode      InventoryMode
+  accountingProvider AccountingProviderKind
+
+  /// Incremented on every update. Optimistic-concurrency token.
+  version Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * Per-tenant module enablement. One row per (tenant, module) the tenant has an
+ * explicit opinion about; `isEnabled = false` is a deliberate revocation and is
+ * meaningfully different from "no row".
+ *
+ * A tenant with no rows at all falls back to the default module set for its
+ * business type — and a tenant with no business profile falls back to the legacy
+ * retail set. No rows are generated for existing tenants by the migration.
+ */
+model TenantModule {
+  id        String    @id @default(cuid())
+  tenantId  String
+  moduleKey ModuleKey
+  isEnabled Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// A module cannot be configured twice for the same tenant.
+  @@unique([tenantId, moduleKey])
+  @@index([tenantId])
 }
 
 /**

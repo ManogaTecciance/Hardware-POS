@@ -36,6 +36,10 @@ export enum Permission {
   SETTINGS_MANAGE = 'settings:manage',
   USER_MANAGE = 'user:manage',
   REPORT_READ = 'report:read',
+  /** Read the tenant's effective platform profile and module set. */
+  PLATFORM_PROFILE_READ = 'platform:profile:read',
+  /** Change the tenant's business type, inventory/accounting mode, or modules. */
+  PLATFORM_PROFILE_MANAGE = 'platform:profile:manage',
 }
 
 const ALL_PERMISSIONS: Permission[] = Object.values(Permission);
@@ -69,6 +73,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.SUPPLIER_MANAGE,
     Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
+    // Read-only: a manager sees which modules the tenant runs, but changing the
+    // business type or accounting provider is an owner/admin decision.
+    Permission.PLATFORM_PROFILE_READ,
   ],
   CASHIER: [
     Permission.SALE_CREATE,
@@ -83,6 +90,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.PRODUCT_READ,
     Permission.CUSTOMER_READ,
     Permission.CUSTOMER_MANAGE,
+    // Read-only. Navigation is driven by the tenant's enabled modules, so a
+    // cashier that could not read them could not render a POS screen at all.
+    Permission.PLATFORM_PROFILE_READ,
   ],
   ACCOUNTANT: [
     Permission.SYNC_READ,
@@ -96,6 +106,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.SUPPLIER_READ,
     Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
+    // Read-only: an accountant needs to know which accounting provider the tenant
+    // is on, but must not be able to switch it.
+    Permission.PLATFORM_PROFILE_READ,
   ],
 };
 

@@ -20,6 +20,11 @@ import { PrismaModule } from '../../src/prisma/prisma.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { AuthModule } from '../../src/modules/auth/auth.module';
 import { AuthService } from '../../src/modules/auth/auth.service';
+import { PlatformModule } from '../../src/modules/platform/platform.module';
+import { BusinessProfileService } from '../../src/modules/platform/business-profile.service';
+import { ProductsModule } from '../../src/modules/products/products.module';
+import { ProductsService } from '../../src/modules/products/products.service';
+import { SyncQueueService } from '../../src/modules/sync/queue/sync-queue.service';
 import { ReturnsModule } from '../../src/modules/returns/returns.module';
 import { ReturnsRepository } from '../../src/modules/returns/returns.repository';
 import { ReturnsService } from '../../src/modules/returns/returns.service';
@@ -39,6 +44,10 @@ export interface IntegrationApp {
   returnsService: ReturnsService;
   returnsRepository: ReturnsRepository;
   settingsService: SettingsService;
+  productsService: ProductsService;
+  /** For asserting the outbox directly, without waiting on the worker. */
+  syncQueueService: SyncQueueService;
+  businessProfileService: BusinessProfileService;
   close(): Promise<void>;
 }
 
@@ -56,9 +65,13 @@ export async function createIntegrationApp(): Promise<IntegrationApp> {
       // documents controllers reach for StorageService, so the graph needs them.
       StorageModule,
       PrismaModule,
+      // @Global() in production too; the module guard and (from Slice 5) the
+      // provider factories resolve the tenant profile through it.
+      PlatformModule,
       AuthModule,
       SalesModule,
       ReturnsModule,
+      ProductsModule,
     ],
   }).compile();
 
@@ -76,6 +89,9 @@ export async function createIntegrationApp(): Promise<IntegrationApp> {
     returnsService: module.get(ReturnsService),
     returnsRepository: module.get(ReturnsRepository),
     settingsService: module.get(SettingsService),
+    productsService: module.get(ProductsService),
+    syncQueueService: module.get(SyncQueueService),
+    businessProfileService: module.get(BusinessProfileService),
     close: () => module.close(),
   };
 }
