@@ -2,6 +2,12 @@
 node_modules/
 .pnpm-store/
 
+# This repo is pnpm-only (see packageManager in package.json). An npm/yarn
+# lockfile here is an accident from a stray `npm install` and drifts from
+# pnpm-lock.yaml — ignore it so it can't be committed again.
+package-lock.json
+yarn.lock
+
 # Build outputs
 dist/
 build/
@@ -17,8 +23,10 @@ out/
 .env.local
 .env.*.local
 .env.prod
+.env.test
 !.env.example
 !.env.prod.example
+!.env.test.example
 
 # Prisma
 packages/database/prisma/migrations/dev.db*

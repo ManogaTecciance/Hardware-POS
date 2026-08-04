@@ -13,7 +13,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [DASH](#dash--dashboards) · [PROD](#prod--products--categories) ·
 [PIMP](#pimp--product-bulk-import) · [POS](#pos--point-of-sale) ·
 [PAY](#pay--payments--credit) · [SALE](#sale--sales-history) ·
-[RET](#ret--returns--refunds) · [QUO](#quo--quotations) ·
+[RET](#ret--returns--refunds) · [EXC](#exc--exchanges) · [QUO](#quo--quotations) ·
 [CUST](#cust--customers) · [CIMP](#cimp--customer-bulk-import) ·
 [SUP](#sup--suppliers-vendors) · [SIMP](#simp--vendor-bulk-import) ·
 [QB](#qb--quickbooks-integration) · [SET](#set--settings) ·
@@ -234,6 +234,39 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | RET-016 | Returns list + status filter | Open /returns, filter by status | Correct rows per status | P | Not Run |
 | RET-017 | Return detail view | Open a completed return | Lines, conditions/dispositions, refunds, approver shown | P | Not Run |
 | RET-018 | Failed refund surfaced | Force QB push failure on a return | Refund/return status FAILED visible; document shows FAILED watermark | N | Not Run |
+
+## EXC — Exchanges
+
+> **Status: the Exchange A4 document renderer exists; the Exchange transaction does not.**
+>
+> `DocumentsService.buildExchangeDocument` renders a combined returned +
+> replacement A4 note, and `'exchange'` is a valid document-preview type. There is
+> no Exchange Prisma model, migration, API module, route, permission key, or UI
+> flow — the renderer's own comment says so: *"Exchanges are not yet a first-class
+> transaction in the POS."*
+>
+> `EXC-D-*` (document) cases are live and covered by
+> `apps/api/src/modules/documents/documents.preview.spec.ts`, plus `SET-013` and
+> `DOC-014`. They are the Tile Shop exchange regression.
+>
+> `EXC-T-*` (transaction) cases are **Blocked — feature not implemented**. They are
+> listed for traceability only and must not be counted as coverage.
+> Exchanges remain a shared-platform feature for Tile Shop / Hardware tenants and
+> are excluded from the Restaurant profile (`EXCHANGES` module key hidden).
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| EXC-D-001 | Exchange A4 document renders | Settings → document preview → type "Exchange" | A4 note renders with returned + replacement lines and a net difference | P | Passed |
+| EXC-D-002 | Returned lines are negative, replacements positive | Preview an exchange with both line kinds | Returned lines prefixed "Return:" and negated; replacements prefixed "New:" | P | Passed |
+| EXC-D-003 | Exchange document honours letterhead settings | Change logo/accent/margins, re-preview | Exchange doc reflects the same document settings as invoice/quotation | P | Passed |
+| EXC-D-004 | Signature blocks present on the exchange doc | Preview exchange | Same signature chain as other document types (see DOC-014) | P | Passed |
+| EXC-T-001 | Create an exchange transaction | — | — | P | Blocked — feature not implemented |
+| EXC-T-002 | Exchange adjusts stock for returned and replacement items | — | — | P | Blocked — feature not implemented |
+| EXC-T-003 | Exchange with a net amount due collects payment | — | — | P | Blocked — feature not implemented |
+| EXC-T-004 | Exchange with a net refund issues a refund | — | — | P | Blocked — feature not implemented |
+| EXC-T-005 | Exchange pushes the correct QuickBooks document(s) | — | — | P | Blocked — feature not implemented |
+| EXC-T-006 | Exchange requires a permission (`exchange:create`) | — | — | N | Blocked — feature not implemented |
+| EXC-T-007 | Exchange is hidden for Restaurant tenants | — | — | N | Blocked — feature not implemented |
 
 ## QUO — Quotations
 

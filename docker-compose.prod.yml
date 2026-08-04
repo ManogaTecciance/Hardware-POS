@@ -13,7 +13,11 @@
 #
 # Bring up:   docker compose -f docker-compose.prod.yml up -d --build
 # Logs:       docker compose -f docker-compose.prod.yml logs -f api
-# Migrations run automatically when the api container boots.
+#
+# Migrations are NOT applied automatically. Applying them is a deliberate,
+# separately-approved step that must run BEFORE replicas are started/updated:
+#   docker compose -f docker-compose.prod.yml run --rm api migrate
+# See docs/restaurant-pos/06-migration-and-rollout.md for the full runbook.
 
 services:
   caddy:

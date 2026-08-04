@@ -1,0 +1,22 @@
+{
+  // The app's tsconfig.json is rooted at `src` and excludes `test`, so this
+  // separate project type-checks the integration harness. Wired into
+  // `pnpm --filter @hardware-pos/api typecheck` so a broken test file fails the
+  // same gate as broken production code.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "noUncheckedIndexedAccess": false,
+    "types": ["node", "jest"]
+  },
+  "include": ["../test/**/*.ts", "../src/**/*.ts"],
+  "exclude": ["../../../node_modules", "../dist"]
+}

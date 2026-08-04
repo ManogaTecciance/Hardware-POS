@@ -7,8 +7,16 @@ The POS pulls products, prices, and stock from QuickBooks, and sends completed
 sales, invoices, and payments back to QuickBooks. The client continues to use
 QuickBooks for inventory, accounting, and financial reports.
 
-> **Status:** Project foundation only. No POS features and no QuickBooks
-> integration are implemented yet.
+> **Status:** Production-oriented. Implemented: authentication and roles,
+> products and categories, customers, suppliers, POS checkout with discount
+> approval and credit limits, payments, returns and refunds, quotations with
+> revisions, receipts and A4 documents, settings, dashboards, audit logging,
+> and a live QuickBooks Online integration (OAuth, product/party sync, and a
+> queued outbound sale/return push).
+>
+> In progress on `feature/restaurant-pos`: making QuickBooks optional behind
+> provider abstractions and adding a configurable Restaurant business profile.
+> See [docs/restaurant-pos/](docs/restaurant-pos/).
 
 ## Monorepo structure
 

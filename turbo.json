@@ -21,6 +21,18 @@
     "test": {
       "dependsOn": ["^build"]
     },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      // Never cached: the result depends on an external PostgreSQL container, so a
+      // cache hit would report a pass without having touched the database.
+      "cache": false,
+      "env": [
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "TOKEN_ENCRYPTION_KEY",
+        "SYNC_WORKER_ENABLED"
+      ]
+    },
     "clean": {
       "cache": false
     }

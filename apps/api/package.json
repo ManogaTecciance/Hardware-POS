@@ -8,9 +8,10 @@
     "start": "node dist/main.js",
     "start:prod": "node dist/main.js",
     "build": "nest build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "test": "jest --passWithNoTests",
+    "test:integration": "jest -c test/integration/jest.integration.config.js --runInBand",
     "clean": "rm -rf dist *.tsbuildinfo",
     "seed:qbo": "tsx scripts/seed-quickbooks-sandbox.ts"
   },

@@ -1,6 +1,48 @@
 # Restaurant Vertical — Backend Implementation Plan
 
-> Status: proposal (not yet implemented) · Scope: `apps/api` + `packages/database` only.
+> ## ⚠️ SUPERSEDED — historical reference only
+>
+> **This document is no longer the implementation authority.** It was superseded
+> on **2026-08-04** by the approved AxloPOS Restaurant POS requirements. The
+> canonical documentation now lives in **[`docs/restaurant-pos/`](./restaurant-pos/)**
+> — start at [`docs/restaurant-pos/README.md`](./restaurant-pos/README.md).
+>
+> It is retained deliberately, unmodified below this notice, because it records
+> the reasoning behind several decisions that were kept.
+>
+> **Superseded — do not implement from this document:**
+>
+> | This document proposed | The approved design instead uses |
+> |---|---|
+> | `Tenant.vertical` enum (`RETAIL` \| `RESTAURANT`) | `TenantBusinessProfile` with 7 `BusinessType` values |
+> | `@RequireVertical()` guard | `@RequireModule()` + `TenantModule` enabled-module flags |
+> | `Tab` / `TabRound` / `TabItem` | `TableSession` / `RestaurantOrder` / `OrderRound` / `RestaurantOrderItem` |
+> | Multiple concurrent open tabs per table, `label`-distinguished | One `TableSession` per visit, with explicit merge / transfer / unmerge |
+> | QuickBooks assumed always present | QuickBooks optional behind `AccountingProvider`; `InventoryMode` selectable |
+>
+> **Retained and still authoritative (carried into the approved design):**
+>
+> - Additive-only migrations: new models, new nullable columns, appended enum
+>   values. Never widen or repurpose an existing retail column.
+> - No `if (vertical)` / `if (businessType)` branching inside shared modules;
+>   vertical behaviour lives in vertical modules or behind a provider port.
+> - Server-authoritative state — sessions and orders are database entities
+>   mutated through the API, never client storage, because several devices work
+>   the same table concurrently.
+> - Optimistic concurrency via a `version` column plus conditional
+>   `updateMany` + row-count checks, following the proven `decrementStock` idiom.
+> - **One junction point:** closing a table session produces a `Sale`, so
+>   everything downstream (payments, receipts, reports, dashboards, accounting)
+>   is reused rather than rebuilt.
+> - Follow the house module pattern: `controller → service → repository →
+>   PrismaService`, class-validator DTOs, `@TenantId()` / `@RequirePermissions()`,
+>   `Paginated<T>` responses, pure `*.calc.ts` with a colocated spec.
+> - Menu ≠ catalog: restaurant menu items are their own models, optionally
+>   mapped to a `Product`, never forced into the QuickBooks-cached `Product` table.
+
+---
+
+> Status: **superseded** (originally: proposal, not yet implemented) · Scope: `apps/api` + `packages/database` only.
 > The retail POS front-end is untouched; a restaurant front-end is a separate effort
 > that consumes the APIs specified here.
 

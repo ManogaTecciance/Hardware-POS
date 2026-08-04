@@ -47,8 +47,17 @@ RUN pnpm turbo run build --filter=@hardware-pos/api
 ENV NODE_ENV=production \
     API_PORT=4000 \
     UPLOAD_DIR=/data/uploads
+
+# Migrations are NOT applied on boot. Schema changes are a separate, approved
+# deployment step (`docker compose run --rm api migrate`) — see the entrypoint
+# and docs/restaurant-pos/06-migration-and-rollout.md. Set to "true" only for
+# local/dev/CI containers where an unattended migration is acceptable.
+ENV RUN_MIGRATIONS_ON_BOOT=false
+
 EXPOSE 4000
 
-# Apply pending migrations, then boot the API. cwd stays /app; the API reads
-# UPLOAD_DIR for local uploads (mount a volume there — see docker-compose.prod.yml).
-CMD ["sh", "-c", "pnpm --filter @hardware-pos/database run db:deploy && node apps/api/dist/main.js"]
+# cwd stays /app; the API reads UPLOAD_DIR for local uploads (mount a volume
+# there — see docker-compose.prod.yml).
+RUN chmod +x apps/api/docker-entrypoint.sh
+ENTRYPOINT ["/app/apps/api/docker-entrypoint.sh"]
+CMD ["serve"]
