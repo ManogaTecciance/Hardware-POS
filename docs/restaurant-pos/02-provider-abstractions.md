@@ -1,7 +1,12 @@
 # Provider abstractions
 
-Status: **specification.** Inventory and accounting ports are Phase 1 Slice 5
-(not yet authorised). Printing is Phase 6. Delivery is Phase 10.
+Status: **inventory and accounting ports implemented** in Phase 1 Slice 5 / 5.5
+(decisions D24, D25). They are deliberately **inert**: `ProvidersModule` is not
+imported into `AppModule`, and no sales, returns, or products call site uses a
+provider yet — adoption is Slice 6. Printing is Phase 6. Delivery is Phase 10.
+
+Where the shipped ports differ from this document's original specification, the
+"As implemented" sections below are authoritative.
 
 ## Why ports at all
 
@@ -37,18 +42,24 @@ dedicated rollback test.
 
 ```ts
 export interface InventoryProvider {
-  readonly mode: InventoryMode;
+  readonly mode: ProviderInventoryMode;
+  readonly name: string;
 
-  getAvailability(tenantId: string, branchId: string, productIds: string[]): Promise<AvailabilityMap>;
+  getAvailability(ctx: ProviderContext, productIds: string[]): Promise<AvailabilityMap>;
 
-  reserveStock (tx: Prisma.TransactionClient, ctx: StockContext, lines: StockLine[]): Promise<void>;
-  reduceStock  (tx: Prisma.TransactionClient, ctx: StockContext, lines: StockLine[]): Promise<void>;
-  restoreStock (tx: Prisma.TransactionClient, ctx: StockContext, lines: StockLine[]): Promise<void>;
-  adjustStock  (tx: Prisma.TransactionClient, ctx: StockContext, adjustments: StockAdjustment[]): Promise<void>;
+  reduceStock  (tx: Prisma.TransactionClient, ctx: ProviderContext, lines: StockLine[]): Promise<void>;
+  restoreStock (tx: Prisma.TransactionClient, ctx: ProviderContext, lines: StockLine[]): Promise<void>;
+  adjustStock  (tx: Prisma.TransactionClient, ctx: ProviderContext, adjustments: StockAdjustment[]): Promise<void>;
 
-  synchronize(tenantId: string): Promise<SyncOutcome>;
+  synchronize(ctx: ProviderContext): Promise<ProviderSyncOutcome>;
 }
 ```
+
+**As implemented — `reserveStock` was dropped.** This document originally proposed it.
+Inspection during Slice 5 found no reservation anywhere in the repository: no
+held-stock column, no reservation table, no expiry. It was a speculative interface
+for a feature that does not exist, and modelling it would have invented a contract
+nobody could check against real behaviour.
 
 | Implementation | Behaviour |
 |---|---|
@@ -64,20 +75,72 @@ export interface InventoryProvider {
 ```ts
 export interface AccountingProvider {
   readonly provider: AccountingProviderKind;
+  readonly name: string;
 
-  /** Which document a completed sale maps to. Returns null when there is no
-   *  accounting integration — this is what removes the QuickBooks decision from
-   *  sales.service. */
-  resolveDocumentType(sale: SaleFinancialShape): SaleDocumentType | null;
+  resolveSaleDocumentType  (sale: SaleFinancialShape):    DocumentTypeDecision<QuickBooksDocumentType>;
+  resolveReturnDocumentType(input: ReturnFinancialShape): DocumentTypeDecision<QuickBooksReturnDocumentType>;
 
-  postSale      (tx: Prisma.TransactionClient, tenantId: string, saleId: string): Promise<void>;
-  postPayment   (tx: Prisma.TransactionClient, tenantId: string, paymentId: string): Promise<void>;
-  postRefund    (tx: Prisma.TransactionClient, tenantId: string, returnId: string): Promise<void>;
-  postCreditNote(tx: Prisma.TransactionClient, tenantId: string, returnId: string): Promise<void>;
+  postSale(
+    tx: Prisma.TransactionClient, ctx: ProviderContext,
+    saleId: string, documentType: QuickBooksDocumentType | null,
+  ): Promise<AccountingSubmissionResult<QuickBooksDocumentType>>;
 
-  synchronize(tenantId: string): Promise<SyncOutcome>;
+  postReturn(
+    tx: Prisma.TransactionClient, ctx: ProviderContext,
+    returnId: string, documentType: QuickBooksReturnDocumentType | null,
+  ): Promise<AccountingSubmissionResult<QuickBooksReturnDocumentType>>;
+
+  synchronize(ctx: ProviderContext): Promise<ProviderSyncOutcome>;
 }
 ```
+
+### `AccountingSubmissionResult` (decision D25)
+
+The result is a discriminated union, never `void` and never the ambiguous pair
+`{ markSynced: true, quickbooksDocumentType: null }` — that combination says a
+synchronisation succeeded *and* that there is no document, so a caller cannot tell
+"posted to QuickBooks" from "no accounting system configured", and the
+safe-looking reading is the wrong one.
+
+```ts
+export type AccountingSubmissionResult<T extends string = string> =
+  | { disposition: 'QUEUED';       provider: 'QUICKBOOKS'; externalDocumentType: T }
+  | { disposition: 'NOT_REQUIRED'; provider: 'NONE';       externalDocumentType: null };
+```
+
+`NOT_REQUIRED` means the transaction completed **locally and completely** and
+nothing needed synchronising. It is a success, not a degraded outcome. It carries no
+secret and no provider internals — three fields, and no realm id, token, or
+connection state.
+
+Application-level only: **no Prisma enum and no migration.** The persisted columns
+are unchanged, and a `NOT_REQUIRED` sale stores `null` in the already-nullable
+`Sale.quickbooksDocumentType`.
+
+`resolveSaleDocumentType` returns `requiresCustomer` rather than throwing, so the
+caller keeps raising its existing user-facing error with its existing wording. That
+is what makes Slice 6 a pure extraction rather than a change in error behaviour.
+
+### `postPayment` is deliberately absent (decision D26)
+
+**Do not add `postPayment()` to `AccountingProvider`** until an approved, implemented
+standalone-payment workflow exists.
+
+`PaymentsService.create` currently throws `NotImplementedException`. Payments are
+created inside the sale transaction and receive their `quickbooksPaymentId` as part
+of the sale push, so there is no separate payment post to abstract. Restaurant split
+and mixed payments will initially be local `Payment` records inside an order/sale
+completion transaction, which needs no accounting port method either.
+
+Add a separate accounting payment operation later, only for a workflow that actually
+exists — paying an existing credit invoice later, posting a payment separately from
+sale creation, or applying a settlement against a previously created invoice. Until
+then it would be a speculative provider operation.
+
+Likewise **`postCreditNote` was dropped**: a credit memo is not a different
+operation from a refund receipt, it is a different *document type* for the same
+return push, already expressed by `QuickBooksReturnDocumentType`. Two methods would
+imply two code paths that do not exist.
 
 | Implementation | Behaviour |
 |---|---|

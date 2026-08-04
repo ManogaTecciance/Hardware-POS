@@ -241,26 +241,33 @@ export default function ReturnDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>QuickBooks</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <Row
-                label="Document"
-                value={
-                  ret.quickbooksDocumentType === 'CREDIT_MEMO' ? 'Credit Memo' : 'Refund Receipt'
-                }
-              />
-              <Row label="Document ID" value={ret.quickbooksDocumentId ?? '—'} />
-              <Row label="Sync status" value={<SyncBadge status={ret.syncStatus} />} />
-              {ret.syncError ? (
-                <div className="rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">
-                  {ret.syncError}
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
+          {/*
+            Hidden for a tenant with no accounting provider, where
+            `quickbooksDocumentType` is null. Previously a null fell through to
+            "Refund Receipt" inside a card headed "QuickBooks" — a label about a
+            system the tenant does not use. A QuickBooks tenant always has a
+            document type, so their view is unchanged.
+          */}
+          {ret.quickbooksDocumentType ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>QuickBooks</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <Row
+                  label="Document"
+                  value={ret.quickbooksDocumentType === 'CREDIT_MEMO' ? 'Credit Memo' : 'Refund Receipt'}
+                />
+                <Row label="Document ID" value={ret.quickbooksDocumentId ?? '—'} />
+                <Row label="Sync status" value={<SyncBadge status={ret.syncStatus} />} />
+                {ret.syncError ? (
+                  <div className="rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">
+                    {ret.syncError}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       </div>
     </div>

@@ -276,29 +276,32 @@ export default function SaleDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>QuickBooks</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <Row
-                label="Document"
-                value={
-                  sale.quickbooksDocumentType === 'SALES_RECEIPT'
-                    ? 'Sales Receipt'
-                    : sale.quickbooksDocumentType === 'INVOICE'
-                      ? 'Invoice'
-                      : '—'
-                }
-              />
-              <Row label="Document ID" value={sale.quickbooksDocumentId ?? 'Not synced'} />
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Status</span>
-                <SyncBadge status={sale.syncStatus} />
-              </div>
-              {sale.syncError ? <p className="text-xs text-danger">{sale.syncError}</p> : null}
-            </CardContent>
-          </Card>
+          {/*
+            External-accounting panel. `quickbooksDocumentType` is set when the sale
+            is created for any tenant with an accounting provider, so a QuickBooks
+            tenant always has one and this card is unchanged for them. A tenant with
+            AccountingProviderKind.NONE has null, and must not be shown a
+            "QuickBooks — Not synced" panel about a system it does not use.
+          */}
+          {sale.quickbooksDocumentType ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>QuickBooks</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <Row
+                  label="Document"
+                  value={sale.quickbooksDocumentType === 'SALES_RECEIPT' ? 'Sales Receipt' : 'Invoice'}
+                />
+                <Row label="Document ID" value={sale.quickbooksDocumentId ?? 'Not synced'} />
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Status</span>
+                  <SyncBadge status={sale.syncStatus} />
+                </div>
+                {sale.syncError ? <p className="text-xs text-danger">{sale.syncError}</p> : null}
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       </div>
 

@@ -606,8 +606,19 @@ export class ReturnsService {
   }
 
   private toReceiptData(ret: ReturnWithRelations, footer: string): ReturnReceiptData {
+    // `quickbooksDocumentType` is external-integration metadata and is null for a
+    // tenant with no accounting provider. The two explicit branches keep today's
+    // QuickBooks wording byte-identical; the fallback derives the customer-facing
+    // label from LOCAL semantics — money back is a refund, store credit is a credit
+    // note — so a null never silently prints "Refund Receipt" on a credit note.
     const documentTypeLabel =
-      ret.quickbooksDocumentType === 'CREDIT_MEMO' ? 'Credit Memo' : 'Refund Receipt';
+      ret.quickbooksDocumentType === 'CREDIT_MEMO'
+        ? 'Credit Memo'
+        : ret.quickbooksDocumentType === 'REFUND_RECEIPT'
+          ? 'Refund Receipt'
+          : ret.refundMethod === 'STORE_CREDIT'
+            ? 'Credit Note'
+            : 'Refund Receipt';
     const remaining = round2(Number(ret.originalSale.total) - Number(ret.originalSale.returnedAmount));
     return {
       storeName: ret.tenant.name,
@@ -638,7 +649,12 @@ export class ReturnsService {
       refundMethod: humanize(ret.refundMethod ?? ''),
       refundReference: ret.refundReference,
       remainingSaleValue: remaining,
-      syncStatus: ret.syncStatus,
+      // The template prints a "QuickBooks · <status>" row whenever this is set, on
+      // a CUSTOMER-facing receipt. Suppress it for a tenant with no accounting
+      // provider — telling a customer their refund is "QuickBooks NOT_SYNCED" is
+      // wrong for a tenant that does not use QuickBooks at all. A tenant that does
+      // always has a document type, so their receipt is unchanged.
+      syncStatus: ret.quickbooksDocumentType === null ? null : ret.syncStatus,
       footer,
     };
   }

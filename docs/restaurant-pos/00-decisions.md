@@ -316,6 +316,53 @@ Required:
 
 ---
 
+## 2026-08-04 — Slice 5 review
+
+### D25 — No-accounting result model
+**Do not represent `NoAccountingProvider` with an ambiguous combination** such as
+`markSynced: true` together with `quickbooksDocumentType: null`.
+
+A tenant on `AccountingProviderKind.NONE` has completed the transaction **locally
+and completely** but has synchronised nothing to an external system. Use a
+provider-neutral discriminated union:
+
+```ts
+type AccountingSubmissionResult =
+  | { disposition: 'QUEUED';       provider: 'QUICKBOOKS'; externalDocumentType: 'SALES_RECEIPT' | 'INVOICE' }
+  | { disposition: 'NOT_REQUIRED'; provider: 'NONE';       externalDocumentType: null };
+```
+
+For `NONE`: no QuickBooks API call, no `SyncJob`, no `SyncLog`, no QuickBooks
+document id, no claim that an external synchronisation occurred, a clear
+`NOT_REQUIRED` result, and no secret or provider-specific detail exposed.
+
+**No new Prisma enum and no migration.** The result stays an application-level union.
+
+### D26 — Customer documents must not depend on `quickbooksDocumentType`
+`quickbooksDocumentType` is **external-integration metadata only.** It must not be
+the authoritative source for receipt-versus-invoice selection, receipt title, A4
+template selection, print eligibility, or any customer-facing document label.
+
+Document selection uses local AxloPOS financial semantics: a fully paid local sale
+is a receipt, a partial or credit sale is an invoice/credit document, a return is a
+return document. The Exchange renderer is unchanged.
+
+A null external document type must never cause a runtime exception, a blank document
+title, the wrong template, "Synced to QuickBooks" wording, a missing print action, or
+an invalid API response.
+
+`postPayment()` must **not** be added to `AccountingProvider` during Slice 5 or 5.5.
+`PaymentsService.create` is unimplemented and there is no characterised standalone
+payment workflow. Restaurant split and mixed payments will initially be local
+`Payment` records inside an order/sale completion transaction. Add a separate
+accounting payment operation only when an approved, implemented workflow exists —
+paying an existing credit invoice later, posting a payment separately from sale
+creation, or applying a settlement against a previously created invoice. **Do not
+design speculative provider operations.** Recorded in
+[`02-provider-abstractions.md`](./02-provider-abstractions.md).
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
