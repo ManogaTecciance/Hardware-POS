@@ -9,9 +9,30 @@ export type RefreshTokenWithUser = Prisma.RefreshTokenGetPayload<{ include: { us
 export class AuthRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Look up an active user by email (for password login). */
-  findActiveByEmail(email: string): Promise<User | null> {
-    return this.prisma.user.findFirst({ where: { email, isActive: true } });
+  /**
+   * Active users with this email, ACROSS ALL TENANTS, in a deterministic order.
+   *
+   * `User` is only `@@unique([tenantId, email])`, so one email may legitimately
+   * exist in several tenants. This returns every candidate so the caller can
+   * decide deterministically instead of silently taking whichever row PostgreSQL
+   * happened to return first — the defect this replaces.
+   *
+   * Ordered by `tenantId` purely so repeated calls are stable and tests are not
+   * flaky; the caller must never resolve ambiguity by picking the first row.
+   */
+  findActiveUsersByEmail(email: string): Promise<User[]> {
+    return this.prisma.user.findMany({
+      where: { email, isActive: true },
+      orderBy: { tenantId: 'asc' },
+    });
+  }
+
+  /**
+   * The single active user with this email inside one tenant. Exact by
+   * construction: `@@unique([tenantId, email])` guarantees at most one row.
+   */
+  findActiveByTenantAndEmail(tenantId: string, email: string): Promise<User | null> {
+    return this.prisma.user.findFirst({ where: { tenantId, email, isActive: true } });
   }
 
   /** Active users in a tenant that have a PIN set (for PIN login / approval). */

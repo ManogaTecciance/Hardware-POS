@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { OptionalTenantId } from '../../common/decorators/optional-tenant-id.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuthenticatedUser, AuthTokenResult } from './auth.types';
@@ -13,12 +14,22 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  /** Email + password login (owner / admin / accountant). */
+  /**
+   * Email + password login (owner / admin / accountant).
+   *
+   * `x-tenant-id` is OPTIONAL and only disambiguates an email that exists in more
+   * than one tenant. It is client-supplied, so it never grants access on its own:
+   * the password is always verified against the resolved user's own hash. Omitting
+   * it keeps the existing single-tenant behaviour untouched.
+   */
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  login(@Body() dto: LoginDto): Promise<AuthTokenResult> {
-    return this.authService.login(dto);
+  login(
+    @Body() dto: LoginDto,
+    @OptionalTenantId() tenantHint: string | null,
+  ): Promise<AuthTokenResult> {
+    return this.authService.login(dto, tenantHint);
   }
 
   /** PIN login (cashier / manager). Tenant comes from the x-tenant-id header. */

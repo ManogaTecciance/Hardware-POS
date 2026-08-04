@@ -20,7 +20,8 @@ which is retained as historical reference and carries a superseded notice.
 | 7 | [`05-testing-strategy.md`](./05-testing-strategy.md) | Writing any test, especially a regression test. |
 | 8 | [`06-migration-and-rollout.md`](./06-migration-and-rollout.md) | Writing a migration or deploying. **Contains the deployment runbook.** |
 | 9 | [`07-roadmap.md`](./07-roadmap.md) | Planning, sequencing, or checking what phase we are in. |
-| 10 | [`phase-01-plan.md`](./phase-01-plan.md) | Implementing Phase 1. |
+| 10 | [`08-authentication-and-workspace-identity.md`](./08-authentication-and-workspace-identity.md) | Touching login, tenant resolution, or the workspace identifier. |
+| 11 | [`phase-01-plan.md`](./phase-01-plan.md) | Implementing Phase 1. |
 
 ## Status
 

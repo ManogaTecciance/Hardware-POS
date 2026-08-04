@@ -11,12 +11,15 @@
  */
 
 import { ConfigModule } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import { Test, type TestingModule } from '@nestjs/testing';
 
 import { validateEnv } from '../../src/config/env.validation';
 import { StorageModule } from '../../src/common/storage/storage.module';
 import { PrismaModule } from '../../src/prisma/prisma.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { AuthModule } from '../../src/modules/auth/auth.module';
+import { AuthService } from '../../src/modules/auth/auth.service';
 import { ReturnsModule } from '../../src/modules/returns/returns.module';
 import { ReturnsRepository } from '../../src/modules/returns/returns.repository';
 import { ReturnsService } from '../../src/modules/returns/returns.service';
@@ -28,6 +31,9 @@ import { SettingsService } from '../../src/modules/settings/settings.service';
 export interface IntegrationApp {
   module: TestingModule;
   prisma: PrismaService;
+  authService: AuthService;
+  /** For decoding issued access tokens and asserting their claims. */
+  jwtService: JwtService;
   salesService: SalesService;
   salesRepository: SalesRepository;
   returnsService: ReturnsService;
@@ -50,6 +56,7 @@ export async function createIntegrationApp(): Promise<IntegrationApp> {
       // documents controllers reach for StorageService, so the graph needs them.
       StorageModule,
       PrismaModule,
+      AuthModule,
       SalesModule,
       ReturnsModule,
     ],
@@ -62,6 +69,8 @@ export async function createIntegrationApp(): Promise<IntegrationApp> {
   return {
     module,
     prisma: module.get(PrismaService),
+    authService: module.get(AuthService),
+    jwtService: module.get(JwtService),
     salesService: module.get(SalesService),
     salesRepository: module.get(SalesRepository),
     returnsService: module.get(ReturnsService),

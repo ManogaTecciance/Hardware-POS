@@ -167,6 +167,62 @@ takeaway, billing, integrations).
 
 ---
 
+## 2026-08-04 — Slice 3.5 review
+
+### D19 — Workspace-first authentication (resolves Risk J)
+`Tenant.slug` is the **canonical public workspace identifier**.
+
+Browser login will support either a `workspace` field on the login form, or a
+tenant-specific URL such as `/login?workspace=<tenant-slug>`. A tenant subdomain
+may be supported later. Full rationale and the target contract are in
+[`08-authentication-and-workspace-identity.md`](./08-authentication-and-workspace-identity.md).
+
+Target email/password contract:
+
+```json
+{ "workspace": "restaurant-name", "email": "user@example.com", "password": "..." }
+```
+
+Backward-compatibility rule:
+- `workspace` supplied → authenticate **only** inside that tenant.
+- `workspace` omitted **and exactly one** active tenant account matches → the
+  existing login may continue **temporarily**.
+- `workspace` omitted **and several** match → reject with a generic
+  `WORKSPACE_REQUIRED` response.
+
+Prohibited:
+- **No searchable tenant dropdown.**
+- **Do not reveal tenant names from an email address.**
+- **Do not return the matching tenant names.**
+- **Do not indicate how many tenants matched.**
+- **Do not expose whether the email exists in another tenant.**
+- No tenant enumeration through login error responses.
+
+PIN authentication remains explicitly scoped through the appropriate tenant,
+branch, and register context.
+
+The browser workspace-login **user interface** belongs to the frontend
+modularisation phase (Slice 8). Slice 4 must not become an authentication UI
+redesign.
+
+### D20 — Authentication throttling is a release gate (Risk K)
+Throttling stays in **Slice 7** and is now a **mandatory gate** before public
+staging, internet-accessible demonstrations, pilot deployment, and production
+deployment.
+
+Slice 7 must protect at least `POST /auth/login`, `POST /auth/pin-login`, and
+refresh-token abuse where appropriate. The design must consider: source IP;
+tenant/workspace; normalised email or login identifier; branch/register context
+for PIN login; a generic HTTP 429; `Retry-After`; account-enumeration safety;
+proxy-aware client IP handling; multiple API replicas; and a
+distributed-compatible limiter or infrastructure-level rate limiting with an
+application backstop.
+
+**Do not implement throttling during Slice 4.** Do not make unrelated
+authentication changes during Slice 4.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
