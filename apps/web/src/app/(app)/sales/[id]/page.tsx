@@ -128,7 +128,12 @@ export default function SaleDetailPage() {
   }
 
   const pay = PAYMENT_STATUS[sale.paymentStatus];
-  const canRetry = sale.syncStatus === 'FAILED' || sale.syncStatus === 'PENDING';
+  // A tenant with no accounting provider has nothing to retry: its sales carry no
+  // external document type and are NOT_SYNCED rather than PENDING. The document-type
+  // check states that intent explicitly instead of relying on the status alone.
+  const hasExternalAccounting = sale.quickbooksDocumentType !== null;
+  const canRetry =
+    hasExternalAccounting && (sale.syncStatus === 'FAILED' || sale.syncStatus === 'PENDING');
   const canReturn =
     sale.status === 'COMPLETED' &&
     sale.returnStatus !== 'FULLY_RETURNED' &&

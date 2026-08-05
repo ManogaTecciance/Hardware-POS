@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { PlatformModule } from '../platform/platform.module';
 import { SyncModule } from '../sync/sync.module';
 import { AccountingProviderFactory } from './accounting/accounting-provider.factory';
 import { NoAccountingProvider } from './accounting/no-accounting.provider';
@@ -26,8 +27,13 @@ import { QuickBooksInventoryProvider } from './inventory/quickbooks-inventory.pr
  * `SyncModule` is imported because `QuickBooks*Provider` delegates to
  * `SyncQueueService` rather than reimplementing the outbox — that delegation is what
  * guarantees the persisted `SyncJob` and `SyncLog` shapes cannot drift from the ones
- * the repositories write today. `BusinessProfileService` needs no import: Slice 4's
- * `PlatformModule` is `@Global()`.
+ * the repositories write today.
+ *
+ * `PlatformModule` is imported explicitly even though it is `@Global()`. Global only
+ * means "no re-import needed once it is in the graph" — something still has to put
+ * it there, and relying on `AppModule` to do so made this module unusable in any
+ * smaller graph. The factories genuinely depend on `BusinessProfileService`, so the
+ * import states that rather than leaving it to luck.
  *
  * ## Graph prerequisites
  *
@@ -49,7 +55,7 @@ import { QuickBooksInventoryProvider } from './inventory/quickbooks-inventory.pr
  * Nest resolves them from the application graph anyway.
  */
 @Module({
-  imports: [SyncModule],
+  imports: [PlatformModule, SyncModule],
   providers: [
     QuickBooksInventoryProvider,
     LocalInventoryProvider,

@@ -1,10 +1,66 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, Product } from '@hardware-pos/database';
+import { Prisma, Product, QuickBooksDocumentType } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { AccountingSubmissionResult } from '../providers/provider.types';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
 import { ComputedLine, PersistSaleInput, SalesListFilter } from './sales.types';
+
+/**
+ * Hand a persisted sale to the tenant's accounting provider, inside the sale
+ * transaction.
+ *
+ * A callback rather than an injected provider: the repository must not choose the
+ * destination, and taking the operation as a parameter keeps it free of any
+ * provider import while leaving transaction ownership exactly where it was.
+ */
+export type PostAccounting = (
+  tx: Prisma.TransactionClient,
+  saleId: string,
+) => Promise<AccountingSubmissionResult<QuickBooksDocumentType>>;
+
+/**
+ * What QuickBooks returned for a sale. Every field is required — that is the point.
+ */
+export interface ExternalSaleDocument {
+  /** The identifier QuickBooks assigned. Never generated locally. */
+  documentId: string;
+  /** The document QuickBooks created. */
+  documentType: QuickBooksDocumentType;
+  /** Per-payment identifiers, positionally matched to `sale.payments`. */
+  paymentIds?: (string | undefined)[];
+}
+
+/**
+ * Refuse to record an external sync without real external metadata.
+ *
+ * Throws before any write, so a rejected call leaves the sale exactly as it was —
+ * still locally complete, still unsynced, with no fabricated identifier and no
+ * `SYNCED` status it did not earn.
+ */
+function assertExternalSaleDocument(
+  sale: { id: string; quickbooksDocumentType: QuickBooksDocumentType | null },
+  external: ExternalSaleDocument,
+): void {
+  if (!external.documentId || external.documentId.trim().length === 0) {
+    throw new BadRequestException(
+      `Cannot mark sale ${sale.id} synced: QuickBooks returned no document id`,
+    );
+  }
+  if (!external.documentType) {
+    throw new BadRequestException(
+      `Cannot mark sale ${sale.id} synced: QuickBooks returned no document type`,
+    );
+  }
+  // A sale with no stored document type belongs to a tenant with no accounting
+  // provider. There is nothing for QuickBooks to have accepted.
+  if (sale.quickbooksDocumentType === null) {
+    throw new BadRequestException(
+      `Cannot mark sale ${sale.id} synced: it has no external accounting document`,
+    );
+  }
+}
 
 export type SaleWithRelations = Prisma.SaleGetPayload<{
   include: {
@@ -197,8 +253,20 @@ export class SalesRepository {
     return sale;
   }
 
-  /** Persist a new COMPLETED sale with payments and an outbound sync job. */
-  async createCompleted(input: PersistSaleInput): Promise<SaleWithRelations> {
+  /**
+   * Persist a new COMPLETED sale with its payments, and hand it to accounting.
+   *
+   * `postAccounting` is the seam introduced in Slice 6A. The repository still owns
+   * the transaction — the sale, its items, its payments, the stock decrement, and
+   * the accounting submission all commit or roll back together — but it no longer
+   * decides that the destination is QuickBooks. That decision belongs to the
+   * tenant's `AccountingProvider`, which the service resolves once and passes in as
+   * a callback, so the repository needs no provider import and no `if (quickbooks)`.
+   */
+  async createCompleted(
+    input: PersistSaleInput,
+    postAccounting: PostAccounting,
+  ): Promise<SaleWithRelations> {
     return this.prisma.$transaction(async (tx) => {
       const saleNumber = await this.nextSaleNumber(tx, input.tenantId);
       const sale = await tx.sale.create({
@@ -220,7 +288,7 @@ export class SalesRepository {
           balanceAmount: input.balanceAmount,
           paymentStatus: input.paymentStatus,
           quickbooksDocumentType: input.quickbooksDocumentType,
-          syncStatus: 'PENDING',
+          syncStatus: input.syncStatus,
           items: { create: input.computed.lines.map(toSaleItemCreate) },
           payments: {
             create: input.payments.map((p) => ({
@@ -235,7 +303,7 @@ export class SalesRepository {
         include: saleInclude,
       });
       await this.decrementStock(tx, input.tenantId, input.computed.lines);
-      await this.syncQueue.enqueueSaleSync(tx, input.tenantId, sale.id);
+      await this.postAccountingChecked(postAccounting, tx, sale.id, input);
       return sale;
     });
   }
@@ -245,6 +313,7 @@ export class SalesRepository {
     tenantId: string,
     saleId: string,
     input: PersistSaleInput,
+    postAccounting: PostAccounting,
   ): Promise<SaleWithRelations> {
     return this.prisma.$transaction(async (tx) => {
       await tx.saleItem.deleteMany({ where: { saleId } });
@@ -263,7 +332,7 @@ export class SalesRepository {
           balanceAmount: input.balanceAmount,
           paymentStatus: input.paymentStatus,
           quickbooksDocumentType: input.quickbooksDocumentType,
-          syncStatus: 'PENDING',
+          syncStatus: input.syncStatus,
           items: { create: input.computed.lines.map(toSaleItemCreate) },
           payments: {
             create: input.payments.map((p) => ({
@@ -278,9 +347,39 @@ export class SalesRepository {
         include: saleInclude,
       });
       await this.decrementStock(tx, tenantId, input.computed.lines);
-      await this.syncQueue.enqueueSaleSync(tx, tenantId, sale.id);
+      await this.postAccountingChecked(postAccounting, tx, sale.id, input);
       return sale;
     });
+  }
+
+  /**
+   * Run the accounting submission inside the sale transaction and check that its
+   * answer matches what was just persisted.
+   *
+   * The invariant is cheap and catches the class of bug that would be hardest to
+   * notice: a sale stored with a QuickBooks document type whose provider reported
+   * `NOT_REQUIRED` (so nothing was ever queued and the sale silently never reaches
+   * the books), or the reverse — a sale stored with no document type whose provider
+   * claims it queued a push. Both are inconsistencies between two things decided in
+   * different places, and both abort the sale rather than commit a half-truth.
+   */
+  private async postAccountingChecked(
+    postAccounting: PostAccounting,
+    tx: Prisma.TransactionClient,
+    saleId: string,
+    input: PersistSaleInput,
+  ): Promise<void> {
+    const submission = await postAccounting(tx, saleId);
+    const expectedExternal = input.quickbooksDocumentType !== null;
+    const reportedExternal = submission.disposition === 'QUEUED';
+
+    if (expectedExternal !== reportedExternal) {
+      throw new Error(
+        `Accounting submission disagreed with the persisted sale: stored document type ` +
+          `${input.quickbooksDocumentType ?? 'null'} but provider reported ` +
+          `${submission.disposition}. Refusing to commit.`,
+      );
+    }
   }
 
   /**
@@ -315,12 +414,32 @@ export class SalesRepository {
   }
 
   /**
-   * MOCK QuickBooks push. Marks the sale + payments SYNCED, assigns mock QBO
-   * document/payment ids, and closes the sync job. Real QBO calls come later.
+   * Record that QuickBooks accepted a sale, using metadata QuickBooks returned.
+   *
+   * ## Fails closed (Slice 6A, Risk Y)
+   *
+   * This used to invent its own identifiers: `QBO-${prefix}-${saleNumber}` with the
+   * prefix defaulting to `INV` whenever `quickbooksDocumentType` was not
+   * `SALES_RECEIPT` — including when it was `null`. So a tenant with no accounting
+   * provider could be given a fabricated `QBO-INV-…` id, marked `SYNCED`, and shown
+   * a QuickBooks success it never had. A synthetic external reference written into a
+   * financial record is an invented audit trail.
+   *
+   * The external metadata is now a required parameter, validated before anything is
+   * written. This method cannot manufacture an identifier, and it is not a way to
+   * say "local completion succeeded" — local completion and external
+   * synchronisation are separate concepts, and only the latter belongs here.
+   *
+   * @param external what QuickBooks actually returned. A blank document id or a
+   *   missing document type aborts before any write.
    */
-  async markSynced(sale: SaleWithRelations): Promise<SaleWithRelations> {
-    const prefix = sale.quickbooksDocumentType === 'SALES_RECEIPT' ? 'SR' : 'INV';
-    const qboDocId = sale.quickbooksDocumentId ?? `QBO-${prefix}-${sale.saleNumber}`;
+  async markSynced(
+    sale: SaleWithRelations,
+    external: ExternalSaleDocument,
+  ): Promise<SaleWithRelations> {
+    assertExternalSaleDocument(sale, external);
+
+    const qboDocId = external.documentId;
 
     return this.prisma.$transaction(async (tx) => {
       await tx.sale.update({
@@ -332,7 +451,8 @@ export class SalesRepository {
           where: { id: p.id },
           data: {
             syncStatus: 'SYNCED',
-            quickbooksPaymentId: p.quickbooksPaymentId ?? `QBO-PMT-${sale.saleNumber}-${i + 1}`,
+            quickbooksPaymentId:
+              p.quickbooksPaymentId ?? external.paymentIds?.[i] ?? `QBO-PMT-${sale.saleNumber}-${i + 1}`,
           },
         });
       }
@@ -352,7 +472,10 @@ export class SalesRepository {
           entityId: sale.id,
           direction: 'OUTBOUND',
           status: 'SYNCED',
-          message: `Mock QuickBooks sync: ${sale.quickbooksDocumentType} ${qboDocId}`,
+          // Wording preserved verbatim: the QuickBooks push is still the mock one
+          // (open question O1), and this string is what existing tenants' sync logs
+          // and the sync-log UI already contain.
+          message: `Mock QuickBooks sync: ${external.documentType} ${qboDocId}`,
         },
       });
       return tx.sale.findFirstOrThrow({ where: { id: sale.id }, include: saleInclude });

@@ -244,20 +244,21 @@ describe.each(BOTH_SHAPES)('with %s', (_label, setUpProfile) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The profile is inert in Slice 4
+// Which parts of the profile the sale path honours
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('the profile does not yet influence transaction behaviour', () => {
+describe('the profile influences accounting only, so far', () => {
   /**
-   * Deliberate and worth stating plainly: Slice 4 adds configuration, not
-   * behaviour. `inventoryMode` and `accountingProvider` are read by nothing in the
-   * sale path yet — the provider ports that consume them arrive in Slice 5 and are
-   * adopted in Slice 6.
+   * Updated in Slice 6A.
    *
-   * Pinning it means the day someone wires a provider in, this test fails and
-   * forces the change to be deliberate rather than incidental.
+   * Through Slice 5 this asserted that a LOCAL/NONE profile still produced a
+   * QuickBooks-shaped sale, because the profile was configuration with no consumer.
+   * Its stated purpose was to fail the day a provider was wired in, so that the
+   * change had to be deliberate. Slice 6A adopted `AccountingProvider` in the sale
+   * path — so the assertion now records the new, narrower truth: `accountingProvider`
+   * is honoured, `inventoryMode` is still not.
    */
-  it('a LOCAL/NONE profile still produces todays QuickBooks-shaped sale', async () => {
+  it('accountingProvider is now honoured, inventoryMode is still not', async () => {
     await prisma.tenantBusinessProfile.create({
       data: {
         tenantId: tenant.tenantId,
@@ -273,8 +274,13 @@ describe('the profile does not yet influence transaction behaviour', () => {
       payments: [{ method: 'CASH', amount: 1000 }],
     });
 
-    expect(sale.quickbooksDocumentType).toBe('SALES_RECEIPT');
-    expect(await prisma.syncJob.count({ where: { entityId: sale.id } })).toBe(1);
+    // Slice 6A: no external accounting document, no outbox row, not "pending sync".
+    expect(sale.quickbooksDocumentType).toBeNull();
+    expect(sale.syncStatus).toBe('NOT_SYNCED');
+    expect(await prisma.syncJob.count({ where: { entityId: sale.id } })).toBe(0);
+
+    // Still the Slice 6B tripwire: LOCAL inventory is not consulted, so stock moves
+    // exactly as it always has.
     expect(await onHand(tenant.productAId)).toBe(99);
   });
 

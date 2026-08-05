@@ -1,17 +1,31 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DiscountType, PaymentStatus, QuickBooksDocumentType } from '@hardware-pos/database';
+import {
+  AccountingProviderKind,
+  DiscountType,
+  PaymentStatus,
+  QuickBooksDocumentType,
+} from '@hardware-pos/database';
 import { CURRENCY_SYMBOL, type Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { DiscountsService, ORDER_DISCOUNT_KEY } from '../discounts/discounts.service';
+import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
+import { ProviderOperationUnavailableError } from '../providers/provider.errors';
 import { SettingsService } from '../settings/settings.service';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { CompleteSaleDto } from './dto/complete-sale.dto';
 import { QuerySalesDto } from './dto/query-sales.dto';
 import { SaleItemInputDto } from './dto/sale-item.dto';
-import { SaleListRow, SaleWithRelations, SalesRepository } from './sales.repository';
+import { resolveCustomerDocumentKind } from './customer-document';
+import {
+  ExternalSaleDocument,
+  PostAccounting,
+  SaleListRow,
+  SaleWithRelations,
+  SalesRepository,
+} from './sales.repository';
 import {
   CartItemInput,
   ComputedSale,
@@ -26,6 +40,7 @@ export class SalesService {
     private readonly salesRepository: SalesRepository,
     private readonly settingsService: SettingsService,
     private readonly discountsService: DiscountsService,
+    private readonly accountingProviders: AccountingProviderFactory,
   ) {}
 
   async list(tenantId: string, query: QuerySalesDto): Promise<Paginated<SaleListItem>> {
@@ -124,10 +139,25 @@ export class SalesService {
     const paymentStatus: PaymentStatus =
       paidAmount <= 0 ? 'UNPAID' : paidAmount >= total ? 'PAID' : 'PARTIAL';
     const balanceAmount = Math.max(0, round2(total - paidAmount));
-    const quickbooksDocumentType: QuickBooksDocumentType =
-      paymentStatus === 'PAID' ? 'SALES_RECEIPT' : 'INVOICE';
 
-    if (quickbooksDocumentType === 'INVOICE' && !customerId) {
+    // Resolve the tenant's accounting provider ONCE, from the authenticated tenant.
+    // The same instance decides the document type and performs the submission, so
+    // the two can never come from different providers. `tenantId` reaches here from
+    // `@TenantId()` — the verified session — and there is no DTO field a client
+    // could use to name a provider.
+    const accounting = await this.accountingProviders.forTenant(tenantId);
+    const documentDecision = accounting.resolveSaleDocumentType({
+      paymentStatus,
+      hasCustomer: Boolean(customerId),
+      total,
+    });
+    const quickbooksDocumentType = documentDecision.documentType;
+
+    // The provider states the requirement; this raises the existing error with its
+    // existing wording, so the behaviour Tile Shop users and tests see is unchanged.
+    // A tenant with no accounting provider does not impose it — a QuickBooks Invoice
+    // needs a CustomerRef, a local invoice does not.
+    if (documentDecision.requiresCustomer && !customerId) {
       throw new BadRequestException('A customer is required for a credit/partial sale (Invoice)');
     }
 
@@ -153,14 +183,35 @@ export class SalesService {
       balanceAmount,
       paymentStatus,
       quickbooksDocumentType,
+      // Derived from the provider's own decision, not from its identity: a sale with
+      // an external document is PENDING a push, one without was never queued and is
+      // NOT_SYNCED. A `NONE` tenant left permanently "pending" would be showing a
+      // QuickBooks state to someone who does not use QuickBooks.
+      syncStatus: quickbooksDocumentType === null ? 'NOT_SYNCED' : 'PENDING',
     };
 
+    const postAccounting: PostAccounting = (tx, saleId) =>
+      accounting.postSale(tx, { tenantId, branchId }, saleId, quickbooksDocumentType);
+
     return dto.saleId
-      ? this.salesRepository.completeDraft(tenantId, dto.saleId, persist)
-      : this.salesRepository.createCompleted(persist);
+      ? this.salesRepository.completeDraft(tenantId, dto.saleId, persist, postAccounting)
+      : this.salesRepository.createCompleted(persist, postAccounting);
   }
 
-  /** MOCK QuickBooks push for a completed sale (real QBO integration comes later). */
+  /**
+   * MOCK QuickBooks push for a completed sale (real QBO integration comes later).
+   *
+   * Slice 6A gated this on the tenant's accounting provider. A tenant with no
+   * external accounting has nothing to push, so the request is refused outright
+   * rather than being handed to a QuickBooks-specific code path that would invent an
+   * identifier for it. Nothing is written on the refusal.
+   *
+   * For a QuickBooks tenant the behaviour is unchanged, mock and all: the identifiers
+   * are still generated locally because there is still no real Intuit call here.
+   * That remains open question O1, deferred to Phase 2 — this slice removes the
+   * fabrication for tenants that should never have reached it, and makes the
+   * repository refuse to invent one, but it does not resolve O1.
+   */
   async syncToQuickBooks(tenantId: string, id: string): Promise<SaleWithRelations> {
     const sale = await this.salesRepository.findByIdForTenant(tenantId, id);
     if (!sale) {
@@ -169,7 +220,38 @@ export class SalesService {
     if (sale.status !== 'COMPLETED') {
       throw new BadRequestException('Only completed sales can be synced to QuickBooks');
     }
-    return this.salesRepository.markSynced(sale);
+
+    const accounting = await this.accountingProviders.forTenant(tenantId);
+    if (accounting.provider !== AccountingProviderKind.QUICKBOOKS) {
+      throw new ProviderOperationUnavailableError(accounting.name, 'QuickBooks sale sync');
+    }
+    if (sale.quickbooksDocumentType === null) {
+      // Belt and braces: a QuickBooks tenant's sales always carry a document type,
+      // so this only fires on inconsistent data — and refusing beats guessing.
+      throw new BadRequestException(
+        `Sale ${sale.saleNumber} has no QuickBooks document type and cannot be synced`,
+      );
+    }
+
+    return this.salesRepository.markSynced(sale, this.mockQuickBooksDocument(sale));
+  }
+
+  /**
+   * The mock identifiers the QuickBooks push has always produced.
+   *
+   * Isolated into a named method so the fabrication is visible rather than buried in
+   * a `??` inside the repository, and so the day a real Intuit call replaces it,
+   * exactly one function disappears. The prefix branch is now exhaustive over a
+   * non-null document type — it can no longer fall through to `INV` for a null.
+   */
+  private mockQuickBooksDocument(sale: SaleWithRelations): ExternalSaleDocument {
+    const documentType = sale.quickbooksDocumentType as QuickBooksDocumentType;
+    const prefix = documentType === 'SALES_RECEIPT' ? 'SR' : 'INV';
+    return {
+      documentId: sale.quickbooksDocumentId ?? `QBO-${prefix}-${sale.saleNumber}`,
+      documentType,
+      paymentIds: sale.payments.map((_, i) => `QBO-PMT-${sale.saleNumber}-${i + 1}`),
+    };
   }
 
   // ── compute pipeline ───────────────────────────────────────────────────────
@@ -394,6 +476,9 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
     returnedAmount: Number(row.returnedAmount),
     quickbooksDocumentType: row.quickbooksDocumentType,
     syncStatus: row.syncStatus,
+    // Always present, derived from local payment state — so a client never has to
+    // fall back to the external type (or to nothing) to know what document this is.
+    documentKind: resolveCustomerDocumentKind(row.paymentStatus),
   };
 }
 

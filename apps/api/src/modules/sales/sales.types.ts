@@ -8,6 +8,8 @@ import {
   SyncStatus,
 } from '@hardware-pos/database';
 
+import { CustomerDocumentKind } from './customer-document';
+
 /** A row in the sales history list — enriched with names + item count, money as numbers. */
 export interface SaleListItem {
   id: string;
@@ -29,8 +31,14 @@ export interface SaleListItem {
   paymentMethods: PaymentMethod[];
   returnStatus: SaleReturnStatus;
   returnedAmount: number;
+  /** External-integration metadata. `null` when the tenant has no accounting provider. */
   quickbooksDocumentType: QuickBooksDocumentType | null;
   syncStatus: SyncStatus;
+  /**
+   * What kind of document the customer gets, derived from local payment state and
+   * always present — including for a tenant with no accounting provider.
+   */
+  documentKind: CustomerDocumentKind;
 }
 
 /** Filters accepted by the sales history list. */
@@ -120,5 +128,23 @@ export interface PersistSaleInput {
   paidAmount: number;
   balanceAmount: number;
   paymentStatus: PaymentStatus;
-  quickbooksDocumentType: QuickBooksDocumentType;
+  /**
+   * The external accounting document type, or `null` when the tenant has no
+   * accounting provider.
+   *
+   * Widened from non-nullable in Slice 6A. The database column was always
+   * nullable; only this input type insisted on a value, which is what would have
+   * forced a fabricated document type onto a `NONE` tenant.
+   */
+  quickbooksDocumentType: QuickBooksDocumentType | null;
+  /**
+   * The sale's initial sync status, decided by the caller from the accounting
+   * provider's own decision — `PENDING` when a push was queued, `NOT_SYNCED` when
+   * there is no external accounting.
+   *
+   * Explicit rather than hardcoded to `PENDING`, because a `NONE` tenant showing
+   * "pending sync" forever is a QuickBooks failure state displayed to a user who
+   * does not use QuickBooks.
+   */
+  syncStatus: SyncStatus;
 }

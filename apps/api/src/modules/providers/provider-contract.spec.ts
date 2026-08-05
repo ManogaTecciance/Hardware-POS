@@ -192,10 +192,15 @@ describe('no provider starts its own transaction', () => {
 // Slice 5 inertness
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Slice 5 is inert', () => {
-  const CALL_SITE_FILES = [
-    'modules/sales/sales.service.ts',
-    'modules/sales/sales.repository.ts',
+describe('Slice 6A adopted the sale path, and only the sale path', () => {
+  /**
+   * Updated in Slice 6A. Through Slice 5.5 this block asserted total inertness —
+   * that nothing outside `providers/` referenced a provider at all. Slice 6A ends
+   * that for the completed-sale workflow by design, so the block now pins the new
+   * boundary instead of the old one. Everything still on the forbidden list is a
+   * Slice 6B/6C decision that has not been taken.
+   */
+  const NOT_YET_ADOPTED = [
     'modules/returns/returns.service.ts',
     'modules/returns/returns.repository.ts',
     'modules/products/products.service.ts',
@@ -204,23 +209,58 @@ describe('Slice 5 is inert', () => {
     'modules/sync/queue/sync-worker.service.ts',
     'modules/sync/queue/sync-queue.service.ts',
     'modules/sync/sync.service.ts',
+    'modules/quickbooks/quickbooks-sales-sync.service.ts',
+    'modules/quickbooks/quickbooks-returns-sync.service.ts',
+    'modules/quickbooks/quickbooks-product-sync.service.ts',
   ];
 
-  it.each(CALL_SITE_FILES)('%s does not reference a provider', (file) => {
+  it.each(NOT_YET_ADOPTED)('%s still references no provider', (file) => {
     const source = readFileSync(resolve(API_SRC, file), 'utf8');
     expect(source).not.toContain('InventoryProvider');
     expect(source).not.toContain('AccountingProvider');
     expect(source).not.toContain('providers/');
   });
 
-  it('ProvidersModule is not wired into AppModule', () => {
-    // Slice 6 adds this import as part of the deliberate adoption diff. Until
-    // then, nothing in the running application can construct a provider.
-    const appModule = readFileSync(resolve(API_SRC, 'app.module.ts'), 'utf8');
-    expect(appModule).not.toContain('ProvidersModule');
+  it('the sale path uses the ACCOUNTING provider only — inventory is untouched', () => {
+    const service = readFileSync(resolve(API_SRC, 'modules/sales/sales.service.ts'), 'utf8');
+
+    expect(service).toContain('AccountingProviderFactory');
+    // Slice 6B's job. Adopting it here would silently change how stock moves.
+    expect(service).not.toContain('InventoryProvider');
+    expect(readFileSync(resolve(API_SRC, 'modules/sales/sales.repository.ts'), 'utf8')).not.toContain(
+      'InventoryProvider',
+    );
   });
 
-  it('nothing outside the providers directory imports a provider', () => {
+  it('the sale repository still decrements stock itself', () => {
+    // The seam Slice 6B replaces. While it is here, inventory has not been adopted.
+    const repository = readFileSync(resolve(API_SRC, 'modules/sales/sales.repository.ts'), 'utf8');
+    expect(repository).toContain('decrementStock');
+    expect(repository).toMatch(/quantityOnHand: \{ gte: qty \}/);
+  });
+
+  it('ProvidersModule is imported by exactly one module — the narrowest that needs it', () => {
+    const importers: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== 'providers') walk(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.module.ts')) continue;
+        if (readFileSync(full, 'utf8').includes('ProvidersModule')) {
+          importers.push(full.replace(`${API_SRC}/`, ''));
+        }
+      }
+    };
+    walk(API_SRC);
+
+    // Not AppModule, and not every feature module "because it is live now".
+    expect(importers).toEqual(['modules/sales/sales.module.ts']);
+  });
+
+  it('only the sales module imports from the providers directory', () => {
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -231,13 +271,18 @@ describe('Slice 5 is inert', () => {
         }
         if (!entry.name.endsWith('.ts')) continue;
         if (full.startsWith(PROVIDERS_DIR)) continue;
-        if (importsOf(readFileSync(full, 'utf8')).some((s) => s.includes('providers/'))) {
+        if (importsOf(readFileSync(full, 'utf8')).some((spec) => spec.includes('providers/'))) {
           offenders.push(full.replace(`${API_SRC}/`, ''));
         }
       }
     };
     walk(API_SRC);
-    expect(offenders).toEqual([]);
+
+    expect(offenders.sort()).toEqual([
+      'modules/sales/sales.module.ts',
+      'modules/sales/sales.repository.ts',
+      'modules/sales/sales.service.ts',
+    ]);
   });
 });
 

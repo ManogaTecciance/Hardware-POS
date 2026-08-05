@@ -737,10 +737,14 @@ describe('the existing pipeline is untouched by the providers existing', () => {
     expect(sale.quickbooksDocumentType).toBe('INVOICE');
   });
 
-  it('a sale for a tenant with a RESTAURANT/LOCAL/NONE profile is STILL QuickBooks-shaped', async () => {
-    // Slice 5 is inert: the profile exists and resolves providers, but no call site
-    // consults them yet. The day this test fails, a provider has been adopted — and
-    // that must be a deliberate Slice 6 change, not an accident.
+  /**
+   * Updated in Slice 6A. This test previously asserted that a LOCAL/NONE profile
+   * still produced a QuickBooks-shaped sale, and its comment said the day it failed,
+   * a provider had been adopted and that must be deliberate. Slice 6A is that
+   * deliberate adoption — for ACCOUNTING only — so the assertion now records the new
+   * split: accounting follows the provider, inventory still does not.
+   */
+  it('accounting now follows the profile, while inventory deliberately does not', async () => {
     await giveProfile(tile, InventoryMode.LOCAL, AccountingProviderKind.NONE);
 
     const sale = await salesService.complete(tile.tenantId, owner, {
@@ -750,8 +754,12 @@ describe('the existing pipeline is untouched by the providers existing', () => {
       payments: [{ method: 'CASH', amount: 1000 }],
     });
 
-    expect(sale.quickbooksDocumentType).toBe('SALES_RECEIPT');
-    expect(await prisma.syncJob.count({ where: { entityId: sale.id } })).toBe(1);
+    // Adopted in Slice 6A: no external accounting for a NONE tenant.
+    expect(sale.quickbooksDocumentType).toBeNull();
+    expect(await prisma.syncJob.count({ where: { entityId: sale.id } })).toBe(0);
+
+    // NOT adopted: stock still moves through `decrementStock`, not LocalInventoryProvider.
+    // This half remains the tripwire for Slice 6B.
     expect(await onHand(tile.productAId)).toBe(99);
   });
 

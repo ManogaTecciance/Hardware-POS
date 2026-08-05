@@ -231,22 +231,24 @@ describe('existing QuickBooks receipt output is unchanged', () => {
     expect(html).toContain('INVOICE');
   });
 
-  it('nulling the metadata removes ONLY the badge — the rest is identical', async () => {
+  it('nulling the metadata swaps the external badge for the LOCAL document kind', async () => {
     const sale = await paidSale();
     const withMetadata = await thermalReceiptHtml(sale);
 
     await clearExternalMetadata(sale.id);
     const withoutMetadata = await thermalReceiptHtml(sale);
 
-    // The single difference is the badge div. Everything else — title, items,
-    // totals, footer — is untouched, which is what makes this a compatibility
-    // change rather than a redesign. Compared with whitespace normalised, since the
-    // template's indentation is not the property under test.
+    // Updated in Slice 6A. Before it, a null simply omitted the badge; now the
+    // receipt states the locally-derived kind instead, so a tenant with no
+    // accounting provider gets a real label rather than a gap.
     expect(withMetadata).toContain('<div class="badge">SALES_RECEIPT</div>');
+    expect(withoutMetadata).toContain('<div class="badge">Receipt</div>');
     expect(withoutMetadata).not.toContain('SALES_RECEIPT');
 
+    // Exactly one div differs — everything else is untouched, which is what makes
+    // this a compatibility change rather than a redesign.
     const squash = (html: string): string => html.replace(/\s+/g, ' ').trim();
-    expect(squash(withoutMetadata)).toBe(
+    expect(squash(withoutMetadata.replace('<div class="badge">Receipt</div>', ''))).toBe(
       squash(withMetadata.replace('<div class="badge">SALES_RECEIPT</div>', '')),
     );
   });

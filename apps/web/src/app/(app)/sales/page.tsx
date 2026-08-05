@@ -319,7 +319,8 @@ export default function SalesPage() {
                             <Printer className="h-4 w-4" />
                           </Button>
                         </Tooltip>
-                        {s.syncStatus === 'FAILED' || s.syncStatus === 'PENDING' ? (
+                        {s.quickbooksDocumentType &&
+                        (s.syncStatus === 'FAILED' || s.syncStatus === 'PENDING') ? (
                           <Tooltip label="Retry QuickBooks sync">
                             <Button
                               variant="ghost"
