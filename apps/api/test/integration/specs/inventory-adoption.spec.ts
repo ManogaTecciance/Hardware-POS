@@ -787,13 +787,20 @@ describe('38-41 — return rollback', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('inventory mode transitions', () => {
-  it('a tenant with no transactions may choose any mode', async () => {
+  /**
+   * Slice 6C-B note: every case below sends BOTH fields. The combination validator
+   * added in 6C-B refuses `LOCAL` + `QUICKBOOKS` outright, so a request that changed
+   * only the mode would be rejected for the wrong reason and would stop exercising
+   * the D29 transition guard at all — a vacuous test in the making.
+   */
+  it('a tenant with no transactions may choose any supported mode', async () => {
     await expect(
       profiles.updateProfile(
         tile.tenantId,
         dto(UpdateBusinessProfileDto, {
           businessType: 'RESTAURANT',
           inventoryMode: 'LOCAL',
+          accountingProvider: 'NONE',
         }),
       ),
     ).resolves.toMatchObject({ inventoryMode: InventoryMode.LOCAL });
@@ -807,7 +814,7 @@ describe('inventory mode transitions', () => {
       await expect(
         profiles.updateProfile(
           tile.tenantId,
-          dto(UpdateBusinessProfileDto, { inventoryMode: mode }),
+          dto(UpdateBusinessProfileDto, { inventoryMode: mode, accountingProvider: 'NONE' }),
         ),
       ).rejects.toThrow(UnsafeInventoryModeTransitionError);
 
@@ -825,7 +832,10 @@ describe('inventory mode transitions', () => {
     await expect(
       profiles.updateProfile(
         tile.tenantId,
-        dto(UpdateBusinessProfileDto, { inventoryMode: 'QUICKBOOKS' }),
+        dto(UpdateBusinessProfileDto, {
+          inventoryMode: 'QUICKBOOKS',
+          accountingProvider: 'QUICKBOOKS',
+        }),
       ),
     ).rejects.toThrow(UnsafeInventoryModeTransitionError);
   });
@@ -836,7 +846,10 @@ describe('inventory mode transitions', () => {
     await prisma.sale.deleteMany({ where: { id: { not: sale.id } } });
 
     await expect(
-      profiles.updateProfile(tile.tenantId, dto(UpdateBusinessProfileDto, { inventoryMode: 'LOCAL' })),
+      profiles.updateProfile(
+        tile.tenantId,
+        dto(UpdateBusinessProfileDto, { inventoryMode: 'LOCAL', accountingProvider: 'NONE' }),
+      ),
     ).rejects.toThrow(UnsafeInventoryModeTransitionError);
   });
 
@@ -876,7 +889,10 @@ describe('inventory mode transitions', () => {
     });
 
     await expect(
-      profiles.updateProfile(tile.tenantId, dto(UpdateBusinessProfileDto, { inventoryMode: 'LOCAL' })),
+      profiles.updateProfile(
+        tile.tenantId,
+        dto(UpdateBusinessProfileDto, { inventoryMode: 'LOCAL', accountingProvider: 'NONE' }),
+      ),
     ).resolves.toMatchObject({ inventoryMode: InventoryMode.LOCAL });
   });
 
@@ -886,7 +902,7 @@ describe('inventory mode transitions', () => {
     await expect(
       profiles.updateProfile(
         other.tenantId,
-        dto(UpdateBusinessProfileDto, { inventoryMode: 'LOCAL' }),
+        dto(UpdateBusinessProfileDto, { inventoryMode: 'LOCAL', accountingProvider: 'NONE' }),
       ),
     ).resolves.toMatchObject({ inventoryMode: InventoryMode.LOCAL });
   });
@@ -896,7 +912,7 @@ describe('inventory mode transitions', () => {
     try {
       await profiles.updateProfile(
         tile.tenantId,
-        dto(UpdateBusinessProfileDto, { inventoryMode: 'LOCAL' }),
+        dto(UpdateBusinessProfileDto, { inventoryMode: 'LOCAL', accountingProvider: 'NONE' }),
       );
       fail('expected a refusal');
     } catch (err) {
@@ -1124,16 +1140,24 @@ describe('6C-A.5 — the provider is genuinely invoked, not merely imported', ()
     expect(rows[0].status).toBe('PENDING');
   });
 
-  it('ProductsService holds no provider factory at runtime', () => {
+  /**
+   * Updated in Slice 6C-B — this tripwire fired exactly as intended.
+   *
+   * Written in 6C-A.5 asserting that ProductsService held NO provider factory, with
+   * `CatalogSyncProviderFactory` named so the day it appeared the change had to be
+   * deliberate. 6C-B is that change, so the assertion now records the new split:
+   * the catalogue factory is present, the stock and accounting ones are not.
+   */
+  it('ProductsService holds ONLY the catalogue factory at runtime', () => {
     const products = testModule.get(ProductsService);
     const dependencies = Object.values(products as unknown as Record<string, unknown>)
       .filter((v) => v && typeof v === 'object')
       .map((v) => (v as object).constructor.name);
 
+    expect(dependencies).toContain('CatalogSyncProviderFactory');
     expect(dependencies).not.toContain('InventoryProviderFactory');
     expect(dependencies).not.toContain('AccountingProviderFactory');
-    expect(dependencies).not.toContain('CatalogSyncProviderFactory');
-    // POSITIVE CONTROL: the probe can see the dependencies it does have.
+    expect(dependencies).not.toContain('SyncQueueService');
     expect(dependencies).toContain('ProductsRepository');
   });
 });

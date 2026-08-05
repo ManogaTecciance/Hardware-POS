@@ -10,7 +10,8 @@ import type { Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
 import { StorageService } from '../../common/storage/storage.service';
-import { SyncQueueService } from '../sync/queue/sync-queue.service';
+import { CatalogSyncProviderFactory } from '../providers/catalog/catalog-sync-provider.factory';
+import { CatalogSyncResult, ProductCatalogShape } from '../providers/provider.types';
 import { MockSyncSummary, ProductsRepository } from './products.repository';
 import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
@@ -21,7 +22,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 export class ProductsService {
   constructor(
     private readonly productsRepository: ProductsRepository,
-    private readonly syncQueue: SyncQueueService,
+    private readonly catalogProviders: CatalogSyncProviderFactory,
     private readonly storage: StorageService,
   ) {}
 
@@ -87,10 +88,14 @@ export class ProductsService {
       isActive: dto.isActive ?? true,
       syncStatus: 'NOT_SYNCED',
     };
+    // One provider for the operation, resolved from the authenticated tenant before
+    // any write. No profile conditional here: the provider decides whether an
+    // external catalogue exists, and this method only applies the local consequence.
+    const catalog = await this.catalogProviders.forTenant(tenantId);
     try {
       const created = await this.productsRepository.create(tenantId, data);
-      // New products flow to QuickBooks automatically when it is connected.
-      return await this.queueQuickBooksPush(tenantId, created);
+      const result = await catalog.productCreated({ tenantId, branchId: null }, toCatalogShape(created));
+      return await this.applyCatalogSync(created, result);
     } catch (err) {
       throw this.mapWriteError(err);
     }
@@ -148,13 +153,17 @@ export class ProductsService {
       reorderLevel: dto.reorderLevel,
       isActive: dto.isActive,
     };
+    const catalog = await this.catalogProviders.forTenant(tenantId);
     try {
       const updated = await this.productsRepository.update(id, data);
-      // Push QBO-relevant edits of a linked product back to QuickBooks.
-      if (existing.quickbooksItemId != null && this.qboFieldsChanged(existing, updated)) {
-        return await this.queueQuickBooksPush(tenantId, updated);
-      }
-      return updated;
+      // Whether a *mirrored* field changed, and whether the product is linked at
+      // all, are the catalogue's own rules — moved into the provider unchanged.
+      const result = await catalog.productUpdated(
+        { tenantId, branchId: null },
+        toCatalogShape(existing),
+        toCatalogShape(updated),
+      );
+      return await this.applyCatalogSync(updated, result);
     } catch (err) {
       throw this.mapWriteError(err);
     }
@@ -162,13 +171,14 @@ export class ProductsService {
 
   /** Soft-delete: deactivate rather than remove (sale history references it). */
   async deactivate(tenantId: string, id: string): Promise<Product> {
-    const existing = await this.getById(tenantId, id);
+    await this.getById(tenantId, id);
+    const catalog = await this.catalogProviders.forTenant(tenantId);
     const updated = await this.productsRepository.update(id, { isActive: false });
-    // Deactivating a QBO-linked product marks the QBO item inactive too.
-    if (existing.quickbooksItemId != null) {
-      return this.queueQuickBooksPush(tenantId, updated);
-    }
-    return updated;
+    const result = await catalog.productDeactivated(
+      { tenantId, branchId: null },
+      toCatalogShape(updated),
+    );
+    return this.applyCatalogSync(updated, result);
   }
 
   /**
@@ -199,11 +209,20 @@ export class ProductsService {
     return this.productsRepository.update(id, { imageUrl: null });
   }
 
-  /** Queue a product push to QuickBooks; the sync worker creates/updates the Item. */
+  /**
+   * Queue an explicit product push; the sync worker creates/updates the item.
+   *
+   * A tenant with no external catalogue gets a typed provider-not-supported refusal
+   * from the provider rather than this method's QuickBooks-specific wording — the
+   * operation genuinely does not exist for them. A QuickBooks tenant with no
+   * connected company keeps the existing `'QuickBooks is not connected'` message,
+   * verbatim, because that is the message the POS surfaces today.
+   */
   async syncToQuickBooks(tenantId: string, id: string): Promise<Product> {
     await this.getById(tenantId, id);
-    const queued = await this.syncQueue.enqueueProductSync(tenantId, id);
-    if (!queued) {
+    const catalog = await this.catalogProviders.forTenant(tenantId);
+    const result = await catalog.pushProduct({ tenantId, branchId: null }, id);
+    if (result.disposition !== 'QUEUED') {
       throw new BadRequestException('QuickBooks is not connected');
     }
     return this.productsRepository.update(id, { syncStatus: 'PENDING' });
@@ -213,34 +232,35 @@ export class ProductsService {
    * Mock QuickBooks sync — refreshes the local product cache from the mock
    * catalog. Stock/prices are only ever updated via sync, never edited in the POS.
    */
-  mockSync(tenantId: string): Promise<MockSyncSummary> {
-    return this.productsRepository.mockSync(tenantId);
+  async mockSync(tenantId: string): Promise<MockSyncSummary> {
+    const catalog = await this.catalogProviders.forTenant(tenantId);
+    // The local refresh is passed in as a callback, so the provider decides whether
+    // an external catalogue refresh is meaningful while the repository keeps owning
+    // the write. A tenant with no external catalogue is refused, not silently no-op'd.
+    const outcome = await catalog.refreshCatalogue({ tenantId, branchId: null }, () =>
+      this.productsRepository.mockSync(tenantId),
+    );
+    return outcome.summary;
   }
 
   /**
-   * Best-effort enqueue of an outbound product push. Returns the product with
-   * PENDING sync status when queued; unchanged when QuickBooks is not connected.
+   * Apply the LOCAL consequence of a catalogue submission.
+   *
+   * `QUEUED` records `PENDING`, which is exactly what `queueQuickBooksPush` did.
+   * `NOT_CONNECTED` and `NOT_REQUIRED` both leave the row alone — the first because
+   * that is today's behaviour when nothing was queued, the second because a tenant
+   * with no external catalogue has nothing pending and must never be shown as
+   * waiting for a push that will not happen.
+   *
+   * This is the only place a catalogue result touches persistence, and it is a
+   * reaction to a provider-neutral disposition rather than a profile check.
    */
-  private async queueQuickBooksPush(tenantId: string, product: Product): Promise<Product> {
-    const queued = await this.syncQueue.enqueueProductSync(tenantId, product.id);
-    if (!queued) return product;
+  private async applyCatalogSync(product: Product, result: CatalogSyncResult): Promise<Product> {
+    if (result.disposition !== 'QUEUED') return product;
     return this.productsRepository.update(product.id, { syncStatus: 'PENDING' });
   }
 
-  /** Did any field that QuickBooks mirrors change between the two rows? */
-  private qboFieldsChanged(before: Product, after: Product): boolean {
-    const num = (v: unknown): number | null => (v == null ? null : Number(v));
-    return (
-      before.name !== after.name ||
-      before.type !== after.type ||
-      before.sku !== after.sku ||
-      before.description !== after.description ||
-      before.purchaseDescription !== after.purchaseDescription ||
-      num(before.unitPrice) !== num(after.unitPrice) ||
-      num(before.costPrice) !== num(after.costPrice) ||
-      before.isActive !== after.isActive
-    );
-  }
+
 
   /**
    * Validate + normalise the category ↔ subcategory link (spec §17): a chosen
@@ -287,4 +307,28 @@ export class ProductsService {
     }
     return err instanceof Error ? err : new BadRequestException('Could not save product');
   }
+}
+
+/**
+ * Narrow a `Product` row to the facts a catalogue provider may read.
+ *
+ * `externalItemId` is the neutral name for `quickbooksItemId`: the port must not
+ * name a vendor, and the field means "the identifier the external catalogue gave
+ * this product" whichever catalogue that is. Quantities, images and category links
+ * are deliberately not passed — a catalogue has no business reading them.
+ */
+function toCatalogShape(product: Product): ProductCatalogShape {
+  const num = (v: unknown): number | null => (v == null ? null : Number(v));
+  return {
+    id: product.id,
+    name: product.name,
+    type: product.type,
+    sku: product.sku,
+    description: product.description,
+    purchaseDescription: product.purchaseDescription,
+    unitPrice: num(product.unitPrice),
+    costPrice: num(product.costPrice),
+    isActive: product.isActive,
+    externalItemId: product.quickbooksItemId,
+  };
 }

@@ -8,7 +8,14 @@ import {
   sortModules,
 } from './platform.constants';
 import { BusinessProfileRepository, PersistedProfile } from './business-profile.repository';
-import { UnsafeInventoryModeTransitionError } from './platform.errors';
+import {
+  UnsafeInventoryModeTransitionError,
+  UnsupportedProfileCombinationError,
+} from './platform.errors';
+import {
+  SUPPORTED_COMBINATION_LABELS,
+  isSupportedProfileCombination,
+} from './profile-combinations';
 import { EffectiveBusinessProfile, ModuleState } from './platform.types';
 
 /**
@@ -90,6 +97,7 @@ export class BusinessProfileService {
     tenantId: string,
     dto: UpdateBusinessProfileDto,
   ): Promise<EffectiveBusinessProfile> {
+    await this.assertSupportedCombination(tenantId, dto);
     await this.assertInventoryModeTransitionIsSafe(tenantId, dto.inventoryMode);
 
     const persisted = await this.repository.upsertProfile(
@@ -108,6 +116,46 @@ export class BusinessProfileService {
         `${persisted.profile?.accountingProvider} v${persisted.profile?.version}`,
     );
     return this.toEffective(persisted);
+  }
+
+  /**
+   * Refuse a profile whose inventory and accounting choices are not a supported
+   * pair (Slice 6C-B).
+   *
+   * Validated on the **resulting** combination, not on the fields the request
+   * happened to send: a `PATCH` that changes only `accountingProvider` can still
+   * produce an unsupported pair with the mode already stored, and a request that
+   * changes nothing must stay valid. Both fall out of merging the DTO over the
+   * effective profile.
+   *
+   * Runs before the transition guard because it needs no extra query and gives the
+   * more specific error — an unsupported pair is wrong regardless of how much
+   * history the tenant has.
+   *
+   * A legacy tenant resolves to `QUICKBOOKS`/`QUICKBOOKS`, which is supported, so
+   * legacy-default resolution is untouched and re-stating it explicitly is allowed.
+   */
+  private async assertSupportedCombination(
+    tenantId: string,
+    dto: UpdateBusinessProfileDto,
+  ): Promise<void> {
+    if (dto.inventoryMode === undefined && dto.accountingProvider === undefined) return;
+
+    const current = await this.getEffectiveProfile(tenantId);
+    const inventoryMode = dto.inventoryMode ?? current.inventoryMode;
+    const accountingProvider = dto.accountingProvider ?? current.accountingProvider;
+
+    if (isSupportedProfileCombination(inventoryMode, accountingProvider)) return;
+
+    this.logger.warn(
+      `Refusing unsupported profile combination for tenant ${tenantId}: ` +
+        `${inventoryMode} inventory + ${accountingProvider} accounting.`,
+    );
+    throw new UnsupportedProfileCombinationError(
+      inventoryMode,
+      accountingProvider,
+      SUPPORTED_COMBINATION_LABELS,
+    );
   }
 
   /**

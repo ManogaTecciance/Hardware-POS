@@ -195,7 +195,7 @@ describe('no provider starts its own transaction', () => {
 // Slice 5 inertness
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Slice 6C-A adopted the sale and return paths, and only those', () => {
+describe('Slice 6C-B adopted the sale, return and product paths, and only those', () => {
   /**
    * Rewritten in Slice 6C-A.5 to the non-vacuous standard.
    *
@@ -212,7 +212,7 @@ describe('Slice 6C-A adopted the sale and return paths, and only those', () => {
    * `testkit/source-analysis.ts`. `referencesIdentifier` reads code only, so a
    * comment can no longer satisfy or defeat a rule.
    */
-  const ADOPTED_PATHS = ['modules/sales', 'modules/returns'];
+  const ADOPTED_PATHS = ['modules/sales', 'modules/returns', 'modules/products'];
 
   /**
    * Files that must stay clear of the provider layer. Each carries the legacy call
@@ -220,7 +220,7 @@ describe('Slice 6C-A adopted the sale and return paths, and only those', () => {
    * for a file that had been deleted, emptied, or renamed.
    */
   const NOT_YET_ADOPTED: { file: string; legacyMarker: string }[] = [
-    { file: 'modules/products/products.service.ts', legacyMarker: 'SyncQueueService' },
+    { file: 'modules/products/products-import.service.ts', legacyMarker: 'ProductsService' },
     { file: 'modules/quotations/quotations.service.ts', legacyMarker: 'QuotationsRepository' },
     { file: 'modules/payments/payments.service.ts', legacyMarker: 'PaymentsRepository' },
     { file: 'modules/sync/queue/sync-worker.service.ts', legacyMarker: 'SyncJob' },
@@ -248,6 +248,69 @@ describe('Slice 6C-A adopted the sale and return paths, and only those', () => {
     },
   );
 
+  it('products.service.ts resolves ONLY the catalogue provider, and no profile conditional', () => {
+    const service = readFileSync(resolve(API_SRC, 'modules/products/products.service.ts'), 'utf8');
+    const code = stripComments(service);
+
+    // POSITIVE — the catalogue provider is resolved.
+    expect(referencesIdentifier(service, 'CatalogSyncProviderFactory')).toBe(true);
+    expect(code).toContain('this.catalogProviders.forTenant(tenantId)');
+
+    // NEGATIVE — no stock or accounting provider, and no direct queue use.
+    expect(referencesIdentifier(service, 'InventoryProvider')).toBe(false);
+    expect(referencesIdentifier(service, 'AccountingProvider')).toBe(false);
+    expect(referencesIdentifier(service, 'SyncQueueService')).toBe(false);
+
+    // NEGATIVE — the provider owns the routing, so no profile branch may appear.
+    // This is the specific thing D28 forbids: trading one hard-coded QuickBooks
+    // branch for several profile-condition branches.
+    expect(referencesIdentifier(service, 'BusinessProfileService')).toBe(false);
+    expect(code).not.toMatch(/inventoryMode\s*[=!]==/);
+    expect(code).not.toMatch(/accountingProvider\s*[=!]==/);
+    expect(code).not.toMatch(/businessType\s*[=!]==/);
+    expect(code).not.toContain('InventoryMode.');
+    expect(code).not.toContain('AccountingProviderKind.');
+  });
+
+  it('the catalogue provider owns the mirrored-field rule, ProductsService no longer does', () => {
+    const service = stripComments(
+      readFileSync(resolve(API_SRC, 'modules/products/products.service.ts'), 'utf8'),
+    );
+    const provider = stripComments(
+      readFileSync(resolve(PROVIDERS_DIR, 'catalog/quickbooks-catalog-sync.provider.ts'), 'utf8'),
+    );
+
+    // Moved, not duplicated: exactly one of the two files decides this.
+    expect(service).not.toContain('qboFieldsChanged');
+    expect(service).not.toContain('purchaseDescription !==');
+    expect(provider).toContain('mirroredFieldsChanged');
+    expect(provider).toContain('before.purchaseDescription !== after.purchaseDescription');
+  });
+
+  it('no catalogue provider writes a Product row — local persistence stays in products', () => {
+    const files = listSourceFiles(resolve(PROVIDERS_DIR, 'catalog'));
+    expect(files.length).toBeGreaterThanOrEqual(4);
+    for (const file of files) {
+      const code = stripComments(readFileSync(resolve(PROVIDERS_DIR, 'catalog', file), 'utf8'));
+      expect(code).not.toContain('product.update');
+      expect(code).not.toContain('product.create');
+      expect(code).not.toContain('ProductsRepository');
+      expect(code).not.toContain('$transaction');
+    }
+  });
+
+  it('NoCatalogSyncProvider has no mechanism to write anything', () => {
+    const code = stripComments(
+      readFileSync(resolve(PROVIDERS_DIR, 'catalog/no-catalog-sync.provider.ts'), 'utf8'),
+    );
+    // Structural, not behavioural: no constructor means no injected dependency, so
+    // "creates no SyncJob" is not a behaviour that could regress.
+    expect(code).not.toMatch(/constructor\s*\(/);
+    expect(code).not.toContain('PrismaService');
+    expect(code).not.toContain('SyncQueueService');
+    expect(code).toContain('class NoCatalogSyncProvider');
+  });
+
   it.each(['modules/sales/sales.service.ts', 'modules/returns/returns.service.ts'])(
     '%s resolves BOTH providers, each from its own factory',
     (file) => {
@@ -255,7 +318,7 @@ describe('Slice 6C-A adopted the sale and return paths, and only those', () => {
 
       expect(referencesIdentifier(service, 'AccountingProviderFactory')).toBe(true);
       expect(referencesIdentifier(service, 'InventoryProviderFactory')).toBe(true);
-      // And not the catalogue one — that is 6C-B.
+      // And not the catalogue one — a sale does not change the catalogue.
       expect(referencesIdentifier(service, 'CatalogSyncProvider')).toBe(false);
     },
   );
@@ -351,18 +414,21 @@ describe('Slice 6C-A adopted the sale and return paths, and only those', () => {
 
     // Not AppModule, and not every feature module "because it is live now".
     expect(importers).toEqual([
+      'modules/products/products.module.ts',
       'modules/returns/returns.module.ts',
       'modules/sales/sales.module.ts',
     ]);
   });
 
-  it('only the sales and returns modules import from the providers directory', () => {
+  it('only the adopted modules import from the providers directory', () => {
     const offenders = collectFiles(API_SRC, {
       skipDirs: ['providers'],
       predicate: (content) => importsOf(content).some((spec) => spec.includes('providers/')),
     });
 
     expect(offenders).toEqual([
+      'modules/products/products.module.ts',
+      'modules/products/products.service.ts',
       'modules/returns/customer-return-document.spec.ts',
       'modules/returns/returns.module.ts',
       'modules/returns/returns.repository.ts',
@@ -408,26 +474,56 @@ describe('the adoption tripwires can actually fail', () => {
     return readFileSync(resolve(API_SRC, relative), 'utf8');
   }
 
-  it('ProductsService adoption would be detected — the highest-risk boundary', () => {
+  /**
+   * Inverted in Slice 6C-B. Until 6C-B this proved that *adding* a provider to
+   * ProductsService would be caught; now that it is adopted, it proves *removing*
+   * it would be — a reversion to the old direct-queue path.
+   */
+  it('reverting ProductsService to the direct queue path would be detected', () => {
     const real = sourceOf('modules/products/products.service.ts');
-    expect(referencesIdentifier(real, 'CatalogSyncProvider')).toBe(false);
+    expect(referencesIdentifier(real, 'CatalogSyncProviderFactory')).toBe(true);
+    expect(referencesIdentifier(real, 'SyncQueueService')).toBe(false);
 
-    const mutated = [
-      "import { CatalogSyncProviderFactory } from '../providers/catalog/catalog-sync-provider.factory';",
-      real,
-    ].join('\n');
+    const reverted = real
+      .replace(/CatalogSyncProviderFactory/g, 'SyncQueueService')
+      .replace(/catalogProviders/g, 'syncQueue');
+    expect(reverted).not.toEqual(real);
+    expect(referencesIdentifier(reverted, 'CatalogSyncProviderFactory')).toBe(false);
+    expect(referencesIdentifier(reverted, 'SyncQueueService')).toBe(true);
+  });
+
+  it('a profile conditional creeping into ProductsService would be detected', () => {
+    const real = stripComments(sourceOf('modules/products/products.service.ts'));
+    expect(real).not.toMatch(/inventoryMode\s*[=!]==/);
+
+    const mutated = real.replace(
+      'const catalog = await this.catalogProviders.forTenant(tenantId);',
+      "const profile = await this.profiles.getEffectiveProfile(tenantId);\n    if (profile.inventoryMode === 'QUICKBOOKS') { /* … */ }",
+    );
     expect(mutated).not.toEqual(real);
-    expect(referencesIdentifier(mutated, 'CatalogSyncProvider')).toBe(true);
-    expect(importsOf(mutated).filter((s) => s.includes('providers/'))).toEqual([
-      '../providers/catalog/catalog-sync-provider.factory',
-    ]);
+    expect(mutated).toMatch(/inventoryMode\s*===/);
   });
 
   it('a provider import hidden in a comment would NOT be detected — and must not be', () => {
-    const real = sourceOf('modules/products/products.service.ts');
+    const real = sourceOf('modules/quotations/quotations.service.ts');
+    expect(referencesIdentifier(real, 'CatalogSyncProvider')).toBe(false);
     const commented = `// import { CatalogSyncProviderFactory } from '../providers/catalog/x';\n${real}`;
     expect(referencesIdentifier(commented, 'CatalogSyncProvider')).toBe(false);
     expect(importsOf(commented).filter((s) => s.includes('providers/'))).toEqual([]);
+  });
+
+  it('a new catalogue write path in a provider would be detected', () => {
+    const real = readFileSync(
+      resolve(PROVIDERS_DIR, 'catalog/quickbooks-catalog-sync.provider.ts'),
+      'utf8',
+    );
+    expect(stripComments(real)).not.toContain('product.update');
+    const mutated = real.replace(
+      'private async enqueue(',
+      'async bad() { await this.prisma.product.update({}); }\n  private async enqueue(',
+    );
+    expect(mutated).not.toEqual(real);
+    expect(stripComments(mutated)).toContain('product.update');
   });
 
   it('a stock write reappearing in a repository would be detected', () => {
@@ -457,11 +553,12 @@ describe('the adoption tripwires can actually fail', () => {
       accept: (name) => name.endsWith('.module.ts'),
       predicate: (content) => referencesIdentifier(content, 'ProvidersModule'),
     });
-    const withNewImporter = [...importers, 'modules/products/products.module.ts'].sort();
+    const withNewImporter = [...importers, 'modules/quotations/quotations.module.ts'].sort();
     // The assertion the tripwire makes, applied to the mutated set, must fail.
     expect(withNewImporter).not.toEqual(importers);
     expect(() =>
       expect(withNewImporter).toEqual([
+        'modules/products/products.module.ts',
         'modules/returns/returns.module.ts',
         'modules/sales/sales.module.ts',
       ]),

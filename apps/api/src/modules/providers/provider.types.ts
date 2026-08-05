@@ -194,3 +194,55 @@ export type AccountingSubmissionResult<T extends string = string> =
 
 /** Convenience alias: `InventoryMode` values a provider may report. */
 export type ProviderInventoryMode = InventoryMode;
+
+/**
+ * The product facts an external catalogue needs, and nothing more.
+ *
+ * Deliberately not `Product`: a catalogue provider has no business reading
+ * `quantityOnHand`, `imageUrl`, or `categoryId`. Narrow input, honest port.
+ */
+export interface ProductCatalogShape {
+  id: string;
+  name: string;
+  type: string;
+  sku: string | null;
+  description: string | null;
+  purchaseDescription: string | null;
+  unitPrice: number | null;
+  costPrice: number | null;
+  isActive: boolean;
+  /** The external item identifier, or `null` when the product is local-only. */
+  externalItemId: string | null;
+}
+
+/**
+ * What happened when a product change was handed to the catalogue layer.
+ *
+ * The same discriminated-union discipline as {@link AccountingSubmissionResult},
+ * for the same reason: a boolean cannot distinguish "queued for QuickBooks" from
+ * "QuickBooks is not connected" from "this tenant has no external catalogue", and
+ * all three already exist in today's behaviour with three different outcomes.
+ *
+ *  • `QUEUED` — an outbound `SyncJob` was written; the caller should record
+ *    `PENDING`. This is `queueQuickBooksPush`'s success path.
+ *  • `NOT_CONNECTED` — QuickBooks is the catalogue, but no company is connected, so
+ *    nothing was queued. Today's code leaves the product's sync status untouched,
+ *    and that is preserved.
+ *  • `NOT_REQUIRED` — the tenant has no external catalogue. Nothing was queued and
+ *    nothing failed. It must never be reported as a synchronisation.
+ *
+ * Application-level only: no Prisma enum, no migration. `Product.syncStatus` keeps
+ * its existing values and meanings.
+ */
+export type CatalogSyncResult =
+  | { disposition: 'QUEUED'; provider: 'QUICKBOOKS' }
+  | { disposition: 'NOT_CONNECTED'; provider: 'QUICKBOOKS' }
+  | { disposition: 'NOT_REQUIRED'; provider: 'NONE' };
+
+/** The result of an external catalogue refresh. */
+export interface CatalogRefreshOutcome<T = unknown> {
+  disposition: 'REFRESHED';
+  provider: 'QUICKBOOKS';
+  /** Whatever the local refresh reported, passed through untouched. */
+  summary: T;
+}

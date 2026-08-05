@@ -3,6 +3,9 @@ import { Module } from '@nestjs/common';
 import { PlatformModule } from '../platform/platform.module';
 import { SyncModule } from '../sync/sync.module';
 import { AccountingProviderFactory } from './accounting/accounting-provider.factory';
+import { CatalogSyncProviderFactory } from './catalog/catalog-sync-provider.factory';
+import { NoCatalogSyncProvider } from './catalog/no-catalog-sync.provider';
+import { QuickBooksCatalogSyncProvider } from './catalog/quickbooks-catalog-sync.provider';
 import { NoAccountingProvider } from './accounting/no-accounting.provider';
 import { QuickBooksAccountingProvider } from './accounting/quickbooks-accounting.provider';
 import { InventoryProviderFactory } from './inventory/inventory-provider.factory';
@@ -64,7 +67,10 @@ import { QuickBooksInventoryProvider } from './inventory/quickbooks-inventory.pr
     QuickBooksAccountingProvider,
     NoAccountingProvider,
     AccountingProviderFactory,
+    QuickBooksCatalogSyncProvider,
+    NoCatalogSyncProvider,
+    CatalogSyncProviderFactory,
   ],
-  exports: [InventoryProviderFactory, AccountingProviderFactory],
+  exports: [InventoryProviderFactory, AccountingProviderFactory, CatalogSyncProviderFactory],
 })
 export class ProvidersModule {}

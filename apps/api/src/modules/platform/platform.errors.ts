@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { InventoryMode } from '@hardware-pos/database';
+import { AccountingProviderKind, InventoryMode } from '@hardware-pos/database';
 
 /**
  * Platform-configuration errors.
@@ -16,6 +16,7 @@ import { InventoryMode } from '@hardware-pos/database';
  */
 export enum PlatformErrorCode {
   UNSAFE_INVENTORY_MODE_TRANSITION = 'PLATFORM_INVENTORY_MODE_TRANSITION_UNSAFE',
+  UNSUPPORTED_PROFILE_COMBINATION = 'PLATFORM_PROFILE_COMBINATION_UNSUPPORTED',
 }
 
 export class PlatformError extends HttpException {
@@ -63,6 +64,38 @@ export class UnsafeInventoryModeTransitionError extends PlatformError {
         'owned by no system, and a return against them would have nowhere safe to restock. ' +
         'Migrating existing stock between inventory authorities is not supported yet.',
       HttpStatus.CONFLICT,
+    );
+  }
+}
+
+/**
+ * A profile whose inventory and accounting choices are not a combination Phase 1
+ * supports.
+ *
+ * Rejected **at configuration time**, not when a sale or a product push discovers
+ * it. The failure modes are quiet ones: QuickBooks accounting builds sale lines with
+ * `ItemRef: { value: product.quickbooksItemId }`, and nothing maintains those ids
+ * under `LOCAL` or `DISABLED` inventory — so documents would post without item
+ * attribution, or be rejected for inventory items, months into a tenant's life.
+ *
+ * 400 rather than 409: unlike an inventory-mode transition this is not a conflict
+ * with existing data, it is a request asking for something unsupported. Retrying
+ * will not help; choosing a supported pair will.
+ *
+ * Names only modes and provider kinds — never a credential, a realm id, a
+ * connection state, or any other integration or infrastructure detail.
+ */
+export class UnsupportedProfileCombinationError extends PlatformError {
+  constructor(
+    inventoryMode: InventoryMode,
+    accountingProvider: AccountingProviderKind,
+    supported: readonly string[],
+  ) {
+    super(
+      PlatformErrorCode.UNSUPPORTED_PROFILE_COMBINATION,
+      `Inventory mode ${inventoryMode} with accounting provider ${accountingProvider} is not a ` +
+        `supported configuration. Supported combinations are: ${supported.join(', ')}.`,
+      HttpStatus.BAD_REQUEST,
     );
   }
 }
