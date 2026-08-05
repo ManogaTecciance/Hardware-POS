@@ -2,12 +2,19 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 
+import { ThrottlingModule } from '../../common/throttling/throttling.module';
 import { AuthController } from './auth.controller';
 import { AuthRepository } from './auth.repository';
 import { AuthService } from './auth.service';
 
 @Module({
   imports: [
+    // Imported explicitly even though ThrottlingModule is @Global: globality only
+    // applies once a module is in the application graph, so an isolated
+    // TestingModule that pulls in AuthModule alone would otherwise fail to resolve
+    // AuthThrottleInterceptor. Declaring the dependency is also simply honest —
+    // AuthController genuinely uses it.
+    ThrottlingModule,
     JwtModule.registerAsync({
       global: true,
       inject: [ConfigService],

@@ -15,9 +15,10 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { Customer } from '@hardware-pos/database';
+import { Customer, ModuleKey } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
@@ -38,6 +39,9 @@ interface UploadedSpreadsheet {
 }
 
 @Controller('customers')
+// Slice 7.6 — enabled for every business profile, so this guard is inert today and becomes
+// meaningful the moment a tenant switches CUSTOMERS off.
+@RequireModule(ModuleKey.CUSTOMERS)
 export class CustomersController {
   constructor(
     private readonly customersService: CustomersService,
@@ -115,6 +119,7 @@ export class CustomersController {
   }
 
   @Post(':id/sync-to-quickbooks')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @RequirePermissions(Permission.QUICKBOOKS_MANAGE)
   syncToQuickBooks(@TenantId() tenantId: string, @Param('id') id: string): Promise<Customer> {
     return this.customersService.syncToQuickBooks(tenantId, id);

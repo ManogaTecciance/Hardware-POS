@@ -28,6 +28,36 @@ export class AuthRepository {
   }
 
   /**
+   * How many ACTIVE tenants hold an active user with this email.
+   *
+   * Used only to decide between "log in" and "ask for a workspace" (Slice 7.2).
+   * Returns a count and nothing else on purpose — the caller must never be able to
+   * turn this into a list of which companies an address belongs to.
+   */
+  async countActiveTenantsForEmail(email: string): Promise<number> {
+    const rows = await this.prisma.user.findMany({
+      where: { email, isActive: true, tenant: { isActive: true } },
+      select: { tenantId: true },
+      distinct: ['tenantId'],
+    });
+    return rows.length;
+  }
+
+  /**
+   * Resolve an ACTIVE tenant by its slug, or null.
+   *
+   * `Tenant.slug` is `@unique`, so this is exact. The `isActive` filter matters:
+   * a deactivated workspace must behave exactly like one that never existed, or
+   * the difference becomes a signal about which companies have been suspended.
+   */
+  findActiveTenantBySlug(slug: string): Promise<{ id: string } | null> {
+    return this.prisma.tenant.findFirst({
+      where: { slug: slug.trim().toLowerCase(), isActive: true },
+      select: { id: true },
+    });
+  }
+
+  /**
    * The single active user with this email inside one tenant. Exact by
    * construction: `@@unique([tenantId, email])` guarantees at most one row.
    */

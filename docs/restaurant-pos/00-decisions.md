@@ -521,6 +521,110 @@ enforcement remain the authority; a hidden control is still refused server-side.
 
 ---
 
+## 2026-08-05 — Slice 7 review
+
+### D32 — Authentication throttling is a storage abstraction, not a claim
+
+Login, PIN login and refresh are rate-limited on **two dimensions at once** — a
+source dimension and an identity dimension — because either alone is trivially
+defeated: identity-only loses to a botnet against one account, source-only loses to
+a spray across many accounts from one address. The strictest verdict wins.
+
+The identity key is **tenant-scoped**. Keying on the email alone would let a failed
+campaign against `owner@acme.test` in tenant A lock out the unrelated
+`owner@acme.test` in tenant B — one tenant denying service to another through a
+shared address. PIN keys never contain the submitted PIN, which would otherwise hand
+an attacker a fresh allowance per guess.
+
+A successful authentication **clears** the keys it spent, so recovery is not punished.
+
+Responses are a generic 429 with `Retry-After` and nothing else — no indication of
+which counter tripped, whether the account exists, or which tenant it is in.
+
+**Client IP is resolved by counting from the RIGHT of `X-Forwarded-For`**, `N` hops
+in, where `N` is `TRUSTED_PROXY_HOP_COUNT` (default **0** = ignore the header). The
+left-most entry is attacker-controlled; trusting it is the most common rate-limiter
+bypass there is. The default fails safe: a deployment that forgets to configure it
+gets a limiter that is too aggressive behind a balancer, not one that is silently
+bypassable.
+
+**The limitation, stated plainly.** `MemoryRateLimitStore` is process-local
+(`isDistributed === false`). It protects a single replica. With several replicas each
+holds its own counters and the effective allowance multiplies. This is **not** a
+multi-replica correctness model, and Phase 1 does not claim it is. The boot log says
+so on every start. Production with more than one replica needs a distributed
+`RateLimitStore` (Redis `INCR`/`EXPIRE` maps onto the interface directly) or an edge
+rate limiter. Blocked on open decision O2.
+
+### D33 — Workspace-first authentication, and the disclosure it makes
+
+`POST /auth/login` accepts an optional `workspace` slug. Resolution order: `workspace`
+→ `x-tenant-id` header → unique match on the email alone. All three are
+client-supplied and only ever **narrow** the lookup; the password is always verified
+against the resolved user's own hash, so a wrong value can only make a login fail.
+
+An email held by several active workspaces returns `AUTH_WORKSPACE_REQUIRED` (409)
+instead of the generic 401 that Slice 3.5 introduced. **This is a deliberate change
+to an existing behavioural assertion**, and the reason is that the 3.5 behaviour left
+a legitimate user with no way forward — correct passwords simply stopped working with
+nothing to act on.
+
+The residual disclosure is recorded rather than hidden: the response reveals that the
+address exists in **more than one** workspace. It reveals no names, no slugs, no
+count, and nothing about any particular workspace. Single-workspace addresses — the
+overwhelming majority — disclose nothing at all and return the same generic 401 as an
+unknown address. The ambiguous branch also short-circuits before any bcrypt round,
+which is asserted explicitly; it adds nothing beyond what the response already says.
+
+An unknown *or deactivated* workspace is indistinguishable from a wrong password.
+
+### D34 — One authority for roles and permissions; settings are eventually consistent
+
+`@hardware-pos/shared` is the single definition of `UserRole`, `Permission` and
+`ROLE_PERMISSIONS`. `apps/api` and `apps/web` re-export it. Both copies had already
+drifted before this slice — the shared `UserRole` was missing `OWNER` and
+`ACCOUNTANT`, and the web permission list never received the two `PLATFORM_PROFILE_*`
+entries added in Slice 4 — and nothing failed, because nothing compared them.
+Parity is now asserted against the Prisma enum. Restaurant permissions extend this
+map; there will be no second permission authority.
+
+**Settings consistency window.** The settings cache was hydrated at boot and
+refreshed only by writes on that process, which with several replicas was not stale
+but *permanently wrong*. Each entry now records when it was read and revalidates in
+the background past `SETTINGS_CACHE_TTL_MS` (30s). The guarantee:
+
+> A settings write is observable on every replica within
+> `SETTINGS_CACHE_TTL_MS` + one database round trip, and immediately on the replica
+> that performed the write.
+
+Deliberately eventual: settings are display and policy defaults. Anything that must
+be immediately correct across replicas — module access, provider routing — does not
+use this cache and reads the database per request, because a stale module revocation
+would fail **open** (D11).
+
+### D35 — Route-module matrix, and where guards are deferred
+
+Every one of the 139 routes is classified, enforced by a spec that reads Nest's own
+metadata. See [`route-module-matrix.md`](./route-module-matrix.md). 79 routes carry
+`@RequireModule`; 60 do not, each for a stated reason.
+
+Notably **`/products` is `SHARED_CORE`, not `INVENTORY`** — products are the
+catalogue, which every business profile needs, while `INVENTORY` means stock tracking,
+already governed by `InventoryMode` (D28, D31). Gating catalogue CRUD on `INVENTORY`
+would stop a Restaurant tenant managing its own products.
+
+`RETAIL_POS` on sales/payments/receipts is classified but **not yet enforced**:
+gating it would deny a Restaurant tenant read access to its own sales history, and
+splitting read from write needs the Phase 2 ordering model settled.
+
+`@Public()` routes cannot carry a module guard — `ModuleAccessGuard` denies anything
+requiring a module without an authenticated tenant — so the QuickBooks OAuth callback
+and the public quotation link enforce their own tokens instead.
+
+Tile Shop is unaffected throughout: every gated module is in the legacy default set.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

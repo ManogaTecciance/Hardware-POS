@@ -1,5 +1,7 @@
+import { ModuleKey } from '@hardware-pos/database';
 import { Controller, Get, Param } from '@nestjs/common';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
@@ -13,6 +15,8 @@ import { ReturnEligibility, ReturnableItem } from './returns.types';
  * the sales controller.
  */
 @Controller('sales')
+// Slice 7.6 — return-eligibility reads live under /sales but belong to RETURNS.
+@RequireModule(ModuleKey.RETURNS)
 export class ReturnsSalesController {
   constructor(private readonly returnsService: ReturnsService) {}
 

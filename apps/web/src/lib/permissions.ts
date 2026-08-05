@@ -1,107 +1,46 @@
-/** Roles and permissions, mirrored from the API for client-side UI gating. */
+/**
+ * Roles and permissions for client-side UI gating.
+ *
+ * **This file defines neither.** Since Slice 7.3 the single authority is
+ * `@hardware-pos/shared`, which the API re-exports too, so the two can no longer
+ * drift. Everything below is either a re-export or genuinely browser-only.
+ *
+ * It previously held a hand-maintained copy of the API's list, and that copy had
+ * already fallen behind: `PLATFORM_PROFILE_READ` and `PLATFORM_PROFILE_MANAGE`
+ * were added to the API in Slice 4 and never reached here. Nothing compared them,
+ * so nothing failed — the client simply could not express a permission the server
+ * was already granting. Slice 8's module-aware navigation depends on that list
+ * being complete, which is why it is fixed now rather than then.
+ *
+ * Client-side gating is a usability affordance only. Every route is enforced
+ * server-side by `PermissionsGuard` and, where applicable, `ModuleAccessGuard`;
+ * hiding a control here does not protect anything.
+ */
 
-export type UserRole = 'OWNER' | 'ADMIN' | 'MANAGER' | 'CASHIER' | 'ACCOUNTANT';
+export {
+  ALL_PERMISSIONS,
+  ALL_USER_ROLES,
+  Permission,
+  ROLE_PERMISSIONS,
+  UserRole,
+  roleHasPermission,
+} from '@hardware-pos/shared';
 
-export const Permission = {
-  SALE_CREATE: 'sale:create',
-  SALE_READ: 'sale:read',
-  PAYMENT_CREATE: 'payment:create',
-  DISCOUNT_APPROVE: 'discount:approve',
-  RETURN_CREATE: 'return:create',
-  RETURN_READ: 'return:read',
-  RETURN_APPROVE: 'return:approve',
-  QUOTATION_CREATE: 'quotation:create',
-  QUOTATION_READ: 'quotation:read',
-  QUOTATION_APPROVE: 'quotation:approve',
-  QUOTATION_CONVERT: 'quotation:convert',
-  QUOTATION_SHARE: 'quotation:share',
-  QUOTATION_CANCEL: 'quotation:cancel',
-  CATEGORY_MANAGE: 'category:manage',
-  PRODUCT_READ: 'product:read',
-  PRODUCT_MANAGE: 'product:manage',
-  CUSTOMER_READ: 'customer:read',
-  CUSTOMER_MANAGE: 'customer:manage',
-  SUPPLIER_READ: 'supplier:read',
-  SUPPLIER_MANAGE: 'supplier:manage',
-  SUPPLIER_DELETE: 'supplier:delete',
-  SUPPLIER_QB_MAP: 'supplier:qb:map',
-  SYNC_READ: 'sync:read',
-  QUICKBOOKS_READ: 'quickbooks:read',
-  QUICKBOOKS_MANAGE: 'quickbooks:manage',
-  SETTINGS_MANAGE: 'settings:manage',
-  USER_MANAGE: 'user:manage',
-  REPORT_READ: 'report:read',
-} as const;
+import { ROLE_PERMISSIONS, type Permission, type UserRole } from '@hardware-pos/shared';
 
-export type Permission = (typeof Permission)[keyof typeof Permission];
-
-const ALL: Permission[] = Object.values(Permission);
-
-export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
-  OWNER: ALL,
-  ADMIN: ALL,
-  MANAGER: [
-    Permission.SALE_CREATE,
-    Permission.SALE_READ,
-    Permission.PAYMENT_CREATE,
-    Permission.DISCOUNT_APPROVE,
-    Permission.RETURN_CREATE,
-    Permission.RETURN_READ,
-    Permission.RETURN_APPROVE,
-    Permission.QUOTATION_CREATE,
-    Permission.QUOTATION_READ,
-    Permission.QUOTATION_APPROVE,
-    Permission.QUOTATION_CONVERT,
-    Permission.QUOTATION_SHARE,
-    Permission.QUOTATION_CANCEL,
-    Permission.CATEGORY_MANAGE,
-    Permission.PRODUCT_READ,
-    Permission.PRODUCT_MANAGE,
-    Permission.CUSTOMER_READ,
-    Permission.CUSTOMER_MANAGE,
-    // Purchasing Officer / Manager: full operational supplier access, may map
-    // QuickBooks and view financial summaries, but cannot permanently delete or
-    // view protected bank details.
-    Permission.SUPPLIER_READ,
-    Permission.SUPPLIER_MANAGE,
-    Permission.SUPPLIER_QB_MAP,
-    Permission.REPORT_READ,
-  ],
-  CASHIER: [
-    Permission.SALE_CREATE,
-    Permission.SALE_READ,
-    Permission.PAYMENT_CREATE,
-    Permission.RETURN_CREATE,
-    Permission.RETURN_READ,
-    Permission.QUOTATION_CREATE,
-    Permission.QUOTATION_READ,
-    Permission.QUOTATION_CONVERT,
-    Permission.QUOTATION_SHARE,
-    Permission.PRODUCT_READ,
-    Permission.CUSTOMER_READ,
-    Permission.CUSTOMER_MANAGE,
-  ],
-  ACCOUNTANT: [
-    Permission.SYNC_READ,
-    Permission.QUICKBOOKS_READ,
-    Permission.SALE_READ,
-    Permission.RETURN_READ,
-    Permission.QUOTATION_READ,
-    Permission.PRODUCT_READ,
-    Permission.CUSTOMER_READ,
-    // Accountant: read suppliers, view financial summaries and QuickBooks
-    // mapping; no operational editing, delete, or bank access.
-    Permission.SUPPLIER_READ,
-    Permission.SUPPLIER_QB_MAP,
-    Permission.REPORT_READ,
-  ],
-};
-
+/** The permissions a role holds, as a mutable copy the session store can own. */
 export function permissionsForRole(role: UserRole): Permission[] {
-  return ROLE_PERMISSIONS[role] ?? [];
+  return [...(ROLE_PERMISSIONS[role] ?? [])];
 }
 
-/** Max manual discount (% of line) a role may apply without approval. null = unlimited. */
+/**
+ * Max manual discount (% of line) a role may apply without approval.
+ * `null` = unlimited.
+ *
+ * Genuinely browser-only, so it stays here: the server enforces discount limits
+ * from `TenantSettings.highDiscountThresholdPercent` and the approver's own role,
+ * and this table only decides whether the POS prompts for approval before asking.
+ */
 export const ROLE_DISCOUNT_LIMIT_PERCENT: Record<UserRole, number | null> = {
   OWNER: null,
   ADMIN: null,

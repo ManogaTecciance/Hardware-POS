@@ -12,6 +12,7 @@ import { User, UserRole } from '@hardware-pos/database';
 import * as bcrypt from 'bcryptjs';
 
 import { AuthRepository } from './auth.repository';
+import { WorkspaceRequiredError } from './auth.errors';
 import { AuthTokenResult, JwtPayload } from './auth.types';
 import { Permission, ROLE_PERMISSIONS } from './permissions';
 import { LoginDto } from './dto/login.dto';
@@ -78,10 +79,10 @@ export class AuthService {
    * tenants.
    */
   async login(dto: LoginDto, tenantHint: string | null = null): Promise<AuthTokenResult> {
-    const user = await this.resolveLoginCandidate(dto.email, tenantHint);
+    const user = await this.resolveLoginCandidate(dto, tenantHint);
 
     // Compare against a decoy when there is no usable candidate, so the timing of
-    // "unknown email", "ambiguous email", and "wrong password" are alike.
+    // "unknown email", "unknown workspace", and "wrong password" are alike.
     const hash = user?.passwordHash ?? TIMING_EQUALISER_HASH;
     const passwordMatches = await bcrypt.compare(dto.password, hash);
 
@@ -93,10 +94,35 @@ export class AuthService {
   }
 
   /**
-   * Pick the one user an email login may authenticate as, or null. Never throws —
-   * the caller owns the single generic rejection so no branch is distinguishable.
+   * Pick the one user an email login may authenticate as (Slice 7.2).
+   *
+   * Three paths, in precedence order:
+   *
+   *  1. **`workspace` slug supplied** — authenticate only inside that tenant. An
+   *     unknown or deactivated slug returns `null`, which the caller turns into the
+   *     same generic 401 as a wrong password, so a slug cannot be probed for
+   *     existence.
+   *  2. **`x-tenant-id` header supplied** — the pre-7.2 narrowing hint, preserved
+   *     verbatim so existing clients are unaffected.
+   *  3. **Neither** — exactly one active candidate proceeds (today's behaviour, and
+   *     every current client); more than one raises `WORKSPACE_REQUIRED`.
+   *
+   * Returning `null` rather than throwing on every *credential* failure is what
+   * keeps the rejection branches indistinguishable; the one deliberate exception is
+   * the ambiguity case, whose whole purpose is to be distinguishable.
    */
-  private async resolveLoginCandidate(email: string, tenantHint: string | null): Promise<User | null> {
+  private async resolveLoginCandidate(
+    dto: LoginDto,
+    tenantHint: string | null,
+  ): Promise<User | null> {
+    const email = dto.email;
+
+    if (dto.workspace) {
+      const tenant = await this.authRepository.findActiveTenantBySlug(dto.workspace);
+      if (!tenant) return null;
+      return this.authRepository.findActiveByTenantAndEmail(tenant.id, email);
+    }
+
     if (tenantHint) {
       return this.authRepository.findActiveByTenantAndEmail(tenantHint, email);
     }
@@ -110,8 +136,12 @@ export class AuthService {
       // Do not log the email — it would put a user identifier in the logs.
       this.logger.warn(
         `Ambiguous email login refused: ${candidates.length} tenants hold this address. ` +
-          'The client must supply x-tenant-id.',
+          'The client must supply a workspace.',
       );
+      // The one branch that is intentionally distinguishable. The alternative is a
+      // generic 401 that a legitimate user has no way to get past; see
+      // `auth.errors.ts` for the disclosure this does and does not make.
+      throw new WorkspaceRequiredError();
     }
     return null;
   }

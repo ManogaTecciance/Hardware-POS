@@ -15,10 +15,11 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Product } from '@hardware-pos/database';
+import { Product, ModuleKey } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 import type { Response } from 'express';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
@@ -137,6 +138,7 @@ export class ProductsController {
 
   /** Refresh the product cache from a mock QuickBooks pull. Owner/admin only. */
   @Post('sync/mock')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(Permission.QUICKBOOKS_MANAGE)
   mockSync(@TenantId() tenantId: string): Promise<MockSyncSummary> {
@@ -187,6 +189,7 @@ export class ProductsController {
   }
 
   @Post(':id/sync-to-quickbooks')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @RequirePermissions(Permission.QUICKBOOKS_MANAGE)
   syncToQuickBooks(@TenantId() tenantId: string, @Param('id') id: string): Promise<Product> {
     return this.productsService.syncToQuickBooks(tenantId, id);

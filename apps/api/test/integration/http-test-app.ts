@@ -34,6 +34,13 @@ export interface HttpResult<T = unknown> {
   data: T;
   /** The raw parsed body, for asserting on error shapes. */
   body: unknown;
+  /**
+   * Response headers, lower-cased.
+   *
+   * Added in Slice 7: a 429 is only useful to a client if it carries `Retry-After`,
+   * and asserting on the status alone would not notice the header going missing.
+   */
+  headers: Record<string, string>;
 }
 
 export interface RequestOptions {
@@ -105,7 +112,11 @@ export async function createHttpIntegrationApp(): Promise<HttpIntegrationApp> {
         body && typeof body === 'object' && 'data' in body
           ? (body as { data: T }).data
           : (body as T);
-      return { status: res.status, data, body };
+      const headers: Record<string, string> = {};
+      res.headers.forEach((value, name) => {
+        headers[name.toLowerCase()] = value;
+      });
+      return { status: res.status, data, body, headers };
     },
     close: () => app.close(),
   };

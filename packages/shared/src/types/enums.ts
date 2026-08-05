@@ -5,13 +5,12 @@
  * the browser and the server without pulling in TypeScript `enum` runtime code.
  */
 
-/** Staff roles. Managers can approve high discounts via manager PIN. */
-export const UserRole = {
-  Cashier: 'CASHIER',
-  Manager: 'MANAGER',
-  Admin: 'ADMIN',
-} as const;
-export type UserRole = (typeof UserRole)[keyof typeof UserRole];
+/**
+ * `UserRole` used to live here, listing only Cashier/Manager/Admin while the
+ * database, the seeds and the API all had five roles. It now lives in
+ * `authorization.ts` beside the permission map it governs, complete and
+ * parity-tested against the Prisma enum.
+ */
 
 /** Lifecycle of a sale within the POS. */
 export const SaleStatus = {

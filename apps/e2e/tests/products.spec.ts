@@ -81,12 +81,30 @@ test.describe('PROD — Products & Categories', () => {
   });
 
   test('PROD-008 new product visible beyond first page (paging)', async ({ ownerApi }) => {
+    // This used to fetch only page 1 and the LAST page and assert the new product
+    // was in one of them. That held while the dev database had under ~400 products
+    // and became unreliable the moment it grew past two pages: every run of this
+    // suite adds more rows, so a product landing on a middle page was in neither
+    // sample. It failed in a full run while passing in isolation — the signature of
+    // a test that degrades with accumulated data rather than one that measures
+    // pagination. Walking every page tests what the title claims, at any size.
     const p = await ownerApi.createProduct({ name: `ZZZ ${uniq('Last')}` });
-    // Client pages through all; emulate by requesting total then last page.
-    const first = await ownerApi.get(`/products?page=1&pageSize=200`);
-    const totalPages = Math.max(1, Math.ceil(first.total / 200));
-    const last = await ownerApi.get(`/products?page=${totalPages}&pageSize=200`);
-    const allIds = [...first.items, ...last.items].map((x: any) => x.id);
-    expect(allIds).toContain(p.id);
+
+    const pageSize = 200;
+    const first = await ownerApi.get(`/products?page=1&pageSize=${pageSize}`);
+    const totalPages = Math.max(1, Math.ceil(first.total / pageSize));
+    // The premise: there really is more than one page, so "beyond the first page"
+    // is a meaningful claim rather than a trivially satisfied one.
+    expect(totalPages).toBeGreaterThan(1);
+
+    const seen: string[] = first.items.map((x: any) => x.id);
+    for (let page = 2; page <= totalPages; page += 1) {
+      const next = await ownerApi.get(`/products?page=${page}&pageSize=${pageSize}`);
+      seen.push(...next.items.map((x: any) => x.id));
+    }
+
+    expect(seen).toContain(p.id);
+    // Pagination must not duplicate or drop rows across the walk.
+    expect(new Set(seen).size).toBe(seen.length);
   });
 });

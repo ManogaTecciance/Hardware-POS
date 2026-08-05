@@ -27,6 +27,7 @@ import { resetDatabase } from '../db-reset';
 import { dto } from '../dto';
 import { seedTenant } from '../fixtures';
 import { createIntegrationApp, type IntegrationApp } from '../test-app';
+import { WorkspaceRequiredError } from '../../../src/modules/auth/auth.errors';
 import { LoginDto } from '../../../src/modules/auth/dto/login.dto';
 import { PinLoginDto } from '../../../src/modules/auth/dto/pin-login.dto';
 
@@ -191,17 +192,39 @@ describe('duplicate email is isolated per tenant', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('ambiguous email with no tenant hint', () => {
+  /**
+   * UPDATED IN SLICE 7.2, deliberately.
+   *
+   * Slice 3.5 made this path fail with the same generic `Invalid email or password`
+   * as every other rejection. That was the right fix for the defect of the day —
+   * never guess a tenant — but it left a legitimate user with no way forward: the
+   * response gave them nothing to act on, and their account was simply unusable.
+   *
+   * Slice 7.2 keeps the refusal and changes only what the caller is told, so they
+   * can supply a workspace and proceed. **The security property under test is
+   * unchanged and still asserted**: no correct password ever authenticates into an
+   * arbitrarily chosen tenant. What changed is the error, not the outcome.
+   */
   it('refuses rather than guessing a tenant, even with a CORRECT password', async () => {
-    // Pre-fix this could have succeeded — into an arbitrary tenant. Guessing is
-    // the defect; refusing is the fix.
-    await expect(login(SHARED_EMAIL, TILE_PASSWORD)).rejects.toThrow('Invalid email or password');
-    await expect(login(SHARED_EMAIL, CAFE_PASSWORD)).rejects.toThrow('Invalid email or password');
+    await expect(login(SHARED_EMAIL, TILE_PASSWORD)).rejects.toThrow(WorkspaceRequiredError);
+    await expect(login(SHARED_EMAIL, CAFE_PASSWORD)).rejects.toThrow(WorkspaceRequiredError);
   });
 
   it('is deterministic — 20 attempts, never a single success', async () => {
     for (let i = 0; i < 20; i += 1) {
-      await expect(login(SHARED_EMAIL, TILE_PASSWORD)).rejects.toThrow('Invalid email or password');
+      await expect(login(SHARED_EMAIL, TILE_PASSWORD)).rejects.toThrow(WorkspaceRequiredError);
     }
+  });
+
+  it('the refusal is a refusal — no token, no session, no tenant chosen', async () => {
+    // The load-bearing assertion, stated directly rather than inferred from the
+    // message. A future change to the error type cannot quietly turn this into a
+    // successful login.
+    await expect(login(SHARED_EMAIL, TILE_PASSWORD)).rejects.toBeInstanceOf(
+      WorkspaceRequiredError,
+    );
+    const sessions = await prisma.refreshToken.count();
+    expect(sessions).toBe(0);
   });
 
   it('starts working again once the duplicate is deactivated', async () => {
@@ -256,7 +279,9 @@ describe('account-enumeration safety', () => {
   const CASES: [string, () => Promise<unknown>][] = [
     ['unknown email', () => login('nobody@nowhere.test', 'whatever123')],
     ['known email, wrong password', () => login(SHARED_EMAIL, 'wrongpassword', tileTenantId)],
-    ['known email, ambiguous tenant', () => login(SHARED_EMAIL, TILE_PASSWORD)],
+    // 'known email, ambiguous tenant' moved out of this set in Slice 7.2: it is now
+    // WORKSPACE_REQUIRED by design, and its own disclosure limits are asserted
+    // separately below and in `auth-hardening.spec.ts`.
     ['known email, wrong tenant', () => login(SHARED_EMAIL, TILE_PASSWORD, cafeTenantId)],
     ['unknown tenant', () => login(SHARED_EMAIL, TILE_PASSWORD, 'tenant-does-not-exist')],
   ];
@@ -268,13 +293,16 @@ describe('account-enumeration safety', () => {
   it('never reveals a tenant id, tenant name, or user name in the error', async () => {
     expect.assertions(6);
     try {
+      // Slice 7.2: this is now the WORKSPACE_REQUIRED path. It is the response that
+      // discloses the MOST of any rejection — it admits the address exists in more
+      // than one workspace — so it is the right one to hold to this standard.
       await login(SHARED_EMAIL, TILE_PASSWORD);
     } catch (err) {
       const text = JSON.stringify((err as { response?: unknown }).response ?? (err as Error).message);
       // POSITIVE CONTROL (Slice 6C-A.5): there IS a real error payload here. Without
       // this, an empty or undefined body would satisfy every negative below.
       expect(text.length).toBeGreaterThan(10);
-      expect(text).toMatch(/Invalid email or password|Unauthorized/i);
+      expect(text).toMatch(/workspace/i);
 
       expect(text).not.toContain(tileTenantId);
       expect(text).not.toContain(cafeTenantId);
@@ -283,23 +311,82 @@ describe('account-enumeration safety', () => {
     }
   });
 
-  it('spends a bcrypt round even when no candidate exists (no fast-path timing leak)', async () => {
-    // Not a wall-clock assertion — those are flaky. Instead: an unknown email and a
-    // real-but-wrong-password attempt must both be far slower than a bare DB round
-    // trip, i.e. neither takes the old no-bcrypt shortcut.
+  it('WORKSPACE_REQUIRED discloses no count of matching workspaces', async () => {
+    // Added in Slice 7.2. "Two workspaces hold this address" would be a materially
+    // larger leak than "supply a workspace", so the boundary is asserted explicitly
+    // rather than left to the wording surviving by luck.
+    try {
+      await login(SHARED_EMAIL, TILE_PASSWORD);
+      fail('expected a refusal');
+    } catch (err) {
+      // The MESSAGE, not the envelope: the envelope carries the 409 status code,
+      // which is not a disclosure about workspaces.
+      const response = (err as { response?: { message?: string } }).response;
+      const message = response?.message ?? (err as Error).message;
+      expect(message.length).toBeGreaterThan(0);
+      expect(message).not.toMatch(/\d/);
+    }
+  });
+
+  it('spends a bcrypt round on every credential rejection (no fast-path)', async () => {
+    /*
+     * REWRITTEN IN SLICE 7.2, and the rewrite is the point.
+     *
+     * The old version asserted both samples took >10ms. That passed for a reason
+     * unrelated to what it claimed: these fixtures hash at bcrypt cost 4 (~2ms) for
+     * speed, while `TIMING_EQUALISER_HASH` is a cost-10 constant (~50ms). So the
+     * "unknown email" arm cleared 10ms only because the decoy is more expensive than
+     * the real hashes *in this fixture* — not because both paths do equal work. The
+     * moment 7.2 changed which branch the second arm took, the assertion collapsed.
+     * A threshold only one arm could ever clear is not a comparison.
+     *
+     * `jest.spyOn(bcrypt, 'compare')` is not available — bcryptjs exports
+     * non-configurable properties — so this measures instead, with a floor chosen
+     * against what it is actually distinguishing: a bcrypt round at cost 4 is ~2ms,
+     * a rejection that skipped bcrypt entirely is a bare query at ~0.1ms. 1ms
+     * separates those decisively without depending on machine speed the way a 10ms
+     * floor did.
+     */
     const time = async (fn: () => Promise<unknown>) => {
       const started = process.hrtime.bigint();
       await fn().catch(() => undefined);
       return Number(process.hrtime.bigint() - started) / 1e6;
     };
 
-    const unknown = await time(() => login('nobody@nowhere.test', 'whatever123'));
-    const ambiguous = await time(() => login(SHARED_EMAIL, TILE_PASSWORD));
+    const unknownEmail = await time(() => login('nobody@nowhere.test', 'whatever123'));
+    const wrongTenant = await time(() => login(SHARED_EMAIL, TILE_PASSWORD, cafeTenantId));
+    const unknownTenant = await time(() => login(SHARED_EMAIL, TILE_PASSWORD, 'nope'));
 
-    // bcrypt cost 10 is ~50-100ms; a pure query miss was ~1ms. A 10ms floor
-    // separates the two decisively without being timing-flaky on a loaded machine.
-    expect(unknown).toBeGreaterThan(10);
-    expect(ambiguous).toBeGreaterThan(10);
+    expect(unknownEmail).toBeGreaterThan(1);
+    expect(wrongTenant).toBeGreaterThan(1);
+    expect(unknownTenant).toBeGreaterThan(1);
+
+    // POSITIVE CONTROL: a SUCCESSFUL login sits in the same band, so the floor is
+    // measuring "a password was checked" rather than "something was slow".
+    const success = await time(() => login(SHARED_EMAIL, TILE_PASSWORD, tileTenantId));
+    expect(success).toBeGreaterThan(1);
+  });
+
+  it('the ambiguous path short-circuits BEFORE any password check', async () => {
+    /*
+     * Added in Slice 7.2 to state the trade-off rather than let it go unrecorded.
+     *
+     * WORKSPACE_REQUIRED is returned without verifying a password, because there is
+     * no single password to verify against. That is a deliberate, approved
+     * disclosure: the response already admits the address exists in more than one
+     * workspace, so the missing bcrypt round reveals nothing further. Asserted so
+     * the behaviour is a recorded decision, not an accident nobody noticed.
+     */
+    const time = async (fn: () => Promise<unknown>) => {
+      const started = process.hrtime.bigint();
+      await fn().catch(() => undefined);
+      return Number(process.hrtime.bigint() - started) / 1e6;
+    };
+
+    const ambiguous = await time(() => login(SHARED_EMAIL, TILE_PASSWORD));
+    const withPasswordCheck = await time(() => login(SHARED_EMAIL, TILE_PASSWORD, cafeTenantId));
+
+    expect(ambiguous).toBeLessThan(withPasswordCheck);
   });
 });
 

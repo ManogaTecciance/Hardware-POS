@@ -10,6 +10,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { ModuleAccessGuard } from './common/guards/module-access.guard';
 import { StorageModule } from './common/storage/storage.module';
+import { ThrottlingModule } from './common/throttling/throttling.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -37,6 +38,9 @@ import { PlatformModule } from './modules/platform/platform.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     StorageModule,
+    // Global: AuthController attaches AuthThrottleInterceptor without needing to
+    // import the rate-limiting plumbing it otherwise has no interest in.
+    ThrottlingModule,
     PrismaModule,
     // Global: ModuleAccessGuard and (from Slice 5) the provider factories resolve
     // the tenant's business profile, so BusinessProfileService must be reachable
