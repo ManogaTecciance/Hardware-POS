@@ -266,11 +266,16 @@ describe('account-enumeration safety', () => {
   });
 
   it('never reveals a tenant id, tenant name, or user name in the error', async () => {
-    expect.assertions(4);
+    expect.assertions(6);
     try {
       await login(SHARED_EMAIL, TILE_PASSWORD);
     } catch (err) {
       const text = JSON.stringify((err as { response?: unknown }).response ?? (err as Error).message);
+      // POSITIVE CONTROL (Slice 6C-A.5): there IS a real error payload here. Without
+      // this, an empty or undefined body would satisfy every negative below.
+      expect(text.length).toBeGreaterThan(10);
+      expect(text).toMatch(/Invalid email or password|Unauthorized/i);
+
       expect(text).not.toContain(tileTenantId);
       expect(text).not.toContain(cafeTenantId);
       expect(text).not.toContain('Tile Shop');

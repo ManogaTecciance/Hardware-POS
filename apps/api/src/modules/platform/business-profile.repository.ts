@@ -59,6 +59,26 @@ export class BusinessProfileRepository {
   }
 
   /**
+   * How many transactions have already moved stock for this tenant.
+   *
+   * Used to decide whether an inventory-authority change is still safe (D29). A
+   * `DRAFT` sale is excluded because it has not decremented anything; `COMPLETED`
+   * and `REFUNDED` have. Every `Return` has restocked or deliberately not, which
+   * is a decision made under the old authority either way.
+   */
+  async countInventoryAffectingTransactions(
+    tenantId: string,
+  ): Promise<{ sales: number; returns: number }> {
+    const [sales, returns] = await this.prisma.$transaction([
+      this.prisma.sale.count({
+        where: { tenantId, status: { in: ['COMPLETED', 'REFUNDED'] } },
+      }),
+      this.prisma.return.count({ where: { tenantId } }),
+    ]);
+    return { sales, returns };
+  }
+
+  /**
    * Create or update the tenant's profile and replace its module configuration,
    * atomically.
    *

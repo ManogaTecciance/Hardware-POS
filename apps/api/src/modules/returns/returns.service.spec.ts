@@ -4,6 +4,10 @@ import { ReturnsService } from './returns.service';
 import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
 import { NoAccountingProvider } from '../providers/accounting/no-accounting.provider';
 import { QuickBooksAccountingProvider } from '../providers/accounting/quickbooks-accounting.provider';
+import { InventoryProviderFactory } from '../providers/inventory/inventory-provider.factory';
+import { LocalInventoryProvider } from '../providers/inventory/local-inventory.provider';
+import { NoInventoryProvider } from '../providers/inventory/no-inventory.provider';
+import { QuickBooksInventoryProvider } from '../providers/inventory/quickbooks-inventory.provider';
 import type { ReturnsRepository } from './returns.repository';
 import type { SettingsService } from '../settings/settings.service';
 import type { AuthService } from '../auth/auth.service';
@@ -94,7 +98,25 @@ function makeService(repo: Partial<ReturnsRepository>) {
     new QuickBooksAccountingProvider(syncQueue, null as never),
     new NoAccountingProvider(),
   );
-  return new ReturnsService(repo as ReturnsRepository, settings, auth, jwt, syncQueue, accounting);
+  // Same reasoning for inventory: the real factory over the real providers, with
+  // `BusinessProfileService` stubbed to the legacy QuickBooks default rather than
+  // absent, because unlike accounting the inventory provider IS resolved from the
+  // tenant profile.
+  const inventory = new InventoryProviderFactory(
+    { getEffectiveProfile: async () => ({ inventoryMode: 'QUICKBOOKS' }) } as never,
+    new QuickBooksInventoryProvider(null as never, null as never),
+    new LocalInventoryProvider(null as never),
+    new NoInventoryProvider(),
+  );
+  return new ReturnsService(
+    repo as ReturnsRepository,
+    settings,
+    auth,
+    jwt,
+    syncQueue,
+    accounting,
+    inventory,
+  );
 }
 
 const goodItem = {

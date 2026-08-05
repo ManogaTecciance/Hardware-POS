@@ -12,6 +12,8 @@ import { round2, sum2 } from '../../common/money';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { DiscountsService, ORDER_DISCOUNT_KEY } from '../discounts/discounts.service';
 import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
+import { InventoryProviderFactory } from '../providers/inventory/inventory-provider.factory';
+import { InventoryProvider } from '../providers/inventory/inventory-provider';
 import { ProviderOperationUnavailableError } from '../providers/provider.errors';
 import { SettingsService } from '../settings/settings.service';
 import { CreateDraftDto } from './dto/create-draft.dto';
@@ -22,6 +24,7 @@ import { resolveCustomerDocumentKind } from './customer-document';
 import {
   ExternalSaleDocument,
   PostAccounting,
+  ReduceStock,
   SaleListRow,
   SaleWithRelations,
   SalesRepository,
@@ -41,6 +44,7 @@ export class SalesService {
     private readonly settingsService: SettingsService,
     private readonly discountsService: DiscountsService,
     private readonly accountingProviders: AccountingProviderFactory,
+    private readonly inventoryProviders: InventoryProviderFactory,
   ) {}
 
   async list(tenantId: string, query: QuerySalesDto): Promise<Paginated<SaleListItem>> {
@@ -74,7 +78,17 @@ export class SalesService {
     dto: CreateDraftDto,
   ): Promise<SaleWithRelations> {
     await this.assertLocations(tenantId, dto.branchId, dto.registerId, dto.customerId);
-    const computed = await this.computeCart(tenantId, actor, dto.items.map(toCartItem));
+    // A draft moves no stock, but it must not be built against availability the
+    // tenant's provider cannot vouch for — an EXTERNAL tenant fails closed here
+    // rather than at completion.
+    const inventory = await this.inventoryProviders.forTenant(tenantId);
+    const computed = await this.computeCart(
+      tenantId,
+      actor,
+      dto.items.map(toCartItem),
+      inventory,
+      dto.branchId,
+    );
     return this.salesRepository.createDraft({
       tenantId,
       cashierId: actor.id,
@@ -133,7 +147,21 @@ export class SalesService {
       reason: dto.orderDiscountReason,
       approvalToken: dto.orderApprovalToken,
     };
-    const computed = await this.computeCart(tenantId, actor, items, orderDiscountInput);
+    // Resolve BOTH providers once, from the authenticated tenant, before any work.
+    // Independent of each other by design: inventory authority and accounting
+    // destination are separate concepts (D29), and a tenant may legitimately keep
+    // stock locally while filing documents in QuickBooks. Neither is derived from
+    // the other, and no DTO field can name either.
+    const inventory = await this.inventoryProviders.forTenant(tenantId);
+
+    const computed = await this.computeCart(
+      tenantId,
+      actor,
+      items,
+      inventory,
+      branchId,
+      orderDiscountInput,
+    );
     const paidAmount = sum2(dto.payments.map((p) => p.amount));
     const { total } = computed;
     const paymentStatus: PaymentStatus =
@@ -193,9 +221,16 @@ export class SalesService {
     const postAccounting: PostAccounting = (tx, saleId) =>
       accounting.postSale(tx, { tenantId, branchId }, saleId, quickbooksDocumentType);
 
+    // Slice 6C-A: the same resolved instance that answered the availability question
+    // performs the reduction, inside the repository's transaction. The conditional
+    // write it contains — not the read above — is what prevents two concurrent sales
+    // from both taking the last unit.
+    const reduceStock: ReduceStock = (tx, lines) =>
+      inventory.reduceStock(tx, { tenantId, branchId }, lines);
+
     return dto.saleId
-      ? this.salesRepository.completeDraft(tenantId, dto.saleId, persist, postAccounting)
-      : this.salesRepository.createCompleted(persist, postAccounting);
+      ? this.salesRepository.completeDraft(tenantId, dto.saleId, persist, postAccounting, reduceStock)
+      : this.salesRepository.createCompleted(persist, postAccounting, reduceStock);
   }
 
   /**
@@ -256,10 +291,19 @@ export class SalesService {
 
   // ── compute pipeline ───────────────────────────────────────────────────────
 
+  /**
+   * Validate and price a cart.
+   *
+   * `inventory` is the provider the *caller* already resolved, passed in rather
+   * than resolved here so one operation cannot check availability against one
+   * provider and then move stock through another.
+   */
   private async computeCart(
     tenantId: string,
     actor: AuthenticatedUser,
     items: CartItemInput[],
+    inventory: InventoryProvider,
+    branchId: string,
     orderDiscountInput?: OrderDiscountInput,
   ): Promise<ComputedSale> {
     if (items.length === 0) {
@@ -270,6 +314,14 @@ export class SalesService {
     const products = await this.salesRepository.findProductsByIds(tenantId, ids);
     const byId = new Map(products.map((p) => [p.id, p]));
     const settings = this.settingsService.getSettings(tenantId);
+
+    // Availability comes from the provider, not from the product row. For
+    // QUICKBOOKS and LOCAL that is still `Product.quantityOnHand`, read the same
+    // way, so the answer is identical; for DISABLED every product is unlimited and
+    // no sale is ever rejected for stock. Read-only, so it happens before the
+    // transaction opens — it is a courtesy check, and `reduceStock`'s conditional
+    // write remains the authority under concurrency.
+    const availability = await inventory.getAvailability({ tenantId, branchId }, ids);
 
     const lines = await Promise.all(
       items.map(async (item) => {
@@ -288,11 +340,20 @@ export class SalesService {
         }
 
         const quantity = item.quantity;
-        const onHand = Number(product.quantityOnHand);
-        if (product.type === 'Inventory' && quantity > onHand) {
-          throw new BadRequestException(
-            `Insufficient stock for ${product.name} (on hand ${onHand}, requested ${quantity})`,
-          );
+        // `isUnlimited` is how a provider says "no ceiling" without inventing a
+        // quantity. Absent from the map means the provider does not know the
+        // product, which the `!product` guard above has already excluded.
+        const stock = availability.get(product.id);
+        if (stock && !stock.isUnlimited && stock.quantityOnHand !== null) {
+          const onHand = stock.quantityOnHand;
+          if (quantity > onHand) {
+            // Wording preserved verbatim — this is the message the POS surfaces and
+            // the Slice 3 characterisation spec asserts. Note it is deliberately
+            // NOT the same string `reduceStock` throws; both are unchanged.
+            throw new BadRequestException(
+              `Insufficient stock for ${product.name} (on hand ${onHand}, requested ${quantity})`,
+            );
+          }
         }
 
         const lineSubtotal = round2(cachedPrice * quantity);

@@ -3,7 +3,7 @@ import { PrintJob, Prisma, QuickBooksReturnDocumentType } from '@hardware-pos/da
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
-import { AccountingSubmissionResult } from '../providers/provider.types';
+import { AccountingSubmissionResult, StockLine } from '../providers/provider.types';
 import { PersistReturnInput, ReturnsListFilter } from './returns.types';
 
 /**
@@ -18,6 +18,20 @@ export type PostReturnAccounting = (
   tx: Prisma.TransactionClient,
   returnId: string,
 ) => Promise<AccountingSubmissionResult<QuickBooksReturnDocumentType>>;
+
+/**
+ * Restore stock for the return lines the caller has already decided are eligible,
+ * inside the return transaction.
+ *
+ * The caller passes only eligible lines. Whether an item is GOOD, DAMAGED, OPENED
+ * or marked RETURN_TO_STOCK is **return-domain** logic and stays in
+ * `ReturnsService`; an inventory provider must not be given condition or
+ * disposition to reason about, or two layers end up owning the same rule.
+ */
+export type RestoreStock = (
+  tx: Prisma.TransactionClient,
+  lines: StockLine[],
+) => Promise<void>;
 
 /** A return with everything the detail screen and receipt need. */
 export type ReturnWithRelations = Prisma.ReturnGetPayload<{
@@ -206,6 +220,7 @@ export class ReturnsRepository {
   async createCompleted(
     input: PersistReturnInput,
     postAccounting: PostReturnAccounting,
+    restoreStock: RestoreStock,
   ): Promise<ReturnWithRelations> {
     return this.prisma.$transaction(async (tx) => {
       const returnNumber = await this.nextReturnNumber(tx, input.tenantId);
@@ -287,22 +302,15 @@ export class ReturnsRepository {
         });
       }
 
-      // Eager local restock — symmetric with how a sale decrements stock on
-      // completion. GOOD items marked RETURN_TO_STOCK re-enter available
-      // inventory the instant the return completes; damaged / opened /
-      // non-resellable stock never restocks, and only Inventory-type products
-      // are stock-tracked. This is deliberately DECOUPLED from the QuickBooks
-      // push (which stays async/retryable) so local inventory is correct
-      // regardless of QuickBooks connectivity. QuickBooks remains the source of
-      // truth; the periodic product pull reconciles to its absolute quantities.
-      for (const it of input.items) {
-        if (it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK') {
-          await tx.product.updateMany({
-            where: { id: it.productId, tenantId: input.tenantId, type: 'Inventory' },
-            data: { quantityOnHand: { increment: Number(it.returnQuantity) } },
-          });
-        }
-      }
+      // Eager restock — symmetric with how a sale decrements stock on completion,
+      // and still DECOUPLED from the QuickBooks push (which stays async/retryable)
+      // so stock is correct regardless of QuickBooks connectivity.
+      //
+      // Slice 6C-A: which lines restock is decided by `ReturnsService` and passed
+      // in; where the stock lives is decided by the tenant's `InventoryProvider`.
+      // The `type: 'Inventory'` predicate that kept Service products out lives in
+      // the provider, unchanged.
+      await restoreStock(tx, input.restockLines);
 
       // Per-sale return-status roll-up (recomputed from the fresh line states).
       const saleItems = await tx.saleItem.findMany({

@@ -363,6 +363,88 @@ design speculative provider operations.** Recorded in
 
 ---
 
+## 2026-08-05 — Slice 6B review
+
+### D27 — Local customer return-document kind (resolves Risk AG)
+
+`CustomerReturnDocumentKind` is decided from **local financial facts**, never from
+`Return.quickbooksDocumentType`. For a return whose original sale was filed under
+`AccountingProviderKind.NONE`:
+
+* a positive monetary refund actually issued → **`REFUND_RECEIPT`**;
+* no money refunded, but store credit issued or an unpaid balance reduced →
+  **`CREDIT_NOTE`**.
+
+**Mixed results.** A return that contains both a monetary refund *and* a credit or
+balance adjustment uses **`REFUND_RECEIPT`** as the primary document kind, and must
+show three separate values — monetary refund, store credit issued, and
+outstanding-balance reduction. **These must never be combined into a single
+"refund" amount**, which would overstate the cash returned.
+
+Not yet reachable: `Return.refundMethod` is a single method and `createCompleted`
+writes exactly one `RefundPayment`, so no mixed return can currently exist. This
+decision governs whichever slice introduces multi-method refunds; a
+`CustomerReturnDocumentKind` of `REFUND_RECEIPT` must not be taken as a licence to
+print one combined figure.
+
+**QuickBooks tenants are unchanged.** Wherever an external document type exists it
+stays authoritative for the printed label, so a QuickBooks tenant's documents are
+byte-identical. The local kind and the external `QuickBooksReturnDocumentType`
+remain two separate decisions with two separate resolvers, deliberately: the
+implemented rules diverge for a **partially-paid sale refunded in money**, where
+local semantics say refund receipt (cash left the drawer, and the return does not
+reduce the sale balance) and QuickBooks says credit memo. That divergence is pinned
+by test rather than reconciled.
+
+### D28 — Product QuickBooks treatment routes on `InventoryMode` (resolves Risk AF)
+
+Product QuickBooks treatment must be removed for tenants that do not use QuickBooks
+inventory, and the routing key is **`InventoryMode`, not `AccountingProviderKind`**:
+
+| Mode | Product behaviour |
+|---|---|
+| `QUICKBOOKS` | Preserve today's pull/push, QuickBooks item ids, and sync statuses. Existing Tile Shop behaviour is unchanged. |
+| `LOCAL` | Locally managed. Create/update/deactivate must **not** enqueue a QuickBooks product sync. Stock operations use `LocalInventoryProvider`. |
+| `DISABLED` | A catalogue may exist. No availability enforcement, no stock mutation, no QuickBooks product synchronisation. |
+| `EXTERNAL` | Fail closed until an approved implementation exists. |
+
+Deferred to **Slice 6C-B — Product Catalogue and Synchronization Provider
+Adoption**, and explicitly out of scope for Slice 6C-A.
+
+Constraints on that slice: the provider abstraction owns the routing decision.
+`ProductsService` must not acquire `if (accountingProvider === NONE)` or
+`if (inventoryMode !== QUICKBOOKS)` conditionals, and `BusinessProfileService` must
+not be injected into it merely to trade one hard-coded QuickBooks branch for
+several profile branches. Before implementing, decide between extending
+`InventoryProvider` with provider-neutral product lifecycle operations and
+introducing a separate `CatalogProvider`.
+
+Unsupported combinations must also be audited rather than silently accepted —
+notably **`LOCAL` inventory + `QUICKBOOKS` accounting** and **`DISABLED` inventory +
+`QUICKBOOKS` accounting**, since QuickBooks accounting documents may require valid
+QuickBooks item mappings that neither mode maintains.
+
+### D29 — Inventory-mode changes are unsupported once stock has moved
+
+Inventory authority and accounting provenance are **separate concepts**. A return
+resolves accounting from the original sale's provenance (D-Slice 6B) but resolves
+inventory from the tenant's **current** `InventoryMode` — there is no per-sale
+inventory provenance, and inferring one from QuickBooks accounting metadata would
+conflate the two.
+
+That is only safe if the mode cannot change underneath existing transactions. No
+safe transition mechanism exists (no stock migration, no per-sale inventory
+authority record), so `BusinessProfileService.updateProfile` **refuses** to change
+`inventoryMode` once inventory-affecting transactions exist for the tenant.
+
+Allowed regardless: a write that does not change the effective mode — which
+includes legacy-default → explicit `QUICKBOOKS`, since the legacy default *is*
+`QUICKBOOKS`. Allowed for a tenant with no completed sales and no returns: any mode.
+
+No migration. The guard reads existing tables.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

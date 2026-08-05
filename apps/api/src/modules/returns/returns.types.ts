@@ -10,6 +10,7 @@ import {
   UserRole,
 } from '@hardware-pos/database';
 
+import { StockLine } from '../providers/provider.types';
 import { CustomerReturnDocumentKind } from './customer-return-document';
 
 /** Signed inside the short-lived return-approval token. */
@@ -192,4 +193,13 @@ export interface PersistReturnInput {
    */
   syncStatus: SyncStatus;
   items: PersistReturnItem[];
+  /**
+   * The lines the return domain has decided are eligible to re-enter stock.
+   *
+   * Separate from {@link items} on purpose: `items` is what gets persisted,
+   * `restockLines` is what the inventory provider is asked to restore. Condition
+   * and disposition are return rules and are resolved before this point, so the
+   * provider is never handed GOOD/DAMAGED/RETURN_TO_STOCK to reason about.
+   */
+  restockLines: StockLine[];
 }

@@ -3,7 +3,7 @@ import { Prisma, Product, QuickBooksDocumentType } from '@hardware-pos/database'
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
-import { AccountingSubmissionResult } from '../providers/provider.types';
+import { AccountingSubmissionResult, StockLine } from '../providers/provider.types';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
 import { ComputedLine, PersistSaleInput, SalesListFilter } from './sales.types';
 
@@ -19,6 +19,21 @@ export type PostAccounting = (
   tx: Prisma.TransactionClient,
   saleId: string,
 ) => Promise<AccountingSubmissionResult<QuickBooksDocumentType>>;
+
+/**
+ * Reduce stock for a persisted sale, inside the sale transaction.
+ *
+ * The Slice 6C-A counterpart of {@link PostAccounting}, and a callback for the same
+ * reason: the repository keeps owning the transaction but stops deciding where
+ * stock lives, so it needs no provider import and no `if (quickbooks)`.
+ *
+ * The callback must keep the conditional write that prevents two concurrent sales
+ * from both consuming the last unit — a read-time availability check cannot.
+ */
+export type ReduceStock = (
+  tx: Prisma.TransactionClient,
+  lines: StockLine[],
+) => Promise<void>;
 
 /**
  * What QuickBooks returned for a sale. Every field is required — that is the point.
@@ -266,6 +281,7 @@ export class SalesRepository {
   async createCompleted(
     input: PersistSaleInput,
     postAccounting: PostAccounting,
+    reduceStock: ReduceStock,
   ): Promise<SaleWithRelations> {
     return this.prisma.$transaction(async (tx) => {
       const saleNumber = await this.nextSaleNumber(tx, input.tenantId);
@@ -302,7 +318,7 @@ export class SalesRepository {
         },
         include: saleInclude,
       });
-      await this.decrementStock(tx, input.tenantId, input.computed.lines);
+      await reduceStock(tx, toStockLines(input.computed.lines));
       await this.postAccountingChecked(postAccounting, tx, sale.id, input);
       return sale;
     });
@@ -314,6 +330,7 @@ export class SalesRepository {
     saleId: string,
     input: PersistSaleInput,
     postAccounting: PostAccounting,
+    reduceStock: ReduceStock,
   ): Promise<SaleWithRelations> {
     return this.prisma.$transaction(async (tx) => {
       await tx.saleItem.deleteMany({ where: { saleId } });
@@ -346,7 +363,7 @@ export class SalesRepository {
         },
         include: saleInclude,
       });
-      await this.decrementStock(tx, tenantId, input.computed.lines);
+      await reduceStock(tx, toStockLines(input.computed.lines));
       await this.postAccountingChecked(postAccounting, tx, sale.id, input);
       return sale;
     });
@@ -382,36 +399,13 @@ export class SalesRepository {
     }
   }
 
-  /**
-   * Decrement on-hand stock for tracked products within the sale transaction.
-   * The conditional update is the authoritative guard against overselling under
-   * concurrency; a zero-row update rolls the whole sale back.
-   */
-  private async decrementStock(
-    tx: Prisma.TransactionClient,
-    tenantId: string,
-    lines: ComputedLine[],
-  ): Promise<void> {
-    // Aggregate per product: a cart may repeat the same productId across lines.
-    const totals = new Map<string, { name: string; qty: number }>();
-    for (const line of lines) {
-      if (!line.trackInventory) continue;
-      const prev = totals.get(line.productId);
-      totals.set(line.productId, {
-        name: line.productName,
-        qty: (prev?.qty ?? 0) + line.quantity,
-      });
-    }
-    for (const [productId, { name, qty }] of totals) {
-      const res = await tx.product.updateMany({
-        where: { id: productId, tenantId, quantityOnHand: { gte: qty } },
-        data: { quantityOnHand: { decrement: qty } },
-      });
-      if (res.count === 0) {
-        throw new BadRequestException(`Insufficient stock for ${name}`);
-      }
-    }
-  }
+  // `decrementStock` used to live here. Its behaviour — aggregate repeated product
+  // ids, a conditional `updateMany` guarded by `quantityOnHand: { gte: qty }`, and a
+  // zero-row check throwing `Insufficient stock for <name>` — moved unchanged into
+  // `LocalInventoryProvider.reduceStock` and `QuickBooksInventoryProvider.reduceStock`
+  // in Slice 6C-A. It was moved rather than rewritten: the conditional write is the
+  // only thing standing between two concurrent sales and a double-sold last unit, so
+  // reimplementing it would have been the single riskiest edit in the refactor.
 
   /**
    * Record that QuickBooks accepted a sale, using metadata QuickBooks returned.
@@ -521,4 +515,21 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
     lineSubtotal: line.lineSubtotal,
     lineTotal: line.lineTotal,
   };
+}
+
+/**
+ * A computed cart line as the inventory port sees it.
+ *
+ * The two shapes already agree field for field — `ComputedLine` carries
+ * `productId`, `productName`, `quantity`, and `trackInventory` precisely because
+ * `decrementStock` needed them. This narrows rather than converts, so a cart line
+ * cannot smuggle pricing or discount state into the inventory layer.
+ */
+function toStockLines(lines: ComputedLine[]): StockLine[] {
+  return lines.map((line) => ({
+    productId: line.productId,
+    productName: line.productName,
+    quantity: line.quantity,
+    trackInventory: line.trackInventory,
+  }));
 }

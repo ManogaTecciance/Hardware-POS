@@ -738,13 +738,19 @@ describe('the existing pipeline is untouched by the providers existing', () => {
   });
 
   /**
-   * Updated in Slice 6A. This test previously asserted that a LOCAL/NONE profile
-   * still produced a QuickBooks-shaped sale, and its comment said the day it failed,
-   * a provider had been adopted and that must be deliberate. Slice 6A is that
-   * deliberate adoption — for ACCOUNTING only — so the assertion now records the new
-   * split: accounting follows the provider, inventory still does not.
+   * Updated in Slice 6C-A, for the second time.
+   *
+   * Originally this asserted that a LOCAL/NONE profile still produced a
+   * QuickBooks-shaped sale, as a tripwire for deliberate adoption. Slice 6A adopted
+   * accounting and the inventory half was left asserting `onHand === 99`.
+   *
+   * That half became **vacuous** the moment 6C-A landed: `LocalInventoryProvider`
+   * decrements the same column by the same amount, so `99` is true whether or not
+   * the provider is consulted. It passed for the wrong reason. The discriminator
+   * below cannot be satisfied by the old `decrementStock` at all — only a real
+   * `LocalInventoryProvider` refuses a multi-branch tenant.
    */
-  it('accounting now follows the profile, while inventory deliberately does not', async () => {
+  it('accounting and inventory now both follow the profile', async () => {
     await giveProfile(tile, InventoryMode.LOCAL, AccountingProviderKind.NONE);
 
     const sale = await salesService.complete(tile.tenantId, owner, {
@@ -758,8 +764,22 @@ describe('the existing pipeline is untouched by the providers existing', () => {
     expect(sale.quickbooksDocumentType).toBeNull();
     expect(await prisma.syncJob.count({ where: { entityId: sale.id } })).toBe(0);
 
-    // NOT adopted: stock still moves through `decrementStock`, not LocalInventoryProvider.
-    // This half remains the tripwire for Slice 6B.
+    // Adopted in Slice 6C-A: the quantity is the same, but the AUTHORITY is not.
+    expect(await onHand(tile.productAId)).toBe(99);
+
+    // The proof. `Product.quantityOnHand` is not branch-scoped, so LOCAL refuses a
+    // second active branch. The old repository-owned decrement had no such rule, so
+    // this assertion is only satisfiable by the provider actually being consulted.
+    await prisma.branch.create({
+      data: { tenantId: tile.tenantId, name: 'Second', code: 'SECOND', isActive: true },
+    });
+    await expect(
+      salesService.complete(tile.tenantId, owner, {
+        branchId: tile.branchId,
+        items: [{ productId: tile.productAId, quantity: 1 }],
+        payments: [{ method: 'CASH', amount: 1000 }],
+      }),
+    ).rejects.toThrow(/active branches/);
     expect(await onHand(tile.productAId)).toBe(99);
   });
 

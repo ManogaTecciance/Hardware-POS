@@ -15,6 +15,14 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import {
+  collectFiles,
+  importsOf,
+  listSourceFiles,
+  referencesIdentifier,
+  stripComments,
+} from './testkit/source-analysis';
+
 const PROVIDERS_DIR = resolve(__dirname);
 const API_SRC = resolve(__dirname, '../..');
 
@@ -41,17 +49,12 @@ function read(relative: string): string {
   return readFileSync(resolve(PROVIDERS_DIR, relative), 'utf8');
 }
 
-/** Every `from '…'` specifier in a file. */
-function importsOf(source: string): string[] {
-  return [...source.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]);
-}
-
-/** Strip comments so a rule matches real code, not prose describing it. */
-function codeOnly(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
+/**
+ * Retained alias. `codeOnly` was this file's private comment stripper until Slice
+ * 6C-A.5 moved it into `testkit/source-analysis.ts`, where it is tested against
+ * fixtures rather than assumed correct.
+ */
+const codeOnly = stripComments;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 14 — no QuickBooks or vendor types in the ports
@@ -192,127 +195,303 @@ describe('no provider starts its own transaction', () => {
 // Slice 5 inertness
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Slice 6B adopted the sale and return paths, and only those', () => {
+describe('Slice 6C-A adopted the sale and return paths, and only those', () => {
   /**
-   * Updated in Slice 6B. Through Slice 5.5 this block asserted total inertness —
-   * that nothing outside `providers/` referenced a provider at all. Slice 6A ended
-   * that for the completed-sale workflow and Slice 6B for the completed-return
-   * workflow, both by design, so the block pins the current boundary rather than
-   * the old one. Everything still on the forbidden list is a Slice 6C decision
-   * that has not been taken — above all `InventoryProvider`, which no call site
-   * has adopted anywhere.
+   * Rewritten in Slice 6C-A.5 to the non-vacuous standard.
+   *
+   * Through 5.5 this block asserted total inertness. 6A adopted sale accounting,
+   * 6B return accounting, 6C-A sale and return inventory. Twice now the block was
+   * updated by rewriting the *expected value* and leaving the *technique* alone,
+   * and twice the technique turned out to be the problem:
+   *
+   *  • `onHand === 99` was true whether or not the provider was consulted.
+   *  • `toContain('decrementStock')` matched a comment saying it had been deleted.
+   *
+   * So every assertion below now pairs a positive with a negative, or compares an
+   * exact set, and all of them go through the fixture-tested analyser in
+   * `testkit/source-analysis.ts`. `referencesIdentifier` reads code only, so a
+   * comment can no longer satisfy or defeat a rule.
    */
-  const NOT_YET_ADOPTED = [
-    'modules/products/products.service.ts',
-    'modules/quotations/quotations.service.ts',
-    'modules/payments/payments.service.ts',
-    'modules/sync/queue/sync-worker.service.ts',
-    'modules/sync/queue/sync-queue.service.ts',
-    'modules/sync/sync.service.ts',
-    'modules/quickbooks/quickbooks-sales-sync.service.ts',
-    'modules/quickbooks/quickbooks-returns-sync.service.ts',
-    'modules/quickbooks/quickbooks-product-sync.service.ts',
+  const ADOPTED_PATHS = ['modules/sales', 'modules/returns'];
+
+  /**
+   * Files that must stay clear of the provider layer. Each carries the legacy call
+   * site that proves it is still on the old path — a negative alone would also pass
+   * for a file that had been deleted, emptied, or renamed.
+   */
+  const NOT_YET_ADOPTED: { file: string; legacyMarker: string }[] = [
+    { file: 'modules/products/products.service.ts', legacyMarker: 'SyncQueueService' },
+    { file: 'modules/quotations/quotations.service.ts', legacyMarker: 'QuotationsRepository' },
+    { file: 'modules/payments/payments.service.ts', legacyMarker: 'PaymentsRepository' },
+    { file: 'modules/sync/queue/sync-worker.service.ts', legacyMarker: 'SyncJob' },
+    { file: 'modules/sync/queue/sync-queue.service.ts', legacyMarker: 'enqueueSaleSync' },
+    { file: 'modules/sync/sync.service.ts', legacyMarker: 'SyncRepository' },
+    { file: 'modules/quickbooks/quickbooks-sales-sync.service.ts', legacyMarker: 'syncSale' },
+    { file: 'modules/quickbooks/quickbooks-returns-sync.service.ts', legacyMarker: 'syncReturn' },
+    { file: 'modules/quickbooks/quickbooks-product-sync.service.ts', legacyMarker: 'quickbooksItemId' },
   ];
 
-  it.each(NOT_YET_ADOPTED)('%s still references no provider', (file) => {
-    const source = readFileSync(resolve(API_SRC, file), 'utf8');
-    expect(source).not.toContain('InventoryProvider');
-    expect(source).not.toContain('AccountingProvider');
-    expect(source).not.toContain('providers/');
+  it.each(NOT_YET_ADOPTED)(
+    '$file references no provider, and still has its legacy call site',
+    ({ file, legacyMarker }) => {
+      const source = readFileSync(resolve(API_SRC, file), 'utf8');
+
+      // NEGATIVE — the future state is absent.
+      expect(referencesIdentifier(source, 'InventoryProvider')).toBe(false);
+      expect(referencesIdentifier(source, 'AccountingProvider')).toBe(false);
+      expect(referencesIdentifier(source, 'CatalogSyncProvider')).toBe(false);
+      expect(importsOf(source).filter((spec) => spec.includes('providers/'))).toEqual([]);
+
+      // POSITIVE — the current state is present, so the negatives above are being
+      // evaluated against a real file with real content rather than an empty one.
+      expect(referencesIdentifier(source, legacyMarker)).toBe(true);
+    },
+  );
+
+  it.each(['modules/sales/sales.service.ts', 'modules/returns/returns.service.ts'])(
+    '%s resolves BOTH providers, each from its own factory',
+    (file) => {
+      const service = readFileSync(resolve(API_SRC, file), 'utf8');
+
+      expect(referencesIdentifier(service, 'AccountingProviderFactory')).toBe(true);
+      expect(referencesIdentifier(service, 'InventoryProviderFactory')).toBe(true);
+      // And not the catalogue one — that is 6C-B.
+      expect(referencesIdentifier(service, 'CatalogSyncProvider')).toBe(false);
+    },
+  );
+
+  it.each(['modules/sales/sales.repository.ts', 'modules/returns/returns.repository.ts'])(
+    '%s takes both as callbacks and resolves no provider itself',
+    (file) => {
+      const repository = readFileSync(resolve(API_SRC, file), 'utf8');
+
+      // NEGATIVE — no factory, and no direct stock write.
+      expect(referencesIdentifier(repository, 'AccountingProviderFactory')).toBe(false);
+      expect(referencesIdentifier(repository, 'InventoryProviderFactory')).toBe(false);
+      expect(referencesIdentifier(repository, 'quantityOnHand')).toBe(false);
+
+      // POSITIVE — the callback seams it does have. Without these the negatives
+      // above would also hold for a repository that had simply stopped doing
+      // anything, which is exactly the `decrementStock` failure repeated.
+      expect(referencesIdentifier(repository, 'AccountingSubmissionResult')).toBe(true);
+      expect(referencesIdentifier(repository, 'StockLine')).toBe(true);
+      expect(referencesIdentifier(repository, 'postAccountingChecked')).toBe(true);
+    },
+  );
+
+  it('stock movement lives in exactly one layer — the providers, and nowhere else', () => {
+    // EXACT SET. A count would not distinguish "the right three files" from "three
+    // different ones", and a per-file negative would not notice a fourth appearing.
+    const writers = collectFiles(API_SRC, {
+      accept: (name) => name.endsWith('.ts') && !name.endsWith('.spec.ts'),
+      predicate: (content) => /quantityOnHand:\s*\{\s*(increment|decrement)/.test(stripComments(content)),
+    });
+
+    expect(writers).toEqual([
+      'modules/providers/inventory/local-inventory.provider.ts',
+      'modules/providers/inventory/quickbooks-inventory.provider.ts',
+    ]);
   });
 
-  it.each([
-    'modules/sales/sales.service.ts',
-    'modules/returns/returns.service.ts',
-  ])('%s uses the ACCOUNTING provider only — inventory is untouched', (file) => {
-    const service = readFileSync(resolve(API_SRC, file), 'utf8');
+  it('the return domain, not the provider, decides which lines restock', () => {
+    const service = readFileSync(resolve(API_SRC, 'modules/returns/returns.service.ts'), 'utf8');
+    expect(referencesIdentifier(service, 'RETURN_TO_STOCK')).toBe(true);
+    expect(referencesIdentifier(service, 'itemCondition')).toBe(true);
 
-    expect(service).toContain('AccountingProviderFactory');
-    // Slice 6C's job. Adopting it here would silently change how stock moves.
-    expect(service).not.toContain('InventoryProvider');
+    // `listSourceFiles` throws on an empty listing, so this loop cannot pass by
+    // checking nothing — the failure mode of the version it replaces.
+    const providers = listSourceFiles(resolve(PROVIDERS_DIR, 'inventory'));
+    expect(providers.length).toBeGreaterThanOrEqual(3);
+    for (const file of providers) {
+      const source = readFileSync(resolve(PROVIDERS_DIR, 'inventory', file), 'utf8');
+      expect(referencesIdentifier(source, 'RETURN_TO_STOCK')).toBe(false);
+      expect(referencesIdentifier(source, 'itemCondition')).toBe(false);
+    }
   });
 
-  it.each([
-    'modules/sales/sales.repository.ts',
-    'modules/returns/returns.repository.ts',
-  ])('%s takes accounting as a callback and imports no provider', (file) => {
-    const repository = readFileSync(resolve(API_SRC, file), 'utf8');
-
-    // The repository still owns the transaction but no longer picks the
-    // destination: it never constructs or resolves a provider.
-    expect(repository).not.toContain('InventoryProvider');
-    expect(repository).not.toContain('AccountingProviderFactory');
-    expect(repository).toContain('AccountingSubmissionResult');
+  it('no inventory provider opens its own transaction, and each really was inspected', () => {
+    const providers = listSourceFiles(resolve(PROVIDERS_DIR, 'inventory'));
+    const inspected: string[] = [];
+    for (const file of providers) {
+      const source = readFileSync(resolve(PROVIDERS_DIR, 'inventory', file), 'utf8');
+      expect(referencesIdentifier(source, '$transaction')).toBe(false);
+      inspected.push(file);
+    }
+    // The positive control: name the files that were actually read.
+    expect(inspected).toEqual([
+      'inventory-provider.factory.ts',
+      'inventory-provider.ts',
+      'local-inventory.provider.ts',
+      'no-inventory.provider.ts',
+      'quickbooks-inventory.provider.ts',
+    ]);
   });
 
-  it('the RETURN repository still restocks locally — inventory is not adopted', () => {
-    // The seam Slice 6C replaces on the return side. While this is here, return
-    // stock restoration is unchanged.
-    const repository = readFileSync(resolve(API_SRC, 'modules/returns/returns.repository.ts'), 'utf8');
-    expect(repository).toContain("it.itemCondition === 'GOOD'");
-    expect(repository).toContain("it.stockDisposition === 'RETURN_TO_STOCK'");
-    expect(repository).toMatch(/quantityOnHand: \{ increment: Number\(it\.returnQuantity\) \}/);
-  });
-
-  it('the sale repository still decrements stock itself', () => {
-    // The seam Slice 6B replaces. While it is here, inventory has not been adopted.
-    const repository = readFileSync(resolve(API_SRC, 'modules/sales/sales.repository.ts'), 'utf8');
-    expect(repository).toContain('decrementStock');
-    expect(repository).toMatch(/quantityOnHand: \{ gte: qty \}/);
+  it('the multi-branch guard is intact on every LOCAL mutator', () => {
+    const local = stripComments(
+      readFileSync(resolve(PROVIDERS_DIR, 'inventory/local-inventory.provider.ts'), 'utf8'),
+    );
+    expect(local).toContain('UnsafeMultiBranchInventoryError');
+    // One definition plus one call from each of the four operations.
+    expect((local.match(/assertSingleBranch\(/g) ?? []).length).toBe(5);
+    // And the QuickBooks provider must NOT have it — the guard is about the LOCAL
+    // authority only, so an identical count in both would mean nothing.
+    const quickbooks = stripComments(
+      readFileSync(resolve(PROVIDERS_DIR, 'inventory/quickbooks-inventory.provider.ts'), 'utf8'),
+    );
+    expect(quickbooks).not.toContain('assertSingleBranch');
   });
 
   it('ProvidersModule is imported only by the modules that resolve a provider', () => {
-    const importers: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = resolve(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name !== 'providers') walk(full);
-          continue;
-        }
-        if (!entry.name.endsWith('.module.ts')) continue;
-        if (readFileSync(full, 'utf8').includes('ProvidersModule')) {
-          importers.push(full.replace(`${API_SRC}/`, ''));
-        }
-      }
-    };
-    walk(API_SRC);
+    const importers = collectFiles(API_SRC, {
+      skipDirs: ['providers'],
+      accept: (name) => name.endsWith('.module.ts'),
+      predicate: (content) => referencesIdentifier(content, 'ProvidersModule'),
+    });
 
     // Not AppModule, and not every feature module "because it is live now".
-    expect(importers.sort()).toEqual([
+    expect(importers).toEqual([
       'modules/returns/returns.module.ts',
       'modules/sales/sales.module.ts',
     ]);
   });
 
   it('only the sales and returns modules import from the providers directory', () => {
-    const offenders: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = resolve(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name !== 'providers') walk(full);
-          continue;
-        }
-        if (!entry.name.endsWith('.ts')) continue;
-        if (full.startsWith(PROVIDERS_DIR)) continue;
-        if (importsOf(readFileSync(full, 'utf8')).some((spec) => spec.includes('providers/'))) {
-          offenders.push(full.replace(`${API_SRC}/`, ''));
-        }
-      }
-    };
-    walk(API_SRC);
+    const offenders = collectFiles(API_SRC, {
+      skipDirs: ['providers'],
+      predicate: (content) => importsOf(content).some((spec) => spec.includes('providers/')),
+    });
 
-    expect(offenders.sort()).toEqual([
+    expect(offenders).toEqual([
       'modules/returns/customer-return-document.spec.ts',
       'modules/returns/returns.module.ts',
       'modules/returns/returns.repository.ts',
       'modules/returns/returns.service.spec.ts',
       'modules/returns/returns.service.ts',
+      'modules/returns/returns.types.ts',
       'modules/sales/sales.module.ts',
       'modules/sales/sales.repository.ts',
       'modules/sales/sales.service.ts',
     ]);
+    // Every offender is inside an adopted module — stated separately so a future
+    // path outside sales/returns fails loudly even if someone updates the list.
+    for (const file of offenders) {
+      expect(ADOPTED_PATHS.some((prefix) => file.startsWith(prefix))).toBe(true);
+    }
+  });
+
+  it('the test-only analyser is never imported by production code', () => {
+    const importers = collectFiles(API_SRC, {
+      accept: (name) => name.endsWith('.ts') && !name.endsWith('.spec.ts'),
+      predicate: (content) => importsOf(content).some((spec) => spec.includes('testkit/')),
+    });
+    expect(importers).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slice 6C-A.5 — mutation proofs for the high-risk tripwires
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Approved pattern 4. Each test below takes the **real** current source, injects
+ * the change the tripwire forbids, and asserts the analyser's answer flips.
+ *
+ * Production code is never mutated: the injection happens in memory, on a string.
+ * That keeps the proof deterministic and leaves nothing to clean up, at the cost
+ * of proving the *rule* rather than the whole `it()` body — so each proof mirrors
+ * the exact predicate its tripwire uses, and they sit next to each other here so a
+ * change to one is obvious against the other.
+ */
+describe('the adoption tripwires can actually fail', () => {
+  function sourceOf(relative: string): string {
+    return readFileSync(resolve(API_SRC, relative), 'utf8');
+  }
+
+  it('ProductsService adoption would be detected — the highest-risk boundary', () => {
+    const real = sourceOf('modules/products/products.service.ts');
+    expect(referencesIdentifier(real, 'CatalogSyncProvider')).toBe(false);
+
+    const mutated = [
+      "import { CatalogSyncProviderFactory } from '../providers/catalog/catalog-sync-provider.factory';",
+      real,
+    ].join('\n');
+    expect(mutated).not.toEqual(real);
+    expect(referencesIdentifier(mutated, 'CatalogSyncProvider')).toBe(true);
+    expect(importsOf(mutated).filter((s) => s.includes('providers/'))).toEqual([
+      '../providers/catalog/catalog-sync-provider.factory',
+    ]);
+  });
+
+  it('a provider import hidden in a comment would NOT be detected — and must not be', () => {
+    const real = sourceOf('modules/products/products.service.ts');
+    const commented = `// import { CatalogSyncProviderFactory } from '../providers/catalog/x';\n${real}`;
+    expect(referencesIdentifier(commented, 'CatalogSyncProvider')).toBe(false);
+    expect(importsOf(commented).filter((s) => s.includes('providers/'))).toEqual([]);
+  });
+
+  it('a stock write reappearing in a repository would be detected', () => {
+    const real = sourceOf('modules/sales/sales.repository.ts');
+    expect(referencesIdentifier(real, 'quantityOnHand')).toBe(false);
+
+    const mutated = real.replace(
+      'await reduceStock(tx, toStockLines(input.computed.lines));',
+      'await tx.product.updateMany({ data: { quantityOnHand: { decrement: 1 } } });',
+    );
+    expect(mutated).not.toEqual(real);
+    expect(referencesIdentifier(mutated, 'quantityOnHand')).toBe(true);
+  });
+
+  it('a comment mentioning a deleted symbol does not resurrect it — the 6C-A regression', () => {
+    // `sales.repository.ts` really does still say "decrementStock" in a comment
+    // explaining where it went. A test asserting the function is present used to
+    // pass on exactly this, while claiming stock had not been adopted.
+    const real = sourceOf('modules/sales/sales.repository.ts');
+    expect(real).toContain('decrementStock');
+    expect(referencesIdentifier(real, 'decrementStock')).toBe(false);
+  });
+
+  it('a new ProvidersModule importer would be detected by the exact-set assertion', () => {
+    const importers = collectFiles(API_SRC, {
+      skipDirs: ['providers'],
+      accept: (name) => name.endsWith('.module.ts'),
+      predicate: (content) => referencesIdentifier(content, 'ProvidersModule'),
+    });
+    const withNewImporter = [...importers, 'modules/products/products.module.ts'].sort();
+    // The assertion the tripwire makes, applied to the mutated set, must fail.
+    expect(withNewImporter).not.toEqual(importers);
+    expect(() =>
+      expect(withNewImporter).toEqual([
+        'modules/returns/returns.module.ts',
+        'modules/sales/sales.module.ts',
+      ]),
+    ).toThrow();
+  });
+
+  it('an inventory provider opening its own transaction would be detected', () => {
+    const real = readFileSync(
+      resolve(PROVIDERS_DIR, 'inventory/local-inventory.provider.ts'),
+      'utf8',
+    );
+    expect(referencesIdentifier(real, '$transaction')).toBe(false);
+    const mutated = real.replace(
+      'async reduceStock(',
+      ['async other() { await this.prisma.$transaction(async () => {}); }', '  async reduceStock('].join(
+        '\n',
+      ),
+    );
+    expect(mutated).not.toEqual(real);
+    expect(referencesIdentifier(mutated, '$transaction')).toBe(true);
+  });
+
+  it('removing the multi-branch guard would be detected', () => {
+    const real = readFileSync(
+      resolve(PROVIDERS_DIR, 'inventory/local-inventory.provider.ts'),
+      'utf8',
+    );
+    const mutated = stripComments(real).replace(/await this\.assertSingleBranch\([^;]+;/g, '');
+    expect((stripComments(real).match(/assertSingleBranch\(/g) ?? []).length).toBe(5);
+    expect((mutated.match(/assertSingleBranch\(/g) ?? []).length).toBeLessThan(5);
   });
 });
 
@@ -437,33 +616,79 @@ describe('customer document renderers do not depend on external accounting metad
 // 30 — no Prisma migration generated
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Slice 5 generated no Prisma migration', () => {
+describe('no Prisma migration was generated by Slices 5 through 6C-A', () => {
   const MIGRATIONS_DIR = resolve(API_SRC, '../../../packages/database/prisma/migrations');
 
-  it('the migration count is unchanged at 20 (19 pre-existing + Slice 4)', () => {
-    const dirs = readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
+  function migrationDirs(): string[] {
+    return readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
       .filter((e) => e.isDirectory())
-      .map((e) => e.name);
-    expect(dirs).toHaveLength(20);
-    expect(dirs).toContain('20260804121830_add_tenant_platform_profile');
+      .map((e) => e.name)
+      .sort();
+  }
+
+  it('the migration set is exactly the 20 that existed after Slice 4', () => {
+    // EXACT SET, not a count: a count cannot tell "the same 20" from "one added and
+    // one deleted", and the whole claim is that nothing was added.
+    expect(migrationDirs()).toEqual([
+      '20260709104420_init',
+      '20260709121301_add_auth_fields',
+      '20260709131923_add_printjob_and_warehouse_pickup',
+      '20260709145818_add_qr_payment_method',
+      '20260710160825_add_order_discount_to_sale',
+      '20260710170714_add_product_management_fields',
+      '20260710180019_add_customer_management_fields',
+      '20260714090621_add_returns_and_refunds',
+      '20260714104606_add_quotations_and_subcategories',
+      '20260714231302_add_refresh_tokens',
+      '20260715094152_add_tenant_settings',
+      '20260716181014_add_product_batch_grouping',
+      '20260716233022_add_variation_config',
+      '20260717201840_add_product_is_draft',
+      '20260717235634_mirror_qb_product_fields',
+      '20260718043727_restore_product_image_url',
+      '20260722002628_add_document_sequence',
+      '20260724150128_add_suppliers',
+      '20260724164658_reshape_customer_to_qb_fields',
+      '20260804121830_add_tenant_platform_profile',
+    ]);
   });
 
-  it('no migration mentions a provider or a restaurant table', () => {
-    const dirs = readdirSync(MIGRATIONS_DIR, { withFileTypes: true }).filter((e) =>
-      e.isDirectory(),
-    );
+  it('no migration creates a provider, inventory or restaurant table', () => {
+    const dirs = migrationDirs();
+    const scanned: string[] = [];
+    const createdTables = new Set<string>();
+
     for (const dir of dirs) {
-      const sql = readFileSync(resolve(MIGRATIONS_DIR, dir.name, 'migration.sql'), 'utf8');
+      const sql = readFileSync(resolve(MIGRATIONS_DIR, dir, 'migration.sql'), 'utf8');
+      scanned.push(dir);
+      for (const match of sql.matchAll(/CREATE TABLE "([A-Za-z_]+)"/g)) {
+        createdTables.add(match[1]);
+      }
       for (const forbidden of [
         'BranchInventory',
+        'InventoryBalance',
+        'InventoryMovement',
         'StockMovement',
         'RestaurantOrder',
+        'OrderRound',
         'DiningTable',
+        'DiningArea',
+        'RestaurantTable',
         'MenuItem',
         'KitchenTicket',
       ]) {
         expect(sql).not.toContain(forbidden);
       }
     }
+
+    // POSITIVE CONTROL. Without these the loop would also pass having scanned
+    // nothing, or having scanned files whose CREATE TABLE statements it cannot
+    // parse — in which case the negatives above prove nothing at all.
+    expect(scanned).toEqual(dirs);
+    expect(scanned.length).toBe(20);
+    expect(createdTables.has('Sale')).toBe(true);
+    expect(createdTables.has('Product')).toBe(true);
+    expect(createdTables.has('TenantBusinessProfile')).toBe(true);
+    expect(createdTables.size).toBeGreaterThan(20);
   });
 });

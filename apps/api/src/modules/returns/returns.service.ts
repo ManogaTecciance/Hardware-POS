@@ -16,8 +16,10 @@ import { AuthenticatedUser } from '../auth/auth.types';
 import { AuthService } from '../auth/auth.service';
 import { Permission, roleHasPermission } from '../auth/permissions';
 import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
+import { InventoryProviderFactory } from '../providers/inventory/inventory-provider.factory';
 import { AccountingProvider } from '../providers/accounting/accounting-provider';
 import { ProviderOperationUnavailableError } from '../providers/provider.errors';
+import { StockLine } from '../providers/provider.types';
 import { SettingsService } from '../settings/settings.service';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
 import {
@@ -27,6 +29,7 @@ import {
 import { computeReturnLine, sumReturnTotals, type ComputedReturnLine } from './returns.calc';
 import {
   PostReturnAccounting,
+  RestoreStock,
   ReturnListRow,
   ReturnWithRelations,
   ReturnsRepository,
@@ -78,6 +81,7 @@ export class ReturnsService {
     private readonly jwtService: JwtService,
     private readonly syncQueue: SyncQueueService,
     private readonly accountingProviders: AccountingProviderFactory,
+    private readonly inventoryProviders: InventoryProviderFactory,
   ) {}
 
   /**
@@ -284,6 +288,16 @@ export class ReturnsService {
         quickbooksDocumentType,
       );
 
+    // Inventory is resolved from the tenant's CURRENT mode, not from the sale's
+    // accounting provenance. Inventory authority and accounting provenance are
+    // separate concepts (D29), and there is no per-sale inventory provenance to
+    // read — which is safe only because `BusinessProfileService` now refuses to
+    // change `inventoryMode` once stock has moved.
+    const inventory = await this.inventoryProviders.forTenant(tenantId);
+    const restockLines = eligibleRestockLines(computed.persistItems);
+    const restoreStock: RestoreStock = (tx, lines) =>
+      inventory.restoreStock(tx, { tenantId, branchId: sale.branchId }, lines);
+
     let created: ReturnWithRelations;
     try {
       created = await this.repo.createCompleted(
@@ -307,6 +321,7 @@ export class ReturnsService {
           refundReference: dto.refundReference?.trim() || null,
           refundMetadata: dto.refundMetadata ?? null,
           quickbooksDocumentType,
+          restockLines,
           // No external document means nothing is pending. Leaving this `PENDING`
           // would show a QuickBooks push that is never going to happen, and would
           // leave the return permanently "waiting for QuickBooks".
@@ -314,6 +329,7 @@ export class ReturnsService {
           items: computed.persistItems,
         },
         postAccounting,
+        restoreStock,
       );
     } catch (err) {
       // Unique-key race on idempotency: return the winner instead of failing.
@@ -780,6 +796,31 @@ function toReturnListItem(row: ReturnListRow): ReturnListItem {
       originalPaymentStatus: row.originalSale.paymentStatus,
     }),
   };
+}
+
+/**
+ * Which returned lines re-enter available stock.
+ *
+ * The rule is unchanged from `returns.repository`: only GOOD items marked
+ * RETURN_TO_STOCK. Damaged, opened, defective and non-resellable stock never
+ * restocks whatever the disposition says.
+ *
+ * `trackInventory: true` on every eligible line is deliberate and preserves
+ * today's behaviour exactly. The old code did not know a product's type either —
+ * it relied on `type: 'Inventory'` in the update predicate to make a Service
+ * product silently restock nothing, and both stock-tracking providers carry that
+ * same predicate. Deciding it here instead would need an extra product read and
+ * would move a rule that is already enforced correctly one layer down.
+ */
+function eligibleRestockLines(items: PersistReturnItem[]): StockLine[] {
+  return items
+    .filter((it) => it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK')
+    .map((it) => ({
+      productId: it.productId,
+      productName: it.productNameSnapshot,
+      quantity: Number(it.returnQuantity),
+      trackInventory: true,
+    }));
 }
 
 /** Turn an enum value (WRONG_PRODUCT) into a label (Wrong product). */

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ModuleKey } from '@hardware-pos/database';
+import { InventoryMode, ModuleKey } from '@hardware-pos/database';
 
 import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto';
 import {
@@ -8,6 +8,7 @@ import {
   sortModules,
 } from './platform.constants';
 import { BusinessProfileRepository, PersistedProfile } from './business-profile.repository';
+import { UnsafeInventoryModeTransitionError } from './platform.errors';
 import { EffectiveBusinessProfile, ModuleState } from './platform.types';
 
 /**
@@ -89,6 +90,8 @@ export class BusinessProfileService {
     tenantId: string,
     dto: UpdateBusinessProfileDto,
   ): Promise<EffectiveBusinessProfile> {
+    await this.assertInventoryModeTransitionIsSafe(tenantId, dto.inventoryMode);
+
     const persisted = await this.repository.upsertProfile(
       tenantId,
       {
@@ -105,6 +108,49 @@ export class BusinessProfileService {
         `${persisted.profile?.accountingProvider} v${persisted.profile?.version}`,
     );
     return this.toEffective(persisted);
+  }
+
+  /**
+   * Refuse to move inventory authority once stock has already moved (D29).
+   *
+   * Slice 6C-A resolves a sale's and a return's inventory provider from the
+   * tenant's **current** mode, because — unlike accounting — there is no per-sale
+   * inventory provenance to read, and manufacturing one out of QuickBooks
+   * accounting metadata would conflate two separate concepts. Resolving from the
+   * current mode is only sound while the mode cannot move underneath transactions
+   * that already exist, which is what this enforces.
+   *
+   * Two things stay allowed, and both fall out of the comparison rather than being
+   * special-cased:
+   *
+   *  • **A write that does not change the mode.** Comparing against the *effective*
+   *    profile means legacy-default → explicit `QUICKBOOKS` is a no-op, because the
+   *    legacy default already is `QUICKBOOKS`.
+   *  • **Omitting `inventoryMode`.** `upsertProfile` leaves an existing row's mode
+   *    alone, and a first write defaults it to `QUICKBOOKS` — which for a legacy
+   *    tenant is again the effective value.
+   *
+   * A tenant with no completed sales and no returns may still choose any mode, so
+   * this never blocks initial configuration — only a change made too late.
+   */
+  private async assertInventoryModeTransitionIsSafe(
+    tenantId: string,
+    requested: InventoryMode | undefined,
+  ): Promise<void> {
+    if (requested === undefined) return;
+
+    const current = await this.getEffectiveProfile(tenantId);
+    if (current.inventoryMode === requested) return;
+
+    const counts = await this.repository.countInventoryAffectingTransactions(tenantId);
+    if (counts.sales === 0 && counts.returns === 0) return;
+
+    this.logger.warn(
+      `Refusing inventory mode change for tenant ${tenantId}: ` +
+        `${current.inventoryMode} → ${requested} with ${counts.sales} sale(s) and ` +
+        `${counts.returns} return(s) already recorded.`,
+    );
+    throw new UnsafeInventoryModeTransitionError(current.inventoryMode, requested, counts);
   }
 
   // ── resolution ─────────────────────────────────────────────────

@@ -339,6 +339,9 @@ describe('a tenant with NONE accounting', () => {
     const sale = await paidSale(other, otherOwner);
     const row = await prisma.sale.findUniqueOrThrow({ where: { id: sale.id } });
 
+    // POSITIVE first: the status is a real, specific value — not merely "one of
+    // three things it is not", which an undefined column would also satisfy.
+    expect(row.syncStatus).toBe('NOT_SYNCED');
     expect(row.syncStatus).not.toBe('SYNCED');
     expect(row.syncStatus).not.toBe('SYNCING');
     expect(row.syncStatus).not.toBe('FAILED');

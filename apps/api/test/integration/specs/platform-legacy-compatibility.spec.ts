@@ -256,9 +256,9 @@ describe('the profile influences accounting only, so far', () => {
    * Its stated purpose was to fail the day a provider was wired in, so that the
    * change had to be deliberate. Slice 6A adopted `AccountingProvider` in the sale
    * path — so the assertion now records the new, narrower truth: `accountingProvider`
-   * is honoured, `inventoryMode` is still not.
+   * is honoured. Updated again in Slice 6C-A, which adopted `inventoryMode` too.
    */
-  it('accountingProvider is now honoured, inventoryMode is still not', async () => {
+  it('accountingProvider and inventoryMode are both honoured now', async () => {
     await prisma.tenantBusinessProfile.create({
       data: {
         tenantId: tenant.tenantId,
@@ -279,9 +279,24 @@ describe('the profile influences accounting only, so far', () => {
     expect(sale.syncStatus).toBe('NOT_SYNCED');
     expect(await prisma.syncJob.count({ where: { entityId: sale.id } })).toBe(0);
 
-    // Still the Slice 6B tripwire: LOCAL inventory is not consulted, so stock moves
-    // exactly as it always has.
+    // Slice 6C-A: the quantity is unchanged, because LOCAL and QUICKBOOKS decrement
+    // the same column identically for a single-branch tenant — so `99` alone can no
+    // longer tell an adopted path from an unadopted one, and asserting only that
+    // would be a tripwire that passes for the wrong reason.
     expect(await onHand(tenant.productAId)).toBe(99);
+
+    // This is the discriminator: only a real `LocalInventoryProvider` refuses a
+    // tenant with two active branches, because `quantityOnHand` is not branch-scoped.
+    await prisma.branch.create({
+      data: { tenantId: tenant.tenantId, name: 'Second', code: 'SECOND', isActive: true },
+    });
+    await expect(
+      app.salesService.complete(tenant.tenantId, owner, {
+        branchId: tenant.branchId,
+        items: oneUnitOfA(),
+        payments: [{ method: 'CASH', amount: 1000 }],
+      }),
+    ).rejects.toThrow(/active branches/);
   });
 
   it('changing the profile never rewrites existing sales', async () => {

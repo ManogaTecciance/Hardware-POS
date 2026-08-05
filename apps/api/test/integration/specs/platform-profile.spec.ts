@@ -261,9 +261,24 @@ describe('an explicit Restaurant profile', () => {
       SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'
     `;
     const names = tables.map((row) => row.table_name);
-    for (const restaurantTable of ['RestaurantOrder', 'DiningTable', 'Menu', 'MenuItem', 'KitchenTicket']) {
+    for (const restaurantTable of [
+      'RestaurantOrder',
+      'OrderRound',
+      'DiningTable',
+      'DiningArea',
+      'RestaurantTable',
+      'Menu',
+      'MenuItem',
+      'KitchenTicket',
+      'BranchInventory',
+    ]) {
       expect(names).not.toContain(restaurantTable);
     }
+    // POSITIVE CONTROL (Slice 6C-A.5): the query really did return the schema, so
+    // the absences above are absences and not an empty result set.
+    expect(names).toContain('Sale');
+    expect(names).toContain('TenantBusinessProfile');
+    expect(names.length).toBeGreaterThan(20);
   });
 
   it('leaves the OTHER tenant on the legacy default', async () => {
@@ -725,6 +740,11 @@ describe('GET /platform/modules', () => {
       token: ownerToken(tile),
     });
 
-    expect(res.data.map((row) => row.moduleKey)).not.toContain(ModuleKey.DINING);
+    const keys = res.data.map((row) => row.moduleKey);
+    expect(keys).not.toContain(ModuleKey.DINING);
+    // POSITIVE CONTROL: the response really is this tenant's module list, so the
+    // absence above means "not enabled here" rather than "empty response".
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys).toContain(ModuleKey.RETAIL_POS);
   });
 });
