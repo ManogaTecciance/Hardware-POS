@@ -74,6 +74,16 @@ export class QuickBooksReturnsSyncService {
     if (ret.status !== 'COMPLETED') {
       throw new BadRequestException('Only completed returns can be synced to QuickBooks');
     }
+    // Fail closed (Slice 6B). A return with no external document type belongs to a
+    // tenant with no accounting provider — there is nothing for QuickBooks to
+    // create, and `mockSync` below would otherwise happily invent a `QBO-CM-…` id
+    // and mark it SYNCED. Unreachable today because such a return never gets a
+    // SyncJob, so the worker never sees it; this is the second lock on the door.
+    if (ret.quickbooksDocumentType === null) {
+      throw new BadRequestException(
+        `Return ${ret.returnNumber} has no external accounting document and cannot be synced to QuickBooks`,
+      );
+    }
 
     // Idempotency: don't create a duplicate document for an already-synced return.
     if (ret.syncStatus === 'SYNCED' && ret.quickbooksDocumentId) {
@@ -228,11 +238,32 @@ export class QuickBooksReturnsSyncService {
 
   // ── persistence ────────────────────────────────────────────────────────────
 
+  /**
+   * Record an external success — the return-side equivalent of
+   * `sales.repository.markSynced`, and hardened the same way in Slice 6B.
+   *
+   * Validates before any write, so a rejected call leaves the return exactly as it
+   * was: still completed, still unsynced, with no fabricated identifier and no
+   * `SYNCED` status it did not earn. A blank document id is refused rather than
+   * stored, because `RefundPayment.quickbooksPaymentId` is set from the same value
+   * and an empty external reference is indistinguishable from a real one later.
+   */
   private async persistSuccess(
     ret: ReturnWithSyncRelations,
     documentId: string,
     attempt: number,
   ): Promise<void> {
+    if (!documentId || documentId.trim().length === 0) {
+      throw new BadRequestException(
+        `Cannot mark return ${ret.returnNumber} synced: QuickBooks returned no document id`,
+      );
+    }
+    if (ret.quickbooksDocumentType === null) {
+      throw new BadRequestException(
+        `Cannot mark return ${ret.returnNumber} synced: it has no external accounting document`,
+      );
+    }
+
     await this.prisma.$transaction(async (tx) => {
       await tx.return.update({
         where: { id: ret.id },

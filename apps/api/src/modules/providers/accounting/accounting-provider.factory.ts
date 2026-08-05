@@ -4,6 +4,12 @@ import { AccountingProviderKind } from '@hardware-pos/database';
 import { BusinessProfileService } from '../../platform/business-profile.service';
 import { UnsupportedAccountingProviderError } from '../provider.errors';
 import { AccountingProvider } from './accounting-provider';
+import {
+  ReturnAccountingFacts,
+  SaleAccountingFacts,
+  returnAccountingProvenance,
+  saleAccountingProvenance,
+} from './accounting-provenance';
 import { NoAccountingProvider } from './no-accounting.provider';
 import { QuickBooksAccountingProvider } from './quickbooks-accounting.provider';
 
@@ -43,6 +49,26 @@ export class AccountingProviderFactory {
   async forTenant(tenantId: string): Promise<AccountingProvider> {
     const profile = await this.businessProfile.getEffectiveProfile(tenantId);
     return this.forProvider(profile.accountingProvider);
+  }
+
+  /**
+   * The provider a **completed sale** was filed under, for operations that reverse
+   * or amend it.
+   *
+   * Deliberately does not consult `TenantBusinessProfile`. A tenant that switches
+   * accounting providers still has sales sitting in the old one, and a return has
+   * to go back to where the money was booked. See `accounting-provenance.ts`.
+   */
+  forSale(sale: SaleAccountingFacts): AccountingProvider {
+    return this.forProvider(saleAccountingProvenance(sale));
+  }
+
+  /**
+   * The provider a **persisted return** was filed under — for retrying or
+   * inspecting a return without re-loading its original sale.
+   */
+  forReturn(ret: ReturnAccountingFacts): AccountingProvider {
+    return this.forProvider(returnAccountingProvenance(ret));
   }
 
   /** The provider for an explicit kind. */

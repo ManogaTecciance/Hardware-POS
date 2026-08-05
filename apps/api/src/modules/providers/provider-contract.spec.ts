@@ -192,17 +192,17 @@ describe('no provider starts its own transaction', () => {
 // Slice 5 inertness
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Slice 6A adopted the sale path, and only the sale path', () => {
+describe('Slice 6B adopted the sale and return paths, and only those', () => {
   /**
-   * Updated in Slice 6A. Through Slice 5.5 this block asserted total inertness —
-   * that nothing outside `providers/` referenced a provider at all. Slice 6A ends
-   * that for the completed-sale workflow by design, so the block now pins the new
-   * boundary instead of the old one. Everything still on the forbidden list is a
-   * Slice 6B/6C decision that has not been taken.
+   * Updated in Slice 6B. Through Slice 5.5 this block asserted total inertness —
+   * that nothing outside `providers/` referenced a provider at all. Slice 6A ended
+   * that for the completed-sale workflow and Slice 6B for the completed-return
+   * workflow, both by design, so the block pins the current boundary rather than
+   * the old one. Everything still on the forbidden list is a Slice 6C decision
+   * that has not been taken — above all `InventoryProvider`, which no call site
+   * has adopted anywhere.
    */
   const NOT_YET_ADOPTED = [
-    'modules/returns/returns.service.ts',
-    'modules/returns/returns.repository.ts',
     'modules/products/products.service.ts',
     'modules/quotations/quotations.service.ts',
     'modules/payments/payments.service.ts',
@@ -221,15 +221,37 @@ describe('Slice 6A adopted the sale path, and only the sale path', () => {
     expect(source).not.toContain('providers/');
   });
 
-  it('the sale path uses the ACCOUNTING provider only — inventory is untouched', () => {
-    const service = readFileSync(resolve(API_SRC, 'modules/sales/sales.service.ts'), 'utf8');
+  it.each([
+    'modules/sales/sales.service.ts',
+    'modules/returns/returns.service.ts',
+  ])('%s uses the ACCOUNTING provider only — inventory is untouched', (file) => {
+    const service = readFileSync(resolve(API_SRC, file), 'utf8');
 
     expect(service).toContain('AccountingProviderFactory');
-    // Slice 6B's job. Adopting it here would silently change how stock moves.
+    // Slice 6C's job. Adopting it here would silently change how stock moves.
     expect(service).not.toContain('InventoryProvider');
-    expect(readFileSync(resolve(API_SRC, 'modules/sales/sales.repository.ts'), 'utf8')).not.toContain(
-      'InventoryProvider',
-    );
+  });
+
+  it.each([
+    'modules/sales/sales.repository.ts',
+    'modules/returns/returns.repository.ts',
+  ])('%s takes accounting as a callback and imports no provider', (file) => {
+    const repository = readFileSync(resolve(API_SRC, file), 'utf8');
+
+    // The repository still owns the transaction but no longer picks the
+    // destination: it never constructs or resolves a provider.
+    expect(repository).not.toContain('InventoryProvider');
+    expect(repository).not.toContain('AccountingProviderFactory');
+    expect(repository).toContain('AccountingSubmissionResult');
+  });
+
+  it('the RETURN repository still restocks locally — inventory is not adopted', () => {
+    // The seam Slice 6C replaces on the return side. While this is here, return
+    // stock restoration is unchanged.
+    const repository = readFileSync(resolve(API_SRC, 'modules/returns/returns.repository.ts'), 'utf8');
+    expect(repository).toContain("it.itemCondition === 'GOOD'");
+    expect(repository).toContain("it.stockDisposition === 'RETURN_TO_STOCK'");
+    expect(repository).toMatch(/quantityOnHand: \{ increment: Number\(it\.returnQuantity\) \}/);
   });
 
   it('the sale repository still decrements stock itself', () => {
@@ -239,7 +261,7 @@ describe('Slice 6A adopted the sale path, and only the sale path', () => {
     expect(repository).toMatch(/quantityOnHand: \{ gte: qty \}/);
   });
 
-  it('ProvidersModule is imported by exactly one module — the narrowest that needs it', () => {
+  it('ProvidersModule is imported only by the modules that resolve a provider', () => {
     const importers: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -257,10 +279,13 @@ describe('Slice 6A adopted the sale path, and only the sale path', () => {
     walk(API_SRC);
 
     // Not AppModule, and not every feature module "because it is live now".
-    expect(importers).toEqual(['modules/sales/sales.module.ts']);
+    expect(importers.sort()).toEqual([
+      'modules/returns/returns.module.ts',
+      'modules/sales/sales.module.ts',
+    ]);
   });
 
-  it('only the sales module imports from the providers directory', () => {
+  it('only the sales and returns modules import from the providers directory', () => {
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -279,6 +304,11 @@ describe('Slice 6A adopted the sale path, and only the sale path', () => {
     walk(API_SRC);
 
     expect(offenders.sort()).toEqual([
+      'modules/returns/customer-return-document.spec.ts',
+      'modules/returns/returns.module.ts',
+      'modules/returns/returns.repository.ts',
+      'modules/returns/returns.service.spec.ts',
+      'modules/returns/returns.service.ts',
       'modules/sales/sales.module.ts',
       'modules/sales/sales.repository.ts',
       'modules/sales/sales.service.ts',
@@ -376,11 +406,30 @@ describe('customer document renderers do not depend on external accounting metad
 
   it('the return receipt label has a local-semantics fallback for null', () => {
     const service = readFileSync(resolve(API_SRC, 'modules/returns/returns.service.ts'), 'utf8');
-    // Both QuickBooks branches are explicit, and the fallback uses refundMethod —
-    // a local fact — rather than letting a null land on "Refund Receipt" by accident.
+    // Both QuickBooks branches stay explicit, so their wording cannot move.
     expect(service).toContain("=== 'CREDIT_MEMO'");
     expect(service).toContain("=== 'REFUND_RECEIPT'");
-    expect(service).toContain("refundMethod === 'STORE_CREDIT'");
+    // Slice 6B: the fallback is the shared local resolver rather than an inline
+    // ternary, so the label and the API's `documentKind` cannot drift apart.
+    expect(service).toContain('customerReturnDocumentLabel(');
+    expect(service).toContain('resolveCustomerReturnDocumentKind(');
+  });
+
+  it('the local return-document resolver reads no external accounting metadata', () => {
+    const module = readFileSync(
+      resolve(API_SRC, 'modules/returns/customer-return-document.ts'),
+      'utf8',
+    );
+    // Just the resolver body: `customerReturnDocumentKindOf` further down names
+    // CREDIT_MEMO on purpose — it exists to state QuickBooks' rule for comparison.
+    const code = codeOnly(module);
+    const start = code.indexOf('export function resolveCustomerReturnDocumentKind');
+    const decision = code.slice(start, code.indexOf('export function', start + 1));
+    expect(decision).toContain('CustomerReturnDocumentKind.CREDIT_NOTE');
+    // The decision reads a refund method and a payment status. It must not consult
+    // the QuickBooks document type, or it would be the old rule wearing a new name.
+    expect(decision).not.toContain('quickbooksDocumentType');
+    expect(decision).not.toContain('CREDIT_MEMO');
   });
 });
 

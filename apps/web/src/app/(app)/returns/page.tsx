@@ -190,7 +190,19 @@ export default function ReturnsPage() {
                       <ReturnStatusBadge status={r.status} />
                     </td>
                     <td className="px-4 py-3">
-                      <SyncBadge status={r.syncStatus} />
+                      {/*
+                        A QuickBooks sync status only means something for a return
+                        that was filed with QuickBooks. A tenant with no accounting
+                        provider sees their local document kind instead of a
+                        permanent "Not synced".
+                      */}
+                      {r.quickbooksDocumentType ? (
+                        <SyncBadge status={r.syncStatus} />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          {r.documentKind === 'CREDIT_NOTE' ? 'Credit note' : 'Refund receipt'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <Link href={`/returns/${r.id}`}>

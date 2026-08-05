@@ -113,6 +113,13 @@ export default function ReturnDetailPage() {
   if (!ret) return null;
 
   const remaining = ret.originalSale.total - ret.originalSale.returnedAmount;
+  /**
+   * Whether this return was filed with an external accounting system. Derived from
+   * the stored document type, the same evidence the server resolves provenance
+   * from — so the UI cannot show a QuickBooks control for a return QuickBooks
+   * never received, and the API would refuse it anyway.
+   */
+  const hasExternalAccounting = ret.quickbooksDocumentType !== null;
 
   return (
     <div className="space-y-6">
@@ -140,7 +147,7 @@ export default function ReturnDetailPage() {
           <Button variant="outline" onClick={printA4Note} disabled={busy}>
             <FileDown className="h-4 w-4" /> A4 note
           </Button>
-          {ret.syncStatus === 'FAILED' ? (
+          {hasExternalAccounting && ret.syncStatus === 'FAILED' ? (
             <Button variant="outline" onClick={retrySync} disabled={busy}>
               <RefreshCw className="h-4 w-4" /> Retry sync
             </Button>
@@ -151,11 +158,25 @@ export default function ReturnDetailPage() {
       <div className="flex flex-wrap items-center gap-2">
         <ReturnStatusBadge status={ret.status} />
         <RefundStatusBadge status={ret.refundStatus} />
-        <SyncBadge status={ret.syncStatus} />
-        {ret.quickbooksDocumentType ? (
-          <Badge variant="primary">
-            {ret.quickbooksDocumentType === 'CREDIT_MEMO' ? 'Credit Memo' : 'Refund Receipt'}
-          </Badge>
+        {/*
+          `SyncBadge` reads "Synced"/"Not synced"/"Sync failed", all of which mean
+          QuickBooks here, and the badge beside it is the QuickBooks document name.
+          A tenant with no accounting provider has neither, so both are suppressed
+          rather than shown as a status about a system they do not use. A QuickBooks
+          tenant always has a document type, so their header is unchanged.
+
+          No LOCAL document badge is substituted: the detail endpoint returns the
+          raw return row and does not carry `documentKind` (see Slice 6B report,
+          Known limitations). The customer-facing thermal document does carry the
+          correct local label, resolved server-side.
+        */}
+        {hasExternalAccounting ? (
+          <>
+            <SyncBadge status={ret.syncStatus} />
+            <Badge variant="primary">
+              {ret.quickbooksDocumentType === 'CREDIT_MEMO' ? 'Credit Memo' : 'Refund Receipt'}
+            </Badge>
+          </>
         ) : null}
       </div>
 

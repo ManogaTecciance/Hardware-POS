@@ -31,6 +31,7 @@ export enum ProviderErrorCode {
   INVALID_BRANCH_CONTEXT = 'PROVIDER_INVALID_BRANCH_CONTEXT',
   PROVIDER_CONFIGURATION_MISSING = 'PROVIDER_CONFIGURATION_MISSING',
   PROVIDER_OPERATION_UNAVAILABLE = 'PROVIDER_OPERATION_UNAVAILABLE',
+  AMBIGUOUS_ACCOUNTING_PROVENANCE = 'PROVIDER_ACCOUNTING_PROVENANCE_AMBIGUOUS',
 }
 
 /**
@@ -155,6 +156,34 @@ export class ProviderOperationUnavailableError extends ProviderError {
       ProviderErrorCode.PROVIDER_OPERATION_UNAVAILABLE,
       `${providerName} does not support '${operation}'`,
       HttpStatus.NOT_IMPLEMENTED,
+    );
+  }
+}
+
+/**
+ * A persisted sale or return whose stored accounting evidence cannot be read as
+ * one provider.
+ *
+ * Raised instead of falling back to the tenant's *current* profile, which is the
+ * specific mistake this error exists to prevent: a return must reverse the entry
+ * where the original sale was actually filed, not wherever the tenant happens to
+ * be configured now.
+ *
+ * 409 rather than 400 or 500: the request is well-formed and the server is
+ * healthy — the stored row is in a state no valid workflow produces, and it is
+ * fixed by correcting the data, not by retrying.
+ *
+ * Names only the entity, its id, and the contradiction. No token, no realm id, no
+ * connection state.
+ */
+export class AmbiguousAccountingProvenanceError extends ProviderError {
+  constructor(entity: 'sale' | 'return', entityId: string, detail: string) {
+    super(
+      ProviderErrorCode.AMBIGUOUS_ACCOUNTING_PROVENANCE,
+      `Cannot determine which accounting system ${entity} ${entityId} belongs to: ${detail}. ` +
+        'Refusing to guess, because the wrong choice would either duplicate or omit a ' +
+        'financial entry.',
+      HttpStatus.CONFLICT,
     );
   }
 }

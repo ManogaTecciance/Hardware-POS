@@ -1,6 +1,9 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 import { ReturnsService } from './returns.service';
+import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
+import { NoAccountingProvider } from '../providers/accounting/no-accounting.provider';
+import { QuickBooksAccountingProvider } from '../providers/accounting/quickbooks-accounting.provider';
 import type { ReturnsRepository } from './returns.repository';
 import type { SettingsService } from '../settings/settings.service';
 import type { AuthService } from '../auth/auth.service';
@@ -23,6 +26,13 @@ function makeSale(overrides: Partial<Record<string, unknown>> = {}) {
     paidAmount: 400,
     returnedAmount: 0,
     paymentStatus: 'PAID',
+    // Accounting provenance. Every completed sale carries these — the field was
+    // non-nullable before Slice 6A, and 317 of 317 rows in the development
+    // database have a document type. The fixture simply omitted them; Slice 6B
+    // reads them to decide which accounting system a return must reverse.
+    quickbooksDocumentType: 'SALES_RECEIPT',
+    quickbooksDocumentId: null,
+    syncStatus: 'PENDING',
     completedAt: new Date(),
     createdAt: new Date(),
     customer: null,
@@ -74,7 +84,17 @@ function makeService(repo: Partial<ReturnsRepository>) {
   } as unknown as AuthService;
   const jwt = { signAsync: jest.fn(), verify: jest.fn() } as never;
   const syncQueue = { requeueReturn: jest.fn() } as never;
-  return new ReturnsService(repo as ReturnsRepository, settings, auth, jwt, syncQueue);
+  // The real factory, wired to the real providers: these tests assert the QuickBooks
+  // document decision, so stubbing the provider would assert the stub. Only
+  // `BusinessProfileService` is absent, and deliberately — `forSale` resolves from
+  // the sale's own provenance and must never reach the tenant profile. If it ever
+  // did, the `null` here would throw and the test would say so.
+  const accounting = new AccountingProviderFactory(
+    null as never,
+    new QuickBooksAccountingProvider(syncQueue, null as never),
+    new NoAccountingProvider(),
+  );
+  return new ReturnsService(repo as ReturnsRepository, settings, auth, jwt, syncQueue, accounting);
 }
 
 const goodItem = {

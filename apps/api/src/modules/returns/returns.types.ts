@@ -10,6 +10,8 @@ import {
   UserRole,
 } from '@hardware-pos/database';
 
+import { CustomerReturnDocumentKind } from './customer-return-document';
+
 /** Signed inside the short-lived return-approval token. */
 export interface ReturnApprovalTokenPayload {
   typ: 'return-approval';
@@ -91,7 +93,14 @@ export interface ReturnPreview {
   approvalReasons: string[];
   suggestedRefundMethod: PaymentMethod | null;
   allowedRefundMethods: PaymentMethod[];
-  quickbooksDocumentType: QuickBooksReturnDocumentType;
+  /**
+   * The external accounting document, or `null` for a tenant with no accounting
+   * provider. Integration metadata — never the authority for what the customer is
+   * handed; that is {@link documentKind}.
+   */
+  quickbooksDocumentType: QuickBooksReturnDocumentType | null;
+  /** The customer-facing document, decided from local financial facts. */
+  documentKind: CustomerReturnDocumentKind;
 }
 
 /** A flattened row for the Returns list (money as numbers). */
@@ -110,6 +119,15 @@ export interface ReturnListItem {
   status: ReturnStatus;
   refundStatus: RefundStatus;
   syncStatus: SyncStatus;
+  /**
+   * The external accounting document, or `null` for a tenant with no accounting
+   * provider. Exposed so the list can tell "no external accounting" apart from
+   * "not pushed yet" and suppress the sync column for the former, instead of
+   * showing every restaurant tenant a QuickBooks status they have no use for.
+   */
+  quickbooksDocumentType: QuickBooksReturnDocumentType | null;
+  /** The customer-facing document, decided from local financial facts. */
+  documentKind: CustomerReturnDocumentKind;
 }
 
 export interface ReturnsListFilter {
@@ -165,6 +183,13 @@ export interface PersistReturnInput {
   refundMethod: PaymentMethod;
   refundReference: string | null;
   refundMetadata: Record<string, unknown> | null;
-  quickbooksDocumentType: QuickBooksReturnDocumentType;
+  /** `null` when the tenant's accounting provider files nothing externally. */
+  quickbooksDocumentType: QuickBooksReturnDocumentType | null;
+  /**
+   * Persisted verbatim rather than hardcoded to `PENDING`. A return with no
+   * external document has nothing pending, and leaving it `PENDING` would show a
+   * QuickBooks push that is never going to happen.
+   */
+  syncStatus: SyncStatus;
   items: PersistReturnItem[];
 }

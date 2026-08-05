@@ -20,7 +20,7 @@
  * Slice 6 has to adopt.
  */
 
-import { InventoryMode } from '@hardware-pos/database';
+import { InventoryMode, PaymentStatus } from '@hardware-pos/database';
 
 /**
  * Who the operation is for.
@@ -123,8 +123,16 @@ export interface SaleFinancialShape {
 
 /** The facts needed to choose a return document. */
 export interface ReturnFinancialShape {
-  /** Payment status of the ORIGINAL sale being returned against. */
-  originalPaymentStatus: 'UNPAID' | 'PARTIAL' | 'PAID';
+  /**
+   * Payment status of the ORIGINAL sale being returned against.
+   *
+   * The full `PaymentStatus`, including `REFUNDED`, because this is read off a
+   * persisted sale rather than computed in-flight like {@link SaleFinancialShape}.
+   * Widened in Slice 6B so the adoption needed no cast — `resolveQboDocType`
+   * already took the whole enum and compared it against `PAID`, so every status
+   * other than `PAID` behaves exactly as it did.
+   */
+  originalPaymentStatus: PaymentStatus;
   /** How the refund is being given back. */
   refundMethod: string;
 }

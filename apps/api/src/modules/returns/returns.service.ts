@@ -7,12 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import {
-  PaymentMethod,
-  Prisma,
-  QuickBooksReturnDocumentType,
-  UserRole,
-} from '@hardware-pos/database';
+import { PaymentMethod, Prisma, UserRole } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
 import { round2 } from '../../common/money';
@@ -20,10 +15,18 @@ import { paginate } from '../../common/pagination';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { AuthService } from '../auth/auth.service';
 import { Permission, roleHasPermission } from '../auth/permissions';
+import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
+import { AccountingProvider } from '../providers/accounting/accounting-provider';
+import { ProviderOperationUnavailableError } from '../providers/provider.errors';
 import { SettingsService } from '../settings/settings.service';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
+import {
+  customerReturnDocumentLabel,
+  resolveCustomerReturnDocumentKind,
+} from './customer-return-document';
 import { computeReturnLine, sumReturnTotals, type ComputedReturnLine } from './returns.calc';
 import {
+  PostReturnAccounting,
   ReturnListRow,
   ReturnWithRelations,
   ReturnsRepository,
@@ -74,7 +77,21 @@ export class ReturnsService {
     private readonly authService: AuthService,
     private readonly jwtService: JwtService,
     private readonly syncQueue: SyncQueueService,
+    private readonly accountingProviders: AccountingProviderFactory,
   ) {}
+
+  /**
+   * The accounting provider that owns this sale's financial record.
+   *
+   * Resolved from the sale's own stored evidence, never from the tenant's current
+   * `TenantBusinessProfile`: a return has to reverse the entry where the sale was
+   * actually filed. A tenant that moved from QuickBooks to NONE still has sales in
+   * QuickBooks that must be credited there, and a tenant that moved the other way
+   * must not have credit notes pushed for sales QuickBooks never recorded.
+   */
+  private accountingFor(sale: SaleForReturn): AccountingProvider {
+    return this.accountingProviders.forSale(sale);
+  }
 
   // ── sale eligibility / returnable items ────────────────────────────────────
 
@@ -144,6 +161,10 @@ export class ReturnsService {
       actor.role,
     );
 
+    // The same provider the completion will use, resolved from the same evidence,
+    // so a preview can never advertise a document the completion will not produce.
+    const accounting = this.accountingFor(sale);
+
     return {
       originalSaleId: sale.id,
       saleNumber: sale.saleNumber,
@@ -158,7 +179,14 @@ export class ReturnsService {
       approvalReasons: reasons,
       suggestedRefundMethod: this.suggestRefundMethod(sale),
       allowedRefundMethods: this.allowedRefundMethods(settings.returns),
-      quickbooksDocumentType: this.resolveQboDocType(sale, refundMethod),
+      quickbooksDocumentType: accounting.resolveReturnDocumentType({
+        originalPaymentStatus: sale.paymentStatus,
+        refundMethod,
+      }).documentType,
+      documentKind: resolveCustomerReturnDocumentKind({
+        refundMethod,
+        originalPaymentStatus: sale.paymentStatus,
+      }),
     };
   }
 
@@ -239,32 +267,54 @@ export class ReturnsService {
       ? await this.verifyApprovalToken(tenantId, dto.originalSaleId, refundTotal, dto.approvalToken, reasons)
       : null;
 
-    const quickbooksDocumentType = this.resolveQboDocType(sale, dto.refundMethod);
+    // One provider for the whole operation: the document decision below and the
+    // submission inside the transaction come from the same resolved instance, so
+    // they cannot disagree.
+    const accounting = this.accountingFor(sale);
+    const quickbooksDocumentType = accounting.resolveReturnDocumentType({
+      originalPaymentStatus: sale.paymentStatus,
+      refundMethod: dto.refundMethod,
+    }).documentType;
+
+    const postAccounting: PostReturnAccounting = (tx, returnId) =>
+      accounting.postReturn(
+        tx,
+        { tenantId, branchId: sale.branchId },
+        returnId,
+        quickbooksDocumentType,
+      );
 
     let created: ReturnWithRelations;
     try {
-      created = await this.repo.createCompleted({
-        tenantId,
-        branchId: sale.branchId,
-        registerId: sale.registerId,
-        originalSaleId: sale.id,
-        customerId: sale.customerId,
-        createdByUserId: actor.id,
-        approvedByUserId,
-        approvalToken: requiresApproval ? (dto.approvalToken ?? null) : null,
-        idempotencyKey: key ?? null,
-        notes: dto.notes?.trim() || null,
-        subtotal: computed.totals.subtotal,
-        productDiscountAdjustment: computed.totals.productDiscountAdjustment,
-        orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
-        taxAdjustment: computed.totals.taxAdjustment,
-        refundTotal,
-        refundMethod: dto.refundMethod,
-        refundReference: dto.refundReference?.trim() || null,
-        refundMetadata: dto.refundMetadata ?? null,
-        quickbooksDocumentType,
-        items: computed.persistItems,
-      });
+      created = await this.repo.createCompleted(
+        {
+          tenantId,
+          branchId: sale.branchId,
+          registerId: sale.registerId,
+          originalSaleId: sale.id,
+          customerId: sale.customerId,
+          createdByUserId: actor.id,
+          approvedByUserId,
+          approvalToken: requiresApproval ? (dto.approvalToken ?? null) : null,
+          idempotencyKey: key ?? null,
+          notes: dto.notes?.trim() || null,
+          subtotal: computed.totals.subtotal,
+          productDiscountAdjustment: computed.totals.productDiscountAdjustment,
+          orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
+          taxAdjustment: computed.totals.taxAdjustment,
+          refundTotal,
+          refundMethod: dto.refundMethod,
+          refundReference: dto.refundReference?.trim() || null,
+          refundMetadata: dto.refundMetadata ?? null,
+          quickbooksDocumentType,
+          // No external document means nothing is pending. Leaving this `PENDING`
+          // would show a QuickBooks push that is never going to happen, and would
+          // leave the return permanently "waiting for QuickBooks".
+          syncStatus: quickbooksDocumentType === null ? 'NOT_SYNCED' : 'PENDING',
+          items: computed.persistItems,
+        },
+        postAccounting,
+      );
     } catch (err) {
       // Unique-key race on idempotency: return the winner instead of failing.
       if (
@@ -330,7 +380,20 @@ export class ReturnsService {
     return this.issueReceipt(tenantId, ret, userId);
   }
 
-  retrySync(tenantId: string, id: string): Promise<{ id: string; syncStatus: string }> {
+  /**
+   * Re-queue a failed external push.
+   *
+   * Gated on the return's own provenance rather than the tenant's current profile.
+   * A return with no external accounting document has nothing to retry: there is
+   * no `SyncJob` to requeue and no external system that ever received it, so this
+   * refuses instead of producing a confusing "no sync job found" from the queue.
+   */
+  async retrySync(tenantId: string, id: string): Promise<{ id: string; syncStatus: string }> {
+    const ret = await this.getById(tenantId, id);
+    const accounting = this.accountingProviders.forReturn(ret);
+    if (accounting.provider !== 'QUICKBOOKS') {
+      throw new ProviderOperationUnavailableError(accounting.name, 'retrying an external sync');
+    }
     return this.syncQueue.requeueReturn(tenantId, id);
   }
 
@@ -608,17 +671,21 @@ export class ReturnsService {
   private toReceiptData(ret: ReturnWithRelations, footer: string): ReturnReceiptData {
     // `quickbooksDocumentType` is external-integration metadata and is null for a
     // tenant with no accounting provider. The two explicit branches keep today's
-    // QuickBooks wording byte-identical; the fallback derives the customer-facing
-    // label from LOCAL semantics — money back is a refund, store credit is a credit
-    // note — so a null never silently prints "Refund Receipt" on a credit note.
+    // QuickBooks wording byte-identical — a QuickBooks return always has a document
+    // type, so its label never comes from the local resolver. The fallback is the
+    // Slice 6B local decision, so a null never silently prints "Refund Receipt" on
+    // a return where no money moved.
     const documentTypeLabel =
       ret.quickbooksDocumentType === 'CREDIT_MEMO'
         ? 'Credit Memo'
         : ret.quickbooksDocumentType === 'REFUND_RECEIPT'
           ? 'Refund Receipt'
-          : ret.refundMethod === 'STORE_CREDIT'
-            ? 'Credit Note'
-            : 'Refund Receipt';
+          : customerReturnDocumentLabel(
+              resolveCustomerReturnDocumentKind({
+                refundMethod: ret.refundMethod,
+                originalPaymentStatus: ret.originalSale.paymentStatus,
+              }),
+            );
     const remaining = round2(Number(ret.originalSale.total) - Number(ret.originalSale.returnedAmount));
     return {
       storeName: ret.tenant.name,
@@ -672,12 +739,12 @@ export class ReturnsService {
       .filter((m) => settings.allowStoreCredit || m !== 'STORE_CREDIT') as PaymentMethod[];
   }
 
-  private resolveQboDocType(sale: SaleForReturn, refundMethod: PaymentMethod): QuickBooksReturnDocumentType {
-    // Store / customer credit is always a Credit Memo; a fully-paid sale refunded
-    // by cash/card/bank is a Refund Receipt; credit / partial sales are Credit Memos.
-    if (refundMethod === 'STORE_CREDIT') return 'CREDIT_MEMO';
-    return sale.paymentStatus === 'PAID' ? 'REFUND_RECEIPT' : 'CREDIT_MEMO';
-  }
+  // `resolveQboDocType` used to live here. Its rule — STORE_CREDIT → CREDIT_MEMO,
+  // otherwise a fully-paid sale → REFUND_RECEIPT and anything else → CREDIT_MEMO —
+  // now lives in `QuickBooksAccountingProvider.resolveReturnDocumentType`,
+  // unchanged. It was moved rather than rewritten, and
+  // `return-accounting-adoption.spec.ts` pins the two against each other across
+  // every payment-status × refund-method pair.
 }
 
 /** PaymentMethod enum values as a plain object (Prisma enums are type-only at runtime). */
@@ -707,6 +774,11 @@ function toReturnListItem(row: ReturnListRow): ReturnListItem {
     status: row.status,
     refundStatus: row.refundStatus,
     syncStatus: row.syncStatus,
+    quickbooksDocumentType: row.quickbooksDocumentType,
+    documentKind: resolveCustomerReturnDocumentKind({
+      refundMethod: row.refundMethod,
+      originalPaymentStatus: row.originalSale.paymentStatus,
+    }),
   };
 }
 
