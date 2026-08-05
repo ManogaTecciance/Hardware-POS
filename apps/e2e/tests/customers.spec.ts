@@ -40,9 +40,17 @@ test.describe('CUST — Customers', () => {
   });
 
   test('CUST-010 search across fields', async ({ ownerApi }) => {
+    // The phone must be UNIQUE per run. It used to be the literal '0771234567',
+    // which every run reused: once 20+ customers shared it the new one fell off
+    // page 1 and the test failed permanently — and it accumulated one more each
+    // run, so it was guaranteed to break eventually. It measured pagination, not
+    // search. A unique number tests what the name says.
     const tag = uniq('Findable');
-    const c = await ownerApi.createCustomer({ name: tag, phone: '0771234567' });
-    const res = await ownerApi.get(`/customers?page=1&pageSize=20&search=${encodeURIComponent('0771234567')}`);
+    const phone = `077${String(Date.now()).slice(-7)}`;
+    const c = await ownerApi.createCustomer({ name: tag, phone });
+    const res = await ownerApi.get(
+      `/customers?page=1&pageSize=20&search=${encodeURIComponent(phone)}`,
+    );
     expect(res.items.map((x: any) => x.id)).toContain(c.id);
   });
 });

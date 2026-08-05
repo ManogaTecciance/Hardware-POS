@@ -1,18 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft, Pencil, RefreshCw } from 'lucide-react';
 
 import { ProductImage } from '@/components/product-image';
 
-import { SyncBadge } from '@/components/quickbooks/sync-badge';
+import { ProductStatusBadge } from '@/components/products/product-status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
+import { useEffectiveProfile } from '@/lib/platform-profile';
+import { resolveProductManagementPresentation } from '@/lib/products/product-presentation';
 import {
   fetchProduct,
   resolveImageUrl,
@@ -26,6 +28,8 @@ export default function ProductDetailPage() {
   const canManage = hasPermission(Permission.PRODUCT_MANAGE);
   const canSyncQb = hasPermission(Permission.QUICKBOOKS_MANAGE);
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const { inventoryMode, status: profileStatus } = useEffectiveProfile();
 
   const [product, setProduct] = React.useState<ManagedProduct | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -59,7 +63,12 @@ export default function ProductDetailPage() {
     }
   };
 
-  if (loading) return <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>;
+  // Waits for the profile too: the sync button and the QuickBooks details below are
+  // mode-dependent, and drawing them before the mode is known is the flash this
+  // slice exists to remove.
+  if (loading || profileStatus === 'loading') {
+    return <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>;
+  }
 
   if (error || !product) {
     return (
@@ -74,6 +83,16 @@ export default function ProductDetailPage() {
     );
   }
 
+  const presentation = resolveProductManagementPresentation({
+    inventoryMode,
+    syncStatus: product.syncStatus,
+    quickbooksItemId: product.quickbooksItemId,
+  });
+
+  // The form only appends `?saved=1` when the resolver supplies wording, but the
+  // message is resolved here too so a hand-typed URL cannot invent one.
+  const savedMessage = searchParams.get('saved') === '1' ? presentation.saveMessage : null;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -85,7 +104,7 @@ export default function ProductDetailPage() {
           <p className="text-sm text-muted-foreground">{product.sku ?? 'No SKU'}</p>
         </div>
         <div className="flex items-center gap-2">
-          {canSyncQb && !product.quickbooksItemId ? (
+          {presentation.showSyncActions && canSyncQb && !product.quickbooksItemId ? (
             <Button variant="outline" onClick={handleSync} disabled={busy}>
               <RefreshCw className="h-4 w-4" />
               Sync to QuickBooks
@@ -100,14 +119,25 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
+      {/* Mode-aware save confirmation. Only reaches here when the resolver supplies
+          wording, so the QuickBooks screen keeps its existing silent redirect. */}
+      {savedMessage ? (
+        <p role="status" className="text-sm text-success">
+          {savedMessage}
+        </p>
+      ) : null}
+      {presentation.warning ? (
+        <p role="status" className="text-sm text-warning">
+          {presentation.warning}
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2">
         {product.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}
-        {product.quickbooksItemId ? (
-          <Badge variant="primary">QuickBooks-managed</Badge>
-        ) : (
-          <Badge variant="neutral">Local (not synced)</Badge>
-        )}
-        <SyncBadge status={product.syncStatus} />
+        {presentation.sourceDetailLabel ? (
+          <Badge variant={presentation.sourceBadgeKind}>{presentation.sourceDetailLabel}</Badge>
+        ) : null}
+        <ProductStatusBadge presentation={presentation} syncStatus={product.syncStatus} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
@@ -131,22 +161,42 @@ export default function ProductDetailPage() {
             <Detail label="Sales price/rate" value={formatMoney(product.unitPrice)} />
             <Detail label="Purchase cost" value={product.costPrice != null ? formatMoney(product.costPrice) : '—'} />
             <Detail label="Purchase description" value={product.purchaseDescription ?? '—'} />
-            <Detail
-              label="Quantity on hand"
-              value={product.type === 'Inventory' ? String(product.quantityOnHand) : 'Not tracked'}
-            />
-            <Detail
-              label="Quantity as of date"
-              value={product.quantityAsOfDate ? product.quantityAsOfDate.slice(0, 10) : '—'}
-            />
-            <Detail label="Reorder point" value={product.reorderLevel != null ? String(product.reorderLevel) : '—'} />
-            <Detail label="Income account" value={product.incomeAccount ?? 'Auto-assigned on sync'} />
-            <Detail label="Expense account" value={product.expenseAccount ?? 'Auto-assigned on sync'} />
-            <Detail
-              label="Inventory asset account"
-              value={product.type === 'Inventory' ? (product.inventoryAssetAccount ?? 'Auto-assigned on sync') : '—'}
-            />
-            <Detail label="QuickBooks item ID" value={product.quickbooksItemId ?? 'Not synced'} />
+            {/* Stock facts are omitted rather than shown as zero when nothing
+                tracks them — a quantity the tenant's configuration does not
+                enforce is a promise the POS cannot keep. */}
+            {presentation.showStockControls ? (
+              <>
+                <Detail
+                  label="Quantity on hand"
+                  value={product.type === 'Inventory' ? String(product.quantityOnHand) : 'Not tracked'}
+                />
+                <Detail
+                  label="Quantity as of date"
+                  value={product.quantityAsOfDate ? product.quantityAsOfDate.slice(0, 10) : '—'}
+                />
+                <Detail
+                  label="Reorder point"
+                  value={product.reorderLevel != null ? String(product.reorderLevel) : '—'}
+                />
+              </>
+            ) : presentation.stockTrackingNote ? (
+              <Detail label="Stock" value={presentation.stockTrackingNote} />
+            ) : null}
+            {presentation.showExternalAccounts ? (
+              <>
+                <Detail label="Income account" value={product.incomeAccount ?? 'Auto-assigned on sync'} />
+                <Detail label="Expense account" value={product.expenseAccount ?? 'Auto-assigned on sync'} />
+                <Detail
+                  label="Inventory asset account"
+                  value={
+                    product.type === 'Inventory'
+                      ? (product.inventoryAssetAccount ?? 'Auto-assigned on sync')
+                      : '—'
+                  }
+                />
+                <Detail label="QuickBooks item ID" value={product.quickbooksItemId ?? 'Not synced'} />
+              </>
+            ) : null}
             {product.description ? (
               <div className="sm:col-span-2">
                 <div className="text-xs text-muted-foreground">Description</div>

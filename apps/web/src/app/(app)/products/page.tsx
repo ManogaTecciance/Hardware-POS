@@ -6,9 +6,9 @@ import { Ban, FileUp, FolderTree, PackagePlus, Pencil, RotateCcw, Search } from 
 
 import { ProductImage } from '@/components/product-image';
 import { ImportProductsDialog } from '@/components/products/import-products-dialog';
+import { ProductStatusBadge } from '@/components/products/product-status-badge';
 import { ExportMenu } from '@/components/sales/export-menu';
 import { PageHeader } from '@/components/page-header';
-import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,6 +18,11 @@ import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
+import { useEffectiveProfile } from '@/lib/platform-profile';
+import {
+  resolveProductManagementPresentation,
+  type ProfileInventoryState,
+} from '@/lib/products/product-presentation';
 import {
   deactivateProduct,
   downloadProductsReport,
@@ -39,9 +44,37 @@ function isLowStock(p: ManagedProduct): boolean {
   return p.type === 'Inventory' && p.reorderLevel != null && p.quantityOnHand <= p.reorderLevel;
 }
 
+/**
+ * The "Source" cell for one row.
+ *
+ * Both the wording and the styling come from the resolver, so the QuickBooks table
+ * keeps its exact `QuickBooks`/`Local` split while a LOCAL or DISABLED tenant sees
+ * its own neutral label — with no inventory-mode conditional in this file.
+ */
+function SourceCell({
+  inventoryMode,
+  product,
+}: {
+  inventoryMode: ProfileInventoryState;
+  product: ManagedProduct;
+}) {
+  const row = resolveProductManagementPresentation({
+    inventoryMode,
+    syncStatus: product.syncStatus,
+    quickbooksItemId: product.quickbooksItemId,
+  });
+  if (!row.sourceLabel) return null;
+  return <Badge variant={row.sourceBadgeKind}>{row.sourceLabel}</Badge>;
+}
+
 export default function ProductsPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.PRODUCT_MANAGE);
+
+  // The only mode-dependent value on this screen. Everything below reads flags off
+  // it rather than asking what the tenant is configured for.
+  const { inventoryMode, status: profileStatus } = useEffectiveProfile();
+  const screen = resolveProductManagementPresentation({ inventoryMode });
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -89,6 +122,19 @@ export default function ProductsPage() {
   React.useEffect(() => {
     setPage(1);
   }, [debouncedSearch, categoryId, subcategoryId, stockStatus, active, syncStatus, pageSize]);
+
+  /**
+   * Drop filters the tenant's mode does not have, including ones a deep link set.
+   *
+   * The URL effect above runs on mount, before the profile is known, so a
+   * `?syncStatus=FAILED` link would otherwise send a QuickBooks filter for a LOCAL
+   * tenant. Clearing the state — rather than merely hiding the `<select>` — is what
+   * keeps the filter out of the request as well as off the screen.
+   */
+  React.useEffect(() => {
+    if (!screen.showSyncStatus && syncStatus !== '') setSyncStatus('');
+    if (!screen.showStockControls && stockStatus !== '') setStockStatus('');
+  }, [screen.showSyncStatus, screen.showStockControls, syncStatus, stockStatus]);
 
   React.useEffect(() => {
     if (!session) return;
@@ -166,6 +212,20 @@ export default function ProductsPage() {
     }
   };
 
+  /**
+   * The rows wait for the profile as well as for the products.
+   *
+   * Not merely cosmetic: rendering the table before the mode is known would draw
+   * one set of columns and then swap it, which is both the layout instability and
+   * the "QuickBooks label flashes for a LOCAL tenant" problem. A failed profile
+   * request is a resolved state — it settles on the safe unresolved presentation
+   * rather than waiting forever.
+   */
+  const tableBusy = loading || profileStatus === 'loading';
+  // Product, SKU, Price, [On hand], [Source], Status, Actions.
+  const columnCount =
+    4 + (screen.showStockControls ? 1 : 0) + (screen.sourceLabel ? 1 : 0);
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const subcategoryOptions = categoryId
     ? (categories.find((c) => c.id === categoryId)?.subcategories ?? [])
@@ -175,7 +235,7 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Products"
-        description="Manage the product catalog. QuickBooks remains the inventory master."
+        description={screen.helpText}
         actions={
           <div className="flex items-center gap-2">
             <Link href="/products/categories" className={buttonVariants({ variant: 'outline' })}>
@@ -240,27 +300,33 @@ export default function ProductsPage() {
             ))}
           </Select>
         ) : null}
-        <Select
-          value={stockStatus}
-          onChange={(e) => setStockStatus(e.target.value as '' | 'IN' | 'OUT' | 'LOW')}
-          className="w-auto"
-        >
-          <option value="">All stock</option>
-          <option value="IN">In stock</option>
-          <option value="LOW">Low stock</option>
-          <option value="OUT">Out of stock</option>
-        </Select>
-        <Select
-          value={syncStatus}
-          onChange={(e) => setSyncStatus(e.target.value as '' | ProductSyncStatus)}
-          className="w-auto"
-        >
-          <option value="">All sync</option>
-          <option value="SYNCED">Synced</option>
-          <option value="PENDING">Pending</option>
-          <option value="NOT_SYNCED">Not synced</option>
-          <option value="FAILED">Failed</option>
-        </Select>
+        {screen.showStockControls ? (
+          <Select
+            value={stockStatus}
+            onChange={(e) => setStockStatus(e.target.value as '' | 'IN' | 'OUT' | 'LOW')}
+            className="w-auto"
+            aria-label="Filter by stock status"
+          >
+            <option value="">All stock</option>
+            <option value="IN">In stock</option>
+            <option value="LOW">Low stock</option>
+            <option value="OUT">Out of stock</option>
+          </Select>
+        ) : null}
+        {screen.showSyncStatus ? (
+          <Select
+            value={syncStatus}
+            onChange={(e) => setSyncStatus(e.target.value as '' | ProductSyncStatus)}
+            className="w-auto"
+            aria-label="Filter by sync status"
+          >
+            <option value="">All sync</option>
+            <option value="SYNCED">Synced</option>
+            <option value="PENDING">Pending</option>
+            <option value="NOT_SYNCED">Not synced</option>
+            <option value="FAILED">Failed</option>
+          </Select>
+        ) : null}
         <Select
           value={active}
           onChange={(e) => setActive(e.target.value as '' | 'true' | 'false')}
@@ -282,6 +348,11 @@ export default function ProductsPage() {
       </div>
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
+      {screen.warning ? (
+        <p role="status" className="text-sm text-warning">
+          {screen.warning}
+        </p>
+      ) : null}
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
@@ -291,22 +362,24 @@ export default function ProductsPage() {
                 <th className="px-4 py-3 font-medium">Product</th>
                 <th className="px-4 py-3 font-medium">SKU</th>
                 <th className="px-4 py-3 text-right font-medium">Price</th>
-                <th className="px-4 py-3 text-right font-medium">On hand</th>
-                <th className="px-4 py-3 font-medium">Source</th>
+                {screen.showStockControls ? (
+                  <th className="px-4 py-3 text-right font-medium">On hand</th>
+                ) : null}
+                {screen.sourceLabel ? <th className="px-4 py-3 font-medium">Source</th> : null}
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {tableBusy ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={columnCount} className="px-4 py-16 text-center text-muted-foreground">
                     Loading products…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={columnCount} className="px-4 py-16 text-center text-muted-foreground">
                     No products found.
                   </td>
                 </tr>
@@ -335,31 +408,44 @@ export default function ProductsPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{p.sku ?? '—'}</td>
                     <td className="px-4 py-3 text-right font-medium">{formatMoney(p.unitPrice)}</td>
-                    <td className="px-4 py-3 text-right">
-                      {p.type === 'Inventory' ? (
-                        <>
-                          <span className={cn(p.quantityOnHand <= 0 && 'font-medium text-danger')}>
-                            {p.quantityOnHand}
-                          </span>
-                          {isLowStock(p) && p.quantityOnHand > 0 ? (
-                            <div className="text-xs text-warning">Low</div>
-                          ) : null}
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {p.quickbooksItemId ? (
-                        <Badge variant="primary">QuickBooks</Badge>
-                      ) : (
-                        <Badge variant="neutral">Local</Badge>
-                      )}
-                    </td>
+                    {screen.showStockControls ? (
+                      <td className="px-4 py-3 text-right">
+                        {p.type === 'Inventory' ? (
+                          <>
+                            <span
+                              className={cn(
+                                screen.showStockWarnings &&
+                                  p.quantityOnHand <= 0 &&
+                                  'font-medium text-danger',
+                              )}
+                            >
+                              {p.quantityOnHand}
+                            </span>
+                            {screen.showStockWarnings && isLowStock(p) && p.quantityOnHand > 0 ? (
+                              <div className="text-xs text-warning">Low</div>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    ) : null}
+                    {screen.sourceLabel ? (
+                      <td className="px-4 py-3">
+                        <SourceCell inventoryMode={inventoryMode} product={p} />
+                      </td>
+                    ) : null}
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1">
                         {!p.isActive ? <Badge variant="danger">Inactive</Badge> : null}
-                        <SyncBadge status={p.syncStatus} />
+                        <ProductStatusBadge
+                          presentation={resolveProductManagementPresentation({
+                            inventoryMode,
+                            syncStatus: p.syncStatus,
+                            quickbooksItemId: p.quickbooksItemId,
+                          })}
+                          syncStatus={p.syncStatus}
+                        />
                       </div>
                     </td>
                     <td className="px-4 py-3">

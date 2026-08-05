@@ -4,6 +4,7 @@ import * as React from 'react';
 
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import type { ProductPresentation } from '@/lib/products/product-presentation';
 import type { ManagedProduct } from '@/lib/products-api';
 
 import { Field, InfoPanel, StepHeader } from './fields';
@@ -21,6 +22,7 @@ export function PriceStockStep({
   errors,
   stockLocked,
   product,
+  presentation,
 }: {
   form: FormState;
   set: SetField;
@@ -28,8 +30,11 @@ export function PriceStockStep({
   stockLocked: boolean;
   /** Existing product (edit mode) — source of the read-only account names. */
   product?: ManagedProduct;
+  /** Mode-aware flags; the only thing that varies per tenant configuration. */
+  presentation: ProductPresentation;
 }) {
-  const isInventory = form.type === 'Inventory';
+  // Both must hold: the item must be stock-shaped AND the tenant must track stock.
+  const isInventory = form.type === 'Inventory' && presentation.showStockControls;
 
   return (
     <div className="space-y-6">
@@ -136,34 +141,38 @@ export function PriceStockStep({
         </div>
       ) : (
         <InfoPanel>
-          {form.type === 'Service'
-            ? 'Services have no stock — quantity fields are not applicable.'
-            : 'Non-Inventory products are not stock-tracked — quantity fields are not applicable.'}
+          {presentation.stockTrackingNote
+            ? `${presentation.stockTrackingNote} for this business — quantity fields are not applicable.`
+            : form.type === 'Service'
+              ? 'Services have no stock — quantity fields are not applicable.'
+              : 'Non-Inventory products are not stock-tracked — quantity fields are not applicable.'}
         </InfoPanel>
       )}
 
-      <div className="space-y-2 rounded-2xl border border-border bg-surface p-5">
-        <h3 className="text-sm font-semibold">QuickBooks accounts</h3>
-        <p className="text-xs text-muted-foreground">
-          Assigned automatically when the product syncs to QuickBooks.
-        </p>
-        <dl className="grid gap-3 text-sm sm:grid-cols-3">
-          <div>
-            <dt className="text-xs text-muted-foreground">Income account</dt>
-            <dd className="mt-0.5 font-medium">{product?.incomeAccount ?? 'Auto-assigned'}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-muted-foreground">Expense account</dt>
-            <dd className="mt-0.5 font-medium">{product?.expenseAccount ?? 'Auto-assigned'}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-muted-foreground">Inventory asset account</dt>
-            <dd className="mt-0.5 font-medium">
-              {isInventory ? (product?.inventoryAssetAccount ?? 'Auto-assigned') : '—'}
-            </dd>
-          </div>
-        </dl>
-      </div>
+      {presentation.showExternalAccounts ? (
+        <div className="space-y-2 rounded-2xl border border-border bg-surface p-5">
+          <h3 className="text-sm font-semibold">QuickBooks accounts</h3>
+          <p className="text-xs text-muted-foreground">
+            Assigned automatically when the product syncs to QuickBooks.
+          </p>
+          <dl className="grid gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-muted-foreground">Income account</dt>
+              <dd className="mt-0.5 font-medium">{product?.incomeAccount ?? 'Auto-assigned'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Expense account</dt>
+              <dd className="mt-0.5 font-medium">{product?.expenseAccount ?? 'Auto-assigned'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Inventory asset account</dt>
+              <dd className="mt-0.5 font-medium">
+                {isInventory ? (product?.inventoryAssetAccount ?? 'Auto-assigned') : '—'}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
     </div>
   );
 }

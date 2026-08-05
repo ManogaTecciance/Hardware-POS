@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import type { ProductPresentation } from '@/lib/products/product-presentation';
 import type { CategoryNode } from '@/lib/products-api';
 import type { ProductItemType } from '@/lib/products-api';
 import { cn } from '@/lib/utils';
@@ -28,7 +29,9 @@ const ITEM_TYPES: { value: ProductItemType; label: string; hint: string }[] = [
 
 /**
  * Step 1 — the identity half of the QuickBooks Products & Services template:
- * name, item type, SKU, category, and sales description.
+ * name, item type, SKU, category, and sales description. The field set is the same
+ * for every tenant; only the copy that names QuickBooks varies, and that comes from
+ * the presentation resolver rather than a conditional here.
  */
 export function ProductDetailsStep({
   form,
@@ -40,6 +43,7 @@ export function ProductDetailsStep({
   imageBusy,
   onPickFile,
   onRemoveImage,
+  presentation,
 }: {
   form: FormState;
   set: SetField;
@@ -50,6 +54,8 @@ export function ProductDetailsStep({
   imageBusy: boolean;
   onPickFile: (file: File) => void;
   onRemoveImage: () => void;
+  /** Mode-aware copy; this step names QuickBooks only where QuickBooks applies. */
+  presentation: ProductPresentation;
 }) {
   const subcategories = categories.find((c) => c.id === form.categoryId)?.subcategories ?? [];
   const typeHint = ITEM_TYPES.find((t) => t.value === form.type)?.hint;
@@ -65,7 +71,7 @@ export function ProductDetailsStep({
       <StepHeader
         eyebrow="Step 1 of 3"
         title="Product details"
-        description="The name, type, and category this product is filed under — mirroring QuickBooks."
+        description={presentation.detailsHelpText}
       />
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -179,13 +185,11 @@ export function ProductDetailsStep({
         </Button>
       </div>
 
-      {/* POS-side photo — stored in S3; never sent to QuickBooks. */}
+      {/* POS-side photo — stored in S3; never sent to any external catalogue. */}
       <div className="space-y-3 rounded-2xl border border-border bg-surface p-5">
         <div>
           <h3 className="text-sm font-semibold">Product image</h3>
-          <p className="text-xs text-muted-foreground">
-            Shown on the POS tiles only — this photo is not sent to QuickBooks.
-          </p>
+          <p className="text-xs text-muted-foreground">{presentation.imageHelpText}</p>
         </div>
 
         <input

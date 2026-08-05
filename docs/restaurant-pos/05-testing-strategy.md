@@ -27,6 +27,38 @@ There was **no database integration harness** — every API spec hand-mocks Pris
    complete:
    `pnpm lint` · `pnpm typecheck` · `pnpm test` · `pnpm test:integration` ·
    `pnpm build`, plus Playwright where the environment supports it.
+4. **Structural, scope-control and source-inspection tests must meet the
+   architectural-test standard (decision D30).** It applies to every slice from
+   Slice 6C-A.5 onward and is reproduced in full in
+   [`00-decisions.md`](./00-decisions.md#d30--architectural-test-integrity-standard-resolves-risk-ah).
+
+## Architectural-test standard in brief (D30)
+
+A structural test must never pass merely because two counts match, a string is
+absent from both paths, an analyser silently skipped a file, a fixture does not
+resemble production, a regex matches neither state, a renamed symbol left the test
+inspecting nothing, or the only assertion is that a future feature is absent.
+
+Required of every such test:
+
+| # | Rule |
+|---|---|
+| 1 | Assert the expected current behaviour **positively**. |
+| 2 | Assert the prohibited or future behaviour **negatively**. |
+| 3 | Prefer exact file or importer **sets** over counts. |
+| 4 | Use **runtime provider spies** where possible. |
+| 5 | **Mutation-prove** high-risk architectural tripwires. |
+| 6 | Analysers are tested against valid, invalid, empty, renamed-symbol, nested/multiline and every-import-form source. |
+| 7 | **Fail** if the analyser inspects zero relevant files unexpectedly. |
+| 8 | Report which architectural tests were mutation-proven. |
+
+Mutation proofs are written inline, next to the tripwire they justify. No
+repository-wide mutation-testing infrastructure is introduced for this.
+
+The analysers themselves live at
+`apps/api/src/modules/providers/testkit/source-analysis.ts` and
+`apps/web/src/testkit/source-analysis.ts`. Both throw rather than return an empty
+result when they are asked to inspect files that are not there.
 
 ## Four regression layers
 

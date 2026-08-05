@@ -445,6 +445,82 @@ No migration. The guard reads existing tables.
 
 ---
 
+## 2026-08-05 — Slice 6C-B review
+
+### D30 — Architectural-test integrity standard (resolves Risk AH)
+
+The standard introduced during Slice 6C-A.5 is now a **permanent AxloPOS
+engineering rule**, and applies to every future slice.
+
+It exists because Slice 6C-A shipped structural tripwires that were green while
+asserting something false. That is a worse failure than a missing test: a missing
+test is visibly missing, whereas a vacuous one is indistinguishable from a passing
+one and actively discourages anyone from looking again.
+
+**A structural, scope-control or source-inspection test must not pass merely
+because:**
+
+- Two counts happen to be equal.
+- A searched string is absent from both the adopted and the unadopted path.
+- An analyser silently ignored a file.
+- A fixture does not represent the real production structure.
+- A regular expression fails to match either the valid or the invalid state.
+- A renamed symbol caused the test to inspect nothing.
+- The test asserts only that a future feature is absent, without proving the
+  expected current path exists.
+
+**Required standard:**
+
+1. Assert the expected current behaviour **positively**.
+2. Assert the prohibited or future behaviour **negatively**.
+3. Prefer exact file or importer **sets** over counts.
+4. Use **runtime provider spies** where possible, in preference to source text.
+5. **Mutation-prove** high-risk architectural tripwires.
+6. Ensure analysers have tests for: valid source, invalid source, empty source,
+   a renamed symbol, nested or multiline syntax, and every applicable import form.
+7. **Fail** if the analyser inspects zero relevant files unexpectedly.
+8. Report which architectural tests were mutation-proven.
+
+**Scope of the mutation requirement.** Focused, inline mutation proofs at
+high-risk boundaries only. No repository-wide mutation-testing framework is
+introduced, and none should be added as a side effect of this rule.
+
+Recorded operationally in
+[`05-testing-strategy.md`](./05-testing-strategy.md#architectural-test-standard-in-brief-d30)
+and in the repository engineering guide (`CLAUDE.md`).
+
+### D31 — Product presentation routes on the effective profile, resolved once
+
+The product screens must reflect the tenant's `InventoryMode`, and the **only**
+admissible source for that mode is `GET /v1/platform/profile`. It must never be
+inferred from `quickbooksItemId`, `syncStatus`, the product name, the business type,
+or the presence of a QuickBooks connection — none of those can distinguish "this
+tenant does not use QuickBooks" from "this tenant uses QuickBooks and this product
+has not reached it yet".
+
+The decision is taken **once**, in a pure resolver
+(`apps/web/src/lib/products/product-presentation.ts`), which returns view flags.
+Components read flags; no product component compares an inventory mode. This is the
+frontend counterpart of the D28 constraint on `ProductsService`, and for the same
+reason: replacing one hard-coded QuickBooks branch with several profile branches
+spread across a table, a detail page and three wizard steps is not an improvement.
+
+| Mode | Product interface |
+|---|---|
+| `QUICKBOOKS` | Unchanged. Sync status, explicit sync, refresh, accounts panel and existing wording all preserved. Legacy tenants resolve here. |
+| `LOCAL` | Provider-neutral "Locally managed". Stock is real and editable. No sync surface of any kind. A null `quickbooksItemId` is never styled as a fault. |
+| `DISABLED` | "Catalogue item" / "Stock tracking disabled". Full CRUD, no stock figures, no sync surface. |
+| `EXTERNAL` | Fails safe: a generic configuration warning, and no fallback to QuickBooks or Local. |
+| Unresolved | While loading **and** after a failed profile request: neutral, no external action, no claim about stock. The client never defaults to the legacy configuration. |
+
+`Product.syncStatus` is unchanged and remains legacy external-integration state. No
+Prisma migration.
+
+**Hiding is usability, not security.** Backend provider resolution and permission
+enforcement remain the authority; a hidden control is still refused server-side.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

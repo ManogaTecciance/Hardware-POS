@@ -23,6 +23,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import type { Session } from '@/lib/auth';
+import { useEffectiveProfile } from '@/lib/platform-profile';
+import { resolveProductManagementPresentation } from '@/lib/products/product-presentation';
 import { productDraftService } from '@/lib/product-draft';
 import {
   createProduct,
@@ -57,6 +59,13 @@ export function ProductForm({
   const editing = !!product;
   const productId = product?.id ?? null;
 
+  const { inventoryMode } = useEffectiveProfile();
+  const presentation = resolveProductManagementPresentation({
+    inventoryMode,
+    syncStatus: product?.syncStatus,
+    quickbooksItemId: product?.quickbooksItemId ?? null,
+  });
+
   const [form, setForm] = React.useState<FormState>(() => initialFormState(product));
   const [imageUrl, setImageUrl] = React.useState<string | null>(product?.imageUrl ?? null);
   const [pendingFile, setPendingFile] = React.useState<File | null>(null);
@@ -70,7 +79,15 @@ export function ProductForm({
   const [confirmCancel, setConfirmCancel] = React.useState(false);
   const dirty = React.useRef(false);
 
-  const qbManaged = !!product?.quickbooksItemId;
+  /**
+   * Stock is read-only for a non-admin only where an external system owns it.
+   *
+   * Under LOCAL inventory AxloPOS *is* the authority, so there is nothing to defer
+   * to and a cashier-facing lock would be inventing a restriction. The condition is
+   * therefore gated on the mode, not just on the presence of an item id — which is
+   * the client-controlled value this slice is not allowed to route on.
+   */
+  const qbManaged = presentation.showSyncActions && !!product?.quickbooksItemId;
   const stockLocked = qbManaged && !isAdmin;
 
   const set = React.useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -282,11 +299,22 @@ export function ProductForm({
     setError(null);
     try {
       const input = buildInput();
+      // Nothing tracks stock in this mode, so no quantity is submitted at all.
+      // Sending one would record a figure the POS never enforces and the operator
+      // would reasonably read as a promise.
+      if (!presentation.showStockControls) {
+        delete (input as Partial<ProductInput>).quantityOnHand;
+        delete (input as Partial<ProductInput>).quantityAsOfDate;
+        delete (input as Partial<ProductInput>).reorderLevel;
+      }
+      // Appended only when the resolver has mode-appropriate wording, so the
+      // QuickBooks flow keeps its existing silent redirect.
+      const saved = presentation.saveMessage ? '?saved=1' : '';
       if (editing && product) {
         if (stockLocked) delete (input as Partial<ProductInput>).quantityOnHand;
         await updateProduct(session, product.id, input);
         productDraftService.clear(productId);
-        router.push(`/products/${product.id}`);
+        router.push(`/products/${product.id}${saved}`);
       } else {
         const created = await createProduct(session, input);
         productDraftService.clear(null);
@@ -297,7 +325,7 @@ export function ProductForm({
             /* image can be added later from edit */
           }
         }
-        router.push(`/products/${created.id}`);
+        router.push(`/products/${created.id}${saved}`);
       }
       router.refresh();
     } catch (err) {
@@ -386,6 +414,7 @@ export function ProductForm({
       <div className="min-w-0 rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
         {step === 'details' ? (
           <ProductDetailsStep
+            presentation={presentation}
             form={form}
             set={set}
             setCategory={setCategory}
@@ -404,6 +433,7 @@ export function ProductForm({
             errors={errors}
             stockLocked={stockLocked}
             product={product}
+            presentation={presentation}
           />
         ) : null}
         {step === 'review' ? (
