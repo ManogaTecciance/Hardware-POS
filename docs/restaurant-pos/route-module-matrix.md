@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 197
-- Module-guarded routes: 152
+- Total routes: 203
+- Module-guarded routes: 158
 - Ungated routes: 45
 
 ## How to read the Guard column
@@ -272,6 +272,17 @@ reach production unclassified.
 |---|---|---|---|---|
 | GET | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | platform:profile:read |
 | PUT | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | restaurant:config:manage |
+
+### RestaurantReportsController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/reports/branches/:branchId/sales-summary` | REPORTING | ENFORCED | report:read |
+| GET | `/restaurant/reports/branches/:branchId/top-items` | REPORTING | ENFORCED | report:read |
+| GET | `/restaurant/reports/branches/:branchId/waiter-performance` | REPORTING | ENFORCED | report:read |
+| GET | `/restaurant/reports/branches/:branchId/payment-breakdown` | REPORTING | ENFORCED | report:read |
+| GET | `/restaurant/reports/branches/:branchId/voids` | REPORTING | ENFORCED | report:read |
+| GET | `/restaurant/reports/branches/:branchId/channels` | REPORTING | ENFORCED | report:read |
 
 ### BillingController
 

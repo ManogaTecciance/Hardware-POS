@@ -42,6 +42,7 @@ import { TableSessionsModule } from './modules/table-sessions/table-sessions.mod
 import { KitchenModule } from './modules/kitchen/kitchen.module';
 import { TakeawayModule } from './modules/takeaway/takeaway.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { RestaurantReportsModule } from './modules/restaurant-reports/restaurant-reports.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { BillingModule } from './modules/billing/billing.module';
     KitchenModule,
     TakeawayModule,
     BillingModule,
+    RestaurantReportsModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.
