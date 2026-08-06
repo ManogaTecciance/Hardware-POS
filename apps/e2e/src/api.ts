@@ -19,9 +19,13 @@ interface Envelope<T> {
   data: T;
 }
 
-export async function apiLogin(email: string, password: string): Promise<Auth> {
+export async function apiLogin(email: string, password: string, workspace?: string): Promise<Auth> {
   const ctx = await request.newContext();
-  const res = await ctx.post(`${API_URL}/auth/login`, { data: { email, password } });
+  const res = await ctx.post(`${API_URL}/auth/login`, {
+    // Omitted rather than sent empty: the API distinguishes "no workspace given"
+    // from "a workspace that failed validation".
+    data: workspace ? { email, password, workspace } : { email, password },
+  });
   expect(res.ok(), `login as ${email}`).toBeTruthy();
   const { data } = (await res.json()) as Envelope<{
     token: string;
@@ -183,4 +187,23 @@ export const SEED = {
   tenantId: 'tnt_dev',
   branchId: 'brn_dev',
   registerId: 'reg_dev',
+  /** The Tile Shop workspace slug, for workspace-scoped sign-in. */
+  workspace: 'demo',
+};
+
+/**
+ * The Restaurant demo tenant (Slice 8.9 seed).
+ *
+ * A second tenant with a different business profile — RESTAURANT, LOCAL
+ * inventory, no accounting provider — so the module-aware behaviour can be tested
+ * against a real workspace rather than a mocked profile. It is also the
+ * tenant-isolation subject: nothing it can see may belong to `tnt_dev`.
+ */
+export const RESTAURANT_SEED = {
+  owner: { email: 'owner@axlorestaurant.test', password: 'password123' },
+  cashierPin: '3333',
+  tenantId: 'tnt_resto',
+  workspace: 'resto-demo',
+  branchId: 'brn_resto',
+  registerId: 'reg_resto',
 };

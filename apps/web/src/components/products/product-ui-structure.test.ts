@@ -39,11 +39,14 @@ const APP_FILES = (name: string) => /\.tsx?$/.test(name) && !/\.(test|spec)\.tsx
  * every rule below into a no-op.
  */
 const PRODUCT_COMPONENTS = [
+  // `app/(app)/products/layout.tsx` was listed here until Slice 8. It mounted the
+  // profile provider for the product routes only; Slice 8 promoted the provider to
+  // the app shell, so the file is gone. This spec failed on its removal — which is
+  // the tripwire doing its job, not a defect.
   'app/(app)/products/page.tsx',
   'app/(app)/products/[id]/page.tsx',
   'app/(app)/products/new/page.tsx',
   'app/(app)/products/[id]/edit/page.tsx',
-  'app/(app)/products/layout.tsx',
   'components/products/product-form.tsx',
   'components/products/product-status-badge.tsx',
   'components/products/wizard/price-stock-step.tsx',
@@ -144,7 +147,11 @@ describe('the mode is read from the effective profile and nothing else', () => {
     // NOT the app shell, NOT the sidebar, NOT the root layout. This is what keeps
     // the slice off every other route (requirement 36). `lib/platform-profile.tsx`
     // is where it is defined; the products layout is the only place it is mounted.
-    expect(mounters).toEqual(['app/(app)/products/layout.tsx', 'lib/platform-profile.tsx']);
+    // UPDATED IN SLICE 8. Until then the provider was mounted by the products
+    // layout only, precisely so Slice 6C-B.5 could not affect navigation. Slice 8
+    // is the deliberate change: the shell mounts it once, and the sidebar, the
+    // workspace shell and the product screens all read the same fetch.
+    expect(mounters).toEqual(['app/(app)/layout.tsx', 'lib/platform-profile.tsx']);
   });
 
   it('the profile hook never defaults to a mode on the client', () => {
@@ -171,38 +178,95 @@ describe('the mode is read from the effective profile and nothing else', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('36/37 — nothing outside the product screens changed', () => {
-  it('36 — the sidebar is still static and knows nothing about the profile', () => {
+  /**
+   * UPDATED IN SLICE 8, and both tripwires fired first.
+   *
+   * Through 6C-B.5 these asserted the sidebar and nav were static and knew nothing
+   * about the profile — the scope boundary that slice was given. Slice 8 is the
+   * approved change, so the assertions now record the new shape: navigation is
+   * derived from the profile, and it must still never route on `inventoryMode`,
+   * which belongs to the product presentation resolver alone (D31).
+   */
+  it('8.3 — the sidebar derives navigation from the profile, not from a static list', () => {
     const sidebar = readFileSync(`${SRC}/components/sidebar.tsx`, 'utf8');
-    expect(referencesIdentifier(sidebar, 'useEffectiveProfile')).toBe(false);
+    // POSITIVE — it reads the profile and delegates to the resolver.
+    expect(referencesIdentifier(sidebar, 'useEffectiveProfile')).toBe(true);
+    expect(referencesIdentifier(sidebar, 'resolveNavigation')).toBe(true);
+    // NEGATIVE — it does not mount the provider (the shell does), and it does not
+    // reach for the inventory mode, which is not a navigation concern.
     expect(referencesIdentifier(sidebar, 'PlatformProfileProvider')).toBe(false);
     expect(referencesIdentifier(sidebar, 'inventoryMode')).toBe(false);
-    // POSITIVE CONTROL: the analyser really is reading the sidebar, and finds the
-    // things that ARE there. Without this the three negatives above would pass
-    // just as happily against an empty or missing file.
-    expect(referencesIdentifier(sidebar, 'nav')).toBe(true);
   });
 
-  it('36 — the nav definition is unchanged in shape: still a static list', () => {
+  it('8.3 — the nav module gates on business type and modules, never on inventory mode', () => {
     const nav = stripComments(readFileSync(`${SRC}/lib/nav.ts`, 'utf8'));
-    expect(nav).not.toContain('useEffectiveProfile');
-    expect(nav).not.toContain('inventoryMode');
-    expect(nav).not.toContain('enabledModules');
+    expect(nav).toContain('enabledModules');
+    expect(nav).toContain('businessType');
     expect(nav).toContain('/products');
+    // Stock authority is a product-screen concern. A navigation entry that appeared
+    // or vanished with the inventory mode would be a second, competing authority.
+    expect(nav).not.toContain('inventoryMode');
+    expect(nav).not.toContain('useEffectiveProfile');
   });
 
-  it('37 — no Restaurant route or component exists', () => {
+  it('8.3 — the resolver is the only place navigation is filtered', () => {
+    const sidebar = stripComments(readFileSync(`${SRC}/components/sidebar.tsx`, 'utf8'));
+    // The sidebar PASSES the module list to the resolver, so it necessarily names
+    // it. What it must not do is filter on it — that would be a second authority
+    // that could disagree with the first.
+    expect(sidebar).toContain('resolveNavigation');
+    expect(sidebar).not.toMatch(/enabledModules[^)]*\.includes/);
+    expect(sidebar).not.toMatch(/\.filter\(/);
+    expect(sidebar).not.toMatch(/businessType\s*===/);
+  });
+
+  /**
+   * UPDATED IN SLICE 8. Through 6C-B.5 this asserted no Restaurant route existed at
+   * all, which is what stopped that slice drifting into this one. Slice 8.4 creates
+   * the shells deliberately, so the rule becomes: these routes exist, and they are
+   * *only* shells.
+   */
+  it('8.4 — the Restaurant route shells exist', () => {
     for (const path of [
-      'app/(app)/restaurant',
       'app/(app)/menu',
-      'app/(app)/dining',
       'app/(app)/tables',
-      'app/(app)/kitchen',
       'app/(app)/takeaway',
-      'components/restaurant',
+      'app/(app)/kitchen',
     ]) {
-      expect(pathExists(SRC, path), `${path} must not exist yet`).toBe(false);
+      expect({ path, exists: pathExists(SRC, path) }).toEqual({ path, exists: true });
     }
-    // POSITIVE CONTROL: pathExists is capable of returning true.
+  });
+
+  it('8.4 — the shells are shells: no data, no writes, no fake state', () => {
+    const shells = readComponents(SRC, [
+      'app/(app)/menu/page.tsx',
+      'app/(app)/tables/page.tsx',
+      'app/(app)/takeaway/page.tsx',
+      'app/(app)/kitchen/page.tsx',
+      'components/upcoming-feature.tsx',
+    ]);
+    for (const [path, source] of shells) {
+      const code = stripComments(source);
+      // Nothing that could read, write or fabricate restaurant state.
+      for (const forbidden of ['useState', 'useEffect', 'fetch(', 'api.', 'onSubmit', 'onClick']) {
+        expect({ path, forbidden, present: code.includes(forbidden) }).toEqual({
+          path,
+          forbidden,
+          present: false,
+        });
+      }
+    }
+    // POSITIVE CONTROL: the files are real and say what they are.
+    expect(shells.get('components/upcoming-feature.tsx')).toContain(
+      'Not implemented in this release',
+    );
+  });
+
+  it('no Restaurant DOMAIN model or workflow was created', () => {
+    // The boundary that still holds: shells are routes, not features.
+    for (const path of ['app/(app)/restaurant', 'app/(app)/dining', 'components/restaurant']) {
+      expect({ path, exists: pathExists(SRC, path) }).toEqual({ path, exists: false });
+    }
     expect(pathExists(SRC, 'app/(app)/products')).toBe(true);
   });
 
@@ -276,12 +340,28 @@ describe('40/41/42 — these structural rules can actually fail', () => {
     expect(mutated).toContain("'QUICKBOOKS'");
   });
 
-  it('41 — and a sidebar that started reading the profile would be caught', () => {
-    const real = readFileSync(`${SRC}/components/sidebar.tsx`, 'utf8');
-    expect(referencesIdentifier(real, 'useEffectiveProfile')).toBe(false);
+  it('8.3 — a navigation resolver that ignored modules would be caught', () => {
+    // Replaces the 6C-B.5 proof about the sidebar reading the profile, which is now
+    // the intended behaviour. The regression that matters at Slice 8 is the module
+    // filter being dropped, which would show every retail entry to a restaurant.
+    const real = stripComments(readFileSync(`${SRC}/lib/nav.ts`, 'utf8'));
+    expect(real).toContain('enabled.has(item.module)');
 
-    const mutated = `import { useEffectiveProfile } from '@/lib/platform-profile';\n${real}`;
-    expect(referencesIdentifier(mutated, 'useEffectiveProfile')).toBe(true);
+    const mutated = real.replace('(!item.module || enabled.has(item.module)) &&', '');
+    expect(mutated).not.toEqual(real);
+    expect(mutated).not.toContain('enabled.has(item.module)');
+  });
+
+  it('8.3 — a resolver that guessed while the profile was unresolved would be caught', () => {
+    const real = stripComments(readFileSync(`${SRC}/lib/nav.ts`, 'utf8'));
+    expect(real).toContain('if (input.businessType === null || input.enabledModules === null) return [];');
+
+    const mutated = real.replace(
+      'if (input.businessType === null || input.enabledModules === null) return [];',
+      '',
+    );
+    expect(mutated).not.toEqual(real);
+    expect(mutated).not.toContain('input.enabledModules === null');
   });
 
   it('42 — a renamed product screen makes this file fail rather than inspect nothing', () => {

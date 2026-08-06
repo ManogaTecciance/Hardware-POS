@@ -11,10 +11,9 @@ import {
   type Session,
   type SessionUser,
 } from './session-store';
+import { recallTenant, rememberTenant } from './workspace-memory';
 
 export type { Session, SessionUser };
-
-const DEV_TENANT = 'tnt_dev';
 
 interface LoginResponse {
   token: string;
@@ -29,7 +28,7 @@ interface AuthContextValue {
   loading: boolean;
   isAuthenticated: boolean;
   hasPermission: (permission: Permission) => boolean;
-  loginWithEmail: (email: string, password: string) => Promise<void>;
+  loginWithEmail: (email: string, password: string, workspace?: string) => Promise<void>;
   loginWithPin: (pin: string) => Promise<void>;
   logout: () => void;
 }
@@ -59,17 +58,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return subscribeSession(setSession);
   }, []);
 
-  const loginWithEmail = React.useCallback(async (email: string, password: string) => {
-    const res = await api.post<LoginResponse>('/auth/login', { email, password });
-    saveSession(toSession(res));
-  }, []);
+  /**
+   * Email + password sign-in, optionally scoped to a workspace (Slice 8.2).
+   *
+   * `workspace` is omitted from the payload when blank rather than sent as `''` —
+   * the API distinguishes "no workspace supplied" (fall back to a unique email
+   * match) from a workspace that failed validation, and an empty string is the
+   * latter.
+   */
+  const loginWithEmail = React.useCallback(
+    async (email: string, password: string, workspace?: string) => {
+      const slug = workspace?.trim();
+      const res = await api.post<LoginResponse>('/auth/login', {
+        email,
+        password,
+        ...(slug ? { workspace: slug } : {}),
+      });
+      // Commissions this device for PIN sign-in (Slice 8.8). Written from the
+      // server's answer, never from anything the user typed.
+      rememberTenant(res.user.tenantId);
+      saveSession(toSession(res));
+    },
+    [],
+  );
 
+  /**
+   * PIN sign-in, scoped to the tenant this device was commissioned for.
+   *
+   * The tenant used to be the hard-coded `'tnt_dev'`. It now comes from the last
+   * successful email sign-in on this device, and a device that has had none is
+   * told so rather than being sent to the API with a guess — a guess would return
+   * "Invalid PIN", which sends a cashier looking for a mistake they did not make.
+   */
   const loginWithPin = React.useCallback(async (pin: string) => {
-    const res = await api.post<LoginResponse>(
-      '/auth/pin-login',
-      { pin },
-      { tenantId: DEV_TENANT },
-    );
+    const tenantId = recallTenant();
+    if (!tenantId) {
+      throw new Error(
+        'This device is not set up for PIN sign-in yet. Sign in with an email and password once first.',
+      );
+    }
+    const res = await api.post<LoginResponse>('/auth/pin-login', { pin }, { tenantId });
     saveSession(toSession(res));
   }, []);
 

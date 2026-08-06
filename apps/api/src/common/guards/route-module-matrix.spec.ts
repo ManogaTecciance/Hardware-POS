@@ -24,10 +24,19 @@
  *  • `shared-core` — authentication, tenant isolation and permissions only. These
  *    routes must work for **every** business profile, so gating them would be
  *    wrong, not merely unfinished.
- *  • `deferred-retail-pos` — classified `RETAIL_POS`, not yet gated. Gating the
- *    sale/payment/receipt path would deny a Restaurant tenant read access to its
- *    own sales history, which the Slice 8 Restaurant navigation shows. Splitting
- *    read from write needs the Phase 2 ordering model to be settled first.
+ *  • `deferred-retail-pos` — classified `RETAIL_POS`, not yet gated. This is the
+ *    sale *write* path (draft, complete, payment, receipt, print) plus the
+ *    QuickBooks sync operations on a sale. Gating it is safe in principle and is
+ *    deferred with the rest of the retail-write work.
+ *
+ *    The **read** path is no longer in this class. After Slice 8 the product owner
+ *    classified completed-sale history and sale detail as shared core: every
+ *    business profile needs to look up what it has already sold, and a Restaurant
+ *    tenant reaches exactly those routes from its own navigation. Future
+ *    restaurant *operational orders* are a separate model on separate routes, so
+ *    they do not make the read path retail-only. Per that decision, a new
+ *    business-specific operation on `SalesController` is classified on its own
+ *    rather than by moving the whole controller.
  *  • `deferred-mixed-controller` — `DocumentsController` serves sale bills, return
  *    notes and settings previews from one class. Route-level gating is the right
  *    answer and is deferred with the rest of the document work.
@@ -172,8 +181,8 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /returns/:id/retry-sync': { module: 'RETURNS', guard: 'ENFORCED' },
   'POST /returns/approve': { module: 'RETURNS', guard: 'ENFORCED' },
   'POST /returns/preview': { module: 'RETURNS', guard: 'ENFORCED' },
-  'GET /sales': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /sales/:id': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
+  'GET /sales': { module: 'SHARED_CORE', guard: 'shared-core' },
+  'GET /sales/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
   'POST /sales/:id/retry-sync': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
   'GET /sales/:id/return-eligibility': { module: 'RETURNS', guard: 'ENFORCED' },
   'GET /sales/:id/returnable-items': { module: 'RETURNS', guard: 'ENFORCED' },
@@ -181,7 +190,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /sales/:id/sync': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
   'POST /sales/complete': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
   'POST /sales/draft': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /sales/report': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
+  'GET /sales/report': { module: 'SHARED_CORE', guard: 'shared-core' },
   'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED' },
   'PUT /settings': { module: 'SETTINGS', guard: 'ENFORCED' },
   'DELETE /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED' },
@@ -336,6 +345,72 @@ describe('7.6 — a route marked ENFORCED really is guarded', () => {
     const status = routes.find((r) => key(r) === 'GET /quickbooks/status')!;
     expect(status.isPublic).toBe(false);
     expect(status.requiredModule).toBe('QUICKBOOKS');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Product-owner route decisions (post-Slice 8)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('QuickBooks routes are enforced server-side, not merely hidden', () => {
+  it('every authenticated QuickBooks route requires the QUICKBOOKS module', () => {
+    const quickbooks = actualRoutes().filter(
+      (r) => r.path.startsWith('/quickbooks') || r.path.startsWith('/sync'),
+    );
+    // POSITIVE CONTROL: the probe found the routes it is about to judge.
+    expect(quickbooks.length).toBeGreaterThan(5);
+
+    const unguarded = quickbooks
+      .filter((r) => !r.isPublic)
+      .filter((r) => r.requiredModule !== 'QUICKBOOKS')
+      .map(key);
+    expect(unguarded).toEqual([]);
+  });
+
+  it('hiding the navigation is not what protects them', () => {
+    // The decision in one assertion: a tenant without the module is refused by the
+    // server, so the frontend gate is a usability affordance and nothing more.
+    const status = actualRoutes().find((r) => key(r) === 'GET /quickbooks/status')!;
+    expect(status.requiredModule).toBe('QUICKBOOKS');
+    expect(status.isPublic).toBe(false);
+  });
+});
+
+describe('completed-sale history is shared core', () => {
+  const READS = ['GET /sales', 'GET /sales/:id', 'GET /sales/report'];
+
+  it('carries no module guard, so every business profile can read its own sales', () => {
+    const routes = actualRoutes().filter((r) => READS.includes(key(r)));
+    // POSITIVE CONTROL: all three exist. A renamed route would otherwise make the
+    // assertion below inspect an empty list.
+    expect(routes.map(key).sort()).toEqual([...READS].sort());
+
+    expect(routes.filter((r) => r.requiredModule !== null).map(key)).toEqual([]);
+    for (const route of READS) {
+      expect({ route, module: ROUTE_CLASSIFICATION[route].module }).toEqual({
+        route,
+        module: 'SHARED_CORE',
+      });
+    }
+  });
+
+  it('does not reclassify the sale write path with it', () => {
+    // The decision is per-operation. Taking a sale stays a retail workflow; only
+    // reading one became shared core, and a blanket controller move would be
+    // exactly what the product owner ruled out.
+    for (const route of ['POST /sales/draft', 'POST /sales/complete']) {
+      expect({ route, classified: ROUTE_CLASSIFICATION[route] }).toEqual({
+        route,
+        classified: { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
+      });
+    }
+  });
+
+  it('is still protected by permissions rather than by nothing', () => {
+    // "Shared core" removes a module requirement, not authentication. Every sales
+    // read route is non-public, so the permission and tenant guards still run.
+    const routes = actualRoutes().filter((r) => READS.includes(key(r)));
+    expect(routes.filter((r) => r.isPublic).map(key)).toEqual([]);
   });
 });
 

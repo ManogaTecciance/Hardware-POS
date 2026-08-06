@@ -1,0 +1,75 @@
+/**
+ * Human wording for the platform-profile enums (Slice 8.7).
+ *
+ * Every map is a total `Record` over its union rather than a lookup with a
+ * fallback. A module added to `ModuleKey` and forgotten here fails the build,
+ * which is the only reliable moment to notice — the alternative is a settings
+ * screen quietly printing `DELIVERY_INTEGRATIONS` at an operator.
+ */
+import type {
+  AccountingProviderKind,
+  BusinessType,
+  InventoryMode,
+  ModuleKey,
+} from './platform-api';
+
+export const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
+  TILE_SHOP: 'Tile shop',
+  HARDWARE: 'Hardware store',
+  RETAIL: 'Retail',
+  RESTAURANT: 'Restaurant',
+  CAFE: 'Café',
+  BAKERY: 'Bakery',
+  GENERAL: 'General',
+};
+
+/** Phrased as *where stock is mastered*, which is what the mode actually decides. */
+export const INVENTORY_MODE_LABELS: Record<InventoryMode, string> = {
+  LOCAL: 'Tracked in AxloPOS',
+  QUICKBOOKS: 'Tracked in QuickBooks Online',
+  EXTERNAL: 'Tracked in an external system',
+  DISABLED: 'Not tracked',
+};
+
+export const ACCOUNTING_PROVIDER_LABELS: Record<AccountingProviderKind, string> = {
+  NONE: 'None',
+  QUICKBOOKS: 'QuickBooks Online',
+  FUTURE_EXTERNAL: 'External accounting system',
+};
+
+export const MODULE_LABELS: Record<ModuleKey, string> = {
+  RETAIL_POS: 'Point of sale',
+  INVENTORY: 'Inventory',
+  CUSTOMERS: 'Customers',
+  QUOTATIONS: 'Quotations',
+  RETURNS: 'Returns',
+  EXCHANGES: 'Exchanges',
+  SUPPLIERS: 'Suppliers',
+  REPORTING: 'Reports',
+  USERS: 'Users and roles',
+  BRANCHES: 'Branches',
+  SETTINGS: 'Settings',
+  BRANDING: 'Branding',
+  QUICKBOOKS: 'QuickBooks',
+  MENU_MANAGEMENT: 'Menu',
+  DINING: 'Dining areas',
+  TABLE_MANAGEMENT: 'Tables',
+  TAKEAWAY: 'Takeaway',
+  KITCHEN: 'Kitchen',
+  KITCHEN_DISPLAY: 'Kitchen display',
+  ONLINE_ORDERS: 'Online orders',
+  DELIVERY_INTEGRATIONS: 'Delivery integrations',
+  RESERVATIONS: 'Reservations',
+};
+
+/**
+ * Display order for a module list — declaration order of `MODULE_LABELS`, which
+ * mirrors `ALL_MODULE_KEYS` on the server.
+ *
+ * The API returns modules in that order already; sorting here means the screen
+ * does not depend on it, and a reordered response is not a visible change.
+ */
+export function sortModules(modules: readonly ModuleKey[]): ModuleKey[] {
+  const wanted = new Set(modules);
+  return (Object.keys(MODULE_LABELS) as ModuleKey[]).filter((key) => wanted.has(key));
+}

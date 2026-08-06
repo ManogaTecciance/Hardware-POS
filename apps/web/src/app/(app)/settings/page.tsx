@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import * as React from 'react';
 import { AlertTriangle, ImageIcon, RotateCcw, Save, Upload } from 'lucide-react';
 
@@ -185,6 +186,17 @@ export default function SettingsPage() {
       <PageHeader
         title="Documents & Printing"
         description="Business letterhead, branding and A4 template settings applied to every quotation, invoice, bill and return."
+        actions={
+          // Slice 8.7: the only route to the workspace configuration. It stays out
+          // of the sidebar — an operator looks for it under Settings, and a second
+          // Settings entry in the rail would compete with this one.
+          <Link
+            href="/settings/business"
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            Workspace configuration
+          </Link>
+        }
       />
 
       {/* Tabs */}

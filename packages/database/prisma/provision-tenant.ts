@@ -9,6 +9,7 @@
  *   pnpm --filter @hardware-pos/database exec tsx prisma/provision-tenant.ts \
  *     --name "Colombawa Plantation Pvt Ltd" \
  *     --slug colombawa \
+ *     --business-type RESTAURANT \
  *     --user "Colombawa1:colombawa1@example.com:OWNER:TheirPassword123:9876" \
  *     --user "Colombawa2:colombawa2@example.com:CASHIER::1234"
  *
@@ -18,11 +19,21 @@
  * digits) feeds the in-POS approval prompts: any user whose role carries the
  * approve permission (owner, admin, manager) can answer a "manager PIN"
  * request with their own PIN.
+ *
+ * `--business-type` (Slice 8.9) writes an explicit platform profile, which is what
+ * decides the tenant's navigation, its inventory authority and whether QuickBooks
+ * exists for it at all. Omitting it writes **no profile row**, exactly as this
+ * script did before — such a tenant resolves to the legacy Tile Shop / QuickBooks
+ * configuration, which stays the default so provisioning a retail company keeps
+ * behaving as it always has. A restaurant must pass it: there is no way to infer
+ * "this company serves food" from a name.
  */
 import { randomBytes } from 'node:crypto';
 
-import { PrismaClient, UserRole } from '@prisma/client';
+import { BusinessType, PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+
+import { BUSINESS_PROFILE_PRESETS } from '../src/business-profile-presets';
 
 const prisma = new PrismaClient();
 const SALT_ROUNDS = 10;
@@ -41,10 +52,17 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-function parseArgs(argv: string[]): { name: string; slug: string; branch: string; users: UserSpec[] } {
+function parseArgs(argv: string[]): {
+  name: string;
+  slug: string;
+  branch: string;
+  businessType: BusinessType | null;
+  users: UserSpec[];
+} {
   let name = '';
   let slug = '';
   let branch = 'Main Branch';
+  let businessType: BusinessType | null = null;
   const users: UserSpec[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -57,7 +75,13 @@ function parseArgs(argv: string[]): { name: string; slug: string; branch: string
     if (arg === '--name') name = next();
     else if (arg === '--slug') slug = next();
     else if (arg === '--branch') branch = next();
-    else if (arg === '--user') {
+    else if (arg === '--business-type') {
+      const raw = next().toUpperCase();
+      if (!(raw in BusinessType)) {
+        fail(`Unknown business type "${raw}" — use one of ${Object.keys(BusinessType).join(', ')}`);
+      }
+      businessType = raw as BusinessType;
+    } else if (arg === '--user') {
       const raw = next();
       const [userName, email, role, password, pin] = raw.split(':');
       if (!userName || !email || !role) {
@@ -94,11 +118,11 @@ function parseArgs(argv: string[]): { name: string; slug: string; branch: string
   // PINs would be ambiguous.
   const pins = users.map((u) => u.pin).filter(Boolean);
   if (new Set(pins).size !== pins.length) fail('User PINs must be distinct');
-  return { name, slug, branch, users };
+  return { name, slug, branch, businessType, users };
 }
 
 async function main(): Promise<void> {
-  const { name, slug, branch, users } = parseArgs(process.argv.slice(2));
+  const { name, slug, branch, businessType, users } = parseArgs(process.argv.slice(2));
 
   // Fresh accounts only — never adopt or modify an existing company.
   const existingTenant = await prisma.tenant.findFirst({
@@ -123,6 +147,14 @@ async function main(): Promise<void> {
     await tx.register.create({
       data: { tenantId: t.id, branchId: b.id, name: 'Register 1', code: 'R1' },
     });
+    if (businessType) {
+      // No `TenantModule` rows: with a profile and no explicit per-module opinion
+      // the API resolves the defaults for the business type. Writing them here
+      // would freeze today's defaults into every tenant provisioned today.
+      await tx.tenantBusinessProfile.create({
+        data: { tenantId: t.id, businessType, ...BUSINESS_PROFILE_PRESETS[businessType] },
+      });
+    }
     for (const user of users) {
       await tx.user.create({
         data: {
@@ -141,7 +173,17 @@ async function main(): Promise<void> {
 
   console.log('\n✔ Company provisioned — no sample data, ready for first login.\n');
   console.log(`  Tenant   ${tenant.name}  (id: ${tenant.id}, slug: ${tenant.slug})`);
-  console.log(`  Branch   ${branch} (MAIN) · Register 1 (R1)\n`);
+  console.log(`  Branch   ${branch} (MAIN) · Register 1 (R1)`);
+  if (businessType) {
+    const preset = BUSINESS_PROFILE_PRESETS[businessType];
+    console.log(
+      `  Profile  ${businessType} · ${preset.inventoryMode} inventory · ${preset.accountingProvider} accounting\n`,
+    );
+  } else {
+    // Stated, not silent: the operator should know they provisioned a QuickBooks
+    // retail tenant by omission rather than by choice.
+    console.log('  Profile  none — resolves to the legacy TILE_SHOP / QuickBooks configuration\n');
+  }
   console.log('  Logins (email / password / PIN):');
   for (const user of users) {
     const note = user.generated ? '  ← generated, record it now' : '';

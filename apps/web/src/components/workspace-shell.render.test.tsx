@@ -1,0 +1,379 @@
+/**
+ * The workspace shell, rendered (Slice 8).
+ *
+ * Covers what `nav.test.ts` cannot: that the sidebar actually draws what the
+ * resolver returns, that the unresolved state is a neutral placeholder rather than
+ * a flash of retail navigation, that the login form exposes the workspace field and
+ * reacts to `WORKSPACE_REQUIRED`, and that every control has an accessible name.
+ */
+import { act, cleanup, render, screen, within } from '@testing-library/react';
+import * as React from 'react';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { ApiError } from '@/lib/api';
+import { Permission, ROLE_PERMISSIONS, type UserRole } from '@/lib/permissions';
+import type { EffectiveBusinessProfile, ModuleKey } from '@/lib/platform-api';
+
+// ── boundaries ───────────────────────────────────────────────────────────────
+
+const push = vi.fn();
+const replace = vi.fn();
+let searchParams = new URLSearchParams();
+
+vi.mock('next/link', () => ({
+  default: ({
+    children,
+    href,
+    ...rest
+  }: { children: React.ReactNode; href: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push, replace, back: vi.fn(), refresh: vi.fn() }),
+  useParams: () => ({}),
+  useSearchParams: () => searchParams,
+  usePathname: () => '/dashboard',
+}));
+
+let role: UserRole = 'OWNER';
+const loginWithEmail = vi.fn();
+const loginWithPin = vi.fn();
+
+vi.mock('@/lib/auth', () => ({
+  useAuth: () => ({
+    session: { user: { role, tenantId: 't' } },
+    loading: false,
+    isAuthenticated: false,
+    hasPermission: (p: Permission) => (ROLE_PERMISSIONS[role] as readonly string[]).includes(p),
+    loginWithEmail,
+    loginWithPin,
+    logout: vi.fn(),
+  }),
+}));
+
+let profileState: {
+  status: 'loading' | 'ready' | 'error';
+  profile: EffectiveBusinessProfile | null;
+};
+
+vi.mock('@/lib/platform-profile', () => ({
+  PlatformProfileProvider: ({ children }: { children: React.ReactNode }) => children,
+  useEffectiveProfile: () => ({
+    ...profileState,
+    inventoryMode: profileState.profile?.inventoryMode ?? null,
+    refresh: vi.fn(),
+  }),
+}));
+
+// Must match `SidebarValue` exactly — a partial stub reaches the component as a
+// missing function and fails with "closeMobile is not a function", which looks
+// like a component bug rather than a mock bug.
+vi.mock('@/lib/sidebar', () => ({
+  useSidebar: () => ({
+    collapsed: false,
+    toggleCollapsed: vi.fn(),
+    mobileOpen: false,
+    openMobile: vi.fn(),
+    closeMobile: vi.fn(),
+    hydrated: true,
+  }),
+  SidebarProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+const { Sidebar } = await import('@/components/sidebar');
+const LoginPage = (await import('@/app/login/page')).default;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+const SHARED_CORE: ModuleKey[] = ['CUSTOMERS', 'REPORTING', 'USERS', 'BRANCHES', 'SETTINGS', 'BRANDING'];
+const LEGACY: ModuleKey[] = [
+  ...SHARED_CORE,
+  'RETAIL_POS',
+  'INVENTORY',
+  'QUOTATIONS',
+  'RETURNS',
+  'EXCHANGES',
+  'SUPPLIERS',
+  'QUICKBOOKS',
+];
+const RESTAURANT: ModuleKey[] = [
+  ...SHARED_CORE,
+  'MENU_MANAGEMENT',
+  'DINING',
+  'TABLE_MANAGEMENT',
+  'TAKEAWAY',
+  'KITCHEN',
+];
+
+function profile(businessType: string, enabledModules: ModuleKey[]): EffectiveBusinessProfile {
+  return {
+    source: 'EXPLICIT',
+    businessType: businessType as EffectiveBusinessProfile['businessType'],
+    inventoryMode: businessType === 'RESTAURANT' ? 'LOCAL' : 'QUICKBOOKS',
+    accountingProvider: businessType === 'RESTAURANT' ? 'NONE' : 'QUICKBOOKS',
+    enabledModules,
+    version: 1,
+    updatedAt: null,
+  };
+}
+
+/**
+ * Type into a React-controlled input.
+ *
+ * Assigning `.value` directly does not fire React's synthetic onChange — React
+ * tracks the last value it set and treats an identical-looking write as a no-op —
+ * so the component never sees the change and the assertion tests nothing.
+ */
+function type(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    'value',
+  )?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+}
+
+/**
+ * The desktop rail's navigation landmark.
+ *
+ * Exact name, not a regex: the mobile drawer renders a second landmark called
+ * "Main (mobile)", and `/main/i` matches both. Every query below scopes to this
+ * one so an assertion cannot pass because the *other* copy happened to contain
+ * what it was looking for.
+ */
+function mainNav(): HTMLElement {
+  return screen.getByRole('navigation', { name: 'Main' });
+}
+
+function navLinks(): string[] {
+  return within(mainNav())
+    .queryAllByRole('link')
+    .map((a) => a.textContent?.trim() ?? '');
+}
+
+beforeAll(() => {
+  window.scrollTo = () => undefined;
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  role = 'OWNER';
+  searchParams = new URLSearchParams();
+  profileState = { status: 'ready', profile: profile('TILE_SHOP', LEGACY) };
+  window.localStorage.clear();
+});
+
+afterEach(cleanup);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Navigation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('8.3 — the sidebar draws what the resolver returns', () => {
+  it('a Tile Shop tenant sees the retail navigation', async () => {
+    render(<Sidebar />);
+    await settle();
+    const links = navLinks().join(' | ');
+    for (const expected of ['POS', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+      expect({ expected, present: links.includes(expected) }).toEqual({ expected, present: true });
+    }
+  });
+
+  it('a Restaurant tenant sees the Restaurant shell and no retail entries', async () => {
+    profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
+    render(<Sidebar />);
+    await settle();
+    const links = navLinks().join(' | ');
+
+    for (const expected of ['Tables', 'Takeaway', 'Kitchen', 'Menu']) {
+      expect({ expected, present: links.includes(expected) }).toEqual({ expected, present: true });
+    }
+    for (const absent of ['POS', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+      expect({ absent, present: links.includes(absent) }).toEqual({ absent, present: false });
+    }
+  });
+
+  it('unbuilt Restaurant destinations are visibly marked, in text', async () => {
+    profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
+    render(<Sidebar />);
+    await settle();
+    const tables = within(mainNav()).getByRole('link', { name: /tables/i });
+    // Text, not colour: a "Soon" badge that only a sighted user can perceive would
+    // let the shell read as finished for everyone else.
+    expect(tables.textContent).toMatch(/soon/i);
+
+    const products = within(mainNav()).getByRole('link', { name: /products/i });
+    expect(products.textContent).not.toMatch(/soon/i);
+  });
+
+  it('7/8 — an unresolved profile shows a neutral placeholder, not retail navigation', async () => {
+    profileState = { status: 'loading', profile: null };
+    render(<Sidebar />);
+    await settle();
+    expect(navLinks()).toEqual([]);
+    expect(within(mainNav()).getByRole('status').textContent).toMatch(/loading/i);
+    expect(document.body.textContent).not.toMatch(/quickbooks|quotations/i);
+  });
+
+  it('8 — a failed profile request shows no navigation and says so', async () => {
+    profileState = { status: 'error', profile: null };
+    render(<Sidebar />);
+    await settle();
+    expect(navLinks()).toEqual([]);
+    expect(within(mainNav()).getByRole('status').textContent).toMatch(/unavailable/i);
+  });
+
+  it('permission gating still applies inside a workspace', async () => {
+    role = 'CASHIER';
+    render(<Sidebar />);
+    await settle();
+    const links = navLinks().join(' | ');
+    expect(links).toContain('POS');
+    expect(links).not.toContain('QuickBooks');
+    expect(links).not.toContain('Settings');
+  });
+});
+
+describe('accessibility — the shell is navigable without sight or a mouse', () => {
+  it('the navigation landmark is labelled', async () => {
+    render(<Sidebar />);
+    await settle();
+    expect(mainNav()).toBeDefined();
+    // Both landmarks are labelled, and distinctly — two navs both called "Main"
+    // is indistinguishable noise to a screen-reader user.
+    const names = screen
+      .getAllByRole('navigation')
+      .map((n) => n.getAttribute('aria-label'));
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('every navigation entry is a focusable link with an accessible name', async () => {
+    render(<Sidebar />);
+    await settle();
+    const links = within(mainNav()).getAllByRole('link');
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link.tagName).toBe('A');
+      expect((link.textContent ?? '').trim().length).toBeGreaterThan(0);
+      expect(link.getAttribute('href')?.startsWith('/')).toBe(true);
+    }
+  });
+
+  it('the current page is marked with aria-current, not only a colour', async () => {
+    render(<Sidebar />);
+    await settle();
+    const current = within(mainNav()).getByRole('link', { name: /dashboard/i });
+    expect(current.getAttribute('aria-current')).toBe('page');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workspace login
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('8.2 — workspace login', () => {
+  it('offers a Workspace field, marked optional', async () => {
+    render(<LoginPage />);
+    await settle();
+    const field = screen.getByLabelText(/workspace/i);
+    expect(field).toBeDefined();
+    expect(document.body.textContent).toMatch(/optional/i);
+  });
+
+  it('prefills from a ?workspace= link', async () => {
+    searchParams = new URLSearchParams('workspace=restaurant-demo');
+    render(<LoginPage />);
+    await settle();
+    expect((screen.getByLabelText(/workspace/i) as HTMLInputElement).value).toBe('restaurant-demo');
+  });
+
+  it('sends the workspace when one is entered, and omits it when blank', async () => {
+    render(<LoginPage />);
+    await settle();
+
+    screen.getByRole('button', { name: /^sign in$/i }).click();
+    await settle();
+    expect(loginWithEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), '');
+
+    type(screen.getByLabelText(/workspace/i) as HTMLInputElement, 'restaurant-demo');
+    await settle();
+    screen.getByRole('button', { name: /^sign in$/i }).click();
+    await settle();
+    expect(loginWithEmail).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      'restaurant-demo',
+    );
+  });
+
+  it('reveals the workspace requirement on AUTH_WORKSPACE_REQUIRED', async () => {
+    loginWithEmail.mockRejectedValueOnce(
+      new ApiError(409, {
+        statusCode: 409,
+        code: 'AUTH_WORKSPACE_REQUIRED',
+        message: 'Please enter your workspace to continue.',
+        error: 'Conflict',
+      }),
+    );
+    render(<LoginPage />);
+    await settle();
+    screen.getByRole('button', { name: /^sign in$/i }).click();
+    await settle();
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toMatch(/more than one workspace/i);
+    expect(screen.getByLabelText(/workspace/i).getAttribute('aria-invalid')).toBe('true');
+    // And it must not name any workspace — the API does not send one, and the UI
+    // must not invent one.
+    expect(alert.textContent).not.toMatch(/tile|cafe|restaurant-demo/i);
+  });
+
+  it('a generic failure does not claim a workspace is required', async () => {
+    loginWithEmail.mockRejectedValueOnce(
+      new ApiError(401, {
+        statusCode: 401,
+        message: 'Invalid email or password',
+        error: 'Unauthorized',
+      }),
+    );
+    render(<LoginPage />);
+    await settle();
+    screen.getByRole('button', { name: /^sign in$/i }).click();
+    await settle();
+    expect(screen.getByRole('alert').textContent).toMatch(/invalid email or password/i);
+    expect(screen.getByLabelText(/workspace/i).getAttribute('aria-invalid')).toBeNull();
+  });
+
+  it('never stores a password, and only remembers the slug after success', async () => {
+    render(<LoginPage />);
+    await settle();
+    type(screen.getByLabelText(/workspace/i) as HTMLInputElement, 'restaurant-demo');
+    await settle();
+    screen.getByRole('button', { name: /^sign in$/i }).click();
+    await settle();
+
+    const stored = JSON.stringify({ ...window.localStorage });
+    expect(stored).toContain('restaurant-demo');
+    expect(stored).not.toContain('password123');
+    expect(stored.toLowerCase()).not.toContain('passw0rd');
+  });
+
+  it('offers no workspace directory or lookup', async () => {
+    render(<LoginPage />);
+    await settle();
+    // A dropdown of workspaces would be a tenant directory readable by anyone.
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect((screen.getByLabelText(/workspace/i) as HTMLInputElement).list).toBeFalsy();
+  });
+});

@@ -42,11 +42,22 @@ of them enabled and every route behaves exactly as before. This is asserted by
 
 ## Deferred, and why
 
-**`RETAIL_POS` on sales, payments, receipts, print jobs and discounts.** Gating
-these would deny a Restaurant tenant read access to its own sales history, which
-the Slice 8 Restaurant navigation surfaces. Splitting read from write needs the
-Phase 2 ordering model settled first, so the classification is recorded and the
-guard is not yet applied.
+**`RETAIL_POS` on the sale *write* path, payments, receipts, print jobs and
+discounts.** Taking a sale, collecting payment and printing a receipt are retail
+workflows. The classification is recorded and the guard is not yet applied; the
+work is deferred with the rest of the retail-write gating.
+
+**Superseded — sale *reads* are no longer in that class.** After Slice 8 the
+product owner classified completed-sale history and sale detail as `SHARED_CORE`:
+`GET /sales`, `GET /sales/:id` and `GET /sales/report`. Every business profile
+needs to look up what it has already sold, and the Restaurant navigation links
+straight to those routes. Access continues to depend on authentication, tenant
+isolation, branch isolation where applicable, and the existing `sale:read`
+permission — removing a module requirement is not removing protection. Future
+restaurant *operational orders* are a separate model on separate routes and do not
+make sale history retail-only. A later business-specific operation on
+`SalesController` is to be classified individually, never by moving the whole
+controller. Asserted in `route-module-matrix.spec.ts`.
 
 **`INVENTORY` on `/products` and the category controllers.** Products are the
 *catalogue*, which every business profile needs; `INVENTORY` means *stock
@@ -282,13 +293,13 @@ reach production unclassified.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
-| GET | `/sales` | RETAIL_POS | deferred-retail-pos | sale:read |
-| GET | `/sales/:id` | RETAIL_POS | deferred-retail-pos | sale:read |
+| GET | `/sales` | SHARED_CORE | shared-core | sale:read |
+| GET | `/sales/:id` | SHARED_CORE | shared-core | sale:read |
 | POST | `/sales/:id/retry-sync` | RETAIL_POS | deferred-retail-pos | sale:create |
 | POST | `/sales/:id/sync` | RETAIL_POS | deferred-retail-pos | sale:create |
 | POST | `/sales/complete` | RETAIL_POS | deferred-retail-pos | sale:create |
 | POST | `/sales/draft` | RETAIL_POS | deferred-retail-pos | sale:create |
-| GET | `/sales/report` | RETAIL_POS | deferred-retail-pos | sale:read |
+| GET | `/sales/report` | SHARED_CORE | shared-core | sale:read |
 
 ### SettingsController
 
