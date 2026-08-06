@@ -110,8 +110,15 @@ They are deliberately not synonyms, and a slice can hold several at once.
 | 6 | Provider adoption — catalogue sync | implemented · committed · pushed · verified | `6774926` |
 | 6C-B | Provider-aware catalogue status (frontend) | implemented · committed · pushed · verified | `062f931` |
 | 7 | Security & consistency (throttling, workspace login, shared permissions) | implemented · committed · pushed · verified | `cc7fb8b` |
-| 8 | Frontend modularisation (module-aware workspaces) | implemented · verified · **awaiting checkpoint commit** | — |
-| 9 | Phase 1 completion and demo readiness | not started | — |
+| 8 | Frontend modularisation (module-aware workspaces) | implemented · committed · pushed · verified | `3c5c916` |
+| 9 | Phase 1 completion and demo readiness | implemented · verified · **committed in the commit carrying this line** | — |
+
+Slice 9's results, the development workspaces and the known limitations are in
+[`09-phase-1-acceptance.md`](./09-phase-1-acceptance.md). *Verified* there means
+what the table above defines: `lint`, `typecheck`, `test`, `test:integration` and
+`build` pass, and Playwright was run serially against a live stack. One case,
+`QB-006/007/008`, is flaky against the live QuickBooks sandbox — it failed on a
+timeout in 2 of 7 runs. That is recorded rather than rounded off.
 
 ### Restaurant phases
 

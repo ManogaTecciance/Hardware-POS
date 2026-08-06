@@ -57,7 +57,17 @@ pnpm dev
 - Web → http://localhost:3000
 - API → http://localhost:4000/v1
 
-Seeded logins: `owner@hardwarepos.test` / `password123` (Owner), Manager PIN `2222`, Cashier PIN `1111`.
+Seeded logins — two workspaces with different business profiles:
+
+| Workspace | Sign in with | Profile |
+| --------- | ------------ | ------- |
+| `demo` | `owner@hardwarepos.test` / `password123`, Manager PIN `2222`, Cashier PIN `1111` | Tile Shop, QuickBooks inventory and accounting |
+| `resto-demo` | `owner@axlorestaurant.test` / `password123`, Cashier PIN `3333` | Restaurant, local inventory, no accounting |
+
+The workspace field is optional while an email is unique across tenants. **PIN
+sign-in requires the device to be commissioned first** — sign in once with an email
+and password in that browser, after which the PIN box works for that tenant and
+keeps working across sign-out.
 
 See [docs/getting-started.md](./docs/getting-started.md) for full setup, and
 [docs/architecture.md](./docs/architecture.md) for the system design.

@@ -22,13 +22,14 @@ which is retained as historical reference and carries a superseded notice.
 | 9 | [`07-roadmap.md`](./07-roadmap.md) | Planning, sequencing, or checking what phase we are in. |
 | 10 | [`08-authentication-and-workspace-identity.md`](./08-authentication-and-workspace-identity.md) | Touching login, tenant resolution, or the workspace identifier. |
 | 11 | [`phase-01-plan.md`](./phase-01-plan.md) | Implementing Phase 1. |
+| 12 | [`09-phase-1-acceptance.md`](./09-phase-1-acceptance.md) | You need Phase 1's verification results, the development workspaces, or its known limitations. |
 
 ## Status
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Repository and architecture audit | ✅ Complete — [`phase-00-audit.md`](./phase-00-audit.md) |
-| 1 | Platform modularisation, optional QuickBooks | 🟡 In progress — Slices 0-4 implemented, Slice 5+ awaiting approval |
+| 1 | Platform modularisation, optional QuickBooks | ✅ Complete — all slices committed and pushed. Results and limitations in [`09-phase-1-acceptance.md`](./09-phase-1-acceptance.md); per-slice status and SHAs in [`07-roadmap.md`](./07-roadmap.md) |
 | 2 | DB-backed permissions, restaurant roles, branch scoping | ⬜ Not started |
 | 2.5 | Branch-scoped inventory (`BranchInventory` + `StockMovement`) | ⬜ Not started |
 | 3 | Restaurant menu and modifiers | ⬜ Not started |
