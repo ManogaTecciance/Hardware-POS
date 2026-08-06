@@ -17,6 +17,7 @@ import { PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 import { BUSINESS_PROFILE_PRESETS } from '../src/business-profile-presets';
+import { seedTenantRoles, syncPermissionCatalogue } from '../src/seed-roles';
 import { MOCK_HARDWARE_PRODUCTS, mockCategoryId, mockCategoryNames } from '../src/mock-catalog';
 
 const prisma = new PrismaClient();
@@ -149,7 +150,13 @@ async function main(): Promise<void> {
     });
   }
 
+  // Phase 1.5: the permission catalogue is global; roles are per tenant (D36).
+  // Landed inert — nothing resolves authorization from these rows yet.
+  const permissionCount = await syncPermissionCatalogue(prisma);
+  const tileRoles = await seedTenantRoles(prisma, tenant.id, 'TILE_SHOP');
+
   const restaurant = await seedRestaurant(password123);
+  const restaurantRoles = await seedTenantRoles(prisma, restaurant.id, 'RESTAURANT');
 
   /* eslint-disable no-console */
   console.log('Seeded tenant:', tenant.id);
@@ -164,6 +171,10 @@ async function main(): Promise<void> {
   console.log('Login users:');
   console.log('  Owner       owner@axlorestaurant.test / password123   workspace: resto-demo');
   console.log('  Cashier     PIN 3333  (x-tenant-id: ' + restaurant.id + ')');
+  console.log('');
+  console.log(`Permission catalogue: ${permissionCount} keys`);
+  console.log(`Roles: ${tileRoles.length} for ${tenant.id}, ${restaurantRoles.length} for ${restaurant.id}`);
+  console.log('  (roles are seeded but not yet used for authorization — Phase 1.5 lands them inert)');
   /* eslint-enable no-console */
 }
 

@@ -7,5 +7,6 @@
  */
 
 export * from './authorization.js';
+export * from './role-templates.js';
 export * from './enums.js';
 export * from './api.js';

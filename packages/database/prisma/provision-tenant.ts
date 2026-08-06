@@ -34,6 +34,7 @@ import { BusinessType, PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 import { BUSINESS_PROFILE_PRESETS } from '../src/business-profile-presets';
+import { seedTenantRoles, syncPermissionCatalogue } from '../src/seed-roles';
 
 const prisma = new PrismaClient();
 const SALT_ROUNDS = 10;
@@ -139,6 +140,7 @@ async function main(): Promise<void> {
     if (clash) fail(`The email ${user.email} is already in use by another account`);
   }
 
+  let roleCount = 0;
   const tenant = await prisma.$transaction(async (tx) => {
     const t = await tx.tenant.create({ data: { name, slug } });
     const b = await tx.branch.create({
@@ -155,6 +157,12 @@ async function main(): Promise<void> {
         data: { tenantId: t.id, businessType, ...BUSINESS_PROFILE_PRESETS[businessType] },
       });
     }
+    // Phase 1.5 (D36): every tenant is created with its own role rows. A tenant
+    // with none must fail closed once authorization reads them, so this is part of
+    // creating a tenant rather than a follow-up step someone can forget.
+    await syncPermissionCatalogue(tx);
+    roleCount = (await seedTenantRoles(tx, t.id, businessType ?? 'TILE_SHOP')).length;
+
     for (const user of users) {
       await tx.user.create({
         data: {
@@ -190,6 +198,7 @@ async function main(): Promise<void> {
     const pin = user.pin ? ` / PIN ${user.pin}` : '';
     console.log(`    ${user.role.padEnd(10)} ${user.email} / ${user.password}${pin}${note}`);
   }
+  console.log(`  Roles    ${roleCount} seeded (not yet used for authorization)\n`);
   console.log('\n  Sign in at the web app with the email + password above.');
   console.log('  PINs answer the in-POS approval prompts (discounts, returns).');
 }

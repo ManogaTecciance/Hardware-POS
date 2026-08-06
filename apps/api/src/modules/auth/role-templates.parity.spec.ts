@@ -1,0 +1,222 @@
+/**
+ * Role-template and permission parity (Phase 1.5, D36/D37).
+ *
+ * The Product Owner required parity across four copies of the same vocabulary:
+ * the code catalogue, the seeded assignments, the API's permission decorators,
+ * and the frontend constants. Slice 7.3 already ended the drift between three of
+ * them by making `packages/shared` the single authority; this file covers what
+ * Phase 1.5 adds — role *templates*, which are a second statement of
+ * `ROLE_PERMISSIONS` and could drift from it the moment someone edits one.
+ *
+ * ## What makes these non-vacuous
+ *
+ * Every set comparison is exact, never a count. Every "X is absent" is paired with
+ * a positive control proving the collection being searched is populated. The
+ * reserved-permission assertions matter most: they are the claim that no
+ * restaurant feature is implemented, and they would pass trivially against a route
+ * probe that found nothing — so the probe's own output is asserted first.
+ */
+import {
+  ACTIVE_PERMISSIONS,
+  ALL_PERMISSIONS,
+  ALL_ROLE_TEMPLATES,
+  BUILT_IN_ROLE_TEMPLATES,
+  Permission,
+  RESERVED_PERMISSIONS,
+  RESTAURANT_ROLE_TEMPLATES,
+  ROLE_PERMISSIONS,
+  roleTemplatesForBusinessType,
+  UserRole,
+} from '@hardware-pos/shared';
+import { UserRole as PrismaUserRole } from '@hardware-pos/database';
+
+import { ALL_CONTROLLERS } from '../../common/testkit/controller-registry';
+import { collectRoutes } from '../../common/testkit/route-inventory';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Built-in templates mirror ROLE_PERMISSIONS exactly
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('built-in role templates match the permission authority', () => {
+  it('there is exactly one template per persisted UserRole', () => {
+    expect(BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual(
+      [...Object.values(PrismaUserRole)].sort(),
+    );
+  });
+
+  it('each template grants exactly what ROLE_PERMISSIONS grants that role', () => {
+    // Exact sets per role, not a total count: two roles could swap permission
+    // sets and keep the total identical.
+    for (const template of BUILT_IN_ROLE_TEMPLATES) {
+      const authority = ROLE_PERMISSIONS[template.key as UserRole];
+      expect({ role: template.key, granted: [...template.permissions].sort() }).toEqual({
+        role: template.key,
+        granted: [...authority].sort(),
+      });
+    }
+  });
+
+  it('every built-in template is marked built-in, and no other template is', () => {
+    expect(BUILT_IN_ROLE_TEMPLATES.every((t) => t.isBuiltIn)).toBe(true);
+    expect(RESTAURANT_ROLE_TEMPLATES.every((t) => !t.isBuiltIn)).toBe(true);
+    // Positive control: both collections are populated, so neither `every` is
+    // vacuously true.
+    expect(BUILT_IN_ROLE_TEMPLATES.length).toBe(5);
+    expect(RESTAURANT_ROLE_TEMPLATES.length).toBeGreaterThan(0);
+  });
+
+  it('owner and admin hold the whole catalogue, including reserved keys', () => {
+    // The invariant that keeps "owner can do everything" true as the catalogue
+    // grows — including permissions whose features do not exist yet.
+    for (const key of ['OWNER', 'ADMIN'] as const) {
+      const template = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === key)!;
+      expect([...template.permissions].sort()).toEqual([...ALL_PERMISSIONS].sort());
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Keys and uniqueness
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('template keys are stable identifiers', () => {
+  it('every key is unique across all templates', () => {
+    const keys = ALL_ROLE_TEMPLATES.map((t) => t.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('no key collides with a display name', () => {
+    // `Role` is unique on (tenantId, name) AND (tenantId, key). A template whose
+    // key equals another's name would collide on insert for reasons no one could
+    // read from the error.
+    const names = new Set(ALL_ROLE_TEMPLATES.map((t) => t.name));
+    const collisions = ALL_ROLE_TEMPLATES.filter((t) => names.has(t.key)).map((t) => t.key);
+    expect(collisions).toEqual([]);
+  });
+
+  it('keys are upper snake case, so they read as identifiers rather than labels', () => {
+    const malformed = ALL_ROLE_TEMPLATES.filter((t) => !/^[A-Z][A-Z_]*$/.test(t.key));
+    expect(malformed.map((t) => t.key)).toEqual([]);
+  });
+
+  it('every template grants only permissions the catalogue knows', () => {
+    // D37: unknown permission values must fail closed. This is the compile-time
+    // guarantee restated at runtime, because a template could be built from a
+    // widened type in future.
+    const known = new Set<string>(ALL_PERMISSIONS);
+    const unknown = ALL_ROLE_TEMPLATES.flatMap((t) =>
+      t.permissions.filter((p) => !known.has(p)).map((p) => `${t.key}:${p}`),
+    );
+    expect(unknown).toEqual([]);
+    // Positive control: the templates do grant things, so the filter ran.
+    expect(ALL_ROLE_TEMPLATES.flatMap((t) => [...t.permissions]).length).toBeGreaterThan(20);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Which tenants get which templates
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('templates are selected by business type', () => {
+  it('a retail tenant gets the built-in roles and no restaurant role', () => {
+    for (const type of ['TILE_SHOP', 'HARDWARE', 'RETAIL', 'GENERAL']) {
+      const keys = roleTemplatesForBusinessType(type).map((t) => t.key);
+      expect({ type, keys: keys.sort() }).toEqual({
+        type,
+        keys: BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort(),
+      });
+    }
+  });
+
+  it('a food-service tenant gets both sets', () => {
+    for (const type of ['RESTAURANT', 'CAFE', 'BAKERY']) {
+      const keys = roleTemplatesForBusinessType(type).map((t) => t.key);
+      expect({ type, count: keys.length }).toEqual({
+        type,
+        count: BUILT_IN_ROLE_TEMPLATES.length + RESTAURANT_ROLE_TEMPLATES.length,
+      });
+      expect(keys).toContain('WAITER');
+    }
+  });
+
+  it('an unrecognised business type still gets the built-in roles', () => {
+    // Failing closed here would mean a tenant with no roles at all, which once
+    // authorization reads these rows is an account nobody can use.
+    expect(roleTemplatesForBusinessType('SOMETHING_NEW').length).toBe(
+      BUILT_IN_ROLE_TEMPLATES.length,
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reserved permissions govern nothing — the honest-scope tripwire
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('reserved permissions are reserved, not implemented', () => {
+  const routes = collectRoutes(ALL_CONTROLLERS);
+
+  it('the route probe found real routes, so the claims below mean something', () => {
+    expect(routes.length).toBeGreaterThan(100);
+    // POSITIVE CONTROL: permissions ARE enforced somewhere, so "not enforced" is a
+    // meaningful statement rather than an artefact of reading empty metadata.
+    const enforced = new Set(routes.flatMap((r) => r.permissions));
+    expect(enforced.size).toBeGreaterThan(5);
+    expect([...enforced]).toContain(Permission.SALE_READ);
+  });
+
+  it('no route requires a reserved permission', () => {
+    const enforced = new Set<string>(routes.flatMap((r) => r.permissions));
+    const leaked = RESERVED_PERMISSIONS.filter((p) => enforced.has(p));
+    // If this fails, a restaurant feature has been wired up. That is not a test
+    // failure to silence — it is the moment to move the key out of
+    // RESERVED_PERMISSIONS and say the feature is implemented.
+    expect(leaked).toEqual([]);
+  });
+
+  it('reserved and active permissions partition the catalogue exactly', () => {
+    expect([...RESERVED_PERMISSIONS, ...ACTIVE_PERMISSIONS].sort()).toEqual(
+      [...ALL_PERMISSIONS].sort(),
+    );
+    expect(RESERVED_PERMISSIONS.some((p) => ACTIVE_PERMISSIONS.includes(p))).toBe(false);
+    expect(RESERVED_PERMISSIONS.length).toBeGreaterThan(0);
+    expect(ACTIVE_PERMISSIONS.length).toBeGreaterThan(0);
+  });
+
+  it('restaurant roles are built almost entirely from reserved permissions', () => {
+    // Which is the same statement as "these roles cannot currently do anything
+    // restaurant-specific", expressed as data rather than as a comment.
+    const waiter = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === 'WAITER')!;
+    const active = waiter.permissions.filter((p) => ACTIVE_PERMISSIONS.includes(p));
+    expect(active.sort()).toEqual([Permission.CUSTOMER_READ, Permission.PRODUCT_READ].sort());
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mutation proofs
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('the parity assertions can actually fail', () => {
+  it('a template that drifted from ROLE_PERMISSIONS would be detected', () => {
+    const cashier = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === 'CASHIER')!;
+    expect([...cashier.permissions].sort()).toEqual([...ROLE_PERMISSIONS.CASHIER].sort());
+
+    const drifted = [...cashier.permissions, Permission.SETTINGS_MANAGE].sort();
+    expect(() => expect(drifted).toEqual([...ROLE_PERMISSIONS.CASHIER].sort())).toThrow();
+  });
+
+  it('a reserved permission acquiring a route would be detected', () => {
+    const enforcedNow = new Set<string>();
+    expect(RESERVED_PERMISSIONS.filter((p) => enforcedNow.has(p))).toEqual([]);
+
+    const enforcedLater = new Set<string>([Permission.TABLE_OPEN]);
+    const leaked = RESERVED_PERMISSIONS.filter((p) => enforcedLater.has(p));
+    expect(leaked).toEqual([Permission.TABLE_OPEN]);
+    expect(() => expect(leaked).toEqual([])).toThrow();
+  });
+
+  it('a route probe returning nothing would be detected', () => {
+    // The guard on the whole reserved-permission section: an empty probe makes
+    // "no route requires a reserved permission" true for the wrong reason.
+    expect(() => expect([].length).toBeGreaterThan(100)).toThrow();
+  });
+});

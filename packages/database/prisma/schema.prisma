@@ -459,20 +459,31 @@ model User {
   @@index([branchId])
 }
 
+/// A role owned by one tenant (decision D36). `tenantId` is required and no row is
+/// ever shared, so a role belonging to one tenant can never be assigned within
+/// another.
 model Role {
-  id          String   @id @default(cuid())
-  tenantId    String
+  id       String @id @default(cuid())
+  tenantId String
+  /// Stable internal identifier: OWNER, MANAGER, WAITER, … Never shown to a user
+  /// and never edited. `name` is the display label and may be customised, which is
+  /// exactly why lookups must not use it — renaming "Manager" must not orphan the
+  /// role the code resolves. Nullable only so the column could be added without a
+  /// backfill; every seeded row sets it (decision D40).
+  key         String?
   name        String
   description String?
-  isSystem    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  /// Built-in roles cannot be deleted by a tenant.
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   users       User[]
   permissions Permission[] @relation("RolePermissions")
 
   @@unique([tenantId, name])
+  @@unique([tenantId, key])
   @@index([tenantId])
 }
 

@@ -97,11 +97,75 @@ export const Permission = {
   PLATFORM_PROFILE_READ: 'platform:profile:read',
   /** Change the tenant's business type, inventory/accounting mode, or modules. */
   PLATFORM_PROFILE_MANAGE: 'platform:profile:manage',
+
+  // ── Reserved for restaurant operations (Phase 1.5) ───────────────────────
+  //
+  // These are declared so that restaurant role templates can be expressed as
+  // real permission assignments rather than as free-form strings. **No route
+  // enforces any of them today, and none of the features behind them exists.**
+  // `reserved-permissions.spec.ts` asserts exactly that — a reserved key that
+  // acquires a controller must be moved out of this block deliberately, which is
+  // the moment someone has to say the feature is implemented.
+  //
+  // They are in the catalogue rather than beside it because the alternative is an
+  // assignment referencing a key the catalogue does not know, and unknown keys
+  // must fail closed. A key that is known-but-unused is inert; a key that is
+  // unknown is a hole.
+  TABLE_VIEW: 'table:view',
+  TABLE_OPEN: 'table:open',
+  TABLE_TRANSFER: 'table:transfer',
+  TABLE_MERGE: 'table:merge',
+  TABLE_CLOSE: 'table:close',
+  ORDER_CREATE: 'order:create',
+  ORDER_EDIT_DRAFT: 'order:edit:draft',
+  ORDER_SEND_TO_KITCHEN: 'order:send-to-kitchen',
+  ORDER_VOID_SENT: 'order:void:sent',
+  KOT_VIEW: 'kot:view',
+  KOT_PRINT: 'kot:print',
+  KITCHEN_STATUS_UPDATE: 'kitchen:status:update',
+  TAKEAWAY_VIEW: 'takeaway:view',
+  TAKEAWAY_CREATE: 'takeaway:create',
+  BILL_VIEW: 'bill:view',
+  BILL_SPLIT: 'bill:split',
+  PAYMENT_COLLECT: 'payment:collect',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
 /** Every permission value. Owner and Admin hold exactly this set. */
 export const ALL_PERMISSIONS: readonly Permission[] = Object.values(Permission);
+
+/**
+ * Permissions that exist in the vocabulary but govern nothing yet.
+ *
+ * Listing them is a claim that has to stay true: a spec walks every route's
+ * metadata and fails if any of these appears on a controller. That turns
+ * "reserved" from a comment into an enforced state, and stops a half-built
+ * restaurant feature from arriving without anyone deciding it had.
+ */
+export const RESERVED_PERMISSIONS: readonly Permission[] = [
+  Permission.TABLE_VIEW,
+  Permission.TABLE_OPEN,
+  Permission.TABLE_TRANSFER,
+  Permission.TABLE_MERGE,
+  Permission.TABLE_CLOSE,
+  Permission.ORDER_CREATE,
+  Permission.ORDER_EDIT_DRAFT,
+  Permission.ORDER_SEND_TO_KITCHEN,
+  Permission.ORDER_VOID_SENT,
+  Permission.KOT_VIEW,
+  Permission.KOT_PRINT,
+  Permission.KITCHEN_STATUS_UPDATE,
+  Permission.TAKEAWAY_VIEW,
+  Permission.TAKEAWAY_CREATE,
+  Permission.BILL_VIEW,
+  Permission.BILL_SPLIT,
+  Permission.PAYMENT_COLLECT,
+];
+
+/** Permissions that a route may actually enforce today. */
+export const ACTIVE_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS.filter(
+  (p) => !RESERVED_PERMISSIONS.includes(p),
+);
 
 /**
  * Role → permissions, for the five built-in roles.
