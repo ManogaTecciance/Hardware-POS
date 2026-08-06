@@ -40,6 +40,7 @@ import { SalesController } from '../../modules/sales/sales.controller';
 import { SettingsController } from '../../modules/settings/settings.controller';
 import { SuppliersController } from '../../modules/suppliers/suppliers.controller';
 import { SyncController } from '../../modules/sync/sync.controller';
+import { UserBranchAccessController } from '../../modules/users/user-branch-access.controller';
 import { UsersController } from '../../modules/users/users.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,6 +72,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   SettingsController,
   SuppliersController,
   SyncController,
+  UserBranchAccessController,
   UsersController,
 ];
 
@@ -111,5 +113,6 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'settings',
   'suppliers',
   'sync',
+  'user-branch-access',
   'users',
 ];

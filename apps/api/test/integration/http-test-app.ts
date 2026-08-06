@@ -54,7 +54,12 @@ export interface HttpIntegrationApp {
   prisma: PrismaService;
   jwt: JwtService;
   /** Mint an access token exactly as `AuthService.issueToken` does. */
-  tokenFor(input: { userId: string; tenantId: string; role: UserRole }): string;
+  tokenFor(input: {
+    userId: string;
+    tenantId: string;
+    role: UserRole;
+    activeBranchId?: string | null;
+  }): string;
   request<T = unknown>(
     method: string,
     path: string,
@@ -92,7 +97,8 @@ export async function createHttpIntegrationApp(): Promise<HttpIntegrationApp> {
     app,
     prisma: moduleRef.get(PrismaService),
     jwt,
-    tokenFor: ({ userId, tenantId, role }) => jwt.sign({ sub: userId, tenantId, role }),
+    tokenFor: ({ userId, tenantId, role, activeBranchId }) =>
+      jwt.sign({ sub: userId, tenantId, role, activeBranchId: activeBranchId ?? null }),
     async request<T>(
       method: string,
       path: string,

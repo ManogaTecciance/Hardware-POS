@@ -52,7 +52,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase(prisma);
   tenant = await seedTileShopWithQuickBooks(prisma);
-  owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' };
+  owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' , activeBranchId: null };
 });
 
 /** Write the legacy configuration as an EXPLICIT row, to test parity with "no row". */

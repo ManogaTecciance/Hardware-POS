@@ -58,6 +58,10 @@ describe('7.1 — every credential-accepting auth route is throttled', () => {
       refresh: 'refresh',
       logout: NONE,
       me: NONE,
+      // Both Phase 1.5.6 admin routes: both are authenticated, both go through
+      // `PermissionResolver`, neither takes a credential. No new throttle.
+      listAccessibleBranches: NONE,
+      switchActiveBranch: NONE,
     });
   });
 

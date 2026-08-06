@@ -389,15 +389,36 @@ model Branch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  registers  Register[]
-  users      User[]
-  sales      Sale[]
-  returns    Return[]
-  quotations Quotation[]
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  registers    Register[]
+  users        User[]
+  branchAccess BranchAccess[]
+  sales        Sale[]
+  returns      Return[]
+  quotations   Quotation[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
+}
+
+/// Phase 1.5.6. Multi-branch access without altering `User.branchId` — the
+/// existing column stays as the user's default active branch, matching the
+/// login/register-resolution flow that Slice 7 depends on. Rows are additive:
+/// unassigned users fall back to the tenant's active branches for OWNER/ADMIN
+/// (policy) and to `User.branchId` alone for anyone else.
+model BranchAccess {
+  id              String   @id @default(cuid())
+  userId          String
+  branchId        String
+  grantedAt       DateTime @default(now())
+  grantedByUserId String?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, branchId])
+  @@index([branchId])
+  @@index([userId])
 }
 
 model Register {
@@ -442,6 +463,7 @@ model User {
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch             Branch?             @relation(fields: [branchId], references: [id])
   customRole         Role?               @relation(fields: [roleId], references: [id])
+  branchAccess       BranchAccess[]
   sales              Sale[]
   payments           Payment[]
   approvedDiscounts  SaleItem[]          @relation("DiscountApprover")

@@ -25,6 +25,7 @@ import { ModuleKey } from '@hardware-pos/database';
 import { REQUIRE_MODULE_KEY } from '../decorators/require-module.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
+import { BRANCH_SCOPE_METADATA, BranchScopeKind } from '../decorators/branch-scope.decorator';
 
 /** Nest's own metadata keys. Imported by value so a version bump cannot silently drift. */
 const PATH_METADATA = 'path';
@@ -57,6 +58,14 @@ export interface RouteInfo {
   isPublic: boolean;
   /** Permissions required by `@RequirePermissions(...)`, if any. */
   permissions: string[];
+  /**
+   * Branch-scope classification (Phase 1.5.6). `null` when the handler and its
+   * controller both declare no scope — the guard treats a null scope as
+   * `TENANT_SCOPED` (no-op). Classified routes state their intent explicitly so
+   * the matrix test can verify that every branch-scoped route really does need
+   * an active branch, and vice versa.
+   */
+  branchScope: BranchScopeKind | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -110,6 +119,10 @@ export function collectRoutes(controllers: ControllerClass[]): RouteInfo[] {
         permissions:
           ((Reflect.getMetadata(PERMISSIONS_KEY, fn) ??
             Reflect.getMetadata(PERMISSIONS_KEY, controller)) as string[] | undefined) ?? [],
+        branchScope:
+          ((Reflect.getMetadata(BRANCH_SCOPE_METADATA, fn) ??
+            Reflect.getMetadata(BRANCH_SCOPE_METADATA, controller)) as BranchScopeKind | undefined) ??
+          null,
       });
     }
 

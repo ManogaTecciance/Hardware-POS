@@ -47,7 +47,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase(prisma);
   tenant = await seedTileShopWithQuickBooks(prisma);
-  owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' };
+  owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' , activeBranchId: null };
 });
 
 /** A completed, fully-paid sale of `quantity` × Product A (1000.00 each). */
@@ -627,7 +627,7 @@ describe('tenant scoping of the return pipeline', () => {
     await expect(
       app.returnsService.complete(
         other.id,
-        { id: 'ghost', tenantId: other.id, role: 'OWNER' },
+        { id: 'ghost', tenantId: other.id, role: 'OWNER' , activeBranchId: null },
         returnDto({
           originalSaleId: sale.id,
           items: [

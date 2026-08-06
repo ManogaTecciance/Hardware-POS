@@ -94,8 +94,8 @@ beforeEach(async () => {
   await resetDatabase(prisma);
   tile = await seedTileShopWithQuickBooks(prisma);
   other = await seedSecondTenant(prisma);
-  owner = { id: tile.ownerId, tenantId: tile.tenantId, role: 'OWNER' };
-  otherOwner = { id: other.ownerId, tenantId: other.tenantId, role: 'OWNER' };
+  owner = { id: tile.ownerId, tenantId: tile.tenantId, role: 'OWNER' , activeBranchId: null };
+  otherOwner = { id: other.ownerId, tenantId: other.tenantId, role: 'OWNER' , activeBranchId: null };
 });
 
 async function giveProfile(

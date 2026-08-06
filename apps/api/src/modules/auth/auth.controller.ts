@@ -11,6 +11,7 @@ import { AuthService, CurrentUserView } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { PinLoginDto } from './dto/pin-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { SwitchActiveBranchDto } from './dto/switch-active-branch.dto';
 
 /**
  * Every credential-accepting route here carries `@AuthThrottle` (Slice 7.1).
@@ -76,5 +77,33 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser): Promise<CurrentUserView> {
     return this.authService.getCurrentUser(user.id);
+  }
+
+  /**
+   * List the branches this session may switch into, right now (Phase 1.5.6).
+   *
+   * OWNER/ADMIN see every active branch of their tenant. Everyone else sees
+   * their assigned `User.branchId` plus every branch granted through
+   * `BranchAccess`. Inactive branches are omitted.
+   */
+  @Get('accessible-branches')
+  listAccessibleBranches(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ id: string; name: string }[]> {
+    return this.authService.listAccessibleBranches(user.id);
+  }
+
+  /**
+   * Switch the caller's active branch. Issues a new access + refresh pair.
+   * A stale token or a branch the user was removed from is refused here just
+   * as it would be on any branch-scoped request. Cross-tenant ids answer 404.
+   */
+  @Post('active-branch')
+  @HttpCode(HttpStatus.OK)
+  switchActiveBranch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SwitchActiveBranchDto,
+  ): Promise<AuthTokenResult> {
+    return this.authService.switchActiveBranch(user.id, dto.branchId);
   }
 }

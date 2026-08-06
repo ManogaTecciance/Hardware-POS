@@ -1,10 +1,21 @@
 import { UserRole } from '@hardware-pos/database';
 
-/** Signed into the JWT and re-hydrated on each request. */
+/**
+ * Signed into the JWT and re-hydrated on each request.
+ *
+ * `activeBranchId` is the branch this session is *currently* operating from.
+ * Under decision D38 / AD-03 the token carries it as CONTEXT, never as
+ * authorisation: every branch-scoped request re-validates that the user still
+ * has access to the branch. See `BranchScopeGuard`.
+ *
+ * `null` means the caller is operating tenant-wide (OWNER/ADMIN who did not
+ * choose a specific branch, or a legacy token issued before Phase 1.5.6).
+ */
 export interface JwtPayload {
   sub: string;
   tenantId: string;
   role: UserRole;
+  activeBranchId?: string | null;
 }
 
 /** Attached to `request.user` by the JWT guard. */
@@ -12,6 +23,12 @@ export interface AuthenticatedUser {
   id: string;
   tenantId: string;
   role: UserRole;
+  /**
+   * The branch this session is currently operating from. `null` when the token
+   * predates Phase 1.5.6 or the caller chose the tenant-wide view. Never trust
+   * this for authorisation — `BranchScopeGuard` re-checks the database.
+   */
+  activeBranchId: string | null;
 }
 
 export interface AuthTokenResult {

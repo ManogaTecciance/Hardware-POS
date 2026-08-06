@@ -80,6 +80,54 @@ export class AuthRepository {
     await this.prisma.user.update({ where: { id }, data: { lastLoginAt: new Date() } });
   }
 
+  /**
+   * Does this user currently have access to that branch, within their tenant?
+   *
+   * OWNER and ADMIN implicitly access every active branch in their tenant —
+   * they are the roles that manage the branches, and a deactivated branch is
+   * still refused. Everyone else needs a matching `BranchAccess` row, OR to
+   * have `User.branchId` still pointing at that branch (backwards compat with
+   * pre-Phase-1.5.6 users). The branch must be active in every case.
+   */
+  async hasBranchAccess(user: User, branchId: string): Promise<boolean> {
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, tenantId: user.tenantId, isActive: true },
+      select: { id: true },
+    });
+    if (!branch) return false;
+    if (user.role === 'OWNER' || user.role === 'ADMIN') return true;
+    if (user.branchId === branchId) return true;
+    const access = await this.prisma.branchAccess.findUnique({
+      where: { userId_branchId: { userId: user.id, branchId } },
+      select: { id: true },
+    });
+    return access !== null;
+  }
+
+  /** The list of branches this user can currently access, tenant-scoped. */
+  async listAccessibleBranches(user: User): Promise<{ id: string; name: string }[]> {
+    if (user.role === 'OWNER' || user.role === 'ADMIN') {
+      return this.prisma.branch.findMany({
+        where: { tenantId: user.tenantId, isActive: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      });
+    }
+    const rows = await this.prisma.branch.findMany({
+      where: {
+        tenantId: user.tenantId,
+        isActive: true,
+        OR: [
+          { id: user.branchId ?? '__no_match__' },
+          { branchAccess: { some: { userId: user.id } } },
+        ],
+      },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+    return rows;
+  }
+
   // ── session location ─────────────────────────────────────────────────────
 
   /**

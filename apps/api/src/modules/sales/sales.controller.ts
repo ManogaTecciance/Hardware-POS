@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Res } 
 import type { Paginated } from '@hardware-pos/shared';
 import type { Response } from 'express';
 
+import { BranchScope, BranchScopeKind } from '../../common/decorators/branch-scope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
@@ -25,6 +26,7 @@ export class SalesController {
 
   @Post('draft')
   @RequirePermissions(Permission.SALE_CREATE)
+  @BranchScope(BranchScopeKind.BRANCH_SCOPED)
   createDraft(
     @TenantId() tenantId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -36,6 +38,7 @@ export class SalesController {
   @Post('complete')
   @HttpCode(HttpStatus.CREATED)
   @RequirePermissions(Permission.SALE_CREATE)
+  @BranchScope(BranchScopeKind.BRANCH_SCOPED)
   complete(
     @TenantId() tenantId: string,
     @CurrentUser() user: AuthenticatedUser,

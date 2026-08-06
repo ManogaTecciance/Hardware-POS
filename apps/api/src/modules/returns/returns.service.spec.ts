@@ -78,7 +78,12 @@ const SETTINGS = {
   returns: RETURN_SETTINGS,
 };
 
-const CASHIER: AuthenticatedUser = { id: 'u1', tenantId: 't1', role: 'CASHIER' };
+const CASHIER: AuthenticatedUser = {
+  id: 'u1',
+  tenantId: 't1',
+  role: 'CASHIER',
+  activeBranchId: null,
+};
 
 function makeService(repo: Partial<ReturnsRepository>) {
   const settings = { getSettings: () => SETTINGS } as unknown as SettingsService;

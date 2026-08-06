@@ -44,7 +44,16 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    request.user = { id: payload.sub, tenantId: payload.tenantId, role: payload.role };
+    request.user = {
+      id: payload.sub,
+      tenantId: payload.tenantId,
+      role: payload.role,
+      // `activeBranchId` is context only. `BranchScopeGuard` re-validates it
+      // against the database — a stale, forged or foreign branch is caught
+      // there, not here. Tokens issued before Phase 1.5.6 have no claim and
+      // resolve to `null`, which the guard treats as "tenant-wide by default".
+      activeBranchId: payload.activeBranchId ?? null,
+    };
     return true;
   }
 

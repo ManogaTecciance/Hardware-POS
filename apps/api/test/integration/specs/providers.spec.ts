@@ -102,7 +102,7 @@ beforeEach(async () => {
   other = await seedSecondTenant(prisma);
   ctx = { tenantId: tile.tenantId, branchId: tile.branchId };
   otherCtx = { tenantId: other.tenantId, branchId: other.branchId };
-  owner = { id: tile.ownerId, tenantId: tile.tenantId, role: 'OWNER' };
+  owner = { id: tile.ownerId, tenantId: tile.tenantId, role: 'OWNER' , activeBranchId: null };
 });
 
 /** Write an explicit profile straight to the database. */

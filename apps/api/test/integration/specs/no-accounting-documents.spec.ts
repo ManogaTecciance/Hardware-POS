@@ -80,7 +80,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase(prisma);
   tenant = await seedTileShopWithQuickBooks(prisma);
-  owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' };
+  owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' , activeBranchId: null };
 });
 
 /** A fully paid sale. */
@@ -188,7 +188,7 @@ describe('thermal sale receipt with null external accounting metadata', () => {
       await expect(thermalReceiptHtml(sale)).resolves.toBeTruthy();
       await resetDatabase(prisma);
       tenant = await seedTileShopWithQuickBooks(prisma);
-      owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' };
+      owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' , activeBranchId: null };
     }
   });
 
@@ -442,7 +442,7 @@ describe('return documents with null external accounting metadata', () => {
 
     await resetDatabase(prisma);
     tenant = await seedTileShopWithQuickBooks(prisma);
-    owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' };
+    owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' , activeBranchId: null };
 
     const credit = await completedReturn('STORE_CREDIT');
     expect(credit.quickbooksDocumentType).toBe('CREDIT_MEMO');

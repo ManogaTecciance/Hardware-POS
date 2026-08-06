@@ -57,6 +57,7 @@ import {
   REGISTERED_CONTROLLER_FILES,
 } from '../testkit/controller-registry';
 import { collectRoutes, discoverControllerFiles } from '../testkit/route-inventory';
+import { BranchScopeKind } from '../decorators/branch-scope.decorator';
 
 const API_SRC = resolve(__dirname, '../..');
 const MATRIX_DOC = resolve(
@@ -71,160 +72,178 @@ type GuardState =
   | 'deferred-mixed-controller'
   | 'public-no-tenant';
 
+/**
+ * Phase 1.5.6. `null` is shorthand for `TENANT_SCOPED` (no metadata carried).
+ * A route is declared here explicitly when it is branch- or register-scoped,
+ * so the assertions below fail if scope metadata drifts. Public routes and
+ * routes on tenant-wide controllers are `TENANT_SCOPED`.
+ */
+type Scope = BranchScopeKind;
+
 interface Classification {
   module: string;
   guard: GuardState;
+  scope: Scope;
 }
 
-/** Every route the API serves, classified. Exactly 139 entries at Slice 7. */
+const T = BranchScopeKind.TENANT_SCOPED;
+const B = BranchScopeKind.BRANCH_SCOPED;
+const G = BranchScopeKind.GLOBAL_PLATFORM;
+
+/** Every route the API serves, classified. 152 entries at Phase 1.5.6. */
 const ROUTE_CLASSIFICATION: Record<string, Classification> = {
-  'GET /audit-logs': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /auth/login': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /auth/logout': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /auth/me': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /auth/pin-login': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /auth/refresh': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /branches': { module: 'BRANCHES', guard: 'ENFORCED' },
-  'GET /categories': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /customers': { module: 'CUSTOMERS', guard: 'ENFORCED' },
-  'POST /customers': { module: 'CUSTOMERS', guard: 'ENFORCED' },
-  'GET /customers/:id': { module: 'CUSTOMERS', guard: 'ENFORCED' },
-  'PATCH /customers/:id': { module: 'CUSTOMERS', guard: 'ENFORCED' },
-  'POST /customers/:id/sync-to-quickbooks': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /customers/import/commit': { module: 'CUSTOMERS', guard: 'ENFORCED' },
-  'POST /customers/import/preview': { module: 'CUSTOMERS', guard: 'ENFORCED' },
-  'GET /customers/import/template': { module: 'CUSTOMERS', guard: 'ENFORCED' },
-  'GET /dashboard/payment-methods': { module: 'REPORTING', guard: 'ENFORCED' },
-  'GET /dashboard/sales-series': { module: 'REPORTING', guard: 'ENFORCED' },
-  'GET /dashboard/shift-summary': { module: 'REPORTING', guard: 'ENFORCED' },
-  'GET /dashboard/stats': { module: 'REPORTING', guard: 'ENFORCED' },
-  'GET /dashboard/summary': { module: 'REPORTING', guard: 'ENFORCED' },
-  'GET /dashboard/top-categories': { module: 'REPORTING', guard: 'ENFORCED' },
-  'GET /dashboard/top-products': { module: 'REPORTING', guard: 'ENFORCED' },
-  'POST /discounts/approve': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'POST /documents/preview/:type': { module: 'SETTINGS', guard: 'deferred-mixed-controller' },
-  'GET /documents/returns/:returnId': { module: 'RETURNS', guard: 'deferred-mixed-controller' },
-  'GET /documents/sales/:saleId': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /documents/sample-pdf/:type': { module: 'SETTINGS', guard: 'deferred-mixed-controller' },
-  'GET /health': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /payments': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'POST /payments': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /payments/:id': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /platform/modules': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /platform/profile': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'PATCH /platform/profile': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /print-jobs': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'POST /print-jobs/:id/mark-printed': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /product-categories': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-categories': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /product-categories/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'PATCH /product-categories/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-categories/:id/deactivate': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-categories/:id/reactivate': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-categories/reorder': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /product-subcategories': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-subcategories': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /product-subcategories/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'PATCH /product-subcategories/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-subcategories/:id/deactivate': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-subcategories/:id/move': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-subcategories/:id/reactivate': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /product-subcategories/reorder': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /products': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /products': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'DELETE /products/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /products/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'PATCH /products/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'DELETE /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /products/:id/sync-to-quickbooks': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /products/import/commit': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /products/import/preview': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /products/import/template': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /products/report': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /products/search': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /products/sync/mock': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'GET /public/quotations/:token': { module: 'QUOTATIONS', guard: 'public-no-tenant' },
-  'GET /quickbooks/callback': { module: 'QUICKBOOKS', guard: 'public-no-tenant' },
-  'GET /quickbooks/connect': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /quickbooks/disconnect': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'GET /quickbooks/party-sync-status': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /quickbooks/retry/:syncLogId': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'GET /quickbooks/status': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /quickbooks/sync': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /quickbooks/sync-products': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /quickbooks/sync-sale/:saleId': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'GET /quickbooks/vendors': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'GET /quotations': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'GET /quotations/:id': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'PATCH /quotations/:id': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations/:id/cancel': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations/:id/convert-to-sale': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations/:id/duplicate': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations/:id/mark-sent': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'GET /quotations/:id/pdf': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'GET /quotations/:id/revisions': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations/:id/revisions': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'GET /quotations/:id/revisions/:revisionId': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations/:id/share/email': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations/:id/share/whatsapp': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'POST /quotations/preview': { module: 'QUOTATIONS', guard: 'ENFORCED' },
-  'GET /receipts/:id': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'POST /receipts/:saleId/customer': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /receipts/sale/:saleId': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /returns': { module: 'RETURNS', guard: 'ENFORCED' },
-  'POST /returns': { module: 'RETURNS', guard: 'ENFORCED' },
-  'GET /returns/:id': { module: 'RETURNS', guard: 'ENFORCED' },
-  'POST /returns/:id/cancel': { module: 'RETURNS', guard: 'ENFORCED' },
-  'POST /returns/:id/receipt': { module: 'RETURNS', guard: 'ENFORCED' },
-  'POST /returns/:id/retry-sync': { module: 'RETURNS', guard: 'ENFORCED' },
-  'POST /returns/approve': { module: 'RETURNS', guard: 'ENFORCED' },
-  'POST /returns/preview': { module: 'RETURNS', guard: 'ENFORCED' },
-  'GET /roles': { module: 'USERS', guard: 'ENFORCED' },
-  'POST /roles': { module: 'USERS', guard: 'ENFORCED' },
-  'GET /roles/:roleId': { module: 'USERS', guard: 'ENFORCED' },
-  'PATCH /roles/:roleId': { module: 'USERS', guard: 'ENFORCED' },
-  'POST /roles/:roleId/archive': { module: 'USERS', guard: 'ENFORCED' },
-  'PUT /roles/:roleId/permissions': { module: 'USERS', guard: 'ENFORCED' },
-  'GET /sales': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /sales/:id': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'POST /sales/:id/retry-sync': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /sales/:id/return-eligibility': { module: 'RETURNS', guard: 'ENFORCED' },
-  'GET /sales/:id/returnable-items': { module: 'RETURNS', guard: 'ENFORCED' },
-  'GET /sales/:id/returns': { module: 'RETURNS', guard: 'ENFORCED' },
-  'POST /sales/:id/sync': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'POST /sales/complete': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'POST /sales/draft': { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
-  'GET /sales/report': { module: 'SHARED_CORE', guard: 'shared-core' },
-  'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'PUT /settings': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'DELETE /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'POST /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'DELETE /settings/document-profile/signature': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'POST /settings/document-profile/signature': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'DELETE /settings/document-profile/stamp': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'POST /settings/document-profile/stamp': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'POST /settings/reset': { module: 'SETTINGS', guard: 'ENFORCED' },
-  'GET /suppliers': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'POST /suppliers': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'DELETE /suppliers/:id': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'GET /suppliers/:id': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'PATCH /suppliers/:id': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'DELETE /suppliers/:id/quickbooks-mapping': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'POST /suppliers/:id/quickbooks-mapping': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'POST /suppliers/import/commit': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'POST /suppliers/import/preview': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'GET /suppliers/import/template': { module: 'SUPPLIERS', guard: 'ENFORCED' },
-  'GET /sync/logs': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /sync/products/refresh': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'POST /sync/sales/:id/retry': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'GET /sync/status': { module: 'QUICKBOOKS', guard: 'ENFORCED' },
-  'GET /users': { module: 'USERS', guard: 'ENFORCED' },
-  'PUT /users/:userId/role': { module: 'USERS', guard: 'ENFORCED' },
-  'GET /users/:userId/effective-permissions': { module: 'USERS', guard: 'ENFORCED' },
-  'POST /users': { module: 'USERS', guard: 'ENFORCED' },
-  'GET /users/:id': { module: 'USERS', guard: 'ENFORCED' },
+  'GET /audit-logs': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /auth/active-branch': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /auth/accessible-branches': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /auth/login': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /auth/logout': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /auth/me': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /auth/pin-login': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /auth/refresh': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /branches': { module: 'BRANCHES', guard: 'ENFORCED', scope: T },
+  'GET /categories': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /customers': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
+  'POST /customers': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
+  'GET /customers/:id': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
+  'PATCH /customers/:id': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
+  'POST /customers/:id/sync-to-quickbooks': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /customers/import/commit': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
+  'POST /customers/import/preview': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
+  'GET /customers/import/template': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
+  'GET /dashboard/payment-methods': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /dashboard/sales-series': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /dashboard/shift-summary': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /dashboard/stats': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /dashboard/summary': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /dashboard/top-categories': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /dashboard/top-products': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'POST /discounts/approve': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'POST /documents/preview/:type': { module: 'SETTINGS', guard: 'deferred-mixed-controller', scope: T },
+  'GET /documents/returns/:returnId': { module: 'RETURNS', guard: 'deferred-mixed-controller', scope: T },
+  'GET /documents/sales/:saleId': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /documents/sample-pdf/:type': { module: 'SETTINGS', guard: 'deferred-mixed-controller', scope: T },
+  'GET /health': { module: 'SHARED_CORE', guard: 'shared-core', scope: G },
+  'GET /payments': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'POST /payments': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /payments/:id': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /platform/modules': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /platform/profile': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /platform/profile': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /print-jobs': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'POST /print-jobs/:id/mark-printed': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /product-categories': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-categories': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /product-categories/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /product-categories/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-categories/:id/deactivate': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-categories/:id/reactivate': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-categories/reorder': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /product-subcategories': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-subcategories': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /product-subcategories/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /product-subcategories/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-subcategories/:id/deactivate': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-subcategories/:id/move': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-subcategories/:id/reactivate': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /product-subcategories/reorder': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /products': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'DELETE /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'DELETE /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /products/:id/sync-to-quickbooks': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /products/import/commit': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /products/import/preview': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/import/template': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/report': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/search': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /products/sync/mock': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'GET /public/quotations/:token': { module: 'QUOTATIONS', guard: 'public-no-tenant', scope: G },
+  'GET /quickbooks/callback': { module: 'QUICKBOOKS', guard: 'public-no-tenant', scope: G },
+  'GET /quickbooks/connect': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /quickbooks/disconnect': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'GET /quickbooks/party-sync-status': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /quickbooks/retry/:syncLogId': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'GET /quickbooks/status': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /quickbooks/sync': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /quickbooks/sync-products': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /quickbooks/sync-sale/:saleId': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'GET /quickbooks/vendors': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'GET /quotations': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'GET /quotations/:id': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'PATCH /quotations/:id': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations/:id/cancel': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations/:id/convert-to-sale': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations/:id/duplicate': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations/:id/mark-sent': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'GET /quotations/:id/pdf': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'GET /quotations/:id/revisions': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations/:id/revisions': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'GET /quotations/:id/revisions/:revisionId': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations/:id/share/email': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations/:id/share/whatsapp': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'POST /quotations/preview': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
+  'GET /receipts/:id': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'POST /receipts/:saleId/customer': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /receipts/sale/:saleId': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'POST /returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'GET /returns/:id': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'POST /returns/:id/cancel': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'POST /returns/:id/receipt': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'POST /returns/:id/retry-sync': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'POST /returns/approve': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'POST /returns/preview': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'GET /roles': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'POST /roles': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'GET /roles/:roleId': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'PATCH /roles/:roleId': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'POST /roles/:roleId/archive': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'PUT /roles/:roleId/permissions': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'GET /sales': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /sales/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /sales/:id/retry-sync': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /sales/:id/return-eligibility': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'GET /sales/:id/returnable-items': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'GET /sales/:id/returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'POST /sales/:id/sync': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'POST /sales/complete': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: B },
+  'POST /sales/draft': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: B },
+  'GET /sales/report': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'PUT /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'DELETE /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'POST /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'DELETE /settings/document-profile/signature': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'POST /settings/document-profile/signature': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'DELETE /settings/document-profile/stamp': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'POST /settings/document-profile/stamp': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'POST /settings/reset': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'GET /suppliers': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'POST /suppliers': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'DELETE /suppliers/:id': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'GET /suppliers/:id': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'PATCH /suppliers/:id': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'DELETE /suppliers/:id/quickbooks-mapping': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'POST /suppliers/:id/quickbooks-mapping': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'POST /suppliers/import/commit': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'POST /suppliers/import/preview': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'GET /suppliers/import/template': { module: 'SUPPLIERS', guard: 'ENFORCED', scope: T },
+  'GET /sync/logs': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /sync/products/refresh': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'POST /sync/sales/:id/retry': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'GET /sync/status': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  'GET /users': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'GET /users/:userId/branch-access': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'PUT /users/:userId/branch-access/:branchId': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'DELETE /users/:userId/branch-access/:branchId': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'PUT /users/:userId/role': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'GET /users/:userId/effective-permissions': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'POST /users': { module: 'USERS', guard: 'ENFORCED', scope: T },
+  'GET /users/:id': { module: 'USERS', guard: 'ENFORCED', scope: T },
 };
 
 function actualRoutes() {
@@ -409,7 +428,11 @@ describe('completed-sale history is shared core', () => {
     for (const route of ['POST /sales/draft', 'POST /sales/complete']) {
       expect({ route, classified: ROUTE_CLASSIFICATION[route] }).toEqual({
         route,
-        classified: { module: 'RETAIL_POS', guard: 'deferred-retail-pos' },
+        classified: {
+          module: 'RETAIL_POS',
+          guard: 'deferred-retail-pos',
+          scope: BranchScopeKind.BRANCH_SCOPED,
+        },
       });
     }
   });
@@ -435,6 +458,70 @@ describe('7.6 — the matrix document matches the code', () => {
     expect(doc).toContain(`Total routes: ${routes.length}`);
     expect(doc).toContain(`Module-guarded routes: ${enforced}`);
     expect(doc).toContain(`Ungated routes: ${routes.length - enforced}`);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 1.5.6 — branch-scope classification is complete and consistent
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1.5.6 — every route has a branch-scope classification', () => {
+  it('every BRANCH_SCOPED route carries the @BranchScope metadata', () => {
+    const mismatches = actualRoutes()
+      .filter((r) => ROUTE_CLASSIFICATION[key(r)]?.scope === BranchScopeKind.BRANCH_SCOPED)
+      .filter((r) => r.branchScope !== BranchScopeKind.BRANCH_SCOPED)
+      .map((r) => `${key(r)}: metadata=${r.branchScope ?? 'null'} classified=BRANCH_SCOPED`);
+    expect(mismatches).toEqual([]);
+  });
+
+  it('a route without BRANCH_SCOPED classification never carries the metadata', () => {
+    // The other direction: a stray @BranchScope on a tenant-wide route would
+    // gate it against a branch nobody expected, silently breaking every OWNER
+    // request that skipped a branch pick.
+    const unexpected = actualRoutes()
+      .filter((r) => ROUTE_CLASSIFICATION[key(r)]?.scope !== BranchScopeKind.BRANCH_SCOPED)
+      .filter((r) => r.branchScope === BranchScopeKind.BRANCH_SCOPED)
+      .map((r) => `${key(r)} carries BRANCH_SCOPED metadata`);
+    expect(unexpected).toEqual([]);
+  });
+
+  it('there IS a branch-scoped route, so the assertions above are not vacuous', () => {
+    // POSITIVE CONTROL. If nothing on the surface is branch-scoped both
+    // assertions above pass while inspecting nothing.
+    const branchScoped = actualRoutes().filter(
+      (r) => r.branchScope === BranchScopeKind.BRANCH_SCOPED,
+    );
+    expect(branchScoped.length).toBeGreaterThan(0);
+    expect(branchScoped.map(key)).toContain('POST /sales/complete');
+  });
+});
+
+describe('Phase 1.5.6 — new administration routes are wired correctly', () => {
+  it('the switch-branch and accessible-branches routes are public-to-any-user, tenant-wide', () => {
+    const routes = actualRoutes();
+    for (const path of ['POST /auth/active-branch', 'GET /auth/accessible-branches']) {
+      const route = routes.find((r) => key(r) === path);
+      expect({ path, present: !!route }).toEqual({ path, present: true });
+      // Not @Public(): every authenticated caller may switch.
+      expect(route!.isPublic).toBe(false);
+      // Not module-gated: switching branches is core.
+      expect(route!.requiredModule).toBeNull();
+    }
+  });
+
+  it('branch-access administration lives on UsersController and requires USER_MANAGE', () => {
+    const routes = actualRoutes();
+    const paths = [
+      'GET /users/:userId/branch-access',
+      'PUT /users/:userId/branch-access/:branchId',
+      'DELETE /users/:userId/branch-access/:branchId',
+    ];
+    for (const path of paths) {
+      const route = routes.find((r) => key(r) === path);
+      expect({ path, present: !!route }).toEqual({ path, present: true });
+      expect(route!.requiredModule).toBe('USERS');
+      expect(route!.permissions).toContain('user:manage');
+    }
   });
 });
 

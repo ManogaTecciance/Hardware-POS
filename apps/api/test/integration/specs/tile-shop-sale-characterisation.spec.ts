@@ -49,7 +49,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase(prisma);
   tenant = await seedTileShopWithQuickBooks(prisma);
-  owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' };
+  owner = { id: tenant.ownerId, tenantId: tenant.tenantId, role: 'OWNER' , activeBranchId: null };
 });
 
 /** Line totalling 1000.00 (1 × Product A). */

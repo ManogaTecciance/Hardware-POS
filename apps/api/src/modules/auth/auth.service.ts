@@ -233,8 +233,20 @@ export class AuthService {
     return null;
   }
 
-  private async issueToken(user: User): Promise<AuthTokenResult> {
-    const payload: JwtPayload = { sub: user.id, tenantId: user.tenantId, role: user.role };
+  private async issueToken(user: User, requestedBranchId: string | null = null): Promise<AuthTokenResult> {
+    const location = await this.authRepository.resolveLocation(user.tenantId, requestedBranchId ?? user.branchId);
+    // The resolved branch is authoritative — `resolveLocation` refuses
+    // deactivated branches and cross-tenant ids. If it comes back null the
+    // token carries no branch claim, and the caller lands in the tenant-wide
+    // view (guarded routes will refuse until the caller picks a branch).
+    const activeBranchId = location.branch?.id ?? null;
+
+    const payload: JwtPayload = {
+      sub: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+      activeBranchId,
+    };
     const token = await this.jwtService.signAsync(payload);
 
     const refreshToken = randomBytes(48).toString('base64url');
@@ -247,7 +259,6 @@ export class AuthService {
       expiresAt,
     );
 
-    const location = await this.authRepository.resolveLocation(user.tenantId, user.branchId);
     await this.authRepository.touchLastLogin(user.id);
 
     return {
@@ -263,6 +274,36 @@ export class AuthService {
       branch: location.branch,
       register: location.register,
     };
+  }
+
+  /**
+   * The branches this session may switch into right now, from the database —
+   * never from the token.
+   */
+  async listAccessibleBranches(userId: string): Promise<{ id: string; name: string }[]> {
+    const user = await this.authRepository.findById(userId);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+    return this.authRepository.listAccessibleBranches(user);
+  }
+
+  /**
+   * Switch the caller's active branch. The server re-validates access every
+   * time — a stale token or a branch the user was removed from is refused
+   * here just as it would be on any branch-scoped request.
+   */
+  async switchActiveBranch(userId: string, branchId: string): Promise<AuthTokenResult> {
+    const user = await this.authRepository.findById(userId);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+    const allowed = await this.authRepository.hasBranchAccess(user, branchId);
+    if (!allowed) {
+      // Never leak whether the branch exists in another tenant.
+      throw new NotFoundException('Branch not found');
+    }
+    return this.issueToken(user, branchId);
   }
 
   private toCurrentUserView(user: User): CurrentUserView {

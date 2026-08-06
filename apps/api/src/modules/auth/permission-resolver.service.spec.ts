@@ -31,7 +31,12 @@ function resolverFor(row: UserRow) {
   return { resolver: new PermissionResolver(prisma), findFirst };
 }
 
-const USER: AuthenticatedUser = { id: 'usr_1', tenantId: 'tnt_a', role: 'CASHIER' };
+const USER: AuthenticatedUser = {
+  id: 'usr_1',
+  tenantId: 'tnt_a',
+  role: 'CASHIER',
+  activeBranchId: null,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 

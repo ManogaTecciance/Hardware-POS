@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 147
-- Module-guarded routes: 87
-- Ungated routes: 60
+- Total routes: 152
+- Module-guarded routes: 90
+- Ungated routes: 62
 
 ## How to read the Guard column
 
@@ -88,6 +88,8 @@ reach production unclassified.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
+| GET | `/auth/accessible-branches` | SHARED_CORE | shared-core | — |
+| POST | `/auth/active-branch` | SHARED_CORE | shared-core | — |
 | POST | `/auth/login` | SHARED_CORE | shared-core | _public_ |
 | POST | `/auth/logout` | SHARED_CORE | shared-core | _public_ |
 | GET | `/auth/me` | SHARED_CORE | shared-core | — |
@@ -368,3 +370,11 @@ administrator role, or builds its own, keeps working.
 | GET | `/users` | USERS | ENFORCED | user:manage |
 | POST | `/users` | USERS | ENFORCED | user:manage |
 | GET | `/users/:id` | USERS | ENFORCED | user:manage |
+
+### UserBranchAccessController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/users/:userId/branch-access` | USERS | ENFORCED | user:manage |
+| PUT | `/users/:userId/branch-access/:branchId` | USERS | ENFORCED | user:manage |
+| DELETE | `/users/:userId/branch-access/:branchId` | USERS | ENFORCED | user:manage |
