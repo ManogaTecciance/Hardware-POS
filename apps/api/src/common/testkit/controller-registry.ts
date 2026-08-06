@@ -50,6 +50,7 @@ import { MenusController } from '../../modules/menu/menus.controller';
 import { ModifiersController } from '../../modules/menu/modifiers.controller';
 import { DiningAreasController } from '../../modules/dining/dining-areas.controller';
 import { RestaurantTablesController } from '../../modules/dining/restaurant-tables.controller';
+import { TableSessionsController } from '../../modules/table-sessions/table-sessions.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -90,6 +91,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   ModifiersController,
   DiningAreasController,
   RestaurantTablesController,
+  TableSessionsController,
 ];
 
 /**
@@ -139,4 +141,5 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'modifiers',
   'dining-areas',
   'restaurant-tables',
+  'table-sessions',
 ];

@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 177
-- Module-guarded routes: 132
+- Total routes: 183
+- Module-guarded routes: 138
 - Ungated routes: 45
 
 ## How to read the Guard column
@@ -272,6 +272,17 @@ reach production unclassified.
 |---|---|---|---|---|
 | GET | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | platform:profile:read |
 | PUT | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | restaurant:config:manage |
+
+### TableSessionsController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| POST | `/restaurant/branches/:branchId/table-sessions` | TABLE_MANAGEMENT | ENFORCED | table:open |
+| GET | `/restaurant/table-sessions/:sessionId` | TABLE_MANAGEMENT | ENFORCED | table:view |
+| POST | `/restaurant/table-sessions/:sessionId/orders` | TABLE_MANAGEMENT | ENFORCED | order:create |
+| POST | `/restaurant/orders/:orderId/rounds` | TABLE_MANAGEMENT | ENFORCED | order:send-to-kitchen |
+| POST | `/restaurant/order-items/:itemId/void` | TABLE_MANAGEMENT | ENFORCED | order:void:sent |
+| POST | `/restaurant/table-sessions/:sessionId/close` | TABLE_MANAGEMENT | ENFORCED | table:close |
 
 ### DiningAreasController
 

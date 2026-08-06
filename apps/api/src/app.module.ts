@@ -38,6 +38,7 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { DiningModule } from './modules/dining/dining.module';
+import { TableSessionsModule } from './modules/table-sessions/table-sessions.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { DiningModule } from './modules/dining/dining.module';
     RestaurantModule,
     MenuModule,
     DiningModule,
+    TableSessionsModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.

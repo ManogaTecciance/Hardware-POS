@@ -152,15 +152,11 @@ export const ALL_PERMISSIONS: readonly Permission[] = Object.values(Permission);
  * restaurant feature from arriving without anyone deciding it had.
  */
 export const RESERVED_PERMISSIONS: readonly Permission[] = [
-  Permission.TABLE_VIEW,
-  Permission.TABLE_OPEN,
+  // Phase 5 activated: TABLE_VIEW, TABLE_OPEN, TABLE_CLOSE, ORDER_CREATE,
+  // ORDER_SEND_TO_KITCHEN, ORDER_VOID_SENT (see `table-sessions.controller`).
   Permission.TABLE_TRANSFER,
   Permission.TABLE_MERGE,
-  Permission.TABLE_CLOSE,
-  Permission.ORDER_CREATE,
   Permission.ORDER_EDIT_DRAFT,
-  Permission.ORDER_SEND_TO_KITCHEN,
-  Permission.ORDER_VOID_SENT,
   Permission.KOT_VIEW,
   Permission.KOT_PRINT,
   Permission.KITCHEN_STATUS_UPDATE,

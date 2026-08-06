@@ -2,7 +2,15 @@ import { Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../prisma/prisma.service';
 
-export type DocumentType = 'SALE' | 'RETURN' | 'QUOTATION';
+export type DocumentType =
+  | 'SALE'
+  | 'RETURN'
+  | 'QUOTATION'
+  // Phase 5 additions — table sessions and restaurant orders each get
+  // their own per-tenant sequence so waiters can talk about "TS-47" out
+  // loud, and order numbers don't collide with sale numbers.
+  | 'TABLE_SESSION'
+  | 'RESTAURANT_ORDER';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;
