@@ -371,6 +371,20 @@ export class TableSessionsService {
         }
       }
 
+      // Phase 8: apply the branch's service charge (D8). Default is 0
+      // (disabled), so a tenant that has never configured it pays only the
+      // subtotal. Rounded to 2 decimals to match money precision.
+      const config = await tx.restaurantBranchConfig.findUnique({
+        where: { branchId: session.branchId },
+        select: { serviceChargePercent: true },
+      });
+      const serviceChargePercent = config?.serviceChargePercent ?? new Prisma.Decimal(0);
+      const serviceChargeAmount = subtotal
+        .mul(serviceChargePercent)
+        .div(100)
+        .toDecimalPlaces(2);
+      const total = subtotal.plus(serviceChargeAmount);
+
       // Register lookup: use the branch's first active register (matches
       // resolveLocation() in auth.repository).
       const register = await tx.register.findFirstOrThrow({
@@ -402,9 +416,11 @@ export class TableSessionsService {
           subtotal,
           totalDiscount: new Prisma.Decimal(0),
           taxAmount: new Prisma.Decimal(0),
-          total: subtotal,
+          serviceChargeAmount,
+          packagingCharge: new Prisma.Decimal(0),
+          total,
           paidAmount: new Prisma.Decimal(0),
-          balanceAmount: subtotal,
+          balanceAmount: total,
           paymentStatus: 'UNPAID',
           status: 'COMPLETED',
           completedAt: new Date(),

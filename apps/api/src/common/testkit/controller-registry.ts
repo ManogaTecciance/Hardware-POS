@@ -54,6 +54,7 @@ import { TableSessionsController } from '../../modules/table-sessions/table-sess
 import { KitchenPrintersController } from '../../modules/kitchen/kitchen-printers.controller';
 import { KitchenTicketsController } from '../../modules/kitchen/kitchen-tickets.controller';
 import { TakeawayController } from '../../modules/takeaway/takeaway.controller';
+import { BillingController } from '../../modules/billing/billing.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -98,6 +99,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   KitchenPrintersController,
   KitchenTicketsController,
   TakeawayController,
+  BillingController,
 ];
 
 /**
@@ -151,4 +153,5 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'kitchen-printers',
   'kitchen-tickets',
   'takeaway',
+  'billing',
 ];

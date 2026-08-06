@@ -157,12 +157,11 @@ export const RESERVED_PERMISSIONS: readonly Permission[] = [
   // Phase 6 activated: KOT_VIEW, KOT_PRINT, KITCHEN_STATUS_UPDATE (see
   // `kitchen-tickets.controller`).
   // Phase 7 activated: TAKEAWAY_VIEW, TAKEAWAY_CREATE (see `takeaway.controller`).
+  // Phase 8 activated: BILL_VIEW, BILL_SPLIT, PAYMENT_COLLECT (see
+  // `billing.controller`).
   Permission.TABLE_TRANSFER,
   Permission.TABLE_MERGE,
   Permission.ORDER_EDIT_DRAFT,
-  Permission.BILL_VIEW,
-  Permission.BILL_SPLIT,
-  Permission.PAYMENT_COLLECT,
 ];
 
 /** Permissions that a route may actually enforce today. */

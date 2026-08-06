@@ -318,6 +318,7 @@ model Tenant {
   kitchenTicketItems   KitchenTicketItem[]
   kitchenPrintAttempts KitchenPrintAttempt[]
   takeawayOrderProfiles TakeawayOrderProfile[]
+  billSplits            BillSplit[]
 }
 
 /**
@@ -763,6 +764,11 @@ model Sale {
   orderDiscountReason       String?
   orderDiscountApprovedById String?
   taxAmount                 Decimal                 @default(0) @db.Decimal(12, 2)
+  /// Phase 8: restaurant service charge, computed at close from
+  /// RestaurantBranchConfig.serviceChargePercent (D8). 0 for retail sales.
+  serviceChargeAmount       Decimal                 @default(0) @db.Decimal(12, 2)
+  /// Phase 8: packaging surcharge for takeaway (per branch config, future).
+  packagingCharge           Decimal                 @default(0) @db.Decimal(12, 2)
   total                     Decimal                 @default(0) @db.Decimal(12, 2)
   paidAmount                Decimal                 @default(0) @db.Decimal(12, 2)
   balanceAmount             Decimal                 @default(0) @db.Decimal(12, 2)
@@ -774,6 +780,10 @@ model Sale {
   syncStatus                SyncStatus              @default(NOT_SYNCED)
   syncError                 String?
   completedAt               DateTime?
+  /// Phase 8: optimistic-concurrency token for cross-cashier billing.
+  billingVersion            Int                     @default(1)
+  /// Phase 8: idempotency key for the closing operation.
+  closeIdempotencyKey       String?
   createdAt                 DateTime                @default(now())
   updatedAt                 DateTime                @updatedAt
 
@@ -788,6 +798,7 @@ model Sale {
   printJobs PrintJob[]
   returns   Return[]
   quotation Quotation? @relation("QuotationConvertedSale")
+  billSplits BillSplit[]
 
   @@unique([tenantId, saleNumber])
   @@index([tenantId])
@@ -2293,4 +2304,32 @@ model TakeawayOrderProfile {
 
   @@index([tenantId])
   @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 8 — Bill splitting
+// ─────────────────────────────────────────────────────────────
+//
+// One Sale, several bill splits. Each split is a partial claim on the
+// Sale's total that a specific guest will settle. The sum of `share` must
+// equal Sale.total; the service enforces that on create.
+
+model BillSplit {
+  id       String @id @default(cuid())
+  tenantId String
+  saleId   String
+
+  /// Optional label ("Alex", "By-card guest") for the receipt.
+  label    String?
+  share    Decimal @db.Decimal(12, 2)
+  paidAmount Decimal @default(0) @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([saleId])
 }

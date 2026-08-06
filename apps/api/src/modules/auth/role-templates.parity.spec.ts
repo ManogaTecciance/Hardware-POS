@@ -183,11 +183,9 @@ describe('reserved permissions are reserved, not implemented', () => {
   });
 
   it('restaurant roles carry a mix of active and reserved permissions', () => {
-    // Phase 5 activated the table-lifecycle and order-round permissions, so
-    // a WAITER now has real active permissions beyond the shared reads. What
-    // remains reserved (TABLE_TRANSFER, TABLE_MERGE, ORDER_EDIT_DRAFT, KOT_*,
-    // TAKEAWAY_*, BILL_*, PAYMENT_COLLECT) still cannot be enforced because
-    // no route requires them yet.
+    // Phases 5-8 activated most restaurant permissions. What remains
+    // reserved (TABLE_TRANSFER, TABLE_MERGE, ORDER_EDIT_DRAFT) still
+    // cannot be enforced because no route requires them.
     const waiter = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === 'WAITER')!;
     const active = waiter.permissions.filter((p) => ACTIVE_PERMISSIONS.includes(p));
     // Positive control: the roles the waiter now genuinely holds live routes for.
@@ -195,9 +193,10 @@ describe('reserved permissions are reserved, not implemented', () => {
     expect(active).toContain(Permission.TABLE_CLOSE);
     expect(active).toContain(Permission.ORDER_CREATE);
     expect(active).toContain(Permission.ORDER_SEND_TO_KITCHEN);
-    // Negative: still-reserved permissions are NOT in the active set.
-    expect(active).not.toContain(Permission.BILL_VIEW);
-    expect(active).not.toContain(Permission.TAKEAWAY_CREATE);
+    // Negative: WAITER's permission list does NOT include TABLE_TRANSFER
+    // or TABLE_MERGE — that's the deliberate split from role-templates.ts.
+    expect(waiter.permissions).not.toContain(Permission.TABLE_TRANSFER);
+    expect(waiter.permissions).not.toContain(Permission.TABLE_MERGE);
   });
 });
 
@@ -218,10 +217,10 @@ describe('the parity assertions can actually fail', () => {
     const enforcedNow = new Set<string>();
     expect(RESERVED_PERMISSIONS.filter((p) => enforcedNow.has(p))).toEqual([]);
 
-    // Use a permission that is STILL reserved (BILL_VIEW lands in Phase 8).
-    const enforcedLater = new Set<string>([Permission.BILL_VIEW]);
+    // Use a permission that is STILL reserved (TABLE_TRANSFER).
+    const enforcedLater = new Set<string>([Permission.TABLE_TRANSFER]);
     const leaked = RESERVED_PERMISSIONS.filter((p) => enforcedLater.has(p));
-    expect(leaked).toEqual([Permission.BILL_VIEW]);
+    expect(leaked).toEqual([Permission.TABLE_TRANSFER]);
     expect(() => expect(leaked).toEqual([])).toThrow();
   });
 

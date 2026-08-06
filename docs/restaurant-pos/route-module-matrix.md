@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 193
-- Module-guarded routes: 148
+- Total routes: 197
+- Module-guarded routes: 152
 - Ungated routes: 45
 
 ## How to read the Guard column
@@ -272,6 +272,15 @@ reach production unclassified.
 |---|---|---|---|---|
 | GET | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | platform:profile:read |
 | PUT | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | restaurant:config:manage |
+
+### BillingController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/bills/:saleId` | TABLE_MANAGEMENT | ENFORCED | bill:view |
+| POST | `/restaurant/bills/:saleId/payments` | TABLE_MANAGEMENT | ENFORCED | payment:collect |
+| POST | `/restaurant/bills/:saleId/splits` | TABLE_MANAGEMENT | ENFORCED | bill:split |
+| POST | `/restaurant/bills/:saleId/reopen` | TABLE_MANAGEMENT | ENFORCED | bill:split |
 
 ### TakeawayController
 
