@@ -5,6 +5,7 @@
   "description": "Hardware POS cashier front-end — Next.js (App Router) + TypeScript + Tailwind CSS.",
   "scripts": {
     "dev": "next dev --port 3000",
+    "prebuild": "node scripts/check-web-dev-running.mjs",
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "next lint",

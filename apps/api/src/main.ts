@@ -10,10 +10,22 @@ import { StorageService } from './common/storage/storage.service';
 import { UPLOAD_URL_PREFIX } from './common/storage/storage.util';
 import { uploadsHandler } from './common/storage/uploads.handler';
 import { parseWebOrigins } from './common/web-origins';
+import { RATE_LIMIT_STORE, RateLimitStore } from './common/throttling/rate-limit.store';
+import { assertReplicaSafetyOrExit } from './common/throttling/replica-safety';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: false });
   const config = app.get(ConfigService);
+
+  // Phase 1.5.10 — refuse to boot in a multi-replica deployment when the
+  // rate-limit store is process-local. Otherwise an attacker gets N times the
+  // configured budget across N replicas, silently, and the "protection" is a
+  // fiction. Exits 78 (EX_CONFIG) with a clear reason.
+  assertReplicaSafetyOrExit({
+    replicaCount: Number(config.get<string>('APP_REPLICA_COUNT') ?? '1'),
+    store: app.get<RateLimitStore>(RATE_LIMIT_STORE),
+    logger: new Logger('Bootstrap'),
+  });
 
   app.setGlobalPrefix(API_VERSION);
   // Serve uploaded product images (outside the versioned API prefix), e.g.
