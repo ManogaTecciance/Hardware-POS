@@ -625,12 +625,104 @@ Tile Shop is unaffected throughout: every gated module is in the legacy default 
 
 ---
 
+## Phase 1.5 — platform and branch security hardening
+
+Approved at the Phase 1 checkpoint. The phase was renamed from "Restaurant Phase 2"
+because it contains no restaurant domain entity and no restaurant operational
+workflow; see [`phase-1_5-plan.md`](./phase-1_5-plan.md).
+
+### D36 — Roles are per-tenant rows, never shared
+
+`Role.tenantId` is `NOT NULL`. Each tenant owns its five built-in roles plus any it
+creates, and no row is shared between tenants.
+
+The alternative — global built-in rows with `tenantId NULL` and per-tenant
+overrides — stores fewer rows and creates a cross-tenant **write** surface: one
+`OWNER` row serving every tenant means any update path that forgets its
+`tenantId` predicate edits every tenant at once. That is the same class of defect
+as D-slice-3.5's login lookup, which returned an arbitrary tenant's user because
+the query had no tenant predicate. Paying five rows per tenant at provisioning is
+the cheaper side of that trade.
+
+Consequence: `provision-tenant.ts` and `seed.ts` must seed the built-in roles, and
+a tenant created without them has no role rows — which must fail closed, not fall
+through to "no permissions".
+
+### D37 — Permissions are a code catalogue; the database stores only assignments
+
+The list of permissions that exist stays in `packages/shared` as a TypeScript
+union. The database stores which role holds which permission, and nothing else.
+
+A `Permission` table that tenants can insert into invites permissions the codebase
+has never heard of. No decorator references them, no guard enforces them, and they
+grant exactly nothing — while looking, in an admin screen, like access control. The
+compiler is the right authority for *what can exist*; the database is the right
+authority for *who has it*.
+
+Permission string values are already treated as an immutable storage contract
+(`authorization.ts`), which this makes load-bearing rather than aspirational.
+
+### D38 — The access token carries `activeBranchId`, and the server re-validates it every request
+
+The claim is a hint, never proof. `BranchScopeGuard` re-checks on every
+branch-scoped request that the branch belongs to the authenticated tenant, is
+active, and is still one the user may use — and that any register named belongs to
+that branch.
+
+This is what makes the Product Owner's requirement satisfiable: *"branch access
+changes must not remain valid indefinitely because an old JWT contains a branch
+ID."* Trusting the claim would make revocation wait for token expiry. Resolving the
+branch per request with no claim at all would also be correct, but it loses the
+ability to switch branches without a stored preference, and it still costs the same
+lookup the validation costs.
+
+Fails closed: a claim naming a branch the user may no longer use is a 403, not a
+fallback to the user's default branch — silently serving a *different* branch's data
+than the client believes it is showing is worse than refusing.
+
+### D39 — No Redis yet; the abstraction ships, the dependency does not
+
+`RateLimitStore` keeps its process-local implementation as the only one. The
+distributed contract is specified and the deployment requirement documented, and
+the API refuses to start if it is configured for several replicas without a
+distributed store — rather than starting and quietly protecting one process.
+
+The same abstraction is reused for cross-replica settings invalidation, so
+answering O2 later switches both at once. Until then **multi-replica operation is
+unsupported and is documented as such**, which is honest where "we have rate
+limiting" would not be.
+
+O2 stays open. It becomes forced at Phase 4, where the Socket.IO adapter needs a
+shared backplane and no abstraction can paper over it.
+
+### D40 — The dormant `Role` / `Permission` tables are adopted, not replaced
+
+`Role`, `Permission` and `User.roleId` already exist in the schema. They hold
+**zero rows in every environment**, and no application code reads or writes them —
+grep finds no `prisma.role`, no `prisma.permission`, and no non-spec use of
+`roleId`. They are scaffolding from an earlier design that was never wired up.
+
+Phase 1.5 adopts these tables rather than adding a parallel set. Two consequences:
+
+- The migration is far smaller than planned, and carries **no data migration** —
+  there is no data.
+- `Role` is keyed `@@unique([tenantId, name])`, i.e. on a *display name*. A built-in
+  role identified by the string an admin can rename is a defect waiting to happen,
+  so an additive `Role.key` column is required, unique per tenant, holding the
+  stable `OWNER` / `ADMIN` / … identifiers. `name` becomes presentation only.
+
+Recording this because a reader of the Phase 1 plan would reasonably assume these
+tables were part of the working system. They are not, and a structural test that
+asserted their existence would have passed while proving nothing.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
 |---|---|---|
 | O1 | `mockSync()` fabricates QuickBooks document ids for a *disconnected Tile Shop tenant*, writing synthetic ids into financial records. Preserve, or change deliberately? | Phase 2 |
-| O2 | Redis: yes or no? Determines the Socket.IO multi-replica adapter (D7, D11) and the settings-cache invalidation strategy. | Phase 4 |
+| O2 | Redis: yes or no? Determines the Socket.IO multi-replica adapter (D7, D11) and the settings-cache invalidation strategy. **Deferred at Phase 1.5 (D39): the abstraction ships without the dependency, and multi-replica operation stays unsupported until this is answered.** | Phase 4 |
 | O3 | Service-charge tax treatment specifics, to be confirmed with an accountant (D8). | Phase 8 |
 | O4 | Pilot restaurant: which tenant, how many branches, which printers, which channels. | Phase 4 |
 | O5 | Commercial model (per-branch / per-register / per-module) — blocks subscription and entitlement design. | before entitlements |
