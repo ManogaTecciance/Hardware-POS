@@ -14,6 +14,7 @@ import { ThrottlingModule } from './common/throttling/throttling.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { RolesModule } from './modules/roles/roles.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProductsModule } from './modules/products/products.module';
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -48,6 +49,7 @@ import { PlatformModule } from './modules/platform/platform.module';
     PlatformModule,
     HealthModule,
     AuthModule,
+    RolesModule,
     UsersModule,
     ProductsModule,
     CategoriesModule,

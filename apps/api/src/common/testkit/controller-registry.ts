@@ -15,6 +15,8 @@
 
 import { HealthController } from '../../health/health.controller';
 import { AuditLogController } from '../../modules/audit-log/audit-log.controller';
+import { RolesController } from '../../modules/roles/roles.controller';
+import { UserRolesController } from '../../modules/roles/user-roles.controller';
 import { AuthController } from '../../modules/auth/auth.controller';
 import { BranchesController } from '../../modules/branches/branches.controller';
 import { CategoriesController } from '../../modules/categories/categories.controller';
@@ -61,6 +63,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   QuickBooksController,
   QuotationsController,
   ReceiptsController,
+  RolesController,
+  UserRolesController,
   ReturnsController,
   ReturnsSalesController,
   SalesController,
@@ -81,6 +85,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
  */
 export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'audit-log',
+  'roles',
+  'user-roles',
   'auth',
   'branches',
   'categories',

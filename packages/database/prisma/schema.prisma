@@ -473,8 +473,15 @@ model Role {
   key         String?
   name        String
   description String?
-  /// Built-in roles cannot be deleted by a tenant.
-  isSystem  Boolean  @default(false)
+  /// Built-in roles cannot be deleted or archived by a tenant.
+  isSystem Boolean @default(false)
+  /// Archived roles keep every historical assignment and audit reference — roles
+  /// are never physically deleted (Phase 1.5.5). An archived role cannot be
+  /// assigned to anyone new, and any user still holding one fails closed.
+  isActive Boolean @default(true)
+  /// Optimistic-concurrency token. Incremented on every mutation so two
+  /// administrators editing one role cannot silently overwrite each other.
+  version   Int      @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

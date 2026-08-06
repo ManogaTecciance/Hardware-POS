@@ -20,6 +20,7 @@ type UserRow = {
     id: string;
     key: string | null;
     tenantId: string;
+    isActive: boolean;
     permissions: { key: string }[];
   } | null;
 } | null;
@@ -64,6 +65,7 @@ describe('a migrated user', () => {
         id: 'rol_1',
         key: 'CASHIER',
         tenantId: 'tnt_a',
+        isActive: true,
         permissions: [{ key: Permission.SALE_READ }, { key: Permission.PRODUCT_READ }],
       },
     });
@@ -86,6 +88,7 @@ describe('a migrated user', () => {
         id: 'rol_1',
         key: 'CASHIER',
         tenantId: 'tnt_a',
+        isActive: true,
         permissions: [{ key: Permission.SALE_READ }],
       },
     });
@@ -102,7 +105,7 @@ describe('a migrated user', () => {
     const { resolver, findFirst } = resolverFor({
       roleId: 'rol_1',
       role: 'CASHIER',
-      customRole: { id: 'rol_1', key: 'CASHIER', tenantId: 'tnt_a', permissions: [] },
+      customRole: { id: 'rol_1', key: 'CASHIER', tenantId: 'tnt_a', isActive: true, permissions: [] },
     });
 
     await resolver.resolve(USER);
@@ -149,6 +152,7 @@ describe('failing closed', () => {
         id: 'rol_x',
         key: 'OWNER',
         tenantId: 'tnt_b',
+        isActive: true,
         permissions: [{ key: Permission.SETTINGS_MANAGE }],
       },
     });
@@ -168,6 +172,7 @@ describe('failing closed', () => {
         id: 'rol_1',
         key: 'CUSTOM',
         tenantId: 'tnt_a',
+        isActive: true,
         permissions: [{ key: Permission.SALE_READ }, { key: 'invented:permission' }],
       },
     });
@@ -178,6 +183,27 @@ describe('failing closed', () => {
     expect(authority.reason).toBe('unknown-permission');
     // Not "honour the valid half" — a hand-edited row is not partially trustworthy.
     expect(authority.permissions.size).toBe(0);
+  });
+
+  it('denies an archived role rather than reverting to legacy', async () => {
+    // Archival is a deliberate revocation. Falling back would undo it.
+    const { resolver } = resolverFor({
+      roleId: 'rol_1',
+      role: 'OWNER',
+      customRole: {
+        id: 'rol_1',
+        key: 'RETIRED',
+        tenantId: 'tnt_a',
+        isActive: false,
+        permissions: [{ key: Permission.SALE_READ }],
+      },
+    });
+
+    const authority = await resolver.resolve({ ...USER, role: 'OWNER' });
+
+    expect(authority.source).toBe('DENIED');
+    expect(authority.reason).toBe('role-archived');
+    expect(authority.permissions.has(Permission.SETTINGS_MANAGE)).toBe(false);
   });
 
   it('denies a user who is no longer active', async () => {
@@ -198,7 +224,7 @@ describe('failing closed', () => {
     const { resolver } = resolverFor({
       roleId: 'rol_1',
       role: 'CASHIER',
-      customRole: { id: 'rol_1', key: 'EMPTY', tenantId: 'tnt_a', permissions: [] },
+      customRole: { id: 'rol_1', key: 'EMPTY', tenantId: 'tnt_a', isActive: true, permissions: [] },
     });
 
     const authority = await resolver.resolve(USER);

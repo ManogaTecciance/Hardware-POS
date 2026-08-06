@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 139
-- Module-guarded routes: 79
+- Total routes: 147
+- Module-guarded routes: 87
 - Ungated routes: 60
 
 ## How to read the Guard column
@@ -288,6 +288,28 @@ reach production unclassified.
 | GET | `/sales/:id/return-eligibility` | RETURNS | ENFORCED | return:read |
 | GET | `/sales/:id/returnable-items` | RETURNS | ENFORCED | return:read |
 | GET | `/sales/:id/returns` | RETURNS | ENFORCED | return:read |
+
+### RolesController
+
+Tenant role management (Phase 1.5.5). Gated on the `USERS` module and the
+`user:manage` permission — never on a role *name*, so a tenant that renames its
+administrator role, or builds its own, keeps working.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/roles` | USERS | ENFORCED | user:manage |
+| POST | `/roles` | USERS | ENFORCED | user:manage |
+| GET | `/roles/:roleId` | USERS | ENFORCED | user:manage |
+| PATCH | `/roles/:roleId` | USERS | ENFORCED | user:manage |
+| POST | `/roles/:roleId/archive` | USERS | ENFORCED | user:manage |
+| PUT | `/roles/:roleId/permissions` | USERS | ENFORCED | user:manage |
+
+### UserRolesController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| PUT | `/users/:userId/role` | USERS | ENFORCED | user:manage |
+| GET | `/users/:userId/effective-permissions` | USERS | ENFORCED | user:manage |
 
 ### SalesController
 

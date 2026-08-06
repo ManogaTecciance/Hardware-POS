@@ -71,6 +71,7 @@ export class PermissionResolver {
             id: true,
             key: true,
             tenantId: true,
+            isActive: true,
             permissions: { select: { key: true } },
           },
         },
@@ -107,6 +108,17 @@ export class PermissionResolver {
           `assigned to a user in ${user.tenantId}. Denying.`,
       );
       return { source: 'DENIED', permissions: new Set(), reason: 'cross-tenant-role' };
+    }
+
+    // An archived role fails closed rather than reverting to legacy. Archival is a
+    // deliberate revocation; restoring the enum's permissions would undo it. The
+    // API refuses to archive a role that still has users, so reaching this state
+    // means the assignment was made outside the application.
+    if (!row.customRole.isActive) {
+      this.logger.warn(
+        `User ${user.id} holds archived role ${row.customRole.key ?? row.customRole.id}. Denying.`,
+      );
+      return { source: 'DENIED', permissions: new Set(), reason: 'role-archived' };
     }
 
     const assigned = row.customRole.permissions.map((p) => p.key);
