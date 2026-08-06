@@ -6,7 +6,8 @@ Estimates are engineering days for one developer, excluding review cycles.
 |---|---|---|---|
 | 0 | Repository and architecture audit | done | audit approved |
 | **1** | Platform modularisation + optional QuickBooks | **~13 d** | Tile Shop provably unchanged; a Restaurant tenant creates zero `SyncJob` rows |
-| 2 | DB-backed permissions, restaurant roles, branch scoping, audit expansion, settings-cache fix | 1.5 wk | Waiter role works; cross-branch access denied |
+| **1.5** | **Platform and branch security hardening** — DB-backed roles and permissions, restaurant roles as data, active branch context, `BranchScopeGuard`, audit expansion, settings consistency, remaining module gating, document-route enforcement, rate-limiter architecture, staging readiness | 1.5 wk | cross-branch access denied; a stale branch claim is rejected; parity proven before the shared authority is retired |
+| 2 | **Restaurant domain foundation** — configuration and kitchen stations, menu, dining areas and tables, table sessions (sub-slices 2A-2D, one migration each) | 1.5 wk | additive schema only; `Sale` unchanged; no sub-slice shares a migration |
 | 2.5 | Branch-scoped inventory (`BranchInventory` + `StockMovement`) — decision D10 | 1.5 wk | branch rollup equals sum of branches; `Product.quantityOnHand` preserved |
 | 3 | Menu, modifiers, channel pricing, availability windows | 2 wk | full menu CRUD + modifier min/max validation |
 | 4 | Dining areas, tables, kitchen stations, floor view, **WebSocket transport** (D7) | 2 wk | live floor plan; screens resynchronise after reconnect |
@@ -111,7 +112,15 @@ They are deliberately not synonyms, and a slice can hold several at once.
 | 6C-B | Provider-aware catalogue status (frontend) | implemented · committed · pushed · verified | `062f931` |
 | 7 | Security & consistency (throttling, workspace login, shared permissions) | implemented · committed · pushed · verified | `cc7fb8b` |
 | 8 | Frontend modularisation (module-aware workspaces) | implemented · committed · pushed · verified | `3c5c916` |
-| 9 | Phase 1 completion and demo readiness | implemented · verified · **committed in the commit carrying this line** | — |
+| 9 | Phase 1 completion and demo readiness | implemented · committed · pushed · verified | `80823b6` |
+
+**Phase 1 is complete**: implemented, verified, committed and pushed. It is
+**accepted for development and local demonstration only** — the Product Owner has
+not accepted it for production deployment, and the reasons are recorded as
+limitations in [`09-phase-1-acceptance.md`](./09-phase-1-acceptance.md): no
+staging environment, process-local rate limiting, module gating still incomplete on
+the retail write path and `DocumentsController`, and a dashboard that is not yet
+profile-aware. Do not merge this branch to `main`, and do not deploy it.
 
 Slice 9's results, the development workspaces and the known limitations are in
 [`09-phase-1-acceptance.md`](./09-phase-1-acceptance.md). *Verified* there means
@@ -120,11 +129,35 @@ what the table above defines: `lint`, `typecheck`, `test`, `test:integration` an
 `QB-006/007/008`, is flaky against the live QuickBooks sandbox — it failed on a
 timeout in 2 of 7 runs. That is recorded rather than rounded off.
 
+### Phase 1.5 — Platform and Branch Security Hardening
+
+**Not started.** Approved scope, planned in
+[`phase-1_5-plan.md`](./phase-1_5-plan.md).
+
+This work carries **no restaurant domain entity and no restaurant operational
+workflow**. It was drafted as "Restaurant Phase 2" in the Slice 9 acceptance
+report and renamed by the Product Owner, because that name implied restaurant
+capability the work does not deliver. Restaurant Phase 2 begins only when Phase 1.5
+is complete.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Database-backed roles and permissions (additive, parity proven) | not started |
+| 2 | Restaurant roles as data, with reserved permissions | not started |
+| 3 | Active branch context, validated server-side | not started |
+| 4 | `BranchScopeGuard`, failing closed | not started |
+| 5 | Audit expansion | not started |
+| 6 | Settings and profile consistency across replicas | not started |
+| 7 | Remaining module-guard rollout | not started |
+| 8 | `DocumentsController` route-level enforcement | not started |
+| 9 | Production rate-limiter architecture | not started |
+| 10 | Staging readiness plan | not started |
+
 ### Restaurant phases
 
 | Phase | Status |
 |---|---|
-| 2 — DB-backed permissions, restaurant roles, branch scoping | not started |
+| 2 — Restaurant domain foundation (2A configuration and kitchen stations · 2B menu · 2C dining areas and tables · 2D table sessions) | not started — begins after Phase 1.5 |
 | 2.5 — Branch-scoped inventory | not started |
 | 3 — Menu, modifiers, channel pricing | not started |
 | 4 — Dining areas, tables, kitchen stations, WebSocket transport | not started |
@@ -134,6 +167,10 @@ timeout in 2 of 7 runs. That is recorded rather than rounded off.
 | 8 — Restaurant billing, service charge, splits | not started |
 | 9 — Restaurant reports | not started |
 | 10-14 — Online orders, delivery adapters, KDS, hardening | not started |
+
+**Restaurant operational ordering is not implemented.** No table session, no
+order, no order round, no kitchen ticket, no restaurant bill — the models do not
+exist and neither do the workflows.
 
 **No restaurant operational feature is implemented.** Slice 8 added navigation,
 module gating and route shells for Menu, Tables, Takeaway and Kitchen. Each shell

@@ -257,11 +257,28 @@ loads the same API and destabilises the API tests.
    `eslint-disable` directives, pre-existing, unchanged by this work, and `pnpm
    lint` exits 0.
 8. **Development credentials differ from the Slice 9 brief** — see the note above.
+9. **The dashboard is not profile-aware.** Found by running the application, after
+   the Slice 9 verification passed. A Restaurant tenant's dashboard renders a
+   **"QuickBooks Health"** card reading *Connected · All systems operational*,
+   although that tenant has no `QUICKBOOKS` module and `GET /quickbooks/status`
+   answers **403** for it. The cause is `buildQuickBooksHealth` in
+   `apps/web/src/lib/dashboard/adapters.ts`, which hard-codes `state: 'connected'`
+   and never asks whether QuickBooks is configured; nothing under
+   `apps/web/src/components/dashboard/` reads the effective profile. The same
+   screen's primary action, "New Sale", links to `/pos`, which the module gate
+   refuses for that tenant — a call to action that leads to a refusal.
 
-## Acceptance recommendation
+   This predates Slice 8 and the dashboard was never in its scope, which is why no
+   test caught it. It is nonetheless the same false-claim class D31 exists to
+   prevent, on the first screen a restaurant operator sees, and it undercuts the
+   claim that no screen asserts QuickBooks for a tenant that does not use it.
+   **Fix belongs in Phase 1.5**: gate the card on the module, resolve the primary
+   action from the profile, and cover both directions with a render test.
 
-**Accept Phase 1**, with limitations 2, 3 and 6 recorded as follow-up work. Every
-required command passes; nothing below is a failing check.
+## Acceptance decision
+
+**Accepted for development and local demonstration. Not accepted for production
+deployment.** — Product Owner, at the Phase 1 checkpoint.
 
 The exit gate was *"Tile Shop provably unchanged; a Restaurant tenant creates zero
 `SyncJob` rows"*. Both hold: the Tile Shop's navigation, product screens,
@@ -269,31 +286,50 @@ QuickBooks behaviour and characterisation tests are unedited and green, and a LO
 tenant's catalogue writes queue no sync job (asserted in `catalog-adoption.spec.ts`
 and over HTTP in `WS-803`).
 
-Limitation 6 blocks *production deployment*, not acceptance of the phase. Nothing
-here should be deployed to production until staging exists.
+Every required command passes. The limitations below are not failing checks — they
+are the reasons production is not in scope, and they stay documented until closed:
 
-## Proposed scope — Restaurant Phase 2
+| Blocks production until closed | Limitation |
+|---|---|
+| No staging environment (D4) | 6 |
+| Process-local rate limiting — no multi-replica protection | 4 |
+| Module gating incomplete on the retail write path and `DocumentsController` | 3 |
+| Dashboard not profile-aware — see below | 9 |
 
-Offered for approval. **Not started, and not to be started without it.**
+Nothing on this branch is to be merged to `main` or deployed to production.
 
-1. **DB-backed permissions.** Move role → permission mapping out of the shared
-   constant into `Role` / `Permission` tables, per tenant, with the current mapping
-   as the seeded default. Parity test against the shared constant before it is
-   retired.
-2. **Restaurant roles** — Waiter, Chef, and a restaurant Cashier — as data, with
-   the permissions they need for the Phase 3-5 workflows.
-3. **Branch scoping.** `branchId` in the JWT and a `BranchScopeGuard`, so a user
-   assigned to one branch cannot read another's sales, customers or stock. This is
-   a real gap today.
-4. **Audit expansion** to cover profile and module changes, role changes, and
-   branch-scope denials.
-5. **Settings cache fix.** `SettingsService` is synchronous and caches per process;
-   convert to async and make invalidation correct across replicas, or document the
-   single-replica constraint as enforced.
-6. **Complete the module gating** deferred in limitation 3 — the retail write path
-   and `DocumentsController` — now that sale reads are classified shared core.
+## What comes next, and what it is called
 
-Explicitly **not** in Phase 2: every restaurant domain model (`DiningArea`,
+The follow-up security work is **Phase 1.5 — Platform and Branch Security
+Hardening**. It was previously drafted here as "Restaurant Phase 2"; the Product
+Owner corrected the name, because the work contains **no restaurant domain entity
+and no restaurant operational workflow**. Calling it Restaurant Phase 2 would have
+implied restaurant capability that it does not deliver.
+
+**Restaurant Phase 2 — Restaurant Domain Foundation** begins only after Phase 1.5
+is complete. Its scope is planned in
+[`phase-1_5-plan.md`](./phase-1_5-plan.md) and the roadmap.
+
+### Phase 1.5 scope (approved, not started)
+
+1. Database-backed roles and permissions, additive, with parity proven before the
+   shared authority is retired.
+2. Restaurant roles as **data**, with reserved permissions for features not yet
+   designed — reserved, not implemented.
+3. Active branch context, validated server-side rather than trusted from a claim.
+4. `BranchScopeGuard`, failing closed, composed with the permission and module
+   guards.
+5. Audit expansion across profile, module, role, permission, branch and denial
+   events.
+6. Settings and profile consistency across independent replicas.
+7. Remaining module-guard rollout on business-specific write routes.
+8. `DocumentsController` route-level enforcement, including cross-tenant and
+   cross-branch negative tests.
+9. Production rate-limiter architecture — abstraction, contract and configuration,
+   without adding a mandatory external dependency unapproved.
+10. Staging readiness plan.
+
+Explicitly **not** in Phase 1.5: every restaurant domain model (`DiningArea`,
 `RestaurantTable`, `TableSession`, `RestaurantOrder`, `OrderRound`, `Menu`,
 `ModifierGroup`, `KitchenTicket`, `TakeawayOrder`), branch-scoped inventory
 (Phase 2.5), WebSockets (Phase 4), printing (Phase 6), and every delivery

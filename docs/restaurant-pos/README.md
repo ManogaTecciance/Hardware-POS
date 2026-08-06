@@ -23,14 +23,16 @@ which is retained as historical reference and carries a superseded notice.
 | 10 | [`08-authentication-and-workspace-identity.md`](./08-authentication-and-workspace-identity.md) | Touching login, tenant resolution, or the workspace identifier. |
 | 11 | [`phase-01-plan.md`](./phase-01-plan.md) | Implementing Phase 1. |
 | 12 | [`09-phase-1-acceptance.md`](./09-phase-1-acceptance.md) | You need Phase 1's verification results, the development workspaces, or its known limitations. |
+| 13 | [`phase-1_5-plan.md`](./phase-1_5-plan.md) | Implementing Phase 1.5 — platform and branch security hardening. |
 
 ## Status
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Repository and architecture audit | ✅ Complete — [`phase-00-audit.md`](./phase-00-audit.md) |
-| 1 | Platform modularisation, optional QuickBooks | ✅ Complete — all slices committed and pushed. Results and limitations in [`09-phase-1-acceptance.md`](./09-phase-1-acceptance.md); per-slice status and SHAs in [`07-roadmap.md`](./07-roadmap.md) |
-| 2 | DB-backed permissions, restaurant roles, branch scoping | ⬜ Not started |
+| 1 | Platform modularisation, optional QuickBooks | ✅ Complete — implemented, verified, committed and pushed. **Accepted for development and local demonstration only, not for production deployment.** Results and limitations in [`09-phase-1-acceptance.md`](./09-phase-1-acceptance.md); per-slice status and SHAs in [`07-roadmap.md`](./07-roadmap.md) |
+| 1.5 | Platform and branch security hardening — roles/permissions as data, branch scoping, audit, module-guard completion, rate-limiter architecture, staging readiness | ⬜ Not started — [`phase-1_5-plan.md`](./phase-1_5-plan.md). **Contains no restaurant domain entity**; renamed from "Restaurant Phase 2" by the Product Owner for exactly that reason. |
+| 2 | Restaurant domain foundation (2A configuration and kitchen stations · 2B menu · 2C dining areas and tables · 2D table sessions) | ⬜ Not started — begins after Phase 1.5 |
 | 2.5 | Branch-scoped inventory (`BranchInventory` + `StockMovement`) | ⬜ Not started |
 | 3 | Restaurant menu and modifiers | ⬜ Not started |
 | 4 | Dining areas and tables | ⬜ Not started |
