@@ -42,6 +42,8 @@ import { SuppliersController } from '../../modules/suppliers/suppliers.controlle
 import { SyncController } from '../../modules/sync/sync.controller';
 import { UserBranchAccessController } from '../../modules/users/user-branch-access.controller';
 import { UsersController } from '../../modules/users/users.controller';
+import { KitchenStationsController } from '../../modules/restaurant/kitchen-stations.controller';
+import { RestaurantConfigController } from '../../modules/restaurant/restaurant-config.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -74,6 +76,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   SyncController,
   UserBranchAccessController,
   UsersController,
+  RestaurantConfigController,
+  KitchenStationsController,
 ];
 
 /**
@@ -115,4 +119,6 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'sync',
   'user-branch-access',
   'users',
+  'kitchen-stations',
+  'restaurant-config',
 ];

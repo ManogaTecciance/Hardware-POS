@@ -130,6 +130,9 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.BILL_VIEW,
       Permission.BILL_SPLIT,
       Permission.PAYMENT_COLLECT,
+      // Phase 2A: restaurant managers configure their own branch and stations.
+      Permission.RESTAURANT_CONFIG_MANAGE,
+      Permission.KITCHEN_STATION_MANAGE,
     ],
   },
   {
@@ -183,6 +186,8 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.KITCHEN_STATUS_UPDATE,
       Permission.ORDER_VOID_SENT,
       Permission.TAKEAWAY_VIEW,
+      // Phase 2A: kitchen managers configure their own stations.
+      Permission.KITCHEN_STATION_MANAGE,
     ],
   },
   {

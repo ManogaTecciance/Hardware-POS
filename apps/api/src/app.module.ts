@@ -35,6 +35,7 @@ import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { BranchesModule } from './modules/branches/branches.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { RestaurantModule } from './modules/restaurant/restaurant.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { PlatformModule } from './modules/platform/platform.module';
     AuditLogModule,
     DashboardModule,
     BranchesModule,
+    RestaurantModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.

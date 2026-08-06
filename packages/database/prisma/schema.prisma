@@ -296,6 +296,8 @@ model Tenant {
   suppliers            Supplier[]
   businessProfile      TenantBusinessProfile?
   modules              TenantModule[]
+  restaurantConfigs    RestaurantBranchConfig[]
+  kitchenStations      KitchenStation[]
 }
 
 /**
@@ -389,13 +391,15 @@ model Branch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  registers    Register[]
-  users        User[]
-  branchAccess BranchAccess[]
-  sales        Sale[]
-  returns      Return[]
-  quotations   Quotation[]
+  tenant             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  registers          Register[]
+  users              User[]
+  branchAccess       BranchAccess[]
+  sales              Sale[]
+  returns            Return[]
+  quotations         Quotation[]
+  restaurantConfig   RestaurantBranchConfig?
+  kitchenStations    KitchenStation[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1330,4 +1334,101 @@ model Supplier {
   @@unique([tenantId, quickbooksVendorId])
   @@index([tenantId])
   @@index([tenantId, isActive])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restaurant Phase 2A — restaurant configuration + kitchen stations
+// ─────────────────────────────────────────────────────────────
+//
+// Configuration first, workflow later (Phase 2D and beyond). Tables here are
+// dormant until the operational surface lands, but the shapes are set now so
+// that later migrations are additive. Menu, dining areas and table sessions
+// are separate sub-slices with their own migrations (decision AD-12).
+//
+// The RestaurantOrderChannel enum is deliberately NOT here — it lands with
+// the operational order model in Phase 2D, so this sub-slice contains no
+// substring the migration tripwire forbids.
+
+/// Per-branch restaurant configuration.
+///
+/// Optional — a branch with no row falls back to code defaults. Tenant-level
+/// restaurant defaults live in `TenantSettings.data.restaurant` (Phase 8+);
+/// this row is the branch-level override, primarily service-charge and open
+/// hours. Zero rows for a hardware tenant is the expected state.
+model RestaurantBranchConfig {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String @unique
+
+  /// Service charge percent — 0 disables. Default disabled per D8.
+  serviceChargePercent Decimal @default(0) @db.Decimal(5, 2)
+  /// Enable takeaway operations on this branch. Independent of service charge.
+  takeawayEnabled      Boolean @default(false)
+  /// Enable dine-in operations on this branch.
+  dineInEnabled        Boolean @default(true)
+  /// Default target time for a KOT ticket, in minutes. Informational only in
+  /// Phase 2A — Phase 6 will surface this on the kitchen display.
+  defaultTicketTargetMinutes Int?
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+/// Kitchen station — the physical or logical destination that receives a
+/// portion of a restaurant order.
+///
+/// Belongs to a branch (kitchens don't cross locations). The join to menu
+/// items lands in Phase 2B; the join to printers is a separate model that
+/// stays empty until Phase 6 (decision AD-14).
+model KitchenStation {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  /// Stable identifier used in KOT routing — upper-snake-case, immutable,
+  /// unique per branch. Distinct from `name`, which is the display label.
+  code String
+  name String
+
+  /// Distinguish a bar from a hot line so Phase 6 can route drinks vs. dishes.
+  /// String rather than enum because tenants add their own (e.g. DESSERT, COLD).
+  category String @default("KITCHEN")
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  printers KitchenStationPrinter[]
+
+  @@unique([branchId, code])
+  @@index([tenantId])
+  @@index([branchId])
+}
+
+/// Zero-or-many printers per station (D6). Empty until Phase 6 ships the
+/// `KitchenPrinter` model — the join sits here so a future printer migration
+/// is additive on this side. `isPrimary` chooses which printer receives the
+/// KOT first; the redundancy pair per D6 is the secondary.
+model KitchenStationPrinter {
+  id        String @id @default(cuid())
+  stationId String
+  printerId String
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  station KitchenStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([stationId, printerId])
+  @@index([printerId])
 }

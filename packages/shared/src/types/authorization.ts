@@ -128,6 +128,15 @@ export const Permission = {
   BILL_VIEW: 'bill:view',
   BILL_SPLIT: 'bill:split',
   PAYMENT_COLLECT: 'payment:collect',
+
+  // ── Restaurant Phase 2A (active) ─────────────────────────────────────────
+  //
+  // Enforced now — Phase 2A ships the restaurant configuration and kitchen
+  // station administration routes.
+  /** Change the branch's restaurant configuration (service charge, hours, …). */
+  RESTAURANT_CONFIG_MANAGE: 'restaurant:config:manage',
+  /** Add, edit, archive kitchen stations on a branch. */
+  KITCHEN_STATION_MANAGE: 'kitchen:station:manage',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 

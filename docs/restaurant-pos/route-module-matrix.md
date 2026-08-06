@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 152
-- Module-guarded routes: 107
+- Total routes: 158
+- Module-guarded routes: 113
 - Ungated routes: 45
 
 ## How to read the Guard column
@@ -265,6 +265,22 @@ reach production unclassified.
 | GET | `/receipts/:id` | RETAIL_POS | ENFORCED | sale:read |
 | POST | `/receipts/:saleId/customer` | RETAIL_POS | ENFORCED | sale:create |
 | GET | `/receipts/sale/:saleId` | RETAIL_POS | ENFORCED | sale:read |
+
+### RestaurantConfigController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | platform:profile:read |
+| PUT | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | restaurant:config:manage |
+
+### KitchenStationsController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/branches/:branchId/kitchen-stations` | KITCHEN | ENFORCED | platform:profile:read |
+| POST | `/restaurant/branches/:branchId/kitchen-stations` | KITCHEN | ENFORCED | kitchen:station:manage |
+| GET | `/restaurant/branches/:branchId/kitchen-stations/:stationId` | KITCHEN | ENFORCED | platform:profile:read |
+| PATCH | `/restaurant/branches/:branchId/kitchen-stations/:stationId` | KITCHEN | ENFORCED | kitchen:station:manage |
 
 ### ReturnsController
 
