@@ -44,6 +44,10 @@ import { UserBranchAccessController } from '../../modules/users/user-branch-acce
 import { UsersController } from '../../modules/users/users.controller';
 import { KitchenStationsController } from '../../modules/restaurant/kitchen-stations.controller';
 import { RestaurantConfigController } from '../../modules/restaurant/restaurant-config.controller';
+import { MenuItemsController } from '../../modules/menu/menu-items.controller';
+import { MenuSectionsController } from '../../modules/menu/menu-sections.controller';
+import { MenusController } from '../../modules/menu/menus.controller';
+import { ModifiersController } from '../../modules/menu/modifiers.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -78,6 +82,10 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   UsersController,
   RestaurantConfigController,
   KitchenStationsController,
+  MenusController,
+  MenuSectionsController,
+  MenuItemsController,
+  ModifiersController,
 ];
 
 /**
@@ -121,4 +129,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'users',
   'kitchen-stations',
   'restaurant-config',
+  'menus',
+  'menu-sections',
+  'menu-items',
+  'modifiers',
 ];

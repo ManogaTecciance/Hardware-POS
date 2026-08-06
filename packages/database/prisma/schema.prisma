@@ -298,6 +298,11 @@ model Tenant {
   modules              TenantModule[]
   restaurantConfigs    RestaurantBranchConfig[]
   kitchenStations      KitchenStation[]
+  menus                Menu[]
+  menuSections         MenuSection[]
+  menuItems            MenuItem[]
+  modifierGroups       ModifierGroup[]
+  modifierOptions      ModifierOption[]
 }
 
 /**
@@ -400,6 +405,7 @@ model Branch {
   quotations         Quotation[]
   restaurantConfig   RestaurantBranchConfig?
   kitchenStations    KitchenStation[]
+  menus              Menu[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -646,6 +652,7 @@ model Product {
   saleItems      SaleItem[]
   returnItems    ReturnItem[]
   quotationItems QuotationItem[]
+  menuItems      MenuItem[]
 
   @@unique([tenantId, quickbooksItemId])
   @@unique([tenantId, sku])
@@ -1408,7 +1415,8 @@ model KitchenStation {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
-  printers KitchenStationPrinter[]
+  printers  KitchenStationPrinter[]
+  menuItems MenuItemStationLink[]
 
   @@unique([branchId, code])
   @@index([tenantId])
@@ -1431,4 +1439,242 @@ model KitchenStationPrinter {
 
   @@unique([stationId, printerId])
   @@index([printerId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restaurant Phase 2B — menu, sections, items, modifiers
+// ─────────────────────────────────────────────────────────────
+//
+// Retained principle from the superseded plan (D1): **menu ≠ catalog**.
+// Menu prices are what the customer pays; product prices are what a retail
+// checkout charges. A `MenuItem.productId` is optional (AD-13); items that
+// map to a `Product` decrement stock through the existing local inventory
+// path when Phase 5 sends them, items without a product map to composed
+// dishes tracked elsewhere.
+//
+// Menu is per-branch (one branch can offer a different menu from another).
+// A future multi-branch menu-share mechanism is deliberately deferred —
+// solving that before there is any real menu data would over-engineer.
+
+enum MenuAvailabilityDayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum ModifierSelection {
+  SINGLE
+  MULTIPLE
+}
+
+/// One menu belongs to one branch. A branch may run several menus but only one
+/// is `isActive` per channel at a time (a lunch menu and a dinner menu can
+/// coexist if their availability windows are disjoint; Phase 3 enforces the
+/// windowing).
+model Menu {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+  version     Int     @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  sections MenuSection[]
+
+  @@index([tenantId])
+  @@index([branchId])
+  @@unique([branchId, name])
+}
+
+/// Ordered heading within a menu — Starters, Mains, Desserts, Drinks.
+model MenuSection {
+  id       String @id @default(cuid())
+  tenantId String
+  menuId   String
+
+  name        String
+  description String?
+  /// Display order within the menu, 0-based. Ties are broken by name to keep
+  /// the render deterministic when two sections share a position.
+  position    Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  menu   Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  items  MenuItem[]
+
+  @@index([tenantId])
+  @@index([menuId])
+  @@unique([menuId, name])
+}
+
+/// One line item on a menu, with its own price. Optionally maps to a `Product`
+/// so that dispatch through the local inventory provider stays uniform between
+/// retail sales and restaurant orders (AD-13).
+model MenuItem {
+  id       String @id @default(cuid())
+  tenantId String
+  sectionId String
+
+  name         String
+  description  String?
+  /// Base price per item, before modifiers. Menu prices are the source of truth
+  /// for what the customer pays; `productId` (if set) is used for stock only.
+  basePrice    Decimal @db.Decimal(12, 2)
+  /// Optional link to the retail catalogue. When set, sending an order round
+  /// decrements `Product.quantityOnHand` (LocalInventoryProvider) exactly as a
+  /// retail sale would. When null, this item is a composed dish tracked
+  /// elsewhere (Phase 3 or later may introduce ingredient recipes).
+  productId    String?
+
+  isActive     Boolean @default(true)
+  /// Optional display order within the section. Ties broken by name.
+  position     Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  section      MenuSection            @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  product      Product?               @relation(fields: [productId], references: [id])
+  modifierGroups MenuItemModifierGroup[]
+  channelPrices MenuItemChannelPrice[]
+  availability MenuAvailability[]
+  stationLinks MenuItemStationLink[]
+
+  @@index([tenantId])
+  @@index([sectionId])
+  @@index([productId])
+}
+
+/// A group of related choices (e.g. "Choose bread type") with min/max
+/// selection rules. `min` = 0 makes the group optional; `min` = 1 forces the
+/// customer to choose; `max` > 1 with `selection = MULTIPLE` gives a checklist.
+model ModifierGroup {
+  id       String @id @default(cuid())
+  tenantId String
+
+  name        String
+  selection   ModifierSelection @default(SINGLE)
+  minSelections Int @default(0)
+  maxSelections Int @default(1)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  options ModifierOption[]
+  items   MenuItemModifierGroup[]
+
+  @@index([tenantId])
+  @@unique([tenantId, name])
+}
+
+/// One option within a modifier group. Price delta is added to the parent
+/// item's price when selected. Negative deltas allowed (a discount for
+/// substituting a cheaper side).
+model ModifierOption {
+  id       String @id @default(cuid())
+  tenantId String
+  groupId  String
+
+  name       String
+  priceDelta Decimal @db.Decimal(12, 2) @default(0)
+  position   Int     @default(0)
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  group  ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@unique([groupId, name])
+}
+
+/// Junction linking a menu item to a modifier group. A group can be reused
+/// across items (all pasta dishes might share "Choose pasta type"), and an
+/// item can have several groups.
+model MenuItemModifierGroup {
+  id           String @id @default(cuid())
+  menuItemId   String
+  modifierGroupId String
+  position     Int     @default(0)
+
+  menuItem      MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  modifierGroup ModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, modifierGroupId])
+  @@index([modifierGroupId])
+}
+
+/// Channel-specific price override. When absent, the menu item's `basePrice`
+/// applies. Enables e.g. an online-delivery markup without changing the
+/// dine-in price.
+model MenuItemChannelPrice {
+  id         String @id @default(cuid())
+  menuItemId String
+  /// String rather than enum so tenants can add channels beyond the built-in
+  /// DINE_IN / TAKEAWAY / ONLINE without a migration. Validation is at the
+  /// service layer.
+  channel    String
+  price      Decimal @db.Decimal(12, 2)
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, channel])
+  @@index([menuItemId])
+}
+
+/// Time-based availability. When any row exists for an item, the item is
+/// available ONLY during matching windows. When no rows exist, the item is
+/// always available. Overlapping rows widen availability rather than restrict.
+model MenuAvailability {
+  id         String @id @default(cuid())
+  menuItemId String
+
+  dayOfWeek  MenuAvailabilityDayOfWeek
+  /// HH:MM in the tenant's local time, inclusive.
+  startTime  String
+  /// HH:MM inclusive.
+  endTime    String
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@index([menuItemId])
+}
+
+/// Menu item ↔ kitchen station routing. A single item may fan out to several
+/// stations (a burger with a milkshake side splits between grill and bar); a
+/// single station receives many items.
+///
+/// Landed in Phase 2B rather than 2A because the FK on this side needs
+/// `MenuItem` to exist. `KitchenStation` came in 2A.
+model MenuItemStationLink {
+  id         String @id @default(cuid())
+  menuItemId String
+  stationId  String
+
+  createdAt DateTime @default(now())
+
+  menuItem MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  station  KitchenStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, stationId])
+  @@index([stationId])
 }

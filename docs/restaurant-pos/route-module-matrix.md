@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 158
-- Module-guarded routes: 113
+- Total routes: 171
+- Module-guarded routes: 126
 - Ungated routes: 45
 
 ## How to read the Guard column
@@ -281,6 +281,39 @@ reach production unclassified.
 | POST | `/restaurant/branches/:branchId/kitchen-stations` | KITCHEN | ENFORCED | kitchen:station:manage |
 | GET | `/restaurant/branches/:branchId/kitchen-stations/:stationId` | KITCHEN | ENFORCED | platform:profile:read |
 | PATCH | `/restaurant/branches/:branchId/kitchen-stations/:stationId` | KITCHEN | ENFORCED | kitchen:station:manage |
+
+### MenusController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/branches/:branchId/menus` | MENU_MANAGEMENT | ENFORCED | product:read |
+| POST | `/restaurant/branches/:branchId/menus` | MENU_MANAGEMENT | ENFORCED | product:manage |
+| PATCH | `/restaurant/branches/:branchId/menus/:menuId` | MENU_MANAGEMENT | ENFORCED | product:manage |
+
+### MenuSectionsController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/menus/:menuId/sections` | MENU_MANAGEMENT | ENFORCED | product:read |
+| POST | `/restaurant/menus/:menuId/sections` | MENU_MANAGEMENT | ENFORCED | product:manage |
+| PATCH | `/restaurant/menus/:menuId/sections/:sectionId` | MENU_MANAGEMENT | ENFORCED | product:manage |
+
+### MenuItemsController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/menu-sections/:sectionId/items` | MENU_MANAGEMENT | ENFORCED | product:read |
+| POST | `/restaurant/menu-sections/:sectionId/items` | MENU_MANAGEMENT | ENFORCED | product:manage |
+| PATCH | `/restaurant/menu-sections/:sectionId/items/:itemId` | MENU_MANAGEMENT | ENFORCED | product:manage |
+
+### ModifiersController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/modifier-groups` | MENU_MANAGEMENT | ENFORCED | product:read |
+| POST | `/restaurant/modifier-groups` | MENU_MANAGEMENT | ENFORCED | product:manage |
+| GET | `/restaurant/modifier-groups/:groupId` | MENU_MANAGEMENT | ENFORCED | product:read |
+| PATCH | `/restaurant/modifier-groups/:groupId` | MENU_MANAGEMENT | ENFORCED | product:manage |
 
 ### ReturnsController
 
