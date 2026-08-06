@@ -200,10 +200,10 @@ export const SEED = {
  * tenant-isolation subject: nothing it can see may belong to `tnt_dev`.
  */
 export const RESTAURANT_SEED = {
-  owner: { email: 'owner@axlorestaurant.test', password: 'password123' },
+  owner: { email: 'restaurant.owner@axlopos.test', password: 'Restaurant123!' },
   cashierPin: '3333',
   tenantId: 'tnt_resto',
-  workspace: 'resto-demo',
+  workspace: 'restaurant-demo',
   branchId: 'brn_resto',
   registerId: 'reg_resto',
 };

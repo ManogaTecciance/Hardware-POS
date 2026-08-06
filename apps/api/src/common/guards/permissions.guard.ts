@@ -4,14 +4,38 @@ import type { Request } from 'express';
 
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 import { AuthenticatedUser } from '../../modules/auth/auth.types';
-import { Permission, roleHasPermission } from '../../modules/auth/permissions';
+import { Permission } from '../../modules/auth/permissions';
+import {
+  PermissionResolver,
+  type AuthoritySource,
+} from '../../modules/auth/permission-resolver.service';
 
-/** Enforces @RequirePermissions(...) route metadata. No metadata → allowed. */
+/** The resolved authority, attached to the request for audit and diagnostics. */
+export interface RequestAuthority {
+  source: AuthoritySource;
+  reason?: string;
+}
+
+/**
+ * Enforces `@RequirePermissions(...)` route metadata. No metadata → allowed.
+ *
+ * Since Phase 1.5.4 the permission set comes from `PermissionResolver` — the
+ * tenant's own role rows where the user has been migrated, the legacy
+ * `ROLE_PERMISSIONS` map where they have not. The guard makes no policy decision
+ * about which; it asks, and refuses if the answer does not cover the route.
+ *
+ * Behaviour is unchanged for every existing user: one with no `roleId` resolves
+ * through the legacy authority, and the seeded roles are proven equal to it by
+ * `role-templates.parity.spec.ts` and `role-seeding.spec.ts`.
+ */
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly resolver: PermissionResolver,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const required = this.reflector.getAllAndOverride<Permission[]>(PERMISSIONS_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -20,14 +44,25 @@ export class PermissionsGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<Request & { user?: AuthenticatedUser }>();
+    const request = context
+      .switchToHttp()
+      .getRequest<Request & { user?: AuthenticatedUser; authority?: RequestAuthority }>();
     const user = request.user;
     if (!user) {
       throw new ForbiddenException('Not authenticated');
     }
 
-    const allowed = required.every((permission) => roleHasPermission(user.role, permission));
+    const authority = await this.resolver.resolve(user);
+    // Recorded on the request rather than logged per call: the audit expansion in
+    // 1.5.7 needs to say which authority made a decision, and the migration report
+    // needs to count how many users still take the legacy path.
+    request.authority = { source: authority.source, reason: authority.reason };
+
+    const allowed = required.every((permission) => authority.permissions.has(permission));
     if (!allowed) {
+      // Deliberately the same message whatever the reason. "Your role is broken"
+      // and "you lack this permission" are different facts, and only one of them
+      // is the caller's business.
       throw new ForbiddenException('Insufficient permissions');
     }
     return true;

@@ -140,17 +140,20 @@ is on.
 
 | | |
 |---|---|
-| Workspace | `resto-demo` |
-| Owner | `owner@axlorestaurant.test` / `password123` |
+| Workspace | `restaurant-demo` |
+| Owner | `restaurant.owner@axlopos.test` / `Restaurant123!` |
 | Cashier PIN | `3333` |
 | Profile | `RESTAURANT` · `LOCAL` inventory · `NONE` accounting (explicit) |
 
-> **These differ from the values named in the Slice 9 brief** (`restaurant-demo`,
-> `restaurant.owner@axlopos.test`, `Restaurant123!`). The table above is what the
-> approved Slice 8 seed actually creates and what was verified end to end. The
-> credentials were not changed to match the brief — renaming a seeded workspace
-> silently would leave the two records disagreeing about which is real. Say the
-> word and the seed will be updated to the briefed values in a follow-up.
+Development only. The password is **not printed by the seed** — echoing a
+credential to a terminal is how it reaches scrollback, CI logs and screenshots.
+`provision-tenant.ts` remains the production path and requires a caller-supplied
+password or generates a random one.
+
+Earlier revisions of this document listed `resto-demo` /
+`owner@axlorestaurant.test` / `password123`. The Product Owner directed the change
+to the values above; re-running `pnpm db:seed` migrates an existing development
+database, including the workspace slug.
 
 ### What the Restaurant account can do
 
@@ -256,7 +259,9 @@ loads the same API and destabilises the API tests.
 7. **Two lint warnings** in `apps/api/src/common/testkit/` — unused
    `eslint-disable` directives, pre-existing, unchanged by this work, and `pnpm
    lint` exits 0.
-8. **Development credentials differ from the Slice 9 brief** — see the note above.
+8. **~~Development credentials differ from the brief~~** — closed. The Restaurant
+   workspace is now `restaurant-demo` / `restaurant.owner@axlopos.test`, per the
+   Product Owner's decision at the Phase 1 checkpoint.
 9. **The dashboard is not profile-aware.** Found by running the application, after
    the Slice 9 verification passed. A Restaurant tenant's dashboard renders a
    **"QuickBooks Health"** card reading *Connected · All systems operational*,

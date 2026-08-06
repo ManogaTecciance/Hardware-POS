@@ -6,6 +6,7 @@ import { ThrottlingModule } from '../../common/throttling/throttling.module';
 import { AuthController } from './auth.controller';
 import { AuthRepository } from './auth.repository';
 import { AuthService } from './auth.service';
+import { PermissionResolver } from './permission-resolver.service';
 
 @Module({
   imports: [
@@ -29,7 +30,10 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AuthRepository],
-  exports: [AuthService],
+  // PermissionResolver is exported because PermissionsGuard is registered globally
+  // in AppModule and Nest resolves an APP_GUARD's dependencies from the root
+  // injector — a provider declared here but not exported would not be visible to it.
+  providers: [AuthService, AuthRepository, PermissionResolver],
+  exports: [AuthService, PermissionResolver],
 })
 export class AuthModule {}

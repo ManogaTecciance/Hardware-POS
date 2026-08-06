@@ -29,6 +29,7 @@ import {
 
 /** Minimal surface so a transaction client is accepted as readily as the client. */
 type Db = Pick<PrismaClient, 'permission' | 'role'>;
+type DbWithUsers = Db & Pick<PrismaClient, 'user'>;
 
 /**
  * Ensures every catalogue permission exists as a row. Idempotent, and global
@@ -89,4 +90,40 @@ export async function seedTenantRoles(
   }
 
   return [...templates];
+}
+
+/**
+ * Links each of a tenant's users to the role row matching their `UserRole`
+ * (Phase 1.5.4).
+ *
+ * This is what moves a user from `LEGACY_FALLBACK` to `DATABASE` resolution. It is
+ * safe precisely because parity is proven first: the role rows grant exactly what
+ * `ROLE_PERMISSIONS` grants, so the switch changes the *source* of a user's
+ * permissions and not the permissions themselves.
+ *
+ * Only ever links within the tenant, and only to a role whose key matches the
+ * user's enum value. A user whose role has no matching row is left on the legacy
+ * path rather than linked to something approximate — a wrong link is a silent
+ * permission change, while no link is the status quo.
+ */
+export async function linkUsersToRoles(db: DbWithUsers, tenantId: string): Promise<number> {
+  const roles = await db.role.findMany({
+    where: { tenantId },
+    select: { id: true, key: true },
+  });
+  const byKey = new Map(roles.filter((r) => r.key).map((r) => [r.key as string, r.id]));
+
+  const users = await db.user.findMany({
+    where: { tenantId, roleId: null },
+    select: { id: true, role: true },
+  });
+
+  let linked = 0;
+  for (const user of users) {
+    const roleId = byKey.get(user.role);
+    if (!roleId) continue;
+    await db.user.update({ where: { id: user.id }, data: { roleId } });
+    linked += 1;
+  }
+  return linked;
 }

@@ -17,7 +17,7 @@ import { PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 import { BUSINESS_PROFILE_PRESETS } from '../src/business-profile-presets';
-import { seedTenantRoles, syncPermissionCatalogue } from '../src/seed-roles';
+import { linkUsersToRoles, seedTenantRoles, syncPermissionCatalogue } from '../src/seed-roles';
 import { MOCK_HARDWARE_PRODUCTS, mockCategoryId, mockCategoryNames } from '../src/mock-catalog';
 
 const prisma = new PrismaClient();
@@ -28,6 +28,15 @@ const REGISTER_ID = 'reg_dev';
 const SALT_ROUNDS = 10;
 
 const RESTAURANT_TENANT_ID = 'tnt_resto';
+/**
+ * Development-only credentials for the Restaurant demo tenant.
+ *
+ * Hashed with the same bcrypt cost as every other seeded user. **Never logged**,
+ * and never created outside development: `provision-tenant.ts` is the production
+ * path and requires a caller-supplied password or generates a random one.
+ */
+const RESTAURANT_OWNER_EMAIL = 'restaurant.owner@axlopos.test';
+const RESTAURANT_OWNER_PASSWORD = 'Restaurant123!';
 const RESTAURANT_BRANCH_ID = 'brn_resto';
 const RESTAURANT_REGISTER_ID = 'reg_resto';
 
@@ -155,8 +164,14 @@ async function main(): Promise<void> {
   const permissionCount = await syncPermissionCatalogue(prisma);
   const tileRoles = await seedTenantRoles(prisma, tenant.id, 'TILE_SHOP');
 
-  const restaurant = await seedRestaurant(password123);
+  const restaurant = await seedRestaurant(await bcrypt.hash(RESTAURANT_OWNER_PASSWORD, SALT_ROUNDS));
   const restaurantRoles = await seedTenantRoles(prisma, restaurant.id, 'RESTAURANT');
+
+  // Phase 1.5.4: link seeded users to their role rows so a development database
+  // exercises DATABASE resolution rather than the legacy fallback. Safe because
+  // parity is proven — the rows grant exactly what the enum granted.
+  const linked =
+    (await linkUsersToRoles(prisma, tenant.id)) + (await linkUsersToRoles(prisma, restaurant.id));
 
   /* eslint-disable no-console */
   console.log('Seeded tenant:', tenant.id);
@@ -169,12 +184,16 @@ async function main(): Promise<void> {
   console.log('');
   console.log('Seeded tenant:', restaurant.id, '(RESTAURANT · LOCAL inventory · no accounting)');
   console.log('Login users:');
-  console.log('  Owner       owner@axlorestaurant.test / password123   workspace: resto-demo');
+  // The password is deliberately NOT printed. It is a development-only credential
+  // documented in docs/restaurant-pos/09-phase-1-acceptance.md; echoing secrets to
+  // a terminal is how they end up in scrollback, CI logs and screenshots.
+  console.log(`  Owner       ${RESTAURANT_OWNER_EMAIL}   workspace: restaurant-demo`);
+  console.log('              password: see docs/restaurant-pos/09-phase-1-acceptance.md');
   console.log('  Cashier     PIN 3333  (x-tenant-id: ' + restaurant.id + ')');
   console.log('');
   console.log(`Permission catalogue: ${permissionCount} keys`);
   console.log(`Roles: ${tileRoles.length} for ${tenant.id}, ${restaurantRoles.length} for ${restaurant.id}`);
-  console.log('  (roles are seeded but not yet used for authorization — Phase 1.5 lands them inert)');
+  console.log(`Users linked to role rows: ${linked} (these resolve permissions from the database)`);
   /* eslint-enable no-console */
 }
 
@@ -190,8 +209,12 @@ async function main(): Promise<void> {
 async function seedRestaurant(passwordHash: string) {
   const tenant = await prisma.tenant.upsert({
     where: { id: RESTAURANT_TENANT_ID },
-    update: {},
-    create: { id: RESTAURANT_TENANT_ID, name: 'Axlo Restaurant Demo', slug: 'resto-demo' },
+    // The slug IS updated, unlike the Tile Shop's: the Product Owner renamed this
+    // workspace after it had already been seeded, and a re-seed that left the old
+    // slug in place would make the documented sign-in fail on exactly the machines
+    // that had followed the instructions earliest.
+    update: { name: 'Axlo Restaurant Demo', slug: 'restaurant-demo' },
+    create: { id: RESTAURANT_TENANT_ID, name: 'Axlo Restaurant Demo', slug: 'restaurant-demo' },
   });
 
   const branch = await prisma.branch.upsert({
@@ -226,7 +249,7 @@ async function seedRestaurant(passwordHash: string) {
     {
       id: 'usr_resto_owner',
       name: 'Restaurant Owner',
-      email: 'owner@axlorestaurant.test' as string | null,
+      email: RESTAURANT_OWNER_EMAIL as string | null,
       role: UserRole.OWNER,
       passwordHash: passwordHash as string | null,
       pinHash: null as string | null,
