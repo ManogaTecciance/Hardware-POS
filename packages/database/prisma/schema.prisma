@@ -305,6 +305,12 @@ model Tenant {
   modifierOptions      ModifierOption[]
   diningAreas          DiningArea[]
   restaurantTables     RestaurantTable[]
+  tableSessions        TableSession[]
+  restaurantOrders     RestaurantOrder[]
+  orderRounds          OrderRound[]
+  restaurantOrderItems RestaurantOrderItem[]
+  restaurantOrderItemModifiers RestaurantOrderItemModifier[]
+  restaurantOrderStatusHistory RestaurantOrderStatusHistory[]
 }
 
 /**
@@ -410,6 +416,8 @@ model Branch {
   menus              Menu[]
   diningAreas        DiningArea[]
   restaurantTables   RestaurantTable[]
+  tableSessions      TableSession[]
+  restaurantOrders   RestaurantOrder[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1776,4 +1784,240 @@ model RestaurantTable {
   @@index([branchId])
   @@index([areaId])
   @@index([status])
+
+  sessions TableSession[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restaurant Phase 2D — table sessions + order lifecycle
+// ─────────────────────────────────────────────────────────────
+//
+// Operational core. `TableSession` is one seating; `RestaurantOrder` is the
+// per-session order book; `OrderRound` is the immutable slice of items sent
+// to the kitchen in one submit. The junction to `Sale` (closing a session
+// produces a Sale) is a nullable FK, matching Quotation.convertedSaleId.
+//
+// Every mutation-prone entity carries a `version` column for optimistic
+// concurrency, per D11 and the Phase 2 schema-conventions checklist.
+
+enum RestaurantOrderChannel {
+  DINE_IN
+  TAKEAWAY
+  ONLINE
+}
+
+enum TableSessionStatus {
+  OPEN
+  BILLING
+  CLOSED
+  CANCELLED
+}
+
+enum RestaurantOrderStatus {
+  DRAFT
+  SUBMITTED
+  PARTIAL
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderRoundStatus {
+  DRAFT
+  SUBMITTED
+  IN_PROGRESS
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum RestaurantOrderItemStatus {
+  PENDING
+  SENT
+  IN_PROGRESS
+  READY
+  DELIVERED
+  VOIDED
+}
+
+/// One party at one table. Opened by a waiter, closed when the bill is paid.
+/// `guestCount` and `waiterUserId` are set at open and may be updated during
+/// the session. When the session closes into a Sale, `finalSaleId` is set
+/// (unique to prevent a double-close producing two Sales).
+model TableSession {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  tableId  String
+
+  /// Human-friendly reference number; assigned via `DocumentSequence` at
+  /// open so waiters can talk about "Session 47" out loud.
+  sessionNumber String
+
+  status TableSessionStatus @default(OPEN)
+
+  waiterUserId String?
+  guestCount   Int?
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+
+  /// Double-close guard. Matches Quotation.convertedSaleId — a session that
+  /// has produced a Sale is unique to that Sale row.
+  finalSaleId String? @unique
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  table  RestaurantTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  orders RestaurantOrder[]
+
+  @@unique([tenantId, sessionNumber])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([tableId])
+  @@index([status])
+}
+
+/// The order book for a session. In dine-in there is one per session; in
+/// takeaway / online there can be several per branch attached to a
+/// synthetic session (Phase 7 / 10).
+model RestaurantOrder {
+  id        String @id @default(cuid())
+  tenantId  String
+  branchId  String
+  sessionId String
+
+  orderNumber String
+  channel     RestaurantOrderChannel @default(DINE_IN)
+  status      RestaurantOrderStatus  @default(DRAFT)
+
+  /// Optimistic concurrency token.
+  version Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch  Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  session TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  rounds  OrderRound[]
+  items   RestaurantOrderItem[]
+
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([sessionId])
+  @@index([status])
+}
+
+/// An immutable slice of order items sent to the kitchen in one submit.
+/// A single item belongs to exactly one round; a round belongs to one order.
+/// The submitter's identity is snapshotted on the round.
+model OrderRound {
+  id       String @id @default(cuid())
+  tenantId String
+  orderId  String
+
+  /// 1-based sequence within its order.
+  roundNumber   Int
+  submittedAt   DateTime? // null while DRAFT
+  submittedByUserId String?
+  status        OrderRoundStatus @default(DRAFT)
+  /// Idempotency key for round submission — a re-submit of the same key
+  /// returns the existing row rather than creating a duplicate round.
+  idempotencyKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order  RestaurantOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items  RestaurantOrderItem[]
+
+  @@unique([orderId, roundNumber])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId])
+}
+
+/// One line on an order round. Prices are snapshotted at send-to-kitchen so
+/// a later menu edit does not retroactively alter the round (AD-15).
+model RestaurantOrderItem {
+  id       String @id @default(cuid())
+  tenantId String
+  orderId  String
+  roundId  String
+
+  menuItemId String
+  /// Snapshot at submit: name, code and price of the item at that instant.
+  menuItemName String
+  menuItemCode String?
+  unitPrice    Decimal @db.Decimal(12, 2)
+  /// Sum of the modifier price-deltas snapshotted with this item.
+  modifierTotal Decimal @db.Decimal(12, 2) @default(0)
+  /// Quantity ordered.
+  quantity     Decimal @db.Decimal(12, 3) @default(1)
+  specialInstructions String?
+
+  status RestaurantOrderItemStatus @default(PENDING)
+  voidReason String?
+  voidedByUserId String?
+  voidedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order    RestaurantOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  round    OrderRound      @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  modifiers RestaurantOrderItemModifier[]
+
+  @@index([tenantId])
+  @@index([orderId])
+  @@index([roundId])
+  @@index([menuItemId])
+  @@index([status])
+}
+
+/// One selected modifier on an order item. Snapshotted like the item itself —
+/// the option's name and priceDelta are frozen at submit time.
+model RestaurantOrderItemModifier {
+  id       String @id @default(cuid())
+  tenantId String
+  itemId   String
+
+  modifierOptionId String
+  optionName       String
+  groupName        String
+  priceDelta       Decimal @db.Decimal(12, 2) @default(0)
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item   RestaurantOrderItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([itemId])
+}
+
+/// Append-only history of order status changes — one row per transition.
+model RestaurantOrderStatusHistory {
+  id       String @id @default(cuid())
+  tenantId String
+  orderId  String
+
+  fromStatus RestaurantOrderStatus?
+  toStatus   RestaurantOrderStatus
+  reason     String?
+  changedByUserId String?
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([orderId])
 }
