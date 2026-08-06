@@ -6,6 +6,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { OptionalTenantId } from '../../common/decorators/optional-tenant-id.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser, AuthTokenResult } from './auth.types';
 import { AuthService, CurrentUserView } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -21,7 +22,10 @@ import { SwitchActiveBranchDto } from './dto/switch-active-branch.dto';
 @Controller('auth')
 @UseInterceptors(AuthThrottleInterceptor)
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly audit: AuditLogService,
+  ) {}
 
   /**
    * Email + password login (owner / admin / accountant).
@@ -100,10 +104,21 @@ export class AuthController {
    */
   @Post('active-branch')
   @HttpCode(HttpStatus.OK)
-  switchActiveBranch(
+  async switchActiveBranch(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SwitchActiveBranchDto,
   ): Promise<AuthTokenResult> {
-    return this.authService.switchActiveBranch(user.id, dto.branchId);
+    const result = await this.authService.switchActiveBranch(user.id, dto.branchId);
+    await this.audit.record(user.tenantId, {
+      userId: user.id,
+      action: 'AUTH_ACTIVE_BRANCH_CHANGED',
+      entityType: 'User',
+      entityId: user.id,
+      metadata: {
+        previousBranchId: user.activeBranchId,
+        newBranchId: dto.branchId,
+      },
+    });
+    return result;
   }
 }

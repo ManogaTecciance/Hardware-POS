@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 
 import { ThrottlingModule } from '../../common/throttling/throttling.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 import { AuthController } from './auth.controller';
 import { AuthRepository } from './auth.repository';
 import { AuthService } from './auth.service';
@@ -16,6 +17,7 @@ import { PermissionResolver } from './permission-resolver.service';
     // AuthThrottleInterceptor. Declaring the dependency is also simply honest —
     // AuthController genuinely uses it.
     ThrottlingModule,
+    AuditLogModule,
     JwtModule.registerAsync({
       global: true,
       inject: [ConfigService],
