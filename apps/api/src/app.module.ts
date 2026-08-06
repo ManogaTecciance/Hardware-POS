@@ -12,6 +12,7 @@ import { ModuleAccessGuard } from './common/guards/module-access.guard';
 import { BranchScopeGuard } from './common/guards/branch-scope.guard';
 import { StorageModule } from './common/storage/storage.module';
 import { ThrottlingModule } from './common/throttling/throttling.module';
+import { RealtimeModule } from './common/realtime/realtime.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -52,6 +53,7 @@ import { DeliveryHubModule } from './modules/delivery-hub/delivery-hub.module';
     // Global: AuthController attaches AuthThrottleInterceptor without needing to
     // import the rate-limiting plumbing it otherwise has no interest in.
     ThrottlingModule,
+    RealtimeModule,
     PrismaModule,
     // Global: ModuleAccessGuard and (from Slice 5) the provider factories resolve
     // the tenant's business profile, so BusinessProfileService must be reachable

@@ -57,6 +57,7 @@ import { TakeawayController } from '../../modules/takeaway/takeaway.controller';
 import { BillingController } from '../../modules/billing/billing.controller';
 import { RestaurantReportsController } from '../../modules/restaurant-reports/restaurant-reports.controller';
 import { DeliveryWebhookController } from '../../modules/delivery-hub/delivery-webhook.controller';
+import { KdsController } from '../../modules/kitchen/kds.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -104,6 +105,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   BillingController,
   RestaurantReportsController,
   DeliveryWebhookController,
+  KdsController,
 ];
 
 /**
@@ -160,4 +162,5 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'billing',
   'restaurant-reports',
   'delivery-webhook',
+  'kds',
 ];

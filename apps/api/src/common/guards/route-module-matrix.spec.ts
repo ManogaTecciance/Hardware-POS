@@ -213,6 +213,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /delivery-hub/platforms/:platformId/webhook': { module: 'ONLINE_ORDERS', guard: 'ENFORCED', scope: T },
   'POST /delivery-hub/external-orders/:externalOrderId/accept': { module: 'ONLINE_ORDERS', guard: 'ENFORCED', scope: T },
   'GET /delivery-hub/branches/:branchId/external-orders': { module: 'ONLINE_ORDERS', guard: 'ENFORCED', scope: T },
+  'GET /restaurant/branches/:branchId/kds/board': { module: 'KITCHEN_DISPLAY', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/dining-areas': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/branches/:branchId/dining-areas/:areaId': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'GET /restaurant/dining-areas/:areaId/tables': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
