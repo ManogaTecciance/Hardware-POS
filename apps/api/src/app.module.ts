@@ -43,6 +43,7 @@ import { KitchenModule } from './modules/kitchen/kitchen.module';
 import { TakeawayModule } from './modules/takeaway/takeaway.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { RestaurantReportsModule } from './modules/restaurant-reports/restaurant-reports.module';
+import { DeliveryHubModule } from './modules/delivery-hub/delivery-hub.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { RestaurantReportsModule } from './modules/restaurant-reports/restaurant
     TakeawayModule,
     BillingModule,
     RestaurantReportsModule,
+    DeliveryHubModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.

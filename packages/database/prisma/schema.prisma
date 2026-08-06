@@ -319,6 +319,10 @@ model Tenant {
   kitchenPrintAttempts KitchenPrintAttempt[]
   takeawayOrderProfiles TakeawayOrderProfile[]
   billSplits            BillSplit[]
+  deliveryPlatforms     DeliveryPlatform[]
+  externalOrders        ExternalOrder[]
+  externalOrderEvents   ExternalOrderEvent[]
+  webhookDeliveryLogs   WebhookDeliveryLog[]
 }
 
 /**
@@ -430,6 +434,9 @@ model Branch {
   stockMovements     StockMovement[]
   kitchenPrinters    KitchenPrinter[]
   kitchenTickets     KitchenTicket[]
+  deliveryPlatforms  DeliveryPlatform[]
+  externalOrders     ExternalOrder[]
+  webhookDeliveryLogs WebhookDeliveryLog[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -2332,4 +2339,120 @@ model BillSplit {
 
   @@index([tenantId])
   @@index([saleId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 10 — Online orders integration hub (infrastructure only)
+// ─────────────────────────────────────────────────────────────
+//
+// The abstraction plus a Mock adapter. Uber Eats and PickMe are deferred
+// (user instruction / D9). ExternalOrder is the normalised inbound order
+// from a delivery platform; ExternalOrderEvent captures each state
+// notification; WebhookDeliveryLog records what arrived and whether we
+// answered 200.
+
+enum DeliveryPlatformKind {
+  MOCK
+  UBER_EATS
+  PICKME_FOOD
+  DOORDASH
+  OTHER
+}
+
+enum ExternalOrderStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  IN_KITCHEN
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+model DeliveryPlatform {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  kind DeliveryPlatformKind
+  externalStoreRef String?
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  externalOrders ExternalOrder[]
+  webhookLogs    WebhookDeliveryLog[]
+
+  @@unique([branchId, kind])
+  @@index([tenantId])
+}
+
+model ExternalOrder {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  platformId String
+
+  externalOrderRef String
+  status ExternalOrderStatus @default(PENDING)
+  externalTotal Decimal? @db.Decimal(12, 2)
+
+  restaurantOrderId String?
+
+  receivedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  platform DeliveryPlatform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+
+  events   ExternalOrderEvent[]
+
+  @@unique([platformId, externalOrderRef])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([status])
+}
+
+model ExternalOrderEvent {
+  id       String @id @default(cuid())
+  tenantId String
+  externalOrderId String
+
+  fromStatus ExternalOrderStatus?
+  toStatus   ExternalOrderStatus
+  payload    Json?
+  createdAt  DateTime @default(now())
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  externalOrder ExternalOrder @relation(fields: [externalOrderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([externalOrderId])
+}
+
+model WebhookDeliveryLog {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String?
+  platformId String?
+
+  payload Json
+  responseStatus Int
+  message String?
+
+  receivedAt DateTime @default(now())
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch?           @relation(fields: [branchId], references: [id])
+  platform DeliveryPlatform? @relation(fields: [platformId], references: [id])
+
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([platformId])
 }

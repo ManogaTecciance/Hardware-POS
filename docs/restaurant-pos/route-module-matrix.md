@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 203
-- Module-guarded routes: 158
+- Total routes: 206
+- Module-guarded routes: 161
 - Ungated routes: 45
 
 ## How to read the Guard column
@@ -272,6 +272,14 @@ reach production unclassified.
 |---|---|---|---|---|
 | GET | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | platform:profile:read |
 | PUT | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | restaurant:config:manage |
+
+### DeliveryWebhookController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| POST | `/delivery-hub/platforms/:platformId/webhook` | ONLINE_ORDERS | ENFORCED | platform:profile:manage |
+| POST | `/delivery-hub/external-orders/:externalOrderId/accept` | ONLINE_ORDERS | ENFORCED | platform:profile:manage |
+| GET | `/delivery-hub/branches/:branchId/external-orders` | ONLINE_ORDERS | ENFORCED | platform:profile:read |
 
 ### RestaurantReportsController
 
