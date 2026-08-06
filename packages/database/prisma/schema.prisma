@@ -317,6 +317,7 @@ model Tenant {
   kitchenTickets       KitchenTicket[]
   kitchenTicketItems   KitchenTicketItem[]
   kitchenPrintAttempts KitchenPrintAttempt[]
+  takeawayOrderProfiles TakeawayOrderProfile[]
 }
 
 /**
@@ -1919,6 +1920,7 @@ model RestaurantOrder {
 
   rounds  OrderRound[]
   items   RestaurantOrderItem[]
+  takeawayProfile TakeawayOrderProfile?
 
   @@unique([tenantId, orderNumber])
   @@index([tenantId])
@@ -2249,5 +2251,46 @@ model KitchenPrintAttempt {
   @@index([tenantId])
   @@index([ticketId])
   @@index([printerId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 7 — Takeaway
+// ─────────────────────────────────────────────────────────────
+//
+// A takeaway order piggy-backs on a RestaurantOrder with channel=TAKEAWAY.
+// The extra pickup/handover state lives on the paired TakeawayOrderProfile.
+// Behind the scenes we still create a TableSession (attached to a synthetic
+// "walk-in" table per branch, provisioned on first use), so the junction to
+// Sale stays unified (D1).
+
+enum TakeawayOrderStatus {
+  PLACED
+  IN_KITCHEN
+  READY
+  HANDED_OVER
+  CANCELLED
+}
+
+model TakeawayOrderProfile {
+  id       String @id @default(cuid())
+  tenantId String
+  orderId  String @unique
+
+  customerName  String?
+  customerPhone String?
+  pickupAt      DateTime?
+  handoverAt    DateTime?
+
+  status TakeawayOrderStatus @default(PLACED)
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order  RestaurantOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
   @@index([status])
 }

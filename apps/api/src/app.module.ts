@@ -40,6 +40,7 @@ import { MenuModule } from './modules/menu/menu.module';
 import { DiningModule } from './modules/dining/dining.module';
 import { TableSessionsModule } from './modules/table-sessions/table-sessions.module';
 import { KitchenModule } from './modules/kitchen/kitchen.module';
+import { TakeawayModule } from './modules/takeaway/takeaway.module';
 
 @Module({
   imports: [
@@ -79,6 +80,7 @@ import { KitchenModule } from './modules/kitchen/kitchen.module';
     DiningModule,
     TableSessionsModule,
     KitchenModule,
+    TakeawayModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.

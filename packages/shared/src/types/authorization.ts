@@ -156,11 +156,10 @@ export const RESERVED_PERMISSIONS: readonly Permission[] = [
   // ORDER_SEND_TO_KITCHEN, ORDER_VOID_SENT (see `table-sessions.controller`).
   // Phase 6 activated: KOT_VIEW, KOT_PRINT, KITCHEN_STATUS_UPDATE (see
   // `kitchen-tickets.controller`).
+  // Phase 7 activated: TAKEAWAY_VIEW, TAKEAWAY_CREATE (see `takeaway.controller`).
   Permission.TABLE_TRANSFER,
   Permission.TABLE_MERGE,
   Permission.ORDER_EDIT_DRAFT,
-  Permission.TAKEAWAY_VIEW,
-  Permission.TAKEAWAY_CREATE,
   Permission.BILL_VIEW,
   Permission.BILL_SPLIT,
   Permission.PAYMENT_COLLECT,
