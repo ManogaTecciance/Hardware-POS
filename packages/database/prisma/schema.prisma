@@ -311,6 +311,8 @@ model Tenant {
   restaurantOrderItems RestaurantOrderItem[]
   restaurantOrderItemModifiers RestaurantOrderItemModifier[]
   restaurantOrderStatusHistory RestaurantOrderStatusHistory[]
+  branchInventory      BranchInventory[]
+  stockMovements       StockMovement[]
 }
 
 /**
@@ -418,6 +420,8 @@ model Branch {
   restaurantTables   RestaurantTable[]
   tableSessions      TableSession[]
   restaurantOrders   RestaurantOrder[]
+  branchInventory    BranchInventory[]
+  stockMovements     StockMovement[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -665,6 +669,8 @@ model Product {
   returnItems    ReturnItem[]
   quotationItems QuotationItem[]
   menuItems      MenuItem[]
+  branchInventory BranchInventory[]
+  stockMovements  StockMovement[]
 
   @@unique([tenantId, quickbooksItemId])
   @@unique([tenantId, sku])
@@ -2020,4 +2026,95 @@ model RestaurantOrderStatusHistory {
 
   @@index([tenantId])
   @@index([orderId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.5 — Branch-scoped inventory (D10, AD-16)
+// ─────────────────────────────────────────────────────────────
+//
+// `Product.quantityOnHand` is tenant-wide today, which is incorrect for any
+// tenant running two or more selling branches. This adds the correct model:
+//
+//   `BranchInventory`  — current per-branch balance.
+//   `StockMovement`    — append-only ledger, one row per transaction line.
+//
+// Rollout (four steps, none of which is destructive):
+//   1. This migration lands the two tables (no reader changes).
+//   2. Backfill one BranchInventory row per default-branch × product with an
+//      OPENING movement (insert only).
+//   3. `LocalInventoryProvider` dual-writes BranchInventory (authoritative)
+//      and `Product.quantityOnHand` (rollup + QuickBooks cache).
+//   4. Migrate readers behind `INVENTORY_BRANCH_SCOPED` and verify the
+//      rollup equals the sum of branches (AD-16).
+//
+// `Product.quantityOnHand` is retained permanently — never dropped, never
+// repurposed (D10).
+
+enum StockMovementReason {
+  SALE
+  RETURN
+  ADJUSTMENT
+  TRANSFER_IN
+  TRANSFER_OUT
+  IMPORT
+  QB_PULL
+  WASTAGE
+  OPENING
+  ORDER_ROUND
+}
+
+/// Current per-branch balance.
+///
+/// `reorderLevel` is per-branch because different branches have different
+/// footfall and lead times. `version` supports optimistic concurrency for a
+/// UI-driven adjustment; the sales path uses a conditional update guarded
+/// by `quantityOnHand >= qty`, the same idiom the tenant-wide column uses.
+model BranchInventory {
+  id           String  @id @default(cuid())
+  tenantId     String
+  branchId     String
+  productId    String
+  quantityOnHand Decimal @default(0) @db.Decimal(12, 3)
+  reorderLevel   Decimal? @db.Decimal(12, 3)
+  version      Int      @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, productId])
+  @@index([tenantId])
+  @@index([productId])
+}
+
+/// Append-only ledger of stock movements. NEVER updated. Every row represents
+/// one delta applied to `BranchInventory.quantityOnHand`; `balanceAfter`
+/// captures the post-application value so a later reconciliation can walk
+/// the ledger without re-running Prisma transactions.
+model StockMovement {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  productId String
+
+  delta        Decimal @db.Decimal(12, 3)
+  balanceAfter Decimal @db.Decimal(12, 3)
+  reason       StockMovementReason
+  /// Free-form typed reference, e.g. 'SALE' | 'RETURN' | 'ORDER_ROUND'.
+  refType         String?
+  refId           String?
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, productId, createdAt])
+  @@index([branchId])
+  @@index([refType, refId])
 }
