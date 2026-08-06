@@ -758,22 +758,27 @@ describe('42-47 — Slice 6C-B changed nothing outside the product catalogue', (
     expect(Number(after.quantityOnHand)).toBe(before - 2);
   });
 
-  it('44/45 — no BranchInventory and no Restaurant model exists', () => {
+  it('44/45 — no forbidden alt-name models are present (superseded post Phase 2/2.5)', () => {
+    // This assertion was authored at Phase 1 acceptance to prevent restaurant
+    // and branch-inventory tables from arriving before their approved slice.
+    // Restaurant Phase 2 (2A-2D) and Phase 2.5 have since landed; the
+    // originally-forbidden model names are all valid and present. The
+    // assertion now enforces the smaller class of *alternative names* that
+    // must never appear (the migration tripwire pins the same set).
     const client = prisma as unknown as Record<string, unknown>;
-    for (const model of [
-      'branchInventory',
-      'inventoryMovement',
-      'restaurantOrder',
-      'menu',
-      'menuItem',
-      'kitchenTicket',
-      'diningArea',
-    ]) {
+    for (const model of ['inventoryMovement', 'inventoryBalance', 'diningTable']) {
       expect(client[model]).toBeUndefined();
     }
     // POSITIVE CONTROL: the probe finds the models that do exist.
     expect(typeof client.product).toBe('object');
     expect(typeof client.tenantBusinessProfile).toBe('object');
+    // Positive control for the models that Phase 2 and 2.5 legitimately add.
+    expect(typeof client.branchInventory).toBe('object');
+    expect(typeof client.menu).toBe('object');
+    expect(typeof client.menuItem).toBe('object');
+    expect(typeof client.diningArea).toBe('object');
+    expect(typeof client.restaurantOrder).toBe('object');
+    expect(typeof client.kitchenTicket).toBe('object');
   });
 
   it('46 — Product.syncStatus still uses its existing values, unredefined', async () => {

@@ -954,18 +954,25 @@ describe('43-47 — Slice 6C-A changed nothing outside sale and return stock', (
     }
   });
 
-  it('46 — no BranchInventory model exists', () => {
+  it('46 — Phase 2.5 introduced BranchInventory and StockMovement (superseded)', () => {
+    // Originally: "no BranchInventory model exists" — pinned at Phase 1
+    // acceptance. Phase 2.5 landed the branch-scoped inventory tables per
+    // D10 / AD-16. The assertion is inverted: they DO exist now, but the
+    // alternative names (`inventoryMovement`, `inventoryBalance`) must not.
     const client = prisma as unknown as Record<string, unknown>;
-    expect(client.branchInventory).toBeUndefined();
+    expect(typeof client.branchInventory).toBe('object');
+    expect(typeof client.stockMovement).toBe('object');
     expect(client.inventoryMovement).toBeUndefined();
     expect(client.inventoryBalance).toBeUndefined();
-    // POSITIVE CONTROL: the same probe finds the models that DO exist, so an
-    // `undefined` above is a real absence and not a mistyped accessor.
+    // POSITIVE CONTROL: the same probe finds the models that DO exist.
     expect(typeof client.product).toBe('object');
     expect(typeof client.tenantBusinessProfile).toBe('object');
   });
 
-  it('45/46 — no Restaurant domain model exists either', () => {
+  it('45/46 — Phase 2A-2D restaurant domain models are present (superseded)', () => {
+    // Originally: "no Restaurant domain model exists either" — pinned at
+    // Phase 1 acceptance. Restaurant Phase 2 (2A-2D) has since landed;
+    // all these models are present by design.
     const client = prisma as unknown as Record<string, unknown>;
     for (const model of [
       'restaurantOrder',
@@ -976,26 +983,34 @@ describe('43-47 — Slice 6C-A changed nothing outside sale and return stock', (
       'menu',
       'menuItem',
     ]) {
-      expect(client[model]).toBeUndefined();
+      expect(typeof client[model]).toBe('object');
     }
     expect(typeof client.sale).toBe('object');
+    // Negative: `diningTable` (alt name) must never appear.
+    expect(client.diningTable).toBeUndefined();
   });
 
-  it('quantityOnHand is still the only stock column, and still not branch-scoped', async () => {
-    const columns = await prisma.$queryRawUnsafe<{ column_name: string }[]>(
+  it('Product.quantityOnHand is retained and BranchInventory adds a per-branch column (D10)', async () => {
+    // The rollout keeps `Product.quantityOnHand` as a rollup and cache
+    // (retained permanently, never dropped, never repurposed — D10).
+    // Phase 2.5 additionally introduces `BranchInventory.quantityOnHand`
+    // as the authoritative per-branch balance.
+    const productColumns = await prisma.$queryRawUnsafe<{ column_name: string }[]>(
       `select column_name from information_schema.columns
         where table_name = 'Product' and column_name ilike '%quantity%'
         order by column_name`,
     );
-    // `quantityAsOfDate` is the pre-existing QuickBooks inventory-start mirror, not
-    // a stock level. The point of the assertion is that no branch-scoped quantity
-    // column has appeared — that is Phase 2.5, and D10 still holds.
-    expect(columns.map((c) => c.column_name)).toEqual(['quantityAsOfDate', 'quantityOnHand']);
-    const branchScoped = await prisma.$queryRawUnsafe<{ table_name: string }[]>(
-      `select table_name from information_schema.columns
-        where column_name = 'branchId' and table_name ilike '%inventory%'`,
+    expect(productColumns.map((c) => c.column_name)).toEqual([
+      'quantityAsOfDate',
+      'quantityOnHand',
+    ]);
+    const branchInventoryColumns = await prisma.$queryRawUnsafe<{ column_name: string }[]>(
+      `select column_name from information_schema.columns
+        where table_name = 'BranchInventory'
+        order by column_name`,
     );
-    expect(branchScoped).toEqual([]);
+    expect(branchInventoryColumns.map((c) => c.column_name)).toContain('quantityOnHand');
+    expect(branchInventoryColumns.map((c) => c.column_name)).toContain('branchId');
   });
 });
 

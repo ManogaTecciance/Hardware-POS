@@ -20,7 +20,6 @@ import {
 } from './dto/table-sessions.dto';
 import {
   BranchNotFoundError,
-  ItemAlreadySentError,
   MenuItemInactiveError,
   MenuItemNotFoundError,
   OrderNotFoundError,

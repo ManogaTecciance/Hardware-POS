@@ -253,32 +253,36 @@ describe('an explicit Restaurant profile', () => {
     ]);
   });
 
-  it('creates no restaurant operational rows — the domain does not exist yet', async () => {
-    await patchProfile(ownerToken(other), RESTAURANT_PROFILE);
-
-    // Nothing beyond the two platform tables should have appeared.
-    const tables = await prisma.$queryRaw<{ table_name: string }[]>`
+  it('setting the profile does not create OR delete any tables — schema is stable', async () => {
+    // Originally: "creates no restaurant operational rows — the domain does
+    // not exist yet". After Restaurant Phase 2 (2A-2D), Phase 2.5 and Phase
+    // 6, all the tables the plan called for exist. What still holds is that
+    // *setting the profile* is a data change only — it must not create,
+    // drop or alter any schema table. The alt-name `DiningTable` must
+    // never appear either way.
+    const tablesBefore = await prisma.$queryRaw<{ table_name: string }[]>`
       SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'
     `;
-    const names = tables.map((row) => row.table_name);
-    for (const restaurantTable of [
-      'RestaurantOrder',
-      'OrderRound',
-      'DiningTable',
-      'DiningArea',
-      'RestaurantTable',
-      'Menu',
-      'MenuItem',
-      'KitchenTicket',
-      'BranchInventory',
-    ]) {
-      expect(names).not.toContain(restaurantTable);
-    }
-    // POSITIVE CONTROL (Slice 6C-A.5): the query really did return the schema, so
-    // the absences above are absences and not an empty result set.
-    expect(names).toContain('Sale');
-    expect(names).toContain('TenantBusinessProfile');
-    expect(names.length).toBeGreaterThan(20);
+    const before = tablesBefore.map((row) => row.table_name).sort();
+
+    await patchProfile(ownerToken(other), RESTAURANT_PROFILE);
+
+    const tablesAfter = await prisma.$queryRaw<{ table_name: string }[]>`
+      SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'
+    `;
+    const after = tablesAfter.map((row) => row.table_name).sort();
+
+    // Schema is byte-for-byte identical either side of the profile change.
+    expect(after).toEqual(before);
+    // POSITIVE CONTROL: the query did return the schema.
+    expect(after).toContain('Sale');
+    expect(after).toContain('TenantBusinessProfile');
+    expect(after).toContain('RestaurantOrder');
+    expect(after).toContain('BranchInventory');
+    expect(after.length).toBeGreaterThan(20);
+    // Negative: alternative names must never appear.
+    expect(after).not.toContain('DiningTable');
+    expect(after).not.toContain('InventoryBalance');
   });
 
   it('leaves the OTHER tenant on the legacy default', async () => {
