@@ -1,7 +1,9 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
+import { ModuleKey } from '@hardware-pos/database';
 import type { Response } from 'express';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuthenticatedUser } from '../auth/auth.types';
@@ -28,6 +30,7 @@ export class DocumentsController {
 
   /** A4 final bill / invoice HTML for a completed sale (print or Save-as-PDF). */
   @Get('sales/:saleId')
+  @RequireModule(ModuleKey.RETAIL_POS)
   @RequirePermissions(Permission.SALE_READ)
   async saleBill(
     @TenantId() tenantId: string,
@@ -47,6 +50,7 @@ export class DocumentsController {
 
   /** A4 return / refund note HTML for a completed return. */
   @Get('returns/:returnId')
+  @RequireModule(ModuleKey.RETURNS)
   @RequirePermissions(Permission.RETURN_READ)
   async returnNote(
     @TenantId() tenantId: string,
@@ -71,6 +75,7 @@ export class DocumentsController {
    * body lets the Settings UI preview UNSAVED document settings live.
    */
   @Post('preview/:type')
+  @RequireModule(ModuleKey.SETTINGS)
   @RequirePermissions(Permission.SETTINGS_MANAGE)
   preview(
     @TenantId() tenantId: string,
@@ -88,6 +93,7 @@ export class DocumentsController {
 
   /** Downloadable sample PDF (falls back to print-ready HTML if Puppeteer is off). */
   @Get('sample-pdf/:type')
+  @RequireModule(ModuleKey.SETTINGS)
   @RequirePermissions(Permission.SETTINGS_MANAGE)
   async samplePdf(
     @TenantId() tenantId: string,

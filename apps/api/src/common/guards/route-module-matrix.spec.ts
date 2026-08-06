@@ -21,25 +21,15 @@
  * ## `guard` values
  *
  *  • `ENFORCED` — `@RequireModule` is on the route (or its controller) today.
+ *    Phase 1.5.9 completed the rollout: the retail write path (sale draft /
+ *    complete / sync / retry-sync), payments, receipts, print jobs, discounts
+ *    and the `DocumentsController` per-route metadata all carry the guard now.
  *  • `shared-core` — authentication, tenant isolation and permissions only. These
  *    routes must work for **every** business profile, so gating them would be
- *    wrong, not merely unfinished.
- *  • `deferred-retail-pos` — classified `RETAIL_POS`, not yet gated. This is the
- *    sale *write* path (draft, complete, payment, receipt, print) plus the
- *    QuickBooks sync operations on a sale. Gating it is safe in principle and is
- *    deferred with the rest of the retail-write work.
- *
- *    The **read** path is no longer in this class. After Slice 8 the product owner
- *    classified completed-sale history and sale detail as shared core: every
- *    business profile needs to look up what it has already sold, and a Restaurant
- *    tenant reaches exactly those routes from its own navigation. Future
- *    restaurant *operational orders* are a separate model on separate routes, so
- *    they do not make the read path retail-only. Per that decision, a new
- *    business-specific operation on `SalesController` is classified on its own
- *    rather than by moving the whole controller.
- *  • `deferred-mixed-controller` — `DocumentsController` serves sale bills, return
- *    notes and settings previews from one class. Route-level gating is the right
- *    answer and is deferred with the rest of the document work.
+ *    wrong, not merely unfinished. Sale reads (`GET /sales`, `GET /sales/:id`,
+ *    `GET /sales/report`) are in this class — every business profile needs to
+ *    look up what it has already sold. Restaurant *operational orders* will be
+ *    a separate model on separate routes and will not change this classification.
  *  • `public-no-tenant` — `@Public()` routes. `ModuleAccessGuard` denies any route
  *    that requires a module without an authenticated tenant (the `x-tenant-id`
  *    header is client-supplied and must not be trusted), so these **cannot** carry
@@ -68,8 +58,6 @@ const MATRIX_DOC = resolve(
 type GuardState =
   | 'ENFORCED'
   | 'shared-core'
-  | 'deferred-retail-pos'
-  | 'deferred-mixed-controller'
   | 'public-no-tenant';
 
 /**
@@ -117,20 +105,20 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /dashboard/summary': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /dashboard/top-categories': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /dashboard/top-products': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
-  'POST /discounts/approve': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
-  'POST /documents/preview/:type': { module: 'SETTINGS', guard: 'deferred-mixed-controller', scope: T },
-  'GET /documents/returns/:returnId': { module: 'RETURNS', guard: 'deferred-mixed-controller', scope: T },
-  'GET /documents/sales/:saleId': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
-  'GET /documents/sample-pdf/:type': { module: 'SETTINGS', guard: 'deferred-mixed-controller', scope: T },
+  'POST /discounts/approve': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'POST /documents/preview/:type': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
+  'GET /documents/returns/:returnId': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
+  'GET /documents/sales/:saleId': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'GET /documents/sample-pdf/:type': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'GET /health': { module: 'SHARED_CORE', guard: 'shared-core', scope: G },
-  'GET /payments': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
-  'POST /payments': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
-  'GET /payments/:id': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /payments': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'POST /payments': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'GET /payments/:id': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'GET /platform/modules': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /platform/profile': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'PATCH /platform/profile': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
-  'GET /print-jobs': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
-  'POST /print-jobs/:id/mark-printed': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /print-jobs': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'POST /print-jobs/:id/mark-printed': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'GET /product-categories': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /product-categories': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /product-categories/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
@@ -186,9 +174,9 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /quotations/:id/share/email': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
   'POST /quotations/:id/share/whatsapp': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
   'POST /quotations/preview': { module: 'QUOTATIONS', guard: 'ENFORCED', scope: T },
-  'GET /receipts/:id': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
-  'POST /receipts/:saleId/customer': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
-  'GET /receipts/sale/:saleId': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'GET /receipts/:id': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'POST /receipts/:saleId/customer': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'GET /receipts/sale/:saleId': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'GET /returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
   'POST /returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
   'GET /returns/:id': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
@@ -205,13 +193,13 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'PUT /roles/:roleId/permissions': { module: 'USERS', guard: 'ENFORCED', scope: T },
   'GET /sales': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /sales/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
-  'POST /sales/:id/retry-sync': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
+  'POST /sales/:id/retry-sync': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'GET /sales/:id/return-eligibility': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
   'GET /sales/:id/returnable-items': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
   'GET /sales/:id/returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
-  'POST /sales/:id/sync': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: T },
-  'POST /sales/complete': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: B },
-  'POST /sales/draft': { module: 'RETAIL_POS', guard: 'deferred-retail-pos', scope: B },
+  'POST /sales/:id/sync': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'POST /sales/complete': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: B },
+  'POST /sales/draft': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: B },
   'GET /sales/report': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'PUT /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
@@ -430,7 +418,7 @@ describe('completed-sale history is shared core', () => {
         route,
         classified: {
           module: 'RETAIL_POS',
-          guard: 'deferred-retail-pos',
+          guard: 'ENFORCED',
           scope: BranchScopeKind.BRANCH_SCOPED,
         },
       });

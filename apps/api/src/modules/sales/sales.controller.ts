@@ -1,9 +1,11 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Res } from '@nestjs/common';
+import { ModuleKey } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 import type { Response } from 'express';
 
 import { BranchScope, BranchScopeKind } from '../../common/decorators/branch-scope.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuthenticatedUser } from '../auth/auth.types';
@@ -25,6 +27,7 @@ export class SalesController {
   ) {}
 
   @Post('draft')
+  @RequireModule(ModuleKey.RETAIL_POS)
   @RequirePermissions(Permission.SALE_CREATE)
   @BranchScope(BranchScopeKind.BRANCH_SCOPED)
   createDraft(
@@ -37,6 +40,7 @@ export class SalesController {
 
   @Post('complete')
   @HttpCode(HttpStatus.CREATED)
+  @RequireModule(ModuleKey.RETAIL_POS)
   @RequirePermissions(Permission.SALE_CREATE)
   @BranchScope(BranchScopeKind.BRANCH_SCOPED)
   complete(
@@ -80,6 +84,7 @@ export class SalesController {
   }
 
   @Post(':id/sync')
+  @RequireModule(ModuleKey.RETAIL_POS)
   @RequirePermissions(Permission.SALE_CREATE)
   sync(@TenantId() tenantId: string, @Param('id') id: string): Promise<SaleWithRelations> {
     return this.salesService.syncToQuickBooks(tenantId, id);
@@ -87,6 +92,7 @@ export class SalesController {
 
   /** Alias of `/sync` — retry a failed/pending QuickBooks push from the Sales UI. */
   @Post(':id/retry-sync')
+  @RequireModule(ModuleKey.RETAIL_POS)
   @RequirePermissions(Permission.SALE_CREATE)
   retrySync(@TenantId() tenantId: string, @Param('id') id: string): Promise<SaleWithRelations> {
     return this.salesService.syncToQuickBooks(tenantId, id);

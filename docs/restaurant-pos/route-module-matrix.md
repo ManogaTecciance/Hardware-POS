@@ -6,8 +6,8 @@ route metadata off the real controller classes. **Do not edit the totals by hand
 that spec fails when this document and the code disagree.
 
 - Total routes: 152
-- Module-guarded routes: 90
-- Ungated routes: 62
+- Module-guarded routes: 107
+- Ungated routes: 45
 
 ## How to read the Guard column
 
@@ -15,8 +15,6 @@ that spec fails when this document and the code disagree.
 |---|---|
 | `ENFORCED` | `@RequireModule` is applied today; `ModuleAccessGuard` denies the route when the tenant has the module switched off. |
 | `shared-core` | Authentication, tenant isolation and permissions only. These routes must work for **every** business profile, so gating them would be wrong rather than merely unfinished. |
-| `deferred-retail-pos` | Classified `RETAIL_POS`, not yet gated — see *Deferred* below. |
-| `deferred-mixed-controller` | One controller serves several modules; route-level gating is the right answer and is deferred with the rest of the document work. |
 | `public-no-tenant` | `@Public()` route. `ModuleAccessGuard` denies any route requiring a module without an authenticated tenant (the `x-tenant-id` header is client-supplied and untrusted), so these **cannot** carry a module guard. Each enforces its own token instead. |
 
 ## Guard rollout in Slice 7.6
@@ -40,24 +38,21 @@ Applied at **route level** where a controller is mixed:
 of them enabled and every route behaves exactly as before. This is asserted by
 `platform-legacy-compatibility.spec.ts` and by the full Playwright suite.
 
-## Deferred, and why
+## Guard rollout completed in Phase 1.5.9
 
 **`RETAIL_POS` on the sale *write* path, payments, receipts, print jobs and
-discounts.** Taking a sale, collecting payment and printing a receipt are retail
-workflows. The classification is recorded and the guard is not yet applied; the
-work is deferred with the rest of the retail-write gating.
+discounts** now carries `@RequireModule` — see the individual entries below.
+Taking a sale, collecting payment and printing a receipt are retail workflows;
+a Restaurant tenant reaches these routes only through the retail POS module.
+When Restaurant Phase 2 lands the operational-order routes, they are a
+separate model on separate routes and do not change this classification.
 
-**Superseded — sale *reads* are no longer in that class.** After Slice 8 the
-product owner classified completed-sale history and sale detail as `SHARED_CORE`:
-`GET /sales`, `GET /sales/:id` and `GET /sales/report`. Every business profile
-needs to look up what it has already sold, and the Restaurant navigation links
-straight to those routes. Access continues to depend on authentication, tenant
-isolation, branch isolation where applicable, and the existing `sale:read`
-permission — removing a module requirement is not removing protection. Future
-restaurant *operational orders* are a separate model on separate routes and do not
-make sale history retail-only. A later business-specific operation on
-`SalesController` is to be classified individually, never by moving the whole
-controller. Asserted in `route-module-matrix.spec.ts`.
+**Sale *reads* remain `SHARED_CORE`.** `GET /sales`, `GET /sales/:id` and
+`GET /sales/report` every business profile needs to look up what it has already
+sold. Access continues to depend on authentication, tenant isolation, branch
+isolation where applicable, and the existing `sale:read` permission — removing
+a module requirement is not removing protection. Asserted in
+`route-module-matrix.spec.ts`.
 
 **`INVENTORY` on `/products` and the category controllers.** Products are the
 *catalogue*, which every business profile needs; `INVENTORY` means *stock
@@ -66,8 +61,9 @@ tracking*, which is already governed by `InventoryMode` and the catalogue provid
 tenant managing its own products, contradicting the Phase 1 acceptance criteria.
 Classified `SHARED_CORE` deliberately, not by omission.
 
-**`DocumentsController`.** Sale bills, return notes and settings previews share one
-class. Route-level gating is correct and is deferred with the document work.
+**`DocumentsController` per-route gating.** Sale bills → `RETAIL_POS`, return
+notes → `RETURNS`, settings previews → `SETTINGS`. Applied at the handler,
+not the class, because the four routes serve three different modules.
 
 ## Every future Restaurant controller
 
@@ -137,16 +133,16 @@ reach production unclassified.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
-| POST | `/discounts/approve` | RETAIL_POS | deferred-retail-pos | sale:create |
+| POST | `/discounts/approve` | RETAIL_POS | ENFORCED | sale:create |
 
 ### DocumentsController
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
-| POST | `/documents/preview/:type` | SETTINGS | deferred-mixed-controller | settings:manage |
-| GET | `/documents/returns/:returnId` | RETURNS | deferred-mixed-controller | return:read |
-| GET | `/documents/sales/:saleId` | RETAIL_POS | deferred-retail-pos | sale:read |
-| GET | `/documents/sample-pdf/:type` | SETTINGS | deferred-mixed-controller | settings:manage |
+| POST | `/documents/preview/:type` | SETTINGS | ENFORCED | settings:manage |
+| GET | `/documents/returns/:returnId` | RETURNS | ENFORCED | return:read |
+| GET | `/documents/sales/:saleId` | RETAIL_POS | ENFORCED | sale:read |
+| GET | `/documents/sample-pdf/:type` | SETTINGS | ENFORCED | settings:manage |
 
 ### HealthController
 
@@ -158,9 +154,9 @@ reach production unclassified.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
-| GET | `/payments` | RETAIL_POS | deferred-retail-pos | — |
-| POST | `/payments` | RETAIL_POS | deferred-retail-pos | payment:create |
-| GET | `/payments/:id` | RETAIL_POS | deferred-retail-pos | — |
+| GET | `/payments` | RETAIL_POS | ENFORCED | — |
+| POST | `/payments` | RETAIL_POS | ENFORCED | payment:create |
+| GET | `/payments/:id` | RETAIL_POS | ENFORCED | — |
 
 ### PlatformController
 
@@ -174,8 +170,8 @@ reach production unclassified.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
-| GET | `/print-jobs` | RETAIL_POS | deferred-retail-pos | sale:read |
-| POST | `/print-jobs/:id/mark-printed` | RETAIL_POS | deferred-retail-pos | sale:create |
+| GET | `/print-jobs` | RETAIL_POS | ENFORCED | sale:read |
+| POST | `/print-jobs/:id/mark-printed` | RETAIL_POS | ENFORCED | sale:create |
 
 ### ProductCategoriesController
 
@@ -266,9 +262,9 @@ reach production unclassified.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
-| GET | `/receipts/:id` | RETAIL_POS | deferred-retail-pos | sale:read |
-| POST | `/receipts/:saleId/customer` | RETAIL_POS | deferred-retail-pos | sale:create |
-| GET | `/receipts/sale/:saleId` | RETAIL_POS | deferred-retail-pos | sale:read |
+| GET | `/receipts/:id` | RETAIL_POS | ENFORCED | sale:read |
+| POST | `/receipts/:saleId/customer` | RETAIL_POS | ENFORCED | sale:create |
+| GET | `/receipts/sale/:saleId` | RETAIL_POS | ENFORCED | sale:read |
 
 ### ReturnsController
 
@@ -319,10 +315,10 @@ administrator role, or builds its own, keeps working.
 |---|---|---|---|---|
 | GET | `/sales` | SHARED_CORE | shared-core | sale:read |
 | GET | `/sales/:id` | SHARED_CORE | shared-core | sale:read |
-| POST | `/sales/:id/retry-sync` | RETAIL_POS | deferred-retail-pos | sale:create |
-| POST | `/sales/:id/sync` | RETAIL_POS | deferred-retail-pos | sale:create |
-| POST | `/sales/complete` | RETAIL_POS | deferred-retail-pos | sale:create |
-| POST | `/sales/draft` | RETAIL_POS | deferred-retail-pos | sale:create |
+| POST | `/sales/:id/retry-sync` | RETAIL_POS | ENFORCED | sale:create |
+| POST | `/sales/:id/sync` | RETAIL_POS | ENFORCED | sale:create |
+| POST | `/sales/complete` | RETAIL_POS | ENFORCED | sale:create |
+| POST | `/sales/draft` | RETAIL_POS | ENFORCED | sale:create |
 | GET | `/sales/report` | SHARED_CORE | shared-core | sale:read |
 
 ### SettingsController
