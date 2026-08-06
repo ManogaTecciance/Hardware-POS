@@ -154,12 +154,11 @@ export const ALL_PERMISSIONS: readonly Permission[] = Object.values(Permission);
 export const RESERVED_PERMISSIONS: readonly Permission[] = [
   // Phase 5 activated: TABLE_VIEW, TABLE_OPEN, TABLE_CLOSE, ORDER_CREATE,
   // ORDER_SEND_TO_KITCHEN, ORDER_VOID_SENT (see `table-sessions.controller`).
+  // Phase 6 activated: KOT_VIEW, KOT_PRINT, KITCHEN_STATUS_UPDATE (see
+  // `kitchen-tickets.controller`).
   Permission.TABLE_TRANSFER,
   Permission.TABLE_MERGE,
   Permission.ORDER_EDIT_DRAFT,
-  Permission.KOT_VIEW,
-  Permission.KOT_PRINT,
-  Permission.KITCHEN_STATUS_UPDATE,
   Permission.TAKEAWAY_VIEW,
   Permission.TAKEAWAY_CREATE,
   Permission.BILL_VIEW,

@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 183
-- Module-guarded routes: 138
+- Total routes: 190
+- Module-guarded routes: 145
 - Ungated routes: 45
 
 ## How to read the Guard column
@@ -272,6 +272,23 @@ reach production unclassified.
 |---|---|---|---|---|
 | GET | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | platform:profile:read |
 | PUT | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | restaurant:config:manage |
+
+### KitchenPrintersController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/branches/:branchId/kitchen-printers` | KITCHEN | ENFORCED | platform:profile:read |
+| POST | `/restaurant/branches/:branchId/kitchen-printers` | KITCHEN | ENFORCED | kitchen:station:manage |
+| PATCH | `/restaurant/branches/:branchId/kitchen-printers/:printerId` | KITCHEN | ENFORCED | kitchen:station:manage |
+
+### KitchenTicketsController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/branches/:branchId/kitchen-tickets` | KITCHEN | ENFORCED | kot:view |
+| POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/mark-printed` | KITCHEN | ENFORCED | kitchen:status:update |
+| POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/mark-failed` | KITCHEN | ENFORCED | kitchen:status:update |
+| POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/reprint` | KITCHEN | ENFORCED | kot:print |
 
 ### TableSessionsController
 

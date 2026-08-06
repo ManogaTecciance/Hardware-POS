@@ -39,6 +39,7 @@ import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { DiningModule } from './modules/dining/dining.module';
 import { TableSessionsModule } from './modules/table-sessions/table-sessions.module';
+import { KitchenModule } from './modules/kitchen/kitchen.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { TableSessionsModule } from './modules/table-sessions/table-sessions.mod
     MenuModule,
     DiningModule,
     TableSessionsModule,
+    KitchenModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.

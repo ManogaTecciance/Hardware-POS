@@ -196,8 +196,8 @@ describe('reserved permissions are reserved, not implemented', () => {
     expect(active).toContain(Permission.ORDER_CREATE);
     expect(active).toContain(Permission.ORDER_SEND_TO_KITCHEN);
     // Negative: still-reserved permissions are NOT in the active set.
-    expect(active).not.toContain(Permission.KOT_VIEW);
     expect(active).not.toContain(Permission.BILL_VIEW);
+    expect(active).not.toContain(Permission.TAKEAWAY_CREATE);
   });
 });
 
@@ -218,10 +218,10 @@ describe('the parity assertions can actually fail', () => {
     const enforcedNow = new Set<string>();
     expect(RESERVED_PERMISSIONS.filter((p) => enforcedNow.has(p))).toEqual([]);
 
-    // Use a permission that is STILL reserved (KOT_VIEW lands in Phase 6).
-    const enforcedLater = new Set<string>([Permission.KOT_VIEW]);
+    // Use a permission that is STILL reserved (BILL_VIEW lands in Phase 8).
+    const enforcedLater = new Set<string>([Permission.BILL_VIEW]);
     const leaked = RESERVED_PERMISSIONS.filter((p) => enforcedLater.has(p));
-    expect(leaked).toEqual([Permission.KOT_VIEW]);
+    expect(leaked).toEqual([Permission.BILL_VIEW]);
     expect(() => expect(leaked).toEqual([])).toThrow();
   });
 

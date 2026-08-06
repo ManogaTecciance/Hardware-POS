@@ -313,6 +313,10 @@ model Tenant {
   restaurantOrderStatusHistory RestaurantOrderStatusHistory[]
   branchInventory      BranchInventory[]
   stockMovements       StockMovement[]
+  kitchenPrinters      KitchenPrinter[]
+  kitchenTickets       KitchenTicket[]
+  kitchenTicketItems   KitchenTicketItem[]
+  kitchenPrintAttempts KitchenPrintAttempt[]
 }
 
 /**
@@ -422,6 +426,8 @@ model Branch {
   restaurantOrders   RestaurantOrder[]
   branchInventory    BranchInventory[]
   stockMovements     StockMovement[]
+  kitchenPrinters    KitchenPrinter[]
+  kitchenTickets     KitchenTicket[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1435,6 +1441,7 @@ model KitchenStation {
 
   printers  KitchenStationPrinter[]
   menuItems MenuItemStationLink[]
+  tickets   KitchenTicket[]
 
   @@unique([branchId, code])
   @@index([tenantId])
@@ -1943,6 +1950,7 @@ model OrderRound {
   tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   order  RestaurantOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items  RestaurantOrderItem[]
+  tickets KitchenTicket[]
 
   @@unique([orderId, roundNumber])
   @@unique([tenantId, idempotencyKey])
@@ -2117,4 +2125,129 @@ model StockMovement {
   @@index([tenantId, productId, createdAt])
   @@index([branchId])
   @@index([refType, refId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 6 — KOT/BOT + printing (D6, scenario 20)
+// ─────────────────────────────────────────────────────────────
+//
+// A KOT (kitchen order ticket) is generated when a round is submitted and
+// routed to the stations the round's items map to. Each ticket lands as a
+// print job on a specific printer; the print job carries retry state so
+// printer failure never loses the order (scenario 20 — the sale is already
+// recorded; the ticket is a downstream side effect).
+
+enum KitchenPrinterKind {
+  ESC_POS_NETWORK
+  ESC_POS_USB
+  A4_NETWORK
+  MOCK
+}
+
+enum KitchenTicketStatus {
+  QUEUED
+  PRINTED
+  REPRINTED
+  FAILED
+}
+
+enum KitchenPrintAttemptStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model KitchenPrinter {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  code     String
+  name     String
+  kind     KitchenPrinterKind
+  address  String
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  tickets       KitchenTicket[]
+  printAttempts KitchenPrintAttempt[]
+
+  @@unique([branchId, code])
+  @@index([tenantId])
+  @@index([branchId])
+}
+
+model KitchenTicket {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  roundId  String
+  stationId String
+  primaryPrinterId String?
+
+  ticketNumber String
+
+  status KitchenTicketStatus @default(QUEUED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch  Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  round   OrderRound       @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  station KitchenStation   @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  primaryPrinter KitchenPrinter? @relation(fields: [primaryPrinterId], references: [id])
+
+  items    KitchenTicketItem[]
+  attempts KitchenPrintAttempt[]
+
+  @@unique([tenantId, ticketNumber])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([roundId])
+  @@index([stationId])
+  @@index([status])
+}
+
+model KitchenTicketItem {
+  id       String @id @default(cuid())
+  ticketId String
+  tenantId String
+
+  menuItemName String
+  quantity     Decimal @db.Decimal(12, 3)
+  modifierNames String[]
+  specialInstructions String?
+
+  ticket KitchenTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([ticketId])
+}
+
+model KitchenPrintAttempt {
+  id       String @id @default(cuid())
+  tenantId String
+  ticketId String
+  printerId String
+
+  status KitchenPrintAttemptStatus @default(PENDING)
+  error String?
+  attemptedAt DateTime @default(now())
+  completedAt DateTime?
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket  KitchenTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  printer KitchenPrinter @relation(fields: [printerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([printerId])
+  @@index([status])
 }

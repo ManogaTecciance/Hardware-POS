@@ -11,6 +11,7 @@ import {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { KitchenService } from '../kitchen/kitchen.service';
 import {
   CloseSessionDto,
   OpenSessionDto,
@@ -66,7 +67,10 @@ export interface RoundView {
 
 @Injectable()
 export class TableSessionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly kitchen: KitchenService,
+  ) {}
 
   // ─────────────────────────────────────────────────────────────
   // Sessions
@@ -283,16 +287,20 @@ export class TableSessionsService {
       }
 
       // Table transitions to OCCUPIED once at least one round is sent.
+      const session = await tx.tableSession.findUniqueOrThrow({
+        where: { id: order.sessionId },
+        select: { tableId: true, branchId: true },
+      });
       await tx.restaurantTable.updateMany({
-        where: {
-          tenantId,
-          id: (await tx.tableSession.findUniqueOrThrow({
-            where: { id: order.sessionId },
-            select: { tableId: true },
-          })).tableId,
-        },
+        where: { tenantId, id: session.tableId },
         data: { status: RestaurantTableStatus.OCCUPIED },
       });
+
+      // Phase 6: generate KOTs inside the same transaction so a round and
+      // its tickets are visible together. Scenario 20 requires the round
+      // to be persisted even if printer wiring later fails; the tickets
+      // themselves are QUEUED and the print attempt driver handles retry.
+      await this.kitchen.generateTicketsForRound(tx, tenantId, session.branchId, round.id);
 
       const roundFull = await tx.orderRound.findUniqueOrThrow({
         where: { id: round.id },
