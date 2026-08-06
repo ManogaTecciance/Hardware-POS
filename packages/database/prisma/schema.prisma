@@ -303,6 +303,8 @@ model Tenant {
   menuItems            MenuItem[]
   modifierGroups       ModifierGroup[]
   modifierOptions      ModifierOption[]
+  diningAreas          DiningArea[]
+  restaurantTables     RestaurantTable[]
 }
 
 /**
@@ -406,6 +408,8 @@ model Branch {
   restaurantConfig   RestaurantBranchConfig?
   kitchenStations    KitchenStation[]
   menus              Menu[]
+  diningAreas        DiningArea[]
+  restaurantTables   RestaurantTable[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1677,4 +1681,99 @@ model MenuItemStationLink {
 
   @@unique([menuItemId, stationId])
   @@index([stationId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restaurant Phase 2C — dining areas + restaurant tables
+// ─────────────────────────────────────────────────────────────
+//
+// Configuration only in this sub-slice; the operational lifecycle (opening a
+// table, orders, sessions) lands with Phase 2D and Phase 5. A `DiningArea`
+// belongs to a branch (a floor plan is per-location), and each area holds
+// zero-or-many `RestaurantTable` rows. The status column on the table lives
+// here so a future `TableStatusChange` history table can be added additively
+// in Phase 5 without an ALTER.
+
+enum RestaurantTableStatus {
+  /// Ready for the next party.
+  AVAILABLE
+  /// A party is seated but no order has been sent yet.
+  SEATED
+  /// A session is in progress.
+  OCCUPIED
+  /// The bill has been requested / printed; no more orders expected.
+  BILLING
+  /// Cleaning between parties.
+  CLEANING
+  /// Explicit shutdown — booked out or blocked from seating.
+  BLOCKED
+}
+
+/// A section of the floor plan — a dining room, a patio, a bar. Belongs to
+/// one branch; a tenant with two branches can have two "Main Room" areas
+/// without collision.
+model DiningArea {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  name        String
+  description String?
+  /// Display order on the floor plan; ties broken by name.
+  position    Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  tables RestaurantTable[]
+
+  @@unique([branchId, name])
+  @@index([tenantId])
+  @@index([branchId])
+}
+
+/// A physical table (or "table" — bar seat, counter position, patio spot).
+///
+/// `code` is the operator-facing label (T1, T2, BAR-3) and must be unique per
+/// area. `capacity` is nominal — the current `guestCount` on the session
+/// (Phase 2D) may differ.
+///
+/// The `status` column lives on the table because it is the answer to "what
+/// is happening here right now" — that question is best answered from the
+/// row the floor plan renders, without joining. A history table lands in
+/// Phase 5 additively, so audit does not require it here.
+model RestaurantTable {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  areaId   String
+
+  /// Unique operator-facing label per area, e.g. T1, T2, BAR-3.
+  code     String
+  /// Optional display name for a large or named table.
+  label    String?
+  /// Nominal seat count.
+  capacity Int
+  /// Optional pixel-level layout coordinates for the floor plan (Phase 4 uses).
+  positionX Int?
+  positionY Int?
+
+  status   RestaurantTableStatus @default(AVAILABLE)
+  isActive Boolean               @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  area   DiningArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
+
+  @@unique([areaId, code])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([areaId])
+  @@index([status])
 }

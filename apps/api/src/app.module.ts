@@ -37,6 +37,7 @@ import { BranchesModule } from './modules/branches/branches.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { MenuModule } from './modules/menu/menu.module';
+import { DiningModule } from './modules/dining/dining.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { MenuModule } from './modules/menu/menu.module';
     BranchesModule,
     RestaurantModule,
     MenuModule,
+    DiningModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.

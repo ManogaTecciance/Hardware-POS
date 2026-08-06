@@ -48,6 +48,8 @@ import { MenuItemsController } from '../../modules/menu/menu-items.controller';
 import { MenuSectionsController } from '../../modules/menu/menu-sections.controller';
 import { MenusController } from '../../modules/menu/menus.controller';
 import { ModifiersController } from '../../modules/menu/modifiers.controller';
+import { DiningAreasController } from '../../modules/dining/dining-areas.controller';
+import { RestaurantTablesController } from '../../modules/dining/restaurant-tables.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -86,6 +88,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   MenuSectionsController,
   MenuItemsController,
   ModifiersController,
+  DiningAreasController,
+  RestaurantTablesController,
 ];
 
 /**
@@ -133,4 +137,6 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'menu-sections',
   'menu-items',
   'modifiers',
+  'dining-areas',
+  'restaurant-tables',
 ];
