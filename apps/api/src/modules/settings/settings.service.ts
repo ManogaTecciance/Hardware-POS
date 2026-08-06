@@ -9,9 +9,35 @@ import { AppSettings, DocumentSettings } from './settings.interfaces';
 /**
  * How stale a cached settings entry may be before it is revalidated (Slice 7.5).
  *
- * This value **is** the documented consistency guarantee. See the class comment.
+ * This value **is** the documented consistency guarantee. See the class comment
+ * and Phase 1.5.8 for the "two-tier" separation between this (non-security,
+ * eventual) and the read-through path used by roles, users, branch access and
+ * module access (authoritative on the next validated request).
  */
 export const SETTINGS_CACHE_TTL_MS = 30_000;
+
+/**
+ * The two-tier consistency contract (Phase 1.5.8).
+ *
+ * Tier 1 — authoritative on the next validated request. Used by:
+ *   - `PermissionResolver` (roles / permissions / user activation)
+ *   - `BranchScopeGuard` (branch access, branch active state)
+ *   - `ModuleAccessGuard` via `BusinessProfileService`
+ *   - Anything gating a mutation
+ * These paths query the database on every request. They must never take a
+ * value from a process-local cache — a stale revocation would fail *open*.
+ *
+ * Tier 2 — documented eventual consistency, at most `SETTINGS_CACHE_TTL_MS`.
+ *   - Branding, receipt presentation, business preferences, UI configuration
+ * A 30-second lag on a receipt footer is unremarkable, and the alternative
+ * (a database round trip on every hot-path read) is not.
+ *
+ * Anything security-sensitive that also happens to live in `TenantSettings`
+ * MUST be read via `getSettingsFresh()` — never `getSettings()`.
+ */
+export const SETTINGS_TIER = {
+  MAX_NON_SECURITY_STALENESS_MS: SETTINGS_CACHE_TTL_MS,
+} as const;
 
 interface CacheEntry {
   value: AppSettings;
