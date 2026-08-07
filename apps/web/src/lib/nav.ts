@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   ChefHat,
   ClipboardList,
   FileText,
@@ -165,20 +166,20 @@ const RESTAURANT_NAV: NavGroup[] = [
         module: 'TABLE_MANAGEMENT',
       },
       {
+        // Frontend Phase G — takeaway board + new-order form are live.
         href: '/takeaway',
         label: 'Takeaway',
         icon: ShoppingBag,
-        permission: Permission.SALE_CREATE,
+        permission: Permission.TAKEAWAY_VIEW,
         module: 'TAKEAWAY',
-        upcoming: true,
       },
       {
+        // Frontend Phase F — kitchen ticket board + reprint actions are live.
         href: '/kitchen',
         label: 'Kitchen',
         icon: ChefHat,
-        permission: Permission.SALE_READ,
+        permission: Permission.KOT_VIEW,
         module: 'KITCHEN',
-        upcoming: true,
       },
     ],
   },
@@ -211,6 +212,14 @@ const RESTAURANT_NAV: NavGroup[] = [
         label: 'Sales',
         icon: ReceiptText,
         permission: Permission.SALE_READ,
+      },
+      {
+        // Frontend Phase I — restaurant reports dashboard.
+        href: '/reports',
+        label: 'Reports',
+        icon: BarChart3,
+        permission: Permission.REPORT_READ,
+        module: 'REPORTING',
       },
       {
         href: '/settings',

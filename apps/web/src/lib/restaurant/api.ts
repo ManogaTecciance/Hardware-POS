@@ -20,6 +20,7 @@ import { api } from '../api';
 import type { Session } from '../session-store';
 import type {
   BillView,
+  ChannelBreakdownRow,
   DiningAreaView,
   ExternalOrderView,
   KitchenPrinterKind,
@@ -31,15 +32,21 @@ import type {
   ModifierGroupView,
   OrderItemInput,
   OrderView,
+  PaymentBreakdownRow,
   PaymentMethod,
   RestaurantBranchConfigView,
   RestaurantTableStatus,
   RestaurantTableView,
   RoundView,
+  SalesSummaryView,
   SectionView,
+  SessionDetail,
   TableSessionView,
   TakeawayOrderStatus,
   TakeawayView,
+  TopMenuItemView,
+  VoidReportRow,
+  WaiterPerformanceRow,
 } from './types';
 
 function auth(session: Session) {
@@ -379,6 +386,18 @@ export const tableSessions = {
       auth(session),
     );
   },
+  listOpen(session: Session, branchId: string) {
+    return api.get<(TableSessionView & { activeOrderId: string | null })[]>(
+      `/restaurant/branches/${branchId}/open-sessions`,
+      auth(session),
+    );
+  },
+  getDetail(session: Session, sessionId: string) {
+    return api.get<SessionDetail>(
+      `/restaurant/table-sessions/${sessionId}/detail`,
+      auth(session),
+    );
+  },
   createOrder(session: Session, sessionId: string) {
     return api.post<OrderView>(
       `/restaurant/table-sessions/${sessionId}/orders`,
@@ -566,18 +585,19 @@ export const billing = {
 };
 
 // ── Restaurant reports ─────────────────────────────────────────────────────
+function reportQuery(range?: { from?: string; to?: string; limit?: number }): string {
+  if (!range) return '';
+  const q = new URLSearchParams();
+  if (range.from) q.set('from', range.from);
+  if (range.to) q.set('to', range.to);
+  if (range.limit) q.set('limit', String(range.limit));
+  return q.toString() ? `?${q.toString()}` : '';
+}
+
 export const restaurantReports = {
-  salesSummary(
-    session: Session,
-    branchId: string,
-    range?: { from?: string; to?: string },
-  ) {
-    const q = new URLSearchParams();
-    if (range?.from) q.set('from', range.from);
-    if (range?.to) q.set('to', range.to);
-    const query = q.toString() ? `?${q.toString()}` : '';
-    return api.get<unknown>(
-      `/restaurant/reports/branches/${branchId}/sales-summary${query}`,
+  salesSummary(session: Session, branchId: string, range?: { from?: string; to?: string }) {
+    return api.get<SalesSummaryView>(
+      `/restaurant/reports/branches/${branchId}/sales-summary${reportQuery(range)}`,
       auth(session),
     );
   },
@@ -586,53 +606,32 @@ export const restaurantReports = {
     branchId: string,
     range?: { from?: string; to?: string; limit?: number },
   ) {
-    const q = new URLSearchParams();
-    if (range?.from) q.set('from', range.from);
-    if (range?.to) q.set('to', range.to);
-    if (range?.limit) q.set('limit', String(range.limit));
-    const query = q.toString() ? `?${q.toString()}` : '';
-    return api.get<unknown>(
-      `/restaurant/reports/branches/${branchId}/top-items${query}`,
+    return api.get<TopMenuItemView[]>(
+      `/restaurant/reports/branches/${branchId}/top-items${reportQuery(range)}`,
       auth(session),
     );
   },
   waiterPerformance(session: Session, branchId: string, range?: { from?: string; to?: string }) {
-    const q = new URLSearchParams();
-    if (range?.from) q.set('from', range.from);
-    if (range?.to) q.set('to', range.to);
-    const query = q.toString() ? `?${q.toString()}` : '';
-    return api.get<unknown>(
-      `/restaurant/reports/branches/${branchId}/waiter-performance${query}`,
+    return api.get<WaiterPerformanceRow[]>(
+      `/restaurant/reports/branches/${branchId}/waiter-performance${reportQuery(range)}`,
       auth(session),
     );
   },
   paymentBreakdown(session: Session, branchId: string, range?: { from?: string; to?: string }) {
-    const q = new URLSearchParams();
-    if (range?.from) q.set('from', range.from);
-    if (range?.to) q.set('to', range.to);
-    const query = q.toString() ? `?${q.toString()}` : '';
-    return api.get<unknown>(
-      `/restaurant/reports/branches/${branchId}/payment-breakdown${query}`,
+    return api.get<PaymentBreakdownRow[]>(
+      `/restaurant/reports/branches/${branchId}/payment-breakdown${reportQuery(range)}`,
       auth(session),
     );
   },
   voids(session: Session, branchId: string, range?: { from?: string; to?: string }) {
-    const q = new URLSearchParams();
-    if (range?.from) q.set('from', range.from);
-    if (range?.to) q.set('to', range.to);
-    const query = q.toString() ? `?${q.toString()}` : '';
-    return api.get<unknown>(
-      `/restaurant/reports/branches/${branchId}/voids${query}`,
+    return api.get<VoidReportRow[]>(
+      `/restaurant/reports/branches/${branchId}/voids${reportQuery(range)}`,
       auth(session),
     );
   },
   channels(session: Session, branchId: string, range?: { from?: string; to?: string }) {
-    const q = new URLSearchParams();
-    if (range?.from) q.set('from', range.from);
-    if (range?.to) q.set('to', range.to);
-    const query = q.toString() ? `?${q.toString()}` : '';
-    return api.get<unknown>(
-      `/restaurant/reports/branches/${branchId}/channels${query}`,
+    return api.get<ChannelBreakdownRow[]>(
+      `/restaurant/reports/branches/${branchId}/channels${reportQuery(range)}`,
       auth(session),
     );
   },

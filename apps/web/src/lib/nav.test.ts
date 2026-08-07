@@ -125,6 +125,7 @@ describe('Restaurant navigation', () => {
       'Products',
       'Customers',
       'Sales',
+      'Reports',
       'Settings',
     ]);
   });
@@ -143,21 +144,22 @@ describe('Restaurant navigation', () => {
   });
 
   it('marks every unbuilt destination as upcoming, and no built one', () => {
-    // Frontend Phases B and C are live now: Menu and Tables are no longer
-    // upcoming. The remaining `upcoming: true` set shrinks phase by phase;
-    // when Takeaway and Kitchen ship they come off too.
+    // Frontend Phases B, C, F and G are live: Menu, Tables, Kitchen and
+    // Takeaway are all built now, so nothing in the Restaurant sidebar carries
+    // the "Soon" marker.
     const byLabel = Object.fromEntries(
       restaurant.flatMap((g) => g.items).map((i) => [i.label, Boolean(i.upcoming)]),
     );
     expect(byLabel).toEqual({
       Dashboard: false,
       Tables: false,
-      Takeaway: true,
-      Kitchen: true,
+      Takeaway: false,
+      Kitchen: false,
       Menu: false,
       Products: false,
       Customers: false,
       Sales: false,
+      Reports: false,
       Settings: false,
     });
   });

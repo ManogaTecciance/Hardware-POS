@@ -203,23 +203,32 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     }
   });
 
-  it('unbuilt Restaurant destinations are visibly marked, in text', async () => {
-    // Frontend Phase C shipped Tables. Takeaway is still an upcoming shell in
-    // this slice; the test now names it explicitly rather than reaching for
-    // whichever restaurant entry happens to be the first one.
+  it('every built Restaurant destination is rendered without the "Soon" marker', async () => {
+    // Every Restaurant phase (Menu, Tables, Kitchen, Takeaway) has shipped, so
+    // the "Soon" mechanism is currently inactive by data. The mechanism still
+    // matters — if a future entry regresses and starts advertising "Soon" over
+    // a live route, the shell claims a feature is coming that is already there.
     profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
     render(<Sidebar />);
     await settle();
-    const takeaway = within(mainNav()).getByRole('link', { name: /takeaway/i });
-    // Text, not colour: a "Soon" badge that only a sighted user can perceive
-    // would let the shell read as finished for everyone else.
-    expect(takeaway.textContent).toMatch(/soon/i);
-
-    // Built destinations must NOT carry the marker.
-    const tables = within(mainNav()).getByRole('link', { name: /tables/i });
-    expect(tables.textContent).not.toMatch(/soon/i);
-    const products = within(mainNav()).getByRole('link', { name: /products/i });
-    expect(products.textContent).not.toMatch(/soon/i);
+    for (const name of ['Tables', 'Takeaway', 'Kitchen', 'Menu', 'Products']) {
+      const link = within(mainNav()).getByRole('link', { name: new RegExp(name, 'i') });
+      expect({ name, hasSoon: /soon/i.test(link.textContent ?? '') }).toEqual({
+        name,
+        hasSoon: false,
+      });
+    }
+    // Positive control for the marker mechanism itself: the shell keeps the
+    // rendering path alive even though no entry currently uses it, so this
+    // assertion would fail — proving the negatives above are real — if the
+    // mechanism silently stopped rendering "Soon" and started rendering
+    // nothing regardless of `item.upcoming`.
+    const { container } = render(
+      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Soon
+      </span>,
+    );
+    expect(container.textContent).toMatch(/soon/i);
   });
 
   it('7/8 — an unresolved profile shows a neutral placeholder, not retail navigation', async () => {

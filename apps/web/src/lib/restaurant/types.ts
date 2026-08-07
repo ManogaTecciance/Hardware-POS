@@ -223,6 +223,35 @@ export interface RoundView {
   itemIds: string[];
 }
 
+/**
+ * Full item as returned by `GET /table-sessions/:id/detail`. Includes the
+ * snapshot fields the order-entry screen needs to render a running bill:
+ * name, unit price, modifier total, quantity, item status, and the frozen
+ * modifier labels.
+ */
+export interface SessionDetailItem {
+  id: string;
+  menuItemId: string;
+  menuItemName: string;
+  unitPrice: string;
+  modifierTotal: string;
+  quantity: string;
+  specialInstructions: string | null;
+  status: RestaurantOrderItemStatus;
+  modifiers: { optionName: string; groupName: string; priceDelta: string }[];
+}
+
+export interface SessionDetail {
+  session: TableSessionView;
+  orders: {
+    order: OrderView;
+    rounds: {
+      round: RoundView;
+      items: SessionDetailItem[];
+    }[];
+  }[];
+}
+
 // ── Kitchen tickets ─────────────────────────────────────────────────────────
 export interface KitchenTicketView {
   id: string;
@@ -297,6 +326,54 @@ export interface BillView {
     method: PaymentMethod;
     reference: string | null;
   }[];
+}
+
+// ── Reports ─────────────────────────────────────────────────────────────────
+export interface SalesSummaryView {
+  branchId: string;
+  from: string;
+  to: string;
+  sessionsClosed: number;
+  ordersServed: number;
+  itemsSold: string;
+  netRevenue: string;
+  serviceChargeCollected: string;
+  paymentsCollected: string;
+  bySaleStatus: Record<string, number>;
+}
+
+export interface TopMenuItemView {
+  menuItemId: string;
+  menuItemName: string;
+  quantitySold: string;
+  revenue: string;
+}
+
+export interface WaiterPerformanceRow {
+  userId: string;
+  sessionsHandled: number;
+  roundsSubmitted: number;
+  totalRevenue: string;
+}
+
+export interface PaymentBreakdownRow {
+  method: string;
+  count: number;
+  amount: string;
+}
+
+export interface VoidReportRow {
+  itemId: string;
+  menuItemName: string;
+  quantity: string;
+  reason: string;
+  voidedAt: string;
+  voidedByUserId: string | null;
+}
+
+export interface ChannelBreakdownRow {
+  channel: RestaurantOrderChannel;
+  orders: number;
 }
 
 // ── Delivery hub ────────────────────────────────────────────────────────────
