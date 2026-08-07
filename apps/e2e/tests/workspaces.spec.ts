@@ -195,12 +195,34 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     expect(flat.join(' | ')).toContain('Customers');
   });
 
-  test('WS-404 unbuilt destinations say so on the page itself', async ({ page }) => {
+  test('WS-404 built destinations render their real feature, not the shell text', async ({
+    page,
+  }) => {
+    // Frontend Phases B, C, F, G shipped: Menu, Tables, Kitchen and Takeaway
+    // now render live features. This test previously asserted the shell text
+    // "Not implemented in this release" for each. It now asserts the opposite
+    // — none of those routes carries the shell copy any more — plus a small
+    // positive signal per route so a page that renders nothing at all cannot
+    // silently satisfy the negative.
     await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
 
-    for (const path of ['/tables', '/takeaway', '/kitchen', '/menu']) {
+    const positiveSignals: Record<string, RegExp> = {
+      '/tables': /show/i,           // area filter label at the top of the floor
+      '/takeaway': /active/i,       // "N active · N closed today" header
+      '/kitchen': /refreshes/i,     // "Refreshes every 5 s." footer
+      '/menu': /menus|no menus/i,   // menu column header (or empty-state)
+    };
+
+    for (const [path, signal] of Object.entries(positiveSignals)) {
       await page.goto(path);
-      await expect(page.getByText('Not implemented in this release')).toBeVisible();
+      await expect(
+        page.getByText('Not implemented in this release'),
+        `${path} should no longer carry the shell copy`,
+      ).toHaveCount(0);
+      await expect(
+        page.getByText(signal).first(),
+        `${path} should render a real feature affordance`,
+      ).toBeVisible();
     }
   });
 });
