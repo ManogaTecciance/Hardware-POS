@@ -143,15 +143,18 @@ describe('Restaurant navigation', () => {
   });
 
   it('marks every unbuilt destination as upcoming, and no built one', () => {
+    // Frontend Phases B and C are live now: Menu and Tables are no longer
+    // upcoming. The remaining `upcoming: true` set shrinks phase by phase;
+    // when Takeaway and Kitchen ship they come off too.
     const byLabel = Object.fromEntries(
       restaurant.flatMap((g) => g.items).map((i) => [i.label, Boolean(i.upcoming)]),
     );
     expect(byLabel).toEqual({
       Dashboard: false,
-      Tables: true,
+      Tables: false,
       Takeaway: true,
       Kitchen: true,
-      Menu: true,
+      Menu: false,
       Products: false,
       Customers: false,
       Sales: false,

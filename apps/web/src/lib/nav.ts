@@ -157,12 +157,12 @@ const RESTAURANT_NAV: NavGroup[] = [
     label: 'Service',
     items: [
       {
+        // Frontend Phase C — tables floor + area/table management is live.
         href: '/tables',
         label: 'Tables',
         icon: UtensilsCrossed,
         permission: Permission.SALE_CREATE,
         module: 'TABLE_MANAGEMENT',
-        upcoming: true,
       },
       {
         href: '/takeaway',
@@ -186,12 +186,12 @@ const RESTAURANT_NAV: NavGroup[] = [
     label: 'Catalog',
     items: [
       {
+        // Frontend Phase B — menu / section / item CRUD is live.
         href: '/menu',
         label: 'Menu',
         icon: ClipboardList,
         permission: Permission.PRODUCT_READ,
         module: 'MENU_MANAGEMENT',
-        upcoming: true,
       },
       { href: '/products', label: 'Products', icon: Package, permission: Permission.PRODUCT_READ },
       {

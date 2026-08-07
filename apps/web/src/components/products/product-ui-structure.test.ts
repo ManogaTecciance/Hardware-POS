@@ -262,12 +262,22 @@ describe('36/37 — nothing outside the product screens changed', () => {
     );
   });
 
-  it('no Restaurant DOMAIN model or workflow was created', () => {
-    // The boundary that still holds: shells are routes, not features.
-    for (const path of ['app/(app)/restaurant', 'app/(app)/dining', 'components/restaurant']) {
-      expect({ path, exists: pathExists(SRC, path) }).toEqual({ path, exists: false });
+  it('Restaurant routes remain shells; the domain lives under components/restaurant', () => {
+    // Frontend Phases A-C landed real Restaurant UI. What still holds is
+    // that the domain lives under one directory (`components/restaurant/`),
+    // NOT scattered under `app/(app)/restaurant/` or `app/(app)/dining/`
+    // subtrees — that would create a second application shape, which was
+    // the original tripwire's real concern. Routes remain the existing
+    // top-level entries (`/menu`, `/tables`, …).
+    for (const forbiddenRoutePrefix of ['app/(app)/restaurant', 'app/(app)/dining']) {
+      expect({
+        path: forbiddenRoutePrefix,
+        exists: pathExists(SRC, forbiddenRoutePrefix),
+      }).toEqual({ path: forbiddenRoutePrefix, exists: false });
     }
+    // POSITIVE CONTROL: the two directories that DO exist by design.
     expect(pathExists(SRC, 'app/(app)/products')).toBe(true);
+    expect(pathExists(SRC, 'components/restaurant')).toBe(true);
   });
 
   it('37 — no component mentions a Restaurant domain concept', () => {

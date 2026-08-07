@@ -204,14 +204,20 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
   });
 
   it('unbuilt Restaurant destinations are visibly marked, in text', async () => {
+    // Frontend Phase C shipped Tables. Takeaway is still an upcoming shell in
+    // this slice; the test now names it explicitly rather than reaching for
+    // whichever restaurant entry happens to be the first one.
     profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
     render(<Sidebar />);
     await settle();
-    const tables = within(mainNav()).getByRole('link', { name: /tables/i });
-    // Text, not colour: a "Soon" badge that only a sighted user can perceive would
-    // let the shell read as finished for everyone else.
-    expect(tables.textContent).toMatch(/soon/i);
+    const takeaway = within(mainNav()).getByRole('link', { name: /takeaway/i });
+    // Text, not colour: a "Soon" badge that only a sighted user can perceive
+    // would let the shell read as finished for everyone else.
+    expect(takeaway.textContent).toMatch(/soon/i);
 
+    // Built destinations must NOT carry the marker.
+    const tables = within(mainNav()).getByRole('link', { name: /tables/i });
+    expect(tables.textContent).not.toMatch(/soon/i);
     const products = within(mainNav()).getByRole('link', { name: /products/i });
     expect(products.textContent).not.toMatch(/soon/i);
   });
