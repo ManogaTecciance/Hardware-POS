@@ -75,6 +75,7 @@ function user(overrides: Partial<User> = {}): User {
     lastLoginAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    ...overrides,
   } as unknown as User;
 }
 
