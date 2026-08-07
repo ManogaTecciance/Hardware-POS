@@ -16,8 +16,10 @@ import {
   VoidItemDto,
 } from './dto/table-sessions.dto';
 import {
+  OpenSessionSummary,
   OrderView,
   RoundView,
+  SessionDetailView,
   TableSessionView,
   TableSessionsService,
 } from './table-sessions.service';
@@ -60,6 +62,36 @@ export class TableSessionsController {
   @RequirePermissions(Permission.TABLE_VIEW)
   get(@TenantId() tenantId: string, @Param('sessionId') sessionId: string): Promise<TableSessionView> {
     return this.service.getSession(tenantId, sessionId);
+  }
+
+  /**
+   * Frontend Phase D — floor plan → session join. Returns open sessions on
+   * the branch as a small summary + activeOrderId so the frontend can jump
+   * straight to the order-entry screen. Read-only, TABLE_VIEW gated.
+   */
+  @Get('branches/:branchId/open-sessions')
+  @RequirePermissions(Permission.TABLE_VIEW)
+  listOpen(
+    @TenantId() tenantId: string,
+    @Param('branchId') branchId: string,
+  ): Promise<OpenSessionSummary[]> {
+    return this.service.listOpenSessions(tenantId, branchId);
+  }
+
+  /**
+   * Frontend Phase D — full session tree for the order-entry screen. Returns
+   * the session plus every order → round → item with modifier snapshots.
+   * Read-only, TABLE_VIEW gated. Additive to the existing single-session
+   * `GET /table-sessions/:sessionId` — kept separate so the smaller shape
+   * of the original stays stable for callers that just need the header.
+   */
+  @Get('table-sessions/:sessionId/detail')
+  @RequirePermissions(Permission.TABLE_VIEW)
+  getDetail(
+    @TenantId() tenantId: string,
+    @Param('sessionId') sessionId: string,
+  ): Promise<SessionDetailView> {
+    return this.service.getSessionDetail(tenantId, sessionId);
   }
 
   @Post('table-sessions/:sessionId/orders')

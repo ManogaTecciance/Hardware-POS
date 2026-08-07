@@ -64,6 +64,42 @@ export interface RoundView {
   itemIds: string[];
 }
 
+/**
+ * Frontend Phase D needed a cheap "which sessions are open on this branch"
+ * read for the floor plan → session join. Returned as a flat list of
+ * TableSessionView + activeOrderId (the most recent non-cancelled order on
+ * the session, if any).
+ */
+export interface OpenSessionSummary extends TableSessionView {
+  activeOrderId: string | null;
+}
+
+/**
+ * Full detail for one session (Frontend Phase D). Included on a dedicated
+ * `/detail` route rather than mutating the existing `getSession` shape so
+ * existing consumers (spec/integration harness) stay stable.
+ */
+export interface SessionDetailView {
+  session: TableSessionView;
+  orders: {
+    order: OrderView;
+    rounds: {
+      round: RoundView;
+      items: {
+        id: string;
+        menuItemId: string;
+        menuItemName: string;
+        unitPrice: string;
+        modifierTotal: string;
+        quantity: string;
+        specialInstructions: string | null;
+        status: RestaurantOrderItemStatus;
+        modifiers: { optionName: string; groupName: string; priceDelta: string }[];
+      }[];
+    }[];
+  }[];
+}
+
 @Injectable()
 export class TableSessionsService {
   constructor(
@@ -127,6 +163,92 @@ export class TableSessionsService {
     });
     if (!row) throw new SessionNotFoundError();
     return this.sessionToView(row);
+  }
+
+  /**
+   * Frontend Phase D: cheap "which sessions are open on this branch" read
+   * for the floor plan → session join. Deliberately does NOT walk orders
+   * or items — the summary is small and cacheable; the order-entry screen
+   * calls `getSessionDetail` for the full tree.
+   */
+  async listOpenSessions(tenantId: string, branchId: string): Promise<OpenSessionSummary[]> {
+    const rows = await this.prisma.tableSession.findMany({
+      where: { tenantId, branchId, status: TableSessionStatus.OPEN },
+      include: {
+        orders: {
+          where: { status: { not: 'CANCELLED' } },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, createdAt: true },
+          take: 1,
+        },
+      },
+      orderBy: { openedAt: 'asc' },
+    });
+    return rows.map((row) => ({
+      ...this.sessionToView(row),
+      activeOrderId: row.orders[0]?.id ?? null,
+    }));
+  }
+
+  /**
+   * Frontend Phase D: full session tree for the order-entry screen —
+   * every non-cancelled order, its rounds, and each round's items with
+   * modifier snapshots. Prices come through as strings (Decimal
+   * precision preserved). Voided items are included so the running bill
+   * can render them struck through.
+   */
+  async getSessionDetail(tenantId: string, sessionId: string): Promise<SessionDetailView> {
+    const row = await this.prisma.tableSession.findFirst({
+      where: { id: sessionId, tenantId },
+      include: {
+        orders: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            rounds: {
+              orderBy: { roundNumber: 'asc' },
+              include: {
+                items: {
+                  orderBy: { createdAt: 'asc' },
+                  include: { modifiers: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!row) throw new SessionNotFoundError();
+    return {
+      session: this.sessionToView(row),
+      orders: row.orders.map((order) => ({
+        order: this.orderToView(order),
+        rounds: order.rounds.map((round) => ({
+          round: {
+            id: round.id,
+            orderId: round.orderId,
+            roundNumber: round.roundNumber,
+            status: round.status,
+            submittedAt: round.submittedAt?.toISOString() ?? null,
+            itemIds: round.items.map((i) => i.id),
+          },
+          items: round.items.map((item) => ({
+            id: item.id,
+            menuItemId: item.menuItemId,
+            menuItemName: item.menuItemName,
+            unitPrice: item.unitPrice.toFixed(2),
+            modifierTotal: item.modifierTotal.toFixed(2),
+            quantity: item.quantity.toFixed(3),
+            specialInstructions: item.specialInstructions,
+            status: item.status,
+            modifiers: item.modifiers.map((m) => ({
+              optionName: m.optionName,
+              groupName: m.groupName,
+              priceDelta: m.priceDelta.toFixed(2),
+            })),
+          })),
+        })),
+      })),
+    };
   }
 
   // ─────────────────────────────────────────────────────────────
