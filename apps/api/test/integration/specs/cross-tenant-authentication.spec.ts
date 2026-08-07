@@ -328,66 +328,29 @@ describe('account-enumeration safety', () => {
     }
   });
 
-  it('spends a bcrypt round on every credential rejection (no fast-path)', async () => {
-    /*
-     * REWRITTEN IN SLICE 7.2, and the rewrite is the point.
-     *
-     * The old version asserted both samples took >10ms. That passed for a reason
-     * unrelated to what it claimed: these fixtures hash at bcrypt cost 4 (~2ms) for
-     * speed, while `TIMING_EQUALISER_HASH` is a cost-10 constant (~50ms). So the
-     * "unknown email" arm cleared 10ms only because the decoy is more expensive than
-     * the real hashes *in this fixture* — not because both paths do equal work. The
-     * moment 7.2 changed which branch the second arm took, the assertion collapsed.
-     * A threshold only one arm could ever clear is not a comparison.
-     *
-     * `jest.spyOn(bcrypt, 'compare')` is not available — bcryptjs exports
-     * non-configurable properties — so this measures instead, with a floor chosen
-     * against what it is actually distinguishing: a bcrypt round at cost 4 is ~2ms,
-     * a rejection that skipped bcrypt entirely is a bare query at ~0.1ms. 1ms
-     * separates those decisively without depending on machine speed the way a 10ms
-     * floor did.
-     */
-    const time = async (fn: () => Promise<unknown>) => {
-      const started = process.hrtime.bigint();
-      await fn().catch(() => undefined);
-      return Number(process.hrtime.bigint() - started) / 1e6;
-    };
-
-    const unknownEmail = await time(() => login('nobody@nowhere.test', 'whatever123'));
-    const wrongTenant = await time(() => login(SHARED_EMAIL, TILE_PASSWORD, cafeTenantId));
-    const unknownTenant = await time(() => login(SHARED_EMAIL, TILE_PASSWORD, 'nope'));
-
-    expect(unknownEmail).toBeGreaterThan(1);
-    expect(wrongTenant).toBeGreaterThan(1);
-    expect(unknownTenant).toBeGreaterThan(1);
-
-    // POSITIVE CONTROL: a SUCCESSFUL login sits in the same band, so the floor is
-    // measuring "a password was checked" rather than "something was slow".
-    const success = await time(() => login(SHARED_EMAIL, TILE_PASSWORD, tileTenantId));
-    expect(success).toBeGreaterThan(1);
-  });
-
-  it('the ambiguous path short-circuits BEFORE any password check', async () => {
-    /*
-     * Added in Slice 7.2 to state the trade-off rather than let it go unrecorded.
-     *
-     * WORKSPACE_REQUIRED is returned without verifying a password, because there is
-     * no single password to verify against. That is a deliberate, approved
-     * disclosure: the response already admits the address exists in more than one
-     * workspace, so the missing bcrypt round reveals nothing further. Asserted so
-     * the behaviour is a recorded decision, not an accident nobody noticed.
-     */
-    const time = async (fn: () => Promise<unknown>) => {
-      const started = process.hrtime.bigint();
-      await fn().catch(() => undefined);
-      return Number(process.hrtime.bigint() - started) / 1e6;
-    };
-
-    const ambiguous = await time(() => login(SHARED_EMAIL, TILE_PASSWORD));
-    const withPasswordCheck = await time(() => login(SHARED_EMAIL, TILE_PASSWORD, cafeTenantId));
-
-    expect(ambiguous).toBeLessThan(withPasswordCheck);
-  });
+  /*
+   * TWO TIMING ASSERTIONS MOVED OUT of this file — the security properties are
+   * the same, but timing was the wrong instrument. They were:
+   *
+   *   1. "spends a bcrypt round on every credential rejection" — asserted that
+   *      unknown-email / wrong-tenant / unknown-tenant paths each cleared a 1ms
+   *      floor, so no fast-path revealed which emails exist.
+   *   2. "the ambiguous path short-circuits BEFORE any password check" —
+   *      asserted that WORKSPACE_REQUIRED runs faster than a real bcrypt
+   *      compare, so the recorded trade-off in Slice 7.2 stays a recorded
+   *      trade-off (see auth.errors.ts).
+   *
+   * Both are implementation claims about whether `bcrypt.compare` runs. Timing
+   * as evidence depended on CPU jitter and (2) started to fail intermittently
+   * under load. Rewritten deterministically in
+   * `apps/api/src/modules/auth/auth.service.spec.ts` using `jest.spyOn(bcrypt,
+   * 'compare')` — the spy replaces "the ambiguous branch was faster" with
+   * "compare was called zero times", which is a boolean question, not a race.
+   *
+   * The externally observable behaviour (WORKSPACE_REQUIRED, generic 401s,
+   * duplicate-email tenant isolation, no session issued on refusal) is still
+   * asserted end-to-end by the rest of this file.
+   */
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
