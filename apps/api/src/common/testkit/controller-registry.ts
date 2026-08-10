@@ -58,6 +58,7 @@ import { BillingController } from '../../modules/billing/billing.controller';
 import { RestaurantReportsController } from '../../modules/restaurant-reports/restaurant-reports.controller';
 import { DeliveryWebhookController } from '../../modules/delivery-hub/delivery-webhook.controller';
 import { KdsController } from '../../modules/kitchen/kds.controller';
+import { RestaurantOrdersController } from '../../modules/restaurant-orders/restaurant-orders.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -106,6 +107,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   RestaurantReportsController,
   DeliveryWebhookController,
   KdsController,
+  RestaurantOrdersController,
 ];
 
 /**
@@ -163,4 +165,5 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'restaurant-reports',
   'delivery-webhook',
   'kds',
+  'restaurant-orders',
 ];

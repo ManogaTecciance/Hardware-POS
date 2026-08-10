@@ -44,6 +44,9 @@ import type {
   TakeawayOrderStatus,
   TakeawayView,
   TopMenuItemView,
+  UnifiedChannel,
+  UnifiedOrderStatus,
+  UnifiedOrderView,
   VoidReportRow,
   WaiterPerformanceRow,
 } from './types';
@@ -653,6 +656,35 @@ export const restaurantReports = {
   channels(session: Session, branchId: string, range?: { from?: string; to?: string }) {
     return api.get<ChannelBreakdownRow[]>(
       `/restaurant/reports/branches/${branchId}/channels${reportQuery(range)}`,
+      auth(session),
+    );
+  },
+};
+
+// ── Unified orders (Pilot Change 2 Slice D) ────────────────────────────────
+export interface OrdersQuery {
+  channel?: UnifiedChannel | 'ALL';
+  status?: UnifiedOrderStatus | 'ALL';
+  paymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | 'ALL';
+  search?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export const restaurantOrders = {
+  list(session: Session, branchId: string, q: OrdersQuery = {}) {
+    const params = new URLSearchParams();
+    if (q.channel && q.channel !== 'ALL') params.set('channel', q.channel);
+    if (q.status && q.status !== 'ALL') params.set('status', q.status);
+    if (q.paymentStatus && q.paymentStatus !== 'ALL') params.set('paymentStatus', q.paymentStatus);
+    if (q.search) params.set('search', q.search);
+    if (q.from) params.set('from', q.from);
+    if (q.to) params.set('to', q.to);
+    if (q.limit) params.set('limit', String(q.limit));
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return api.get<UnifiedOrderView[]>(
+      `/restaurant/branches/${branchId}/orders${query}`,
       auth(session),
     );
   },

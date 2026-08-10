@@ -337,6 +337,46 @@ export interface BillView {
   }[];
 }
 
+// ── Orders (unified read-model, Pilot Change 2 Slice D) ────────────────────
+export type UnifiedOrderStatus =
+  | 'DRAFT'
+  | 'PENDING'
+  | 'CONFIRMED'
+  | 'IN_PROGRESS'
+  | 'READY'
+  | 'HANDED_OVER'
+  | 'COMPLETED'
+  | 'CANCELLED';
+
+export type UnifiedChannel = 'DINE_IN' | 'TAKEAWAY' | 'THIRD_PARTY';
+
+export type UnifiedSource =
+  | 'POS'
+  | 'WALK_IN'
+  | 'PHONE_ORDER'
+  | 'UBER_EATS'
+  | 'PICKME_FOOD'
+  | 'DOORDASH'
+  | 'MOCK'
+  | 'OTHER';
+
+export interface UnifiedOrderView {
+  id: string;
+  channel: UnifiedChannel;
+  source: UnifiedSource;
+  orderNumber: string;
+  unifiedStatus: UnifiedOrderStatus;
+  paymentStatus: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  contextLabel: string | null;
+  pickupAt: string | null;
+  createdAt: string;
+  total: string | null;
+  itemCount: number;
+  itemPreview: { name: string; qty: number }[];
+}
+
 // ── Reports ─────────────────────────────────────────────────────────────────
 export interface SalesSummaryView {
   branchId: string;
