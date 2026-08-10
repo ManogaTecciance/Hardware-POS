@@ -310,6 +310,12 @@ export interface TakeawayView {
   handoverAt: string | null;
   notes: string | null;
   createdAt: string;
+  /**
+   * Populated once the underlying session has been closed on `HANDED_OVER`.
+   * Null before handover. The counter POS reads this to call
+   * `/bills/:saleId/payments` without a second round-trip. Pilot Change 3.
+   */
+  finalSaleId: string | null;
 }
 
 // ── Billing ────────────────────────────────────────────────────────────────

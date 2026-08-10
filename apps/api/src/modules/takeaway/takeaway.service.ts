@@ -23,6 +23,13 @@ export interface TakeawayView {
   handoverAt: string | null;
   notes: string | null;
   createdAt: string;
+  /**
+   * The Sale row created when the session closes on `HANDED_OVER`. Null
+   * before handover. Exposed so the counter POS can collect payment
+   * (`/bills/:saleId/payments`) without a second round-trip to look up
+   * `session.finalSaleId`. Pilot Change 3.
+   */
+  finalSaleId: string | null;
 }
 
 /**
@@ -136,17 +143,27 @@ export class TakeawayService {
         data: { status: 'SUBMITTED' },
       });
 
-      return this.toView(profile, order.orderNumber);
+      // A freshly-created takeaway has no Sale yet — it lands on handover.
+      return this.toView(profile, order.orderNumber, null);
     });
   }
 
   async list(tenantId: string, branchId: string): Promise<TakeawayView[]> {
     const rows = await this.prisma.takeawayOrderProfile.findMany({
       where: { tenantId, order: { branchId } },
-      include: { order: { select: { orderNumber: true } } },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            session: { select: { finalSaleId: true } },
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((r) => this.toView(r, r.order.orderNumber));
+    return rows.map((r) =>
+      this.toView(r, r.order.orderNumber, r.order.session?.finalSaleId ?? null),
+    );
   }
 
   async updateStatus(
@@ -169,6 +186,7 @@ export class TakeawayService {
         data: { status: nextStatus, handoverAt },
         include: { order: { select: { orderNumber: true, sessionId: true, branchId: true } } },
       });
+      let finalSaleId: string | null = null;
       // On handover, close the underlying session into a Sale (D1 junction).
       if (nextStatus === 'HANDED_OVER' && updated.order.sessionId) {
         const session = await tx.tableSession.findUniqueOrThrow({
@@ -179,6 +197,7 @@ export class TakeawayService {
             },
           },
         });
+        finalSaleId = session.finalSaleId;
         if (session.status !== 'CLOSED') {
           let subtotal = new Prisma.Decimal(0);
           for (const order of session.orders) {
@@ -216,9 +235,10 @@ export class TakeawayService {
             where: { id: session.tableId },
             data: { status: RestaurantTableStatus.AVAILABLE },
           });
+          finalSaleId = sale.id;
         }
       }
-      return this.toView(updated, updated.order.orderNumber);
+      return this.toView(updated, updated.order.orderNumber, finalSaleId);
     });
   }
 
@@ -259,6 +279,7 @@ export class TakeawayService {
   private toView(
     row: Prisma.TakeawayOrderProfileGetPayload<Record<string, never>>,
     orderNumber: string,
+    finalSaleId: string | null,
   ): TakeawayView {
     return {
       id: row.id,
@@ -271,6 +292,7 @@ export class TakeawayService {
       handoverAt: row.handoverAt?.toISOString() ?? null,
       notes: row.notes,
       createdAt: row.createdAt.toISOString(),
+      finalSaleId,
     };
   }
 }
