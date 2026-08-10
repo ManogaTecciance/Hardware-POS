@@ -666,4 +666,17 @@ export const deliveryHub = {
       auth(session),
     );
   },
+  getExternalOrder(session: Session, externalOrderId: string) {
+    return api.get<ExternalOrderView | null>(
+      `/delivery-hub/external-orders/${externalOrderId}`,
+      auth(session),
+    );
+  },
+  acceptExternal(session: Session, externalOrderId: string) {
+    return api.post<ExternalOrderView>(
+      `/delivery-hub/external-orders/${externalOrderId}/accept`,
+      undefined,
+      auth(session),
+    );
+  },
 };

@@ -219,6 +219,24 @@ export class DeliveryHubService {
     return rows.map((r) => this.toView(r, r.platform.kind));
   }
 
+  /**
+   * Single external order for the POS 3rd Party inspector. Scoped on
+   * tenantId + externalOrderId together so a client cannot read another
+   * tenant's row by guessing the id; returns null rather than throwing
+   * so the caller can render a friendly "not found in your workspace"
+   * message without wrapping every fetch in a try.
+   */
+  async getExternalOrder(
+    tenantId: string,
+    externalOrderId: string,
+  ): Promise<ExternalOrderView | null> {
+    const row = await this.prisma.externalOrder.findFirst({
+      where: { tenantId, id: externalOrderId },
+      include: { platform: { select: { kind: true } } },
+    });
+    return row ? this.toView(row, row.platform.kind) : null;
+  }
+
   private toView(
     row: Prisma.ExternalOrderGetPayload<Record<string, never>>,
     kind: DeliveryPlatformKind,

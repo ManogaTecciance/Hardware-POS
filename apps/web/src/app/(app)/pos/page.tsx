@@ -1,11 +1,13 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 
 import { PageHeader } from '@/components/page-header';
-import { PosModeSelector, type PosMode } from '@/components/pos/pos-mode-selector';
+import { PosDineInWorkspace } from '@/components/pos/pos-dine-in-workspace';
+import { type PosMode } from '@/components/pos/pos-mode-selector';
 import { PosRetailCheckout } from '@/components/pos/pos-retail-checkout';
 import { PosTakeawayWorkspace } from '@/components/pos/pos-takeaway-workspace';
+import { PosThirdPartyWorkspace } from '@/components/pos/pos-third-party-workspace';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 import { useEffectiveProfile } from '@/lib/platform-profile';
@@ -27,7 +29,6 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
 export default function PosPage() {
   const { session } = useAuth();
   const { profile } = useEffectiveProfile();
-  const router = useRouter();
   const params = useSearchParams();
 
   if (!session) return null;
@@ -66,47 +67,23 @@ export default function PosPage() {
   if (mode === 'TAKEAWAY') {
     return <PosTakeawayWorkspace session={session} branchId={session.branchId} />;
   }
-
-  // Dine In + 3rd Party arrive in Slice C. Show a waypoint that keeps the
-  // mode selector visible so the operator can flip back to Takeaway
-  // without navigating away and losing the workspace scroll position.
+  if (mode === 'DINE_IN') {
+    const sessionId = params.get('sessionId');
+    return (
+      <PosDineInWorkspace
+        session={session}
+        branchId={session.branchId}
+        sessionId={sessionId}
+      />
+    );
+  }
+  // THIRD_PARTY
+  const externalOrderId = params.get('externalOrderId');
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <PageHeader title="POS" description={`${session.branchName} · Counter 1`} />
-        <PosModeSelector
-          value={mode}
-          onChange={(next) =>
-            router.push(`/pos?mode=${next.toLowerCase().replace('_', '-')}`)
-          }
-        />
-      </div>
-      <Card>
-        <CardContent className="space-y-2 py-16 text-center">
-          <p className="text-sm font-medium">
-            {mode === 'DINE_IN' ? 'Dine In' : '3rd Party'} lands in the next slice.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            For now use{' '}
-            <button
-              type="button"
-              className="text-primary underline"
-              onClick={() => router.push('/pos?mode=takeaway')}
-            >
-              Takeaway
-            </button>{' '}
-            or the existing{' '}
-            <button
-              type="button"
-              className="text-primary underline"
-              onClick={() => router.push('/tables')}
-            >
-              Tables
-            </button>{' '}
-            floor.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <PosThirdPartyWorkspace
+      session={session}
+      branchId={session.branchId}
+      externalOrderId={externalOrderId}
+    />
   );
 }

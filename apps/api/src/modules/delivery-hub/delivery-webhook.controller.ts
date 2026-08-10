@@ -74,4 +74,18 @@ export class DeliveryWebhookController {
   ): Promise<ExternalOrderView[]> {
     return this.service.listExternalOrders(tenantId, branchId);
   }
+
+  /**
+   * Single external order for the POS 3rd Party inspector (Pilot Change 2
+   * Slice C). Read-only, PLATFORM_PROFILE_READ gated, tenant-scoped —
+   * additive, no schema change.
+   */
+  @Get('external-orders/:externalOrderId')
+  @RequirePermissions(Permission.PLATFORM_PROFILE_READ)
+  async get(
+    @TenantId() tenantId: string,
+    @Param('externalOrderId') externalOrderId: string,
+  ): Promise<ExternalOrderView | null> {
+    return this.service.getExternalOrder(tenantId, externalOrderId);
+  }
 }
