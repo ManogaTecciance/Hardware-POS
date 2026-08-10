@@ -100,9 +100,39 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
     }
   });
 
-  it('OWNER and ADMIN hold every permission, including newly added ones', () => {
+  it('OWNER holds every permission, including newly added ones', () => {
     expect([...ROLE_PERMISSIONS.OWNER].sort()).toEqual([...ALL_PERMISSIONS].sort());
-    expect([...ROLE_PERMISSIONS.ADMIN].sort()).toEqual([...ALL_PERMISSIONS].sort());
+  });
+
+  it('ADMIN holds every permission EXCEPT the creator-scoped six (Restaurant Pilot Change 1)', () => {
+    // The six DINING_AREA_/TABLE_ *_CREATE / _EDIT_OWN / _ARCHIVE_OWN
+    // permissions name capabilities that only make sense paired with a
+    // per-row ownership check. Granting them to a role above the ownership
+    // check would let ADMIN edit an OWNER's floor whenever the service
+    // ownership check moved out of the way (or was ever bypassed by
+    // mistake). ADMIN keeps every other permission unchanged; asserted
+    // positively by naming the exact expected set below.
+    const excludedSet: ReadonlySet<Permission> = new Set([
+      Permission.DINING_AREA_CREATE,
+      Permission.DINING_AREA_EDIT_OWN,
+      Permission.DINING_AREA_ARCHIVE_OWN,
+      Permission.TABLE_CREATE,
+      Permission.TABLE_EDIT_OWN,
+      Permission.TABLE_ARCHIVE_OWN,
+    ]);
+    const expected = ALL_PERMISSIONS.filter((p) => !excludedSet.has(p));
+    expect([...ROLE_PERMISSIONS.ADMIN].sort()).toEqual([...expected].sort());
+    // Sibling negative: the six are demonstrably absent.
+    for (const missing of [
+      Permission.DINING_AREA_CREATE,
+      Permission.DINING_AREA_EDIT_OWN,
+      Permission.DINING_AREA_ARCHIVE_OWN,
+      Permission.TABLE_CREATE,
+      Permission.TABLE_EDIT_OWN,
+      Permission.TABLE_ARCHIVE_OWN,
+    ]) {
+      expect(ROLE_PERMISSIONS.ADMIN).not.toContain(missing);
+    }
   });
 
   it('MANAGER keeps its exact operational set', () => {

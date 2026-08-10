@@ -137,11 +137,55 @@ export const Permission = {
   RESTAURANT_CONFIG_MANAGE: 'restaurant:config:manage',
   /** Add, edit, archive kitchen stations on a branch. */
   KITCHEN_STATION_MANAGE: 'kitchen:station:manage',
+
+  // ── Restaurant Pilot Change 1 — creator-owned floor management ───────────
+  //
+  // Six permissions that split "manage the floor" into create-anything and
+  // edit-your-own / archive-your-own. Every mutation route requires BOTH the
+  // matching permission AND `entity.createdByUserId === actor.id`; role alone
+  // is never sufficient (that is what `_OWN` names — the row must belong to
+  // the caller). Only the OWNER role template holds these by default; ADMIN
+  // has them stripped from its otherwise-total set so that the "any other
+  // user must not edit that entity" rule survives even for the highest role
+  // short of OWNER.
+  /** Create a Dining Area / Floor on a branch. */
+  DINING_AREA_CREATE: 'dining-area:create',
+  /** Edit a Dining Area the caller created. Ownership check is at the service. */
+  DINING_AREA_EDIT_OWN: 'dining-area:edit:own',
+  /** Archive a Dining Area the caller created (soft-delete via `isActive=false`). */
+  DINING_AREA_ARCHIVE_OWN: 'dining-area:archive:own',
+  /** Create a Restaurant Table on a Dining Area. */
+  TABLE_CREATE: 'table:create',
+  /** Edit a Restaurant Table the caller created. */
+  TABLE_EDIT_OWN: 'table:edit:own',
+  /** Archive a Restaurant Table the caller created. */
+  TABLE_ARCHIVE_OWN: 'table:archive:own',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
-/** Every permission value. Owner and Admin hold exactly this set. */
+/** Every permission value. Owner holds exactly this set; Admin holds all of it EXCEPT `CREATOR_OWNED_PERMISSIONS` — see below. */
 export const ALL_PERMISSIONS: readonly Permission[] = Object.values(Permission);
+
+/**
+ * Permissions that only make sense when paired with a runtime ownership check
+ * (the row's `createdByUserId` must equal the caller). Naming an OWNER-only
+ * capability isn't enough on its own — a Restaurant tenant would then have any
+ * OWNER able to overwrite another OWNER's floor. The service layer enforces the
+ * `_OWN` half; ROLE_PERMISSIONS below refuses to grant these to any role but
+ * OWNER, so a compromised ADMIN account cannot escalate itself into every
+ * floor manager's row.
+ *
+ * Restaurant Pilot Change 1 (Aug 2026) — dining-area and restaurant-table
+ * management moved from role-only to creator-scoped.
+ */
+export const CREATOR_OWNED_PERMISSIONS: readonly Permission[] = [
+  Permission.DINING_AREA_CREATE,
+  Permission.DINING_AREA_EDIT_OWN,
+  Permission.DINING_AREA_ARCHIVE_OWN,
+  Permission.TABLE_CREATE,
+  Permission.TABLE_EDIT_OWN,
+  Permission.TABLE_ARCHIVE_OWN,
+];
 
 /**
  * Permissions that exist in the vocabulary but govern nothing yet.
@@ -185,7 +229,13 @@ export const ACTIVE_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS.filter(
  */
 export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   OWNER: ALL_PERMISSIONS,
-  ADMIN: ALL_PERMISSIONS,
+  // ADMIN historically inherited ALL_PERMISSIONS. Restaurant Pilot Change 1
+  // narrows that: the six CREATOR_OWNED_PERMISSIONS name capabilities that
+  // must be paired with a per-row ownership check, and granting them at the
+  // role level to a non-OWNER would let an ADMIN edit an OWNER's floor
+  // whenever the service ownership check moved out of the way (or was ever
+  // bypassed by mistake). ADMIN keeps every other permission unchanged.
+  ADMIN: ALL_PERMISSIONS.filter((p) => !CREATOR_OWNED_PERMISSIONS.includes(p)),
   MANAGER: [
     Permission.SALE_CREATE,
     Permission.SALE_READ,

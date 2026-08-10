@@ -65,12 +65,34 @@ describe('built-in role templates match the permission authority', () => {
     expect(RESTAURANT_ROLE_TEMPLATES.length).toBeGreaterThan(0);
   });
 
-  it('owner and admin hold the whole catalogue, including reserved keys', () => {
+  it('owner holds the whole catalogue, including reserved keys', () => {
     // The invariant that keeps "owner can do everything" true as the catalogue
     // grows — including permissions whose features do not exist yet.
-    for (const key of ['OWNER', 'ADMIN'] as const) {
-      const template = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === key)!;
-      expect([...template.permissions].sort()).toEqual([...ALL_PERMISSIONS].sort());
+    const owner = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === 'OWNER')!;
+    expect([...owner.permissions].sort()).toEqual([...ALL_PERMISSIONS].sort());
+  });
+
+  it('admin holds the catalogue MINUS the six creator-scoped permissions (Restaurant Pilot Change 1)', () => {
+    // The six DINING_AREA_/TABLE_ *_CREATE / _EDIT_OWN / _ARCHIVE_OWN keys
+    // name capabilities that only make sense paired with the ownership check
+    // inside the service. Granting them at the role level to anyone above
+    // that check — even ADMIN — would let a role bypass ownership the moment
+    // the check moved. `authorization.ts` filters them out of ADMIN's set;
+    // this parity spec pins the derivation so a future "make ADMIN total
+    // again" edit trips a red test.
+    const admin = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === 'ADMIN')!;
+    const excluded: readonly Permission[] = [
+      Permission.DINING_AREA_CREATE,
+      Permission.DINING_AREA_EDIT_OWN,
+      Permission.DINING_AREA_ARCHIVE_OWN,
+      Permission.TABLE_CREATE,
+      Permission.TABLE_EDIT_OWN,
+      Permission.TABLE_ARCHIVE_OWN,
+    ];
+    const expected = ALL_PERMISSIONS.filter((p) => !excluded.includes(p));
+    expect([...admin.permissions].sort()).toEqual([...expected].sort());
+    for (const missing of excluded) {
+      expect(admin.permissions).not.toContain(missing);
     }
   });
 });

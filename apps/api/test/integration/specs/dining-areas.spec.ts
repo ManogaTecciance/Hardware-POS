@@ -98,7 +98,12 @@ describe('Restaurant Phase 2C — dining areas and tables', () => {
     expect(dup.status).toBe(409);
   });
 
-  it('updating a table status transitions AVAILABLE → SEATED', async () => {
+  it('the creator-scoped PATCH refuses status changes (that is the sessions system\'s job)', async () => {
+    // Restaurant Pilot Change 1: the dining PATCH DTO no longer accepts
+    // `status`. Table status transitions belong to the sessions system, which
+    // has its own test coverage (`table-sessions.spec.ts`). A client sending
+    // `status` here now trips the `forbidNonWhitelisted` guard on the pipe,
+    // which is the intended fail-loud: nothing silently swallows the field.
     const area = await http.request<{ id: string }>(
       'POST',
       `/restaurant/branches/${restaurant.branchId}/dining-areas`,
@@ -109,12 +114,11 @@ describe('Restaurant Phase 2C — dining areas and tables', () => {
       `/restaurant/dining-areas/${area.data.id}/tables`,
       { token: ownerToken(restaurant), body: { code: 'T1', capacity: 4 } },
     );
-    const patched = await http.request<{ status: string }>(
+    const patched = await http.request(
       'PATCH',
       `/restaurant/dining-areas/${area.data.id}/tables/${table.data.id}`,
       { token: ownerToken(restaurant), body: { status: 'SEATED' } },
     );
-    expect(patched.status).toBe(200);
-    expect(patched.data.status).toBe('SEATED');
+    expect(patched.status).toBe(400);
   });
 });
