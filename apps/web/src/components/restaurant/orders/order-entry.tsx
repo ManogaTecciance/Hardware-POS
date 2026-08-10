@@ -4,6 +4,9 @@ import { Minus, Plus, Receipt, Send, Trash2, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
+import { ModifierPickerDialog } from '@/components/pos/modifier-picker-dialog';
+import { EMPTY_MENU, type DraftLine, type MenuData } from '@/components/pos/pos-types';
+import { cryptoRandomKey } from '@/components/pos/pos-utils';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,7 +31,6 @@ import {
 } from '@/lib/restaurant/labels';
 import type {
   MenuItemView,
-  MenuView,
   ModifierGroupView,
   OrderView,
   RoundView,
@@ -42,43 +44,10 @@ interface Props {
   sessionId: string;
 }
 
-/**
- * A single line in the local draft — what the waiter is about to send.
- *
- * Snapshot fields (unitPrice, name, modifier labels) are captured at add-time
- * from the menu list, so the running subtotal displayed to the waiter matches
- * the price the backend will freeze on submit. If the menu is updated between
- * add and send, the backend re-reads the *current* price and freezes that
- * — the running total is display only, never sent to the server as money.
- */
-interface DraftLine {
-  key: string;
-  menuItemId: string;
-  name: string;
-  unitPrice: string;
-  quantity: number;
-  specialInstructions: string;
-  modifiers: {
-    optionId: string;
-    optionName: string;
-    groupName: string;
-    priceDelta: string;
-  }[];
-}
-
-interface MenuData {
-  menus: MenuView[];
-  sectionsByMenu: Map<string, SectionView[]>;
-  itemsBySection: Map<string, MenuItemView[]>;
-  modifierGroupsById: Map<string, ModifierGroupView>;
-}
-
-const EMPTY_MENU: MenuData = {
-  menus: [],
-  sectionsByMenu: new Map(),
-  itemsBySection: new Map(),
-  modifierGroupsById: new Map(),
-};
+// DraftLine, MenuData, EMPTY_MENU moved to components/pos/pos-types.ts and are
+// imported above. Dine-in behaviour is unchanged — the same shapes travel
+// through the same call sites; only the declaration site moved so the POS
+// workspace can share them.
 
 export function OrderEntry({ session, sessionId }: Props) {
   const router = useRouter();
@@ -741,143 +710,7 @@ function RoundBlock({
   );
 }
 
-function ModifierPickerDialog({
-  item,
-  groupsById,
-  onCancel,
-  onConfirm,
-}: {
-  item: MenuItemView;
-  groupsById: Map<string, ModifierGroupView>;
-  onCancel: () => void;
-  onConfirm: (lines: DraftLine[]) => void;
-}) {
-  const groups = item.modifierGroupIds
-    .map((id) => groupsById.get(id))
-    .filter((g): g is ModifierGroupView => Boolean(g));
-  const [selected, setSelected] = React.useState<Record<string, string[]>>({});
-  const [error, setError] = React.useState<string | null>(null);
-
-  const toggle = (group: ModifierGroupView, optionId: string) => {
-    setSelected((cur) => {
-      const current = cur[group.id] ?? [];
-      const isSelected = current.includes(optionId);
-      let next: string[];
-      if (group.selection === 'SINGLE') {
-        next = isSelected ? [] : [optionId];
-      } else if (isSelected) {
-        next = current.filter((x) => x !== optionId);
-      } else {
-        next = [...current, optionId];
-      }
-      return { ...cur, [group.id]: next };
-    });
-  };
-
-  const confirm = () => {
-    for (const g of groups) {
-      const count = (selected[g.id] ?? []).length;
-      if (count < g.minSelections) {
-        setError(`Pick at least ${g.minSelections} from ${g.name}.`);
-        return;
-      }
-      if (g.maxSelections > 0 && count > g.maxSelections) {
-        setError(`${g.name} allows at most ${g.maxSelections}.`);
-        return;
-      }
-    }
-    const lineModifiers: DraftLine['modifiers'] = [];
-    for (const g of groups) {
-      for (const optId of selected[g.id] ?? []) {
-        const opt = g.options.find((o) => o.id === optId);
-        if (!opt) continue;
-        lineModifiers.push({
-          optionId: opt.id,
-          optionName: opt.name,
-          groupName: g.name,
-          priceDelta: opt.priceDelta,
-        });
-      }
-    }
-    onConfirm([
-      {
-        key: cryptoRandomKey(),
-        menuItemId: item.id,
-        name: item.name,
-        unitPrice: item.basePrice,
-        quantity: 1,
-        specialInstructions: '',
-        modifiers: lineModifiers,
-      },
-    ]);
-  };
-
-  return (
-    <Dialog
-      open
-      onClose={onCancel}
-      title={`Customise: ${item.name}`}
-      description="Choose the modifiers, then add to the round."
-      footer={
-        <>
-          <Button variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button onClick={confirm}>Add to round</Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        {groups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No modifier groups are configured for this item — it will be added as-is.
-          </p>
-        ) : (
-          groups.map((g) => (
-            <div key={g.id}>
-              <div className="mb-1 flex items-baseline justify-between">
-                <p className="text-sm font-medium">{g.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {g.selection === 'SINGLE'
-                    ? 'Pick one'
-                    : `Pick ${g.minSelections}${
-                        g.maxSelections > 0 ? `–${g.maxSelections}` : '+'
-                      }`}
-                </p>
-              </div>
-              <ul className="space-y-1">
-                {g.options.map((opt) => {
-                  const isChecked = (selected[g.id] ?? []).includes(opt.id);
-                  return (
-                    <li key={opt.id}>
-                      <label className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface p-2 text-sm">
-                        <span className="inline-flex items-center gap-2">
-                          <input
-                            type={g.selection === 'SINGLE' ? 'radio' : 'checkbox'}
-                            name={`grp-${g.id}`}
-                            checked={isChecked}
-                            onChange={() => toggle(g, opt.id)}
-                          />
-                          <span>{opt.name}</span>
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {Number(opt.priceDelta) === 0
-                            ? '—'
-                            : `+ ${formatMoney(opt.priceDelta)}`}
-                        </span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))
-        )}
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-      </div>
-    </Dialog>
-  );
-}
+// ModifierPickerDialog moved to components/pos/modifier-picker-dialog.tsx.
 
 function VoidItemDialog({
   item,
@@ -969,10 +802,5 @@ function flattenSubmittedRounds(detail: SessionDetail): FlatRound[] {
   return rows.sort((a, b) => b.round.roundNumber - a.round.roundNumber);
 }
 
-/** Prefer the platform's UUID generator; fall back to Math.random for old browsers. */
-function cryptoRandomKey(): string {
-  const c = globalThis.crypto;
-  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-  return `key-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
+// cryptoRandomKey moved to components/pos/pos-utils.ts.
 
