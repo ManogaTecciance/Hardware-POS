@@ -1,12 +1,13 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import * as React from 'react';
 
 import { PageHeader } from '@/components/page-header';
+import { PosCounterWorkspace } from '@/components/pos/pos-counter-workspace';
 import { PosDineInWorkspace } from '@/components/pos/pos-dine-in-workspace';
 import { type PosMode } from '@/components/pos/pos-mode-selector';
 import { PosRetailCheckout } from '@/components/pos/pos-retail-checkout';
-import { PosTakeawayWorkspace } from '@/components/pos/pos-takeaway-workspace';
 import { PosThirdPartyWorkspace } from '@/components/pos/pos-third-party-workspace';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
@@ -15,20 +16,31 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
 /**
  * POS route — dispatches on the tenant's business type.
  *
- * Retail (Tile Shop / Hardware / Retail) → existing `PosRetailCheckout`
- * with catalog, cart and discount flow. Untouched by this slice.
+ * Retail (Tile Shop / Hardware / Retail) → existing `PosRetailCheckout`,
+ * untouched.
  *
- * Restaurant / Cafe / Bakery → the new POS workspace with mode selector
- * (Dine In, Takeaway, 3rd Party). This slice ships Takeaway; Dine-In +
- * 3rd Party ship in Slice C.
+ * Restaurant / Cafe / Bakery → the counter POS workspace.
  *
- * Unresolved profile falls back to the retail POS, matching the D31 rule
- * ("unresolved is its own state — never guess Restaurant") that
- * `dashboard/page.tsx` already applies.
+ *   * `?mode=…` absent → the counter workspace opens the Order Type
+ *     modal on mount (per Pilot Change 3 Section 1).
+ *   * `?mode=takeaway` or `?mode=third-party` → the workspace opens
+ *     straight into that mode.
+ *   * `?mode=dine-in&sessionId=…` → still routes to the pre-existing
+ *     `PosDineInWorkspace` (table-service session order-entry), because
+ *     table service is a separate flow we preserve unchanged.
+ *   * `?mode=dine-in` (no sessionId) → the counter workspace opens
+ *     Dine-In counter mode (no table, immediate payment).
+ *   * `?mode=third-party&externalOrderId=…` → still routes to the
+ *     `PosThirdPartyWorkspace` platform inspector for accepting inbound
+ *     external orders. New Delivery-counter orders (composed here) use
+ *     the counter workspace instead.
+ *
+ * Unresolved profile falls back to retail POS (D31).
  */
 export default function PosPage() {
   const { session } = useAuth();
   const { profile } = useEffectiveProfile();
+  const router = useRouter();
   const params = useSearchParams();
 
   if (!session) return null;
@@ -57,18 +69,19 @@ export default function PosPage() {
   }
 
   const raw = params.get('mode');
-  const mode: PosMode =
+  const sessionId = params.get('sessionId');
+  const externalOrderId = params.get('externalOrderId');
+  const mode: PosMode | null =
     raw === 'dine-in'
       ? 'DINE_IN'
       : raw === 'third-party'
         ? 'THIRD_PARTY'
-        : 'TAKEAWAY';
+        : raw === 'takeaway'
+          ? 'TAKEAWAY'
+          : null;
 
-  if (mode === 'TAKEAWAY') {
-    return <PosTakeawayWorkspace session={session} branchId={session.branchId} />;
-  }
-  if (mode === 'DINE_IN') {
-    const sessionId = params.get('sessionId');
+  // Deep-link exceptions that still route to the pre-existing screens.
+  if (mode === 'DINE_IN' && sessionId) {
     return (
       <PosDineInWorkspace
         session={session}
@@ -77,13 +90,29 @@ export default function PosPage() {
       />
     );
   }
-  // THIRD_PARTY
-  const externalOrderId = params.get('externalOrderId');
+  if (mode === 'THIRD_PARTY' && externalOrderId) {
+    return (
+      <PosThirdPartyWorkspace
+        session={session}
+        branchId={session.branchId}
+        externalOrderId={externalOrderId}
+      />
+    );
+  }
+
   return (
-    <PosThirdPartyWorkspace
+    <PosCounterWorkspace
       session={session}
       branchId={session.branchId}
-      externalOrderId={externalOrderId}
+      initialMode={mode}
+      onModeChange={(m) => {
+        // Keep the URL in sync so bookmarks + back-button work. Empty
+        // mode drops the ?mode= param — Order Type modal re-opens.
+        const next = m
+          ? `/pos?mode=${m.toLowerCase().replace('_', '-')}`
+          : '/pos';
+        router.replace(next);
+      }}
     />
   );
 }

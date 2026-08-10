@@ -38,6 +38,22 @@ export interface DraftLine {
     groupName: string;
     priceDelta: string;
   }[];
+  /**
+   * Item-level discount attached at the counter. Client-side snapshot
+   * only for the pilot — `RestaurantOrderItem` has no discountAmount
+   * column today, so the value never leaves the browser as truth. The
+   * counter workspace sums these into the Sale total displayed to the
+   * cashier and reconciles against the server-calculated Sale total on
+   * completion; the difference is what the operator sees as "discount".
+   */
+  discount?: {
+    type: 'PERCENTAGE' | 'FIXED';
+    value: number;
+    reason?: string;
+    /** Manager approval token if the discount exceeded the cashier's role limit. */
+    approvalToken?: string;
+    approvedByUserId?: string;
+  };
 }
 
 /** Loaded menu tree for a branch — the picker's data source. */

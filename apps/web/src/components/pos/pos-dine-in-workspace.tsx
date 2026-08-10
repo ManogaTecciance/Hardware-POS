@@ -94,7 +94,7 @@ function DineInPicker({ session, branchId }: { session: Session; branchId: strin
           <div>
             <CardTitle className="text-base">Continue an open session</CardTitle>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Jump straight into a running session's order entry.
+              Jump straight into a running session&apos;s order entry.
             </p>
           </div>
         </CardHeader>

@@ -61,13 +61,11 @@ export function PosMenuBrowser({ data, loading, onPick }: Props) {
     }
   }, [allSections, selectedSectionId]);
 
-  const currentItems: MenuItemView[] = selectedSectionId
-    ? data.itemsBySection.get(selectedSectionId) ?? []
-    : [];
-
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return currentItems;
+    if (!q) {
+      return selectedSectionId ? data.itemsBySection.get(selectedSectionId) ?? [] : [];
+    }
     // Search widens beyond the current section so a waiter typing "kottu"
     // doesn't need to guess which section it lives in.
     const acrossAll: MenuItemView[] = [];
@@ -79,7 +77,7 @@ export function PosMenuBrowser({ data, loading, onPick }: Props) {
         it.name.toLowerCase().includes(q) ||
         (it.description ?? '').toLowerCase().includes(q),
     );
-  }, [search, currentItems, data]);
+  }, [search, selectedSectionId, data]);
 
   if (loading && data.menus.length === 0) {
     return (
