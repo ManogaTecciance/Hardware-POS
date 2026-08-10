@@ -4,6 +4,7 @@ import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView, ModifierGroupView } from '@/lib/restaurant/types';
 
@@ -24,18 +25,42 @@ import type { DraftLine } from './pos-types';
 export function ModifierPickerDialog({
   item,
   groupsById,
+  initialLine,
+  initialQuantity,
+  initialInstructions,
   onCancel,
   onConfirm,
 }: {
   item: MenuItemView;
   groupsById: Map<string, ModifierGroupView>;
+  /** When re-opening the dialog for an existing cart line, its previous
+   *  modifier picks + quantity + notes seed the initial state — Pilot
+   *  Change 3 Section 7. */
+  initialLine?: DraftLine | null;
+  initialQuantity?: number;
+  initialInstructions?: string;
   onCancel: () => void;
   onConfirm: (lines: DraftLine[]) => void;
 }) {
   const groups = item.modifierGroupIds
     .map((id) => groupsById.get(id))
     .filter((g): g is ModifierGroupView => Boolean(g));
-  const [selected, setSelected] = React.useState<Record<string, string[]>>({});
+  const [selected, setSelected] = React.useState<Record<string, string[]>>(() => {
+    if (!initialLine) return {};
+    // Rebuild the group → optionIds map from the existing line snapshot.
+    const map: Record<string, string[]> = {};
+    for (const g of groups) {
+      const picked = initialLine.modifiers
+        .filter((m) => g.options.some((o) => o.id === m.optionId))
+        .map((m) => m.optionId);
+      if (picked.length > 0) map[g.id] = picked;
+    }
+    return map;
+  });
+  const [quantity, setQuantity] = React.useState(initialQuantity ?? initialLine?.quantity ?? 1);
+  const [instructions, setInstructions] = React.useState(
+    initialInstructions ?? initialLine?.specialInstructions ?? '',
+  );
   const [error, setError] = React.useState<string | null>(null);
 
   const toggle = (group: ModifierGroupView, optionId: string) => {
@@ -81,13 +106,16 @@ export function ModifierPickerDialog({
     }
     onConfirm([
       {
-        key: cryptoRandomKey(),
+        key: initialLine?.key ?? cryptoRandomKey(),
         menuItemId: item.id,
         name: item.name,
         unitPrice: item.basePrice,
-        quantity: 1,
-        specialInstructions: '',
+        quantity,
+        specialInstructions: instructions,
         modifiers: lineModifiers,
+        // Preserve any existing discount on the original line — Edit
+        // must not silently wipe it.
+        ...(initialLine?.discount ? { discount: initialLine.discount } : {}),
       },
     ]);
   };
@@ -103,7 +131,9 @@ export function ModifierPickerDialog({
           <Button variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button onClick={confirm}>Add to round</Button>
+          <Button onClick={confirm}>
+            {initialLine ? 'Update item' : 'Add to Cart'}
+          </Button>
         </>
       }
     >
@@ -153,6 +183,60 @@ export function ModifierPickerDialog({
             </div>
           ))
         )}
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor="modifier-instructions">
+            Special instructions
+          </label>
+          <Input
+            id="modifier-instructions"
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            placeholder="e.g. don't add beef"
+          />
+        </div>
+
+        <div className="flex items-center justify-between border-t border-border pt-3">
+          <div className="inline-flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Decrease quantity"
+              onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-base font-medium hover:bg-muted"
+            >
+              −
+            </button>
+            <span className="min-w-8 text-center text-base font-semibold">{quantity}</span>
+            <button
+              type="button"
+              aria-label="Increase quantity"
+              onClick={() => setQuantity((q) => q + 1)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-base font-medium hover:bg-muted"
+            >
+              +
+            </button>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground">Item total</p>
+            <p className="text-lg font-bold tabular-nums text-primary">
+              {formatMoney(
+                quantity *
+                  (Number(item.basePrice) +
+                    Object.entries(selected).reduce((sum, [gid, optIds]) => {
+                      const g = groups.find((x) => x.id === gid);
+                      if (!g) return sum;
+                      return (
+                        sum +
+                        optIds.reduce((s, oid) => {
+                          const o = g.options.find((x) => x.id === oid);
+                          return s + (o ? Number(o.priceDelta) : 0);
+                        }, 0)
+                      );
+                    }, 0)),
+              )}
+            </p>
+          </div>
+        </div>
+
         {error ? <p className="text-sm text-danger">{error}</p> : null}
       </div>
     </Dialog>

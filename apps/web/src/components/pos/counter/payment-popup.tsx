@@ -152,29 +152,24 @@ export function PaymentPopup(props: Props) {
       let paidNow = false;
 
       if (!isDelivery) {
-        // Step 2: hand over → creates a Sale (UNPAID).
+        // Step 2: hand over → creates a Sale (UNPAID). The updated
+        // TakeawayView now carries `finalSaleId` directly (Pilot Change 3
+        // additive backend), so we can go straight to payment.
         const handedOver = await takeaway.updateStatus(session, takeawayRow.id, {
           status: 'HANDED_OVER',
         });
-        // The handover response is a TakeawayView which does not expose the
-        // Sale id today. Refetch via list is heavy; instead the billing
-        // endpoint needs the sale id which we get from the underlying
-        // order. For the pilot the Bills page carries this info; here we
-        // read the current bill for the newly-handed-over order.
-        const bill = await billing
-          .get(session, handedOver.orderId)
-          .catch(() => null);
-        // NOTE: `bill.saleId` is what we want, but the shape depends on the
-        // Bills endpoint accepting a saleId not an orderId. If unresolvable,
-        // we fall through to a completion with paidNow=false so the operator
-        // knows to collect payment from /bills — flagged as a known limit.
-        saleId = bill?.saleId ?? null;
+        saleId = handedOver.finalSaleId;
 
         if (saleId) {
-          // Step 3: collect payment.
+          // Step 3: collect payment. The billing endpoint reconciles
+          // against Sale.total server-side; if the operator's cart
+          // amount disagreed with the server total, the server refuses
+          // and the operator sees the difference in the popup.
           try {
+            const bill = await billing.get(session, saleId).catch(() => null);
+            const authoritativeTotal = bill ? Number(bill.total) : total;
             await billing.collectPayment(session, saleId, {
-              amount: total,
+              amount: authoritativeTotal,
               method,
               reference: reference.trim() || undefined,
             });

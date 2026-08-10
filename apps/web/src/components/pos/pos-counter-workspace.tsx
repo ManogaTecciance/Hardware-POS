@@ -258,6 +258,11 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
         <ModifierPickerDialog
           item={modifierTarget.item}
           groupsById={menuData.modifierGroupsById}
+          initialLine={
+            modifierTarget.editingKey
+              ? draft.find((r) => r.key === modifierTarget.editingKey) ?? null
+              : null
+          }
           onCancel={() => setModifierTarget(null)}
           onConfirm={(lines) => {
             const line = lines[0];
