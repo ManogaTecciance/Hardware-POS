@@ -265,9 +265,11 @@ test.describe('WS-5 — direct URLs to disabled modules are refused', () => {
   });
 
   test('WS-503 a restaurant is refused the other retail routes too', async ({ page }) => {
+    // `/pos` is no longer retail-only after Pilot Change 2 — it dispatches
+    // by business type. The three routes below remain retail-only.
     await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
 
-    for (const path of ['/quotations', '/returns', '/suppliers', '/pos']) {
+    for (const path of ['/quotations', '/returns', '/suppliers']) {
       await page.goto(path);
       await expect(
         page.getByText('Not part of this workspace'),
@@ -277,9 +279,14 @@ test.describe('WS-5 — direct URLs to disabled modules are refused', () => {
   });
 
   test('WS-504 a Tile Shop is refused the restaurant routes', async ({ page }) => {
+    // `/takeaway` was replaced by the POS-mode workspace in Pilot Change 2;
+    // its middleware redirect points at `/pos?mode=takeaway`, which for a
+    // Tile Shop resolves to the retail POS via business-type dispatch —
+    // so it never renders the module-gate refusal. `/orders` is the new
+    // TABLE_MANAGEMENT-gated route that a Tile Shop cannot reach.
     await signIn(page, SEED.owner, SEED.workspace);
 
-    for (const path of ['/tables', '/takeaway', '/kitchen', '/menu']) {
+    for (const path of ['/tables', '/orders', '/kitchen', '/menu']) {
       await page.goto(path);
       await expect(
         page.getByText('Not part of this workspace'),
