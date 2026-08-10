@@ -5,10 +5,10 @@ import {
   FileText,
   LayoutDashboard,
   Link2,
+  ListChecks,
   Package,
   ReceiptText,
   Settings,
-  ShoppingBag,
   ShoppingCart,
   Truck,
   Undo2,
@@ -158,20 +158,22 @@ const RESTAURANT_NAV: NavGroup[] = [
     label: 'Service',
     items: [
       {
-        // Frontend Phase C — tables floor + area/table management is live.
-        href: '/tables',
-        label: 'Tables',
-        icon: UtensilsCrossed,
+        // Pilot Change 2 Slice B — unified POS workspace with mode selector
+        // (Dine In / Takeaway / 3rd Party). Takeaway is no longer a top-level
+        // destination — it lives as `POS → Takeaway` per PO decision 3.
+        href: '/pos',
+        label: 'POS',
+        icon: ShoppingCart,
         permission: Permission.SALE_CREATE,
         module: 'TABLE_MANAGEMENT',
       },
       {
-        // Frontend Phase G — takeaway board + new-order form are live.
-        href: '/takeaway',
-        label: 'Takeaway',
-        icon: ShoppingBag,
-        permission: Permission.TAKEAWAY_VIEW,
-        module: 'TAKEAWAY',
+        // Pilot Change 2 Slice D — unified Orders queue across every channel.
+        href: '/orders',
+        label: 'Orders',
+        icon: ListChecks,
+        permission: Permission.TABLE_VIEW,
+        module: 'TABLE_MANAGEMENT',
       },
       {
         // Frontend Phase F — kitchen ticket board + reprint actions are live.
@@ -180,6 +182,14 @@ const RESTAURANT_NAV: NavGroup[] = [
         icon: ChefHat,
         permission: Permission.KOT_VIEW,
         module: 'KITCHEN',
+      },
+      {
+        // Frontend Phase C — tables floor + area/table management is live.
+        href: '/tables',
+        label: 'Tables',
+        icon: UtensilsCrossed,
+        permission: Permission.SALE_CREATE,
+        module: 'TABLE_MANAGEMENT',
       },
     ],
   },

@@ -128,7 +128,13 @@ describe('a tenant that has the module', () => {
   });
 
   it('renders the restaurant shells for a restaurant', () => {
-    for (const path of ['/tables', '/takeaway', '/kitchen', '/menu']) {
+    // `/takeaway` was replaced by the POS-mode workspace in Pilot Change 2;
+    // `/orders` is the new gated path (TABLE_MANAGEMENT) so the test now
+    // covers it. `/pos` is intentionally not in this list — it dispatches
+    // by business type and is shared with the retail workspace, so its
+    // client-side gate is null (server-authoritative) rather than
+    // TABLE_MANAGEMENT.
+    for (const path of ['/tables', '/orders', '/kitchen', '/menu']) {
       renderAt(path, ready('RESTAURANT', RESTAURANT));
       expect({ path, shown: !!screen.queryByText(CONTENT) }).toEqual({ path, shown: true });
       cleanup();
@@ -146,7 +152,7 @@ describe('a tenant that does not have the module', () => {
   });
 
   it('blocks the restaurant shells for a Tile Shop', () => {
-    for (const path of ['/tables', '/takeaway', '/kitchen', '/menu']) {
+    for (const path of ['/tables', '/orders', '/kitchen', '/menu']) {
       renderAt(path, ready('TILE_SHOP', LEGACY));
       expect({ path, shown: !!screen.queryByText(CONTENT) }).toEqual({ path, shown: false });
       cleanup();

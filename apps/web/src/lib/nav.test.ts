@@ -116,11 +116,14 @@ describe('Restaurant navigation', () => {
   const restaurant = nav('RESTAURANT', RESTAURANT_MODULES);
 
   it('shows the Restaurant shell', () => {
+    // Pilot Change 2 rebuild: POS + Orders replace the standalone Takeaway
+    // entry (PO decision 3 — Takeaway is now `POS → Takeaway`).
     expect(labels(restaurant)).toEqual([
       'Dashboard',
-      'Tables',
-      'Takeaway',
+      'POS',
+      'Orders',
       'Kitchen',
+      'Tables',
       'Menu',
       'Products',
       'Customers',
@@ -131,30 +134,38 @@ describe('Restaurant navigation', () => {
   });
 
   it('shows no retail-only destination', () => {
+    // `POS` is no longer retail-only after Pilot Change 2 — it is the
+    // shared entry point that dispatches by business type. The other
+    // four remain retail-only.
     const shown = labels(restaurant);
-    for (const absent of ['POS', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+    for (const absent of ['Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect({ absent, shown: shown.includes(absent) }).toEqual({ absent, shown: false });
     }
     // POSITIVE CONTROL: the same names ARE present for a retail tenant, so the
     // absences above are the module filter working rather than an empty result.
     const retail = labels(nav('TILE_SHOP', LEGACY_MODULES));
-    for (const present of ['POS', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+    for (const present of ['Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect({ present, shown: retail.includes(present) }).toEqual({ present, shown: true });
     }
+    // And POS is present in BOTH — same label, different implementation
+    // behind the dispatcher.
+    expect(shown).toContain('POS');
+    expect(retail).toContain('POS');
   });
 
   it('marks every unbuilt destination as upcoming, and no built one', () => {
-    // Frontend Phases B, C, F and G are live: Menu, Tables, Kitchen and
-    // Takeaway are all built now, so nothing in the Restaurant sidebar carries
-    // the "Soon" marker.
+    // Every Restaurant destination is live: POS + Orders replaced the
+    // standalone Takeaway entry in Pilot Change 2, and nothing in the
+    // sidebar carries the "Soon" marker today.
     const byLabel = Object.fromEntries(
       restaurant.flatMap((g) => g.items).map((i) => [i.label, Boolean(i.upcoming)]),
     );
     expect(byLabel).toEqual({
       Dashboard: false,
-      Tables: false,
-      Takeaway: false,
+      POS: false,
+      Orders: false,
       Kitchen: false,
+      Tables: false,
       Menu: false,
       Products: false,
       Customers: false,
@@ -302,9 +313,23 @@ describe('moduleForPath', () => {
   it('gates the routes a hidden link would otherwise still reach', () => {
     // Exact pairs, not "is not null": a route mapped to the *wrong* module would
     // satisfy a null check while gating on something the tenant happens to have.
+    //
+    // `/pos` is now shared between workspaces (Pilot Change 2 — a restaurant
+    // POS dispatch lives at the same route as the retail checkout). Because
+    // the two workspace declarations disagree on the module, the derivation
+    // rule resolves `/pos` to `null` at the client; each tenant's *own*
+    // required module is still enforced by the API, matching the note in
+    // `nav.ts` next to `ROUTE_MODULES`. Asserted as `null` here rather than
+    // one of the two, deliberately.
+    //
+    // `/takeaway` is no longer in the nav — the entry moved to POS mode —
+    // so `moduleForPath` returns null. A 307 middleware redirect ships the
+    // request to `/pos?mode=takeaway`; the client-side gate never fires on
+    // the old path.
     expect([
       ['/quickbooks', moduleForPath('/quickbooks')],
       ['/pos', moduleForPath('/pos')],
+      ['/orders', moduleForPath('/orders')],
       ['/quotations', moduleForPath('/quotations')],
       ['/returns', moduleForPath('/returns')],
       ['/suppliers', moduleForPath('/suppliers')],
@@ -316,14 +341,15 @@ describe('moduleForPath', () => {
       ['/menu', moduleForPath('/menu')],
     ]).toEqual([
       ['/quickbooks', 'QUICKBOOKS'],
-      ['/pos', 'RETAIL_POS'],
+      ['/pos', null],
+      ['/orders', 'TABLE_MANAGEMENT'],
       ['/quotations', 'QUOTATIONS'],
       ['/returns', 'RETURNS'],
       ['/suppliers', 'SUPPLIERS'],
       ['/customers', 'CUSTOMERS'],
       ['/settings', 'SETTINGS'],
       ['/tables', 'TABLE_MANAGEMENT'],
-      ['/takeaway', 'TAKEAWAY'],
+      ['/takeaway', null],
       ['/kitchen', 'KITCHEN'],
       ['/menu', 'MENU_MANAGEMENT'],
     ]);
@@ -362,16 +388,24 @@ describe('moduleForPath', () => {
     expect(moduleForPath('/')).toBeNull();
   });
 
-  it('agrees with the navigation list it is derived from', () => {
+  it('agrees with the navigation list it is derived from, except for shared-route disagreements', () => {
     // The invariant that keeps the two mechanisms from drifting: every item the
     // sidebar filters on a module is a path the gate also blocks, on the same key.
-    // No exemptions — once `/sales` was classified shared core, nothing in either
-    // list declares a module the gate does not enforce.
+    //
+    // Pilot Change 2 introduced one deliberate exception documented in
+    // `nav.ts` next to `ROUTE_MODULES`: `/pos` is declared with
+    // `RETAIL_POS` on the retail rail and `TABLE_MANAGEMENT` on the
+    // restaurant rail. The derivation rule resolves such disagreements to
+    // "ungated" at the client so neither workspace can accidentally be
+    // stricter than the API; the API refuses the wrong module per-tenant.
+    // Asserted here as a named exception rather than "no disagreements",
+    // so a future disagreement on a different href is a red test.
     const gatedByNav = ALL_NAV_ITEMS.filter((item) => item.module);
     expect(gatedByNav.length).toBeGreaterThan(0);
 
     const disagreements = gatedByNav.filter((item) => moduleForPath(item.href) !== item.module);
-    expect(disagreements.map((item) => item.href)).toEqual([]);
+    const disagreeingHrefs = [...new Set(disagreements.map((item) => item.href))].sort();
+    expect(disagreeingHrefs).toEqual(['/pos']);
   });
 
   it('classifies completed-sale history as shared core in both workspaces', () => {

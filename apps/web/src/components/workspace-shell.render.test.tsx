@@ -189,29 +189,33 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     }
   });
 
-  it('a Restaurant tenant sees the Restaurant shell and no retail entries', async () => {
+  it('a Restaurant tenant sees the Restaurant shell and no retail-only entries', async () => {
+    // Pilot Change 2: `POS` is now shared between workspaces (it dispatches
+    // to a restaurant workspace inside `app/(app)/pos/page.tsx`), and
+    // Takeaway is no longer a top-level destination — it lives as a POS
+    // mode. `Orders` is the new unified queue.
     profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
     render(<Sidebar />);
     await settle();
     const links = navLinks().join(' | ');
 
-    for (const expected of ['Tables', 'Takeaway', 'Kitchen', 'Menu']) {
+    for (const expected of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu']) {
       expect({ expected, present: links.includes(expected) }).toEqual({ expected, present: true });
     }
-    for (const absent of ['POS', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+    for (const absent of ['Takeaway', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect({ absent, present: links.includes(absent) }).toEqual({ absent, present: false });
     }
   });
 
   it('every built Restaurant destination is rendered without the "Soon" marker', async () => {
-    // Every Restaurant phase (Menu, Tables, Kitchen, Takeaway) has shipped, so
-    // the "Soon" mechanism is currently inactive by data. The mechanism still
-    // matters — if a future entry regresses and starts advertising "Soon" over
-    // a live route, the shell claims a feature is coming that is already there.
+    // Every Restaurant destination is live — no entry uses the upcoming
+    // marker today. The mechanism still matters: if a future entry
+    // regresses and starts advertising "Soon" over a live route, the shell
+    // claims a feature is coming that is already there.
     profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
     render(<Sidebar />);
     await settle();
-    for (const name of ['Tables', 'Takeaway', 'Kitchen', 'Menu', 'Products']) {
+    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu', 'Products']) {
       const link = within(mainNav()).getByRole('link', { name: new RegExp(name, 'i') });
       expect({ name, hasSoon: /soon/i.test(link.textContent ?? '') }).toEqual({
         name,

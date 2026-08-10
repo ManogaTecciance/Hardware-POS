@@ -168,19 +168,25 @@ test.describe('WS-3 — Tile Shop navigation is unchanged', () => {
 
 test.describe('WS-4 — Restaurant navigation is derived from the profile', () => {
   test('WS-401 the restaurant rail shows its own destinations', async ({ page }) => {
+    // Pilot Change 2 rebuild: POS and Orders replaced the standalone Takeaway
+    // entry — Takeaway is now a mode inside POS.
     await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
     const flat = await railLinkNames(page);
 
-    for (const expected of ['Dashboard', 'Tables', 'Takeaway', 'Kitchen', 'Menu', 'Products']) {
+    for (const expected of ['Dashboard', 'POS', 'Orders', 'Kitchen', 'Tables', 'Menu', 'Products']) {
       expect(flat.join(' | '), `restaurant rail should contain ${expected}`).toContain(expected);
     }
   });
 
-  test('WS-402 retail destinations are absent', async ({ page }) => {
+  test('WS-402 retail-only destinations are absent from the restaurant rail', async ({ page }) => {
+    // `POS` is no longer retail-only — Pilot Change 2 made it the shared entry
+    // that both workspaces use, dispatched by business type inside
+    // `app/(app)/pos/page.tsx`. The Quotations / Returns / Suppliers /
+    // QuickBooks assertion still holds — those remain retail-only.
     await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
     const flat = await railLinkNames(page);
 
-    for (const absent of ['POS', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+    for (const absent of ['Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect(flat, `restaurant rail should not contain ${absent}`).not.toContain(absent);
     }
   });
@@ -198,19 +204,19 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
   test('WS-404 built destinations render their real feature, not the shell text', async ({
     page,
   }) => {
-    // Frontend Phases B, C, F, G shipped: Menu, Tables, Kitchen and Takeaway
-    // now render live features. This test previously asserted the shell text
-    // "Not implemented in this release" for each. It now asserts the opposite
-    // — none of those routes carries the shell copy any more — plus a small
-    // positive signal per route so a page that renders nothing at all cannot
-    // silently satisfy the negative.
+    // Pilot Change 2 replaced the standalone /takeaway board with the
+    // POS-mode workspace; /takeaway now 307-redirects to /pos?mode=takeaway.
+    // /orders is the new unified queue. Every route below asserts a small
+    // positive signal so a page that renders nothing at all cannot silently
+    // satisfy the "no shell copy" negative.
     await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
 
     const positiveSignals: Record<string, RegExp> = {
-      '/tables': /show/i,           // area filter label at the top of the floor
-      '/takeaway': /active/i,       // "N active · N closed today" header
-      '/kitchen': /refreshes/i,     // "Refreshes every 5 s." footer
-      '/menu': /menus|no menus/i,   // menu column header (or empty-state)
+      '/tables': /show/i,          // area filter label at the top of the floor
+      '/kitchen': /refreshes/i,    // "Refreshes every 5 s." footer
+      '/menu': /menus|no menus/i,  // menu column header
+      '/pos?mode=takeaway': /place order|active menu|customer/i,
+      '/orders': /live queue|no orders/i,
     };
 
     for (const [path, signal] of Object.entries(positiveSignals)) {
@@ -224,6 +230,16 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
         `${path} should render a real feature affordance`,
       ).toBeVisible();
     }
+  });
+
+  test('WS-405 the /takeaway redirect keeps existing bookmarks working', async ({ page }) => {
+    // The old top-level `/takeaway` page was deleted in Slice E; middleware
+    // redirects `/takeaway*` → `/pos?mode=takeaway`. Verifies the shim
+    // documented in `apps/web/src/middleware.ts`.
+    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await page.goto('/takeaway');
+    await page.waitForURL(/\/pos\?mode=takeaway/);
+    expect(page.url()).toContain('/pos?mode=takeaway');
   });
 });
 

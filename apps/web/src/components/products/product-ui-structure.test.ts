@@ -227,22 +227,31 @@ describe('36/37 — nothing outside the product screens changed', () => {
    * *only* shells.
    */
   it('8.4 — the Restaurant route shells exist', () => {
+    // Pilot Change 2 deleted `/takeaway` as a top-level route — Takeaway is
+    // now a POS mode at `/pos?mode=takeaway`. `/pos` and `/orders` are the
+    // new top-level destinations that replaced it; both exist.
     for (const path of [
       'app/(app)/menu',
       'app/(app)/tables',
-      'app/(app)/takeaway',
       'app/(app)/kitchen',
+      'app/(app)/pos',
+      'app/(app)/orders',
     ]) {
       expect({ path, exists: pathExists(SRC, path) }).toEqual({ path, exists: true });
     }
   });
 
   it('8.4 — the shells are shells: no data, no writes, no fake state', () => {
+    // page.tsx files stay as thin wrappers even after Phases D–I landed
+    // real components — the meaty state lives in imported components under
+    // `components/restaurant/*`. `/pos` is not in this list because its
+    // page.tsx does the business-type dispatch (reads useAuth /
+    // useEffectiveProfile), which is the deliberate exception.
     const shells = readComponents(SRC, [
       'app/(app)/menu/page.tsx',
       'app/(app)/tables/page.tsx',
-      'app/(app)/takeaway/page.tsx',
       'app/(app)/kitchen/page.tsx',
+      'app/(app)/orders/page.tsx',
       'components/upcoming-feature.tsx',
     ]);
     for (const [path, source] of shells) {
