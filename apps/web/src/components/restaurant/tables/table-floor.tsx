@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, DoorOpen, Plus, Users } from 'lucide-react';
+import { Archive, Building2, DoorOpen, MoreVertical, Pencil, Plus, Users } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { ApiError } from '@/lib/api';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import {
@@ -66,6 +67,26 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   const [showNewArea, setShowNewArea] = React.useState(false);
   const [showNewTable, setShowNewTable] = React.useState<{ areaId: string } | null>(null);
   const [openTarget, setOpenTarget] = React.useState<RestaurantTableView | null>(null);
+  const [editArea, setEditArea] = React.useState<DiningAreaView | null>(null);
+  const [archiveArea, setArchiveArea] = React.useState<DiningAreaView | null>(null);
+  const [editTable, setEditTable] = React.useState<RestaurantTableView | null>(null);
+  const [archiveTable, setArchiveTable] = React.useState<RestaurantTableView | null>(null);
+  const canCreateArea = hasPermission(Permission.DINING_AREA_CREATE);
+  const canCreateTable = hasPermission(Permission.TABLE_CREATE);
+  const canEditOwnArea = hasPermission(Permission.DINING_AREA_EDIT_OWN);
+  const canArchiveOwnArea = hasPermission(Permission.DINING_AREA_ARCHIVE_OWN);
+  const canEditOwnTable = hasPermission(Permission.TABLE_EDIT_OWN);
+  const canArchiveOwnTable = hasPermission(Permission.TABLE_ARCHIVE_OWN);
+  const currentUserId = session.user.id;
+  /**
+   * The card menu is a per-row affordance: only the row's creator sees it,
+   * and only when they still hold the *_OWN permission. Hidden entirely
+   * otherwise — never rendered as a disabled control, because a greyed-out
+   * "Edit floor" reads to a manager as "you almost can, but not quite,"
+   * which is worse than absent.
+   */
+  const areaOwnsIt = (area: DiningAreaView) => area.createdByUserId === currentUserId;
+  const tableOwnsIt = (table: RestaurantTableView) => table.createdByUserId === currentUserId;
 
   const load = React.useCallback(async () => {
     try {
@@ -136,7 +157,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
           />
         ))}
         <div className="ml-auto flex items-center gap-2">
-          {canManage ? (
+          {canManage && canCreateArea ? (
             <Button
               size="sm"
               variant="outline"
@@ -170,7 +191,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                 ? 'Create your first area to start seating guests.'
                 : 'Ask an administrator to configure the floor.'}
             </p>
-            {canManage ? (
+            {canManage && canCreateArea ? (
               <Button
                 variant="outline"
                 leftIcon={<Building2 className="h-4 w-4" />}
@@ -193,15 +214,37 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                     <p className="mt-1 text-sm text-muted-foreground">{area.description}</p>
                   ) : null}
                 </div>
-                {canManage ? (
-                  <Button
-                    size="sm"
-                    leftIcon={<Plus className="h-4 w-4" />}
-                    onClick={() => setShowNewTable({ areaId: area.id })}
-                  >
-                    New table
-                  </Button>
-                ) : null}
+                <div className="flex items-center gap-2">
+                  {canManage && canCreateTable ? (
+                    <Button
+                      size="sm"
+                      leftIcon={<Plus className="h-4 w-4" />}
+                      onClick={() => setShowNewTable({ areaId: area.id })}
+                    >
+                      New table
+                    </Button>
+                  ) : null}
+                  {areaOwnsIt(area) && (canEditOwnArea || canArchiveOwnArea) ? (
+                    <OwnerMenu
+                      label={`Manage ${area.name}`}
+                      items={[
+                        canEditOwnArea && {
+                          key: 'edit',
+                          label: 'Edit floor',
+                          icon: <Pencil className="h-4 w-4" />,
+                          onClick: () => setEditArea(area),
+                        },
+                        canArchiveOwnArea && {
+                          key: 'archive',
+                          label: 'Archive floor',
+                          icon: <Archive className="h-4 w-4" />,
+                          onClick: () => setArchiveArea(area),
+                          danger: true,
+                        },
+                      ]}
+                    />
+                  ) : null}
+                </div>
               </CardHeader>
               <CardContent>
                 {tables.length === 0 ? (
@@ -217,6 +260,11 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                         session={snapshot.sessionByTableId.get(t.id) ?? null}
                         canOpen={canOpenTable}
                         onOpenClick={() => setOpenTarget(t)}
+                        ownsIt={tableOwnsIt(t)}
+                        canEdit={canEditOwnTable}
+                        canArchive={canArchiveOwnTable}
+                        onEdit={() => setEditTable(t)}
+                        onArchive={() => setArchiveTable(t)}
                       />
                     ))}
                   </div>
@@ -264,6 +312,52 @@ export function TableFloor({ session, branchId, canManage }: Props) {
           table={openTarget}
         />
       ) : null}
+      {editArea ? (
+        <EditAreaDialog
+          onClose={() => setEditArea(null)}
+          onSaved={async () => {
+            setEditArea(null);
+            await load();
+          }}
+          session={session}
+          branchId={branchId}
+          area={editArea}
+        />
+      ) : null}
+      {archiveArea ? (
+        <ArchiveAreaDialog
+          onClose={() => setArchiveArea(null)}
+          onArchived={async () => {
+            setArchiveArea(null);
+            await load();
+          }}
+          session={session}
+          branchId={branchId}
+          area={archiveArea}
+        />
+      ) : null}
+      {editTable ? (
+        <EditTableDialog
+          onClose={() => setEditTable(null)}
+          onSaved={async () => {
+            setEditTable(null);
+            await load();
+          }}
+          session={session}
+          table={editTable}
+        />
+      ) : null}
+      {archiveTable ? (
+        <ArchiveTableDialog
+          onClose={() => setArchiveTable(null)}
+          onArchived={async () => {
+            setArchiveTable(null);
+            await load();
+          }}
+          session={session}
+          table={archiveTable}
+        />
+      ) : null}
     </div>
   );
 }
@@ -297,13 +391,24 @@ function TableCard({
   session,
   canOpen,
   onOpenClick,
+  ownsIt,
+  canEdit,
+  canArchive,
+  onEdit,
+  onArchive,
 }: {
   table: RestaurantTableView;
   session: (TableSessionView & { activeOrderId: string | null }) | null;
   canOpen: boolean;
   onOpenClick: () => void;
+  ownsIt: boolean;
+  canEdit: boolean;
+  canArchive: boolean;
+  onEdit: () => void;
+  onArchive: () => void;
 }) {
   const isAvailable = table.status === 'AVAILABLE';
+  const showMenu = ownsIt && (canEdit || canArchive);
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2">
@@ -311,10 +416,32 @@ function TableCard({
           <p className="text-base font-semibold">{table.label ?? table.code}</p>
           {table.label ? <p className="text-xs text-muted-foreground">{table.code}</p> : null}
         </div>
-        <StatusBadge
-          label={TABLE_STATUS_LABELS[table.status]}
-          tone={TABLE_STATUS_TONES[table.status]}
-        />
+        <div className="flex items-center gap-1">
+          <StatusBadge
+            label={TABLE_STATUS_LABELS[table.status]}
+            tone={TABLE_STATUS_TONES[table.status]}
+          />
+          {showMenu ? (
+            <OwnerMenu
+              label={`Manage ${table.label ?? table.code}`}
+              items={[
+                canEdit && {
+                  key: 'edit',
+                  label: 'Edit table',
+                  icon: <Pencil className="h-4 w-4" />,
+                  onClick: onEdit,
+                },
+                canArchive && {
+                  key: 'archive',
+                  label: 'Archive table',
+                  icon: <Archive className="h-4 w-4" />,
+                  onClick: onArchive,
+                  danger: true,
+                },
+              ]}
+            />
+          ) : null}
+        </div>
       </div>
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         <Users className="h-3.5 w-3.5" aria-hidden="true" />
@@ -603,6 +730,378 @@ function NewTableDialog({
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
       </div>
+    </Dialog>
+  );
+}
+
+// ── Owner-scoped menus + dialogs (Restaurant Pilot Change 1) ──────────────
+
+/**
+ * A tiny click-out dropdown for the per-row overflow menu. Only rendered by
+ * the caller when the caller has proven ownership *and* holds at least one
+ * of the item permissions — the menu itself never re-decides that.
+ */
+function OwnerMenu({
+  label,
+  items,
+}: {
+  label: string;
+  items: Array<
+    | false
+    | {
+        key: string;
+        label: string;
+        icon: React.ReactNode;
+        onClick: () => void;
+        danger?: boolean;
+      }
+  >;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  const real = items.filter(
+    (it): it is Exclude<typeof it, false> => it !== false,
+  );
+  if (real.length === 0) return null;
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-20 mt-1 min-w-40 rounded-lg border border-border bg-surface p-1 shadow-lg"
+        >
+          {real.map((it) => (
+            <button
+              key={it.key}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
+              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+                it.danger ? 'text-danger hover:bg-danger/10' : 'text-foreground hover:bg-muted'
+              }`}
+            >
+              {it.icon}
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Turns the server's error code into the copy the directive specifies.
+ * Falls back to the raw message for anything unmapped — server-provided
+ * messages already carry the generic wording, so a fallback here does not
+ * regress an unmapped case to "Something went wrong."
+ */
+function translateError(err: unknown): string {
+  if (err instanceof ApiError) {
+    const body = err.body as { code?: string; message?: string } | undefined;
+    switch (body?.code) {
+      case 'FORBIDDEN_NOT_CREATOR':
+        return 'You can only edit tables or dining areas that you created.';
+      case 'TABLE_IN_SERVICE':
+        return 'This table is currently in service and cannot be archived.';
+      case 'AREA_HAS_TABLES':
+        return 'Move or archive the tables in this dining area before archiving it.';
+      case 'AREA_NAME_TAKEN':
+        return body?.message ?? 'That area name is already in use on this branch.';
+      case 'TABLE_CODE_TAKEN':
+        return body?.message ?? 'That table code is already in use in this area.';
+      default:
+        return body?.message ?? err.message;
+    }
+  }
+  return err instanceof Error ? err.message : 'Something went wrong.';
+}
+
+function EditAreaDialog({
+  onClose,
+  onSaved,
+  session,
+  branchId,
+  area,
+}: {
+  onClose: () => void;
+  onSaved: () => void;
+  session: Session;
+  branchId: string;
+  area: DiningAreaView;
+}) {
+  const [name, setName] = React.useState(area.name);
+  const [description, setDescription] = React.useState(area.description ?? '');
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const submit = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await diningAreas.update(session, branchId, area.id, {
+        name: name.trim(),
+        description: description.trim() || undefined,
+      });
+      onSaved();
+    } catch (err) {
+      setError(translateError(err));
+      setSaving(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Edit ${area.name}`}
+      description="Rename this floor or update its description."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={submit} isLoading={saving} disabled={!name.trim()}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor="edit-area-name">
+            Name
+          </label>
+          <Input
+            id="edit-area-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor="edit-area-desc">
+            Description
+          </label>
+          <Input
+            id="edit-area-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+      </div>
+    </Dialog>
+  );
+}
+
+function ArchiveAreaDialog({
+  onClose,
+  onArchived,
+  session,
+  branchId,
+  area,
+}: {
+  onClose: () => void;
+  onArchived: () => void;
+  session: Session;
+  branchId: string;
+  area: DiningAreaView;
+}) {
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const submit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await diningAreas.archive(session, branchId, area.id);
+      onArchived();
+    } catch (err) {
+      setError(translateError(err));
+      setSaving(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Archive ${area.name}?`}
+      description="All active tables must first be moved or archived."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={submit} isLoading={saving}>
+            Archive floor
+          </Button>
+        </>
+      }
+    >
+      {error ? (
+        <p className="text-sm text-danger">{error}</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Historical orders and reports for this floor will remain available.
+        </p>
+      )}
+    </Dialog>
+  );
+}
+
+function EditTableDialog({
+  onClose,
+  onSaved,
+  session,
+  table,
+}: {
+  onClose: () => void;
+  onSaved: () => void;
+  session: Session;
+  table: RestaurantTableView;
+}) {
+  const [label, setLabel] = React.useState(table.label ?? '');
+  const [capacity, setCapacity] = React.useState(String(table.capacity));
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const capacityNum = Number(capacity);
+  const valid = Number.isInteger(capacityNum) && capacityNum >= 1;
+  const submit = async () => {
+    if (!valid) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await restaurantTables.update(session, table.areaId, table.id, {
+        label: label.trim() || undefined,
+        capacity: capacityNum,
+      });
+      onSaved();
+    } catch (err) {
+      setError(translateError(err));
+      setSaving(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Edit ${table.label ?? table.code}`}
+      description={`Code (${table.code}) is fixed for consistency with the shared vocabulary.`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={submit} isLoading={saving} disabled={!valid}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor="edit-table-label">
+            Display label
+          </label>
+          <Input
+            id="edit-table-label"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Optional — e.g. Window 1"
+            autoFocus
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor="edit-table-capacity">
+            Capacity (seats)
+          </label>
+          <Input
+            id="edit-table-capacity"
+            value={capacity}
+            onChange={(e) => setCapacity(e.target.value)}
+            inputMode="numeric"
+          />
+        </div>
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+      </div>
+    </Dialog>
+  );
+}
+
+function ArchiveTableDialog({
+  onClose,
+  onArchived,
+  session,
+  table,
+}: {
+  onClose: () => void;
+  onArchived: () => void;
+  session: Session;
+  table: RestaurantTableView;
+}) {
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const submit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await restaurantTables.archive(session, table.areaId, table.id);
+      onArchived();
+    } catch (err) {
+      setError(translateError(err));
+      setSaving(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Archive ${table.label ?? table.code}?`}
+      description="This table will no longer be available for new guests."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={submit} isLoading={saving}>
+            Archive table
+          </Button>
+        </>
+      }
+    >
+      {error ? (
+        <p className="text-sm text-danger">{error}</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Historical orders and reports will remain available.
+        </p>
+      )}
     </Dialog>
   );
 }

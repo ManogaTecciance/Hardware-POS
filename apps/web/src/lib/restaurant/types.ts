@@ -174,6 +174,13 @@ export interface DiningAreaView {
   description: string | null;
   position: number;
   isActive: boolean;
+  /**
+   * The user who created this area. Restaurant Pilot Change 1: only that user
+   * may edit or archive the row; the tables UI hides the "•••" menu on cards
+   * whose creator is not the current session. Null on legacy rows the
+   * additive migration could not attribute (see the migration comment).
+   */
+  createdByUserId: string | null;
 }
 
 export interface RestaurantTableView {
@@ -187,6 +194,8 @@ export interface RestaurantTableView {
   positionY: number | null;
   status: RestaurantTableStatus;
   isActive: boolean;
+  /** See DiningAreaView.createdByUserId — same rule, same reason. */
+  createdByUserId: string | null;
 }
 
 // ── Table sessions & orders ─────────────────────────────────────────────────

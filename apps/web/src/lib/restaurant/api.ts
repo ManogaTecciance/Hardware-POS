@@ -35,7 +35,6 @@ import type {
   PaymentBreakdownRow,
   PaymentMethod,
   RestaurantBranchConfigView,
-  RestaurantTableStatus,
   RestaurantTableView,
   RoundView,
   SalesSummaryView,
@@ -307,15 +306,27 @@ export const diningAreas = {
       auth(session),
     );
   },
+  /**
+   * PATCH — creator-scoped (Restaurant Pilot Change 1). Only `name`,
+   * `description`, `position` travel; the DTO on the server does not accept
+   * `isActive`, which is archive's job (see `archive` below), or `status`
+   * (that is not a field on areas). Fields have been narrowed accordingly.
+   */
   update(
     session: Session,
     branchId: string,
     areaId: string,
-    body: Partial<{ name: string; description: string; position: number; isActive: boolean }>,
+    body: Partial<{ name: string; description: string; position: number }>,
   ) {
     return api.patch<DiningAreaView>(
       `/restaurant/branches/${branchId}/dining-areas/${areaId}`,
       body,
+      auth(session),
+    );
+  },
+  archive(session: Session, branchId: string, areaId: string) {
+    return api.del<DiningAreaView>(
+      `/restaurant/branches/${branchId}/dining-areas/${areaId}`,
       auth(session),
     );
   },
@@ -346,6 +357,12 @@ export const restaurantTables = {
       auth(session),
     );
   },
+  /**
+   * PATCH — creator-scoped. `status` and `isActive` no longer travel through
+   * this endpoint (status is set operationally by the sessions system;
+   * archive is its own endpoint). `code` is intentionally not editable —
+   * it is the shared shorthand callers use out loud.
+   */
   update(
     session: Session,
     areaId: string,
@@ -355,13 +372,17 @@ export const restaurantTables = {
       capacity: number;
       positionX: number;
       positionY: number;
-      isActive: boolean;
-      status: RestaurantTableStatus;
     }>,
   ) {
     return api.patch<RestaurantTableView>(
       `/restaurant/dining-areas/${areaId}/tables/${tableId}`,
       body,
+      auth(session),
+    );
+  },
+  archive(session: Session, areaId: string, tableId: string) {
+    return api.del<RestaurantTableView>(
+      `/restaurant/dining-areas/${areaId}/tables/${tableId}`,
       auth(session),
     );
   },
