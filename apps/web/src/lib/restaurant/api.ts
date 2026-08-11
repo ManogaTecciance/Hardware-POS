@@ -206,6 +206,10 @@ export const menuItems = {
       channelPrices?: { channel: string; price: number }[];
       availability?: { dayOfWeek: string; startTime: string; endTime: string }[];
       stationIds?: string[];
+      itemType?: 'FOOD' | 'BEVERAGE' | 'DESSERT';
+      prepMinutes?: number;
+      dietaryTags?: string[];
+      imageUrl?: string;
     },
   ) {
     return api.post<MenuItemView>(
@@ -229,6 +233,10 @@ export const menuItems = {
       channelPrices: { channel: string; price: number }[];
       availability: { dayOfWeek: string; startTime: string; endTime: string }[];
       stationIds: string[];
+      itemType: 'FOOD' | 'BEVERAGE' | 'DESSERT';
+      prepMinutes: number;
+      dietaryTags: string[];
+      imageUrl: string;
     }>,
   ) {
     return api.patch<MenuItemView>(
@@ -261,6 +269,7 @@ export const modifierGroups = {
       minSelections?: number;
       maxSelections?: number;
       options: { name: string; priceDelta?: number; position?: number }[];
+      role?: string;
     },
   ) {
     return api.post<ModifierGroupView>(
@@ -279,6 +288,7 @@ export const modifierGroups = {
       maxSelections: number;
       isActive: boolean;
       options: { name: string; priceDelta?: number; position?: number }[];
+      role: string;
     }>,
   ) {
     return api.patch<ModifierGroupView>(

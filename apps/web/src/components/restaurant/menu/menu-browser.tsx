@@ -1,6 +1,7 @@
 'use client';
 
-import { Plus, ChevronRight, Sparkles } from 'lucide-react';
+import { ChevronRight, MoreVertical, Package, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import type { Session } from '@/lib/auth';
+import type { ManagedProduct } from '@/lib/products-api';
 import {
   menuItems as menuItemsApi,
   menuSections as menuSectionsApi,
@@ -21,6 +23,11 @@ import type {
   SectionView,
 } from '@/lib/restaurant/types';
 import { StatusBadge } from '@/components/restaurant/status-badge';
+
+import { AddItemChoiceDialog, type AddItemChoice } from './item-add/add-item-choice-dialog';
+import { LinkedProductDialog } from './item-add/linked-product-dialog';
+import { PreparedDishDialog } from './item-add/prepared-dish-dialog';
+import { ProductSelectorDialog } from './item-add/product-selector-dialog';
 
 interface Props {
   session: Session;
@@ -47,7 +54,23 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
   const [itemsError, setItemsError] = React.useState<string | null>(null);
   const [showNewMenu, setShowNewMenu] = React.useState(false);
   const [showNewSection, setShowNewSection] = React.useState(false);
-  const [showNewItem, setShowNewItem] = React.useState(false);
+  /**
+   * Add-item flow state machine (Pilot Change 4):
+   *   `null`         — flow closed
+   *   `'CHOICE'`     — the "Prepared Dish vs Existing Product" dialog is open
+   *   `'PREPARED'`   — prepared-dish form is open
+   *   `'PICK_PRODUCT'` — product selector dialog is open
+   *   `'LINK_PRODUCT'` — linked-product form is open (holds the picked product)
+   */
+  type AddStage =
+    | null
+    | { kind: 'CHOICE' }
+    | { kind: 'PREPARED' }
+    | { kind: 'PICK_PRODUCT' }
+    | { kind: 'LINK_PRODUCT'; product: ManagedProduct };
+  const [addStage, setAddStage] = React.useState<AddStage>(null);
+  // Delete-confirmation state — D42 archive semantics.
+  const [pendingDelete, setPendingDelete] = React.useState<MenuItemView | null>(null);
 
   const loadMenus = React.useCallback(async () => {
     setMenuError(null);
@@ -230,7 +253,7 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
             <Button
               size="sm"
               leftIcon={<Plus className="h-4 w-4" />}
-              onClick={() => setShowNewItem(true)}
+              onClick={() => setAddStage({ kind: 'CHOICE' })}
             >
               New
             </Button>
@@ -254,32 +277,12 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
               .slice()
               .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
               .map((it) => (
-                <div
+                <MenuItemCard
                   key={it.id}
-                  className="flex items-start justify-between gap-3 rounded-xl border border-border p-3"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-semibold">{it.name}</p>
-                      {it.modifierGroupIds.length > 0 ? (
-                        <span
-                          className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-                          title="This item has modifier groups"
-                        >
-                          <Sparkles className="h-3 w-3" aria-hidden="true" />
-                          {it.modifierGroupIds.length}
-                        </span>
-                      ) : null}
-                    </div>
-                    {it.description ? (
-                      <p className="truncate text-xs text-muted-foreground">{it.description}</p>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <p className="text-sm font-semibold">{formatMoney(it.basePrice)}</p>
-                    {!it.isActive ? <StatusBadge label="Inactive" tone="muted" /> : null}
-                  </div>
-                </div>
+                  item={it}
+                  canManage={canManage}
+                  onDelete={() => setPendingDelete(it)}
+                />
               ))
           )}
         </CardContent>
@@ -310,18 +313,210 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
           menuId={selectedMenuId}
         />
       ) : null}
-      {canManage && showNewItem && selectedSectionId ? (
-        <NewItemDialog
-          onClose={() => setShowNewItem(false)}
-          onCreated={async () => {
-            setShowNewItem(false);
-            await loadItems(selectedSectionId);
-          }}
+      {canManage && addStage && selectedSectionId ? (
+        <AddItemFlow
+          stage={addStage}
           session={session}
           sectionId={selectedSectionId}
+          onStage={setAddStage}
+          onCreated={async () => {
+            setAddStage(null);
+            await loadItems(selectedSectionId);
+          }}
+        />
+      ) : null}
+      {canManage && pendingDelete && selectedSectionId ? (
+        <DeleteMenuItemDialog
+          item={pendingDelete}
+          session={session}
+          sectionId={selectedSectionId}
+          onClose={() => setPendingDelete(null)}
+          onDone={async () => {
+            setPendingDelete(null);
+            await loadItems(selectedSectionId);
+          }}
         />
       ) : null}
     </div>
+  );
+}
+
+// ── MenuItemCard ─────────────────────────────────────────────────────────
+
+function MenuItemCard({
+  item,
+  canManage,
+  onDelete,
+}: {
+  item: MenuItemView;
+  canManage: boolean;
+  onDelete: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const escHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', escHandler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', escHandler);
+    };
+  }, [menuOpen]);
+
+  return (
+    <div
+      className={`group relative flex items-start justify-between gap-3 rounded-xl border border-border p-3 transition-colors hover:border-primary motion-reduce:transition-none ${
+        item.isActive ? '' : 'opacity-70'
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-semibold">{item.name}</p>
+          {item.productId ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title="Linked to an inventory product — stock is tracked by that product"
+            >
+              <Package className="h-3 w-3" aria-hidden="true" />
+              Inventory linked
+            </span>
+          ) : null}
+          {item.modifierGroupIds.length > 0 ? (
+            <span
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+              title="This item has modifier groups"
+            >
+              <Sparkles className="h-3 w-3" aria-hidden="true" />
+              {item.modifierGroupIds.length}
+            </span>
+          ) : null}
+        </div>
+        {item.description ? (
+          <p className="truncate text-xs text-muted-foreground">{item.description}</p>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <p className="text-sm font-semibold">{formatMoney(item.basePrice)}</p>
+        {!item.isActive ? <StatusBadge label="Unavailable" tone="muted" /> : null}
+      </div>
+
+      {canManage ? (
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label={`Actions for ${item.name}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className="rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 motion-reduce:transition-none"
+          >
+            <MoreVertical className="h-4 w-4" />
+          </button>
+          {menuOpen ? (
+            <div
+              role="menu"
+              className="absolute right-0 z-10 mt-1 w-40 rounded-lg border border-border bg-popover p-1 shadow-pop"
+            >
+              <Link
+                role="menuitem"
+                href={`/menu/items/${item.id}/edit`}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                onClick={() => setMenuOpen(false)}
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                Edit
+              </Link>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDelete();
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-danger hover:bg-danger-soft focus-visible:bg-danger-soft focus-visible:outline-none"
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Delete item
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── DeleteMenuItemDialog — archive semantics per D42 ──────────────────────
+
+function DeleteMenuItemDialog({
+  item,
+  session,
+  sectionId,
+  onClose,
+  onDone,
+}: {
+  item: MenuItemView;
+  session: Session;
+  sectionId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const confirm = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await menuItemsApi.update(session, sectionId, item.id, { isActive: false });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove item');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Delete ${item.name}?`}
+      description={undefined}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={confirm} isLoading={busy}>
+            Delete item
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-2">
+        <p className="text-sm">
+          This item will no longer be available for new orders.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Historical orders, kitchen tickets, bills and reports for
+          <span className="mx-1 font-medium text-foreground">{item.name}</span>
+          remain unchanged — the item is archived, not deleted from history.
+        </p>
+        {error ? (
+          <p className="text-sm text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Dialog>
   );
 }
 
@@ -485,105 +680,74 @@ function NewSectionDialog({
   );
 }
 
-function NewItemDialog({
-  onClose,
-  onCreated,
+// The old `NewItemDialog` was replaced by the multi-step flow — see
+// `AddItemFlow` below and the three step components in `./item-add/`.
+
+type AddStage =
+  | { kind: 'CHOICE' }
+  | { kind: 'PREPARED' }
+  | { kind: 'PICK_PRODUCT' }
+  | { kind: 'LINK_PRODUCT'; product: ManagedProduct };
+
+/**
+ * The four-step add-menu-item flow (Pilot Change 4). Kept as a single
+ * component so the state transitions between the choice dialog, the two
+ * form dialogs, and the product selector all live in one place — the
+ * transitions have "Back" semantics and it's important they always land
+ * on the right previous step.
+ */
+function AddItemFlow({
+  stage,
   session,
   sectionId,
+  onStage,
+  onCreated,
 }: {
-  onClose: () => void;
-  onCreated: (item: MenuItemView) => void;
+  stage: AddStage;
   session: Session;
   sectionId: string;
+  onStage: (next: AddStage | null) => void;
+  onCreated: () => void;
 }) {
-  const [name, setName] = React.useState('');
-  const [description, setDescription] = React.useState('');
-  const [price, setPrice] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-
-  const submit = async () => {
-    const priceNum = Number(price);
-    if (!name.trim() || !Number.isFinite(priceNum) || priceNum < 0) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const created = await menuItemsApi.create(session, sectionId, {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        basePrice: priceNum,
-      });
-      onCreated(created);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create item');
-      setSaving(false);
-    }
-  };
-
-  const priceIsValid = price === '' || (Number.isFinite(Number(price)) && Number(price) >= 0);
-
+  if (stage.kind === 'CHOICE') {
+    return (
+      <AddItemChoiceDialog
+        onChoose={(choice: AddItemChoice) =>
+          onStage(
+            choice === 'PREPARED' ? { kind: 'PREPARED' } : { kind: 'PICK_PRODUCT' },
+          )
+        }
+        onClose={() => onStage(null)}
+      />
+    );
+  }
+  if (stage.kind === 'PREPARED') {
+    return (
+      <PreparedDishDialog
+        session={session}
+        sectionId={sectionId}
+        onCreated={onCreated}
+        onBack={() => onStage({ kind: 'CHOICE' })}
+      />
+    );
+  }
+  if (stage.kind === 'PICK_PRODUCT') {
+    return (
+      <ProductSelectorDialog
+        session={session}
+        onSelect={(product) => onStage({ kind: 'LINK_PRODUCT', product })}
+        onBack={() => onStage({ kind: 'CHOICE' })}
+      />
+    );
+  }
+  // LINK_PRODUCT — the product has been picked; open the linked-product form.
   return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="New menu item"
-      description="Modifier groups, station routing and channel prices can be added after saving."
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button
-            onClick={submit}
-            isLoading={saving}
-            disabled={!name.trim() || !priceIsValid || price === ''}
-          >
-            Create item
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor="item-name">
-            Name
-          </label>
-          <Input
-            id="item-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Chicken Fried Rice"
-            autoFocus
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor="item-desc">
-            Description
-          </label>
-          <Textarea
-            id="item-desc"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional."
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor="item-price">
-            Base price
-          </label>
-          <Input
-            id="item-price"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="0.00"
-            inputMode="decimal"
-          />
-          {!priceIsValid ? (
-            <p className="text-xs text-danger">Enter a non-negative number.</p>
-          ) : null}
-        </div>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-      </div>
-    </Dialog>
+    <LinkedProductDialog
+      session={session}
+      sectionId={sectionId}
+      product={stage.product}
+      onCreated={onCreated}
+      onBack={() => onStage({ kind: 'PICK_PRODUCT' })}
+    />
   );
 }

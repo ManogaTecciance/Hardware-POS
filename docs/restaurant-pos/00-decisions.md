@@ -717,6 +717,58 @@ asserted their existence would have passed while proving nothing.
 
 ---
 
+## 2026-08-11 — Restaurant Menu Wizard
+
+### D41 — Additive presentation fields on `MenuItem` + role marker on `ModifierGroup`
+Approved to unblock the Add Menu Item wizard whose mock includes fields the
+schema does not persist today.
+
+**Additive columns** (migration `20260811000000_add_menu_item_presentation_fields`):
+
+- `MenuItem.imageUrl TEXT NULL` — item photo URL; media pipeline reuses the
+  one `Product.imageUrl` already uses. NULL renders the menu card placeholder.
+- `MenuItem.itemType MenuItemType NULL` (enum `FOOD | BEVERAGE | DESSERT`) —
+  wizard segmented control. NULL on legacy rows (Menu filter treats as unset).
+- `MenuItem.dietaryTags TEXT[] NOT NULL DEFAULT '{}'` — presentation chips
+  (Veg / Non-Veg / Egg / Spicy / Gluten-Free). Tenants may add more strings;
+  server does not enforce vocabulary.
+- `MenuItem.prepMinutes INTEGER NULL` — menu-level preparation estimate.
+  Distinct from `KitchenTicket.prepMinutes` which is a per-ticket actual.
+  NULL on legacy rows and Prepared Dishes without an estimate.
+- `ModifierGroup.role TEXT NULL` — wizard marker. `'SIZE'` for variation groups
+  (Small / Medium / Large); NULL for ordinary groups. Server enforces nothing
+  on this string — it is a frontend semantics marker so an edit round-trip does
+  not lose the wizard's intent.
+
+**Non-goals of D41:**
+
+- No new media pipeline. `imageUrl` accepts a URL string; upload plumbing is
+  the pre-existing product-image mechanism.
+- No dietary-tag enum. Tenants can add strings ad-hoc.
+- No enforcement of `ModifierGroup.role` values on the server.
+
+**Compatibility:** every new column is nullable or has a safe default read.
+Pre-migration rows remain valid; existing callers that omit the new fields
+receive the previous behaviour.
+
+**Variations pricing (approved with D41):** Small/Medium/Large are persisted
+as `ModifierOption.priceDelta` on a `ModifierGroup(selection=SINGLE, min=1,
+max=1, role='SIZE')`. The wizard UI collects and displays the *adjustment*
+(Small +0, Medium +300, Large +600). One arithmetic authority, no double
+storage. POS renders it exactly like any SINGLE modifier group.
+
+### D42 — Menu item Delete uses archive semantics
+The card `•••` menu presents "Delete" to the operator but the implementation
+sets `isActive = false` via `PATCH /menu-items/:id`. Historical orders,
+kitchen tickets, bills and reports retain the item unchanged — a hard
+delete would break the historical join. Wording on the confirmation dialog
+makes this explicit to the operator.
+
+Never-used items may still be true-deleted in a follow-up if the backend
+grows a safe path for it; the wizard does not need it.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

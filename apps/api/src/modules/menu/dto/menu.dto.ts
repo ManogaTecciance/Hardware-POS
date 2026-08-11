@@ -57,6 +57,13 @@ export class AvailabilityWindowDto {
   @IsString() @Matches(HHMM, { message: 'endTime must be HH:MM' }) endTime!: string;
 }
 
+// Presentation-only fields added by the Restaurant Menu wizard. Kept as their
+// own constants so the wizard, tests and DTO share one source of truth for the
+// tag vocabulary and the itemType enum. Backed by the additive migration
+// 20260811000000_add_menu_item_presentation_fields.
+export const MENU_ITEM_TYPES = ['FOOD', 'BEVERAGE', 'DESSERT'] as const;
+export type MenuItemTypeValue = (typeof MENU_ITEM_TYPES)[number];
+
 export class CreateItemDto {
   @IsString() @Length(1, 120) name!: string;
   @IsOptional() @IsString() @MaxLength(1000) description?: string;
@@ -69,6 +76,12 @@ export class CreateItemDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AvailabilityWindowDto)
   availability?: AvailabilityWindowDto[];
   @IsOptional() @IsArray() @IsString({ each: true }) stationIds?: string[];
+
+  // ── Presentation fields ───────────────────────────────────────────────
+  @IsOptional() @IsIn(MENU_ITEM_TYPES) itemType?: MenuItemTypeValue;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(360) prepMinutes?: number;
+  @IsOptional() @IsArray() @IsString({ each: true }) dietaryTags?: string[];
+  @IsOptional() @IsString() @MaxLength(2048) imageUrl?: string;
 }
 
 export class UpdateItemDto {
@@ -84,6 +97,12 @@ export class UpdateItemDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AvailabilityWindowDto)
   availability?: AvailabilityWindowDto[];
   @IsOptional() @IsArray() @IsString({ each: true }) stationIds?: string[];
+
+  // Presentation fields — empty string clears imageUrl / prepMinutes explicitly.
+  @IsOptional() @IsIn(MENU_ITEM_TYPES) itemType?: MenuItemTypeValue;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(360) prepMinutes?: number;
+  @IsOptional() @IsArray() @IsString({ each: true }) dietaryTags?: string[];
+  @IsOptional() @IsString() @MaxLength(2048) imageUrl?: string;
 }
 
 // ── Modifier ────────────────────────────────────────────────────────────
@@ -93,6 +112,12 @@ export class ModifierOptionInputDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) position?: number;
 }
 
+// Wizard uses 'SIZE' to mark the Small/Medium/Large group; NULL for ordinary
+// modifier groups. Server enforces nothing on this string — kept small so
+// mistyped values don't overflow. See ModifierGroup.role in the schema.
+export const MODIFIER_GROUP_ROLES = ['SIZE'] as const;
+export type ModifierGroupRoleValue = (typeof MODIFIER_GROUP_ROLES)[number];
+
 export class CreateModifierGroupDto {
   @IsString() @Length(1, 80) name!: string;
   @IsOptional() @IsIn(['SINGLE', 'MULTIPLE']) selection?: string;
@@ -100,6 +125,7 @@ export class CreateModifierGroupDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(20) maxSelections?: number;
   @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => ModifierOptionInputDto)
   options!: ModifierOptionInputDto[];
+  @IsOptional() @IsString() @Length(1, 32) role?: string;
 }
 
 export class UpdateModifierGroupDto {
@@ -110,4 +136,5 @@ export class UpdateModifierGroupDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ModifierOptionInputDto)
   options?: ModifierOptionInputDto[];
+  @IsOptional() @IsString() @Length(1, 32) role?: string;
 }

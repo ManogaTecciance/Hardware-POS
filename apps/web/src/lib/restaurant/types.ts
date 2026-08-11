@@ -131,6 +131,13 @@ export interface SectionView {
   isActive: boolean;
 }
 
+export type MenuItemType = 'FOOD' | 'BEVERAGE' | 'DESSERT';
+
+/** Restaurant Menu wizard dietary chip vocabulary. Kept as a string constant
+ * (not a TS enum) so tenants can extend at runtime — server stores strings. */
+export const MENU_DIETARY_TAGS = ['Veg', 'Non-Veg', 'Egg', 'Spicy', 'Gluten-Free'] as const;
+export type MenuDietaryTag = (typeof MENU_DIETARY_TAGS)[number];
+
 export interface MenuItemView {
   id: string;
   sectionId: string;
@@ -146,6 +153,11 @@ export interface MenuItemView {
   availability: { dayOfWeek: string; startTime: string; endTime: string }[];
   createdAt: string;
   updatedAt: string;
+  // Presentation fields (Restaurant Menu wizard). Null on legacy rows.
+  itemType: MenuItemType | null;
+  prepMinutes: number | null;
+  dietaryTags: string[];
+  imageUrl: string | null;
 }
 
 export interface ModifierOptionView {
@@ -164,6 +176,8 @@ export interface ModifierGroupView {
   maxSelections: number;
   isActive: boolean;
   options: ModifierOptionView[];
+  /** Wizard marker — 'SIZE' for variations, null for a plain modifier group. */
+  role: string | null;
 }
 
 // ── Dining ─────────────────────────────────────────────────────────────────

@@ -1518,6 +1518,16 @@ enum ModifierSelection {
   MULTIPLE
 }
 
+/// Restaurant Menu wizard segmentation. Optional so pre-existing rows stay
+/// valid (legacy items were created before the wizard existed). String enum
+/// rather than a free-form field so the /menu filters and future POS
+/// styling (bar layout, dessert grid) can key off a stable value.
+enum MenuItemType {
+  FOOD
+  BEVERAGE
+  DESSERT
+}
+
 /// One menu belongs to one branch. A branch may run several menus but only one
 /// is `isActive` per channel at a time (a lunch menu and a dinner menu can
 /// coexist if their availability windows are disjoint; Phase 3 enforces the
@@ -1591,6 +1601,24 @@ model MenuItem {
   /// Optional display order within the section. Ties broken by name.
   position Int     @default(0)
 
+  /// Menu-level preparation estimate in minutes. Distinct from
+  /// KitchenTicket.prepMinutes, which is the ticket-level actual. Optional so
+  /// legacy rows and Prepared Dishes without an estimate stay valid.
+  prepMinutes Int?
+
+  /// Segmented control on the wizard — Food / Beverage / Dessert. Optional so
+  /// legacy items remain valid; the wizard requires it on new items.
+  itemType MenuItemType?
+
+  /// Presentation tags — Veg, Non-Veg, Egg, Spicy, Gluten-free, etc. String
+  /// array rather than enum so tenants can add "Halal", "Kosher" without
+  /// another migration. The wizard limits to a short curated set.
+  dietaryTags String[] @default([])
+
+  /// URL to the item image. Uses whatever media backend Product already uses
+  /// (see Product.imageUrl at schema:600) — no new media pipeline.
+  imageUrl String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1619,6 +1647,14 @@ model ModifierGroup {
   minSelections Int               @default(0)
   maxSelections Int               @default(1)
   isActive      Boolean           @default(true)
+
+  /// Optional presentation marker used by the Menu wizard to distinguish a
+  /// "size" group from an ordinary "extras" group. NULL for legacy groups;
+  /// 'SIZE' for wizard-created variation groups. Other roles (PROTEIN,
+  /// REMOVAL, …) reserved for future use. Server enforces nothing on this —
+  /// it is a frontend semantics marker only, kept next to the group so an
+  /// edit round-trip does not lose the wizard's intent.
+  role String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

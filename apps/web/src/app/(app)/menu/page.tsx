@@ -1,9 +1,12 @@
 'use client';
 
+import { Plus } from 'lucide-react';
+import Link from 'next/link';
 import * as React from 'react';
 
 import { PageHeader } from '@/components/page-header';
 import { MenuBrowser } from '@/components/restaurant/menu/menu-browser';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 
@@ -39,6 +42,13 @@ export default function MenuPage() {
       <PageHeader
         title="Menu"
         description={`${session.branchName} — menus, sections and items.`}
+        actions={
+          canManage ? (
+            <Button asChild leftIcon={<Plus className="h-4 w-4" />}>
+              <Link href="/menu/items/new">Add menu item</Link>
+            </Button>
+          ) : undefined
+        }
       />
       <MenuBrowser session={session} branchId={session.branchId} canManage={canManage} />
     </div>

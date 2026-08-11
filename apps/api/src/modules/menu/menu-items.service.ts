@@ -26,6 +26,11 @@ export interface MenuItemView {
   availability: { dayOfWeek: string; startTime: string; endTime: string }[];
   createdAt: string;
   updatedAt: string;
+  // Presentation fields — nullable for legacy rows created before the wizard.
+  itemType: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null;
+  prepMinutes: number | null;
+  dietaryTags: string[];
+  imageUrl: string | null;
 }
 
 @Injectable()
@@ -80,6 +85,12 @@ export class MenuItemsService {
           basePrice: new Prisma.Decimal(dto.basePrice),
           productId: dto.productId ?? null,
           position: dto.position ?? 0,
+          itemType: dto.itemType ?? null,
+          prepMinutes: dto.prepMinutes ?? null,
+          // Prisma persists an empty array explicitly — legacy rows keep their
+          // existing default (empty). Never send `undefined`, that becomes NULL.
+          dietaryTags: dto.dietaryTags ?? [],
+          imageUrl: dto.imageUrl ?? null,
         },
       });
       if (dto.modifierGroupIds?.length) {
@@ -152,6 +163,12 @@ export class MenuItemsService {
               : undefined,
           position: dto.position ?? undefined,
           isActive: dto.isActive ?? undefined,
+          itemType: dto.itemType !== undefined ? dto.itemType : undefined,
+          prepMinutes: dto.prepMinutes !== undefined ? dto.prepMinutes : undefined,
+          dietaryTags: dto.dietaryTags !== undefined ? dto.dietaryTags : undefined,
+          // Empty string clears the image; undefined leaves it untouched.
+          imageUrl:
+            dto.imageUrl !== undefined ? (dto.imageUrl === '' ? null : dto.imageUrl) : undefined,
         },
       });
       if (dto.modifierGroupIds) {
@@ -277,6 +294,10 @@ export class MenuItemsService {
       })),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      itemType: row.itemType,
+      prepMinutes: row.prepMinutes,
+      dietaryTags: row.dietaryTags,
+      imageUrl: row.imageUrl,
     };
   }
 }

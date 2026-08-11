@@ -25,6 +25,12 @@ export interface ModifierGroupView {
   maxSelections: number;
   isActive: boolean;
   options: ModifierOptionView[];
+  /**
+   * Wizard-only marker — 'SIZE' for a Small/Medium/Large group, null for a
+   * plain modifier group. Server ignores it; the Menu wizard uses it to
+   * re-open a saved item into the correct step.
+   */
+  role: string | null;
 }
 
 @Injectable()
@@ -60,6 +66,7 @@ export class ModifiersService {
             selection: (dto.selection ?? 'SINGLE') as 'SINGLE' | 'MULTIPLE',
             minSelections: dto.minSelections ?? 0,
             maxSelections: dto.maxSelections ?? 1,
+            role: dto.role ?? null,
           },
         });
         await tx.modifierOption.createMany({
@@ -113,6 +120,7 @@ export class ModifiersService {
             minSelections: dto.minSelections ?? undefined,
             maxSelections: dto.maxSelections ?? undefined,
             isActive: dto.isActive ?? undefined,
+            role: dto.role !== undefined ? dto.role : undefined,
           },
         });
         if (dto.options) {
@@ -164,6 +172,7 @@ export class ModifiersService {
         position: o.position,
         isActive: o.isActive,
       })),
+      role: row.role,
     };
   }
 }
