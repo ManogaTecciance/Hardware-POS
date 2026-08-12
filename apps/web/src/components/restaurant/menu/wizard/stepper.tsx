@@ -45,7 +45,10 @@ export function Stepper({ steps, currentStep, onStepClick }: StepperProps) {
                 onClick={clickable ? () => onStepClick!(s.index) : undefined}
                 disabled={!clickable}
                 aria-current={status === 'active' ? 'step' : undefined}
-                className={`group flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors motion-reduce:transition-none ${
+                // touch-target-coarse: on a tablet a mis-tap on a step
+                // silently reverts the operator's work in progress. 44px min
+                // on coarse pointers only — mice keep the compact 36px look.
+                className={`group flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors touch-target-coarse motion-reduce:transition-none ${
                   status === 'active'
                     ? 'bg-primary/8'
                     : clickable

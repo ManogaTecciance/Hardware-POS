@@ -3,8 +3,8 @@
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Sheet } from '@/components/ui/sheet';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView, ModifierGroupView } from '@/lib/restaurant/types';
 
@@ -121,11 +121,19 @@ export function ModifierPickerDialog({
   };
 
   return (
-    <Dialog
+    // Hard swap from `<Dialog>` (max-w-md) to `<Sheet height="full">`. A 448px
+    // dialog on a 1024px iPad has enough dead space to hide a modifier group,
+    // and even on desktop 1440 a taller sheet with room for 6+ groups reads
+    // better than a scrolling card. `sm:max-w-2xl` caps the panel on wide
+    // viewports so it stays centred rather than stretching to screen edges;
+    // the `<Sheet>` primitive already centres via `mx-auto` at `tab:`.
+    <Sheet
       open
       onClose={onCancel}
+      height="full"
       title={`Customise: ${item.name}`}
       description="Choose the modifiers, then add to the round."
+      className="sm:max-w-2xl touch-manipulation"
       footer={
         <>
           <Button variant="ghost" onClick={onCancel}>
@@ -196,21 +204,27 @@ export function ModifierPickerDialog({
         </div>
 
         <div className="flex items-center justify-between border-t border-border pt-3">
-          <div className="inline-flex items-center gap-1">
+          {/* Quantity stepper is a primary interaction on every mode — bumped
+              from h-9 to h-11 so it always meets the 44px touch minimum on
+              coarse pointers, whether or not the enclosing surface opted into
+              `.touch-target-coarse`. */}
+          <div className="inline-flex items-center gap-2">
             <button
               type="button"
               aria-label="Decrease quantity"
               onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-base font-medium hover:bg-muted"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-border text-lg font-medium hover:bg-muted touch-manipulation"
             >
               −
             </button>
-            <span className="min-w-8 text-center text-base font-semibold">{quantity}</span>
+            <span className="min-w-8 text-center text-base font-semibold tabular-nums">
+              {quantity}
+            </span>
             <button
               type="button"
               aria-label="Increase quantity"
               onClick={() => setQuantity((q) => q + 1)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-base font-medium hover:bg-muted"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-border text-lg font-medium hover:bg-muted touch-manipulation"
             >
               +
             </button>
@@ -239,6 +253,6 @@ export function ModifierPickerDialog({
 
         {error ? <p className="text-sm text-danger">{error}</p> : null}
       </div>
-    </Dialog>
+    </Sheet>
   );
 }

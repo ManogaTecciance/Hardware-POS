@@ -238,15 +238,18 @@ export function AdminDashboard({
         </Reveal>
       </div>
 
-      {/* Row 3 — mix + rankings + integration */}
-      <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {/* Row 3 — mix + rankings + integration. `tab:` (900) keeps the
+          two-across mix on portrait iPad from being crushed under the
+          drawer's content width — the row goes single-column below that
+          rather than fighting for space. */}
+      <div className="grid min-w-0 gap-4 tab:grid-cols-2 xl:grid-cols-3">
         <Reveal>
           <PaymentMethodsCard totals={data.paymentMethods} loading={data.loading && !data.stats} />
         </Reveal>
         <Reveal index={1}>
           <TopCategoriesCard categories={data.topCategories} loading={data.loading && !data.stats} />
         </Reveal>
-        <Reveal index={2} className="md:col-span-2 xl:col-span-1">
+        <Reveal index={2} className="tab:col-span-2 xl:col-span-1">
           <QuickBooksHealthCard health={data.quickbooks} canOpen={canQuickBooks} />
         </Reveal>
       </div>

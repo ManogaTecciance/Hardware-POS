@@ -1,12 +1,14 @@
 'use client';
 
-import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Sheet } from '@/components/ui/sheet';
 import { Toast } from '@/components/ui/toast';
 import { type Session } from '@/lib/auth';
+import { useIsDesktop } from '@/lib/use-viewport';
 import {
   kitchenStations as stationsApi,
   menuItems as menuItemsApi,
@@ -80,6 +82,12 @@ export function MenuItemWizard({ session, branchId, mode, initialSectionId, edit
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
   const [stepAnimKey, setStepAnimKey] = React.useState(0);
+  // Preview rail becomes an on-demand Sheet on tablet-and-narrower — the
+  // rail's 280–380px width squeezes the form badly in iPad landscape, and
+  // the form + rail cannot both be visible at all on portrait. Desktop
+  // keeps the inline rail unchanged.
+  const isDesktop = useIsDesktop();
+  const [previewOpen, setPreviewOpen] = React.useState(false);
 
   const canManage = true; // Route guard enforced upstream on /menu.
 
@@ -352,6 +360,23 @@ export function MenuItemWizard({ session, branchId, mode, initialSectionId, edit
           >
             {step === 1 ? 'Cancel' : 'Back'}
           </Button>
+
+          {/* Preview trigger — on `<lg` viewports only. Desktop already
+              shows the rail inline; a duplicate trigger there would be
+              redundant and could confuse the operator into thinking two
+              previews exist. `lg:hidden` handles the visual hide; the DOM
+              stays predictable and no hydration flash. */}
+          <Button
+            type="button"
+            variant="outline"
+            leftIcon={<Eye className="h-4 w-4" />}
+            onClick={() => setPreviewOpen(true)}
+            disabled={saving}
+            className="lg:hidden"
+          >
+            Preview
+          </Button>
+
           {step < 4 ? (
             <Button
               type="button"
@@ -369,14 +394,36 @@ export function MenuItemWizard({ session, branchId, mode, initialSectionId, edit
         </div>
       </div>
 
-      {/* Preview column — collapses under the form on small viewports. */}
-      <div className="min-w-0 lg:min-w-[280px]">
+      {/* Preview rail — desktop only. On tablet-and-narrower the Sheet
+          below carries the same component; mounting one at a time avoids
+          a duplicate second-render of the same state graph. */}
+      {isDesktop ? (
+        <div className="min-w-0 lg:min-w-[280px]">
+          <ItemPreview
+            state={state}
+            sectionName={currentSection?.name ?? null}
+            stationName={currentStation?.name ?? null}
+          />
+        </div>
+      ) : null}
+
+      {/* On-demand preview Sheet — bottom-anchored so an operator with the
+          tablet flat on a bench can reach the panel without lifting a hand.
+          Reuses `<ItemPreview>` unchanged so the mock and the sheet cannot
+          drift out of sync. */}
+      <Sheet
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        height="full"
+        title="Live preview"
+        description="How this item will appear on the POS and menu."
+      >
         <ItemPreview
           state={state}
           sectionName={currentSection?.name ?? null}
           stationName={currentStation?.name ?? null}
         />
-      </div>
+      </Sheet>
 
       {/* Menus map for section-column context. Kept invisible until useful. */}
       <span className="sr-only" aria-hidden="true">

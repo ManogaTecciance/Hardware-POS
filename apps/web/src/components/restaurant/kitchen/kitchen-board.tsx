@@ -6,6 +6,7 @@ import * as React from 'react';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ChipRow } from '@/components/ui/chip-row';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useAuth, type Session } from '@/lib/auth';
@@ -130,33 +131,44 @@ export function KitchenBoard({ session, branchId }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {FILTERS.map((f) => {
-          const count =
-            f.key === 'ALL' ? tickets.length : tickets.filter((t) => t.status === f.key).length;
-          return (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setFilter(f.key)}
-              className={`inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm font-medium transition-colors ${
-                filter === f.key
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-foreground hover:bg-border'
-              }`}
-            >
-              {f.label}
-              <span
-                className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs ${
-                  filter === f.key ? 'bg-primary-foreground/20' : 'bg-surface'
+      {/* Filter chips wrap in <ChipRow> so a narrow tablet keeps them on one
+          scrollable line. `h-11 px-4` lifts each chip onto the 44px touch
+          line. The "Refreshes every 5 s." hint stays outside the scrollable
+          region so it never gets clipped by the overflow fades. */}
+      <div className="flex items-center gap-3">
+        <ChipRow
+          ariaLabel="Filter kitchen tickets by status"
+          activeKey={String(filter)}
+          className="min-w-0 flex-1"
+        >
+          {FILTERS.map((f) => {
+            const count =
+              f.key === 'ALL' ? tickets.length : tickets.filter((t) => t.status === f.key).length;
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                data-active={filter === f.key}
+                className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors ${
+                  filter === f.key
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-foreground hover:bg-border'
                 }`}
               >
-                {count}
-              </span>
-            </button>
-          );
-        })}
-        <span className="ml-auto text-xs text-muted-foreground">Refreshes every 5 s.</span>
+                {f.label}
+                <span
+                  className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs ${
+                    filter === f.key ? 'bg-primary-foreground/20' : 'bg-surface'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </ChipRow>
+        <span className="shrink-0 text-xs text-muted-foreground">Refreshes every 5 s.</span>
       </div>
 
       {status === 'loading' ? (
@@ -294,9 +306,13 @@ function TicketCard({
           <p className="text-xs text-muted-foreground">No print attempts yet.</p>
         )}
         {canPrint ? (
+          // size="md" (44px) so a rushed chef with wet hands hits the tap
+          // targets first time. `flex-wrap` may push the third button to a
+          // second line on narrow ticket cards — that's an acceptable trade
+          // vs. keeping 32px targets on a kitchen tablet.
           <div className="flex flex-wrap gap-2">
             <Button
-              size="sm"
+              size="md"
               variant="outline"
               leftIcon={<RefreshCw className="h-4 w-4" />}
               onClick={onReprint}
@@ -305,7 +321,7 @@ function TicketCard({
               Reprint
             </Button>
             <Button
-              size="sm"
+              size="md"
               variant="ghost"
               leftIcon={<Printer className="h-4 w-4" />}
               onClick={onMarkPrinted}
@@ -313,7 +329,7 @@ function TicketCard({
               Mark printed
             </Button>
             <Button
-              size="sm"
+              size="md"
               variant="ghost"
               onClick={onMarkFailed}
               leftIcon={<AlertTriangle className="h-4 w-4" />}

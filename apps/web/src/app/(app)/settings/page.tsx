@@ -239,9 +239,11 @@ export default function SettingsPage() {
         <PreviewTab docs={docs} />
       )}
 
-      {/* Sticky action bar */}
+      {/* Sticky action bar. The left inset compensates for the sidebar
+          rail, which only appears from `tab:` (900) up — below that the
+          sidebar is a drawer and the bar spans the full width. */}
       {canManage ? (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 px-4 py-3 backdrop-blur md:pl-72">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 px-4 py-3 pb-safe backdrop-blur tab:pl-72">
           <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
             <Button
               variant="ghost"

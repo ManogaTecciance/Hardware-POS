@@ -7,6 +7,7 @@ import * as React from 'react';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ChipRow } from '@/components/ui/chip-row';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ApiError } from '@/lib/api';
@@ -138,36 +139,46 @@ export function TableFloor({ session, branchId, canManage }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Area filter + management actions */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {/* Area filter + management actions.
+          The chip strip is wrapped in <ChipRow> so branches with 8+ dining
+          areas scroll horizontally on tablet portrait instead of wrapping to
+          three-plus rows and eating vertical space. The "Show" label and the
+          "New area" action sit outside the scrollable region so they stay
+          reachable at both ends. */}
+      <div className="flex items-center gap-3">
+        <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Show
         </span>
-        <AreaChip
-          label="All"
-          active={selectedArea === 'ALL'}
-          onClick={() => setSelectedArea('ALL')}
-        />
-        {snapshot.areas.map((a) => (
+        <ChipRow
+          ariaLabel="Filter by dining area"
+          activeKey={String(selectedArea)}
+          className="min-w-0 flex-1"
+        >
           <AreaChip
-            key={a.id}
-            label={a.name}
-            active={selectedArea === a.id}
-            onClick={() => setSelectedArea(a.id)}
+            label="All"
+            active={selectedArea === 'ALL'}
+            onClick={() => setSelectedArea('ALL')}
           />
-        ))}
-        <div className="ml-auto flex items-center gap-2">
-          {canManage && canCreateArea ? (
-            <Button
-              size="sm"
-              variant="outline"
-              leftIcon={<Building2 className="h-4 w-4" />}
-              onClick={() => setShowNewArea(true)}
-            >
-              New area
-            </Button>
-          ) : null}
-        </div>
+          {snapshot.areas.map((a) => (
+            <AreaChip
+              key={a.id}
+              label={a.name}
+              active={selectedArea === a.id}
+              onClick={() => setSelectedArea(a.id)}
+            />
+          ))}
+        </ChipRow>
+        {canManage && canCreateArea ? (
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={<Building2 className="h-4 w-4" />}
+            onClick={() => setShowNewArea(true)}
+            className="shrink-0"
+          >
+            New area
+          </Button>
+        ) : null}
       </div>
 
       {status === 'loading' ? (
@@ -252,7 +263,10 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                     No tables in this area yet.
                   </p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  // iPad portrait (768) keeps 3 columns for breathing room;
+                  // the 4-column step is deferred to tab: (900) so landscape
+                  // tablets get the denser grid without cramping portrait.
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                     {tables.map((t) => (
                       <TableCard
                         key={t.id}
@@ -371,11 +385,17 @@ function AreaChip({
   active: boolean;
   onClick: () => void;
 }) {
+  // h-11 unconditionally: the floor plan is a touch-priority screen and the
+  // extra 8px keeps the chip on the 44px touch-target line even on desktop.
+  // `data-active` tells the parent ChipRow which chip to scroll into view
+  // when the selection is restored from state.
+  // `shrink-0` prevents flex-parent squish inside the scrollable ChipRow.
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
+      data-active={active}
+      className={`inline-flex h-11 shrink-0 items-center rounded-full px-4 text-sm font-medium transition-colors ${
         active
           ? 'bg-primary text-primary-foreground'
           : 'bg-muted text-foreground hover:bg-border'
@@ -451,13 +471,17 @@ function TableCard({
         ) : null}
       </div>
       <div className="mt-auto flex gap-2 pt-1">
+        {/* `size="md"` (44px) unconditionally — this is the card's primary
+            action, and the sm variant (36px) sits just under the touch line
+            even on desktop. The empty spacer matches the same height so
+            cards without an action don't jitter the grid row. */}
         {session ? (
-          <Button asChild size="sm" fullWidth variant="secondary">
+          <Button asChild size="md" fullWidth variant="secondary">
             <Link href={`/tables/session/${session.id}`}>View order</Link>
           </Button>
         ) : isAvailable && canOpen ? (
           <Button
-            size="sm"
+            size="md"
             fullWidth
             leftIcon={<DoorOpen className="h-4 w-4" />}
             onClick={onOpenClick}
@@ -465,7 +489,7 @@ function TableCard({
             Open table
           </Button>
         ) : (
-          <div className="h-9" aria-hidden="true" />
+          <div className="h-11" aria-hidden="true" />
         )}
       </div>
     </div>
@@ -784,7 +808,10 @@ function OwnerMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
+        // touch-target-coarse expands the tap area to 44×44 on touch devices
+        // without changing the mouse footprint — the icon stays the same
+        // visual size in both places.
+        className="touch-target-coarse inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-muted"
       >
         <MoreVertical className="h-4 w-4" />
       </button>

@@ -22,6 +22,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { Sheet } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/lib/auth';
 import { computeLine, computeTotals, type CartItem } from '@/lib/cart';
@@ -298,10 +299,14 @@ export default function PaymentPage() {
         <p className="truncate text-sm text-muted-foreground">{customerName}</p>
       </div>
 
-      {/* Order summary ~40% · payment workspace ~60% on lg+. */}
-      <div className="grid min-h-0 min-w-0 flex-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        {/* ── Order summary (desktop / tablet-landscape) ── */}
-        <div className="hidden min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm lg:flex lg:max-h-full lg:self-start">
+      {/* Order summary ~40% · payment workspace ~60% once we clear the tablet
+          landscape breakpoint (900px). Below `tab:` — iPad portrait 768–834 —
+          the summary collapses into a Sheet triggered from the workspace
+          header, because a two-column split at 800px squeezes the numeric
+          keypad and the order table into unusable widths. */}
+      <div className="grid min-h-0 min-w-0 flex-1 gap-4 tab:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        {/* ── Order summary (tablet-landscape and up) ── */}
+        <div className="hidden min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm tab:flex tab:max-h-full tab:self-start">
           <OrderSummary
             items={cart.items}
             totals={totals}
@@ -314,11 +319,13 @@ export default function PaymentPage() {
 
         {/* ── Unified payment workspace: fixed top · scroll middle · fixed bottom ── */}
         <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-          {/* Compact order-summary trigger — only below lg. */}
+          {/* Compact order-summary trigger — only below tab:. The Sheet it
+              opens is height="full" so the long items list plus totals fit
+              without the operator hunting for the primary action. */}
           <button
             type="button"
             onClick={() => setSummaryOpen(true)}
-            className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3 text-left lg:hidden"
+            className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3 text-left tab:hidden"
             aria-label="View order summary"
           >
             <span className="flex items-center gap-2 text-sm font-medium">
@@ -608,14 +615,20 @@ export default function PaymentPage() {
         </div>
       </div>
 
-      {/* Order-summary drawer for small/portrait screens. */}
-      <Dialog
+      {/* Order-summary sheet for portrait/narrow screens. `height="full"`
+          because the summary is item-list + totals + tax + optional discounts
+          — capping it at `max-h-[85dvh]` (Sheet default) would hide the grand
+          total on a cart with a dozen items on iPad portrait. The Sheet has
+          its own header X and safe-area footer, so the negative margins the
+          old Dialog wrapper needed are gone; `-mx-6 -my-3` neutralises the
+          Sheet body padding so `OrderSummary` fills edge-to-edge. */}
+      <Sheet
         open={summaryOpen}
         onClose={() => setSummaryOpen(false)}
         title="Order summary"
-        className="max-w-lg"
+        height="full"
       >
-        <div className="-mx-6 -mb-6 max-h-[70vh] overflow-hidden rounded-b-2xl border-t border-border">
+        <div className="-mx-6 -my-3 flex h-full min-h-0 flex-col">
           <OrderSummary
             items={cart.items}
             totals={totals}
@@ -626,7 +639,7 @@ export default function PaymentPage() {
             hideHeader
           />
         </div>
-      </Dialog>
+      </Sheet>
     </div>
   );
 }

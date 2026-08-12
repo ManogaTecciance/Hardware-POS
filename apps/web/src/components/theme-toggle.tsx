@@ -36,7 +36,10 @@ export function ThemeToggle({ className }: { className?: string }) {
             title={`${o.label} theme`}
             onClick={() => setMode(o.mode)}
             className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
+              // 32px on mouse for the compact segmented look; `touch-target-coarse`
+              // grows each option to 44px on touch input so the control is usable
+              // in the profile menu on tablet-portrait.
+              'touch-target-coarse flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
               selected
                 ? 'bg-surface text-primary shadow-sm'
                 : 'text-muted-foreground hover:text-foreground',

@@ -4,6 +4,7 @@ import { Search } from 'lucide-react';
 import * as React from 'react';
 
 import { Card, CardContent } from '@/components/ui/card';
+import { ChipRow } from '@/components/ui/chip-row';
 import { Input } from '@/components/ui/input';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
@@ -116,24 +117,36 @@ export function PosMenuBrowser({ data, loading, onPick }: Props) {
       </div>
 
       {search.trim() === '' ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        // Section chips are a single scrollable row rather than wrap-to-many —
+        // on a portrait tablet with 8+ sections a wrap layout eats vertical
+        // space the menu grid needs. `<ChipRow>` supplies edge fades and
+        // chevron nudges so overflow reads as scroll, not clip. Each chip
+        // stays at least 44px tall on coarse pointers via `touch-target-coarse`.
+        <div className="flex items-center gap-3">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Section
           </span>
-          {allSections.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => setSelectedSectionId(s.id)}
-              className={`inline-flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
-                s.id === selectedSectionId
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-foreground hover:bg-border'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
+          <ChipRow
+            activeKey={selectedSectionId ?? ''}
+            ariaLabel="Menu sections"
+            className="min-w-0 flex-1"
+          >
+            {allSections.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                data-active={s.id === selectedSectionId ? 'true' : undefined}
+                onClick={() => setSelectedSectionId(s.id)}
+                className={`inline-flex h-9 shrink-0 items-center rounded-full px-3 text-sm font-medium transition-colors touch-target-coarse touch-manipulation ${
+                  s.id === selectedSectionId
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-foreground hover:bg-border'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </ChipRow>
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
@@ -151,7 +164,11 @@ export function PosMenuBrowser({ data, loading, onPick }: Props) {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        // 3-across at `tab:` matches the tablet-responsive redesign: at
+        // 900px the cart column reveals AND we have room for three cards
+        // side by side. Below `tab:` we keep the two-column density so a
+        // portrait iPad still shows six cards above the fold.
+        <div className="grid grid-cols-2 gap-3 tab:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {filtered.map((it) => (
             <button
               key={it.id}

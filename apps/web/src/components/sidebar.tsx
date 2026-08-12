@@ -176,10 +176,15 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Desktop rail: collapses to an icon-only strip. */}
+      {/* Desktop / landscape-tablet rail: collapses to an icon-only strip.
+          Cutover raised from `md:` (768) to `tab:` (900) so portrait iPad
+          (768–834) gets the drawer instead of a permanent 64/256 px rail
+          that leaves the working area cramped. `pl-safe` keeps the icon
+          column clear of the notch when a landscape iPad reports a
+          non-zero left safe-area inset (Split View, Slide Over). */}
       <aside
         className={cn(
-          'hidden shrink-0 flex-col border-r border-border bg-surface transition-[width] md:flex',
+          'hidden shrink-0 flex-col border-r border-border bg-surface pl-safe transition-[width] tab:flex',
           collapsed ? 'w-16' : 'w-64',
         )}
       >
@@ -188,7 +193,9 @@ export function Sidebar() {
         {!collapsed && note ? (
           <div className="border-t border-border p-4 text-xs text-muted-foreground">{note}</div>
         ) : null}
-        {/* Collapse / expand the rail — preference persists (localStorage). */}
+        {/* Collapse / expand the rail — preference persists (localStorage).
+            `touch-target-coarse` bumps the tap area to 44px on touch input
+            without inflating the desktop rail button. */}
         <div className="border-t border-border p-3">
           <button
             type="button"
@@ -196,7 +203,7 @@ export function Sidebar() {
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className={cn(
-              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+              'touch-target-coarse flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
               collapsed && 'justify-center gap-0',
             )}
           >
@@ -210,9 +217,13 @@ export function Sidebar() {
         </div>
       </aside>
 
-      {/* Mobile off-canvas drawer. Stays mounted for the slide transition;
-          made inert when closed so its links leave the tab order. */}
-      <div className="md:hidden" inert={mobileOpen ? undefined : true}>
+      {/* Portrait / mobile off-canvas drawer. Stays mounted for the slide
+          transition; made inert when closed so its links leave the tab
+          order. `tab:hidden` matches the rail's `tab:flex` above — the two
+          are strictly exclusive at the same cutover so the app never
+          shows both or neither. `pt-safe` / `pl-safe` keep the drawer
+          clear of the status bar and any left inset (Split View). */}
+      <div className="tab:hidden" inert={mobileOpen ? undefined : true}>
         <button
           type="button"
           aria-label="Close navigation"
@@ -224,7 +235,7 @@ export function Sidebar() {
         />
         <aside
           className={cn(
-            'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-surface transition-transform',
+            'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-surface pl-safe pt-safe transition-transform',
             mobileOpen ? 'translate-x-0' : '-translate-x-full',
           )}
         >

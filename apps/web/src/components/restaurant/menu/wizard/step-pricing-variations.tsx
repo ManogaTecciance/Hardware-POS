@@ -205,7 +205,10 @@ export function StepPricingVariations({ state, errors, onChange }: Props) {
                       type="button"
                       onClick={() => removeRow(v.key)}
                       aria-label={`Remove ${v.name || 'variation'}`}
-                      className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                      // touch-target-coarse enlarges to 44px on tablet so the
+                      // trash icon isn't a 28px stab hazard next to the SKU
+                      // and price inputs.
+                      className="rounded-md p-2 text-muted-foreground transition-colors touch-target-coarse hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>

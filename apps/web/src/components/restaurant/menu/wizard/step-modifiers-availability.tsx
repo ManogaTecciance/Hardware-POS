@@ -184,7 +184,10 @@ export function StepModifiersAvailability({ state, errors, onChange }: Props) {
                       type="button"
                       onClick={() => removeGroup(g.key)}
                       aria-label={`Remove ${g.name || 'group'}`}
-                      className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                      // touch-target-coarse: on a tablet the trash icon sits
+                      // right next to the group's collapse toggle — a 28px
+                      // hit-slop is easy to fumble into the wrong action.
+                      className="rounded-md p-2 text-muted-foreground transition-colors touch-target-coarse hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -239,7 +242,11 @@ export function StepModifiersAvailability({ state, errors, onChange }: Props) {
                                         sel === 'SINGLE' ? 1 : Math.max(g.maxSelections, 1),
                                     })
                                   }
-                                  className={`rounded-lg border p-2 text-xs font-medium transition-colors motion-reduce:transition-none ${
+                                  // px-3 py-3 lifts the segmented options to
+                                  // a real touch target on tablets — p-2 alone
+                                  // was ~28px which is fingertip-sized only in
+                                  // theory.
+                                  className={`rounded-lg border px-3 py-3 text-xs font-medium transition-colors motion-reduce:transition-none ${
                                     selected
                                       ? 'border-primary bg-primary/10 text-primary'
                                       : 'border-border hover:border-primary'
@@ -383,7 +390,11 @@ export function StepModifiersAvailability({ state, errors, onChange }: Props) {
                                   })
                                 }
                                 aria-label={`Remove ${o.name || 'option'}`}
-                                className="h-11 rounded-md px-2 text-muted-foreground hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                // touch-target-coarse: option rows are dense —
+                                // width-only h-11 wasn't a comfortable target
+                                // on tablets. Coarse-only so the mouse footprint
+                                // stays the same.
+                                className="h-11 rounded-md px-2 text-muted-foreground touch-target-coarse hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>

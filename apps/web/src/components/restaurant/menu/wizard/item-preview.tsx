@@ -30,7 +30,11 @@ export function ItemPreview({ state, sectionName, stationName }: Props) {
 
   return (
     <aside
-      className="sticky top-4 space-y-4 rounded-2xl border border-border bg-card p-4"
+      // Sticky only from `lg` up — that's the viewport where the aside sits
+      // in the wizard's inline preview column. On tablet the same component
+      // renders inside a bottom Sheet, where sticky would peel off the top
+      // of the Sheet's scroll container and look broken.
+      className="lg:sticky lg:top-4 space-y-4 rounded-2xl border border-border bg-card p-4"
       aria-label="Item preview"
     >
       <div>

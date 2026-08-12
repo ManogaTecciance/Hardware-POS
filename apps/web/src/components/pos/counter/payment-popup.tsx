@@ -6,12 +6,18 @@ import * as React from 'react';
 import { ApiError } from '@/lib/api';
 import { type Session } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
-import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Sheet } from '@/components/ui/sheet';
 import { billing, takeaway } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { PaymentMethod } from '@/lib/restaurant/types';
+import {
+  useIsTabletUp,
+  useOrientation,
+  usePointerCoarse,
+} from '@/lib/use-viewport';
 
+import { NumericKeypad } from '../payment/numeric-keypad';
 import type { DraftLine } from '../pos-types';
 import type { PosMode } from '../pos-mode-selector';
 import type { ChosenCustomer } from './customer-capture-popup';
@@ -103,6 +109,18 @@ export function PaymentPopup(props: Props) {
   const [reference, setReference] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Viewport-aware affordances: portrait tablet gets a full-height sheet so
+  // the keypad has room; landscape stays at auto so the sheet only claims the
+  // height it needs. Coarse-pointer tablets get the on-screen numeric keypad
+  // alongside the input — cashiers on a bench-mounted iPad hit 56px keys far
+  // faster than the OS keyboard, and the keyboard occluding the CTA is the
+  // number-one complaint from the pilot.
+  const isTabletUp = useIsTabletUp();
+  const isCoarse = usePointerCoarse();
+  const orientation = useOrientation();
+  const showKeypad = isTabletUp && isCoarse;
+  const sheetHeight: 'auto' | 'full' = orientation === 'portrait' ? 'full' : 'auto';
 
   const total = computedTotals.total;
   const tenderedNum = Number(tendered);
@@ -208,9 +226,15 @@ export function PaymentPopup(props: Props) {
   };
 
   return (
-    <Dialog
+    // Swap `<Dialog>` for `<Sheet>` — same role="dialog" aria-modal semantics
+    // for existing selectors, but the sheet fills the tablet correctly and
+    // pins the primary action via the `footer` prop instead of relying on
+    // page flow. Height flips to `full` in portrait so the on-screen keypad
+    // has room without pushing the CTA below the fold.
+    <Sheet
       open
       onClose={onBack}
+      height={sheetHeight}
       title="Payment"
       description={
         isDelivery
@@ -260,14 +284,18 @@ export function PaymentPopup(props: Props) {
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Payment method
           </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {/* Method tiles: 2-across on portrait/phones so each stays big
+              enough to hit confidently; 4-across at `tab:` because a landscape
+              tablet already has room for a single row. `min-h-[6rem]` keeps
+              each tile at a comfortable 96px touch target. */}
+          <div className="grid grid-cols-2 gap-3 tab:grid-cols-4">
             {methodOptions.map((m) => (
               <button
                 key={m.method}
                 type="button"
                 onClick={() => setMethod(m.method)}
                 aria-pressed={method === m.method}
-                className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 text-xs font-medium transition-colors active:scale-[0.98] ${
+                className={`flex min-h-[6rem] flex-col items-center justify-center gap-1 rounded-lg border-2 p-3 text-sm font-medium transition-colors touch-manipulation active:scale-[0.98] ${
                   method === m.method
                     ? 'border-primary bg-brand-100 text-primary'
                     : 'border-border bg-surface text-muted-foreground hover:border-primary'
@@ -294,18 +322,31 @@ export function PaymentPopup(props: Props) {
               placeholder={String(Math.ceil(total / 100) * 100)}
               className="h-12 text-lg font-semibold"
             />
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {quickCashAmounts(total).map((amount) => (
                 <button
                   key={amount}
                   type="button"
                   onClick={() => setTendered(String(amount))}
-                  className="flex-1 rounded-md border border-border bg-surface px-2 py-1.5 text-xs font-medium hover:border-primary"
+                  className="min-h-11 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium hover:border-primary touch-manipulation"
                 >
                   {amount === Math.round(total) ? 'Exact' : formatMoney(amount)}
                 </button>
               ))}
             </div>
+            {showKeypad ? (
+              // On-screen keypad appears below the input on coarse-pointer
+              // tablets. Desktop mouse users fall back to the plain input +
+              // OS keyboard — the keypad's 56px keys are a touch affordance,
+              // not a functional replacement.
+              <div className="pt-2">
+                <NumericKeypad
+                  onPress={(key) => setTendered((prev) => applyKeypad(prev, key))}
+                  onEnter={submit}
+                  enterDisabled={submitting || tendered === '' || tenderedInvalid}
+                />
+              </div>
+            ) : null}
             {tenderedNum >= total && total > 0 ? (
               <div className="flex items-center justify-between rounded-md border border-success/40 bg-success-soft p-2 text-sm">
                 <span className="font-medium">Change</span>
@@ -347,8 +388,34 @@ export function PaymentPopup(props: Props) {
           </p>
         ) : null}
       </div>
-    </Dialog>
+    </Sheet>
   );
+}
+
+/**
+ * Apply one keypad press to the currently-entered tendered string. The keypad
+ * emits digits '0'-'9', '00', '.', and 'back'; every other value is ignored
+ * so a future keypad extension can add symbols without silently corrupting
+ * the numeric state here.
+ */
+function applyKeypad(prev: string, key: string): string {
+  if (key === 'back') return prev.slice(0, -1);
+  if (key === '.') {
+    if (prev.includes('.')) return prev;
+    return prev === '' ? '0.' : `${prev}.`;
+  }
+  if (key === '00') {
+    // Reject a leading '00' — mirrors what a decimal input would render.
+    if (prev === '' || prev === '0') return '0';
+    return `${prev}00`;
+  }
+  if (/^\d$/.test(key)) {
+    // Collapse a single leading zero (`0` + `5` → `5`) so amounts don't
+    // pick up a leading zero after the operator taps 0 first.
+    if (prev === '0') return key;
+    return `${prev}${key}`;
+  }
+  return prev;
 }
 
 function modeLabel(mode: PosMode): string {

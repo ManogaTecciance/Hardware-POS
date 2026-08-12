@@ -51,7 +51,7 @@ export function OverflowMenu({ label, disabled, align = 'right', children }: Pro
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40"
+        className="touch-target-coarse rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40"
       >
         <MoreVertical className="h-4 w-4" />
       </button>

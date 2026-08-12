@@ -279,6 +279,18 @@
   --shadow-pop: var(--sem-shadow-pop);
   --radius-card: 1.25rem;
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /*
+   * Tablet responsive — an extra breakpoint sitting between md (768) and
+   * lg (1024). Restaurant tablets in landscape (iPad 1024–1180, iPad Air
+   * 1180, iPad Pro 11" 1194) all clear this line comfortably, while iPad
+   * portrait (768–834) still resolves to md — so `tab:` is exactly "tablet
+   * landscape or bigger". Used by POS to split cart-vs-menu earlier than
+   * lg, and by wizards to keep the live-preview rail visible on landscape.
+   *
+   * The other Tailwind defaults are unchanged.
+   */
+  --breakpoint-tab: 56.25rem; /* 900px */
 }
 
 html,
@@ -371,6 +383,78 @@ body {
     transition-duration: 0.001ms !important;
   }
 }
+
+/*
+ * ─────────────────────────────────────────────────────────────
+ * Tablet responsive utilities
+ * ─────────────────────────────────────────────────────────────
+ *
+ * Safe-area padding utilities. Depend on `viewport-fit: cover` (declared in
+ * root layout metadata) — without that they resolve to zero, which is the
+ * correct fallback on desktop and non-notched hardware.
+ *
+ *   pt-safe, pr-safe, pb-safe, pl-safe — clamp to viewport-inset edge.
+ *   pb-safe-16, pb-safe-20  — additive: keep an existing bottom padding AND
+ *                              add the safe-area inset on top. Used by
+ *                              sticky POS bottom bars.
+ *
+ * There is no `p-safe` shorthand; a fully safe-padded surface should list
+ * the sides explicitly so a caller can't accidentally push a top-bar down
+ * without meaning to.
+ */
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.pr-safe { padding-right: env(safe-area-inset-right); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pl-safe { padding-left: env(safe-area-inset-left); }
+.pb-safe-16 { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
+.pb-safe-20 { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+
+/*
+ * Coarse-pointer hover neutralisation. `hover:` bg / border / shadow
+ * changes are useful for a mouse, but latch on touch until the next tap
+ * elsewhere — which looks like a stuck selection during a service push.
+ * Every button/link the app renders is inside `body`, so this global rule
+ * short-circuits the hover state on coarse-pointer devices while leaving
+ * `focus-visible` (keyboard) and `active` (pressed) intact.
+ *
+ * Individual components can opt back into hover on coarse pointers by
+ * scoping under `@media (hover: hover)` (see the sidebar hover states,
+ * which are cosmetic). We do not do this globally.
+ */
+@media (hover: none) and (pointer: coarse) {
+  button:not(:disabled):hover,
+  [role='button']:not([aria-disabled='true']):hover,
+  a:hover {
+    background-color: revert-layer;
+    border-color: revert-layer;
+    color: revert-layer;
+    box-shadow: revert-layer;
+  }
+}
+
+/*
+ * Touch-target minimums. Applied selectively — Button/Input/Select already
+ * hit 44px through `h-11`, but bespoke chips, close-Xs and quantity
+ * steppers throughout the POS use `h-8`/`h-9`/`p-1`. Rather than editing
+ * every occurrence, sites can opt into `touch-target` on coarse pointers
+ * only, keeping the compact desktop density intact.
+ *
+ *   .touch-target      — 44×44 on any device.
+ *   .touch-target-coarse — 44×44 only on coarse pointers (mouse stays compact).
+ */
+.touch-target { min-height: 2.75rem; min-width: 2.75rem; }
+@media (pointer: coarse) {
+  .touch-target-coarse { min-height: 2.75rem; min-width: 2.75rem; }
+}
+
+/*
+ * `touch-manipulation` shorthand — disables double-tap zoom and pull-to-
+ * refresh side effects on interactive surfaces where the app owns the
+ * touch gestures (POS keypad, modifier picker, ticket action row).
+ * Kept as a class rather than baked into every button so accidental
+ * disabling of the browser's own zoom gesture stays opt-in.
+ */
+.touch-manipulation { touch-action: manipulation; }
 
 /*
  * Print: always render on a white page regardless of the active theme. Force

@@ -28,7 +28,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <Sidebar />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <Header />
-                  <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+                  {/* `pb-safe` sits on top of the padding so the last row of
+                      any scrollable page clears the home-indicator on
+                      notched iPads. The scroll container itself keeps
+                      p-4 / p-6 for actual content padding. */}
+                  <main className="min-h-0 flex-1 overflow-y-auto p-4 pb-safe md:p-6">
                     {/* Slice 8.6: one gate for every route, inside `main` so a
                         blocked page keeps the shell it was reached from — the
                         sidebar and header stay usable instead of the operator

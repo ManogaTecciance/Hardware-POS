@@ -1,10 +1,11 @@
 'use client';
 
-import { AlertTriangle, Percent, ReceiptText, ShoppingCart, Trash2 } from 'lucide-react';
+import { AlertTriangle, ChevronUp, Percent, ReceiptText, ShoppingCart, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
 import { PageHeader } from '@/components/page-header';
+import { Sheet } from '@/components/ui/sheet';
 import { ApiError } from '@/lib/api';
 import { useAuth, type Session } from '@/lib/auth';
 import { discountLimitFor, withinDiscountLimit, Permission } from '@/lib/permissions';
@@ -84,6 +85,11 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   >('compose');
   const [customer, setCustomer] = React.useState<ChosenCustomer | null>(null);
   const [completion, setCompletion] = React.useState<CompletionSummary | null>(null);
+
+  // Portrait tablets and phones hide the cart aside — the cart lives in a
+  // bottom Sheet reached from a sticky "view order" bar. On landscape (`tab:`
+  // and up) the aside is always visible and this state is unused.
+  const [cartSheetOpen, setCartSheetOpen] = React.useState(false);
 
   // Idempotency key regenerated after a successful placement so a rapid
   // "New Order" cannot piggyback the last one.
@@ -167,6 +173,10 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   // ── Stage transitions ──────────────────────────────────────────────────
   const openCustomer = () => {
     if (draft.length === 0 || !canPlaceTakeaway) return;
+    // Portrait: the cart Sheet has to yield before the customer Dialog goes
+    // up, otherwise both modals stack and the user cannot see whose backdrop
+    // they are tapping.
+    setCartSheetOpen(false);
     setStage('customer');
   };
 
@@ -226,13 +236,25 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
         <PosModeChip mode={mode} onChange={resetMode} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="min-w-0">
+      {/* Grid splits at `tab:` (900px) — comfortably before iPad landscape
+          (1024) so we get the two-column layout on the widest tablet form
+          factors. `min(400px,38%)` caps the aside so a 2560px monitor does
+          not float a 400px column beside a 2000px menu; and the menu stays
+          `minmax(0,1fr)` to prevent flex overflow of long item names. */}
+      <div className="grid gap-4 tab:grid-cols-[minmax(0,1fr)_min(400px,38%)] xl:grid-cols-[minmax(0,1fr)_min(420px,36%)]">
+        {/* Menu column adds `pb-safe-20` below `tab:` so the sticky bottom
+            order bar (h≈4rem + safe-area inset) does not eat the last row of
+            item cards. `tab:pb-0` restores flush spacing once the bar hides. */}
+        <div className="min-w-0 pb-safe-20 tab:pb-0">
           <PosMenuBrowser data={menuData} loading={menuLoading} onPick={openItem} />
         </div>
 
-        <aside className="lg:sticky lg:top-4">
-          <CartRail
+        {/* Aside is hidden below `tab:` — cart moves to a Sheet on portrait.
+            `tab:sticky tab:top-4` (previously `lg:`) means the stickiness
+            kicks in at the same breakpoint the column reveals, so the cart
+            never scrolls out of view once it is on screen. */}
+        <aside className="hidden tab:block tab:sticky tab:top-4">
+          <CartCard
             draft={draft}
             onEdit={editLine}
             onDiscount={(key) => setDiscountTargetKey(key)}
@@ -253,6 +275,76 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
           />
         </aside>
       </div>
+
+      {/* Portrait-only sticky bottom bar — a tap opens the cart Sheet. Hidden
+          from ARIA when empty so the peek does not announce "0 items". The
+          bar is `tab:hidden` and the Sheet is portrait-only, so together they
+          form the portrait cart affordance without any hook-based
+          orientation branching in this component. */}
+      {draft.length > 0 ? (
+        <div className="tab:hidden fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface pb-safe shadow-pop">
+          <button
+            type="button"
+            onClick={() => setCartSheetOpen(true)}
+            aria-label={`View order — ${draft.reduce((s, r) => s + r.quantity, 0)} items, ${formatMoney(total)}`}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left touch-manipulation touch-target"
+          >
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {draft.reduce((s, r) => s + r.quantity, 0)}{' '}
+                item{draft.reduce((s, r) => s + r.quantity, 0) === 1 ? '' : 's'}
+              </div>
+              <div className="text-lg font-semibold tabular-nums">
+                {formatMoney(total)}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-sm font-medium text-primary">
+              View order
+              <ChevronUp className="h-4 w-4" aria-hidden />
+            </div>
+          </button>
+        </div>
+      ) : null}
+
+      {/* Portrait cart Sheet. Same body + place-order footer the aside uses,
+          composed via the Sheet's `footer` prop so Place Order stays pinned
+          while the line list scrolls. */}
+      <Sheet
+        open={cartSheetOpen}
+        onClose={() => setCartSheetOpen(false)}
+        height="full"
+        title="Current order"
+        description={`${draft.reduce((s, r) => s + r.quantity, 0)} item${
+          draft.reduce((s, r) => s + r.quantity, 0) === 1 ? '' : 's'
+        } · ${formatMoney(total)}`}
+        footer={
+          <CartPlaceOrderFooter
+            canPlace={canPlaceTakeaway}
+            disabled={draft.length === 0}
+            total={total}
+            mode={mode}
+            onPlaceOrder={openCustomer}
+            fullWidth
+          />
+        }
+      >
+        <CartBody
+          draft={draft}
+          onEdit={editLine}
+          onDiscount={(key) => setDiscountTargetKey(key)}
+          onChangeQty={changeQty}
+          onRemove={remove}
+          onClearAll={clearAll}
+          canDiscount={canDiscount}
+          subtotal={subtotal}
+          itemDiscount={totalItemDiscount}
+          serviceCharge={serviceCharge}
+          taxAmount={taxAmount}
+          servicePct={servicePct}
+          taxPct={taxPct}
+          total={total}
+        />
+      </Sheet>
 
       {modifierTarget ? (
         <ModifierPickerDialog
@@ -318,9 +410,19 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   );
 }
 
-// ── Cart Rail ───────────────────────────────────────────────────────────
+// ── Cart Card ───────────────────────────────────────────────────────────
+//
+// Two shells now share the cart body:
+//   * `<CartCard>` — the framed rail rendered in the desktop / landscape
+//     aside. Owns its own scroll region and the Place Order button lives at
+//     the bottom of the card.
+//   * `<Sheet>` (rendered in the workspace) — wraps `<CartBody>` on portrait
+//     and pins `<CartPlaceOrderFooter>` via the Sheet's `footer` prop.
+//
+// Both shells render the same `<CartBody>` and `<CartPlaceOrderFooter>` so
+// the two surfaces cannot drift.
 
-interface CartRailProps {
+interface CartRailBodyProps {
   draft: DraftLine[];
   onEdit: (line: DraftLine) => void;
   onDiscount: (key: string) => void;
@@ -328,7 +430,6 @@ interface CartRailProps {
   onRemove: (key: string) => void;
   onClearAll: () => void;
   canDiscount: boolean;
-  mode: PosMode;
   subtotal: number;
   itemDiscount: number;
   serviceCharge: number;
@@ -336,19 +437,48 @@ interface CartRailProps {
   servicePct: number;
   taxPct: number;
   total: number;
+}
+
+interface CartCardProps extends CartRailBodyProps {
+  mode: PosMode;
   onPlaceOrder: () => void;
   canPlace: boolean;
 }
 
-function CartRail(props: CartRailProps) {
+function CartCard(props: CartCardProps) {
   const {
-    draft, onEdit, onDiscount, onChangeQty, onRemove, onClearAll,
-    canDiscount, mode, subtotal, itemDiscount, serviceCharge, taxAmount,
-    servicePct, taxPct, total, onPlaceOrder, canPlace,
+    mode, total, onPlaceOrder, canPlace, ...body
   } = props;
 
   return (
     <div className="flex max-h-[calc(100vh-9rem)] flex-col rounded-xl border border-border bg-surface shadow-sm">
+      <CartBody {...body} total={total} />
+      <div className="border-t border-border p-3">
+        <CartPlaceOrderFooter
+          canPlace={canPlace}
+          disabled={body.draft.length === 0}
+          total={total}
+          mode={mode}
+          onPlaceOrder={onPlaceOrder}
+          fullWidth
+        />
+      </div>
+    </div>
+  );
+}
+
+function CartBody(props: CartRailBodyProps) {
+  const {
+    draft, onEdit, onDiscount, onChangeQty, onRemove, onClearAll,
+    canDiscount, subtotal, itemDiscount, serviceCharge, taxAmount,
+    servicePct, taxPct, total,
+  } = props;
+
+  return (
+    // `min-h-0` + `flex-1` on the scroll region keeps the running-bill
+    // summary anchored when this body renders inside either the card OR the
+    // Sheet's scroll container.
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-border p-3">
         <div className="flex items-center gap-2">
           <ShoppingCart className="h-4 w-4 text-primary" />
@@ -403,30 +533,51 @@ function CartRail(props: CartRailProps) {
         taxPct={taxPct}
         total={total}
       />
+    </div>
+  );
+}
 
-      <div className="border-t border-border p-3">
-        <button
-          type="button"
-          onClick={onPlaceOrder}
-          disabled={draft.length === 0 || !canPlace}
-          className="flex h-14 w-full items-center justify-between rounded-xl bg-primary px-5 text-base font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover active:bg-primary-active disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <span>Place Order</span>
-          <span className="tabular-nums">{formatMoney(total)}</span>
-        </button>
-        {!canPlace ? (
-          <p className="mt-2 flex items-center gap-1 text-xs text-warning">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            Your role can build a draft but not place a counter order.
-          </p>
-        ) : null}
-        {mode === 'THIRD_PARTY' ? (
-          <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
-            <ReceiptText className="h-3.5 w-3.5" />
-            Delivery orders skip immediate payment — collected on delivery.
-          </p>
-        ) : null}
-      </div>
+function CartPlaceOrderFooter({
+  canPlace,
+  disabled,
+  total,
+  mode,
+  onPlaceOrder,
+  fullWidth,
+}: {
+  canPlace: boolean;
+  disabled: boolean;
+  total: number;
+  mode: PosMode;
+  onPlaceOrder: () => void;
+  fullWidth?: boolean;
+}) {
+  return (
+    // `w-full` inside a `flex-wrap` Sheet footer keeps the CTA edge-to-edge on
+    // portrait; the card shell also passes `fullWidth`. The button stays 56px
+    // (`h-14`) which is the primary-action height throughout the counter.
+    <div className={fullWidth ? 'w-full' : undefined}>
+      <button
+        type="button"
+        onClick={onPlaceOrder}
+        disabled={disabled || !canPlace}
+        className="flex h-14 w-full items-center justify-between rounded-xl bg-primary px-5 text-base font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover active:bg-primary-active touch-manipulation disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <span>Place Order</span>
+        <span className="tabular-nums">{formatMoney(total)}</span>
+      </button>
+      {!canPlace ? (
+        <p className="mt-2 flex items-center gap-1 text-xs text-warning">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Your role can build a draft but not place a counter order.
+        </p>
+      ) : null}
+      {mode === 'THIRD_PARTY' ? (
+        <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+          <ReceiptText className="h-3.5 w-3.5" />
+          Delivery orders skip immediate payment — collected on delivery.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -542,11 +693,14 @@ function QtyBtn({
   'aria-label': string;
 }) {
   return (
+    // 32px base to preserve the compact cart line, promoted to 44px on
+    // coarse pointers via `touch-target-coarse` so a fingertip never lands
+    // ambiguously between +/−.
     <button
       type="button"
       onClick={onClick}
       {...aria}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-base font-medium text-foreground hover:bg-muted active:scale-95"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-base font-medium text-foreground hover:bg-muted active:scale-95 touch-target-coarse touch-manipulation"
     >
       {children}
     </button>

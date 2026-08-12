@@ -2,6 +2,7 @@
 
 import {
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Circle,
   Package,
@@ -33,6 +34,7 @@ import type {
   SectionView,
 } from '@/lib/restaurant/types';
 import { StatusBadge } from '@/components/restaurant/status-badge';
+import { useIsTabletUp } from '@/lib/use-viewport';
 
 import { AddItemChoiceDialog, type AddItemChoice } from './item-add/add-item-choice-dialog';
 import { LinkedProductDialog } from './item-add/linked-product-dialog';
@@ -53,14 +55,32 @@ interface Props {
 }
 
 /**
- * Three-column menu browser: menus → sections → items.
+ * Menu browser — three columns on tablet-landscape (`tab:` ≥900px), drill-down
+ * navigation on portrait/phones.
  *
  * Selection state is deliberately local: opening a menu reveals its sections,
  * opening a section reveals its items. Fetches are lazy and cached against
  * the current selection, so a menu with a hundred sections doesn't load every
  * item on first click.
+ *
+ * On portrait we surface one panel at a time and rely on a breadcrumb + back
+ * button — three narrow columns at 800px gave ~230px each, which truncated
+ * item names and their action affordances. On landscape the layout gets fixed
+ * widths for Menus (240px) and Sections (260px) so Items can claim the rest
+ * of the row — an even 1/3 split kept Items cramped when a dish had modifier
+ * badges + Inventory-linked tag + price + overflow button.
  */
 export function MenuBrowser({ session, branchId, canManage }: Props) {
+  // `useIsTabletUp` defaults to `true` on SSR, so the first paint on desktop
+  // is the three-column layout with no re-render — matching the historical
+  // behaviour. Portrait users see one re-render as the hook resolves, which
+  // is the acceptable trade-off (the drill-down view is a strictly different
+  // affordance and cannot be expressed with a CSS-only variant).
+  const isTabletUp = useIsTabletUp();
+  // On portrait, which panel is currently visible. Ignored on tab:+ (all three
+  // panels render simultaneously). Reset to 'menus' when we cross back to
+  // portrait so the operator lands on the entry step.
+  const [portraitView, setPortraitView] = React.useState<'menus' | 'sections' | 'items'>('menus');
   const [menus, setMenus] = React.useState<MenuView[] | null>(null);
   const [menuError, setMenuError] = React.useState<string | null>(null);
   const [selectedMenuId, setSelectedMenuId] = React.useState<string | null>(null);
@@ -160,9 +180,104 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
     if (selectedSectionId) void loadItems(selectedSectionId);
   }, [selectedSectionId, loadItems]);
 
+  // Resolve currently-selected menu / section so the breadcrumb can render
+  // their names without a second fetch.
+  const activeMenu = React.useMemo(
+    () => (menus ?? []).find((m) => m.id === selectedMenuId) ?? null,
+    [menus, selectedMenuId],
+  );
+  const activeSection = React.useMemo(
+    () => (sections ?? []).find((s) => s.id === selectedSectionId) ?? null,
+    [sections, selectedSectionId],
+  );
+
+  // On portrait, tapping a menu drills into sections; tapping a section
+  // drills into items. On tab:+ these handlers still fire (they update
+  // `selectedMenuId` / `selectedSectionId`), but the panel visibility does
+  // not change — all three panels remain on screen.
+  const openMenu = (menuId: string) => {
+    setSelectedMenuId(menuId);
+    if (!isTabletUp) setPortraitView('sections');
+  };
+  const openSection = (sectionId: string) => {
+    setSelectedSectionId(sectionId);
+    if (!isTabletUp) setPortraitView('items');
+  };
+
+  // On portrait, a panel is visible only when its drill-down step is active.
+  // On tab:+, all three panels are always visible.
+  const showMenus = isTabletUp || portraitView === 'menus';
+  const showSections = isTabletUp || portraitView === 'sections';
+  const showItems = isTabletUp || portraitView === 'items';
+
   return (
-    <div className="grid gap-4 md:grid-cols-3">
+    <div className="flex flex-col gap-3">
+      {/* Portrait-only breadcrumb + back. Kept out of tab:+ where the columns
+          themselves are the wayfinding. Tapping a crumb is equivalent to
+          hitting Back until we reach that step; the back arrow at left is a
+          large touch target for the primary reverse action. */}
+      {!isTabletUp && portraitView !== 'menus' ? (
+        <div className="flex items-center gap-2 text-sm">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="touch-target-coarse shrink-0"
+            aria-label="Back"
+            onClick={() =>
+              setPortraitView(portraitView === 'items' ? 'sections' : 'menus')
+            }
+          >
+            <ChevronLeft className="h-5 w-5" aria-hidden />
+          </Button>
+          <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
+            <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              <li>
+                <button
+                  type="button"
+                  onClick={() => setPortraitView('menus')}
+                  className="rounded-md px-1 py-0.5 font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Menus
+                </button>
+              </li>
+              {activeMenu ? (
+                <>
+                  <li aria-hidden className="text-muted-foreground">/</li>
+                  <li className="min-w-0">
+                    {portraitView === 'items' ? (
+                      <button
+                        type="button"
+                        onClick={() => setPortraitView('sections')}
+                        className="truncate rounded-md px-1 py-0.5 font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {activeMenu.name}
+                      </button>
+                    ) : (
+                      <span className="truncate font-semibold text-foreground">
+                        {activeMenu.name}
+                      </span>
+                    )}
+                  </li>
+                </>
+              ) : null}
+              {portraitView === 'items' && activeSection ? (
+                <>
+                  <li aria-hidden className="text-muted-foreground">/</li>
+                  <li className="min-w-0">
+                    <span className="truncate font-semibold text-foreground">
+                      {activeSection.name}
+                    </span>
+                  </li>
+                </>
+              ) : null}
+            </ol>
+          </nav>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 tab:grid-cols-[240px_260px_minmax(0,1fr)]">
       {/* Menus column */}
+      {showMenus ? (
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Menus</CardTitle>
@@ -189,7 +304,7 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
                 menu={m}
                 selected={selectedMenuId === m.id}
                 canManage={canManage}
-                onSelect={() => setSelectedMenuId(m.id)}
+                onSelect={() => openMenu(m.id)}
                 onEdit={() => setEditingMenu(m)}
                 onDelete={() => setDeletingMenu(m)}
               />
@@ -197,8 +312,10 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
           )}
         </CardContent>
       </Card>
+      ) : null}
 
       {/* Sections column */}
+      {showSections ? (
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Sections</CardTitle>
@@ -235,7 +352,7 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
                   section={s}
                   selected={selectedSectionId === s.id}
                   canManage={canManage}
-                  onSelect={() => setSelectedSectionId(s.id)}
+                  onSelect={() => openSection(s.id)}
                   onEdit={() => setEditingSection(s)}
                   onDelete={() => setDeletingSection(s)}
                 />
@@ -243,8 +360,10 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
           )}
         </CardContent>
       </Card>
+      ) : null}
 
       {/* Items column */}
+      {showItems ? (
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Items</CardTitle>
@@ -371,6 +490,8 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
             })()}
         </CardContent>
       </Card>
+      ) : null}
+      </div>
 
       {/* Dialogs */}
       {canManage && showNewMenu ? (
@@ -444,6 +565,10 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
             if (selectedMenuId === deletingMenu.id) {
               setSelectedMenuId(null);
               setSelectedSectionId(null);
+              // Drilled into a menu that's just been deleted — bounce back
+              // to the menus panel so we're not staring at an empty
+              // sections view on portrait.
+              setPortraitView('menus');
             }
             await loadMenus();
           }}
@@ -469,7 +594,10 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
           onClose={() => setDeletingSection(null)}
           onDone={async () => {
             setDeletingSection(null);
-            if (selectedSectionId === deletingSection.id) setSelectedSectionId(null);
+            if (selectedSectionId === deletingSection.id) {
+              setSelectedSectionId(null);
+              if (portraitView === 'items') setPortraitView('sections');
+            }
             await loadSections(selectedMenuId);
           }}
         />

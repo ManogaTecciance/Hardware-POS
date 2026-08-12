@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ChipRow } from '@/components/ui/chip-row';
 import { Input } from '@/components/ui/input';
 import { type Session } from '@/lib/auth';
 import { restaurantOrders } from '@/lib/restaurant/api';
@@ -180,91 +181,120 @@ export function OrdersPage({ session, branchId }: Props) {
       {/* Filter bar */}
       <Card>
         <CardContent className="space-y-3 p-4">
-          {/* Status tabs */}
-          <div className="flex flex-wrap gap-1 border-b border-border pb-2">
-            {STATUS_TABS.map((t) => {
-              const on = t.key === status;
-              const count =
-                t.key === 'ALL'
-                  ? rows.length
-                  : rows.filter((r) => r.unifiedStatus === t.key).length;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => patch({ status: t.key })}
-                  className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                    on
-                      ? 'bg-brand-100 text-primary shadow-[inset_0_-2px_0_0_var(--sem-accent)]'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                  }`}
-                >
-                  {t.label}
-                  <span
-                    className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold ${
-                      on ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'
+          {/* Status tabs — 7 pills that would wrap into two rows on tablet
+              portrait. ChipRow keeps them single-line and scrollable. `py-3`
+              lifts each pill's tap height from ~36px to ~44px. The bottom
+              border stays on the outer wrapper so the underline reads as a
+              tab strip rather than travelling with the scroll. */}
+          <div className="border-b border-border pb-2">
+            <ChipRow
+              ariaLabel="Filter by order status"
+              activeKey={String(status)}
+            >
+              {STATUS_TABS.map((t) => {
+                const on = t.key === status;
+                const count =
+                  t.key === 'ALL'
+                    ? rows.length
+                    : rows.filter((r) => r.unifiedStatus === t.key).length;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => patch({ status: t.key })}
+                    data-active={on}
+                    className={`inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-3 text-sm font-medium transition-colors ${
+                      on
+                        ? 'bg-brand-100 text-primary shadow-[inset_0_-2px_0_0_var(--sem-accent)]'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                     }`}
                   >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+                    {t.label}
+                    <span
+                      className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold ${
+                        on ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </ChipRow>
           </div>
 
-          {/* Channel chips */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {/* Channel chips — the "Channel" label stays outside the scrollable
+              region so it never disappears when a long strip is scrolled. */}
+          <div className="flex items-center gap-3">
+            <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Channel
             </span>
-            {CHANNEL_CHIPS.map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                onClick={() =>
-                  patch({
-                    channel: c.key,
-                    partner: c.key === 'THIRD_PARTY' ? partner : 'ALL',
-                  })
-                }
-                className={`inline-flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
-                  c.key === channel
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-foreground hover:bg-border'
-                }`}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Partner chips — only when 3rd Party is active */}
-          {channel === 'THIRD_PARTY' ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Partner
-              </span>
-              {[
-                { k: 'ALL', l: 'All partners' },
-                { k: 'UBER_EATS', l: 'Uber Eats' },
-                { k: 'PICKME_FOOD', l: 'PickMe Food' },
-                { k: 'DOORDASH', l: 'DoorDash' },
-                { k: 'MOCK', l: 'Mock (dev)' },
-              ].map((p) => (
+            <ChipRow
+              ariaLabel="Filter by channel"
+              activeKey={String(channel)}
+              className="min-w-0 flex-1"
+            >
+              {CHANNEL_CHIPS.map((c) => (
                 <button
-                  key={p.k}
+                  key={c.key}
                   type="button"
-                  onClick={() => patch({ partner: p.k })}
-                  className={`inline-flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
-                    p.k === partner
+                  onClick={() =>
+                    patch({
+                      channel: c.key,
+                      partner: c.key === 'THIRD_PARTY' ? partner : 'ALL',
+                    })
+                  }
+                  data-active={c.key === channel}
+                  className={`inline-flex h-11 shrink-0 items-center rounded-full px-4 text-sm font-medium transition-colors ${
+                    c.key === channel
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-muted text-foreground hover:bg-border'
                   }`}
                 >
-                  {p.l}
+                  {c.label}
                 </button>
               ))}
-              <span className="text-xs text-muted-foreground">
+            </ChipRow>
+          </div>
+
+          {/* Partner chips — only when 3rd Party is active. The disclaimer
+              stays below the scrollable strip so it never gets clipped by
+              the overflow fades. */}
+          {channel === 'THIRD_PARTY' ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Partner
+                </span>
+                <ChipRow
+                  ariaLabel="Filter by delivery partner"
+                  activeKey={String(partner)}
+                  className="min-w-0 flex-1"
+                >
+                  {[
+                    { k: 'ALL', l: 'All partners' },
+                    { k: 'UBER_EATS', l: 'Uber Eats' },
+                    { k: 'PICKME_FOOD', l: 'PickMe Food' },
+                    { k: 'DOORDASH', l: 'DoorDash' },
+                    { k: 'MOCK', l: 'Mock (dev)' },
+                  ].map((p) => (
+                    <button
+                      key={p.k}
+                      type="button"
+                      onClick={() => patch({ partner: p.k })}
+                      data-active={p.k === partner}
+                      className={`inline-flex h-11 shrink-0 items-center rounded-full px-4 text-sm font-medium transition-colors ${
+                        p.k === partner
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-foreground hover:bg-border'
+                      }`}
+                    >
+                      {p.l}
+                    </button>
+                  ))}
+                </ChipRow>
+              </div>
+              <span className="block text-xs text-muted-foreground">
                 Only the MOCK adapter is wired today; live Uber Eats / PickMe Food are deferred.
               </span>
             </div>
@@ -288,7 +318,9 @@ export function OrdersPage({ session, branchId }: Props) {
                   type="button"
                   aria-label="Clear search"
                   onClick={() => setLocalSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted"
+                  // touch-target-coarse lifts the tap area to 44×44 on touch
+                  // devices without changing the desktop footprint.
+                  className="touch-target-coarse absolute right-2 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-muted"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -330,7 +362,10 @@ export function OrdersPage({ session, branchId }: Props) {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        // On tab: (900) we intentionally keep the 2-column layout — pushing to
+        // three columns at 900px squeezes each card under ~290px and truncates
+        // the item preview badly. The third column returns at xl: (1280).
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 tab:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {filteredByPartner.map((r) => (
             <button
               key={r.id}
