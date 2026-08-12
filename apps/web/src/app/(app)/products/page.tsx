@@ -6,6 +6,7 @@ import { Ban, FileUp, FolderTree, PackagePlus, Pencil, RotateCcw, Search } from 
 
 import { ProductImage } from '@/components/product-image';
 import { ImportProductsDialog } from '@/components/products/import-products-dialog';
+import { InventoryTabs } from '@/components/products/inventory-tabs';
 import { ProductStatusBadge } from '@/components/products/product-status-badge';
 import { ExportMenu } from '@/components/sales/export-menu';
 import { PageHeader } from '@/components/page-header';
@@ -233,6 +234,7 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-6">
+      <InventoryTabs />
       <PageHeader
         title="Products"
         description={screen.helpText}

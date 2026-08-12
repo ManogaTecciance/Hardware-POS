@@ -170,12 +170,20 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
   test('WS-401 the restaurant rail shows its own destinations', async ({ page }) => {
     // Pilot Change 2 rebuild: POS and Orders replaced the standalone Takeaway
     // entry — Takeaway is now a mode inside POS.
+    //
+    // D45: `Menu` is intentionally NOT in this list — the Restaurant workspace
+    // authors sellable items via Products (labelled "Inventory" in the rail)
+    // and the runtime POS reads them from `/restaurant/pos-catalogue`.
     await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
     const flat = await railLinkNames(page);
 
-    for (const expected of ['Dashboard', 'POS', 'Orders', 'Kitchen', 'Tables', 'Menu', 'Products']) {
+    for (const expected of ['Dashboard', 'POS', 'Orders', 'Kitchen', 'Tables']) {
       expect(flat.join(' | '), `restaurant rail should contain ${expected}`).toContain(expected);
     }
+    // The catalogue destination is labelled "Inventory" in the Restaurant
+    // rail, not "Products" — assert it explicitly so an accidental relabel
+    // to "Products" would still trip a positive control.
+    expect(flat.join(' | '), 'restaurant rail should contain the catalogue link').toContain('Inventory');
   });
 
   test('WS-402 retail-only destinations are absent from the restaurant rail', async ({ page }) => {
@@ -183,10 +191,14 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     // that both workspaces use, dispatched by business type inside
     // `app/(app)/pos/page.tsx`. The Quotations / Returns / Suppliers /
     // QuickBooks assertion still holds — those remain retail-only.
+    //
+    // D45: `Menu` joins the absent list. The `/menu` route file is retained
+    // for support-only access at `?view=legacy`, but the nav entry is gone
+    // for every Restaurant tenant.
     await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
     const flat = await railLinkNames(page);
 
-    for (const absent of ['Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+    for (const absent of ['Menu', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect(flat, `restaurant rail should not contain ${absent}`).not.toContain(absent);
     }
   });
@@ -214,7 +226,12 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     const positiveSignals: Record<string, RegExp> = {
       '/tables': /show/i,          // area filter label at the top of the floor
       '/kitchen': /refreshes/i,    // "Refreshes every 5 s." footer
-      '/menu': /menus|no menus/i,  // menu column header
+      // D45: `/menu` now renders the "moved to Products" redirect card for
+      // a Restaurant tenant. The positive signal shifts from the old menu
+      // browser header to the redirect card's CTA — the page is *some*
+      // real feature, just a different one, and the shell-copy negative
+      // above still guards against a fallthrough render.
+      '/menu': /go to products|this page has moved/i,
       '/pos?mode=takeaway': /place order|active menu|customer/i,
       '/orders': /live queue|no orders/i,
     };

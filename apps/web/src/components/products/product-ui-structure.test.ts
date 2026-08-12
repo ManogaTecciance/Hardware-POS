@@ -150,12 +150,22 @@ describe('inventory-mode decisions live in the resolver, not in JSX', () => {
     // they take a plain `inventoryMode` prop from the shell instead. Any drift
     // (a new step file reaching for the resolver, or the shell losing the
     // import) fails this exact-set assertion loudly.
+    //
+    // D45 added `ProductBusinessKind` as a `type` re-export from the resolver
+    // (the resolver is still the single authority — it decides whether a
+    // tenant is 'RESTAURANT' vs. 'RETAIL'). The three added importers below
+    // consume only the type; they do NOT call the runtime resolver — the
+    // "components must not compare a mode themselves" rule above continues to
+    // enforce the boundary.
     expect(importers).toEqual([
       'app/(app)/products/[id]/page.tsx',
       'app/(app)/products/page.tsx',
       'components/products/product-detail.tsx',
       'components/products/product-status-badge.tsx',
       'components/products/wizard/product-wizard.tsx',
+      'components/products/wizard/step-details.tsx',
+      'components/products/wizard/step-pricing-inventory.tsx',
+      'components/products/wizard/wizard-state.ts',
     ]);
   });
 });
@@ -270,11 +280,15 @@ describe('36/37 — nothing outside the product screens changed', () => {
   it('8.4 — the shells are shells: no data, no writes, no fake state', () => {
     // page.tsx files stay as thin wrappers even after Phases D–I landed
     // real components — the meaty state lives in imported components under
-    // `components/restaurant/*`. `/pos` is not in this list because its
-    // page.tsx does the business-type dispatch (reads useAuth /
-    // useEffectiveProfile), which is the deliberate exception.
+    // `components/restaurant/*`. Two deliberate exceptions:
+    //   * `/pos/page.tsx` does the business-type dispatch (reads useAuth /
+    //     useEffectiveProfile) — the original exception.
+    //   * `/menu/page.tsx` was promoted to a dispatcher in D45. Restaurant
+    //     tenants see a "moved to Products" redirect card; everyone else
+    //     still gets the historical MenuBrowser. The dispatch requires
+    //     reading `useEffectiveProfile`, which is exactly what this
+    //     shell-tripwire forbids — so the route is off the shell list.
     const shells = readComponents(SRC, [
-      'app/(app)/menu/page.tsx',
       'app/(app)/tables/page.tsx',
       'app/(app)/kitchen/page.tsx',
       'app/(app)/orders/page.tsx',

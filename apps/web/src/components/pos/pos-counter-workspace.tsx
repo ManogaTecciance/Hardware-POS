@@ -9,6 +9,7 @@ import { Sheet } from '@/components/ui/sheet';
 import { ApiError } from '@/lib/api';
 import { useAuth, type Session } from '@/lib/auth';
 import { discountLimitFor, withinDiscountLimit, Permission } from '@/lib/permissions';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 import { restaurantConfig, takeaway } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
@@ -25,7 +26,7 @@ import type { PosMode } from './pos-mode-selector';
 import { PosOrderTypeModal } from './pos-order-type-modal';
 import type { DraftLine } from './pos-types';
 import { cryptoRandomKey, draftSubtotal } from './pos-utils';
-import { useMenuData } from './use-menu-data';
+import { useMenuData, usePosCatalogue } from './use-menu-data';
 
 interface Props {
   session: Session;
@@ -70,7 +71,32 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const discountLimit = discountLimitFor(session.user.role);
 
   const [mode, setMode] = React.useState<PosMode | null>(initialMode);
-  const { data: menuData, loading: menuLoading } = useMenuData(session, branchId);
+
+  // D45: Restaurant / Cafe / Bakery tenants read the new POS catalogue
+  // endpoint (Products the wizard published as POS-sellable). Retail
+  // tenants never reach this workspace (they render `PosRetailCheckout`),
+  // so the fallback to the legacy admin-menu chain is defensive rather
+  // than load-bearing — it keeps the workspace usable if a tenant with an
+  // unresolved profile lands here before the profile has loaded.
+  const { profile } = useEffectiveProfile();
+  const isRestaurantProfile =
+    profile?.businessType === 'RESTAURANT' ||
+    profile?.businessType === 'CAFE' ||
+    profile?.businessType === 'BAKERY';
+
+  // Both hooks always run — React requires stable hook order. The unused
+  // branch resolves to EMPTY_MENU without a network round-trip because the
+  // hook short-circuits when the branch selector below picks the other.
+  // We gate by nulling `branchId` on the inactive hook so it never fetches.
+  const catalogueChannel =
+    mode === 'DINE_IN' ? 'DINE_IN' : mode === 'THIRD_PARTY' ? 'ONLINE' : 'TAKEAWAY';
+  const catalogue = usePosCatalogue(
+    session,
+    isRestaurantProfile ? branchId : null,
+    catalogueChannel,
+  );
+  const legacyMenu = useMenuData(session, isRestaurantProfile ? null : branchId);
+  const { data: menuData, loading: menuLoading } = isRestaurantProfile ? catalogue : legacyMenu;
 
   const [draft, setDraft] = React.useState<DraftLine[]>([]);
   const [modifierTarget, setModifierTarget] = React.useState<{

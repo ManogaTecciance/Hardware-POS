@@ -9,8 +9,14 @@ import {
   menus,
   modifierGroups as modifierGroupsApi,
 } from '@/lib/restaurant/api';
+import {
+  fetchPosCatalogue,
+  type PosCatalogueChannel,
+  type PosCatalogueItem,
+} from '@/lib/restaurant/pos-catalogue-api';
 import type {
   MenuItemView,
+  MenuView,
   ModifierGroupView,
   SectionView,
 } from '@/lib/restaurant/types';
@@ -94,4 +100,211 @@ export function useMenuData(
 
   const reload = React.useCallback(() => setTick((t) => t + 1), []);
   return { data, loading, error, reload };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POS Catalogue hook (D45)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The synthetic Menu id every catalogue-derived section belongs to.
+ *
+ * Callers keying off `MenuData.menus[i].id` see a stable identifier and can
+ * treat the catalogue as a single-menu branch — a real MenuItem id starts
+ * with `mit_…`, so there is no collision.
+ */
+const CATALOGUE_MENU_ID = '__catalogue__';
+
+/**
+ * One synthetic section per foodType bucket. The picker's chip row reads
+ * `SectionView.name` for the label, so these are the strings the operator
+ * sees at the top of the grid.
+ */
+const FOOD_TYPE_SECTIONS: Array<{ id: string; name: string; foodType: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null; position: number }> = [
+  { id: '__section_food__', name: 'Food', foodType: 'FOOD', position: 1 },
+  { id: '__section_beverage__', name: 'Beverage', foodType: 'BEVERAGE', position: 2 },
+  { id: '__section_dessert__', name: 'Dessert', foodType: 'DESSERT', position: 3 },
+  // Catch-all for Products the wizard did not tag with a foodType — most
+  // legacy Retail rows a Restaurant tenant reactivates land here.
+  { id: '__section_other__', name: 'Other', foodType: null, position: 4 },
+];
+
+/**
+ * Load the branch's POS-sellable catalogue (D45) and shape it into the
+ * same `MenuData` structure the picker + modifier dialog consume.
+ *
+ * Why a shape adapter rather than a second picker component:
+ *   - `pos-menu-browser.tsx` is 200 LOC of chip + grid + search + empty
+ *     states that reads MenuData and does not care where the rows came
+ *     from. Duplicating it for the catalogue would double the surface a
+ *     future POS tweak has to touch.
+ *   - The modifier dialog also takes a `groupsById: Map<string, ModifierGroupView>`.
+ *     The catalogue's modifier shape is a superset (same fields plus
+ *     `role`), so a one-to-one map keeps everything working.
+ *
+ * Trade-offs the adapter accepts:
+ *   - **`sectionId` is synthetic.** Each item is placed in one of four
+ *     foodType buckets; a real MenuItem id starts `mit_…` so the invented
+ *     ids can never collide.
+ *   - **Variants collapse to the default price.** The picker still displays
+ *     one card per Product. Variant selection at the POS is a separate
+ *     concern (Phase 3) — for now the default variant's price shows and
+ *     the item enters the cart at that price.
+ *   - **`prepMinutes`, `dietaryTags`, `imageUrl`, `itemType`** are all
+ *     carried through so future card enhancements can read them without
+ *     another round-trip.
+ */
+export function usePosCatalogue(
+  session: Session,
+  branchId: string | null,
+  channel?: PosCatalogueChannel,
+): { data: MenuData; loading: boolean; error: string | null; reload: () => void } {
+  const [data, setData] = React.useState<MenuData>(EMPTY_MENU);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [tick, setTick] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!branchId) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const res = await fetchPosCatalogue(session, { branchId, channel });
+        if (cancelled) return;
+        setData(catalogueToMenuData(res.items));
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load catalogue');
+        setData(EMPTY_MENU);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, branchId, channel, tick]);
+
+  const reload = React.useCallback(() => setTick((t) => t + 1), []);
+  return { data, loading, error, reload };
+}
+
+/**
+ * Pure adapter — exported for tests. Keep this function synchronous and
+ * side-effect free so a snapshot test can pin the shape without spinning
+ * up a fetch mock.
+ */
+export function catalogueToMenuData(items: PosCatalogueItem[]): MenuData {
+  const now = new Date().toISOString();
+  const menu: MenuView = {
+    id: CATALOGUE_MENU_ID,
+    branchId: '',
+    name: 'Menu',
+    description: null,
+    isActive: true,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const itemsBySection = new Map<string, MenuItemView[]>();
+  const modifierGroupsById = new Map<string, ModifierGroupView>();
+  const activeSections: SectionView[] = [];
+
+  for (const section of FOOD_TYPE_SECTIONS) {
+    const bucket = items.filter((it) => it.foodType === section.foodType);
+    if (bucket.length === 0) continue;
+    activeSections.push({
+      id: section.id,
+      menuId: CATALOGUE_MENU_ID,
+      name: section.name,
+      description: null,
+      position: section.position,
+      isActive: true,
+    });
+    itemsBySection.set(
+      section.id,
+      bucket.map((it, i) => toMenuItemView(it, section.id, i, modifierGroupsById, now)),
+    );
+  }
+
+  const sectionsByMenu = new Map<string, SectionView[]>();
+  if (activeSections.length > 0) {
+    sectionsByMenu.set(CATALOGUE_MENU_ID, activeSections);
+  }
+
+  return {
+    // If the catalogue returned zero items we still expose an empty menu
+    // list rather than a placeholder — the picker's own empty state ("No
+    // active menu is configured") reads better than a menu with no
+    // sections.
+    menus: activeSections.length > 0 ? [menu] : [],
+    sectionsByMenu,
+    itemsBySection,
+    modifierGroupsById,
+  };
+}
+
+function toMenuItemView(
+  item: PosCatalogueItem,
+  sectionId: string,
+  position: number,
+  modifierGroupsById: Map<string, ModifierGroupView>,
+  timestamp: string,
+): MenuItemView {
+  // Base price: use the item's unitPrice when available, else fall back to
+  // the default variant's price. `null` on both is a real Product-config
+  // error, but the picker still tolerates `"0"` — the cashier sees the
+  // card and can add a discount if the sticker is missing.
+  const defaultVariant = item.variants.find((v) => v.isDefault) ?? item.variants[0];
+  const basePriceNumber = item.unitPrice ?? defaultVariant?.unitPrice ?? 0;
+
+  // Register every group the item references. Groups are dedup'd by id, so
+  // two items sharing "Spice level" collapse to one entry the modifier
+  // dialog can look up.
+  for (const g of item.modifierGroups) {
+    if (modifierGroupsById.has(g.id)) continue;
+    modifierGroupsById.set(g.id, {
+      id: g.id,
+      name: g.name,
+      selection: g.selection,
+      minSelections: g.minSelections,
+      maxSelections: g.maxSelections,
+      isActive: true,
+      role: g.role,
+      options: g.options.map((o, idx) => ({
+        id: o.id,
+        name: o.name,
+        priceDelta: String(o.priceDelta),
+        position: idx,
+        isActive: o.isActive,
+      })),
+    });
+  }
+
+  return {
+    id: item.id,
+    sectionId,
+    name: item.name,
+    description: item.description,
+    basePrice: String(basePriceNumber),
+    // Products come from `/products`, so this is really a productId — no
+    // MenuItem row exists behind it. Left non-null so downstream code that
+    // shows a "linked to Product" affordance still fires.
+    productId: item.id,
+    isActive: true,
+    position,
+    modifierGroupIds: item.modifierGroups.map((g) => g.id),
+    stationIds: item.stations.map((s) => s.id),
+    channelPrices: [],
+    availability: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    itemType: item.foodType,
+    prepMinutes: item.prepMinutes,
+    dietaryTags: item.dietaryTags,
+    imageUrl: item.imageUrl,
+  };
 }

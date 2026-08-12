@@ -1,7 +1,9 @@
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -13,6 +15,15 @@ import {
 /** QuickBooks item types (mirrors the QBO Products & Services template). */
 export const PRODUCT_TYPES = ['Inventory', 'NonInventory', 'Service'] as const;
 export type ProductType = (typeof PRODUCT_TYPES)[number];
+
+/**
+ * D45 — Restaurant food-type segmentation. Reuses the D41 `MenuItemType`
+ * vocabulary so the wizard, the POS Catalogue endpoint and the historical
+ * Restaurant Menu wizard share ONE vocabulary and route through the same
+ * category chips.
+ */
+export const PRODUCT_FOOD_TYPES = ['FOOD', 'BEVERAGE', 'DESSERT'] as const;
+export type ProductFoodType = (typeof PRODUCT_FOOD_TYPES)[number];
 
 /**
  * Mirrors the QuickBooks Products & Services fields: name, category, item
@@ -93,4 +104,28 @@ export class CreateProductDto {
   @IsOptional()
   @MaxLength(2048)
   imageUrl?: string;
+
+  /**
+   * D45 — Restaurant Product wizard fields. All optional so Retail flows keep
+   * working unchanged; the schema stores them as nullable / defaulted so Tile
+   * Shop rows without a backfill remain valid. See `Product` in schema.prisma
+   * for the storage decisions.
+   */
+
+  /** Kitchen prep time in minutes (KDS ETA hint). */
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  prepMinutes?: number;
+
+  /** Free-form dietary markers (`vegan`, `gluten-free`, `contains-nuts`). */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  dietaryTags?: string[];
+
+  /** FOOD / BEVERAGE / DESSERT segmentation used by the POS Catalogue. */
+  @IsIn(PRODUCT_FOOD_TYPES)
+  @IsOptional()
+  foodType?: ProductFoodType;
 }

@@ -943,6 +943,134 @@ statement, and the presence of every additive column and FK.
 
 ---
 
+## 2026-08-13 — Restaurant Product wizard + Promotions
+
+### D45 — Restaurant tenants manage POS-sellable items from Inventory → Products; Menu admin deprecated read-only
+
+Approved to merge Restaurant Menu Item authority into the Product wizard.
+Restaurant tenants get a single admin surface (Inventory → Products) with
+Restaurant-aware content in the wizard; the `/menu` admin route is removed
+from Restaurant navigation. Retail (Tile Shop, Hardware) behaviour is
+unchanged — the wizard's Restaurant sections render only for tenants whose
+business type resolves to a Restaurant profile.
+
+**Deprecate MenuItem read-only.**
+
+- Existing MenuItem rows stay in the database indefinitely. The
+  `GET /restaurant/menu-sections/:sectionId/items` and sibling read routes
+  stay live so historical RestaurantOrder / KitchenTicket / Sale rows
+  continue to render (each snapshots `menuItemName` / `unitPrice` / etc.,
+  but the loose `menuItemId` reference is still used for KOT reprint,
+  order detail, and receipt lookup).
+- `POST` / `PATCH` / `DELETE` on menu-items and menu-sections continue to
+  work at the API level for a transition period — the Restaurant admin UI
+  routes to `/products` (redirect at the sidebar level; the raw routes are
+  reachable if typed but no navigation exposes them).
+- No auto-conversion. Tenants re-create existing menu items as Restaurant
+  Products at their pace; the transition is a UX decision, not a data
+  migration.
+
+**Domain shape.**
+
+- Restaurant-specific columns land on `Product` — `prepMinutes Int?`,
+  `dietaryTags String[]`, `foodType MenuItemType?`. All nullable /
+  defaulted so Retail rows stay valid with no backfill. `foodType`
+  reuses the D41 `MenuItemType` enum (FOOD / BEVERAGE / DESSERT) to
+  avoid a second authority.
+- `ProductVariant.isDefault Boolean` marks the variant a Restaurant POS
+  quick-add picks when the operator taps the product card without
+  opening the picker. Uniqueness of "one default per product" is
+  enforced by a partial unique index (Prisma cannot declare it).
+- Two new junctions promote existing MenuItem relationships to Product:
+  `ProductModifierGroup(productId, modifierGroupId, position)` and
+  `ProductStationLink(productId, stationId)`. Both are peers of the
+  existing MenuItem junctions; ModifierGroup rows themselves are
+  tenant-scoped and reusable, so a group can be attached to both a
+  Product AND a MenuItem during the transition window without a data
+  copy.
+- Kitchen station routing widens at KOT time: `KitchenService.
+  generateTicketsForRound` reads station IDs from EITHER
+  `MenuItemStationLink` OR `ProductStationLink` depending on how the
+  round item was sourced. A `RestaurantOrderItem.sourceKind` (or
+  equivalent discriminator) is used to pick the correct junction — DB
+  schema unchanged, service resolution widened.
+
+**Promotions vs Discounts — new peer domain.**
+
+- New `Promotion` + `PromotionItem` models cover **scheduled auto-apply
+  rules** — bundle fixed price, BOGO, %/$ discount — with day-of-week,
+  time-of-day, date range, branch scope, and channel scope.
+- `PromotionType`: `BUNDLE_FIXED_PRICE | BUY_X_GET_Y |
+  PERCENTAGE_DISCOUNT | FIXED_AMOUNT_DISCOUNT`.
+- `PromotionItemRole`: `BUY | GET | BUNDLE`.
+- The existing `Discount` model stays authoritative for operator-applied
+  retail line/order discounts at sale time. Promotion is its peer, not
+  its replacement. No `Discount` field is renamed or migrated.
+- **Server-side evaluation is the authority.** POS shows a promotion
+  badge only when the server confirms the promotion is currently valid
+  for the tenant, branch, channel, date, and time-of-day. Client-side
+  computation is advisory (preview only).
+- **Stacking policy defaults to false** — promotions do not stack unless
+  explicitly allowed via `Promotion.stackable`.
+
+**D45 scope — what ships now vs what defers.**
+
+Per Product Owner scope decision: **models + admin CRUD + POS badge**
+ship in this slice.
+
+Ships:
+
+- Prisma migration `20260813000000_add_restaurant_product_wizard_promotions`.
+- Restaurant-aware Product wizard step 3 (Modifiers / Offers /
+  Availability / Kitchen).
+- Promotions admin page (`/products/promotions` under the Inventory tab
+  set) with list + create + edit + activate/deactivate.
+- POS Catalogue endpoint that returns active Restaurant Products with
+  variants + modifier groups + station routing + a `promotions` array
+  of currently-valid promotions per product.
+- POS shows the promotion badge for items with an active promotion.
+
+Defers (follow-up slice):
+
+- Sale-close integration — freezing the promotion discount into
+  `RestaurantOrderItem` snapshots, auto-inserting BOGO reward lines,
+  routing reward lines to KOT, reducing stock for the reward.
+- Bundle auto-collapse in the cart.
+- Receipt line for the promotion discount.
+
+**Frontend routing (D31 respected).**
+
+- Business-profile-aware step content in the Product wizard: Restaurant
+  tenants see Step 3 with Modifier Groups / Promotions / Availability /
+  Kitchen Station; Retail tenants see Step 3 with the existing Pricing
+  & Inventory content only.
+- The `presentation.managementMode` resolver gains a `businessKind` hint
+  (Restaurant vs Retail) — components never compare `businessType`
+  directly, matching D31's rule.
+
+**Backward compatibility.**
+
+- Every existing Product row remains valid — the new columns are
+  nullable / defaulted. Retail Products (no `foodType`, no `dietaryTags`)
+  render exactly as they do today.
+- Every existing MenuItem, RestaurantOrder, KitchenTicket, Sale, and
+  Receipt continues to function against the untouched MenuItem tables
+  and API.
+- `POST /restaurant/orders/:orderId/rounds` gains an optional
+  `sourceKind: 'MENU_ITEM' | 'PRODUCT' | 'PRODUCT_VARIANT'` field
+  (default `'MENU_ITEM'`) so existing clients keep working; new
+  Product-sourced round items use the new discriminator.
+
+**Migration.** `20260813000000_add_restaurant_product_wizard_promotions`.
+Purely additive: 4 new tables, 2 new enums, 3 additive Product columns,
+1 additive ProductVariant column, 1 partial unique index. No DROP, no
+ALTER COLUMN SET NOT NULL, no RENAME. `MenuItem*` and `Discount` are
+untouched — the per-migration structural spec in
+`provider-contract.spec.ts` enforces this via mutation-provable
+negative assertions.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

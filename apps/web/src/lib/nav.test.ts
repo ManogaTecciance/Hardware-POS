@@ -118,22 +118,39 @@ describe('Restaurant navigation', () => {
   it('shows the Restaurant shell', () => {
     // Pilot Change 2 rebuild: POS + Orders replace the standalone Takeaway
     // entry (PO decision 3 — Takeaway is now `POS → Takeaway`).
+    //
+    // D45: `Menu` is intentionally absent — Restaurant tenants author every
+    // sellable item from Products (labelled "Inventory" in the rail) and the
+    // POS reads them via `/restaurant/pos-catalogue`. The `/menu` route file
+    // still exists for support-only access at `?view=legacy`, but the nav
+    // entry is gone.
     expect(labels(restaurant)).toEqual([
       'Dashboard',
       'POS',
       'Orders',
       'Kitchen',
       'Tables',
-      'Menu',
       // Restaurant tenants label the shared product catalogue "Inventory"
-      // so it reads clearly next to "Menu" (see nav.ts). Retail keeps
-      // "Products" — asserted in the Tile Shop block above.
+      // so it reads as the single authoring surface for menu items. Retail
+      // keeps "Products" — asserted in the Tile Shop block above.
       'Inventory',
       'Customers',
       'Sales',
       'Reports',
       'Settings',
     ]);
+  });
+
+  it('does not surface a Menu link (D45)', () => {
+    // Positive assertion of a D45 negative: the Menu nav entry was removed,
+    // and the shape assertion above would still pass a resolver that dropped
+    // several entries — this one nails the exact removal.
+    const shown = labels(restaurant);
+    expect(shown).not.toContain('Menu');
+    // Positive control: the retail list also does not contain Menu, so if
+    // both flipped to including it the test above and this one would agree.
+    // Assert against the RETAIL nav here so the intent is visible.
+    expect(labels(nav('TILE_SHOP', LEGACY_MODULES))).not.toContain('Menu');
   });
 
   it('shows no retail-only destination', () => {
@@ -158,8 +175,10 @@ describe('Restaurant navigation', () => {
 
   it('marks every unbuilt destination as upcoming, and no built one', () => {
     // Every Restaurant destination is live: POS + Orders replaced the
-    // standalone Takeaway entry in Pilot Change 2, and nothing in the
-    // sidebar carries the "Soon" marker today.
+    // standalone Takeaway entry in Pilot Change 2, and D45 removed the
+    // Menu entry (Products is now the single authoring surface for a
+    // Restaurant tenant). Nothing in the sidebar carries the "Soon"
+    // marker today.
     const byLabel = Object.fromEntries(
       restaurant.flatMap((g) => g.items).map((i) => [i.label, Boolean(i.upcoming)]),
     );
@@ -169,7 +188,6 @@ describe('Restaurant navigation', () => {
       Orders: false,
       Kitchen: false,
       Tables: false,
-      Menu: false,
       Inventory: false,
       Customers: false,
       Sales: false,
@@ -341,6 +359,11 @@ describe('moduleForPath', () => {
       ['/tables', moduleForPath('/tables')],
       ['/takeaway', moduleForPath('/takeaway')],
       ['/kitchen', moduleForPath('/kitchen')],
+      // D45: `/menu` is no longer in any workspace's nav, so the derivation
+      // table has no entry for it and `moduleForPath` returns null. The
+      // route file still exists (support-only fallback at `?view=legacy`
+      // + a Restaurant-tenant redirect card), but the client-side module
+      // gate no longer fires — the API's own gating is authoritative.
       ['/menu', moduleForPath('/menu')],
     ]).toEqual([
       ['/quickbooks', 'QUICKBOOKS'],
@@ -354,7 +377,7 @@ describe('moduleForPath', () => {
       ['/tables', 'TABLE_MANAGEMENT'],
       ['/takeaway', null],
       ['/kitchen', 'KITCHEN'],
-      ['/menu', 'MENU_MANAGEMENT'],
+      ['/menu', null],
     ]);
   });
 

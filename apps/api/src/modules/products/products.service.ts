@@ -90,6 +90,14 @@ export class ProductsService {
       // other flow, which historically calls `POST /products/:id/image` after
       // create.
       imageUrl: dto.imageUrl ?? null,
+      // D45 — Restaurant wizard fields. Stored as-is; no provider routing.
+      // dietaryTags defaults to [] in the schema, but Prisma treats undefined
+      // as "leave defaulted" only on update — on create the field is set to
+      // whatever we pass, so we pass an explicit empty array to keep the
+      // shape stable for Retail rows the wizard never touches.
+      prepMinutes: dto.prepMinutes ?? null,
+      dietaryTags: dto.dietaryTags ?? [],
+      foodType: dto.foodType ?? null,
       syncStatus: 'NOT_SYNCED',
     };
     // One provider for the operation, resolved from the authenticated tenant before
@@ -161,6 +169,13 @@ export class ProductsService {
       // path and manage storage.remove(). Skipping `undefined` keeps Prisma
       // from clobbering the existing value.
       ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl || null } : {}),
+      // D45 — Restaurant wizard fields. Passed through unchanged. Prisma
+      // treats `undefined` as "leave unchanged", which is the semantics the
+      // wizard wants (a partial update from step 5 should not zero out the
+      // fields that live on steps 1-4).
+      prepMinutes: dto.prepMinutes,
+      dietaryTags: dto.dietaryTags,
+      foodType: dto.foodType,
     };
     const catalog = await this.catalogProviders.forTenant(tenantId);
     try {

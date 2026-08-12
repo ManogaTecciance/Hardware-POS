@@ -78,9 +78,10 @@ const T = BranchScopeKind.TENANT_SCOPED;
 const B = BranchScopeKind.BRANCH_SCOPED;
 const G = BranchScopeKind.GLOBAL_PLATFORM;
 
-/** Every route the API serves, classified. 166 entries — 152 through
- *  Phase 1.5.6 plus the 14 D44 endpoints (11 product-variants + product-image
- *  under `/products` as SHARED_CORE, 3 inventory-receipts under INVENTORY). */
+/** Every route the API serves, classified. 245 entries after D45 — 233 pre-D45
+ *  plus 12 new endpoints: 4 SHARED_CORE product-side attachments
+ *  (`modifier-groups`, `kitchen-stations`), 7 INVENTORY-gated promotions
+ *  endpoints, and 1 RETAIL_POS-gated Restaurant POS Catalogue read. */
 const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /audit-logs': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /auth/active-branch': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
@@ -163,12 +164,32 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'DELETE /products/:productId/variants/:variantId/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/:productId/variants/:variantId/inventory': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/:productId/variants/:variantId/purchases': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // D45 — Product-side attachment endpoints. Products are the catalogue every
+  // business profile carries (D35), so these stay SHARED_CORE alongside the
+  // rest of `/products`.
+  'GET /products/:productId/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PUT /products/:productId/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/:productId/kitchen-stations': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PUT /products/:productId/kitchen-stations': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/import/commit': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/import/preview': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/import/template': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/report': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/search': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/sync/mock': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  // D45 — Promotions module. Gated on MENU_MANAGEMENT (D45 hotfix): the
+  // Promotions admin lives under Inventory tabs on Restaurant tenants,
+  // whose default module set does NOT include INVENTORY — MENU_MANAGEMENT
+  // is the module that governs their catalogue admin and is present on
+  // every Restaurant / Cafe / Bakery tenant. The prior INVENTORY gate
+  // silently denied the whole feature to the target audience.
+  'GET /promotions': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'POST /promotions': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'GET /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'PATCH /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'DELETE /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'POST /promotions/:id/activate': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'POST /promotions/:id/deactivate': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /public/quotations/:token': { module: 'QUOTATIONS', guard: 'public-no-tenant', scope: G },
   'GET /quickbooks/callback': { module: 'QUICKBOOKS', guard: 'public-no-tenant', scope: G },
   'GET /quickbooks/connect': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
@@ -198,6 +219,13 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /receipts/:id': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'POST /receipts/:saleId/customer': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'GET /receipts/sale/:saleId': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  // D45 — Restaurant POS Catalogue read model. Gated on MENU_MANAGEMENT
+  // (D45 hotfix): Restaurant tenants' default modules include
+  // MENU_MANAGEMENT / DINING / KITCHEN / TAKEAWAY / TABLE_MANAGEMENT but
+  // NOT RETAIL_POS — the initial gate silently denied the Counter POS the
+  // catalogue endpoint it needs. The route path `/restaurant/*` already
+  // makes the Restaurant scoping explicit.
+  'GET /restaurant/pos-catalogue': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/config': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'PUT /restaurant/branches/:branchId/config': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/kitchen-stations': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },

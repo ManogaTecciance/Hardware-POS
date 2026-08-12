@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 233
-- Module-guarded routes: 177
-- Ungated routes: 56
+- Total routes: 245
+- Module-guarded routes: 185
+- Ungated routes: 60
 
 ## How to read the Guard column
 

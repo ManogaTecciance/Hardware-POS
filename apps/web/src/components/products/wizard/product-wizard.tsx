@@ -11,7 +11,10 @@ import { Toast } from '@/components/ui/toast';
 import { type Session } from '@/lib/auth';
 import { useEffectiveProfile } from '@/lib/platform-profile';
 import { useIsDesktop } from '@/lib/use-viewport';
-import { resolveProductManagementPresentation } from '@/lib/products/product-presentation';
+import {
+  resolveBusinessKind,
+  resolveProductManagementPresentation,
+} from '@/lib/products/product-presentation';
 import {
   createProduct,
   fetchCategoryTree,
@@ -20,6 +23,20 @@ import {
   type ManagedProduct,
 } from '@/lib/products-api';
 import { fetchBranches, type BranchSummary } from '@/lib/products/branches-api';
+import {
+  fetchProductModifierGroups,
+  putProductModifierGroups,
+} from '@/lib/products/product-modifiers-api';
+import {
+  fetchProductStations,
+  putProductStations,
+} from '@/lib/products/product-stations-api';
+import {
+  defaultRoleForPromotionType,
+  fetchPromotion,
+  fetchPromotions,
+  updatePromotion,
+} from '@/lib/products/promotions-api';
 import {
   createVariantsBatch,
   fetchVariants,
@@ -88,12 +105,16 @@ type Props = CreateProps | EditProps;
 export function ProductWizard(props: Props) {
   const { session, mode } = props;
   const router = useRouter();
-  const { inventoryMode } = useEffectiveProfile();
+  const { inventoryMode, profile } = useEffectiveProfile();
   const presentation = resolveProductManagementPresentation({
     inventoryMode,
     syncStatus: mode === 'edit' ? props.initialProduct.syncStatus : undefined,
     quickbooksItemId: mode === 'edit' ? props.initialProduct.quickbooksItemId : null,
   });
+  // Restaurant vs. Retail. The step components must not compare `businessType`
+  // themselves (D31 — the resolver is the single authority), so the shell
+  // derives it once here and passes it as a prop.
+  const businessKind = resolveBusinessKind(profile?.businessType ?? null);
   // `showOpeningStock` gates the opening-stock column, the branch select, and
   // the "opening stock only on LOCAL" info banner in Step 3. Reading it from
   // the resolver's `managementMode` — not from `inventoryMode` — keeps D31's
@@ -146,20 +167,45 @@ export function ProductWizard(props: Props) {
   }, [session, props.categories]);
 
   // Edit-mode hydration — variants + dimensions come from separate endpoints.
+  // Restaurant tenants also pull modifier-groups / stations / promotions to
+  // preselect the check-lists on Step 3. Every extra fetch is defensively
+  // cast to `.catch(() => defaultShape)` so a single 404 does not blank the
+  // whole wizard.
   React.useEffect(() => {
     if (mode !== 'edit') return;
     let cancelled = false;
     setLoading(true);
+    const isRestaurantEdit = businessKind === 'RESTAURANT';
     (async () => {
       try {
-        const [variantsRes, dimsRes] = await Promise.all([
+        const [variantsRes, dimsRes, mgRes, ksRes, promoRes] = await Promise.all([
           fetchVariants(session, props.initialProductId).catch(() => [] as ProductVariant[]),
           fetchVariations(session, props.initialProductId).catch(() => ({ dimensions: [] })),
+          isRestaurantEdit
+            ? fetchProductModifierGroups(session, props.initialProductId).catch(() => ({
+                modifierGroups: [],
+              }))
+            : Promise.resolve({ modifierGroups: [] }),
+          isRestaurantEdit
+            ? fetchProductStations(session, props.initialProductId).catch(() => ({ stations: [] }))
+            : Promise.resolve({ stations: [] }),
+          isRestaurantEdit
+            ? fetchPromotions(session, { productId: props.initialProductId }).catch(() => ({
+                items: [],
+                total: 0,
+              }))
+            : Promise.resolve({ items: [], total: 0 }),
         ]);
         if (cancelled) return;
         setDimensions(dimsRes.dimensions);
         setOriginalVariants(variantsRes);
-        setState(hydrateFromProduct(props.initialProduct, variantsRes, dimsRes.dimensions));
+        setState(
+          hydrateFromProduct(props.initialProduct, variantsRes, dimsRes.dimensions, {
+            modifierGroupIds: mgRes.modifierGroups.map((g) => g.id),
+            kitchenStationIds: ksRes.stations.map((s) => s.id),
+            promotionIds: promoRes.items.map((p) => p.id),
+          }),
+        );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -169,7 +215,7 @@ export function ProductWizard(props: Props) {
     };
     // A stable id is enough; the object identity of `initialProduct` doesn't matter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, mode, mode === 'edit' ? props.initialProductId : null]);
+  }, [session, mode, businessKind, mode === 'edit' ? props.initialProductId : null]);
 
   const patchState = React.useCallback((patch: Partial<WizardState>) => {
     dirty.current = true;
@@ -186,7 +232,7 @@ export function ProductWizard(props: Props) {
   };
 
   const onContinue = () => {
-    const stepErrors = validateStep(currentStep, state, { inventoryMode });
+    const stepErrors = validateStep(currentStep, state, { inventoryMode, businessKind });
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
       return;
@@ -214,14 +260,15 @@ export function ProductWizard(props: Props) {
 
   const persist = async () => {
     // Final validation across every step; the earliest failure wins the focus.
+    const validateCtx = { inventoryMode, businessKind };
     const allErrors: Record<string, string> = {};
     for (const key of STEP_ORDER.filter((s) => s !== 'review')) {
-      Object.assign(allErrors, validateStep(key, state, { inventoryMode }));
+      Object.assign(allErrors, validateStep(key, state, validateCtx));
     }
     if (Object.keys(allErrors).length > 0) {
       setErrors(allErrors);
       const earliest = STEP_ORDER.find(
-        (k) => Object.keys(validateStep(k, state, { inventoryMode })).length > 0,
+        (k) => Object.keys(validateStep(k, state, validateCtx)).length > 0,
       );
       if (earliest) goTo(STEP_ORDER.indexOf(earliest));
       return;
@@ -235,12 +282,28 @@ export function ProductWizard(props: Props) {
       } else {
         await runEdit(session, props.initialProductId, state, originalVariants);
       }
+      // Restaurant links: after the product exists and variants are batched,
+      // patch modifier-group + station links + promotion memberships. Kept
+      // outside `runCreate`/`runEdit` so a partial failure here does not roll
+      // back the product itself — the toast is degraded and the operator
+      // fixes it from Products / Promotions admin. Retail wizards skip this
+      // entirely (empty arrays short-circuit each call).
+      const productId =
+        mode === 'edit' ? props.initialProductId : (lastCreatedIdRef.current ?? '');
+      let linkNote: string | null = null;
+      if (productId && businessKind === 'RESTAURANT') {
+        linkNote = await persistRestaurantLinks(session, productId, state);
+      }
+
       setSaveState('saved');
-      setToast(mode === 'edit' ? 'Product updated.' : 'Product created.');
-      const id = mode === 'edit' ? props.initialProductId : (lastCreatedIdRef.current ?? '');
+      if (linkNote) {
+        setToast(linkNote);
+      } else {
+        setToast(mode === 'edit' ? 'Product updated.' : 'Product created.');
+      }
       // Brief pause so the toast is visible before the route change lands.
       setTimeout(() => {
-        if (id) router.push(`/products/${id}`);
+        if (productId) router.push(`/products/${productId}`);
       }, 400);
     } catch (err) {
       setSaveState('idle');
@@ -280,6 +343,7 @@ export function ProductWizard(props: Props) {
               errors={errors}
               categories={categories}
               session={session}
+              businessKind={businessKind}
               onChange={patchState}
             />
           ) : null}
@@ -292,6 +356,9 @@ export function ProductWizard(props: Props) {
               errors={errors}
               branches={branches}
               showOpeningStock={showOpeningStock}
+              businessKind={businessKind}
+              session={session}
+              branchId={session.branchId}
               onChange={patchState}
             />
           ) : null}
@@ -462,6 +529,100 @@ async function runCreate(
     created.id,
     buildVariantsBatchInput(state, dimIdByKey, optIdByKey),
   );
+}
+
+/**
+ * Restaurant link persistence (D45 — post-create/post-edit).
+ *
+ * Runs after the product itself is safely written. Deliberately isolated from
+ * `runCreate`/`runEdit` so a partial failure here does NOT roll back the
+ * product — the operator can complete the linking from the Products /
+ * Promotions admin. Returns a degraded toast message on partial failure, or
+ * `null` when everything landed cleanly (caller picks the default success
+ * wording in that case).
+ *
+ * Promotions are updated in parallel because they are independent PATCHes;
+ * modifier-groups and stations are the wizard's own PUT-replacements and
+ * always run first so the failure surface is limited to "the promotion links
+ * didn't stick" when it happens.
+ */
+async function persistRestaurantLinks(
+  session: Session,
+  productId: string,
+  state: WizardState,
+): Promise<string | null> {
+  const modifierPromise =
+    state.modifierGroupIds.length > 0 || state.hasVariations /* empty PUT is safe */
+      ? putProductModifierGroups(session, productId, state.modifierGroupIds).catch(() => null)
+      : Promise.resolve(null);
+  const stationPromise =
+    state.kitchenStationIds.length > 0
+      ? putProductStations(session, productId, state.kitchenStationIds).catch(() => null)
+      : Promise.resolve(null);
+
+  const [mgResult, ksResult] = await Promise.all([modifierPromise, stationPromise]);
+
+  // Promotion links — fetch each promotion, add the new product to its item
+  // list (if not already there), and PATCH. Parallel because they don't
+  // depend on each other; the count of failures is summarised into the toast.
+  let promoFailures = 0;
+  if (state.promotionIds.length > 0) {
+    const results = await Promise.all(
+      state.promotionIds.map(async (promotionId) => {
+        try {
+          const promo = await fetchPromotion(session, promotionId);
+          // Idempotent: if this product is already an item on the promotion
+          // (edit mode re-save), skip the PATCH so we don't stack duplicate
+          // PromotionItems on every save.
+          if (promo.items.some((i) => i.productId === productId)) return true;
+          const role = defaultRoleForPromotionType(promo.type);
+          await updatePromotion(session, promotionId, {
+            name: promo.name,
+            description: promo.description,
+            fixedPrice: promo.fixedPrice,
+            percentageOff: promo.percentageOff,
+            amountOff: promo.amountOff,
+            buyQuantity: promo.buyQuantity,
+            getQuantity: promo.getQuantity,
+            startsOn: promo.startsOn,
+            endsOn: promo.endsOn,
+            daysOfWeek: promo.daysOfWeek,
+            startTime: promo.startTime,
+            endTime: promo.endTime,
+            branchScope: promo.branchScope,
+            channelScope: promo.channelScope,
+            stackable: promo.stackable,
+            items: [
+              ...promo.items.map((i) => ({
+                productId: i.productId,
+                role: i.role,
+                quantity: i.quantity,
+              })),
+              { productId, role, quantity: 1 },
+            ],
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    );
+    promoFailures = results.filter((ok) => !ok).length;
+  }
+
+  const linkFailures =
+    (mgResult === null && state.modifierGroupIds.length > 0 ? 1 : 0) +
+    (ksResult === null && state.kitchenStationIds.length > 0 ? 1 : 0);
+
+  if (promoFailures > 0 && linkFailures === 0) {
+    return `Product saved, but ${promoFailures} promotion link${
+      promoFailures === 1 ? '' : 's'
+    } failed.`;
+  }
+  if (linkFailures > 0) {
+    return 'Product saved, but some kitchen or modifier links failed. Retry from the Products list.';
+  }
+  return null;
 }
 
 /**

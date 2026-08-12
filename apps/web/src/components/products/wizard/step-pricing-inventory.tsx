@@ -6,9 +6,12 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { type Session } from '@/lib/auth';
 import type { BranchSummary } from '@/lib/products/branches-api';
+import type { ProductBusinessKind } from '@/lib/products/product-presentation';
 import { useIsTabletUp } from '@/lib/use-viewport';
 
+import { StepRestaurantAdditions } from './step-restaurant-additions';
 import { variantLabel, type VariantDraft, type WizardState } from './wizard-state';
 
 /**
@@ -26,6 +29,20 @@ interface Props {
   branches: BranchSummary[];
   /** True when the tenant runs on locally-tracked inventory (LOCAL mode). */
   showOpeningStock: boolean;
+  /**
+   * Restaurant vs. Retail. Restaurant tenants get three extra cards
+   * (Modifier Groups / Promotions / Availability & Kitchen) rendered below the
+   * pricing matrix. Null while unresolved — same safe default as Step 1.
+   */
+  businessKind?: ProductBusinessKind | null;
+  /**
+   * Session required only for the Restaurant additions cards (they fetch the
+   * modifier-groups, promotions and station catalogues). Retail tenants never
+   * render those cards, so a missing session on retail is harmless.
+   */
+  session?: Session;
+  /** Branch scope for kitchen-station catalogue fetches. */
+  branchId?: string | null;
   onChange: (patch: Partial<WizardState>) => void;
 }
 
@@ -34,19 +51,27 @@ export function StepPricingInventory({
   errors,
   branches,
   showOpeningStock,
+  businessKind,
+  session,
+  branchId,
   onChange,
 }: Props) {
   const isLocal = showOpeningStock;
+  const isRestaurant = businessKind === 'RESTAURANT';
 
   return (
     <div className="space-y-5">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-primary">Step 3 of 4</p>
-        <h2 className="mt-1 text-lg font-semibold">Pricing &amp; inventory</h2>
+        <h2 className="mt-1 text-lg font-semibold">
+          {isRestaurant ? 'Pricing, modifiers & availability' : 'Pricing & inventory'}
+        </h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
           {state.hasVariations
             ? 'One row per sellable variant.'
-            : 'Set the selling price and, optionally, opening stock.'}
+            : isRestaurant
+              ? 'Set the price, then attach modifiers, offers and kitchen routing.'
+              : 'Set the selling price and, optionally, opening stock.'}
         </p>
       </div>
 
@@ -68,6 +93,15 @@ export function StepPricingInventory({
       ) : (
         <SimpleForm state={state} errors={errors} isLocal={isLocal} onChange={onChange} />
       )}
+
+      {isRestaurant && session ? (
+        <StepRestaurantAdditions
+          state={state}
+          session={session}
+          branchId={branchId ?? null}
+          onChange={onChange}
+        />
+      ) : null}
     </div>
   );
 }

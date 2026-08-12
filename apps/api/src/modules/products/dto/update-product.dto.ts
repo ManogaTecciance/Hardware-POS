@@ -1,7 +1,9 @@
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -10,7 +12,12 @@ import {
   Min,
 } from 'class-validator';
 
-import { PRODUCT_TYPES, type ProductType } from './create-product.dto';
+import {
+  PRODUCT_FOOD_TYPES,
+  PRODUCT_TYPES,
+  type ProductFoodType,
+  type ProductType,
+} from './create-product.dto';
 
 /** All fields optional — only the provided ones are updated. */
 export class UpdateProductDto {
@@ -84,4 +91,24 @@ export class UpdateProductDto {
   @IsOptional()
   @MaxLength(2048)
   imageUrl?: string;
+
+  /**
+   * D45 — Restaurant Product wizard fields. See CreateProductDto for the
+   * per-field notes. Update semantics: `undefined` = leave unchanged; an
+   * explicit `null` on `prepMinutes` / `foodType` clears the column, and an
+   * empty `dietaryTags` array clears the tag list.
+   */
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  prepMinutes?: number;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  dietaryTags?: string[];
+
+  @IsIn(PRODUCT_FOOD_TYPES)
+  @IsOptional()
+  foodType?: ProductFoodType;
 }

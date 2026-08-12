@@ -64,6 +64,11 @@ import { RestaurantOrdersController } from '../../modules/restaurant-orders/rest
 import { ProductImagesController } from '../../modules/products/product-images.controller';
 import { ProductVariantsController } from '../../modules/products/variants/product-variants.controller';
 import { InventoryReceiptsController } from '../../modules/inventory-receipts/inventory-receipts.controller';
+// D45 — Restaurant Product wizard merge + Promotions.
+import { ProductModifiersController } from '../../modules/products/product-modifiers.controller';
+import { ProductStationsController } from '../../modules/products/product-stations.controller';
+import { PromotionsController } from '../../modules/promotions/promotions.controller';
+import { PosCatalogueController } from '../../modules/restaurant/pos-catalogue.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -118,6 +123,11 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   ProductImagesController,
   ProductVariantsController,
   InventoryReceiptsController,
+  // D45 — Restaurant Product wizard merge + Promotions.
+  ProductModifiersController,
+  ProductStationsController,
+  PromotionsController,
+  PosCatalogueController,
 ];
 
 /**
@@ -181,4 +191,9 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'inventory-receipts',
   'product-images',
   'product-variants',
+  // D45 — Restaurant Product wizard merge + Promotions.
+  'product-modifiers',
+  'product-stations',
+  'promotions',
+  'pos-catalogue',
 ];

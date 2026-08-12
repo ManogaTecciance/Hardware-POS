@@ -1,7 +1,12 @@
 import { Module } from '@nestjs/common';
 
+import { AuditLogModule } from '../audit-log/audit-log.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { ProductImagesController } from './product-images.controller';
+import { ProductModifiersController } from './product-modifiers.controller';
+import { ProductModifiersService } from './product-modifiers.service';
+import { ProductStationsController } from './product-stations.controller';
+import { ProductStationsService } from './product-stations.service';
 import { ProductsController } from './products.controller';
 import { ProductsImportService } from './products-import.service';
 import { ProductsReportService } from './products-report.service';
@@ -27,8 +32,20 @@ import { ProductVariantsService } from './variants/product-variants.service';
  * having ONE weighted-average code path.
  */
 @Module({
-  imports: [ProvidersModule],
-  controllers: [ProductsController, ProductImagesController, ProductVariantsController],
+  // AuditLogModule is imported for D45: the Product ↔ ModifierGroup and
+  // Product ↔ KitchenStation attachment endpoints record a mutation audit
+  // event so the wizard's changes are traceable per-tenant.
+  imports: [ProvidersModule, AuditLogModule],
+  controllers: [
+    ProductsController,
+    ProductImagesController,
+    ProductVariantsController,
+    // D45 — Product-side attachment endpoints. ModifierGroup / KitchenStation
+    // catalogues stay owned by their respective modules; only the junctions
+    // live here.
+    ProductModifiersController,
+    ProductStationsController,
+  ],
   providers: [
     ProductsService,
     ProductsRepository,
@@ -36,6 +53,8 @@ import { ProductVariantsService } from './variants/product-variants.service';
     ProductsReportService,
     ProductVariantsService,
     ProductVariantsRepository,
+    ProductModifiersService,
+    ProductStationsService,
   ],
   exports: [ProductsService],
 })

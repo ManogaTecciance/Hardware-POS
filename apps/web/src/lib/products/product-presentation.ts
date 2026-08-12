@@ -29,9 +29,45 @@
  * provider from the authenticated session and refuses a QuickBooks push for a LOCAL
  * or DISABLED tenant whatever the browser sends.
  */
-import type { InventoryMode } from '@/lib/platform-api';
+import type { BusinessType, InventoryMode } from '@/lib/platform-api';
 
 import type { ProductSyncStatus } from '@/lib/products-api';
+
+/**
+ * Kind of product surface a business runs, from the tenant's `businessType`.
+ *
+ * Split coarsely into `RESTAURANT` (any food-service tenant — restaurant, cafe,
+ * bakery — where the Product wizard surfaces Modifiers / Offers / Availability
+ * on Step 3 and Category is Food/Beverage/Dessert) vs. `RETAIL` (hardware,
+ * tile shop, general trade). Kept as a coarse split because every UI branch
+ * downstream is one of the two — a finer taxonomy would be an authority the
+ * step components would end up reading directly, which is exactly what D31
+ * exists to prevent.
+ *
+ * `null` while the profile is unresolved, so a step component defaults to no
+ * Restaurant chrome rather than briefly rendering restaurant fields for a
+ * retail tenant on load.
+ */
+export type ProductBusinessKind = 'RESTAURANT' | 'RETAIL';
+
+/**
+ * Derive the wizard's `businessKind` from the tenant's `businessType`.
+ *
+ * Living in the resolver so the "coarse kind" bucketing has one owner. Step
+ * components must not compare `businessType` themselves (D31) — they take a
+ * `businessKind` prop the wizard shell derives here.
+ */
+export function resolveBusinessKind(businessType: BusinessType | null): ProductBusinessKind | null {
+  if (businessType === null) return null;
+  if (
+    businessType === 'RESTAURANT' ||
+    businessType === 'CAFE' ||
+    businessType === 'BAKERY'
+  ) {
+    return 'RESTAURANT';
+  }
+  return 'RETAIL';
+}
 
 /**
  * The presentation classes, which are deliberately NOT one-per-`InventoryMode`.

@@ -1,7 +1,9 @@
 import {
   BarChart3,
   ChefHat,
-  ClipboardList,
+  // ClipboardList — reserved for the /menu icon; kept commented alongside the
+  // commented-out nav entry below so a re-enable is a one-line change.
+  // ClipboardList,
   FileText,
   LayoutDashboard,
   Link2,
@@ -196,18 +198,26 @@ const RESTAURANT_NAV: NavGroup[] = [
   {
     label: 'Catalog',
     items: [
-      {
-        // Frontend Phase B — menu / section / item CRUD is live.
-        href: '/menu',
-        label: 'Menu',
-        icon: ClipboardList,
-        permission: Permission.PRODUCT_READ,
-        module: 'MENU_MANAGEMENT',
-      },
-      // Restaurant tenants label the shared product catalogue "Inventory" so it
-      // reads clearly next to "Menu" — a Restaurant owner adds menu items from
-      // Menu; the packaged goods (Coke, water) they stock live under Inventory.
-      // Retail tenants keep the label "Products" (see RETAIL_NAV above).
+      // D45: `/menu` is intentionally removed from the Restaurant rail. The
+      // Product Wizard (Restaurant) is now the single authoring surface for
+      // sellable items — a Restaurant owner adds dishes and packaged goods
+      // in the same place under Products, and the runtime POS reads them
+      // from `GET /restaurant/pos-catalogue`. The `/menu/**` route files are
+      // kept so support staff can still reach the legacy MenuBrowser via a
+      // typed URL (`/menu?view=legacy`), but the nav entry is gone.
+      //
+      // If a future business type wants a distinct authoring surface, put
+      // it back here — do not re-enable this line without a decision record.
+      // {
+      //   href: '/menu',
+      //   label: 'Menu',
+      //   icon: ClipboardList,
+      //   permission: Permission.PRODUCT_READ,
+      //   module: 'MENU_MANAGEMENT',
+      // },
+      // Restaurant tenants label the shared product catalogue "Inventory"
+      // so it reads clearly as the authoring surface for every sellable
+      // item. Retail tenants keep the label "Products" (see RETAIL_NAV above).
       {
         href: '/products',
         label: 'Inventory',

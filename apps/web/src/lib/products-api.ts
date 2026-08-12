@@ -97,6 +97,15 @@ export interface ProductInput {
    * is one-shot.
    */
   imageUrl?: string | null;
+  /**
+   * D45 — Restaurant Product wizard fields. Backend accepts them on every
+   * tenant; Retail tenants leave them null / empty and they don't render
+   * anywhere. Sent through so a Restaurant tenant's Category (Food /
+   * Beverage / Dessert), prep-time, and dietary tags round-trip.
+   */
+  foodType?: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null;
+  prepMinutes?: number | null;
+  dietaryTags?: string[];
 }
 
 export interface Category {

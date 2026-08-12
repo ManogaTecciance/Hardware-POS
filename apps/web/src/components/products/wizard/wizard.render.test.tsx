@@ -196,6 +196,7 @@ describe('StepDetails', () => {
         errors={errors}
         categories={categories}
         session={noopSession}
+        businessKind="RETAIL"
         onChange={h.patch}
       />
     );
@@ -211,6 +212,7 @@ describe('StepDetails', () => {
         errors={validateStep('details', s, { inventoryMode: 'LOCAL' })}
         categories={categoryTree}
         session={noopSession}
+        businessKind="RETAIL"
         onChange={() => {}}
       />,
     );

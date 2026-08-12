@@ -9,11 +9,15 @@
  * (React key stability) and only turn into real ids after the batch POST.
  */
 
+import type { ProductBusinessKind } from '@/lib/products/product-presentation';
 import type { ManagedProduct, ProductItemType } from '@/lib/products-api';
 import type {
   ProductVariant,
   ProductVariationDimension,
 } from '@/lib/products/variants-api';
+
+/** Restaurant Category (Food / Beverage / Dessert). Empty when not chosen yet. */
+export type RestaurantFoodType = '' | 'FOOD' | 'BEVERAGE' | 'DESSERT';
 
 export type StepKey = 'details' | 'variations' | 'pricing' | 'review';
 
@@ -88,6 +92,31 @@ export interface WizardState {
     openingQuantity: string;
     reorderLevel: string;
   };
+
+  // ── Restaurant-only fields (D45). Populated by every wizard state but only
+  //    surfaced when `businessKind === 'RESTAURANT'` — carrying them
+  //    unconditionally keeps the type unbranched and means a tenant that
+  //    flips business type mid-session doesn't lose its already-entered data.
+
+  /** Food / Beverage / Dessert. Required at Step 1 for Restaurant tenants. */
+  foodType: RestaurantFoodType;
+  /** Prep time in minutes, kept as string to match the wizard's input pattern. */
+  prepMinutes: string;
+  /** Dietary chip picks — e.g. Veg / Non-Veg / Spicy. */
+  dietaryTags: string[];
+  /** ModifierGroup ids linked to this product (Step 3, card A). */
+  modifierGroupIds: string[];
+  /** KitchenStation ids the product routes to (Step 3, card C). */
+  kitchenStationIds: string[];
+  /**
+   * Promotion ids the operator picked/linked in Step 3, card B.
+   *
+   * These are NOT persisted from Step 4 as a promotions-array on the product
+   * itself — the wizard patches each promotion after the product exists to add
+   * a `PromotionItem` pointing at the new product id. See `product-wizard.tsx`
+   * for the exact orchestration.
+   */
+  promotionIds: string[];
 }
 
 /**
@@ -125,6 +154,12 @@ export function initialState(): WizardState {
       openingQuantity: '',
       reorderLevel: '',
     },
+    foodType: '',
+    prepMinutes: '',
+    dietaryTags: [],
+    modifierGroupIds: [],
+    kitchenStationIds: [],
+    promotionIds: [],
   };
 }
 
@@ -136,10 +171,29 @@ export function initialState(): WizardState {
  * option id from a deleted variation shows up as an empty select rather than
  * silently landing on a different option.
  */
+/**
+ * Restaurant-only hydration inputs, all optional.
+ *
+ * The wizard shell fetches these AFTER the main product/variants payload lands
+ * (three separate endpoints — modifier groups, stations, promotions) and passes
+ * whichever it managed to load. Missing arrays fall back to `[]` so a hydration
+ * failure does not surface as "already selected everything" or an undefined
+ * `.map`.
+ */
+export interface RestaurantHydration {
+  foodType?: RestaurantFoodType;
+  prepMinutes?: number | null;
+  dietaryTags?: string[];
+  modifierGroupIds?: string[];
+  kitchenStationIds?: string[];
+  promotionIds?: string[];
+}
+
 export function hydrateFromProduct(
   product: ManagedProduct,
   variants: ProductVariant[],
   dimensions: ProductVariationDimension[],
+  restaurant: RestaurantHydration = {},
 ): WizardState {
   const hasVariations = variants.length > 0 || dimensions.length > 0;
 
@@ -192,6 +246,13 @@ export function hydrateFromProduct(
       reorderLevel:
         !hasVariations && product.reorderLevel != null ? String(product.reorderLevel) : '',
     },
+    foodType: restaurant.foodType ?? '',
+    prepMinutes:
+      restaurant.prepMinutes != null ? String(restaurant.prepMinutes) : '',
+    dietaryTags: restaurant.dietaryTags ?? [],
+    modifierGroupIds: restaurant.modifierGroupIds ?? [],
+    kitchenStationIds: restaurant.kitchenStationIds ?? [],
+    promotionIds: restaurant.promotionIds ?? [],
   };
 }
 
@@ -256,6 +317,12 @@ export function variantLabel(
 export interface ValidateContext {
   /** From the platform profile; determines whether opening-stock UI is present. */
   inventoryMode: 'LOCAL' | 'QUICKBOOKS' | 'DISABLED' | 'EXTERNAL' | null;
+  /**
+   * Restaurant vs. Retail. When 'RESTAURANT', Step 1's Food/Beverage/Dessert
+   * `foodType` is required. Null while the profile is unresolved — same fail-
+   * safe as `inventoryMode: null`.
+   */
+  businessKind?: ProductBusinessKind | null;
 }
 
 export const MAX_COMBINATIONS = 500;
@@ -274,6 +341,17 @@ export function validateStep(
     if (!state.type) errors.type = 'Choose an item type.';
     if (state.description.length > 800) {
       errors.description = 'Description is limited to 800 characters.';
+    }
+    // Restaurant only: Food / Beverage / Dessert is a required categorisation.
+    // The retail wizard has no equivalent — Item Type covers it there.
+    if (ctx.businessKind === 'RESTAURANT' && !state.foodType) {
+      errors.foodType = 'Category is required';
+    }
+    if (state.prepMinutes) {
+      const n = Number(state.prepMinutes);
+      if (!Number.isFinite(n) || n < 0 || n > 360) {
+        errors.prepMinutes = 'Preparation time is 0-360 minutes.';
+      }
     }
   }
 
@@ -371,6 +449,15 @@ export interface ProductCreatePayload {
   reorderLevel: number | null;
   isActive: boolean;
   imageUrl?: string | null;
+  /**
+   * D45 — Restaurant fields. Emitted for every tenant; Retail tenants send
+   * empty defaults which are indistinguishable from "not set" in the DB.
+   * Only Restaurant tenants surface UI for these — this keeps the create
+   * payload shape single-branch instead of forking on businessKind.
+   */
+  foodType?: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null;
+  prepMinutes?: number | null;
+  dietaryTags?: string[];
 }
 
 /** Build the `POST /products` body — Step 3 already validated the numbers. */
@@ -398,6 +485,12 @@ export function buildCreateInput(
       useSimpleForRoot && simple.reorderLevel ? Number(simple.reorderLevel) : null,
     isActive: true,
     imageUrl: imageUrl || null,
+    // D45 — Restaurant fields. `foodType` sent as null when empty so a
+    // Retail create (which never surfaces the picker) explicitly clears
+    // any bad prior value on re-save.
+    foodType: state.foodType || null,
+    prepMinutes: state.prepMinutes ? Number(state.prepMinutes) || null : null,
+    dietaryTags: state.dietaryTags,
   };
 }
 

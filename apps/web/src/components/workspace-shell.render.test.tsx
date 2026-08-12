@@ -199,10 +199,12 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     await settle();
     const links = navLinks().join(' | ');
 
-    for (const expected of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu']) {
+    for (const expected of ['POS', 'Orders', 'Tables', 'Kitchen']) {
       expect({ expected, present: links.includes(expected) }).toEqual({ expected, present: true });
     }
-    for (const absent of ['Takeaway', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+    // `Menu` joins the absent list under D45 — the Restaurant workspace now
+    // authors every sellable item through Products (labelled "Inventory").
+    for (const absent of ['Menu', 'Takeaway', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect({ absent, present: links.includes(absent) }).toEqual({ absent, present: false });
     }
   });
@@ -218,7 +220,8 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     // Restaurant tenants label the shared product catalogue "Inventory" —
     // see nav.ts. Tile Shop / retail keeps "Products". If both labels ever
     // regress to the same string, the sidebar disambiguation is gone.
-    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu', 'Inventory']) {
+    // (D45 removed the Menu entry — Products is the single authoring surface.)
+    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Inventory']) {
       const link = within(mainNav()).getByRole('link', { name: new RegExp(name, 'i') });
       expect({ name, hasSoon: /soon/i.test(link.textContent ?? '') }).toEqual({
         name,

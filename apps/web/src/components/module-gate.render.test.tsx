@@ -134,7 +134,12 @@ describe('a tenant that has the module', () => {
     // by business type and is shared with the retail workspace, so its
     // client-side gate is null (server-authoritative) rather than
     // TABLE_MANAGEMENT.
-    for (const path of ['/tables', '/orders', '/kitchen', '/menu']) {
+    //
+    // D45: `/menu` moved off this list — the route is no longer in any
+    // nav's derivation table, so `moduleForPath('/menu')` returns null and
+    // the gate is a no-op there. The route file itself renders a redirect
+    // card, which is a page-level concern rather than a gate concern.
+    for (const path of ['/tables', '/orders', '/kitchen']) {
       renderAt(path, ready('RESTAURANT', RESTAURANT));
       expect({ path, shown: !!screen.queryByText(CONTENT) }).toEqual({ path, shown: true });
       cleanup();
@@ -152,7 +157,12 @@ describe('a tenant that does not have the module', () => {
   });
 
   it('blocks the restaurant shells for a Tile Shop', () => {
-    for (const path of ['/tables', '/orders', '/kitchen', '/menu']) {
+    // D45: `/menu` dropped from this list — the derivation table no longer
+    // registers it as gated (no nav entry claims it), so the module gate is
+    // a no-op on that path for every profile. The route's own page-level
+    // rendering handles the Tile-Shop case by simply not applying the
+    // Restaurant redirect card, and the API refuses the underlying reads.
+    for (const path of ['/tables', '/orders', '/kitchen']) {
       renderAt(path, ready('TILE_SHOP', LEGACY));
       expect({ path, shown: !!screen.queryByText(CONTENT) }).toEqual({ path, shown: false });
       cleanup();
