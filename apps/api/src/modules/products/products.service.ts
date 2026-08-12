@@ -86,6 +86,10 @@ export class ProductsService {
       quantityAsOfDate: dto.quantityAsOfDate ? new Date(dto.quantityAsOfDate) : new Date(),
       reorderLevel: dto.reorderLevel ?? null,
       isActive: dto.isActive ?? true,
+      // Pre-uploaded URL from the Add Product wizard (D44); optional in every
+      // other flow, which historically calls `POST /products/:id/image` after
+      // create.
+      imageUrl: dto.imageUrl ?? null,
       syncStatus: 'NOT_SYNCED',
     };
     // One provider for the operation, resolved from the authenticated tenant before
@@ -152,6 +156,11 @@ export class ProductsService {
           : undefined,
       reorderLevel: dto.reorderLevel,
       isActive: dto.isActive,
+      // Only forward `imageUrl` when the caller actually sent one — the field
+      // is otherwise owned by `setImage` / `removeImage`, which take the file
+      // path and manage storage.remove(). Skipping `undefined` keeps Prisma
+      // from clobbering the existing value.
+      ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl || null } : {}),
     };
     const catalog = await this.catalogProviders.forTenant(tenantId);
     try {

@@ -78,7 +78,9 @@ const T = BranchScopeKind.TENANT_SCOPED;
 const B = BranchScopeKind.BRANCH_SCOPED;
 const G = BranchScopeKind.GLOBAL_PLATFORM;
 
-/** Every route the API serves, classified. 152 entries at Phase 1.5.6. */
+/** Every route the API serves, classified. 166 entries — 152 through
+ *  Phase 1.5.6 plus the 14 D44 endpoints (11 product-variants + product-image
+ *  under `/products` as SHARED_CORE, 3 inventory-receipts under INVENTORY). */
 const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /audit-logs': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /auth/active-branch': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
@@ -111,6 +113,12 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /documents/sales/:saleId': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'GET /documents/sample-pdf/:type': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'GET /health': { module: 'SHARED_CORE', guard: 'shared-core', scope: G },
+  // D44 — Receive Stock (Purchase Receipt). INVENTORY module, branch-scoped
+  // for the write (a receipt lands in one branch); tenant-scoped reads are
+  // filtered by branchId query param without the guard.
+  'POST /inventory-receipts': { module: 'INVENTORY', guard: 'ENFORCED', scope: B },
+  'GET /inventory-receipts': { module: 'INVENTORY', guard: 'ENFORCED', scope: T },
+  'GET /inventory-receipts/:id': { module: 'INVENTORY', guard: 'ENFORCED', scope: T },
   'GET /payments': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'POST /payments': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
   'GET /payments/:id': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
@@ -142,6 +150,19 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'DELETE /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/:id/sync-to-quickbooks': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
+  // D44 — Product variants + pre-create image upload. All SHARED_CORE per
+  // D35 (products are the catalogue every business profile needs).
+  'POST /products/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/:productId/variations': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PUT /products/:productId/variations': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/:productId/variants': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /products/:productId/variants:batch': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /products/:productId/variants/:variantId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'DELETE /products/:productId/variants/:variantId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /products/:productId/variants/:variantId/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'DELETE /products/:productId/variants/:variantId/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/:productId/variants/:variantId/inventory': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/:productId/variants/:variantId/purchases': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/import/commit': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/import/preview': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/import/template': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },

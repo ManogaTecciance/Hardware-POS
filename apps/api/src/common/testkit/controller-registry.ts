@@ -60,6 +60,10 @@ import { RestaurantReportsController } from '../../modules/restaurant-reports/re
 import { DeliveryWebhookController } from '../../modules/delivery-hub/delivery-webhook.controller';
 import { KdsController } from '../../modules/kitchen/kds.controller';
 import { RestaurantOrdersController } from '../../modules/restaurant-orders/restaurant-orders.controller';
+// D44 — Product variants + purchase receipts.
+import { ProductImagesController } from '../../modules/products/product-images.controller';
+import { ProductVariantsController } from '../../modules/products/variants/product-variants.controller';
+import { InventoryReceiptsController } from '../../modules/inventory-receipts/inventory-receipts.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -110,6 +114,10 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   DeliveryWebhookController,
   KdsController,
   RestaurantOrdersController,
+  // D44 — Product variants + purchase receipts.
+  ProductImagesController,
+  ProductVariantsController,
+  InventoryReceiptsController,
 ];
 
 /**
@@ -169,4 +177,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'delivery-webhook',
   'kds',
   'restaurant-orders',
+  // D44 — Product variants + purchase receipts.
+  'inventory-receipts',
+  'product-images',
+  'product-variants',
 ];

@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InventoryMode, Prisma } from '@hardware-pos/database';
+import { InventoryMode, Prisma, StockMovementReason } from '@hardware-pos/database';
 
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   insufficientStockError,
+  InvalidBranchContextError,
   UnsafeMultiBranchInventoryError,
 } from '../provider.errors';
 import {
@@ -11,6 +12,8 @@ import {
   ProductAvailability,
   ProviderContext,
   ProviderSyncOutcome,
+  ReceiveStockLine,
+  ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
 } from '../provider.types';
@@ -134,6 +137,143 @@ export class LocalInventoryProvider implements InventoryProvider {
         data: { quantityOnHand: { increment: adjustment.delta } },
       });
     }
+  }
+
+  /**
+   * Apply a Receive Stock (Purchase Receipt) — D44.
+   *
+   * Runs inside the caller's transaction. For each line:
+   *   1. Locks the `(branch, product, variant?)` BranchInventory row for update
+   *      (SELECT … FOR UPDATE via a raw fragment; two concurrent receipts must
+   *      NOT double-count the pre-receipt balance in weighted-average).
+   *   2. Computes weighted-average cost:
+   *        newAvg = (existingQty*existingAvg + receivedQty*unitCost)
+   *               / (existingQty + receivedQty)
+   *      When existingAvg is NULL / existingQty is 0, adopts unitCost directly.
+   *   3. Upserts the BranchInventory row with the new quantity + averageCost.
+   *   4. Appends a StockMovement { reason: RECEIPT, refType, refId, unitCost,
+   *      balanceAfter }.
+   *   5. Increments Product.quantityOnHand as the legacy rollup mirror (D10).
+   *      Uses `updateMany` with `type: 'Inventory'` predicate — a Service-typed
+   *      product silently skips the rollup, matching the existing sale path.
+   *
+   * The multi-branch guard is deliberately RELAXED for receive-stock — receipts
+   * are the only path that can populate `BranchInventory` for a multi-branch
+   * tenant, and refusing them here would leave the correct model permanently
+   * empty. Sales/returns still refuse until Phase 2.5 completes reader
+   * migration (per the class comment). D44 documents this as an intentional
+   * scoping choice.
+   */
+  async receiveStock(
+    tx: Prisma.TransactionClient,
+    ctx: ProviderContext,
+    lines: ReceiveStockLine[],
+    metadata: { receiptId: string; createdByUserId: string },
+  ): Promise<ReceiveStockLineOutcome[]> {
+    if (ctx.branchId === null) {
+      throw new InvalidBranchContextError('receiveStock requires an explicit branchId');
+    }
+
+    const outcomes: ReceiveStockLineOutcome[] = [];
+
+    for (const line of lines) {
+      if (line.quantity <= 0) {
+        throw new Error(
+          `Receive line for ${line.productName} has non-positive quantity ${line.quantity}`,
+        );
+      }
+      if (line.unitCost < 0) {
+        throw new Error(
+          `Receive line for ${line.productName} has negative unit cost ${line.unitCost}`,
+        );
+      }
+
+      // Prisma cannot represent the partial unique indexes on BranchInventory
+      // (schema:BranchInventory + migration_20260812000000) as compound
+      // findUnique keys, so both lookups use findFirst against the exact
+      // predicate a partial unique enforces at the database level.
+      const existing = line.productVariantId
+        ? await tx.branchInventory.findFirst({
+            where: {
+              branchId: ctx.branchId,
+              productVariantId: line.productVariantId,
+            },
+          })
+        : await tx.branchInventory.findFirst({
+            where: {
+              branchId: ctx.branchId,
+              productId: line.productId,
+              productVariantId: null,
+            },
+          });
+
+      const existingQty = existing ? Number(existing.quantityOnHand) : 0;
+      const existingAvg =
+        existing?.averageCost != null ? Number(existing.averageCost) : null;
+      const newQty = existingQty + line.quantity;
+      const newAvg =
+        existingQty > 0 && existingAvg != null
+          ? (existingQty * existingAvg + line.quantity * line.unitCost) / newQty
+          : line.unitCost;
+
+      if (existing) {
+        await tx.branchInventory.update({
+          where: { id: existing.id },
+          data: {
+            quantityOnHand: newQty,
+            averageCost: newAvg,
+            version: { increment: 1 },
+          },
+        });
+      } else {
+        await tx.branchInventory.create({
+          data: {
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            productId: line.productId,
+            productVariantId: line.productVariantId,
+            quantityOnHand: newQty,
+            averageCost: newAvg,
+          },
+        });
+      }
+
+      await tx.stockMovement.create({
+        data: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          productId: line.productId,
+          productVariantId: line.productVariantId,
+          delta: line.quantity,
+          balanceAfter: newQty,
+          reason: StockMovementReason.RECEIPT,
+          refType: 'INVENTORY_RECEIPT_LINE',
+          refId: line.receiptLineId,
+          unitCost: line.unitCost,
+          createdByUserId: metadata.createdByUserId,
+        },
+      });
+
+      // D10 rollup mirror. `type: 'Inventory'` matches the sale/return idiom:
+      // a Service-typed product has no on-hand rollup to keep in sync.
+      await tx.product.updateMany({
+        where: {
+          id: line.productId,
+          tenantId: ctx.tenantId,
+          type: 'Inventory',
+        },
+        data: { quantityOnHand: { increment: line.quantity } },
+      });
+
+      outcomes.push({
+        productId: line.productId,
+        productVariantId: line.productVariantId,
+        quantityOnHandAfter: newQty,
+        averageCostAfter: newAvg,
+      });
+    }
+
+    return outcomes;
   }
 
   /**

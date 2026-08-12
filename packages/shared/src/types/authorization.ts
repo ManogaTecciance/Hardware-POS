@@ -138,6 +138,16 @@ export const Permission = {
   /** Add, edit, archive kitchen stations on a branch. */
   KITCHEN_STATION_MANAGE: 'kitchen:station:manage',
 
+  // ── D44 — Receive Stock (Purchase Receipt) ───────────────────────────────
+  //
+  // Separate from PRODUCT_MANAGE so a Cashier / Waiter with product-read
+  // never sees the Receive Stock action and a Manager tasked with
+  // receiving can be granted it without also getting product write access
+  // if the tenant later splits the two roles. Held by OWNER, ADMIN,
+  // MANAGER by default (see ROLE_PERMISSIONS below).
+  /** Create an InventoryReceipt on a branch (Receive Stock). */
+  INVENTORY_RECEIVE: 'inventory:receive',
+
   // ── Restaurant Pilot Change 1 — creator-owned floor management ───────────
   //
   // Six permissions that split "manage the floor" into create-anything and
@@ -261,6 +271,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     Permission.SUPPLIER_MANAGE,
     Permission.SUPPLIER_QB_MAP,
     Permission.REPORT_READ,
+    // D44 — Receive Stock is a Manager-level action (recording stock a
+    // supplier delivered is a floor / purchasing responsibility).
+    Permission.INVENTORY_RECEIVE,
     // Read-only: a manager sees which modules the tenant runs, but changing the
     // business type or accounting provider is an owner/admin decision.
     Permission.PLATFORM_PROFILE_READ,

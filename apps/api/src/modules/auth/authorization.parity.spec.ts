@@ -160,6 +160,11 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
         Permission.SUPPLIER_MANAGE,
         Permission.SUPPLIER_QB_MAP,
         Permission.REPORT_READ,
+        // D44 — Receive Stock is a Manager-level responsibility (recording
+        // stock a supplier delivered is a floor / purchasing action, not a
+        // deletion). The escalations below prove it is NOT bundled with the
+        // total-admin ones.
+        Permission.INVENTORY_RECEIVE,
         Permission.PLATFORM_PROFILE_READ,
       ].sort(),
     );

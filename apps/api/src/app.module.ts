@@ -46,6 +46,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { RestaurantReportsModule } from './modules/restaurant-reports/restaurant-reports.module';
 import { DeliveryHubModule } from './modules/delivery-hub/delivery-hub.module';
 import { RestaurantOrdersModule } from './modules/restaurant-orders/restaurant-orders.module';
+import { InventoryReceiptsModule } from './modules/inventory-receipts/inventory-receipts.module';
 
 @Module({
   imports: [
@@ -91,6 +92,10 @@ import { RestaurantOrdersModule } from './modules/restaurant-orders/restaurant-o
     RestaurantReportsModule,
     DeliveryHubModule,
     RestaurantOrdersModule,
+    // D44 — Purchase Receipts / Receive Stock. Consumes InventoryProviderFactory
+    // (via ProvidersModule) so weighted-average cost has one implementation
+    // shared with the product-variant wizard's opening-stock path.
+    InventoryReceiptsModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.

@@ -78,4 +78,10 @@ export class UpdateProductDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  /** POS-side product photo (D44). See CreateProductDto for context. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(2048)
+  imageUrl?: string;
 }

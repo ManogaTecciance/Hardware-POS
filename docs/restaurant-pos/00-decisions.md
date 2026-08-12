@@ -812,6 +812,137 @@ downscale, WebP re-encode, UUID key). Two endpoints:
 
 ---
 
+## 2026-08-12 — Product variants + Purchase Receipts + Weighted-Average
+
+### D44 — Products own variants; Receive Stock owns cost history; costing is weighted-average
+
+Approved for AxloPOS Product Management to gain multi-dimensional variants,
+a proper Receive Stock (Purchase Receipt) workflow, and immutable historical
+purchase cost. Legacy (variant-less) Products and Tile Shop / QuickBooks
+behaviour remain unchanged.
+
+**Domain model.**
+
+- A `Product` is the commercial master. It may have **0..N** variation
+  dimensions (`ProductVariationDimension`) — not limited to two. Each
+  dimension owns 0..N `ProductVariationOption` rows (e.g. Size → 200ml /
+  300ml / 500ml). Every *sellable combination* the operator enables becomes
+  one `ProductVariant` with independent SKU, barcode, selling price,
+  weighted-average cost, per-branch inventory, and reorder point.
+- `ProductVariantOptionValue` fixes one option per dimension for each
+  variant. A product with 2 dimensions × 6 enabled variants stores 12 rows
+  here — one row per (variant, dimension).
+- `Product.hasVariants` is the single boolean the API and UI branch on:
+  - `false` → legacy Product; `unitPrice`, `sku`, `costPrice`,
+    `quantityOnHand`, `averageCost` on the Product row are authoritative.
+    Existing Tile Shop tenants stay exactly here.
+  - `true` → the `ProductVariant` rows are authoritative for price, cost,
+    SKU, barcode, and per-branch inventory. The parent-level fields remain
+    as legacy fallbacks and are never read.
+- A `SaleItem`, `ReturnItem`, `MenuItem`, `BranchInventory`, `StockMovement`
+  or `InventoryReceiptLine` may carry `productVariantId`; NULL keeps the
+  legacy per-product semantics.
+
+**Product variants ≠ Restaurant menu variations.** Menu Small/Medium/Large
+remains a `ModifierGroup(role='SIZE', selection=SINGLE)` per D41. Menu
+variations are customer-facing customisation of one dish; product variants
+are physically distinct stockable items. The wizards share visual language
+per the Restaurant Menu Wizard pattern; the domain models stay separate.
+
+**Purchase Receipts / cost history.**
+
+- Vendor stock enters the system exclusively through **Receive Stock**.
+  Editing `Product.quantityOnHand` or `ProductVariant`-side quantity from
+  the Product form is no longer the supported path for adding stock; the
+  wizard's Step 3 "Opening Quantity" applies once, on creation, then Receive
+  Stock takes over.
+- `InventoryReceipt` (header) + `InventoryReceiptLine` (per-variant line)
+  are immutable once written. A correction goes through a new movement,
+  never by mutating history. `InventoryReceipt.idempotencyKey` guards
+  against a double-submitted form.
+- Every receipt writes an append-only `StockMovement` row with
+  `reason=RECEIPT`, `refType='INVENTORY_RECEIPT_LINE'`, `refId=line.id`,
+  and `unitCost` captured on the movement. Sales / returns / adjustments
+  continue to write their existing reasons.
+
+**Weighted-Average costing (MVP).**
+
+- Costing policy is fixed to **`WEIGHTED_AVERAGE`** for the first commercial
+  release; no per-tenant switch, no enum column. Every receipt into a
+  `(branch, variant?)` cell recomputes:
+
+  `newAvg = ((existingQty × existingAvg) + (receivedQty × unitCost)) / (existingQty + receivedQty)`
+
+  When `existingAvg` is NULL the received `unitCost` is adopted directly.
+- The rollup is stored on `BranchInventory.averageCost` (per branch, per
+  variant/product); `ProductVariant.averageCost` and `Product.averageCost`
+  are updated as the quantity-weighted mean across the variant's / product's
+  branches on receive for fast list rendering. All rollups are recomputable
+  from the ledger — no rollup is a source of truth.
+
+**FIFO readiness.** No FIFO logic ships. But every `InventoryReceiptLine`
+is immutable and every RECEIPT `StockMovement` snapshots `unitCost`, so a
+future policy can walk history lot-by-lot without a schema change.
+
+**Selling price is not touched by a receipt.** A cost increase surfaces to
+the operator (margin banner on the Variants / Inventory tab); the operator
+alone decides whether to change customer price. No auto-repricing.
+
+**Branch-scoped stock is authoritative.** `BranchInventory` becomes the read
+authority for variants. `Product.quantityOnHand` is retained per D10 as the
+legacy rollup + QuickBooks cache — never dropped, never repurposed. Sales /
+returns / restaurant orders still route through the existing
+`InventoryProvider` port; the port grows `receiveStock(tx, ctx, lines)`
+implemented by `LocalInventoryProvider` (writes `BranchInventory` +
+`StockMovement`), refused by `QuickBooksInventoryProvider` (QB is the stock
+authority — a future slice adds `PurchaseOrder` push), and refused by
+`NoInventoryProvider` (stock tracking is off).
+
+**Module boundary (D28 / D31 respected).** Receive Stock lives in a new
+`InventoryReceiptsModule` that holds `InventoryProviderFactory`.
+`ProductsService` still resolves ONLY `CatalogSyncProviderFactory` — the
+per-slice tripwire at `provider-contract.spec.ts:251-273` stays green.
+Variant CRUD lives inside the products module as a `ProductVariantsService`
+that holds no provider port at all (it never moves stock — receiving does).
+
+**Frontend routing (D31 respected).** The 4-step Add Product wizard reads
+the tenant's inventory mode from `GET /v1/platform/profile` via the pure
+resolver at `apps/web/src/lib/products/product-presentation.ts`. Wizard
+Step 3 hides Opening Stock / Reorder in `DISBLED` mode; Receive Stock is
+suppressed in `QUICKBOOKS` mode with the wording "Stock is managed in
+QuickBooks." No component compares an `InventoryMode` value.
+
+**Backward compatibility.**
+
+- Every existing Product remains valid with `hasVariants=false` and no
+  ProductVariant rows. The old create endpoint, product form, POS lookup,
+  QuickBooks push, retail sale, and return flow all continue unchanged.
+- `MenuItem.productId` still means what it did; the additive
+  `productVariantId` narrows it to a specific variant when set.
+- Every existing sale / return keeps its rows and its printable document.
+  `SaleItem.productVariantId` is NULL on all historical rows.
+
+**Migration.** `20260812000000_add_product_variants_and_purchase_receipts`.
+
+- Creates the six new tables listed above.
+- Adds nullable / defaulted columns to `Product`, `SaleItem`, `ReturnItem`,
+  `MenuItem`, `BranchInventory`, `StockMovement`.
+- Adds `RECEIPT` to `StockMovementReason`.
+- Replaces `BranchInventory (branchId, productId)` unique with two partial
+  unique indexes: `(branchId, productId) WHERE productVariantId IS NULL`
+  and `(branchId, productVariantId) WHERE productVariantId IS NOT NULL`.
+  The swap is data-safe because `BranchInventory` holds zero rows in every
+  environment — Phase 2.5 (D10) shipped the table but no code wrote to it
+  until this slice, which is now its first writer.
+
+Additive-only otherwise: no DROP TABLE, no column type change, no rename,
+no data backfill. Legacy rows read unchanged. The per-migration structural
+assertion lives in `provider-contract.spec.ts` and is mutation-proven by
+checking the exact `CREATE TABLE` set, the exact single DROP INDEX
+statement, and the presence of every additive column and FK.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

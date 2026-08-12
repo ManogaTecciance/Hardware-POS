@@ -43,14 +43,29 @@ const PRODUCT_COMPONENTS = [
   // profile provider for the product routes only; Slice 8 promoted the provider to
   // the app shell, so the file is gone. This spec failed on its removal — which is
   // the tripwire doing its job, not a defect.
+  //
+  // D44 replaced the 3-step ProductForm (`product-form.tsx`,
+  // `wizard/price-stock-step.tsx`, `wizard/product-details-step.tsx`) with a
+  // 4-step wizard shell + one step-per-file. The wizard shell owns the profile
+  // read; the step components take a plain `inventoryMode` prop and never
+  // touch the resolver themselves. Listing every step file here keeps the
+  // "no mode conditional in JSX" rule enforced across the whole surface.
   'app/(app)/products/page.tsx',
   'app/(app)/products/[id]/page.tsx',
   'app/(app)/products/new/page.tsx',
   'app/(app)/products/[id]/edit/page.tsx',
-  'components/products/product-form.tsx',
   'components/products/product-status-badge.tsx',
-  'components/products/wizard/price-stock-step.tsx',
-  'components/products/wizard/product-details-step.tsx',
+  'components/products/wizard/product-wizard.tsx',
+  'components/products/wizard/step-details.tsx',
+  'components/products/wizard/step-variations.tsx',
+  'components/products/wizard/step-pricing-inventory.tsx',
+  'components/products/wizard/step-review.tsx',
+  'components/products/wizard/product-preview.tsx',
+  // D44 Product Details page: the tabbed shell reads the resolver too, since it
+  // gates the Receive Stock header button on `managementMode === 'LOCAL'` and
+  // colours the source badges via the resolver's classification. Listed here so
+  // the "no mode conditional in JSX" rule catches any drift.
+  'components/products/product-detail.tsx',
 ];
 
 const RESOLVER = 'lib/products/product-presentation.ts';
@@ -94,10 +109,16 @@ describe('inventory-mode decisions live in the resolver, not in JSX', () => {
   });
 
   it('the screens that vary by mode all go through the resolver', () => {
+    // The wizard shell replaced the old ProductForm as the single place where
+    // the mode-sensitive save flow lives; the step components never call the
+    // resolver themselves, they take a plain `inventoryMode` prop. D44 added
+    // the tabbed Product Details client component, which reads the resolver to
+    // decide whether Receive Stock and per-branch inventory apply.
     const files = readComponents(SRC, [
       'app/(app)/products/page.tsx',
       'app/(app)/products/[id]/page.tsx',
-      'components/products/product-form.tsx',
+      'components/products/wizard/product-wizard.tsx',
+      'components/products/product-detail.tsx',
     ]);
     for (const [path, source] of files) {
       expect(referencesIdentifier(source, 'resolveProductManagementPresentation'), path).toBe(true);
@@ -123,13 +144,18 @@ describe('inventory-mode decisions live in the resolver, not in JSX', () => {
         importsOf(content).some((spec) => spec.includes('products/product-presentation')),
     });
     // An exact set, not a count: two wrong importers would satisfy a count of two.
+    //
+    // D44 collapsed the old ProductForm + two step components into one
+    // resolver-owning wizard shell; the step files never import the resolver,
+    // they take a plain `inventoryMode` prop from the shell instead. Any drift
+    // (a new step file reaching for the resolver, or the shell losing the
+    // import) fails this exact-set assertion loudly.
     expect(importers).toEqual([
       'app/(app)/products/[id]/page.tsx',
       'app/(app)/products/page.tsx',
-      'components/products/product-form.tsx',
+      'components/products/product-detail.tsx',
       'components/products/product-status-badge.tsx',
-      'components/products/wizard/price-stock-step.tsx',
-      'components/products/wizard/product-details-step.tsx',
+      'components/products/wizard/product-wizard.tsx',
     ]);
   });
 });
@@ -336,12 +362,18 @@ describe('the source analyser never reaches the application bundle', () => {
 
 describe('40/41/42 — these structural rules can actually fail', () => {
   it('40 — a mode conditional creeping into a product screen would be caught', () => {
+    // D44 replaced the old flat detail page with a tabbed shell + dedicated
+    // client component. The shell still gates on the resolver (`canReceive` is
+    // fed from `presentation.managementMode === 'LOCAL'` inside
+    // `product-detail.tsx`), so the mutation target is the shell's prop pass —
+    // introducing an `inventoryMode ===` guard there is exactly the regression
+    // this rule exists to catch.
     const real = stripComments(readFileSync(`${SRC}/app/(app)/products/[id]/page.tsx`, 'utf8'));
     expect(real).not.toMatch(/inventoryMode\s*===/);
 
     const mutated = real.replace(
-      'presentation.showSyncActions && canSyncQb',
-      "inventoryMode === 'QUICKBOOKS' && canSyncQb",
+      'hasReceivePermission={canReceive}',
+      "hasReceivePermission={canReceive && inventoryMode === 'LOCAL'}",
     );
     expect(mutated).not.toEqual(real);
     expect(mutated).toMatch(/inventoryMode\s*===/);

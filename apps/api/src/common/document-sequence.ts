@@ -10,7 +10,12 @@ export type DocumentType =
   // their own per-tenant sequence so waiters can talk about "TS-47" out
   // loud, and order numbers don't collide with sale numbers.
   | 'TABLE_SESSION'
-  | 'RESTAURANT_ORDER';
+  | 'RESTAURANT_ORDER'
+  // D44 — Purchase Receipts (Receive Stock / GRN). Kept as its own tenant
+  // sequence so the "RCV-000042" identifiers do not collide with sales,
+  // returns or quotations, and so gaps caused by aborted transactions are
+  // impossible on the same guarantees as every other document type.
+  | 'RECEIPT';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;

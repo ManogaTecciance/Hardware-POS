@@ -83,4 +83,14 @@ export class CreateProductDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  /**
+   * POS-side product photo, previously uploaded via `POST /products/image` for
+   * the Add Product wizard (D44). Kept out of the QuickBooks payload — this is
+   * a POS presentation asset, not a QBO field.
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(2048)
+  imageUrl?: string;
 }

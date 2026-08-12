@@ -5,12 +5,23 @@ import { useParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft } from 'lucide-react';
 
-import { ProductForm } from '@/components/products/product-form';
+import { ProductWizard } from '@/components/products/wizard/product-wizard';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
-import { fetchCategoryTree, fetchProduct, type CategoryNode, type ManagedProduct } from '@/lib/products-api';
+import {
+  fetchCategoryTree,
+  fetchProduct,
+  type CategoryNode,
+  type ManagedProduct,
+} from '@/lib/products-api';
 
+/**
+ * Edit Product route — wraps the D44 wizard in edit mode. The wizard fetches
+ * variants + dimensions on its own from the product id; we still pre-fetch
+ * the parent product here so the wrapper can gate on existence before the
+ * wizard mounts.
+ */
 export default function EditProductPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.PRODUCT_MANAGE);
@@ -31,7 +42,10 @@ export default function EditProductPage() {
         setProduct(p);
         setCategories(cats);
       })
-      .catch((err: unknown) => !cancelled && setError(err instanceof Error ? err.message : 'Could not load product'))
+      .catch(
+        (err: unknown) =>
+          !cancelled && setError(err instanceof Error ? err.message : 'Could not load product'),
+      )
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -50,7 +64,7 @@ export default function EditProductPage() {
       </Link>
 
       {loading ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+        <p className="py-16 text-center text-sm text-muted-foreground">Loading...</p>
       ) : error || !product ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-danger">
@@ -60,15 +74,16 @@ export default function EditProductPage() {
       ) : !canManage ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            You don’t have permission to edit products.
+            You don&apos;t have permission to edit products.
           </CardContent>
         </Card>
       ) : (
-        <ProductForm
+        <ProductWizard
+          mode="edit"
           session={session}
           categories={categories}
-          product={product}
-          isAdmin={session.user.role === 'OWNER' || session.user.role === 'ADMIN'}
+          initialProductId={product.id}
+          initialProduct={product}
         />
       )}
     </div>

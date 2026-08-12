@@ -5,6 +5,8 @@ import {
   ProviderContext,
   ProviderInventoryMode,
   ProviderSyncOutcome,
+  ReceiveStockLine,
+  ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
 } from '../provider.types';
@@ -104,6 +106,44 @@ export interface InventoryProvider {
     ctx: ProviderContext,
     adjustments: StockAdjustment[],
   ): Promise<void>;
+
+  /**
+   * Apply the stock effect of a vendor `InventoryReceipt`, inside the caller's
+   * transaction (D44).
+   *
+   * The caller has already inserted the immutable `InventoryReceipt` header and
+   * every `InventoryReceiptLine`. This method is responsible for the *side
+   * effects* of those lines:
+   *
+   *  1. upserting the branch's `BranchInventory` cell for each line —
+   *     `quantityOnHand += quantityReceived`, `averageCost` recomputed from the
+   *     pre-receipt balance and the received unitCost (weighted average),
+   *  2. appending a `StockMovement` per line with `reason: RECEIPT`,
+   *     `refType: 'INVENTORY_RECEIPT_LINE'`, `refId: line.receiptLineId`,
+   *     `unitCost: line.unitCost`,
+   *  3. for `LOCAL` inventory (single-branch tenants only, per the class
+   *     comment), keeping `Product.quantityOnHand` in sync as the legacy
+   *     rollup + QuickBooks cache mirror (D10).
+   *
+   * Returned outcomes are per line, in input order, and carry the post-receipt
+   * balance + weighted-average snapshot for that (branch, product, variant?)
+   * cell — the caller uses them to refresh the mirror on
+   * `ProductVariant.averageCost` (or `Product.averageCost` for a legacy
+   * variant-less line) and to compose the receipt response.
+   *
+   * Providers that cannot receive stock (QuickBooks — stock is owned upstream;
+   * NONE — stock tracking is off) **must throw**
+   * `ProviderOperationUnavailableError`. A silent no-op would look like a
+   * successful receive that never moved stock, so the receipt would live in the
+   * database with no ledger effect — precisely the "receipt with no stock
+   * change" state D44 forbids.
+   */
+  receiveStock(
+    tx: Prisma.TransactionClient,
+    ctx: ProviderContext,
+    lines: ReceiveStockLine[],
+    metadata: { receiptId: string; createdByUserId: string },
+  ): Promise<ReceiveStockLineOutcome[]>;
 
   /**
    * Ask the provider to reconcile with its upstream system.

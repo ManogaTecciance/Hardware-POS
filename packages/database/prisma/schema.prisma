@@ -313,6 +313,12 @@ model Tenant {
   restaurantOrderStatusHistory RestaurantOrderStatusHistory[]
   branchInventory              BranchInventory[]
   stockMovements               StockMovement[]
+  productVariants              ProductVariant[]
+  productVariationDimensions   ProductVariationDimension[]
+  productVariationOptions      ProductVariationOption[]
+  productVariantOptionValues   ProductVariantOptionValue[]
+  inventoryReceipts            InventoryReceipt[]
+  inventoryReceiptLines        InventoryReceiptLine[]
   kitchenPrinters              KitchenPrinter[]
   kitchenTickets               KitchenTicket[]
   kitchenTicketItems           KitchenTicketItem[]
@@ -429,6 +435,7 @@ model Branch {
   restaurantOrders    RestaurantOrder[]
   branchInventory     BranchInventory[]
   stockMovements      StockMovement[]
+  inventoryReceipts   InventoryReceipt[]
   kitchenPrinters     KitchenPrinter[]
   kitchenTickets      KitchenTicket[]
   deliveryPlatforms   DeliveryPlatform[]
@@ -519,6 +526,7 @@ model User {
   // posture: an ownerless row stays unmanageable).
   createdDiningAreas      DiningArea[]        @relation("DiningAreaCreator")
   createdRestaurantTables RestaurantTable[]   @relation("RestaurantTableCreator")
+  createdInventoryReceipts InventoryReceipt[] @relation("InventoryReceiptCreator")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -675,20 +683,34 @@ model Product {
   /// POS-side product photo (S3/LocalStack) — never pushed to QuickBooks.
   imageUrl              String?
   isActive              Boolean    @default(true)
+  /// D44 — set once the product has one or more `ProductVariant` rows. Legacy
+  /// (false) rows keep the pre-D44 single-SKU semantics: `unitPrice`,
+  /// `costPrice`, `quantityOnHand` and the product-level SKU stay
+  /// authoritative. When true the variant rows own price, cost, SKU, barcode,
+  /// and per-branch stock; the parent-level `unitPrice` / `sku` /
+  /// `quantityOnHand` remain as legacy fallbacks and are not read.
+  hasVariants           Boolean    @default(false)
+  /// D44 — weighted-average cost for legacy variant-less products.
+  /// Recomputed on every InventoryReceipt. NULL until the first receipt.
+  /// Variant products carry their `averageCost` on `ProductVariant` instead.
+  averageCost           Decimal?   @db.Decimal(12, 4)
   lastSyncedAt          DateTime?
   syncStatus            SyncStatus @default(NOT_SYNCED)
   createdAt             DateTime   @default(now())
   updatedAt             DateTime   @updatedAt
 
-  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category        ProductCategory?    @relation(fields: [categoryId], references: [id])
-  subcategory     ProductSubcategory? @relation(fields: [subcategoryId], references: [id])
-  saleItems       SaleItem[]
-  returnItems     ReturnItem[]
-  quotationItems  QuotationItem[]
-  menuItems       MenuItem[]
-  branchInventory BranchInventory[]
-  stockMovements  StockMovement[]
+  tenant              Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category            ProductCategory?            @relation(fields: [categoryId], references: [id])
+  subcategory         ProductSubcategory?         @relation(fields: [subcategoryId], references: [id])
+  saleItems           SaleItem[]
+  returnItems         ReturnItem[]
+  quotationItems      QuotationItem[]
+  menuItems           MenuItem[]
+  branchInventory     BranchInventory[]
+  stockMovements      StockMovement[]
+  variants            ProductVariant[]
+  variationDimensions ProductVariationDimension[]
+  receiptLines        InventoryReceiptLine[]
 
   @@unique([tenantId, quickbooksItemId])
   @@unique([tenantId, sku])
@@ -820,35 +842,46 @@ model Sale {
 }
 
 model SaleItem {
-  id               String           @id @default(cuid())
-  saleId           String
-  productId        String
-  productName      String
-  sku              String?
-  unitPrice        Decimal          @db.Decimal(12, 2)
-  quantity         Decimal          @db.Decimal(12, 3)
-  discountId       String?
-  discountType     DiscountType?
-  discountValue    Decimal?         @db.Decimal(12, 2)
-  discountAmount   Decimal          @default(0) @db.Decimal(12, 2)
-  discountReason   String?
-  approvedByUserId String?
-  taxAmount        Decimal          @default(0) @db.Decimal(12, 2)
-  lineSubtotal     Decimal          @db.Decimal(12, 2)
-  lineTotal        Decimal          @db.Decimal(12, 2)
-  returnedQuantity Decimal          @default(0) @db.Decimal(12, 3)
-  returnStatus     SaleReturnStatus @default(NOT_RETURNED)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  id                  String           @id @default(cuid())
+  saleId              String
+  productId           String
+  /// D44 — optional link to the exact sellable variant this line represents.
+  /// NULL for legacy (variant-less) product sales. When set, the sale reduces
+  /// the *variant's* branch inventory rather than the product's rollup.
+  productVariantId    String?
+  productName         String
+  sku                 String?
+  /// D44 — snapshot of the variant's SKU / display name at sale time so a
+  /// later variant rename cannot rewrite historical receipts. Mirror of the
+  /// snapshot pattern already used on ReturnItem for products.
+  variantSkuSnapshot  String?
+  variantNameSnapshot String?
+  unitPrice           Decimal          @db.Decimal(12, 2)
+  quantity            Decimal          @db.Decimal(12, 3)
+  discountId          String?
+  discountType        DiscountType?
+  discountValue       Decimal?         @db.Decimal(12, 2)
+  discountAmount      Decimal          @default(0) @db.Decimal(12, 2)
+  discountReason      String?
+  approvedByUserId    String?
+  taxAmount           Decimal          @default(0) @db.Decimal(12, 2)
+  lineSubtotal        Decimal          @db.Decimal(12, 2)
+  lineTotal           Decimal          @db.Decimal(12, 2)
+  returnedQuantity    Decimal          @default(0) @db.Decimal(12, 3)
+  returnStatus        SaleReturnStatus @default(NOT_RETURNED)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
 
-  sale        Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  product     Product      @relation(fields: [productId], references: [id])
-  discount    Discount?    @relation(fields: [discountId], references: [id])
-  approvedBy  User?        @relation("DiscountApprover", fields: [approvedByUserId], references: [id])
-  returnItems ReturnItem[]
+  sale           Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId], references: [id])
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id])
+  discount       Discount?       @relation(fields: [discountId], references: [id])
+  approvedBy     User?           @relation("DiscountApprover", fields: [approvedByUserId], references: [id])
+  returnItems    ReturnItem[]
 
   @@index([saleId])
   @@index([productId])
+  @@index([productVariantId])
 }
 
 model Payment {
@@ -1115,10 +1148,18 @@ model ReturnItem {
   returnId                   String
   originalSaleItemId         String
   productId                  String
+  /// D44 — carries the variant reference forward from the original SaleItem
+  /// when present, so the correct variant's branch inventory is restored on
+  /// completion. NULL for legacy variant-less product returns.
+  productVariantId           String?
   // Snapshots so the return survives product edits / deletes.
   productNameSnapshot        String
   skuSnapshot                String?
   imageUrlSnapshot           String?
+  /// D44 — mirrors of the SaleItem variant snapshots so the return document
+  /// keeps the exact variant identity even after a rename.
+  variantSkuSnapshot         String?
+  variantNameSnapshot        String?
   originalUnitPrice          Decimal          @db.Decimal(12, 2)
   purchasedQuantity          Decimal          @db.Decimal(12, 3)
   previouslyReturnedQuantity Decimal          @db.Decimal(12, 3)
@@ -1135,13 +1176,15 @@ model ReturnItem {
   refundableAmount           Decimal          @db.Decimal(12, 2)
   createdAt                  DateTime         @default(now())
 
-  return           Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  originalSaleItem SaleItem @relation(fields: [originalSaleItemId], references: [id])
-  product          Product  @relation(fields: [productId], references: [id])
+  return           Return          @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  originalSaleItem SaleItem        @relation(fields: [originalSaleItemId], references: [id])
+  product          Product         @relation(fields: [productId], references: [id])
+  productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id])
 
   @@index([returnId])
   @@index([originalSaleItemId])
   @@index([productId])
+  @@index([productVariantId])
 }
 
 model RefundPayment {
@@ -1381,7 +1424,8 @@ model Supplier {
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receipts InventoryReceipt[]
 
   @@unique([tenantId, name])
   @@unique([tenantId, quickbooksVendorId])
@@ -1596,6 +1640,12 @@ model MenuItem {
   /// retail sale would. When null, this item is a composed dish tracked
   /// elsewhere (Phase 3 or later may introduce ingredient recipes).
   productId   String?
+  /// D44 — optional link to a specific sellable variant of the linked Product.
+  /// Set only when `productId` is also set. When set, this Menu Item routes to
+  /// that variant's branch inventory rather than to the product rollup; POS
+  /// sales of the Menu Item decrement the exact variant. NULL means "any
+  /// variant" (Menu Item picks up the parent-product stock — legacy behaviour).
+  productVariantId String?
 
   isActive Boolean @default(true)
   /// Optional display order within the section. Ties broken by name.
@@ -1625,6 +1675,7 @@ model MenuItem {
   tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   section        MenuSection             @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   product        Product?                @relation(fields: [productId], references: [id])
+  productVariant ProductVariant?         @relation(fields: [productVariantId], references: [id])
   modifierGroups MenuItemModifierGroup[]
   channelPrices  MenuItemChannelPrice[]
   availability   MenuAvailability[]
@@ -1633,6 +1684,7 @@ model MenuItem {
   @@index([tenantId])
   @@index([sectionId])
   @@index([productId])
+  @@index([productVariantId])
 }
 
 /// A group of related choices (e.g. "Choose bread type") with min/max
@@ -2147,6 +2199,10 @@ enum StockMovementReason {
   WASTAGE
   OPENING
   ORDER_ROUND
+  /// D44 — a vendor stock receipt (Purchase Receipt / GRN). The paired
+  /// StockMovement.refId points at `InventoryReceiptLine.id`; the row's
+  /// unitCost captures the cost snapshot at receive time.
+  RECEIPT
 }
 
 /// Current per-branch balance.
@@ -2156,24 +2212,35 @@ enum StockMovementReason {
 /// UI-driven adjustment; the sales path uses a conditional update guarded
 /// by `quantityOnHand >= qty`, the same idiom the tenant-wide column uses.
 model BranchInventory {
-  id             String   @id @default(cuid())
-  tenantId       String
-  branchId       String
-  productId      String
-  quantityOnHand Decimal  @default(0) @db.Decimal(12, 3)
-  reorderLevel   Decimal? @db.Decimal(12, 3)
-  version        Int      @default(1)
+  id               String   @id @default(cuid())
+  tenantId         String
+  branchId         String
+  productId        String
+  /// D44 — optional variant reference. NULL rows keep the legacy "one row per
+  /// (branch, product)" semantics; non-NULL rows are "one row per (branch,
+  /// variant)". The two uniqueness cases are enforced by paired partial
+  /// unique indexes (see migration 20260812000000_add_product_variants_and_
+  /// purchase_receipts) because Prisma cannot express partial uniques.
+  productVariantId String?
+  quantityOnHand   Decimal  @default(0) @db.Decimal(12, 3)
+  reorderLevel     Decimal? @db.Decimal(12, 3)
+  /// D44 — per-branch weighted-average cost of the (product, variant?)
+  /// combination. Recomputed on every InventoryReceipt into this branch.
+  /// NULL until the first receipt.
+  averageCost      Decimal? @db.Decimal(12, 4)
+  version          Int      @default(1)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
 
-  @@unique([branchId, productId])
   @@index([tenantId])
   @@index([productId])
+  @@index([productVariantId])
 }
 
 /// Append-only ledger of stock movements. NEVER updated. Every row represents
@@ -2181,28 +2248,38 @@ model BranchInventory {
 /// captures the post-application value so a later reconciliation can walk
 /// the ledger without re-running Prisma transactions.
 model StockMovement {
-  id        String @id @default(cuid())
-  tenantId  String
-  branchId  String
-  productId String
+  id               String @id @default(cuid())
+  tenantId         String
+  branchId         String
+  productId        String
+  /// D44 — variant this movement affects. NULL for legacy variant-less
+  /// products; set for every variant sale, return, adjustment or receipt.
+  productVariantId String?
 
   delta           Decimal             @db.Decimal(12, 3)
   balanceAfter    Decimal             @db.Decimal(12, 3)
+  /// D44 — unit cost captured on a RECEIPT movement so the ledger alone is
+  /// enough to walk the cost history for a future FIFO policy. NULL for other
+  /// reasons (sales, returns, adjustments) where cost is not authoritative.
+  unitCost        Decimal?            @db.Decimal(12, 2)
   reason          StockMovementReason
-  /// Free-form typed reference, e.g. 'SALE' | 'RETURN' | 'ORDER_ROUND'.
+  /// Free-form typed reference, e.g. 'SALE' | 'RETURN' | 'ORDER_ROUND' |
+  /// 'INVENTORY_RECEIPT_LINE'.
   refType         String?
   refId           String?
   createdByUserId String?
 
   createdAt DateTime @default(now())
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id])
 
   @@index([tenantId, productId, createdAt])
   @@index([branchId])
   @@index([refType, refId])
+  @@index([productVariantId])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2513,4 +2590,216 @@ model WebhookDeliveryLog {
   @@index([tenantId])
   @@index([branchId])
   @@index([platformId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// D44 — Product variants + Purchase Receipts + Weighted-Average
+// ─────────────────────────────────────────────────────────────
+//
+// A `Product` is the commercial master. It may have 0 variation dimensions
+// (legacy: one sellable configuration, exactly what the pre-D44 schema
+// described) or N variation dimensions ("Size", "Packaging", "Color", …).
+// Each *sellable combination* is a `ProductVariant` — its own SKU, barcode,
+// selling price, cost history, weighted-average cost, per-branch inventory
+// and reorder point. Independent from Restaurant menu variations, which are
+// modifier-style options on a MenuItem (see `ModifierGroup.role = 'SIZE'`).
+//
+// The three-table variation model (dimension / option / variant-option-value
+// junction) captures ANY number of dimensions without a schema change: the
+// wizard adds a `ProductVariationDimension` row per group and a
+// `ProductVariationOption` row per option; each `ProductVariant` fixes one
+// option per dimension via `ProductVariantOptionValue`.
+//
+// Purchase Receipts / Weighted-Average.
+//   • `InventoryReceipt` is the header (branch, supplier, GRN, invoice ref,
+//     received-at, notes, createdBy). `InventoryReceiptLine` is one row per
+//     variant received on this receipt (qty, unit cost, lot, expiry).
+//   • Both are IMMUTABLE once written. A future correction goes through a new
+//     movement (adjustment or reversing receipt), never by updating history.
+//   • Receiving stock: (1) insert receipt + lines, (2) upsert `BranchInventory`
+//     for each line (qty += received, averageCost recomputed), (3) append a
+//     `StockMovement` with `reason: RECEIPT`, `refType: 'INVENTORY_RECEIPT_LINE'`,
+//     `refId: line.id`, `unitCost: line.unitCost`. All inside one transaction.
+//   • Weighted-average = (existingQty × existingAvg + receivedQty × unitCost)
+//     ÷ (existingQty + receivedQty). Computed per branch per variant. First
+//     receipt where averageCost is NULL just adopts the received unitCost.
+//   • Selling price is never touched by a receipt (D44). Cost changes are
+//     surfaced to the operator, who explicitly decides whether to reprice.
+
+/// One variation axis on a Product ("Size", "Packaging", "Color", …). A
+/// Product may have zero or many. Order is captured by `position`.
+model ProductVariationDimension {
+  id        String @id @default(cuid())
+  tenantId  String
+  productId String
+
+  name     String
+  position Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  options       ProductVariationOption[]
+  variantValues ProductVariantOptionValue[]
+
+  @@unique([productId, name])
+  @@index([tenantId])
+  @@index([productId])
+}
+
+/// One option within a variation dimension ("200ml", "Glass Bottle", "Red").
+model ProductVariationOption {
+  id          String @id @default(cuid())
+  tenantId    String
+  dimensionId String
+
+  name     String
+  position Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dimension ProductVariationDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+
+  variantValues ProductVariantOptionValue[]
+
+  @@unique([dimensionId, name])
+  @@index([tenantId])
+  @@index([dimensionId])
+}
+
+/// A sellable variant of a Product — its own SKU, barcode, selling price,
+/// cost history, per-branch stock and reorder point.
+///
+/// A Product without variants is still valid (`Product.hasVariants=false`
+/// and no `ProductVariant` rows). When a Product has variants, `SaleItem`,
+/// `ReturnItem`, `BranchInventory`, `StockMovement` and `InventoryReceiptLine`
+/// all key on `productVariantId`; the parent Product's `unitPrice` / `sku` /
+/// `quantityOnHand` fall back to legacy roles and are not read.
+model ProductVariant {
+  id           String   @id @default(cuid())
+  tenantId     String
+  productId    String
+  sku          String
+  barcode      String?
+  unitPrice    Decimal  @default(0) @db.Decimal(12, 2)
+  /// Latest purchase cost captured on the most recent receipt (mirror of the
+  /// max-receivedAt line's unitCost, refreshed on receive). Legacy-style;
+  /// prefer walking `receiptLines` when full history matters.
+  costPrice    Decimal? @db.Decimal(12, 2)
+  /// Weighted-average cost across all receipts of this variant, rolled up
+  /// from the per-branch BranchInventory.averageCost values. NULL until the
+  /// first receipt.
+  averageCost  Decimal? @db.Decimal(12, 4)
+  reorderLevel Decimal? @db.Decimal(12, 3)
+  imageUrl     String?
+  /// Manual ordering for the Variants tab, 0-based. Ties broken by SKU.
+  position     Int      @default(0)
+  isActive     Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  optionValues    ProductVariantOptionValue[]
+  saleItems       SaleItem[]
+  returnItems     ReturnItem[]
+  menuItems       MenuItem[]
+  branchInventory BranchInventory[]
+  stockMovements  StockMovement[]
+  receiptLines    InventoryReceiptLine[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([productId])
+  @@index([isActive])
+}
+
+/// Junction: which option of which dimension this variant carries. Exactly
+/// one row per (variant, dimension); a Product with two dimensions and 6
+/// enabled variants produces 12 rows here.
+model ProductVariantOptionValue {
+  id          String @id @default(cuid())
+  tenantId    String
+  variantId   String
+  dimensionId String
+  optionId    String
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  variant   ProductVariant            @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  dimension ProductVariationDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  option    ProductVariationOption    @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, dimensionId])
+  @@index([tenantId])
+  @@index([optionId])
+  @@index([dimensionId])
+}
+
+/// One vendor stock receipt into one branch. Immutable once written — every
+/// correction is a new movement, never an in-place edit. `idempotencyKey`
+/// guards against a double-submitted receive form producing two receipts.
+model InventoryReceipt {
+  id               String   @id @default(cuid())
+  tenantId         String
+  branchId         String
+  supplierId       String?
+  receiptNumber    String
+  receivedAt       DateTime @default(now())
+  invoiceReference String?
+  grnReference     String?
+  notes            String?
+  createdByUserId  String
+  idempotencyKey   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch    Branch                 @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  supplier  Supplier?              @relation(fields: [supplierId], references: [id])
+  createdBy User                   @relation("InventoryReceiptCreator", fields: [createdByUserId], references: [id])
+  lines     InventoryReceiptLine[]
+
+  @@unique([tenantId, receiptNumber])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([supplierId])
+  @@index([receivedAt])
+}
+
+/// One line on an InventoryReceipt. Immutable. `productVariantId` may be
+/// NULL for a legacy variant-less product; otherwise the pair
+/// (productId, productVariantId) is authoritative.
+model InventoryReceiptLine {
+  id               String    @id @default(cuid())
+  tenantId         String
+  receiptId        String
+  productId        String
+  productVariantId String?
+  quantityReceived Decimal   @db.Decimal(12, 3)
+  unitCost         Decimal   @db.Decimal(12, 2)
+  lotNumber        String?
+  expiryDate       DateTime?
+
+  createdAt DateTime @default(now())
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receipt InventoryReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  product Product          @relation(fields: [productId], references: [id])
+  variant ProductVariant?  @relation(fields: [productVariantId], references: [id])
+
+  @@index([tenantId])
+  @@index([receiptId])
+  @@index([productId])
+  @@index([productVariantId])
+  @@index([productId, productVariantId, createdAt])
 }

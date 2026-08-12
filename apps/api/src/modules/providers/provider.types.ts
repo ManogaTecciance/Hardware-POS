@@ -196,6 +196,53 @@ export type AccountingSubmissionResult<T extends string = string> =
 export type ProviderInventoryMode = InventoryMode;
 
 /**
+ * One line of a stock receipt handed to {@link InventoryProvider.receiveStock}.
+ *
+ * Deliberately narrow: the provider needs the (product, variant?) key, the
+ * received quantity, and the per-unit cost so it can:
+ *  1. increment the branch's `BranchInventory` balance for that cell,
+ *  2. recompute weighted-average cost, and
+ *  3. append a `StockMovement` row with the `RECEIPT` reason and the
+ *     `receiptLineId` back-reference so the ledger is queryable end-to-end.
+ *
+ * The provider never resolves the receipt header, the supplier, or the
+ * accounting side — those are the caller's responsibility, matching the same
+ * separation the sales/returns paths use.
+ */
+export interface ReceiveStockLine {
+  productId: string;
+  productVariantId: string | null;
+  /** Passthrough for user-facing messages and audit metadata. */
+  productName: string;
+  variantSku: string | null;
+  quantity: number;
+  unitCost: number;
+  /**
+   * The immutable `InventoryReceiptLine.id` the caller has already inserted,
+   * used as `refId` on the paired `StockMovement`. Required so the ledger can
+   * always be walked back to the receipt line, even after a variant rename.
+   */
+  receiptLineId: string;
+}
+
+/**
+ * The per-cell aftermath of one line of a receipt, returned to the caller.
+ *
+ * Exposes only rollup snapshots the caller needs to compose the receipt
+ * response and to refresh the cost mirror on `ProductVariant.averageCost`
+ * (or `Product.averageCost` for legacy variant-less rows). No branch id —
+ * the caller already has it from the receipt header.
+ */
+export interface ReceiveStockLineOutcome {
+  productId: string;
+  productVariantId: string | null;
+  /** Balance for this (branch, product, variant?) cell AFTER the receipt. */
+  quantityOnHandAfter: number;
+  /** Recomputed weighted-average cost for this cell AFTER the receipt. */
+  averageCostAfter: number;
+}
+
+/**
  * The product facts an external catalogue needs, and nothing more.
  *
  * Deliberately not `Product`: a catalogue provider has no business reading

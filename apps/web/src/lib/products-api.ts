@@ -44,6 +44,17 @@ export interface ManagedProduct {
   quickbooksItemId: string | null;
   syncStatus: ProductSyncStatus;
   lastSyncedAt: string | null;
+  /**
+   * True once the product has any active variants (D44). Wizards use this to
+   * decide between the simple single-SKU form and the matrix editor without
+   * having to re-fetch the variants list first.
+   */
+  hasVariants: boolean;
+  /**
+   * Weighted-average cost across all branches for the parent product. Null on a
+   * fresh Inventory item until the first receipt lands.
+   */
+  averageCost: number | null;
 }
 
 export interface ProductsPage {
@@ -79,6 +90,13 @@ export interface ProductInput {
   quantityAsOfDate?: string | null;
   reorderLevel?: number | null;
   isActive?: boolean;
+  /**
+   * URL for a POS-side photo that was pre-uploaded via `POST /products/image`
+   * before the product existed (Add Product wizard, D44). Once created, use
+   * `uploadProductImage(id, file)` for replacements — the pre-create endpoint
+   * is one-shot.
+   */
+  imageUrl?: string | null;
 }
 
 export interface Category {
@@ -148,12 +166,14 @@ export interface SubcategoryUpdate {
 /** Raw product JSON (decimals arrive as strings). */
 type ApiProduct = Omit<
   ManagedProduct,
-  'unitPrice' | 'costPrice' | 'quantityOnHand' | 'reorderLevel'
+  'unitPrice' | 'costPrice' | 'quantityOnHand' | 'reorderLevel' | 'averageCost' | 'hasVariants'
 > & {
   unitPrice: string | number;
   costPrice: string | number | null;
   quantityOnHand: string | number;
   reorderLevel: string | number | null;
+  averageCost?: string | number | null;
+  hasVariants?: boolean;
 };
 
 function auth(session: Session): { token: string; tenantId: string } {
@@ -180,6 +200,10 @@ function toManaged(p: ApiProduct): ManagedProduct {
     costPrice: p.costPrice != null ? Number(p.costPrice) : null,
     quantityOnHand: Number(p.quantityOnHand),
     reorderLevel: p.reorderLevel != null ? Number(p.reorderLevel) : null,
+    // hasVariants and averageCost are D44 additions; older responses may omit
+    // them, so read defensively rather than blowing up during rollout.
+    hasVariants: p.hasVariants ?? false,
+    averageCost: p.averageCost != null ? Number(p.averageCost) : null,
   };
 }
 
@@ -276,6 +300,31 @@ export async function uploadProductImage(
 
 export async function deleteProductImage(session: Session, id: string): Promise<ManagedProduct> {
   return toManaged(await api.del<ApiProduct>(`/products/${id}/image`, auth(session)));
+}
+
+/**
+ * Upload a product photo BEFORE the product exists (Add Product wizard, D44).
+ * Symmetric to the menu-item wizard's pre-create image endpoint: hands back the
+ * stored URL, which the wizard then passes as `imageUrl` on the create call.
+ * An orphan upload (wizard abandoned) is swept by the storage GC follow-up.
+ */
+export async function uploadProductImagePreCreate(
+  session: Session,
+  file: File,
+): Promise<{ imageUrl: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await authorizedFetch('/products/image', session, {
+    method: 'POST',
+    body: form,
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message =
+      json?.message ?? (res.status === 413 ? 'Image is too large (max 5MB)' : 'Image upload failed');
+    throw new Error(Array.isArray(message) ? message.join(', ') : message);
+  }
+  return (json?.data ?? json) as { imageUrl: string };
 }
 
 export type ReportFormat = 'pdf' | 'xlsx';

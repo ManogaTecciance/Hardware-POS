@@ -3,11 +3,16 @@ import { InventoryMode, Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SyncQueueService } from '../../sync/queue/sync-queue.service';
-import { insufficientStockError } from '../provider.errors';
+import {
+  insufficientStockError,
+  ProviderOperationUnavailableError,
+} from '../provider.errors';
 import {
   AvailabilityMap,
   ProviderContext,
   ProviderSyncOutcome,
+  ReceiveStockLine,
+  ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
 } from '../provider.types';
@@ -125,6 +130,30 @@ export class QuickBooksInventoryProvider implements InventoryProvider {
         data: { quantityOnHand: { increment: adjustment.delta } },
       });
     }
+  }
+
+  /**
+   * Receive Stock is REFUSED for QuickBooks-managed inventory (D44).
+   *
+   * QuickBooks Online is the authority for stock in this mode; recording a
+   * receipt locally would create a phantom quantity that the next product pull
+   * cannot reconcile. The correct upstream workflow is a QuickBooks Purchase
+   * Order + Bill, which this repository does not push today (a future slice may
+   * add a QuickBooks-aware receipt bridge).
+   *
+   * Fails closed with a typed error — never silently no-ops — so a
+   * misconfigured tenant sees a clear refusal rather than a receipt that
+   * vanishes at the next sync.
+   */
+  receiveStock(
+    _tx: Prisma.TransactionClient,
+    _ctx: ProviderContext,
+    _lines: ReceiveStockLine[],
+    _metadata: { receiptId: string; createdByUserId: string },
+  ): Promise<ReceiveStockLineOutcome[]> {
+    return Promise.reject(
+      new ProviderOperationUnavailableError(this.name, 'receiveStock'),
+    );
   }
 
   /**

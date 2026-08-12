@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { InventoryMode, Prisma } from '@hardware-pos/database';
 
+import { ProviderOperationUnavailableError } from '../provider.errors';
 import {
   AvailabilityMap,
   ProductAvailability,
   ProviderContext,
   ProviderSyncOutcome,
+  ReceiveStockLine,
+  ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
 } from '../provider.types';
@@ -90,6 +93,26 @@ export class NoInventoryProvider implements InventoryProvider {
     _adjustments: StockAdjustment[],
   ): Promise<void> {
     return Promise.resolve();
+  }
+
+  /**
+   * Receive Stock is REFUSED when inventory tracking is DISABLED (D44).
+   *
+   * A tenant that turned inventory off has no BranchInventory to write into
+   * and no meaningful concept of on-hand quantity. A silent no-op would
+   * accept a receipt and never move a number — precisely the "receipt with no
+   * stock change" pathology D44 exists to prevent. Fails closed with a typed
+   * error instead.
+   */
+  receiveStock(
+    _tx: Prisma.TransactionClient,
+    _ctx: ProviderContext,
+    _lines: ReceiveStockLine[],
+    _metadata: { receiptId: string; createdByUserId: string },
+  ): Promise<ReceiveStockLineOutcome[]> {
+    return Promise.reject(
+      new ProviderOperationUnavailableError(this.name, 'receiveStock'),
+    );
   }
 
   /** Nothing to synchronise, and it says so rather than reporting a success. */
