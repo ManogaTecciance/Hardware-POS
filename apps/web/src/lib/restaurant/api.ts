@@ -149,6 +149,12 @@ export const menus = {
       auth(session),
     );
   },
+  remove(session: Session, branchId: string, menuId: string) {
+    return api.del<void>(
+      `/restaurant/branches/${branchId}/menus/${menuId}`,
+      auth(session),
+    );
+  },
 };
 
 export const menuSections = {
@@ -183,7 +189,75 @@ export const menuSections = {
       auth(session),
     );
   },
+  remove(session: Session, menuId: string, sectionId: string) {
+    return api.del<void>(
+      `/restaurant/menus/${menuId}/sections/${sectionId}`,
+      auth(session),
+    );
+  },
 };
+
+/**
+ * Standalone image upload used by the Add Menu Item wizard. Uploads a File
+ * before the MenuItem exists; the returned `imageUrl` is what the wizard
+ * sends as `imageUrl` on the subsequent create call.
+ *
+ * Multipart, tenant-scoped on the server. 5 MB limit enforced by the API's
+ * FileInterceptor.
+ */
+export async function uploadMenuItemImage(
+  session: Session,
+  file: File,
+): Promise<{ imageUrl: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${api.baseUrl}/restaurant/menu-items/image`, {
+    method: 'POST',
+    body: form,
+    // Multipart requires the browser to set Content-Type + boundary; do not
+    // send it manually. Auth headers only.
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+      'x-tenant-id': session.user.tenantId,
+    },
+  });
+  const payload = (await res.json().catch(() => ({}))) as {
+    data?: { imageUrl: string };
+    message?: string;
+  };
+  if (!res.ok) {
+    throw new Error(payload.message ?? `Upload failed (${res.status})`);
+  }
+  return payload.data ?? { imageUrl: '' };
+}
+
+/** Upload an image and attach it to an existing menu item (edit flow). */
+export async function attachMenuItemImage(
+  session: Session,
+  sectionId: string,
+  itemId: string,
+  file: File,
+): Promise<MenuItemView> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(
+    `${api.baseUrl}/restaurant/menu-sections/${sectionId}/items/${itemId}/image`,
+    {
+      method: 'POST',
+      body: form,
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+        'x-tenant-id': session.user.tenantId,
+      },
+    },
+  );
+  const payload = (await res.json().catch(() => ({}))) as {
+    data?: MenuItemView;
+    message?: string;
+  };
+  if (!res.ok) throw new Error(payload.message ?? `Upload failed (${res.status})`);
+  return payload.data as MenuItemView;
+}
 
 export const menuItems = {
   list(session: Session, sectionId: string, includeArchived = false) {
@@ -215,6 +289,14 @@ export const menuItems = {
     return api.post<MenuItemView>(
       `/restaurant/menu-sections/${sectionId}/items`,
       body,
+      auth(session),
+    );
+  },
+  /** Permanent delete. See D42 (updated in this slice) — server refuses if the
+   * item is on any open order and returns a structured 409 with count. */
+  remove(session: Session, sectionId: string, itemId: string) {
+    return api.del<void>(
+      `/restaurant/menu-sections/${sectionId}/items/${itemId}`,
       auth(session),
     );
   },

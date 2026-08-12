@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
 import { ModuleKey } from '@hardware-pos/database';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -65,5 +65,27 @@ export class MenuSectionsController {
       metadata: { menuId, name: updated.name, isActive: updated.isActive },
     });
     return updated;
+  }
+
+  @Delete(':sectionId')
+  @RequirePermissions(Permission.PRODUCT_MANAGE)
+  @HttpCode(204)
+  async remove(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('menuId') menuId: string,
+    @Param('sectionId') sectionId: string,
+  ): Promise<void> {
+    const before = await this.service
+      .listSections(tenantId, menuId)
+      .then((rows) => rows.find((s) => s.id === sectionId));
+    await this.service.deleteSection(tenantId, menuId, sectionId);
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'MENU_SECTION_DELETED',
+      entityType: 'MenuSection',
+      entityId: sectionId,
+      metadata: { menuId, name: before?.name ?? null },
+    });
   }
 }

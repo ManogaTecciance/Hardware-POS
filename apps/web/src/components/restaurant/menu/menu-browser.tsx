@@ -1,6 +1,16 @@
 'use client';
 
-import { ChevronRight, MoreVertical, Package, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronRight,
+  Circle,
+  Package,
+  Pencil,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -28,6 +38,13 @@ import { AddItemChoiceDialog, type AddItemChoice } from './item-add/add-item-cho
 import { LinkedProductDialog } from './item-add/linked-product-dialog';
 import { PreparedDishDialog } from './item-add/prepared-dish-dialog';
 import { ProductSelectorDialog } from './item-add/product-selector-dialog';
+import {
+  DeleteMenuDialog,
+  DeleteSectionDialog,
+  EditMenuDialog,
+  EditSectionDialog,
+} from './menu-crud-dialogs';
+import { OverflowMenu, OverflowItem } from './overflow-menu';
 
 interface Props {
   session: Session;
@@ -69,8 +86,20 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
     | { kind: 'PICK_PRODUCT' }
     | { kind: 'LINK_PRODUCT'; product: ManagedProduct };
   const [addStage, setAddStage] = React.useState<AddStage>(null);
-  // Delete-confirmation state — D42 archive semantics.
+  // Delete-confirmation state — D42 (updated this slice) — hard delete.
   const [pendingDelete, setPendingDelete] = React.useState<MenuItemView | null>(null);
+  // Menu + Section CRUD state.
+  const [editingMenu, setEditingMenu] = React.useState<MenuView | null>(null);
+  const [deletingMenu, setDeletingMenu] = React.useState<MenuView | null>(null);
+  const [editingSection, setEditingSection] = React.useState<SectionView | null>(null);
+  const [deletingSection, setDeletingSection] = React.useState<SectionView | null>(null);
+  // Items column filter state — stays inside the column so Menu/Section
+  // selection remains stable while item results change.
+  const [itemQuery, setItemQuery] = React.useState('');
+  const [itemStatus, setItemStatus] = React.useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+  // Inline mutation state — Set Active/Inactive optimistic + real POST.
+  const [togglingId, setTogglingId] = React.useState<string | null>(null);
+  const [toggleError, setToggleError] = React.useState<string | null>(null);
 
   const loadMenus = React.useCallback(async () => {
     setMenuError(null);
@@ -155,31 +184,15 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
             </p>
           ) : (
             menus.map((m) => (
-              <button
+              <MenuRow
                 key={m.id}
-                onClick={() => setSelectedMenuId(m.id)}
-                className={`flex w-full items-center justify-between gap-2 rounded-xl border p-3 text-left transition-colors ${
-                  selectedMenuId === m.id
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:bg-muted'
-                }`}
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{m.name}</p>
-                  {m.description ? (
-                    <p className="truncate text-xs text-muted-foreground">{m.description}</p>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2">
-                  {!m.isActive ? (
-                    <StatusBadge label="Inactive" tone="muted" />
-                  ) : null}
-                  <ChevronRight
-                    className="h-4 w-4 shrink-0 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                </div>
-              </button>
+                menu={m}
+                selected={selectedMenuId === m.id}
+                canManage={canManage}
+                onSelect={() => setSelectedMenuId(m.id)}
+                onEdit={() => setEditingMenu(m)}
+                onDelete={() => setDeletingMenu(m)}
+              />
             ))
           )}
         </CardContent>
@@ -217,29 +230,15 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
               .slice()
               .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
               .map((s) => (
-                <button
+                <SectionRow
                   key={s.id}
-                  onClick={() => setSelectedSectionId(s.id)}
-                  className={`flex w-full items-center justify-between gap-2 rounded-xl border p-3 text-left transition-colors ${
-                    selectedSectionId === s.id
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:bg-muted'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{s.name}</p>
-                    {s.description ? (
-                      <p className="truncate text-xs text-muted-foreground">{s.description}</p>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {!s.isActive ? <StatusBadge label="Inactive" tone="muted" /> : null}
-                    <ChevronRight
-                      className="h-4 w-4 shrink-0 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                  </div>
-                </button>
+                  section={s}
+                  selected={selectedSectionId === s.id}
+                  canManage={canManage}
+                  onSelect={() => setSelectedSectionId(s.id)}
+                  onEdit={() => setEditingSection(s)}
+                  onDelete={() => setDeletingSection(s)}
+                />
               ))
           )}
         </CardContent>
@@ -260,6 +259,43 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
           ) : null}
         </CardHeader>
         <CardContent className="space-y-2">
+          {selectedSectionId ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  aria-label="Search menu items"
+                  placeholder="Search items…"
+                  value={itemQuery}
+                  onChange={(e) => setItemQuery(e.target.value)}
+                  className="h-9 pl-8 text-sm"
+                />
+              </div>
+              <div role="tablist" aria-label="Item status filter" className="inline-flex rounded-md border border-border">
+                {(['ALL', 'ACTIVE', 'INACTIVE'] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    role="tab"
+                    aria-selected={itemStatus === s}
+                    onClick={() => setItemStatus(s)}
+                    className={`px-2.5 py-1.5 text-xs font-medium transition-colors first:rounded-l-md last:rounded-r-md motion-reduce:transition-none ${
+                      itemStatus === s
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    {s === 'ALL' ? 'All' : s === 'ACTIVE' ? 'Active' : 'Inactive'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {toggleError ? (
+            <p className="text-xs text-danger" role="alert">
+              {toggleError}
+            </p>
+          ) : null}
           {!selectedSectionId ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               Pick a section to see its items.
@@ -268,23 +304,71 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
             <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
           ) : itemsError ? (
             <p className="py-6 text-center text-sm text-danger">{itemsError}</p>
-          ) : items.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No items in this section yet.
-            </p>
-          ) : (
-            items
-              .slice()
-              .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
-              .map((it) => (
+          ) : (() => {
+              const filtered = items
+                .filter((it) => {
+                  if (itemStatus === 'ACTIVE' && !it.isActive) return false;
+                  if (itemStatus === 'INACTIVE' && it.isActive) return false;
+                  if (itemQuery.trim()) {
+                    const q = itemQuery.trim().toLowerCase();
+                    if (!it.name.toLowerCase().includes(q)) return false;
+                  }
+                  return true;
+                })
+                .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+              if (items.length === 0) {
+                return (
+                  <div className="py-6 text-center text-sm text-muted-foreground">
+                    No items in this section yet.
+                    {canManage ? ' Create one with the New button above.' : ''}
+                  </div>
+                );
+              }
+              if (filtered.length === 0) {
+                return (
+                  <div className="space-y-2 py-6 text-center text-sm text-muted-foreground">
+                    <p>
+                      {itemStatus === 'ACTIVE'
+                        ? 'No active items match.'
+                        : itemStatus === 'INACTIVE'
+                          ? 'No inactive items match.'
+                          : 'No items match.'}
+                    </p>
+                    {itemStatus !== 'ALL' ? (
+                      <Button variant="ghost" size="sm" onClick={() => setItemStatus('ALL')}>
+                        Show all statuses
+                      </Button>
+                    ) : null}
+                  </div>
+                );
+              }
+              return filtered.map((it) => (
                 <MenuItemCard
                   key={it.id}
                   item={it}
                   canManage={canManage}
+                  toggling={togglingId === it.id}
+                  onToggleActive={async () => {
+                    if (!selectedSectionId) return;
+                    setTogglingId(it.id);
+                    setToggleError(null);
+                    try {
+                      await menuItemsApi.update(session, selectedSectionId, it.id, {
+                        isActive: !it.isActive,
+                      });
+                      await loadItems(selectedSectionId);
+                    } catch (err) {
+                      setToggleError(
+                        err instanceof Error ? err.message : 'Failed to update item status',
+                      );
+                    } finally {
+                      setTogglingId(null);
+                    }
+                  }}
                   onDelete={() => setPendingDelete(it)}
                 />
-              ))
-          )}
+              ));
+            })()}
         </CardContent>
       </Card>
 
@@ -337,44 +421,222 @@ export function MenuBrowser({ session, branchId, canManage }: Props) {
           }}
         />
       ) : null}
+      {canManage && editingMenu ? (
+        <EditMenuDialog
+          session={session}
+          branchId={branchId}
+          menu={editingMenu}
+          onClose={() => setEditingMenu(null)}
+          onSaved={async () => {
+            setEditingMenu(null);
+            await loadMenus();
+          }}
+        />
+      ) : null}
+      {canManage && deletingMenu ? (
+        <DeleteMenuDialog
+          session={session}
+          branchId={branchId}
+          menu={deletingMenu}
+          onClose={() => setDeletingMenu(null)}
+          onDone={async () => {
+            setDeletingMenu(null);
+            if (selectedMenuId === deletingMenu.id) {
+              setSelectedMenuId(null);
+              setSelectedSectionId(null);
+            }
+            await loadMenus();
+          }}
+        />
+      ) : null}
+      {canManage && editingSection && selectedMenuId ? (
+        <EditSectionDialog
+          session={session}
+          menuId={selectedMenuId}
+          section={editingSection}
+          onClose={() => setEditingSection(null)}
+          onSaved={async () => {
+            setEditingSection(null);
+            await loadSections(selectedMenuId);
+          }}
+        />
+      ) : null}
+      {canManage && deletingSection && selectedMenuId ? (
+        <DeleteSectionDialog
+          session={session}
+          menuId={selectedMenuId}
+          section={deletingSection}
+          onClose={() => setDeletingSection(null)}
+          onDone={async () => {
+            setDeletingSection(null);
+            if (selectedSectionId === deletingSection.id) setSelectedSectionId(null);
+            await loadSections(selectedMenuId);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// ── MenuRow (with ••• overflow) ──────────────────────────────────────────
+
+function MenuRow({
+  menu,
+  selected,
+  canManage,
+  onSelect,
+  onEdit,
+  onDelete,
+}: {
+  menu: MenuView;
+  selected: boolean;
+  canManage: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className={`group flex items-start justify-between gap-2 rounded-xl border p-3 transition-colors motion-reduce:transition-none ${
+        selected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+      >
+        <p className="truncate text-sm font-semibold">{menu.name}</p>
+        {menu.description ? (
+          <p className="truncate text-xs text-muted-foreground">{menu.description}</p>
+        ) : null}
+      </button>
+      <div className="flex shrink-0 items-center gap-1">
+        {!menu.isActive ? <StatusBadge label="Inactive" tone="muted" /> : null}
+        {canManage ? (
+          <OverflowMenu label={`Actions for ${menu.name}`}>
+            {({ close }) => (
+              <>
+                <OverflowItem
+                  icon={<Pencil className="h-3.5 w-3.5" aria-hidden="true" />}
+                  label="Edit menu"
+                  onClick={() => {
+                    close();
+                    onEdit();
+                  }}
+                />
+                <OverflowItem
+                  icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                  label="Delete permanently"
+                  tone="danger"
+                  onClick={() => {
+                    close();
+                    onDelete();
+                  }}
+                />
+              </>
+            )}
+          </OverflowMenu>
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── SectionRow ───────────────────────────────────────────────────────────
+
+function SectionRow({
+  section,
+  selected,
+  canManage,
+  onSelect,
+  onEdit,
+  onDelete,
+}: {
+  section: SectionView;
+  selected: boolean;
+  canManage: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className={`group flex items-start justify-between gap-2 rounded-xl border p-3 transition-colors motion-reduce:transition-none ${
+        selected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <p className="truncate text-sm font-semibold">{section.name}</p>
+        {section.description ? (
+          <p className="truncate text-xs text-muted-foreground">{section.description}</p>
+        ) : null}
+      </button>
+      <div className="flex shrink-0 items-center gap-1">
+        {!section.isActive ? <StatusBadge label="Inactive" tone="muted" /> : null}
+        {canManage ? (
+          <OverflowMenu label={`Actions for ${section.name}`}>
+            {({ close }) => (
+              <>
+                <OverflowItem
+                  icon={<Pencil className="h-3.5 w-3.5" aria-hidden="true" />}
+                  label="Edit section"
+                  onClick={() => {
+                    close();
+                    onEdit();
+                  }}
+                />
+                <OverflowItem
+                  icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                  label="Delete permanently"
+                  tone="danger"
+                  onClick={() => {
+                    close();
+                    onDelete();
+                  }}
+                />
+              </>
+            )}
+          </OverflowMenu>
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+        )}
+      </div>
     </div>
   );
 }
 
 // ── MenuItemCard ─────────────────────────────────────────────────────────
+// Restaurant Menu wizard follow-up (this slice): the overflow menu splits
+// availability (Set Active / Set Inactive, PATCH isActive) from removal
+// (Delete permanently, hard DELETE). Status text is always rendered — colour
+// never carries the state alone (brief §6, §29).
 
 function MenuItemCard({
   item,
   canManage,
+  toggling,
+  onToggleActive,
   onDelete,
 }: {
   item: MenuItemView;
   canManage: boolean;
+  toggling: boolean;
+  onToggleActive: () => void;
   onDelete: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement | null>(null);
-
-  React.useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    const escHandler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', escHandler);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', escHandler);
-    };
-  }, [menuOpen]);
-
   return (
     <div
-      className={`group relative flex items-start justify-between gap-3 rounded-xl border border-border p-3 transition-colors hover:border-primary motion-reduce:transition-none ${
-        item.isActive ? '' : 'opacity-70'
+      className={`group relative flex items-start justify-between gap-3 rounded-xl border p-3 transition-colors motion-reduce:transition-none ${
+        item.isActive
+          ? 'border-border hover:border-primary'
+          : 'border-border/60 bg-muted/20 opacity-80'
       }`}
     >
       <div className="min-w-0 flex-1">
@@ -402,59 +664,71 @@ function MenuItemCard({
         {item.description ? (
           <p className="truncate text-xs text-muted-foreground">{item.description}</p>
         ) : null}
+        {/* Status line — text + icon, never colour alone. */}
+        <p
+          className={`mt-1 inline-flex items-center gap-1 text-[11px] font-medium ${
+            item.isActive ? 'text-success' : 'text-muted-foreground'
+          }`}
+        >
+          {item.isActive ? (
+            <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+          ) : (
+            <Circle className="h-3 w-3" aria-hidden="true" />
+          )}
+          {item.isActive ? 'Active' : 'Inactive'}
+          {toggling ? <span className="ml-1 text-muted-foreground">· updating…</span> : null}
+        </p>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
         <p className="text-sm font-semibold">{formatMoney(item.basePrice)}</p>
-        {!item.isActive ? <StatusBadge label="Unavailable" tone="muted" /> : null}
       </div>
 
       {canManage ? (
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label={`Actions for ${item.name}`}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            className="rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 motion-reduce:transition-none"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </button>
-          {menuOpen ? (
-            <div
-              role="menu"
-              className="absolute right-0 z-10 mt-1 w-40 rounded-lg border border-border bg-popover p-1 shadow-pop"
-            >
-              <Link
-                role="menuitem"
-                href={`/menu/items/${item.id}/edit`}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
-                onClick={() => setMenuOpen(false)}
-              >
-                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                Edit
-              </Link>
-              <button
-                type="button"
-                role="menuitem"
+        <OverflowMenu label={`Actions for ${item.name}`} disabled={toggling}>
+          {({ close }) => (
+            <>
+              <OverflowItem
+                icon={<Pencil className="h-3.5 w-3.5" aria-hidden="true" />}
+                label="Edit item"
+                asChild={<Link href={`/menu/items/${item.id}/edit`} />}
+                onClick={close}
+              />
+              <OverflowItem
+                icon={
+                  item.isActive ? (
+                    <Circle className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  )
+                }
+                label={item.isActive ? 'Set Inactive' : 'Set Active'}
                 onClick={() => {
-                  setMenuOpen(false);
+                  close();
+                  onToggleActive();
+                }}
+              />
+              <OverflowItem
+                icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                label="Delete permanently"
+                tone="danger"
+                onClick={() => {
+                  close();
                   onDelete();
                 }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-danger hover:bg-danger-soft focus-visible:bg-danger-soft focus-visible:outline-none"
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Delete item
-              </button>
-            </div>
-          ) : null}
-        </div>
+              />
+            </>
+          )}
+        </OverflowMenu>
       ) : null}
     </div>
   );
 }
 
-// ── DeleteMenuItemDialog — archive semantics per D42 ──────────────────────
+// ── DeleteMenuItemDialog — hard delete (D42 updated) ─────────────────────
+// Historical RestaurantOrderItem / KitchenTicketItem rows snapshot the
+// menuItemName/price at submit time and reference the item by a loose (non-FK)
+// id, so a delete is domain-safe. The server refuses if the item is on any
+// open order (DRAFT / SUBMITTED / PARTIAL); that 409 surfaces here.
 
 function DeleteMenuItemDialog({
   item,
@@ -476,10 +750,10 @@ function DeleteMenuItemDialog({
     setBusy(true);
     setError(null);
     try {
-      await menuItemsApi.update(session, sectionId, item.id, { isActive: false });
+      await menuItemsApi.remove(session, sectionId, item.id);
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove item');
+      setError(err instanceof Error ? err.message : 'Failed to delete item');
       setBusy(false);
     }
   };
@@ -488,7 +762,7 @@ function DeleteMenuItemDialog({
     <Dialog
       open
       onClose={onClose}
-      title={`Delete ${item.name}?`}
+      title={`Delete ${item.name} permanently?`}
       description={undefined}
       footer={
         <>
@@ -496,19 +770,18 @@ function DeleteMenuItemDialog({
             Cancel
           </Button>
           <Button variant="danger" onClick={confirm} isLoading={busy}>
-            Delete item
+            Delete permanently
           </Button>
         </>
       }
     >
       <div className="space-y-2">
-        <p className="text-sm">
-          This item will no longer be available for new orders.
-        </p>
+        <p className="text-sm">This action cannot be undone.</p>
         <p className="text-xs text-muted-foreground">
-          Historical orders, kitchen tickets, bills and reports for
-          <span className="mx-1 font-medium text-foreground">{item.name}</span>
-          remain unchanged — the item is archived, not deleted from history.
+          <span className="mr-1 font-medium text-foreground">{item.name}</span>
+          will be permanently removed from Menu Management. Historical orders, kitchen
+          tickets, bills and reports remain intact — they carry a snapshot of the item
+          from when it was ordered.
         </p>
         {error ? (
           <p className="text-sm text-danger" role="alert">

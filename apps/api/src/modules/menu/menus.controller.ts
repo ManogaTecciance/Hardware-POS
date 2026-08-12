@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { ModuleKey } from '@hardware-pos/database';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -71,5 +71,32 @@ export class MenusController {
       },
     });
     return after;
+  }
+
+  /**
+   * Permanent delete. Refuses if the menu still has any sections (see
+   * MenuService.deleteMenu). Audit record is written after the DB commit so a
+   * failed delete does not leave a MENU_DELETED trace.
+   */
+  @Delete(':menuId')
+  @RequirePermissions(Permission.PRODUCT_MANAGE)
+  @HttpCode(204)
+  async remove(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('branchId') branchId: string,
+    @Param('menuId') menuId: string,
+  ): Promise<void> {
+    const before = await this.service
+      .listMenus(tenantId, branchId, true)
+      .then((rows) => rows.find((m) => m.id === menuId));
+    await this.service.deleteMenu(tenantId, branchId, menuId);
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'MENU_DELETED',
+      entityType: 'Menu',
+      entityId: menuId,
+      metadata: { branchId, name: before?.name ?? null },
+    });
   }
 }

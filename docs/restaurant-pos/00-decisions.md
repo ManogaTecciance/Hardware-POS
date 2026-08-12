@@ -767,6 +767,49 @@ makes this explicit to the operator.
 Never-used items may still be true-deleted in a follow-up if the backend
 grows a safe path for it; the wizard does not need it.
 
+**Superseded 2026-08-12 by D43.**
+
+### D43 — Menu admin: hard delete + Set Active/Inactive as distinct actions
+
+Product Owner requires permanent delete for Menus, Sections and Menu Items.
+The domain supports it safely: `RestaurantOrderItem` / `KitchenTicketItem`
+carry `menuItemName / menuItemCode / unitPrice / modifierTotal` snapshots at
+submit time, and `menuItemId` on those rows is a **loose string reference**
+with no Prisma relation. Deleting a `MenuItem` does not cascade into finance
+or kitchen history.
+
+Split the two operations on the card `•••` menu:
+
+- **Set Active / Set Inactive** — `PATCH /menu-items/:id { isActive }`. The
+  archive verb of the old D42. Historical rows untouched. POS hides the item
+  while it is Inactive (server-enforced via the existing `isActive` filter);
+  the server also refuses a POS attempt to add an Inactive item to an order.
+- **Delete permanently** — `DELETE /menu-items/:id`. Refuses with a
+  structured 409 (`ITEM_ON_OPEN_ORDER`) if any `RestaurantOrderItem` for the
+  item is on an order in `DRAFT / SUBMITTED / PARTIAL`. Once every open
+  reference closes (`COMPLETED / CANCELLED`), delete succeeds.
+- **Sections** — `DELETE /menu-sections/:id`. Refuses with `SECTION_HAS_ITEMS`
+  if any `MenuItem` is still attached (active or inactive). Operator must
+  move or delete items first.
+- **Menus** — `DELETE /menus/:id`. Refuses with `MENU_HAS_SECTIONS` if the
+  menu still contains any section.
+
+**Permissions** — reused `PRODUCT_MANAGE` per Section 2 of the brief ("Reuse
+equivalent existing permissions instead of creating duplicates"). Held by
+OWNER + ADMIN today; MANAGER + CASHIER do not have it. A dedicated
+`MENU_DELETE` remains available as a future split without changing the API
+contract.
+
+**Image storage** — image upload for the wizard uses the existing
+`StorageService` (local disk in dev, S3 in prod; validated MIME, sharp
+downscale, WebP re-encode, UUID key). Two endpoints:
+
+- `POST /restaurant/menu-items/image` — standalone, returns `{ imageUrl }`
+  the wizard sends on the subsequent `create`. Orphan sweep is a follow-up.
+- `POST /restaurant/menu-sections/:sectionId/items/:itemId/image` — attach
+  to an existing item (Edit flow), mirrors the Products pattern; old asset
+  is retired only after the DB update commits.
+
 ---
 
 ## Open decisions

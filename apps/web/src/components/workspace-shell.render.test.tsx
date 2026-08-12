@@ -215,7 +215,10 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
     render(<Sidebar />);
     await settle();
-    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu', 'Products']) {
+    // Restaurant tenants label the shared product catalogue "Inventory" —
+    // see nav.ts. Tile Shop / retail keeps "Products". If both labels ever
+    // regress to the same string, the sidebar disambiguation is gone.
+    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu', 'Inventory']) {
       const link = within(mainNav()).getByRole('link', { name: new RegExp(name, 'i') });
       expect({ name, hasSoon: /soon/i.test(link.textContent ?? '') }).toEqual({
         name,

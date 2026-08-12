@@ -44,6 +44,7 @@ import { UserBranchAccessController } from '../../modules/users/user-branch-acce
 import { UsersController } from '../../modules/users/users.controller';
 import { KitchenStationsController } from '../../modules/restaurant/kitchen-stations.controller';
 import { RestaurantConfigController } from '../../modules/restaurant/restaurant-config.controller';
+import { MenuItemImagesController } from '../../modules/menu/menu-item-images.controller';
 import { MenuItemsController } from '../../modules/menu/menu-items.controller';
 import { MenuSectionsController } from '../../modules/menu/menu-sections.controller';
 import { MenusController } from '../../modules/menu/menus.controller';
@@ -96,6 +97,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   MenusController,
   MenuSectionsController,
   MenuItemsController,
+  MenuItemImagesController,
   ModifiersController,
   DiningAreasController,
   RestaurantTablesController,
@@ -154,6 +156,7 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'menus',
   'menu-sections',
   'menu-items',
+  'menu-item-images',
   'modifiers',
   'dining-areas',
   'restaurant-tables',

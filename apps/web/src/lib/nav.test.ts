@@ -125,7 +125,10 @@ describe('Restaurant navigation', () => {
       'Kitchen',
       'Tables',
       'Menu',
-      'Products',
+      // Restaurant tenants label the shared product catalogue "Inventory"
+      // so it reads clearly next to "Menu" (see nav.ts). Retail keeps
+      // "Products" — asserted in the Tile Shop block above.
+      'Inventory',
       'Customers',
       'Sales',
       'Reports',
@@ -167,7 +170,7 @@ describe('Restaurant navigation', () => {
       Kitchen: false,
       Tables: false,
       Menu: false,
-      Products: false,
+      Inventory: false,
       Customers: false,
       Sales: false,
       Reports: false,

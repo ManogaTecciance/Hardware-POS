@@ -204,7 +204,16 @@ const RESTAURANT_NAV: NavGroup[] = [
         permission: Permission.PRODUCT_READ,
         module: 'MENU_MANAGEMENT',
       },
-      { href: '/products', label: 'Products', icon: Package, permission: Permission.PRODUCT_READ },
+      // Restaurant tenants label the shared product catalogue "Inventory" so it
+      // reads clearly next to "Menu" — a Restaurant owner adds menu items from
+      // Menu; the packaged goods (Coke, water) they stock live under Inventory.
+      // Retail tenants keep the label "Products" (see RETAIL_NAV above).
+      {
+        href: '/products',
+        label: 'Inventory',
+        icon: Package,
+        permission: Permission.PRODUCT_READ,
+      },
       {
         href: '/customers',
         label: 'Customers',

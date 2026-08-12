@@ -328,3 +328,238 @@ describe('Restaurant Menu wizard — presentation fields', () => {
     expect((plain.data as { role: string | null }).role).toBeNull();
   });
 });
+
+/**
+ * D43 — Restaurant Menu admin: hard delete + child-guards + open-order guard
+ * for menu items. Every positive test is paired with the negative that would
+ * fire if the guard silently no-op'd.
+ */
+describe('Restaurant Menu admin — hard delete + guards (D43)', () => {
+  const createContext = async () => {
+    const menu = await http.request('POST', `/restaurant/branches/${restaurant.branchId}/menus`, {
+      token: ownerToken(restaurant),
+      body: { name: 'D43 Menu' },
+    });
+    const menuId = (menu.data as { id: string }).id;
+    const section = await http.request('POST', `/restaurant/menus/${menuId}/sections`, {
+      token: ownerToken(restaurant),
+      body: { name: 'Kottu' },
+    });
+    return { menuId, sectionId: (section.data as { id: string }).id };
+  };
+
+  it('empty menu can be permanently deleted', async () => {
+    const menu = await http.request('POST', `/restaurant/branches/${restaurant.branchId}/menus`, {
+      token: ownerToken(restaurant),
+      body: { name: 'Empty menu' },
+    });
+    const menuId = (menu.data as { id: string }).id;
+    const del = await http.request(
+      'DELETE',
+      `/restaurant/branches/${restaurant.branchId}/menus/${menuId}`,
+      { token: ownerToken(restaurant) },
+    );
+    expect(del.status).toBe(204);
+    // Negative: further reads no longer find it.
+    const list = await http.request(
+      'GET',
+      `/restaurant/branches/${restaurant.branchId}/menus?includeArchived=true`,
+      { token: ownerToken(restaurant) },
+    );
+    const rows = list.data as Array<{ id: string }>;
+    expect(rows.find((m) => m.id === menuId)).toBeUndefined();
+  });
+
+  it('menu with sections refuses hard delete with MENU_HAS_SECTIONS', async () => {
+    const { menuId } = await createContext();
+    const del = await http.request(
+      'DELETE',
+      `/restaurant/branches/${restaurant.branchId}/menus/${menuId}`,
+      { token: ownerToken(restaurant) },
+    );
+    expect(del.status).toBe(409);
+    // Positive control on the error code so the frontend can key off it.
+    expect((del.data as { code: string }).code).toBe('MENU_HAS_SECTIONS');
+    expect((del.data as { details: { sectionCount: number } }).details.sectionCount).toBe(1);
+  });
+
+  it('empty section can be deleted; section with items refuses', async () => {
+    const { menuId, sectionId } = await createContext();
+    // Empty section first — succeeds.
+    const empty = await http.request('POST', `/restaurant/menus/${menuId}/sections`, {
+      token: ownerToken(restaurant),
+      body: { name: 'Empty', position: 1 },
+    });
+    const emptyId = (empty.data as { id: string }).id;
+    const okDel = await http.request(
+      'DELETE',
+      `/restaurant/menus/${menuId}/sections/${emptyId}`,
+      { token: ownerToken(restaurant) },
+    );
+    expect(okDel.status).toBe(204);
+
+    // Section with an item — refused.
+    await http.request('POST', `/restaurant/menu-sections/${sectionId}/items`, {
+      token: ownerToken(restaurant),
+      body: { name: 'x', basePrice: 1 },
+    });
+    const blocked = await http.request(
+      'DELETE',
+      `/restaurant/menus/${menuId}/sections/${sectionId}`,
+      { token: ownerToken(restaurant) },
+    );
+    expect(blocked.status).toBe(409);
+    expect((blocked.data as { code: string }).code).toBe('SECTION_HAS_ITEMS');
+  });
+
+  it('menu item with no orders can be permanently deleted', async () => {
+    const { sectionId } = await createContext();
+    const create = await http.request('POST', `/restaurant/menu-sections/${sectionId}/items`, {
+      token: ownerToken(restaurant),
+      body: { name: 'Never ordered', basePrice: 100 },
+    });
+    const itemId = (create.data as { id: string }).id;
+    const del = await http.request(
+      'DELETE',
+      `/restaurant/menu-sections/${sectionId}/items/${itemId}`,
+      { token: ownerToken(restaurant) },
+    );
+    expect(del.status).toBe(204);
+    // Negative: read is gone.
+    const gone = await http.request(
+      'GET',
+      `/restaurant/menu-sections/${sectionId}/items?includeArchived=true`,
+      { token: ownerToken(restaurant) },
+    );
+    const rows = gone.data as Array<{ id: string }>;
+    expect(rows.find((r) => r.id === itemId)).toBeUndefined();
+  });
+
+  it('cross-tenant delete fails with 404', async () => {
+    const { menuId, sectionId } = await createContext();
+    const create = await http.request('POST', `/restaurant/menu-sections/${sectionId}/items`, {
+      token: ownerToken(restaurant),
+      body: { name: 'x', basePrice: 1 },
+    });
+    const itemId = (create.data as { id: string }).id;
+    // Tile Shop owner attempts to delete Restaurant's item — module gate is the
+    // first line (MENU_MANAGEMENT is not on Tile Shop) → 403 or 404 depending
+    // on the guard order. Either proves the isolation, so accept the pair.
+    const cross = await http.request(
+      'DELETE',
+      `/restaurant/menu-sections/${sectionId}/items/${itemId}`,
+      { token: ownerToken(tile) },
+    );
+    expect([403, 404]).toContain(cross.status);
+
+    // Positive control: same owner + same tenant succeeds.
+    const legit = await http.request(
+      'DELETE',
+      `/restaurant/menu-sections/${sectionId}/items/${itemId}`,
+      { token: ownerToken(restaurant) },
+    );
+    expect(legit.status).toBe(204);
+    // Silence unused menuId lint.
+    expect(menuId).toBeDefined();
+  });
+
+  it('menu item on an open order refuses permanent delete with ITEM_ON_OPEN_ORDER', async () => {
+    const { sectionId } = await createContext();
+    const create = await http.request('POST', `/restaurant/menu-sections/${sectionId}/items`, {
+      token: ownerToken(restaurant),
+      body: { name: 'Being ordered', basePrice: 100 },
+    });
+    const itemId = (create.data as { id: string }).id;
+
+    // Manufacture an open RestaurantOrder referencing this item. The
+    // operational endpoints for order creation are heavy to invoke from
+    // integration test infra, so we drop straight into Prisma — this is the
+    // guard test's whole point. RestaurantOrder requires a TableSession →
+    // RestaurantTable → DiningArea chain, so build the minimum.
+    const area = await prisma.diningArea.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        branchId: restaurant.branchId,
+        name: 'D43 Area',
+      },
+    });
+    const table = await prisma.restaurantTable.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        branchId: restaurant.branchId,
+        areaId: area.id,
+        code: 'T1',
+        capacity: 4,
+      },
+    });
+    const session = await prisma.tableSession.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        branchId: restaurant.branchId,
+        tableId: table.id,
+        sessionNumber: 'S-GUARD-1',
+        status: 'OPEN',
+      },
+    });
+    const order = await prisma.restaurantOrder.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        branchId: restaurant.branchId,
+        sessionId: session.id,
+        status: 'DRAFT',
+        channel: 'DINE_IN',
+        orderNumber: 'T-GUARD-1',
+      },
+    });
+    const round = await prisma.orderRound.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        orderId: order.id,
+        roundNumber: 1,
+        status: 'DRAFT',
+      },
+    });
+    await prisma.restaurantOrderItem.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        orderId: order.id,
+        roundId: round.id,
+        menuItemId: itemId,
+        menuItemName: 'Being ordered',
+        unitPrice: '100.00',
+        quantity: '1',
+      },
+    });
+
+    const blocked = await http.request(
+      'DELETE',
+      `/restaurant/menu-sections/${sectionId}/items/${itemId}`,
+      { token: ownerToken(restaurant) },
+    );
+    expect(blocked.status).toBe(409);
+    expect((blocked.data as { code: string }).code).toBe('ITEM_ON_OPEN_ORDER');
+    expect(
+      (blocked.data as { details: { openOrderCount: number } }).details.openOrderCount,
+    ).toBe(1);
+
+    // Positive control: close the order and the delete succeeds. Historical
+    // snapshot must remain readable after the delete.
+    await prisma.restaurantOrder.update({
+      where: { id: order.id },
+      data: { status: 'COMPLETED' },
+    });
+    const okDel = await http.request(
+      'DELETE',
+      `/restaurant/menu-sections/${sectionId}/items/${itemId}`,
+      { token: ownerToken(restaurant) },
+    );
+    expect(okDel.status).toBe(204);
+    // Snapshot survives — this is the D43 safety claim.
+    const historical = await prisma.restaurantOrderItem.findFirst({
+      where: { menuItemId: itemId },
+      select: { menuItemName: true, unitPrice: true },
+    });
+    expect(historical?.menuItemName).toBe('Being ordered');
+    expect(historical?.unitPrice?.toString()).toBe('100');
+  });
+});

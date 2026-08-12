@@ -94,6 +94,7 @@ describe('StepMenuDetails', () => {
       errors: {},
       sections: [section()],
       stations: [station()],
+      session: {} as never,
       onChange: (patch: Partial<WizardState>) => {
         s = { ...s, ...patch };
       },

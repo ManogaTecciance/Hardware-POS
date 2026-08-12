@@ -1,4 +1,17 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ModuleKey } from '@hardware-pos/database';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -85,4 +98,76 @@ export class MenuItemsController {
     });
     return after;
   }
+
+  /**
+   * Permanent delete. Domain-safe per the audit: historical order/KOT rows
+   * snapshot menuItemName + price and only carry a loose menuItemId string
+   * (not a Prisma FK), so this delete does not cascade into finance / kitchen
+   * history. Guarded by an open-order check in the service.
+   */
+  @Delete(':itemId')
+  @RequirePermissions(Permission.PRODUCT_MANAGE)
+  @HttpCode(204)
+  async remove(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('sectionId') sectionId: string,
+    @Param('itemId') itemId: string,
+  ): Promise<void> {
+    const before = await this.service.get(tenantId, itemId);
+    await this.service.remove(tenantId, itemId);
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'MENU_ITEM_DELETED',
+      entityType: 'MenuItem',
+      entityId: itemId,
+      metadata: { sectionId, name: before.name },
+    });
+  }
+
+  /**
+   * Attach an uploaded image to an existing MenuItem. Mirrors the Products
+   * `POST /:id/image` pattern. Old image (if any) is retired only after the
+   * DB write succeeds.
+   */
+  @Post(':itemId/image')
+  @RequirePermissions(Permission.PRODUCT_MANAGE)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async setImage(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('sectionId') sectionId: string,
+    @Param('itemId') itemId: string,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+  ): Promise<MenuItemView> {
+    const updated = await this.service.setImage(tenantId, itemId, file);
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'MENU_ITEM_IMAGE_UPDATED',
+      entityType: 'MenuItem',
+      entityId: itemId,
+      metadata: { sectionId, imageUrl: updated.imageUrl },
+    });
+    return updated;
+  }
+
+  @Delete(':itemId/image')
+  @RequirePermissions(Permission.PRODUCT_MANAGE)
+  async removeImage(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('sectionId') sectionId: string,
+    @Param('itemId') itemId: string,
+  ): Promise<MenuItemView> {
+    const updated = await this.service.removeImage(tenantId, itemId);
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'MENU_ITEM_IMAGE_REMOVED',
+      entityType: 'MenuItem',
+      entityId: itemId,
+      metadata: { sectionId },
+    });
+    return updated;
+  }
 }
+

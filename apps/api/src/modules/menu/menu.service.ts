@@ -10,9 +10,11 @@ import {
 } from './dto/menu.dto';
 import {
   BranchNotFoundError,
+  MenuHasSectionsError,
   MenuNameTakenError,
   MenuNotFoundError,
   MenuVersionConflictError,
+  SectionHasItemsError,
   SectionNameTakenError,
   SectionNotFoundError,
 } from './menu.errors';
@@ -136,6 +138,24 @@ export class MenuService {
     }
   }
 
+  /**
+   * Permanent-delete a menu. Guarded by a child-count check so the caller
+   * always sees the block before the row disappears; the Restaurant Menu wizard
+   * gets that count back on 409 and can show "N sections still here".
+   */
+  async deleteMenu(tenantId: string, branchId: string, menuId: string): Promise<void> {
+    const existing = await this.prisma.menu.findFirst({
+      where: { id: menuId, tenantId, branchId },
+      select: { id: true },
+    });
+    if (!existing) throw new MenuNotFoundError();
+    const sectionCount = await this.prisma.menuSection.count({
+      where: { tenantId, menuId },
+    });
+    if (sectionCount > 0) throw new MenuHasSectionsError(sectionCount);
+    await this.prisma.menu.delete({ where: { id: existing.id } });
+  }
+
   async updateSection(
     tenantId: string,
     menuId: string,
@@ -163,6 +183,26 @@ export class MenuService {
       }
       throw e;
     }
+  }
+
+  /**
+   * Permanent-delete a section. Refuses if the section still has ANY items
+   * (active or inactive) — cascade-deleting menu items would silently take
+   * historical order references' semantics with it (they'd still resolve by
+   * snapshot but the operator would have lost the item metadata for future
+   * re-use). Operator must move or delete items first, per PO Section 11.
+   */
+  async deleteSection(tenantId: string, menuId: string, sectionId: string): Promise<void> {
+    const existing = await this.prisma.menuSection.findFirst({
+      where: { id: sectionId, tenantId, menuId },
+      select: { id: true },
+    });
+    if (!existing) throw new SectionNotFoundError();
+    const itemCount = await this.prisma.menuItem.count({
+      where: { tenantId, sectionId },
+    });
+    if (itemCount > 0) throw new SectionHasItemsError(itemCount);
+    await this.prisma.menuSection.delete({ where: { id: existing.id } });
   }
 
   // ── Assertions ──────────────────────────────────────────────

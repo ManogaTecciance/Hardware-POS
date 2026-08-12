@@ -2,14 +2,23 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
 import { CreateItemDto, UpdateItemDto } from './dto/menu.dto';
 import {
   ItemNotFoundError,
+  ItemOnOpenOrderError,
   ItemProductCrossTenantError,
+  MissingImageUploadError,
   ModifierGroupNotFoundError,
   SectionNotFoundError,
   StationNotFoundError,
 } from './menu.errors';
+
+/// RestaurantOrderStatus values that mean the order is still billable and MUST
+/// NOT lose its menu-item metadata mid-flight. COMPLETED and CANCELLED are the
+/// closed states — safe to delete a menu-item once every referencing order is
+/// in one of them (or if there are no references at all).
+const OPEN_ORDER_STATUSES = ['DRAFT', 'SUBMITTED', 'PARTIAL'] as const;
 
 export interface MenuItemView {
   id: string;
@@ -35,7 +44,10 @@ export interface MenuItemView {
 
 @Injectable()
 export class MenuItemsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   async list(tenantId: string, sectionId: string, includeArchived = false): Promise<MenuItemView[]> {
     await this.assertSection(tenantId, sectionId);
@@ -218,6 +230,110 @@ export class MenuItemsService {
       }
     });
 
+    return this.get(tenantId, itemId);
+  }
+
+  /**
+   * Permanent-delete a menu item. Safe by construction: historical
+   * RestaurantOrderItem / KitchenTicketItem rows snapshot menuItemName /
+   * menuItemCode / unitPrice / modifierTotal at submit, and `menuItemId` on
+   * those rows is a loose string reference — no Prisma relation, so nothing
+   * cascades from this delete.
+   *
+   * Refuses if the item is still on any OPEN order (`DRAFT / SUBMITTED /
+   * PARTIAL`). Closed orders (`COMPLETED / CANCELLED`) may reference the item
+   * and remain readable from their snapshot columns after the delete.
+   *
+   * Also cleans up the item's uploaded image asset if it points at our own
+   * storage (external URLs are left alone; that's the storage service's rule).
+   */
+  async remove(tenantId: string, itemId: string): Promise<void> {
+    const existing = await this.prisma.menuItem.findFirst({
+      where: { id: itemId, tenantId },
+      select: { id: true, imageUrl: true },
+    });
+    if (!existing) throw new ItemNotFoundError();
+
+    const openOrderCount = await this.prisma.restaurantOrderItem.count({
+      where: {
+        tenantId,
+        menuItemId: existing.id,
+        order: { status: { in: OPEN_ORDER_STATUSES as unknown as never[] } },
+      },
+    });
+    if (openOrderCount > 0) throw new ItemOnOpenOrderError(openOrderCount);
+
+    // Prisma cascade takes care of MenuItemModifierGroup /
+    // MenuItemChannelPrice / MenuAvailability / MenuItemStationLink — all
+    // declared `onDelete: Cascade` in the schema.
+    await this.prisma.menuItem.delete({ where: { id: existing.id } });
+
+    // Cleanup happens AFTER the row is gone: a failed delete would leave the
+    // menu-item in place, and we'd still be able to re-issue this via a retry.
+    // A failed image cleanup is logged by the storage provider and does not
+    // resurrect the row.
+    if (existing.imageUrl) {
+      await this.storage.remove(existing.imageUrl).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Persist an uploaded image for the wizard's create flow. Returns the stored
+   * URL for the caller to include in the subsequent CreateItemDto — the same
+   * `imageUrl` field the DTO already accepts (D41).
+   *
+   * No MenuItem is created here — this endpoint is standalone so the wizard
+   * can capture a photo before Save. An abandoned upload becomes an orphan
+   * asset until the storage GC follow-up ships.
+   */
+  async uploadImage(
+    _tenantId: string,
+    file: { buffer: Buffer; mimetype: string } | undefined,
+  ): Promise<{ imageUrl: string }> {
+    if (!file) throw new MissingImageUploadError();
+    const url = await this.storage.saveImage(file);
+    return { imageUrl: url };
+  }
+
+  /**
+   * Attach a freshly uploaded image to an existing MenuItem. Mirrors the
+   * Products `POST /:id/image` pattern so the two admin flows behave the same.
+   */
+  async setImage(
+    tenantId: string,
+    itemId: string,
+    file: { buffer: Buffer; mimetype: string } | undefined,
+  ): Promise<MenuItemView> {
+    const existing = await this.prisma.menuItem.findFirst({
+      where: { id: itemId, tenantId },
+      select: { id: true, imageUrl: true },
+    });
+    if (!existing) throw new ItemNotFoundError();
+    if (!file) throw new MissingImageUploadError();
+
+    const newUrl = await this.storage.saveImage(file);
+    await this.prisma.menuItem.update({
+      where: { id: existing.id },
+      data: { imageUrl: newUrl },
+    });
+    if (existing.imageUrl && existing.imageUrl !== newUrl) {
+      await this.storage.remove(existing.imageUrl).catch(() => undefined);
+    }
+    return this.get(tenantId, itemId);
+  }
+
+  async removeImage(tenantId: string, itemId: string): Promise<MenuItemView> {
+    const existing = await this.prisma.menuItem.findFirst({
+      where: { id: itemId, tenantId },
+      select: { id: true, imageUrl: true },
+    });
+    if (!existing) throw new ItemNotFoundError();
+    if (!existing.imageUrl) return this.get(tenantId, itemId);
+    await this.prisma.menuItem.update({
+      where: { id: existing.id },
+      data: { imageUrl: null },
+    });
+    await this.storage.remove(existing.imageUrl).catch(() => undefined);
     return this.get(tenantId, itemId);
   }
 

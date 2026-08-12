@@ -315,6 +315,7 @@ export function MenuItemWizard({ session, branchId, mode, initialSectionId, edit
               errors={errors}
               sections={sections}
               stations={stations}
+              session={session}
               onChange={patchState}
             />
           ) : null}

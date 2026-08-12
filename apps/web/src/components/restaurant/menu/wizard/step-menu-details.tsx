@@ -1,11 +1,12 @@
 'use client';
 
-import { Coffee, Cookie, ImagePlus, Utensils } from 'lucide-react';
+import { Coffee, Cookie, Utensils } from 'lucide-react';
 import * as React from 'react';
 
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { type Session } from '@/lib/auth';
 import {
   MENU_DIETARY_TAGS,
   type MenuItemType,
@@ -13,6 +14,7 @@ import {
   type KitchenStationView,
 } from '@/lib/restaurant/types';
 
+import { ImageUpload } from './image-upload';
 import type { WizardState } from './wizard-state';
 
 /**
@@ -32,6 +34,7 @@ interface Props {
   errors: Record<string, string>;
   sections: SectionView[];
   stations: KitchenStationView[];
+  session: Session;
   onChange: (patch: Partial<WizardState>) => void;
 }
 
@@ -41,7 +44,14 @@ const ITEM_TYPES: { value: MenuItemType; label: string; icon: React.ReactNode }[
   { value: 'DESSERT', label: 'Dessert', icon: <Cookie className="h-4 w-4" aria-hidden="true" /> },
 ];
 
-export function StepMenuDetails({ state, errors, sections, stations, onChange }: Props) {
+export function StepMenuDetails({
+  state,
+  errors,
+  sections,
+  stations,
+  session,
+  onChange,
+}: Props) {
   return (
     <div className="space-y-5">
       <div>
@@ -221,30 +231,12 @@ export function StepMenuDetails({ state, errors, sections, stations, onChange }:
       </div>
 
       {/* Image */}
-      <Field label="Upload photo" htmlFor="menu-image">
-        <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4">
-          <div className="flex items-start gap-3">
-            <div className="rounded-md bg-primary/12 p-2 text-primary">
-              <ImagePlus className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div className="flex-1 space-y-1">
-              <p className="text-sm font-medium">Paste an image URL</p>
-              <p className="text-xs text-muted-foreground">
-                JPG, PNG or WEBP hosted on your own CDN or an approved bucket. Direct
-                uploads land with the next pilot slice.
-              </p>
-              <Input
-                id="menu-image"
-                type="url"
-                value={state.imageUrl}
-                onChange={(e) => onChange({ imageUrl: e.target.value })}
-                placeholder="https://cdn.example.com/mix-kottu.webp"
-                maxLength={2048}
-                className="mt-1"
-              />
-            </div>
-          </div>
-        </div>
+      <Field label="Item image">
+        <ImageUpload
+          session={session}
+          value={state.imageUrl}
+          onChange={(url) => onChange({ imageUrl: url })}
+        />
       </Field>
     </div>
   );
