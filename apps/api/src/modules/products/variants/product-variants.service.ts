@@ -40,6 +40,12 @@ export interface VariantView {
   imageUrl: string | null;
   position: number;
   isActive: boolean;
+  /**
+   * D46 — one variant per product may be marked default; the POS
+   * Customise dialog preselects it. NULL-safe: `false` for every legacy
+   * row, `true` for at most one row per product (partial unique index).
+   */
+  isDefault: boolean;
   optionValues: VariantOptionValueView[];
 }
 
@@ -307,6 +313,9 @@ export class ProductVariantsService {
               imageUrl: v.imageUrl ?? null,
               position: v.position ?? index,
               isActive: v.isActive ?? true,
+              // D46 — one variant per product may be marked default; the
+              // partial unique index refuses a second one at the DB layer.
+              isDefault: v.isDefault ?? false,
             },
           });
           ids.push(created.id);
@@ -456,16 +465,47 @@ export class ProductVariantsService {
     if (!existing) throw new NotFoundException(`Variant ${variantId} not found`);
 
     try {
-      await this.repo.updateVariant(variantId, {
-        sku: dto.sku,
-        barcode: dto.barcode,
-        unitPrice: dto.unitPrice,
-        costPrice: dto.costPrice,
-        reorderLevel: dto.reorderLevel,
-        imageUrl: dto.imageUrl,
-        position: dto.position,
-        isActive: dto.isActive,
-      });
+      // D46 — setting `isDefault=true` requires flipping any prior
+      // default on the same product to false first, since the partial
+      // unique index (`ProductVariant_productId_default_key`) refuses
+      // a second default row on the same product. One transaction so
+      // the DB never observes two defaults simultaneously.
+      if (dto.isDefault === true) {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.productVariant.updateMany({
+            where: { productId, tenantId, isDefault: true, NOT: { id: variantId } },
+            data: { isDefault: false },
+          });
+          await tx.productVariant.update({
+            where: { id: variantId },
+            data: {
+              sku: dto.sku,
+              barcode: dto.barcode,
+              unitPrice: dto.unitPrice,
+              costPrice: dto.costPrice,
+              reorderLevel: dto.reorderLevel,
+              imageUrl: dto.imageUrl,
+              position: dto.position,
+              isActive: dto.isActive,
+              isDefault: true,
+            },
+          });
+        });
+      } else {
+        await this.repo.updateVariant(variantId, {
+          sku: dto.sku,
+          barcode: dto.barcode,
+          unitPrice: dto.unitPrice,
+          costPrice: dto.costPrice,
+          reorderLevel: dto.reorderLevel,
+          imageUrl: dto.imageUrl,
+          position: dto.position,
+          isActive: dto.isActive,
+          // Only touch isDefault when the client sent a value — an
+          // omitted field is "no change", NOT "clear the default".
+          ...(dto.isDefault === false ? { isDefault: false } : {}),
+        });
+      }
     } catch (err) {
       throw mapWriteError(err);
     }
@@ -617,6 +657,7 @@ type VariantRow = {
   imageUrl: string | null;
   position: number;
   isActive: boolean;
+  isDefault: boolean;
   optionValues: {
     dimensionId: string;
     optionId: string;
@@ -638,6 +679,7 @@ function toVariantView(row: VariantRow): VariantView {
     imageUrl: row.imageUrl,
     position: row.position,
     isActive: row.isActive,
+    isDefault: row.isDefault,
     optionValues: row.optionValues.map((ov) => ({
       dimensionId: ov.dimensionId,
       optionId: ov.optionId,

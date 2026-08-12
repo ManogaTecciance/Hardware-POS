@@ -138,6 +138,22 @@ export type MenuItemType = 'FOOD' | 'BEVERAGE' | 'DESSERT';
 export const MENU_DIETARY_TAGS = ['Veg', 'Non-Veg', 'Egg', 'Spicy', 'Gluten-Free'] as const;
 export type MenuDietaryTag = (typeof MENU_DIETARY_TAGS)[number];
 
+/**
+ * D46 — a POS Catalogue variant, projected onto the MenuItemView shape so
+ * the runtime picker + Customise dialog can consume both source paths
+ * through one type. `unitPrice` is the ABSOLUTE variant price (not a
+ * delta on top of `basePrice`); the Customise dialog must not stack the
+ * two — see the D46 anti-pattern guard in `customise-dialog.render.test.tsx`.
+ */
+export interface MenuItemVariantView {
+  id: string;
+  sku: string;
+  name: string;
+  unitPrice: number;
+  isDefault: boolean;
+  isActive: boolean;
+}
+
 export interface MenuItemView {
   id: string;
   sectionId: string;
@@ -158,6 +174,26 @@ export interface MenuItemView {
   prepMinutes: number | null;
   dietaryTags: string[];
   imageUrl: string | null;
+  /**
+   * D46 — discriminator for the source authority of this view row.
+   *   `'PRODUCT'`   — shaped by the POS Catalogue adapter from a Product
+   *                   (D45); `id` is the Product id and `variants` may
+   *                   carry active ProductVariants.
+   *   `'MENU_ITEM'` — legacy admin-menu row; `id` is the MenuItem id.
+   * Omitted defaults to `'MENU_ITEM'` so consumers that do not care about
+   * the distinction (existing selectors, wizard, etc.) keep working
+   * unchanged. `productId` above is a linked-Product FK on the legacy path
+   * and cannot be used as a source discriminator — a MenuItem can also
+   * link to a Product for inventory purposes.
+   */
+  catalogueSource?: 'PRODUCT' | 'MENU_ITEM';
+  /**
+   * D46 — active variants when the row was shaped from a Product with
+   * variations. Undefined or empty on legacy MenuItems and on Products
+   * without variations. The runtime Customise dialog renders these as
+   * single-select radios above the modifier groups when non-empty.
+   */
+  variants?: MenuItemVariantView[];
 }
 
 export interface ModifierOptionView {
@@ -457,9 +493,35 @@ export interface ExternalOrderView {
 }
 
 // ── Order-item input (used by round submit + takeaway create) ───────────────
-export interface OrderItemInput {
-  menuItemId: string;
-  quantity: number;
-  specialInstructions?: string;
-  modifiers?: { modifierOptionId: string }[];
+/** Modifier option reference on a submitted round item. */
+export interface OrderItemModifierInput {
+  modifierOptionId: string;
 }
+
+/**
+ * D46 — the round-submission wire shape is now a discriminated union so
+ * PRODUCT-sourced items (POS Catalogue) can be sent alongside the legacy
+ * MENU_ITEM path without either branch permitting the other's fields.
+ *
+ * Historical clients that omit `sourceKind` are still accepted by the
+ * backend (DTO defaults to `MENU_ITEM`) so the `'MENU_ITEM'` branch
+ * treats the discriminator as optional to keep every existing call site
+ * — takeaway.create in this workspace, order-entry.tsx in dine-in —
+ * compiling verbatim without a discriminator field.
+ */
+export type OrderItemInput =
+  | {
+      sourceKind?: 'MENU_ITEM';
+      menuItemId: string;
+      quantity: number;
+      specialInstructions?: string;
+      modifiers?: OrderItemModifierInput[];
+    }
+  | {
+      sourceKind: 'PRODUCT';
+      productId: string;
+      productVariantId?: string;
+      quantity: number;
+      specialInstructions?: string;
+      modifiers?: OrderItemModifierInput[];
+    };

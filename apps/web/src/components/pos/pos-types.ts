@@ -54,6 +54,23 @@ export interface DraftLine {
     approvalToken?: string;
     approvedByUserId?: string;
   };
+  /**
+   * D46 — variant source discriminator and payload. When `sourceKind` is
+   * `'PRODUCT'` the line was sourced from the D45 POS Catalogue (Products
+   * + Variants) and `productId` is set; `productVariantId` is set when the
+   * operator picked a variant. When omitted, `MENU_ITEM` is implied — the
+   * legacy admin-menu path with a MenuItem id in `menuItemId`.
+   *
+   * `variantName` and `variantPrice` are snapshotted at add-time so the
+   * cart renders the correct label and price without a re-fetch. The
+   * server remains authoritative for the money on submit — these are
+   * display fields only, mirroring the `unitPrice` snapshot contract.
+   */
+  sourceKind?: 'MENU_ITEM' | 'PRODUCT';
+  productId?: string;
+  productVariantId?: string;
+  variantName?: string;
+  variantPrice?: string;
 }
 
 /** Loaded menu tree for a branch — the picker's data source. */

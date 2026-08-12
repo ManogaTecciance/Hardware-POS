@@ -254,12 +254,28 @@ function toMenuItemView(
   modifierGroupsById: Map<string, ModifierGroupView>,
   timestamp: string,
 ): MenuItemView {
-  // Base price: use the item's unitPrice when available, else fall back to
-  // the default variant's price. `null` on both is a real Product-config
-  // error, but the picker still tolerates `"0"` — the cashier sees the
-  // card and can add a discount if the sticker is missing.
-  const defaultVariant = item.variants.find((v) => v.isDefault) ?? item.variants[0];
-  const basePriceNumber = item.unitPrice ?? defaultVariant?.unitPrice ?? 0;
+  // D46 — only active variants are exposed to the picker; inactive rows
+  // survive the wizard for admin visibility but must never be tappable at
+  // the POS. The dialog itself still receives inactives (via `item.variants`)
+  // when it wants to render an "Unavailable" affordance; for now the runtime
+  // picker only cares about active ones.
+  const activeVariants = item.variants.filter((v) => v.isActive);
+  // Default variant preference — a wizard-marked default wins; else the
+  // cheapest active variant so the card price is the honest floor an
+  // operator can advertise.
+  const defaultVariant =
+    activeVariants.find((v) => v.isDefault) ??
+    [...activeVariants].sort((a, b) => a.unitPrice - b.unitPrice)[0];
+  // Base price: for a Product WITH variants the card shows the default
+  // (or cheapest active) variant's price, so the fast-add tap matches the
+  // dialog's preselected radio. Without variants the Product's own unitPrice
+  // is authoritative; `null` on both is a real config error but the card
+  // still surfaces at "0" — a cashier can add a discount to zero-price
+  // sticker items rather than have the row silently disappear.
+  const basePriceNumber =
+    activeVariants.length > 0
+      ? defaultVariant?.unitPrice ?? 0
+      : item.unitPrice ?? 0;
 
   // Register every group the item references. Groups are dedup'd by id, so
   // two items sharing "Spice level" collapse to one entry the modifier
@@ -292,7 +308,8 @@ function toMenuItemView(
     basePrice: String(basePriceNumber),
     // Products come from `/products`, so this is really a productId — no
     // MenuItem row exists behind it. Left non-null so downstream code that
-    // shows a "linked to Product" affordance still fires.
+    // shows a "linked to Product" affordance still fires; `catalogueSource`
+    // below is the authoritative discriminator for cart writes (D46).
     productId: item.id,
     isActive: true,
     position,
@@ -306,5 +323,20 @@ function toMenuItemView(
     prepMinutes: item.prepMinutes,
     dietaryTags: item.dietaryTags,
     imageUrl: item.imageUrl,
+    // D46 — cart writes route on this: `'PRODUCT'` sends `{sourceKind:
+    // 'PRODUCT', productId, productVariantId?}`, absent/`'MENU_ITEM'` keeps
+    // the legacy `{menuItemId}` shape. `productId` alone is not a safe
+    // discriminator — legacy MenuItems may link a Product for inventory.
+    catalogueSource: 'PRODUCT',
+    // Only actives surface to the runtime picker; the Customise dialog
+    // treats the whole list as authoritative and does not re-filter.
+    variants: activeVariants.map((v) => ({
+      id: v.id,
+      sku: v.sku,
+      name: v.name,
+      unitPrice: v.unitPrice,
+      isDefault: v.isDefault,
+      isActive: v.isActive,
+    })),
   };
 }

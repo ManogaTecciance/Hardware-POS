@@ -145,11 +145,19 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   };
 
   const openItem = (item: MenuItemView) => {
-    if (item.modifierGroupIds.length > 0) {
+    // D46 — variants force the Customise dialog too. Even with zero
+    // modifier groups a Product with variants must let the operator pick
+    // the size, so the fast-add short-circuit only applies when BOTH
+    // lists are empty.
+    const hasVariants = (item.variants ?? []).length > 0;
+    if (item.modifierGroupIds.length > 0 || hasVariants) {
       setModifierTarget({ item });
       return;
     }
-    // No modifiers → straight into the cart.
+    // No modifiers, no variants → straight into the cart. Source
+    // discriminator carries over so the submit call site can route to
+    // the PRODUCT wire shape (D46).
+    const isProductSource = item.catalogueSource === 'PRODUCT';
     addOrEdit({
       key: cryptoRandomKey(),
       menuItemId: item.id,
@@ -158,6 +166,8 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
       quantity: 1,
       specialInstructions: '',
       modifiers: [],
+      sourceKind: isProductSource ? 'PRODUCT' : 'MENU_ITEM',
+      ...(isProductSource ? { productId: item.id } : {}),
     });
   };
 
@@ -641,6 +651,21 @@ function CartLineRow({
               {formatMoney(lineTotal)}
             </p>
           </div>
+          {/* D46 — variant name renders as a sub-line beneath the item
+              name with the ABSOLUTE variant price on the right. Never
+              hidden: the brief calls this out explicitly because the
+              variant is often the difference between a `Small` and a
+              `Large` on the same product card. */}
+          {line.variantName ? (
+            <div className="mt-0.5 flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
+              <span>{line.variantName}</span>
+              {line.variantPrice ? (
+                <span className="tabular-nums">
+                  {formatMoney(line.variantPrice)}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {line.modifiers.length > 0 ? (
             <ul className="mt-0.5 text-xs text-muted-foreground">
               {line.modifiers.map((m) => (

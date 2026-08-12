@@ -3,6 +3,7 @@ import {
   KitchenPrintAttemptStatus,
   KitchenTicketStatus,
   Prisma,
+  RestaurantOrderItemSourceKind,
 } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -19,6 +20,11 @@ export interface KitchenTicketView {
   items: {
     id: string;
     menuItemName: string;
+    /**
+     * D46 — variant selection printed on the KOT ("MEDIUM", "LARGE").
+     * NULL for legacy MENU_ITEM rows and for non-variant Products.
+     */
+    variantName: string | null;
     quantity: string;
     modifierNames: string[];
     specialInstructions: string | null;
@@ -66,30 +72,77 @@ export class KitchenService {
         menuItemName: true,
         quantity: true,
         specialInstructions: true,
+        // D46 — source + Product + variant snapshot so the routing lookup
+        // reads from the correct junction (MenuItem vs Product) and the
+        // printed ticket carries the operator-selected variant verbatim.
+        sourceKind: true,
+        productId: true,
+        variantNameSnapshot: true,
         modifiers: { select: { optionName: true } },
       },
     });
     if (items.length === 0) return [];
 
-    // Discover the station routing per menu item.
-    const menuItemIds = [...new Set(items.map((i) => i.menuItemId))];
-    const stationLinks = await tx.menuItemStationLink.findMany({
-      where: { menuItemId: { in: menuItemIds } },
-      select: { menuItemId: true, stationId: true },
-    });
+    // D46 — the round can now carry a mix of MENU_ITEM and PRODUCT rows,
+    // and each source has its own routing junction. Load both in
+    // parallel, keyed by their respective source id, so an item whose
+    // Product was linked to Grill still routes to Grill.
+    const menuItemIds = [
+      ...new Set(
+        items
+          .filter((i) => i.sourceKind === RestaurantOrderItemSourceKind.MENU_ITEM)
+          .map((i) => i.menuItemId),
+      ),
+    ];
+    const productIds = [
+      ...new Set(
+        items
+          .filter(
+            (i): i is typeof i & { productId: string } =>
+              i.sourceKind === RestaurantOrderItemSourceKind.PRODUCT && i.productId !== null,
+          )
+          .map((i) => i.productId),
+      ),
+    ];
+    const [menuItemStationLinks, productStationLinks] = await Promise.all([
+      menuItemIds.length
+        ? tx.menuItemStationLink.findMany({
+            where: { menuItemId: { in: menuItemIds } },
+            select: { menuItemId: true, stationId: true },
+          })
+        : Promise.resolve([]),
+      productIds.length
+        ? tx.productStationLink.findMany({
+            where: { productId: { in: productIds } },
+            select: { productId: true, stationId: true },
+          })
+        : Promise.resolve([]),
+    ]);
     const stationsByMenuItem = new Map<string, string[]>();
-    for (const link of stationLinks) {
+    for (const link of menuItemStationLinks) {
       const list = stationsByMenuItem.get(link.menuItemId) ?? [];
       list.push(link.stationId);
       stationsByMenuItem.set(link.menuItemId, list);
+    }
+    const stationsByProduct = new Map<string, string[]>();
+    for (const link of productStationLinks) {
+      const list = stationsByProduct.get(link.productId) ?? [];
+      list.push(link.stationId);
+      stationsByProduct.set(link.productId, list);
     }
 
     // Aggregate items per station.
     const perStation = new Map<string, typeof items>();
     for (const item of items) {
-      const stationIds = stationsByMenuItem.get(item.menuItemId) ?? [];
-      // An item with NO station routing falls back to a synthetic
-      // "unrouted" bucket so it doesn't silently disappear.
+      // Look up in the junction that matches the item's source. An item
+      // with NO station routing (either junction empty) falls back to a
+      // synthetic "unrouted" bucket so it doesn't silently disappear.
+      const stationIds =
+        item.sourceKind === RestaurantOrderItemSourceKind.PRODUCT
+          ? item.productId
+            ? stationsByProduct.get(item.productId) ?? []
+            : []
+          : stationsByMenuItem.get(item.menuItemId) ?? [];
       const targets = stationIds.length > 0 ? stationIds : ['__unrouted__'];
       for (const stationId of targets) {
         if (stationId === '__unrouted__') continue;
@@ -128,6 +181,12 @@ export class KitchenService {
             tenantId,
             ticketId: ticket.id,
             menuItemName: item.menuItemName,
+            // D46 — print the variant selection ("MEDIUM", "LARGE") on
+            // the KOT verbatim from the round-item snapshot. NULL when
+            // the round item has no variant (a MENU_ITEM row or a
+            // non-variant Product); the kitchen must not infer the
+            // variant from selling price.
+            variantName: item.variantNameSnapshot,
             quantity: item.quantity,
             modifierNames: item.modifiers.map((m) => m.optionName),
             specialInstructions: item.specialInstructions,
@@ -253,6 +312,7 @@ export class KitchenService {
       items: row.items.map((i) => ({
         id: i.id,
         menuItemName: i.menuItemName,
+        variantName: i.variantName,
         quantity: i.quantity.toFixed(3),
         modifierNames: i.modifierNames,
         specialInstructions: i.specialInstructions,

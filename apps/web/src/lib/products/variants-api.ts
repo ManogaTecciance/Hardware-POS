@@ -48,6 +48,11 @@ export interface ProductVariant {
   imageUrl: string | null;
   position: number;
   isActive: boolean;
+  /**
+   * D46 — one variant per product may be marked default; the POS
+   * Customise dialog preselects it. `false` for every legacy row.
+   */
+  isDefault: boolean;
   optionValues: ProductVariantOptionValue[];
 }
 
@@ -87,6 +92,7 @@ interface ApiVariant {
   imageUrl: string | null;
   position: number;
   isActive: boolean;
+  isDefault: boolean;
   optionValues: ProductVariantOptionValue[];
 }
 
@@ -129,6 +135,7 @@ function toVariant(v: ApiVariant): ProductVariant {
     imageUrl: v.imageUrl,
     position: v.position,
     isActive: v.isActive,
+    isDefault: v.isDefault,
     optionValues: v.optionValues,
   };
 }
@@ -202,6 +209,8 @@ export interface CreateVariantInput {
   openingQuantity?: number;
   imageUrl?: string;
   isActive?: boolean;
+  /** D46 — mark this variant as the POS Customise default. At most one per product. */
+  isDefault?: boolean;
   position?: number;
   optionValues: Array<{ dimensionId: string; optionId: string }>;
 }
@@ -243,6 +252,8 @@ export type UpdateVariantPatch = Partial<{
   imageUrl: string | null;
   position: number;
   isActive: boolean;
+  /** D46 — server flips any prior default in the same transaction. */
+  isDefault: boolean;
 }>;
 
 export async function updateVariant(

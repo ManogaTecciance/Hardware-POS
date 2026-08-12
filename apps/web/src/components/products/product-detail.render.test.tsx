@@ -143,6 +143,7 @@ function makeVariant(overrides: Partial<ProductVariant> = {}): ProductVariant {
     imageUrl: null,
     position: 0,
     isActive: true,
+    isDefault: false,
     optionValues: [
       { dimensionId: 'd1', optionId: 'o1', dimensionName: 'Size', optionName: '200ml' },
       { dimensionId: 'd2', optionId: 'o2', dimensionName: 'Packaging', optionName: 'Glass Bottle' },

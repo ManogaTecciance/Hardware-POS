@@ -158,12 +158,27 @@ export function PaymentPopup(props: Props) {
         customerPhone: customer?.phone ?? undefined,
         idempotencyKey,
         notes,
-        items: draft.map((r) => ({
-          menuItemId: r.menuItemId,
-          quantity: r.quantity,
-          specialInstructions: r.specialInstructions.trim() || undefined,
-          modifiers: r.modifiers.map((m) => ({ modifierOptionId: m.optionId })),
-        })),
+        items: draft.map((r) =>
+          // D46 — route the discriminated union at the boundary. Legacy
+          // MENU_ITEM lines keep the historic wire shape byte-for-byte;
+          // PRODUCT lines emit `{sourceKind, productId, productVariantId?}`.
+          // The server resolves the variant + snapshots price/name.
+          r.sourceKind === 'PRODUCT'
+            ? {
+                sourceKind: 'PRODUCT' as const,
+                productId: r.productId!,
+                productVariantId: r.productVariantId,
+                quantity: r.quantity,
+                specialInstructions: r.specialInstructions.trim() || undefined,
+                modifiers: r.modifiers.map((m) => ({ modifierOptionId: m.optionId })),
+              }
+            : {
+                menuItemId: r.menuItemId,
+                quantity: r.quantity,
+                specialInstructions: r.specialInstructions.trim() || undefined,
+                modifiers: r.modifiers.map((m) => ({ modifierOptionId: m.optionId })),
+              },
+        ),
       });
 
       let saleId: string | null = null;

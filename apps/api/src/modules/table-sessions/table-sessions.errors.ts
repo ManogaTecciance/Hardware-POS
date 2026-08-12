@@ -12,6 +12,16 @@ export const SESSION_ERROR_CODES = {
   MENU_ITEM_INACTIVE: 'MENU_ITEM_INACTIVE',
   ROUND_ALREADY_SUBMITTED: 'ROUND_ALREADY_SUBMITTED',
   ITEM_ALREADY_SENT: 'ITEM_ALREADY_SENT',
+  // D46 — Product / ProductVariant resolution failures on the widened
+  // `submitRound` path. Distinct codes from the MenuItem variants so a
+  // client can differentiate a bad Product id from a bad MenuItem id.
+  PRODUCT_NOT_FOUND: 'PRODUCT_NOT_FOUND',
+  PRODUCT_INACTIVE: 'PRODUCT_INACTIVE',
+  PRODUCT_VARIANT_NOT_FOUND: 'PRODUCT_VARIANT_NOT_FOUND',
+  PRODUCT_VARIANT_INACTIVE: 'PRODUCT_VARIANT_INACTIVE',
+  VARIANT_NOT_ON_PRODUCT: 'VARIANT_NOT_ON_PRODUCT',
+  VARIANT_SELECTION_REQUIRED: 'VARIANT_SELECTION_REQUIRED',
+  MODIFIER_OPTION_NOT_ON_ITEM: 'MODIFIER_OPTION_NOT_ON_ITEM',
 } as const;
 
 const err = (code: string, message: string) => ({ code, message });
@@ -82,6 +92,95 @@ export class ItemAlreadySentError extends ConflictException {
       err(
         SESSION_ERROR_CODES.ITEM_ALREADY_SENT,
         'Item has been sent to the kitchen and cannot be silently removed — void instead',
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// D46 — Product / ProductVariant resolution failures
+// ─────────────────────────────────────────────────────────────
+//
+// A 404 for "not found for this tenant" is deliberate: the response must
+// not distinguish "no such product" from "product exists but on a
+// different tenant" — that would leak cross-tenant existence.
+
+export class ProductNotFoundError extends NotFoundException {
+  constructor() {
+    super(err(SESSION_ERROR_CODES.PRODUCT_NOT_FOUND, 'Product not found for this tenant'));
+  }
+}
+
+export class ProductInactiveError extends BadRequestException {
+  constructor(name: string) {
+    super(err(SESSION_ERROR_CODES.PRODUCT_INACTIVE, `Product "${name}" is not currently available`));
+  }
+}
+
+export class ProductVariantNotFoundError extends NotFoundException {
+  constructor() {
+    super(
+      err(
+        SESSION_ERROR_CODES.PRODUCT_VARIANT_NOT_FOUND,
+        'Product variant not found for this tenant',
+      ),
+    );
+  }
+}
+
+export class ProductVariantInactiveError extends BadRequestException {
+  constructor(sku: string) {
+    super(
+      err(
+        SESSION_ERROR_CODES.PRODUCT_VARIANT_INACTIVE,
+        `Product variant "${sku}" is not currently available`,
+      ),
+    );
+  }
+}
+
+export class VariantNotOnProductError extends BadRequestException {
+  constructor() {
+    super(
+      err(
+        SESSION_ERROR_CODES.VARIANT_NOT_ON_PRODUCT,
+        'Selected variant does not belong to the given product',
+      ),
+    );
+  }
+}
+
+/**
+ * Thrown when a PRODUCT-sourced round item is submitted without a
+ * `productVariantId` but the Product carries one or more active variants.
+ * The dialog copy from D46 ("Select a size to continue") drives the
+ * message so the client can surface it verbatim.
+ */
+export class VariantSelectionRequiredError extends BadRequestException {
+  constructor(productName: string) {
+    super(
+      err(
+        SESSION_ERROR_CODES.VARIANT_SELECTION_REQUIRED,
+        `Select a size to continue for "${productName}"`,
+      ),
+    );
+  }
+}
+
+/**
+ * The referenced modifier option exists (and is tenant-scoped correctly)
+ * but its parent group is not attached to the item being ordered — so
+ * accepting the option would silently pull an unrelated price delta into
+ * the snapshot. Enforced at the service layer because a ModifierGroup is
+ * intentionally reusable across items; the DB cannot express "this
+ * option is valid for THIS item only".
+ */
+export class ModifierOptionNotOnItemError extends BadRequestException {
+  constructor() {
+    super(
+      err(
+        SESSION_ERROR_CODES.MODIFIER_OPTION_NOT_ON_ITEM,
+        'Modifier option is not attached to the ordered item',
       ),
     );
   }

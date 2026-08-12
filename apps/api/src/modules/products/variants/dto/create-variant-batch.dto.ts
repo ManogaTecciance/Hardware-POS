@@ -79,6 +79,16 @@ export class CreateVariantInputDto {
   @IsOptional()
   isActive?: boolean;
 
+  /**
+   * D46 — one variant per product may be marked `isDefault=true`. The POS
+   * Counter's Customise dialog preselects it. The schema-level partial
+   * unique index (`ProductVariant_productId_default_key`) guarantees at
+   * most one; if the batch flags two the transaction fails at the DB.
+   */
+  @IsBoolean()
+  @IsOptional()
+  isDefault?: boolean;
+
   @IsInt()
   @Min(0)
   @Max(10000)

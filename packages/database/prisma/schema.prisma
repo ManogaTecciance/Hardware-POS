@@ -722,6 +722,7 @@ model Product {
   modifierGroups      ProductModifierGroup[]
   stationLinks        ProductStationLink[]
   promotionItems      PromotionItem[]
+  restaurantOrderItems RestaurantOrderItem[]
 
   @@unique([tenantId, quickbooksItemId])
   @@unique([tenantId, sku])
@@ -1994,6 +1995,18 @@ enum RestaurantOrderItemStatus {
   VOIDED
 }
 
+/// D46 — where a round item came from. `MENU_ITEM` is the legacy path (an
+/// existing Restaurant MenuItem was tapped in the POS); `PRODUCT` is the
+/// D45-enabled path (a Restaurant Product from Inventory, with optional
+/// variant selection). The `submitRound` service keys off this to pick the
+/// right resolver (menu-item lookup vs product+variant lookup) and to pick
+/// the right kitchen-station junction (MenuItemStationLink vs
+/// ProductStationLink).
+enum RestaurantOrderItemSourceKind {
+  MENU_ITEM
+  PRODUCT
+}
+
 /// One party at one table. Opened by a waiter, closed when the bill is paid.
 /// `guestCount` and `waiterUserId` are set at open and may be updated during
 /// the session. When the session closes into a Sale, `finalSaleId` is set
@@ -2119,6 +2132,27 @@ model RestaurantOrderItem {
   quantity            Decimal @default(1) @db.Decimal(12, 3)
   specialInstructions String?
 
+  /// D46 — source discriminator. `MENU_ITEM` is the legacy path (default,
+  /// so every historical row keeps its semantics). `PRODUCT` is set when
+  /// the round item was sourced from a Restaurant Product (with optional
+  /// variant selection) via D45's `/restaurant/pos-catalogue`.
+  sourceKind RestaurantOrderItemSourceKind @default(MENU_ITEM)
+
+  /// D46 — Product+Variant reference for a PRODUCT-sourced item. Both are
+  /// nullable so a MENU_ITEM row (or a Product-sourced item on a
+  /// non-variant Product) leaves the appropriate field NULL. FK is
+  /// ON DELETE SET NULL — a Product deletion never cascades into
+  /// historical order rows, and the snapshots below preserve display.
+  productId        String?
+  productVariantId String?
+
+  /// D46 — immutable variant snapshot. Captured at submit time so a later
+  /// variant rename or price change cannot rewrite historical orders /
+  /// KOTs / bills / receipts. Both nullable — NULL on MENU_ITEM rows and
+  /// on non-variant Products.
+  variantNameSnapshot  String?
+  variantPriceSnapshot Decimal? @db.Decimal(12, 2)
+
   status         RestaurantOrderItemStatus @default(PENDING)
   voidReason     String?
   voidedByUserId String?
@@ -2127,16 +2161,21 @@ model RestaurantOrderItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant    Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  order     RestaurantOrder               @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  round     OrderRound                    @relation(fields: [roundId], references: [id], onDelete: Cascade)
-  modifiers RestaurantOrderItemModifier[]
+  tenant         Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order          RestaurantOrder               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  round          OrderRound                    @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  product        Product?                      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productVariant ProductVariant?               @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  modifiers      RestaurantOrderItemModifier[]
 
   @@index([tenantId])
   @@index([orderId])
   @@index([roundId])
   @@index([menuItemId])
   @@index([status])
+  @@index([productId])
+  @@index([productVariantId])
+  @@index([sourceKind])
 }
 
 /// One selected modifier on an order item. Snapshotted like the item itself —
@@ -2388,6 +2427,11 @@ model KitchenTicketItem {
   tenantId String
 
   menuItemName        String
+  /// D46 — the variant selection printed on the KOT ("MEDIUM", "LARGE").
+  /// The kitchen must not infer the variant from the selling price. NULL
+  /// when the round item has no variant selection (a non-variant Product,
+  /// or a legacy MenuItem without SIZE-role modifiers).
+  variantName         String?
   quantity            Decimal  @db.Decimal(12, 3)
   modifierNames       String[]
   specialInstructions String?
@@ -2726,13 +2770,14 @@ model ProductVariant {
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  optionValues    ProductVariantOptionValue[]
-  saleItems       SaleItem[]
-  returnItems     ReturnItem[]
-  menuItems       MenuItem[]
-  branchInventory BranchInventory[]
-  stockMovements  StockMovement[]
-  receiptLines    InventoryReceiptLine[]
+  optionValues         ProductVariantOptionValue[]
+  saleItems            SaleItem[]
+  returnItems          ReturnItem[]
+  menuItems            MenuItem[]
+  branchInventory      BranchInventory[]
+  stockMovements       StockMovement[]
+  receiptLines         InventoryReceiptLine[]
+  restaurantOrderItems RestaurantOrderItem[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])

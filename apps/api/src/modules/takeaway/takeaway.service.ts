@@ -103,12 +103,27 @@ export class TakeawayService {
         },
       });
 
+      // Takeaway is still MENU_ITEM-only (the counter POS's D46 widening
+      // is scoped to the dine-in `submitRound` path). If a client sends a
+      // PRODUCT-sourced item to the takeaway endpoint we refuse up front
+      // — that path would otherwise crash with a Prisma NOT NULL error
+      // because `menuItemId` is optional on the shared DTO now.
+      for (const input of dto.items) {
+        if (input.sourceKind && input.sourceKind !== 'MENU_ITEM') {
+          throw new BadRequestException(
+            'Takeaway does not yet accept Product-sourced items',
+          );
+        }
+        if (!input.menuItemId) {
+          throw new BadRequestException('menuItemId is required');
+        }
+      }
       const menuItems = await tx.menuItem.findMany({
-        where: { id: { in: dto.items.map((i) => i.menuItemId) }, tenantId },
+        where: { id: { in: dto.items.map((i) => i.menuItemId!) }, tenantId },
       });
       const map = new Map(menuItems.map((m) => [m.id, m]));
       for (const input of dto.items) {
-        const mi = map.get(input.menuItemId);
+        const mi = map.get(input.menuItemId!);
         if (!mi) throw new NotFoundException(`Menu item ${input.menuItemId} not found`);
         await tx.restaurantOrderItem.create({
           data: {

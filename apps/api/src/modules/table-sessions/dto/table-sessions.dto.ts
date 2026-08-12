@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
   IsArray,
+  IsEnum,
   IsIn,
   IsInt,
   IsNumber,
@@ -10,8 +11,21 @@ import {
   Length,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
+
+/**
+ * D46 — source discriminator on a round item. Mirrors the Prisma enum
+ * `RestaurantOrderItemSourceKind` (kept as a local string enum so the DTO
+ * layer does not pull the generated Prisma runtime into request validation).
+ * `MENU_ITEM` is the legacy default so clients that don't send `sourceKind`
+ * keep their existing behaviour verbatim.
+ */
+export enum RestaurantOrderItemSourceKindDto {
+  MENU_ITEM = 'MENU_ITEM',
+  PRODUCT = 'PRODUCT',
+}
 
 // ── Session ──────────────────────────────────────────────────
 export class OpenSessionDto {
@@ -26,7 +40,52 @@ export class OrderItemModifierInputDto {
 }
 
 export class OrderItemInputDto {
-  @IsString() @Length(1, 128) menuItemId!: string;
+  /**
+   * D46 — which authority the round item was sourced from. Omitted or
+   * `MENU_ITEM` keeps the legacy path (menuItemId lookup); `PRODUCT`
+   * routes to the Product + optional ProductVariant resolver added in
+   * D46. Nullable-defaulted at the DTO layer so historical clients stay
+   * valid — the service treats a missing discriminator as `MENU_ITEM`.
+   */
+  @IsOptional() @IsEnum(RestaurantOrderItemSourceKindDto)
+  sourceKind?: RestaurantOrderItemSourceKindDto;
+
+  /**
+   * Legacy MENU_ITEM path — the MenuItem id whose name / basePrice the
+   * service snapshots. Required when `sourceKind` is `MENU_ITEM` (or
+   * omitted). Kept as a distinct field from `productId` on the wire so
+   * a client cannot accidentally send a Product id under the MenuItem
+   * discriminator (or vice versa) and have the service silently accept
+   * the wrong shape.
+   */
+  @ValidateIf((o: OrderItemInputDto) =>
+    (o.sourceKind ?? RestaurantOrderItemSourceKindDto.MENU_ITEM) ===
+    RestaurantOrderItemSourceKindDto.MENU_ITEM,
+  )
+  @IsString() @Length(1, 128)
+  menuItemId?: string;
+
+  /**
+   * D46 PRODUCT path — the Product id whose (variant?) unitPrice the
+   * service snapshots. Required when `sourceKind === 'PRODUCT'`.
+   */
+  @ValidateIf(
+    (o: OrderItemInputDto) => o.sourceKind === RestaurantOrderItemSourceKindDto.PRODUCT,
+  )
+  @IsString() @Length(1, 128)
+  productId?: string;
+
+  /**
+   * D46 PRODUCT path — the ProductVariant id when the Product carries
+   * variants. Optional at the DTO layer because a non-variant Product
+   * is legitimately sent without one; the service still refuses a
+   * missing variantId when the Product has any active variants (that
+   * is a service-layer decision because the answer depends on data,
+   * not the request shape).
+   */
+  @IsOptional() @IsString() @Length(1, 128)
+  productVariantId?: string;
+
   @Type(() => Number) @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) quantity!: number;
   @IsOptional() @IsString() @MaxLength(500) specialInstructions?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OrderItemModifierInputDto)

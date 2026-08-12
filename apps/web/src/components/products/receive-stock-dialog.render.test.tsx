@@ -84,6 +84,7 @@ function variantWithAverage(averageCost: number | null): ProductVariant {
     imageUrl: null,
     position: 0,
     isActive: true,
+    isDefault: false,
     optionValues: [],
   };
 }

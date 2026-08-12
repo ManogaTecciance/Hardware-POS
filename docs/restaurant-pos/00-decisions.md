@@ -1071,6 +1071,105 @@ negative assertions.
 
 ---
 
+## 2026-08-14 — POS Product Variations in the Customise dialog
+
+### D46 — Restaurant POS Counter's Customise dialog exposes Product Variations as a single-select radio group; round submit + KOT preserve the variation
+
+Approved to expose the `ProductVariant` selection introduced by D44 in the
+Restaurant POS Customise popup, and to unblock the last piece D45 deferred:
+sending Product-sourced round items to the kitchen. Variation is a
+distinct concept from Additionals (Modifiers) — the two are collected and
+rendered separately, with different selection semantics.
+
+**Two customisation concepts, deliberately separate.**
+
+- **Variation** (Small / Medium / Large) — physically distinct sellable
+  variants of the Product, each with its own absolute selling price. The
+  Customise dialog renders them as a **single-select radio group**;
+  selecting Large deselects Medium. Backed by `ProductVariant` rows
+  created via the D44 wizard. Selling price is the variant's own
+  `unitPrice` — NOT a base price + variant delta.
+- **Modifier / Additional** (Extra Chicken, Extra Cheese, No Onion) —
+  customisation options that add / subtract from the item price. Rendered
+  as a **multi-select checkbox group** with the existing
+  `ModifierGroup.selection / minSelections / maxSelections` constraints.
+  Backed by `ProductModifierGroup` (D45) attaching `ModifierGroup` rows
+  to the Product.
+
+The two must not collapse into one concept — modelling Small / Medium /
+Large as SIZE-role modifiers (the D41 pattern for Restaurant menu items)
+was correct there but would duplicate D44's variant authority for
+Products and break the cart identity + snapshot discipline this decision
+requires.
+
+**Cart identity + round submit.**
+
+- `DraftLine` extends with `productId?`, `productVariantId?`,
+  `variantName?`, `variantPrice?`. The cart continues to be a
+  local-only draft — server remains the pricing authority.
+- `RestaurantOrderItem` gains a `sourceKind` discriminator
+  (`MENU_ITEM | PRODUCT`, default `MENU_ITEM` so every historical row
+  keeps semantics), plus `productId?` + `productVariantId?` FKs and
+  `variantNameSnapshot?` + `variantPriceSnapshot?` for reprint /
+  receipt / audit.
+- `submitRound`'s `OrderItemInputDto` gains `sourceKind` +
+  `productVariantId?`. The service resolves name / price / isActive
+  from EITHER `MenuItem` (legacy) OR `Product`+`ProductVariant` (D46)
+  depending on the discriminator. Cross-tenant, inactive-variant,
+  mismatched-variant-for-product are rejected at the service — client-
+  provided price is NEVER financial authority.
+- `KitchenService.generateTicketsForRound` widens station lookup: for
+  a `PRODUCT`-sourced item it reads `ProductStationLink` (D45); for
+  `MENU_ITEM` it reads the existing `MenuItemStationLink`. Un-routed
+  items still fall to the silent `__unrouted__` bucket the earlier
+  audit flagged — that is out of scope for this slice.
+
+**KOT / snapshot discipline.**
+
+- `KitchenTicketItem` gains a nullable `variantName?` — the KOT prints
+  "MEDIUM" / "LARGE" verbatim. The kitchen must not infer the variant
+  from the selling price (the brief calls this out explicitly).
+- Every snapshot column on `RestaurantOrderItem` is IMMUTABLE once
+  written. A later variant rename or price change cannot rewrite
+  historical orders, bills, receipts, or KOT reprints.
+- Sale-close (`table-sessions.service.closeSession`) reads only from
+  snapshot columns, so it is source-agnostic — no change needed there.
+
+**Default variant preselection.**
+
+- The Customise dialog preselects the variant whose `isDefault=true`
+  (D45 partial unique index guarantees at most one). When no default
+  exists, selection is required; Add to Cart stays disabled with a
+  hint "Select a size to continue" that appears only after the operator
+  has interacted with the dialog.
+- A Product with one active variant either auto-selects or hides the
+  Variation section entirely (per existing "one meaningful option"
+  UX). Products with zero variants render the dialog without a
+  Variation section.
+
+**Backward compatibility.**
+
+- Every existing `RestaurantOrderItem` row remains valid — `sourceKind`
+  defaults to `MENU_ITEM`, `productId` / `productVariantId` /
+  `variantNameSnapshot` / `variantPriceSnapshot` all default NULL.
+- The legacy MenuItem POS path (Restaurant tenants who still have
+  MenuItem-based rounds during the D45 read-only-deprecate transition)
+  continues to work unchanged.
+- Tile Shop and other Retail tenants are unaffected — Restaurant POS
+  is the only consumer.
+
+**Migration.** `20260814000000_add_pos_variation_snapshots`. Purely
+additive: one new enum, three additive columns on `RestaurantOrderItem`,
+one additive column on `KitchenTicketItem`, two indexes + two FKs
+(`ON DELETE SET NULL` so a Product deletion never cascades into
+historical rows). No DROP, no ALTER COLUMN SET NOT NULL, no rename.
+`menuItemId` stays a loose string reference exactly as before. Per-
+migration structural test in `provider-contract.spec.ts` enforces the
+positive shape AND the mutation-provable absence of destructive
+statements.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

@@ -62,4 +62,15 @@ export class UpdateVariantDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  /**
+   * D46 — toggle the default-variant flag from Product Details. Setting
+   * `isDefault=true` on one variant requires flipping any prior default
+   * to false in the same transaction (partial unique index refuses two
+   * defaults per product). The service handles that swap; the client
+   * just sends `isDefault: true`.
+   */
+  @IsBoolean()
+  @IsOptional()
+  isDefault?: boolean;
 }
