@@ -1391,10 +1391,10 @@ function CreateOpenTableDialog({
           </div>
         </div>
         <div className="space-y-1.5">
-          <p className="text-sm font-medium">Tables to join</p>
+          <p className="text-sm font-medium">Tables to reserve</p>
           {joinable.length === 0 ? (
             <p className="rounded-xl border border-border p-3 text-sm text-muted-foreground">
-              No available tables to join right now.
+              No available tables to reserve right now.
             </p>
           ) : (
             <div className="max-h-64 space-y-3 overflow-y-auto rounded-xl border border-border p-3">
