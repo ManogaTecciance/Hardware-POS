@@ -1579,6 +1579,93 @@ computed its balance in the browser with `.toFixed(2)`. Both fixed here.
 Branch and register names in the three POS shells were the literals
 `"Main Dining"` and `"Counter 1"`; they now come from the session.
 
+### D55 — Platform admins: a cross-tenant account that manages workspaces and users, and never reads tenant business data
+
+A new account type that signs in through the same login page and lands on a
+platform console instead of a workspace. It creates workspaces from a
+template, and manages user accounts inside any workspace.
+
+**The security problem this creates.** Every JWT in this system carries a
+`tenantId`, and that one field is what `@TenantId()` turns into the isolation
+boundary on every route. A platform admin belongs to no workspace, so the
+boundary has to be re-stated rather than inherited.
+
+**A bidirectional guard, not a privilege escalation.** `User.isPlatformAdmin`
+marks the account; platform routes carry `@PlatformAdminRoute()`. A global
+`PlatformBoundaryGuard` enforces both directions:
+
+- a non-platform token on a platform route → 403;
+- **a platform token on any tenant-scoped route → 403.**
+
+The second half is the important one. A platform admin's token is refused by
+every existing route in the product, so "cannot read tenant business data" is
+a property of the guard rather than of the endpoints we remembered to check.
+Platform admins live in a dedicated `platform` tenant so the `User.tenantId`
+FK stays satisfied and the whole auth stack — password hashing, refresh
+rotation, login throttling — is reused rather than duplicated.
+
+**Password reset is a deliberate hole in that boundary, and is logged like
+one.** The PO chose full user CRUD including password resets. A platform
+admin can therefore reset a workspace owner's password and sign in as them,
+which reaches the business data the guard otherwise refuses. This is a
+support-desk capability with a master-key shape, so: every reset writes an
+audit record naming the actor, the target user and the workspace, and the
+reset endpoint is the only one in the platform module that touches
+credentials. The metadata-only boundary is real protection against accident
+and casual browsing; it is not a defence against a malicious platform admin,
+and should not be described as one.
+
+**Templates are business types, because that mechanism already exists.**
+`BusinessType` already drives `NAV_BY_BUSINESS_TYPE`, `DEFAULT_MODULES_BY_
+BUSINESS_TYPE`, `BUSINESS_PROFILE_PRESETS` and the role templates. A template
+is therefore a named business type plus its presets, not a new entity: three
+are offered — Hardware, Restaurant, Hotel.
+
+**HOTEL is its own business type that currently aliases Restaurant.** The PO
+asked for a duplicate of the restaurant template. Aliasing at the *map* level
+(HOTEL → `RESTAURANT_NAV`, restaurant modules, restaurant role templates)
+rather than reusing the `RESTAURANT` value means the workspaces are
+distinguishable in data from day one, and the day hotels need their own
+navigation it is a one-line map change instead of a migration over live
+tenants. `BUSINESS_PROFILE_PRESETS` is a total `Record<BusinessType, …>`, so
+the compiler required every map to answer for HOTEL — which is the point.
+
+**Provisioning reuses the proven path.** Creating a workspace runs the same
+sequence as `provision-tenant.ts`: tenant, business profile, main branch,
+register, role rows for the template's business type, and an owner user. It
+is one transaction, so a half-built workspace cannot exist.
+
+**Migration.** `20260820000000_add_platform_admin_and_hotel`: the `HOTEL`
+enum value and `User.isPlatformAdmin` (defaulted false, so no existing user
+gains anything).
+
+**The console is its own route tree, and the two shells push each other
+apart.** `/platform` sits outside the `(app)` group because that layout mounts
+the sidebar, the module gate and the POS cart providers, all of which assume a
+tenant — a platform admin inside it would 403 on the profile fetch and land in
+front of a broken shell. So `Protected` sends a platform admin to `/platform`
+and the platform layout sends a workspace user to `/dashboard`. Neither is a
+security control (the guard already refuses both tokens); they exist so nobody
+reaches a shell that cannot load. `platform-boundary.render.test.tsx` asserts
+both directions and is mutation-proven: dropping the workspace→console half
+fails exactly one test and leaves the other six green.
+
+**The console shows the role that is actually in force.** A user linked to a
+custom workspace role keeps an enum role underneath — the seeded waiter is enum
+`CASHIER` — and `PermissionResolver` uses the linked role. Listing only the
+enum would tell an operator that a waiter is a cashier, so the workspace role
+is named separately and the enum select is labelled as its fallback.
+
+**Known gap, deliberately not closed here.** The seeded hardware tenant
+(`tnt_dev`) has no `TenantBusinessProfile` row at all: it resolves through
+`LEGACY_TENANT_DEFAULTS` to `TILE_SHOP`/QuickBooks. It is therefore linked to
+no template, and the console says so — "Legacy default" — rather than implying
+a Hardware template it does not have. Writing it a `HARDWARE` profile would
+keep the inventory/accounting pair identical but would change its business
+type and swap the legacy 13-module list for the HARDWARE default set, which is
+a behavioural change to the live retail product. That needs its own decision
+and its own verification, so it is not bundled into this one.
+
 ---
 
 ## Open decisions

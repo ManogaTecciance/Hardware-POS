@@ -206,6 +206,31 @@ describe('Restaurant navigation', () => {
     expect(labels(nav('BAKERY', RESTAURANT_MODULES))).toEqual(labels(restaurant));
   });
 
+  /*
+   * D55: "the hotel template is a duplicate of the restaurant template for now"
+   * is the whole specification of the third workspace template, and it is a claim
+   * about this map — so it is asserted here rather than left to a shared array
+   * reference that a later edit could silently split.
+   *
+   * Both halves matter: equal to restaurant, and (below) not equal to retail. An
+   * assertion that hotel merely "has items" would pass for the retail list too.
+   */
+  it('HOTEL renders the restaurant navigation, exactly — labels, hrefs and groups', () => {
+    const hotel = nav('HOTEL', RESTAURANT_MODULES);
+    expect(labels(hotel)).toEqual(labels(restaurant));
+    expect(hrefs(hotel)).toEqual(hrefs(restaurant));
+    expect(hotel.map((g) => g.label)).toEqual(restaurant.map((g) => g.label));
+    // Not vacuous: the shared list is non-empty and food-service specific.
+    expect(labels(hotel)).toContain('Tables');
+    expect(labels(hotel)).toContain('Kitchen');
+  });
+
+  it('HOTEL is not the retail navigation', () => {
+    expect(labels(nav('HOTEL', RESTAURANT_MODULES))).not.toEqual(
+      labels(nav('TILE_SHOP', LEGACY_MODULES)),
+    );
+  });
+
   it('is genuinely different from the retail list', () => {
     expect(labels(restaurant)).not.toEqual(labels(nav('TILE_SHOP', LEGACY_MODULES)));
   });

@@ -239,6 +239,7 @@ export class AuthService {
       tenantId: user.tenantId,
       role: user.role,
       activeBranchId,
+      isPlatformAdmin: user.isPlatformAdmin === true,
     };
     const token = await this.jwtService.signAsync(payload);
 
@@ -274,6 +275,9 @@ export class AuthService {
         role: user.role,
       },
       permissions: [...authority.permissions],
+      // D55: the web app redirects a platform admin to the console instead of
+      // a workspace dashboard.
+      isPlatformAdmin: user.isPlatformAdmin === true,
       branch: location.branch,
       register: location.register,
     };

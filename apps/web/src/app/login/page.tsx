@@ -28,7 +28,7 @@ const FIELD_CLASSES =
 const LABEL_CLASSES = 'text-slate-200';
 
 function LoginForm() {
-  const { isAuthenticated, loginWithEmail } = useAuth();
+  const { isAuthenticated, loginWithEmail, session } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [workspace, setWorkspace] = React.useState('');
@@ -39,8 +39,11 @@ function LoginForm() {
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
-    if (isAuthenticated) router.replace('/dashboard');
-  }, [isAuthenticated, router]);
+    if (!isAuthenticated) return;
+    // D55: a platform admin has no workspace to land in — every workspace
+    // route would refuse their token — so they go to the console instead.
+    router.replace(session?.isPlatformAdmin ? '/platform' : '/dashboard');
+  }, [isAuthenticated, session, router]);
 
   /*
    * A `?workspace=` link is a deliberate instruction (an invite, a bookmark) and
@@ -56,8 +59,8 @@ function LoginForm() {
     setBusy(true);
     setError(null);
     try {
-      await loginWithEmail(email, password, workspace);
-      router.replace('/dashboard');
+      const signedIn = await loginWithEmail(email, password, workspace);
+      router.replace(signedIn?.isPlatformAdmin ? '/platform' : '/dashboard');
       return;
     } catch (err) {
       /*

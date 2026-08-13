@@ -37,6 +37,9 @@ export const BUSINESS_PROFILE_PRESETS: Record<BusinessType, BusinessProfilePrese
   RESTAURANT: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
   CAFE: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
   BAKERY: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
+  // D55: the hotel template currently mirrors restaurant in every map. Its own
+  // BusinessType so hotel workspaces are distinguishable before they diverge.
+  HOTEL: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
   // A catalogue without stock tracking — the third supported pair.
   GENERAL: { inventoryMode: 'DISABLED', accountingProvider: 'NONE' },
 };

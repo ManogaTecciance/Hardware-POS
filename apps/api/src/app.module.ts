@@ -6,6 +6,7 @@ import { validateEnv } from './config/env.validation';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { PlatformBoundaryGuard } from './common/guards/platform-boundary.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { ModuleAccessGuard } from './common/guards/module-access.guard';
@@ -36,6 +37,7 @@ import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { BranchesModule } from './modules/branches/branches.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { PlatformAdminModule } from './modules/platform-admin/platform-admin.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { DiningModule } from './modules/dining/dining.module';
@@ -81,6 +83,7 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     QuickBooksModule,
     SyncModule,
     SettingsModule,
+    PlatformAdminModule,
     AuditLogModule,
     DashboardModule,
     BranchesModule,
@@ -112,6 +115,10 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     // validating branch context for a module the tenant does not have at all.
     // Routes without any of the four metadata keys pass through untouched.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // D55: runs after JwtAuthGuard (request.user populated), before the
+    // permission guards — a platform admin must be refused a tenant route
+    // regardless of what permissions it asks for.
+    { provide: APP_GUARD, useClass: PlatformBoundaryGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: ModuleAccessGuard },

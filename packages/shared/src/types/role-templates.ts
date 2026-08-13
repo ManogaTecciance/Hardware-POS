@@ -252,7 +252,13 @@ export const ALL_ROLE_TEMPLATES: readonly RoleTemplate[] = [
 
 /** Templates a tenant of this business type is provisioned with. */
 export function roleTemplatesForBusinessType(businessType: string): readonly RoleTemplate[] {
-  const foodService = businessType === 'RESTAURANT' || businessType === 'CAFE' || businessType === 'BAKERY';
+  // D55: HOTEL joins the food-service set — its template mirrors restaurant,
+  // so it gets the same waiter / kitchen / bar roles.
+  const foodService =
+    businessType === 'RESTAURANT' ||
+    businessType === 'CAFE' ||
+    businessType === 'BAKERY' ||
+    businessType === 'HOTEL';
   return foodService
     ? [...BUILT_IN_ROLE_TEMPLATES, ...RESTAURANT_ROLE_TEMPLATES]
     : BUILT_IN_ROLE_TEMPLATES;

@@ -23,6 +23,8 @@ interface LoginResponse {
    * session minted before the field existed — see `toSession`.
    */
   permissions?: string[];
+  /** D55 — true when this session belongs to the platform console. */
+  isPlatformAdmin?: boolean;
   branch: { id: string; name: string } | null;
   register: { id: string; name: string } | null;
 }
@@ -32,7 +34,7 @@ interface AuthContextValue {
   loading: boolean;
   isAuthenticated: boolean;
   hasPermission: (permission: Permission) => boolean;
-  loginWithEmail: (email: string, password: string, workspace?: string) => Promise<void>;
+  loginWithEmail: (email: string, password: string, workspace?: string) => Promise<Session>;
   logout: () => void;
 }
 
@@ -50,6 +52,7 @@ function toSession(res: LoginResponse): Session {
   return {
     token: res.token,
     refreshToken: res.refreshToken,
+    isPlatformAdmin: res.isPlatformAdmin === true,
     user: {
       ...res.user,
       permissions: (res.permissions as Permission[] | undefined) ?? permissionsForRole(res.user.role),
@@ -88,7 +91,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
         ...(slug ? { workspace: slug } : {}),
       });
-      saveSession(toSession(res));
+      const next = toSession(res);
+      saveSession(next);
+      // Returned so the caller can route on it immediately: a platform admin
+      // goes to the console, everyone else to their workspace dashboard, and
+      // waiting for the context to re-render first would flash the wrong page.
+      return next;
     },
     [],
   );

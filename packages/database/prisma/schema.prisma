@@ -199,6 +199,9 @@ enum BusinessType {
   RESTAURANT
   CAFE
   BAKERY
+  /// D55. Currently mirrors RESTAURANT everywhere; its own value so hotel
+  /// workspaces are distinguishable in data before they diverge in behaviour.
+  HOTEL
   GENERAL
 }
 
@@ -496,19 +499,23 @@ model Register {
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id           String    @id @default(cuid())
-  tenantId     String
-  branchId     String?
-  roleId       String?
-  role         UserRole  @default(CASHIER)
-  name         String
-  email        String?
-  passwordHash String?
-  pinHash      String?
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  tenantId        String
+  branchId        String?
+  roleId          String?
+  role            UserRole  @default(CASHIER)
+  name            String
+  email           String?
+  passwordHash    String?
+  pinHash         String?
+  isActive        Boolean   @default(true)
+  /// D55. A cross-tenant platform operator. Lives in the dedicated `platform`
+  /// tenant so this FK stays satisfied; `PlatformBoundaryGuard` refuses their
+  /// token on every tenant-scoped route and everyone else's on platform routes.
+  isPlatformAdmin Boolean   @default(false)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   tenant                   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch                   Branch?             @relation(fields: [branchId], references: [id])

@@ -278,6 +278,9 @@ const NAV_BY_BUSINESS_TYPE: Record<string, NavGroup[]> = {
   RESTAURANT: RESTAURANT_NAV,
   CAFE: RESTAURANT_NAV,
   BAKERY: RESTAURANT_NAV,
+  // D55: the hotel template renders the restaurant navigation for now. When
+  // hotels need their own, this line is the change — not a data migration.
+  HOTEL: RESTAURANT_NAV,
   GENERAL: RETAIL_NAV,
 };
 

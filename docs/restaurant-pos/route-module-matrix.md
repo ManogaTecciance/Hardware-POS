@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 253
+- Total routes: 262
 - Module-guarded routes: 194
-- Ungated routes: 59
+- Ungated routes: 68
 
 ## How to read the Guard column
 
@@ -336,6 +336,15 @@ reach production unclassified.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
+| GET | `/platform-admin/templates` | SHARED_CORE | shared-core | _platform admin_ |
+| GET | `/platform-admin/workspaces` | SHARED_CORE | shared-core | _platform admin_ |
+| POST | `/platform-admin/workspaces` | SHARED_CORE | shared-core | _platform admin_ |
+| GET | `/platform-admin/workspaces/:workspaceId` | SHARED_CORE | shared-core | _platform admin_ |
+| PATCH | `/platform-admin/workspaces/:workspaceId` | SHARED_CORE | shared-core | _platform admin_ |
+| GET | `/platform-admin/workspaces/:workspaceId/users` | SHARED_CORE | shared-core | _platform admin_ |
+| POST | `/platform-admin/workspaces/:workspaceId/users` | SHARED_CORE | shared-core | _platform admin_ |
+| PATCH | `/platform-admin/workspaces/:workspaceId/users/:userId` | SHARED_CORE | shared-core | _platform admin_ |
+| POST | `/platform-admin/workspaces/:workspaceId/users/:userId/password` | SHARED_CORE | shared-core | _platform admin_ |
 | GET | `/restaurant/branches/:branchId/open-tables` | TABLE_MANAGEMENT | ENFORCED | platform:profile:read |
 | POST | `/restaurant/branches/:branchId/open-tables` | TABLE_MANAGEMENT | ENFORCED | open-table:manage |
 | DELETE | `/restaurant/branches/:branchId/open-tables/:openTableId` | TABLE_MANAGEMENT | ENFORCED | open-table:manage |

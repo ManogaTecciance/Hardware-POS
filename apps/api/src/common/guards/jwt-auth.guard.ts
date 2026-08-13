@@ -53,6 +53,10 @@ export class JwtAuthGuard implements CanActivate {
       // there, not here. Tokens issued before Phase 1.5.6 have no claim and
       // resolve to `null`, which the guard treats as "tenant-wide by default".
       activeBranchId: payload.activeBranchId ?? null,
+      // D55: carried on the token so PlatformBoundaryGuard can decide without
+      // a database round trip on every request. It grants nothing on its own —
+      // the flag only ever routes a request to a 403.
+      isPlatformAdmin: payload.isPlatformAdmin === true,
     };
     return true;
   }

@@ -100,6 +100,8 @@ export const DEFAULT_MODULES_BY_BUSINESS_TYPE: Record<BusinessType, readonly Mod
   [BusinessType.RESTAURANT]: [...SHARED_CORE_MODULES, ...RESTAURANT_MODULES],
   [BusinessType.CAFE]: [...SHARED_CORE_MODULES, ...RESTAURANT_MODULES],
   [BusinessType.BAKERY]: [...SHARED_CORE_MODULES, ...RESTAURANT_MODULES],
+  // D55: hotel mirrors restaurant for now.
+  [BusinessType.HOTEL]: [...SHARED_CORE_MODULES, ...RESTAURANT_MODULES],
   [BusinessType.GENERAL]: [...SHARED_CORE_MODULES],
 };
 

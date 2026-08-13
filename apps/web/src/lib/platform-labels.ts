@@ -20,6 +20,7 @@ export const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
   RESTAURANT: 'Restaurant',
   CAFE: 'Café',
   BAKERY: 'Bakery',
+  HOTEL: 'Hotel',
   GENERAL: 'General',
 };
 

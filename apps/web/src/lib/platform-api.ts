@@ -19,6 +19,7 @@ function auth(session: Session) {
   return { token: session.token, tenantId: session.user.tenantId };
 }
 
+/** `HOTEL` (D55) is the hotel workspace template; it mirrors RESTAURANT for now. */
 export type BusinessType =
   | 'TILE_SHOP'
   | 'HARDWARE'
@@ -26,6 +27,7 @@ export type BusinessType =
   | 'RESTAURANT'
   | 'CAFE'
   | 'BAKERY'
+  | 'HOTEL'
   | 'GENERAL';
 
 export type InventoryMode = 'LOCAL' | 'QUICKBOOKS' | 'EXTERNAL' | 'DISABLED';

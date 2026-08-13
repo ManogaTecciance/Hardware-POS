@@ -28,6 +28,7 @@ import { DiscountsController } from '../../modules/discounts/discounts.controlle
 import { DocumentsController } from '../../modules/documents/documents.controller';
 import { PaymentsController } from '../../modules/payments/payments.controller';
 import { PlatformController } from '../../modules/platform/platform.controller';
+import { PlatformAdminController } from '../../modules/platform-admin/platform-admin.controller';
 import { ProductsController } from '../../modules/products/products.controller';
 import { QuickBooksController } from '../../modules/quickbooks/quickbooks.controller';
 import { PublicQuotationsController } from '../../modules/quotations/public-quotations.controller';
@@ -114,6 +115,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   RestaurantTablesController,
   // D49 — open tables.
   OpenTablesController,
+  // D55 — the platform console.
+  PlatformAdminController,
   TableSessionsController,
   // D47 — table reservations.
   ReservationsController,
@@ -186,6 +189,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'restaurant-tables',
   // D49 — open tables.
   'open-tables',
+  // D55 — the platform console.
+  'platform-admin',
   'table-sessions',
   // D47 — table reservations.
   'reservations',

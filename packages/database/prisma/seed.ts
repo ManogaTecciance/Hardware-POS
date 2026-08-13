@@ -29,6 +29,15 @@ const SALT_ROUNDS = 10;
 
 const RESTAURANT_TENANT_ID = 'tnt_resto';
 /**
+ * D55 — the platform console's own tenant. It owns no business data; it exists
+ * so a cross-tenant operator satisfies `User.tenantId` and reuses the whole
+ * auth stack instead of a parallel one. `PlatformBoundaryGuard` refuses their
+ * token on every workspace route.
+ */
+const PLATFORM_TENANT_ID = 'tnt_platform';
+const PLATFORM_ADMIN_EMAIL = 'admin@axlopos.test';
+const PLATFORM_ADMIN_PASSWORD = 'Platform123!';
+/**
  * Development-only credentials for the Restaurant demo tenant.
  *
  * Hashed with the same bcrypt cost as every other seeded user. **Never logged**,
@@ -166,6 +175,7 @@ async function main(): Promise<void> {
   const permissionCount = await syncPermissionCatalogue(prisma);
   const tileRoles = await seedTenantRoles(prisma, tenant.id, 'TILE_SHOP');
 
+  const platform = await seedPlatformConsole(await bcrypt.hash(PLATFORM_ADMIN_PASSWORD, SALT_ROUNDS));
   const restaurant = await seedRestaurant(await bcrypt.hash(RESTAURANT_OWNER_PASSWORD, SALT_ROUNDS));
   const restaurantRoles = await seedTenantRoles(prisma, restaurant.id, 'RESTAURANT');
 
@@ -212,6 +222,10 @@ async function main(): Promise<void> {
   console.log('  Cashier     restaurant.cashier@axlopos.test  (approval PIN 3333)');
   console.log('  Waiter      waiter@axlopos.test  (approval PIN 4444) — no Kitchen/Sales/Reports, read-only catalogue');
   console.log('');
+  console.log(`\nPlatform console: ${platform.id}`);
+  console.log(`  Platform admin  ${PLATFORM_ADMIN_EMAIL} / ${PLATFORM_ADMIN_PASSWORD}`);
+  console.log('                  manages workspaces and users; refused every workspace route.\n');
+
   console.log(`Permission catalogue: ${permissionCount} keys`);
   console.log(`Roles: ${tileRoles.length} for ${tenant.id}, ${restaurantRoles.length} for ${restaurant.id}`);
   console.log(`Users linked to role rows: ${linked} (these resolve permissions from the database)`);
@@ -227,6 +241,38 @@ async function main(): Promise<void> {
  * the whole tenant exists to demonstrate. There is no menu, no table and no order:
  * those models do not exist until the Restaurant phases, and the screens say so.
  */
+/** D55 — the platform console tenant and its first operator. */
+async function seedPlatformConsole(passwordHash: string) {
+  const tenant = await prisma.tenant.upsert({
+    where: { id: PLATFORM_TENANT_ID },
+    update: { name: 'Axlo Platform', slug: 'platform' },
+    create: { id: PLATFORM_TENANT_ID, name: 'Axlo Platform', slug: 'platform' },
+  });
+  await prisma.user.upsert({
+    where: { id: 'usr_platform_admin' },
+    update: {
+      name: 'Platform Administrator',
+      email: PLATFORM_ADMIN_EMAIL,
+      passwordHash,
+      isPlatformAdmin: true,
+      isActive: true,
+    },
+    create: {
+      id: 'usr_platform_admin',
+      tenantId: tenant.id,
+      name: 'Platform Administrator',
+      email: PLATFORM_ADMIN_EMAIL,
+      // The enum role is immaterial — authority comes from `isPlatformAdmin`,
+      // and the boundary guard refuses this account every workspace route
+      // regardless of what OWNER would otherwise grant.
+      role: UserRole.OWNER,
+      passwordHash,
+      isPlatformAdmin: true,
+    },
+  });
+  return tenant;
+}
+
 async function seedRestaurant(passwordHash: string) {
   const tenant = await prisma.tenant.upsert({
     where: { id: RESTAURANT_TENANT_ID },

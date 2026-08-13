@@ -20,6 +20,11 @@ export interface Session {
   /** Long-lived rotating token used to mint new access tokens on 401. */
   refreshToken?: string;
   user: SessionUser;
+  /**
+   * D55 — this session belongs to the platform console, not a workspace. The
+   * app routes it to /platform and the API refuses it every workspace route.
+   */
+  isPlatformAdmin?: boolean;
   /** Selling location for this session, as stated by the server at login. */
   branchId: string | null;
   registerId: string | null;

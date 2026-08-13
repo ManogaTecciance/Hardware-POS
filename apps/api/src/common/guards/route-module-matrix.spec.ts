@@ -234,6 +234,18 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/branches/:branchId/dining-areas': { module: 'DINING', guard: 'ENFORCED', scope: T },
   // D49 — open tables: ad-hoc joined tables under the table-management module.
   'GET /restaurant/branches/:branchId/open-tables': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  // D55 — the platform console. Not module-gated: modules are a per-workspace
+  // concept and the console belongs to no workspace. Guarded instead by
+  // PlatformBoundaryGuard, which refuses every non-platform-admin token.
+  'GET /platform-admin/templates': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /platform-admin/workspaces': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /platform-admin/workspaces': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /platform-admin/workspaces/:workspaceId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /platform-admin/workspaces/:workspaceId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /platform-admin/workspaces/:workspaceId/users': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /platform-admin/workspaces/:workspaceId/users': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /platform-admin/workspaces/:workspaceId/users/:userId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /platform-admin/workspaces/:workspaceId/users/:userId/password': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /restaurant/branches/:branchId/open-tables': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'DELETE /restaurant/branches/:branchId/open-tables/:openTableId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   // D50 — manual early release of one shared member table.

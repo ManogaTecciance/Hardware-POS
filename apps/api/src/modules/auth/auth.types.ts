@@ -15,6 +15,8 @@ export interface JwtPayload {
   sub: string;
   tenantId: string;
   role: UserRole;
+  /** D55 — a cross-tenant platform operator. See PlatformBoundaryGuard. */
+  isPlatformAdmin?: boolean;
   activeBranchId?: string | null;
 }
 
@@ -29,6 +31,8 @@ export interface AuthenticatedUser {
    * this for authorisation — `BranchScopeGuard` re-checks the database.
    */
   activeBranchId: string | null;
+  /** D55 — a cross-tenant platform operator. See PlatformBoundaryGuard. */
+  isPlatformAdmin?: boolean;
 }
 
 export interface AuthTokenResult {
@@ -50,6 +54,8 @@ export interface AuthTokenResult {
    * role of CASHIER and an entirely different authority.
    */
   permissions: string[];
+  /** D55 — true when this session belongs to the platform console, not a workspace. */
+  isPlatformAdmin: boolean;
   /** Where this session sells from — the user's branch (or tenant default). */
   branch: { id: string; name: string } | null;
   /** The branch's default register. */
