@@ -24,7 +24,7 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
         <Store className="h-5 w-5" />
       </span>
       {!collapsed ? (
-        <span className="text-base font-semibold tracking-tight">Hardware POS</span>
+        <span className="text-base font-semibold tracking-tight">Axlo POS</span>
       ) : null}
     </div>
   );
