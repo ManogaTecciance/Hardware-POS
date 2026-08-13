@@ -1245,6 +1245,31 @@ one new enum, one new table, indexes + FKs (`ON DELETE CASCADE` from
 tenant/branch/table like `TableSession`; `SET NULL` for customer and
 creator). No DROP, no column changes to existing tables.
 
+### D48 — Email + password is the only login path; PINs are approval-only
+
+The login page's Cashier PIN box and the `POST /auth/pin-login` endpoint are
+removed. Signing in — web form or API — requires an email and password,
+workspace-scoped as before (Slice 8.2). Requested by the Product Owner with
+the login redesign.
+
+**What PINs still do.** In-POS approval prompts (discount over the cap,
+returns) keep verifying PINs via `findUserByPin` — that is an *authenticated*
+check inside a session, not a way to mint one. Seeded users keep their PINs
+for exactly that purpose.
+
+**What went with the endpoint.** The device-commissioning tenant memory
+(Slice 8.8 `rememberTenant`/`recallTenant`) existed only so a pre-auth PIN
+POST could name its tenant; with the endpoint gone it is deleted, along with
+the `pin-login` throttle policy and its rate-limit keys. Workspace memory
+(the slug prefill) is unrelated and stays.
+
+**Seed consequence.** Roles that previously logged in by PIN now carry
+email + password in the dev seed (`manager@` / `cashier@hardwarepos.test`,
+`restaurant.cashier@axlopos.test`); their PINs remain as approval PINs.
+Slice 8.8's WS-201/202 acceptance rows are superseded by this decision —
+the tenant-boundary claim they made is now asserted through
+workspace-scoped email login instead.
+
 ---
 
 ## Open decisions

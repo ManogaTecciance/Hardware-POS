@@ -11,7 +11,6 @@ import {
   type Session,
   type SessionUser,
 } from './session-store';
-import { recallTenant, rememberTenant } from './workspace-memory';
 
 export type { Session, SessionUser };
 
@@ -29,7 +28,6 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   hasPermission: (permission: Permission) => boolean;
   loginWithEmail: (email: string, password: string, workspace?: string) => Promise<void>;
-  loginWithPin: (pin: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -74,32 +72,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
         ...(slug ? { workspace: slug } : {}),
       });
-      // Commissions this device for PIN sign-in (Slice 8.8). Written from the
-      // server's answer, never from anything the user typed.
-      rememberTenant(res.user.tenantId);
       saveSession(toSession(res));
     },
     [],
   );
-
-  /**
-   * PIN sign-in, scoped to the tenant this device was commissioned for.
-   *
-   * The tenant used to be the hard-coded `'tnt_dev'`. It now comes from the last
-   * successful email sign-in on this device, and a device that has had none is
-   * told so rather than being sent to the API with a guess — a guess would return
-   * "Invalid PIN", which sends a cashier looking for a mistake they did not make.
-   */
-  const loginWithPin = React.useCallback(async (pin: string) => {
-    const tenantId = recallTenant();
-    if (!tenantId) {
-      throw new Error(
-        'This device is not set up for PIN sign-in yet. Sign in with an email and password once first.',
-      );
-    }
-    const res = await api.post<LoginResponse>('/auth/pin-login', { pin }, { tenantId });
-    saveSession(toSession(res));
-  }, []);
 
   const logout = React.useCallback(() => {
     const current = loadSession();
@@ -119,10 +95,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAuthenticated: !!session,
       hasPermission: (p) => !!session?.user.permissions.includes(p),
       loginWithEmail,
-      loginWithPin,
       logout,
     }),
-    [session, loading, loginWithEmail, loginWithPin, logout],
+    [session, loading, loginWithEmail, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

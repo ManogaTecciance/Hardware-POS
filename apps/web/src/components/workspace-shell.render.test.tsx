@@ -41,7 +41,6 @@ vi.mock('next/navigation', () => ({
 
 let role: UserRole = 'OWNER';
 const loginWithEmail = vi.fn();
-const loginWithPin = vi.fn();
 
 vi.mock('@/lib/auth', () => ({
   useAuth: () => ({
@@ -50,7 +49,6 @@ vi.mock('@/lib/auth', () => ({
     isAuthenticated: false,
     hasPermission: (p: Permission) => (ROLE_PERMISSIONS[role] as readonly string[]).includes(p),
     loginWithEmail,
-    loginWithPin,
     logout: vi.fn(),
   }),
 }));

@@ -84,21 +84,23 @@ async function main(): Promise<void> {
       pinHash: null,
       branchId: null,
     },
+    // D48: login is email+password only. Manager and Cashier keep their PINs —
+    // those answer the in-POS approval prompts, not the login form.
     {
       id: 'usr_manager',
       name: 'Manager',
-      email: null as string | null,
+      email: 'manager@hardwarepos.test' as string | null,
       role: UserRole.MANAGER,
-      passwordHash: null as string | null,
+      passwordHash: password123 as string | null,
       pinHash: pin2222,
       branchId: branch.id,
     },
     {
       id: 'usr_cashier',
       name: 'Cashier',
-      email: null,
+      email: 'cashier@hardwarepos.test',
       role: UserRole.CASHIER,
-      passwordHash: null,
+      passwordHash: password123,
       pinHash: pin1111,
       branchId: branch.id,
     },
@@ -179,8 +181,8 @@ async function main(): Promise<void> {
   console.log('Login users:');
   console.log('  Owner       owner@hardwarepos.test / password123');
   console.log('  Accountant  accountant@hardwarepos.test / password123');
-  console.log('  Manager     PIN 2222  (x-tenant-id: ' + tenant.id + ')');
-  console.log('  Cashier     PIN 1111  (x-tenant-id: ' + tenant.id + ')');
+  console.log('  Manager     manager@hardwarepos.test / password123  (approval PIN 2222)');
+  console.log('  Cashier     cashier@hardwarepos.test / password123  (approval PIN 1111)');
   console.log('');
   console.log('Seeded tenant:', restaurant.id, '(RESTAURANT · LOCAL inventory · no accounting)');
   console.log('Login users:');
@@ -189,7 +191,7 @@ async function main(): Promise<void> {
   // a terminal is how they end up in scrollback, CI logs and screenshots.
   console.log(`  Owner       ${RESTAURANT_OWNER_EMAIL}   workspace: restaurant-demo`);
   console.log('              password: see docs/restaurant-pos/09-phase-1-acceptance.md');
-  console.log('  Cashier     PIN 3333  (x-tenant-id: ' + restaurant.id + ')');
+  console.log('  Cashier     restaurant.cashier@axlopos.test  (approval PIN 3333)');
   console.log('');
   console.log(`Permission catalogue: ${permissionCount} keys`);
   console.log(`Roles: ${tileRoles.length} for ${tenant.id}, ${restaurantRoles.length} for ${restaurant.id}`);
@@ -255,12 +257,13 @@ async function seedRestaurant(passwordHash: string) {
       pinHash: null as string | null,
       branchId: null as string | null,
     },
+    // D48: email+password is the only login path; the PIN stays for approvals.
     {
       id: 'usr_resto_cashier',
       name: 'Restaurant Cashier',
-      email: null,
+      email: 'restaurant.cashier@axlopos.test',
       role: UserRole.CASHIER,
-      passwordHash: null,
+      passwordHash,
       pinHash: pin3333,
       branchId: branch.id,
     },

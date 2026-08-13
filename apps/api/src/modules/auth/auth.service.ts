@@ -16,7 +16,6 @@ import { WorkspaceRequiredError } from './auth.errors';
 import { AuthTokenResult, JwtPayload } from './auth.types';
 import { Permission, ROLE_PERMISSIONS } from './permissions';
 import { LoginDto } from './dto/login.dto';
-import { PinLoginDto } from './dto/pin-login.dto';
 
 function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -147,14 +146,6 @@ export class AuthService {
   }
 
   /** PIN login (cashier / manager), scoped to the given tenant. */
-  async pinLogin(tenantId: string, dto: PinLoginDto): Promise<AuthTokenResult> {
-    const user = await this.findByPin(tenantId, dto.pin);
-    if (!user) {
-      throw new UnauthorizedException('Invalid PIN');
-    }
-    return this.issueToken(user);
-  }
-
   /**
    * Exchange a live refresh token for a new access + refresh pair.
    * Tokens rotate on every use; presenting an already-rotated (revoked)

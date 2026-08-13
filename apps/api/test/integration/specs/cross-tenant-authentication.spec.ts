@@ -19,7 +19,7 @@
  * mocked Prisma would have happily returned whatever the mock was told to.
  */
 
-import type { PrismaClient, User } from '@hardware-pos/database';
+import type { PrismaClient } from '@hardware-pos/database';
 import * as bcrypt from 'bcryptjs';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
@@ -29,7 +29,6 @@ import { seedTenant } from '../fixtures';
 import { createIntegrationApp, type IntegrationApp } from '../test-app';
 import { WorkspaceRequiredError } from '../../../src/modules/auth/auth.errors';
 import { LoginDto } from '../../../src/modules/auth/dto/login.dto';
-import { PinLoginDto } from '../../../src/modules/auth/dto/pin-login.dto';
 
 let prisma: PrismaClient;
 let app: IntegrationApp;
@@ -419,55 +418,6 @@ describe('refresh tokens respect the tenant boundary', () => {
     await expect(app.authService.refresh('not-a-real-token')).rejects.toThrow(
       'Invalid refresh token',
     );
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PIN login was already tenant-scoped — prove this change left it alone
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('PIN login remains tenant-scoped', () => {
-  const PIN = '4321';
-
-  async function givePin(userId: string, pin: string): Promise<User> {
-    return prisma.user.update({
-      where: { id: userId },
-      data: { pinHash: bcrypt.hashSync(pin, 4) },
-    });
-  }
-
-  it('authenticates the PIN holder inside the requested tenant', async () => {
-    await givePin(cafeUserId, PIN);
-
-    const result = await app.authService.pinLogin(cafeTenantId, dto(PinLoginDto, { pin: PIN }));
-    expect(result.user.id).toBe(cafeUserId);
-    expect(result.user.tenantId).toBe(cafeTenantId);
-  });
-
-  it('refuses a PIN that belongs to a DIFFERENT tenant', async () => {
-    await givePin(cafeUserId, PIN);
-
-    // Same PIN string, wrong tenant — must not match the Cafe user.
-    await expect(
-      app.authService.pinLogin(tileTenantId, dto(PinLoginDto, { pin: PIN })),
-    ).rejects.toThrow('Invalid PIN');
-  });
-
-  it('keeps two tenants using the SAME PIN independent', async () => {
-    await givePin(cafeUserId, PIN);
-    await givePin(tileUserId, PIN);
-
-    const cafe = await app.authService.pinLogin(cafeTenantId, dto(PinLoginDto, { pin: PIN }));
-    const tile = await app.authService.pinLogin(tileTenantId, dto(PinLoginDto, { pin: PIN }));
-
-    expect(cafe.user.id).toBe(cafeUserId);
-    expect(tile.user.id).toBe(tileUserId);
-  });
-
-  it('rejects an unknown PIN with a generic message', async () => {
-    await expect(
-      app.authService.pinLogin(cafeTenantId, dto(PinLoginDto, { pin: '0000' })),
-    ).rejects.toThrow('Invalid PIN');
   });
 });
 

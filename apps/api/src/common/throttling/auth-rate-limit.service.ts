@@ -85,29 +85,6 @@ export class AuthRateLimitService {
   }
 
   /**
-   * PIN login.
-   *
-   * PINs are four digits, so the identity keyspace is tiny and the allowance is
-   * correspondingly tighter than for passwords. The identity dimension is the
-   * physical position — tenant, branch, register — because that is what a PIN
-   * actually authenticates against, and because the *submitted PIN* must not be
-   * part of any key: keying on it would give an attacker a fresh allowance for
-   * every guess, which is precisely the attack.
-   */
-  pinLoginKeys(input: {
-    ip: string;
-    tenantId: string;
-    branchId: string | null;
-    registerId: string | null;
-  }): RateLimitKey[] {
-    const position = `${input.tenantId}:${input.branchId ?? '-'}:${input.registerId ?? '-'}`;
-    return [
-      { rule: this.rule('pin-ip', DEFAULTS.pinIp), key: `pin:ip:${input.ip}` },
-      { rule: this.rule('pin-position', DEFAULTS.pinPosition), key: `pin:pos:${position}` },
-    ];
-  }
-
-  /**
    * Refresh-token exchange.
    *
    * Rotation already revokes every session on replay, so this is not the primary
@@ -194,14 +171,12 @@ export interface RateLimitKey {
  * Default allowances.
  *
  * Chosen to sit far above real human error and far below anything useful to an
- * attacker. A cashier who fumbles a PIN twice a shift never notices; 10 PIN guesses
- * per 5 minutes against one register is 0.1% of the 4-digit space per hour.
+ * attacker: 8 password attempts per identity per 15 minutes never bothers a
+ * clumsy typist, and makes an online guessing loop useless.
  */
 const DEFAULTS = {
   loginIp: { limit: 20, windowMs: 5 * 60_000 },
   loginIdentity: { limit: 8, windowMs: 15 * 60_000 },
-  pinIp: { limit: 20, windowMs: 5 * 60_000 },
-  pinPosition: { limit: 10, windowMs: 5 * 60_000 },
   refreshIp: { limit: 60, windowMs: 5 * 60_000 },
   refreshToken: { limit: 10, windowMs: 5 * 60_000 },
 } as const;

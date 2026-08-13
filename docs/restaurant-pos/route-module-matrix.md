@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 249
+- Total routes: 248
 - Module-guarded routes: 189
-- Ungated routes: 60
+- Ungated routes: 59
 
 ## How to read the Guard column
 
@@ -89,7 +89,6 @@ reach production unclassified.
 | POST | `/auth/login` | SHARED_CORE | shared-core | _public_ |
 | POST | `/auth/logout` | SHARED_CORE | shared-core | _public_ |
 | GET | `/auth/me` | SHARED_CORE | shared-core | — |
-| POST | `/auth/pin-login` | SHARED_CORE | shared-core | _public_ |
 | POST | `/auth/refresh` | SHARED_CORE | shared-core | _public_ |
 
 ### BranchesController

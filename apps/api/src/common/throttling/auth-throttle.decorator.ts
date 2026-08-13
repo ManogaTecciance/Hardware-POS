@@ -7,7 +7,7 @@ import { SetMetadata } from '@nestjs/common';
  * exhaustive and a typo is a compile error instead of a route that silently
  * carries no limit at all.
  */
-export type AuthThrottlePolicy = 'email-login' | 'pin-login' | 'refresh';
+export type AuthThrottlePolicy = 'email-login' | 'refresh';
 
 export const AUTH_THROTTLE_KEY = 'auth:throttle:policy';
 

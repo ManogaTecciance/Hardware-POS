@@ -5,12 +5,10 @@ import { AuthThrottleInterceptor } from '../../common/throttling/auth-throttle.i
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { OptionalTenantId } from '../../common/decorators/optional-tenant-id.decorator';
 import { Public } from '../../common/decorators/public.decorator';
-import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser, AuthTokenResult } from './auth.types';
 import { AuthService, CurrentUserView } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { PinLoginDto } from './dto/pin-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SwitchActiveBranchDto } from './dto/switch-active-branch.dto';
 
@@ -46,15 +44,6 @@ export class AuthController {
     @OptionalTenantId() tenantHint: string | null,
   ): Promise<AuthTokenResult> {
     return this.authService.login(dto, tenantHint);
-  }
-
-  /** PIN login (cashier / manager). Tenant comes from the x-tenant-id header. */
-  @Public()
-  @AuthThrottle('pin-login')
-  @Post('pin-login')
-  @HttpCode(HttpStatus.OK)
-  pinLogin(@TenantId() tenantId: string, @Body() dto: PinLoginDto): Promise<AuthTokenResult> {
-    return this.authService.pinLogin(tenantId, dto);
   }
 
   /**

@@ -78,7 +78,6 @@ vi.mock('@/lib/auth', () => ({
     isAuthenticated: true,
     hasPermission: (p: string) => session.user.permissions.includes(p as Permission),
     loginWithEmail: vi.fn(),
-    loginWithPin: vi.fn(),
     logout: vi.fn(),
   }),
 }));

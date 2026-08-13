@@ -106,30 +106,20 @@ test.describe('WS-1 — workspace login', () => {
   });
 });
 
-test.describe('WS-2 — PIN sign-in after workspace authentication', () => {
-  test('WS-201 a restaurant cashier PINs in once the device is commissioned', async ({ page }) => {
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
-    await page.getByRole('button', { name: /account menu/i }).click();
-    await page.getByRole('menuitem', { name: /log out/i }).click();
-    await page.waitForURL(/\/login/);
-
-    await page.locator('#pin').fill(RESTAURANT_SEED.cashierPin);
-    await page.getByRole('button', { name: 'PIN sign in' }).click();
-    await page.waitForURL((u) => !u.pathname.startsWith('/login'));
+test.describe('WS-2 — cashier sign-in is workspace-scoped email login (D48)', () => {
+  test('WS-201 a restaurant cashier signs in with email + password', async ({ page }) => {
+    await signIn(page, RESTAURANT_SEED.cashier, RESTAURANT_SEED.workspace);
   });
 
-  test('WS-202 the device does not carry the other tenant’s PIN', async ({ page }) => {
-    // Commission for the restaurant, then try the Tile Shop cashier's PIN. It is a
-    // valid PIN — in a different tenant — so this is the tenant boundary, not a
-    // "wrong PIN" case.
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
-    await page.getByRole('button', { name: /account menu/i }).click();
-    await page.getByRole('menuitem', { name: /log out/i }).click();
-    await page.waitForURL(/\/login/);
-
-    await page.locator('#pin').fill(SEED.cashierPin);
-    await page.getByRole('button', { name: 'PIN sign in' }).click();
-    await expect(page.getByText(/invalid pin/i)).toBeVisible();
+  test('WS-202 the restaurant workspace refuses the Tile Shop cashier', async ({ page }) => {
+    // A valid credential — in a different tenant — so this is the tenant
+    // boundary, not a "wrong password" case.
+    await page.goto('/login');
+    await page.locator('#workspace').fill(RESTAURANT_SEED.workspace);
+    await page.locator('#email').fill(SEED.cashier.email);
+    await page.locator('#password').fill(SEED.cashier.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByText(/invalid email or password/i)).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
   });
 });

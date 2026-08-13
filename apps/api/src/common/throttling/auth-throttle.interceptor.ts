@@ -116,16 +116,6 @@ export class AuthThrottleInterceptor implements NestInterceptor {
           email: stringOrNull(body.email) ?? '',
         });
 
-      case 'pin-login':
-        return this.rateLimit.pinLoginKeys({
-          ip,
-          // Unverified client input, deliberately: it only narrows a counter, so a
-          // caller who lies gets their own bucket rather than someone else's budget.
-          tenantId: headerString(request, 'x-tenant-id') ?? '-',
-          branchId: headerString(request, 'x-branch-id'),
-          registerId: headerString(request, 'x-register-id'),
-        });
-
       case 'refresh':
         return this.rateLimit.refreshKeys({
           ip,

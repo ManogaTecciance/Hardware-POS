@@ -89,7 +89,6 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /auth/login': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /auth/logout': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /auth/me': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
-  'POST /auth/pin-login': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /auth/refresh': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /branches': { module: 'BRANCHES', guard: 'ENFORCED', scope: T },
   'GET /categories': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },

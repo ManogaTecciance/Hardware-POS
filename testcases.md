@@ -33,9 +33,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | AUTH-004 | Login with unknown email | Nonexistent email | Same generic error (no user enumeration) | N | Not Run |
 | AUTH-005 | Login with empty fields | Submit with blank email/password | Client validation blocks; no API call | N | Not Run |
 | AUTH-006 | Inactive user cannot log in | Deactivate a user, attempt login | "Invalid email or password" | N | Not Run |
-| AUTH-007 | Cashier PIN login (demo tenant) | Enter valid cashier PIN in PIN box | Logged in as cashier | P | Not Run |
-| AUTH-008 | PIN login with wrong PIN | Enter unused PIN | Error shown; not logged in | N | Not Run |
-| AUTH-009 | PIN login is demo-tenant scoped | Use a non-demo tenant user's PIN in login PIN box | Rejected (PIN box resolves against demo tenant only) | N | Not Run |
+| AUTH-007 | PIN login endpoint removed (D48) | POST /v1/auth/pin-login | 404 — the route does not exist | N | Passed |
+| AUTH-008 | Cashier signs in with email + password (D48) | Cashier credentials in the login form | Logged in; lands on dashboard | P | Passed |
+| AUTH-009 | Login page has no PIN affordance (D48) | Inspect /login | No PIN field or PIN button rendered | N | Passed |
 | AUTH-010 | Session survives reload | Log in, hard-reload the browser | Still authenticated; same route restored | P | Not Run |
 | AUTH-011 | Logout clears session | Account menu → Log out | Redirected to /login; back-button does not restore an authenticated page | P | Not Run |
 | AUTH-012 | Expired access token silently refreshes | Wait past access-token TTL (or force 401), perform an action | Token refresh rotates; request succeeds without logout | P | Not Run |

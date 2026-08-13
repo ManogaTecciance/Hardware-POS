@@ -45,25 +45,6 @@ export async function apiLogin(email: string, password: string, workspace?: stri
   };
 }
 
-export async function apiPinLogin(pin: string, tenantId = 'tnt_dev'): Promise<Auth> {
-  const ctx = await request.newContext();
-  const res = await ctx.post(`${API_URL}/auth/pin-login`, {
-    data: { pin },
-    headers: { 'X-Tenant-Id': tenantId },
-  });
-  expect(res.ok(), `pin login ${pin}`).toBeTruthy();
-  const { data } = (await res.json()) as Envelope<any>;
-  await ctx.dispose();
-  return {
-    token: data.token,
-    refreshToken: data.refreshToken,
-    tenantId: data.user.tenantId,
-    user: data.user,
-    branch: data.branch,
-    register: data.register,
-  };
-}
-
 /** Thin authenticated API wrapper with `{data}` envelope unwrapping. */
 export class Api {
   constructor(
@@ -182,6 +163,9 @@ export class Api {
 export const SEED = {
   owner: { email: 'owner@hardwarepos.test', password: 'password123' },
   accountant: { email: 'accountant@hardwarepos.test', password: 'password123' },
+  manager: { email: 'manager@hardwarepos.test', password: 'password123' },
+  cashier: { email: 'cashier@hardwarepos.test', password: 'password123' },
+  /** Approval PINs (discount / return prompts) — no longer a login credential (D48). */
   managerPin: '2222',
   cashierPin: '1111',
   tenantId: 'tnt_dev',
@@ -201,6 +185,8 @@ export const SEED = {
  */
 export const RESTAURANT_SEED = {
   owner: { email: 'restaurant.owner@axlopos.test', password: 'Restaurant123!' },
+  cashier: { email: 'restaurant.cashier@axlopos.test', password: 'Restaurant123!' },
+  /** Approval PIN only (D48). */
   cashierPin: '3333',
   tenantId: 'tnt_resto',
   workspace: 'restaurant-demo',

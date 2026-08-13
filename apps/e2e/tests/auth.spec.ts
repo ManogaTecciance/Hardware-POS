@@ -12,44 +12,21 @@ test.describe('AUTH — Sessions', () => {
     await expect(page.getByRole('banner')).toBeVisible();
   });
 
-  /*
-   * Slice 8.8 changed this case's preconditions, not its claim. PIN sign-in no
-   * longer carries a hard-coded `tnt_dev` header; it uses the tenant the device
-   * learned when someone last signed in with an email. So the case now commissions
-   * the device first — which is what a real terminal does once, at setup — and the
-   * behaviour before commissioning is asserted separately in AUTH-002b.
-   */
-  test('AUTH-002 cashier logs in with PIN on a commissioned device', async ({ page }) => {
+  test('AUTH-002 cashier logs in with email + password (D48)', async ({ page }) => {
     await page.goto('/login');
-    await page.locator('#email').fill(SEED.owner.email);
-    await page.locator('#password').fill(SEED.owner.password);
+    await page.locator('#email').fill(SEED.cashier.email);
+    await page.locator('#password').fill(SEED.cashier.password);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.waitForURL((u) => !u.pathname.startsWith('/login'));
-
-    await page.getByRole('button', { name: /account menu/i }).click();
-    await page.getByRole('menuitem', { name: /log out/i }).click();
-    await page.waitForURL(/\/login/);
-
-    await page.locator('#pin').fill(SEED.cashierPin);
-    await page.getByRole('button', { name: 'PIN sign in' }).click();
     await page.waitForURL((u) => !u.pathname.startsWith('/login'));
   });
 
-  test('AUTH-002b PIN sign-in is refused on a device that was never commissioned', async ({
-    page,
-  }) => {
-    // The other half of the change. A fresh context has no tenant memory, and the
-    // user is told that rather than being handed "Invalid PIN" for a correct one.
+  test('AUTH-002b the login page offers no PIN sign-in (D48)', async ({ page }) => {
+    // Positive control first: the page rendered its real form...
     await page.goto('/login');
-    await expect(page.getByText(/signed in with an email and password on this device/i)).toBeVisible();
-
-    await page.locator('#pin').fill(SEED.cashierPin);
-    await page.getByRole('button', { name: 'PIN sign in' }).click();
-
-    // Matched by text, not by role: Next renders its own empty `role="alert"`
-    // route announcer, so a role query resolves to two elements.
-    await expect(page.getByText(/not set up for PIN sign-in/i)).toBeVisible();
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page.locator('#email')).toBeVisible();
+    // ...and carries no PIN affordance of any kind.
+    await expect(page.locator('#pin')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'PIN sign in' })).toHaveCount(0);
   });
 
   test('AUTH-003 login with wrong password rejected', async ({ page }) => {
@@ -70,23 +47,23 @@ test.describe('AUTH — Sessions', () => {
     await ctx.dispose();
   });
 
-  test('AUTH-007 cashier PIN login via API', async () => {
+  test('AUTH-007 the PIN login endpoint is gone (D48)', async () => {
     const ctx = await request.newContext();
     const res = await ctx.post(`${API_URL}/auth/pin-login`, {
       data: { pin: SEED.cashierPin },
       headers: { 'X-Tenant-Id': SEED.tenantId },
     });
-    expect(res.ok()).toBeTruthy();
+    // 404, not 401: the route does not exist, it is not merely refusing.
+    expect(res.status()).toBe(404);
     await ctx.dispose();
   });
 
-  test('AUTH-008 wrong PIN rejected', async () => {
+  test('AUTH-008 cashier email login works where the PIN used to (D48)', async () => {
     const ctx = await request.newContext();
-    const res = await ctx.post(`${API_URL}/auth/pin-login`, {
-      data: { pin: '0000' },
-      headers: { 'X-Tenant-Id': SEED.tenantId },
+    const res = await ctx.post(`${API_URL}/auth/login`, {
+      data: { email: SEED.cashier.email, password: SEED.cashier.password },
     });
-    expect(res.ok()).toBeFalsy();
+    expect(res.ok()).toBeTruthy();
     await ctx.dispose();
   });
 

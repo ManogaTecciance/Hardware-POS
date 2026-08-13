@@ -416,52 +416,6 @@ describe('7.1 — email login throttling', () => {
   });
 });
 
-describe('7.1 — PIN login throttling', () => {
-  it('blocks repeated wrong PINs at one register and returns Retry-After', async () => {
-    const ip = freshIp();
-    const attempt = () =>
-      http.request('POST', '/auth/pin-login', {
-        body: { pin: '9999' },
-        headers: {
-          'x-forwarded-for': ip,
-          'x-tenant-id': tile.tenantId,
-          'x-branch-id': tile.branchId,
-          'x-register-id': tile.registerId,
-        },
-      });
-
-    const statuses = [];
-    for (let i = 0; i < 3; i += 1) statuses.push((await attempt()).status);
-    expect(statuses).toEqual([401, 401, 401]);
-
-    const blocked = await attempt();
-    expect(blocked.status).toBe(429);
-    expect(Number(blocked.headers['retry-after'])).toBeGreaterThanOrEqual(1);
-  });
-
-  it('one tenant’s PIN failures do not block another tenant', async () => {
-    const ip = freshIp();
-    for (let i = 0; i < 4; i += 1) {
-      await http.request('POST', '/auth/pin-login', {
-        body: { pin: '9999' },
-        headers: { 'x-forwarded-for': ip, 'x-tenant-id': tile.tenantId },
-      });
-    }
-    const tileBlocked = await http.request('POST', '/auth/pin-login', {
-      body: { pin: '9999' },
-      headers: { 'x-forwarded-for': ip, 'x-tenant-id': tile.tenantId },
-    });
-    expect(tileBlocked.status).toBe(429);
-
-    const cafeStill = await http.request('POST', '/auth/pin-login', {
-      body: { pin: '9999' },
-      headers: { 'x-forwarded-for': freshIp(), 'x-tenant-id': cafe.tenantId },
-    });
-    // 401, not 429: a different tenant has its own allowance.
-    expect(cafeStill.status).toBe(401);
-  });
-});
-
 describe('7.1 — refresh-token throttling and isolation', () => {
   it('a refresh token issued to tenant A cannot be used to reach tenant B', async () => {
     const res = await login(

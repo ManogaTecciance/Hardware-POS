@@ -1,6 +1,6 @@
 import { test as base, expect } from '@playwright/test';
 
-import { Api, apiLogin, apiPinLogin, SEED } from './api';
+import { Api, apiLogin, SEED } from './api';
 
 /**
  * Worker-scoped API clients per role. UI specs additionally opt into a saved
@@ -41,14 +41,14 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
   ],
   managerApi: [
     async ({}, use) => {
-      const auth = await apiPinLogin(SEED.managerPin);
+      const auth = await apiLogin(SEED.manager.email, SEED.manager.password);
       await use(await Api.create(auth));
     },
     { scope: 'worker' },
   ],
   cashierApi: [
     async ({}, use) => {
-      const auth = await apiPinLogin(SEED.cashierPin);
+      const auth = await apiLogin(SEED.cashier.email, SEED.cashier.password);
       await use(await Api.create(auth));
     },
     { scope: 'worker' },

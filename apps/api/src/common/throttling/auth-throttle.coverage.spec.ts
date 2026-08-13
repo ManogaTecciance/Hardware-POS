@@ -54,7 +54,6 @@ describe('7.1 — every credential-accepting auth route is throttled', () => {
     // credential to guess.
     expect(policyByHandler()).toEqual({
       login: 'email-login',
-      pinLogin: 'pin-login',
       refresh: 'refresh',
       logout: NONE,
       me: NONE,
@@ -68,12 +67,11 @@ describe('7.1 — every credential-accepting auth route is throttled', () => {
   it('each credential route carries a policy, stated positively', () => {
     const policies = policyByHandler();
     expect(policies.login).toBe('email-login');
-    expect(policies.pinLogin).toBe('pin-login');
     expect(policies.refresh).toBe('refresh');
   });
 
   it('no two credential routes share a policy — each has its own allowance', () => {
-    const used = ['login', 'pinLogin', 'refresh'].map((h) => policyByHandler()[h]);
+    const used = ['login', 'refresh'].map((h) => policyByHandler()[h]);
     expect(new Set(used).size).toBe(used.length);
   });
 

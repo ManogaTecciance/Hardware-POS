@@ -225,29 +225,6 @@ describe('AuthRateLimitService key policy', () => {
     expect(again[1]!.key).toBe(keys[1]!.key);
   });
 
-  it('PIN keys never include the submitted PIN', () => {
-    // Keying on the PIN would hand an attacker a fresh allowance per guess —
-    // i.e. no limit at all on the one thing being guessed.
-    const keys = service().pinLoginKeys({
-      ip: '1.1.1.1',
-      tenantId: 'tnt_a',
-      branchId: 'brn_1',
-      registerId: 'reg_1',
-    });
-    expect(keys.map((k) => k.rule.name).sort()).toEqual(['pin-ip', 'pin-position']);
-    const position = keys.find((k) => k.rule.name === 'pin-position')!.key;
-    expect(position).toContain('tnt_a');
-    expect(position).toContain('brn_1');
-    expect(position).toContain('reg_1');
-  });
-
-  it('PIN counters separate two registers in the same branch', () => {
-    const svc = service();
-    const one = svc.pinLoginKeys({ ip: '1.1.1.1', tenantId: 't', branchId: 'b', registerId: 'r1' });
-    const two = svc.pinLoginKeys({ ip: '1.1.1.1', tenantId: 't', branchId: 'b', registerId: 'r2' });
-    expect(one[1]!.key).not.toBe(two[1]!.key);
-  });
-
   it('refresh keys pseudonymise the token', () => {
     const keys = service().refreshKeys({ ip: '1.1.1.1', refreshToken: 'super-secret-token' });
     for (const { key } of keys) expect(key).not.toContain('super-secret-token');
@@ -256,8 +233,8 @@ describe('AuthRateLimitService key policy', () => {
 
   it('consume reports the STRICTEST verdict across all keys', async () => {
     const svc = service();
-    const keys = svc.pinLoginKeys({ ip: 'ip', tenantId: 't', branchId: 'b', registerId: 'r' });
-    // Exhaust the tighter position counter (limit 10) while the IP one (20) is fine.
+    const keys = svc.emailLoginKeys({ ip: 'ip', workspace: 't', email: 'a@b.test' });
+    // Exhaust the tighter identity counter (limit 8) while the IP one (20) is fine.
     let last = await svc.consume(keys);
     for (let i = 0; i < 12 && last.allowed; i += 1) last = await svc.consume(keys);
     expect(last.allowed).toBe(false);
@@ -266,7 +243,7 @@ describe('AuthRateLimitService key policy', () => {
 
   it('reset clears every key an attempt spent', async () => {
     const svc = service();
-    const keys = svc.pinLoginKeys({ ip: 'ip2', tenantId: 't', branchId: 'b', registerId: 'r' });
+    const keys = svc.emailLoginKeys({ ip: 'ip2', workspace: 't', email: 'c@d.test' });
     let last = await svc.consume(keys);
     for (let i = 0; i < 12 && last.allowed; i += 1) last = await svc.consume(keys);
     expect(last.allowed).toBe(false);
