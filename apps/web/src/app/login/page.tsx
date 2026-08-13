@@ -2,10 +2,8 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import * as React from 'react';
-import { Store } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/lib/auth';
@@ -14,6 +12,50 @@ import { recallTenant, recallWorkspace, rememberWorkspace } from '@/lib/workspac
 
 /** The API's machine-readable "which workspace?" outcome. */
 const WORKSPACE_REQUIRED = 'AUTH_WORKSPACE_REQUIRED';
+
+/*
+ * The login screen is deliberately theme-blind: the hero artwork is dark navy,
+ * so the whole page commits to the same palette in both app themes instead of
+ * flipping to white around a dark image. Colours are sampled from the artwork
+ * (#161d2f canvas; lime → teal ribbon gradient) rather than the app tokens —
+ * this page is brand surface, not workspace surface.
+ */
+const FIELD_CLASSES =
+  'border-white/15 bg-white/[0.06] text-slate-100 placeholder:text-slate-500 focus-visible:ring-teal-300/50';
+const LABEL_CLASSES = 'text-slate-200';
+
+/** Crossing rounded ribbons echoing the hero artwork — the Axlo "X" mark. */
+function AxloMark() {
+  return (
+    <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+      <defs>
+        <linearGradient id="axlo-x" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#c3f53c" />
+          <stop offset="1" stopColor="#2fd9c2" />
+        </linearGradient>
+        <linearGradient id="axlo-x-2" x1="1" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#39d0e8" />
+          <stop offset="1" stopColor="#55da98" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M8 8 L36 36"
+        stroke="url(#axlo-x)"
+        strokeWidth="7"
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d="M36 8 L8 36"
+        stroke="url(#axlo-x-2)"
+        strokeWidth="7"
+        strokeLinecap="round"
+        fill="none"
+        opacity="0.9"
+      />
+    </svg>
+  );
+}
 
 function LoginForm() {
   const { isAuthenticated, loginWithEmail, loginWithPin } = useAuth();
@@ -82,108 +124,147 @@ function LoginForm() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-canvas p-4">
-      <div className="w-full max-w-md">
-        <div className="mb-6 flex flex-col items-center text-center">
-          <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-            <Store className="h-6 w-6" />
-          </span>
-          <h1 className="text-2xl font-semibold tracking-tight">Hardware POS</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Sign in to start selling</p>
+    <main className="flex min-h-screen bg-[#161d2f] text-slate-100">
+      {/* Hero panel — brand artwork with the platform pitch. Pure decoration
+          around the real form, so it disappears below lg and from the
+          accessibility tree. */}
+      <section aria-hidden="true" className="relative hidden lg:flex lg:w-[58%] xl:w-[60%]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/login-hero.webp"
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        {/* Legibility scrim behind the headline only — the artwork stays vivid. */}
+        <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-[#0d1322]/90 to-transparent" />
+        <div className="relative z-10 mt-auto max-w-xl p-12 pb-14">
+          <h2 className="text-4xl font-semibold leading-tight tracking-tight text-white">
+            AXLO POS:
+            <br />
+            The Unified Platform for Every Business
+          </h2>
+          <p className="mt-4 text-lg text-slate-300">
+            Empowering restaurants, hardware stores, and every commerce domain.
+          </p>
         </div>
+      </section>
 
-        <Card>
-          <CardContent className="space-y-5 p-6">
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="workspace">Workspace</Label>
+      {/* Form panel */}
+      <section className="flex flex-1 items-center justify-center border-l border-white/5 bg-[#1b2236] px-6 py-12">
+        <div className="w-full max-w-sm">
+          <AxloMark />
+          <h1 className="mt-6 text-3xl font-semibold tracking-tight text-white">
+            Sign In to Axlo POS.
+          </h1>
+
+          <div className="mt-8 space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="workspace" className={LABEL_CLASSES}>
+                Workspace
+              </Label>
+              <Input
+                id="workspace"
+                className={FIELD_CLASSES}
+                value={workspace}
+                onChange={(e) => setWorkspace(e.target.value)}
+                placeholder="e.g., cafe-pos"
+                autoComplete="organization"
+                aria-describedby="workspace-hint"
+                aria-invalid={workspaceRequired || undefined}
+              />
+              <p id="workspace-hint" className="text-xs text-slate-400">
+                {workspaceRequired
+                  ? 'Required: this email belongs to more than one workspace.'
+                  : 'Optional — leave blank if you only use one workspace.'}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className={LABEL_CLASSES}>
+                Email
+              </Label>
+              <Input
+                id="email"
+                className={FIELD_CLASSES}
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="username"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="password" className={LABEL_CLASSES}>
+                Password
+              </Label>
+              <Input
+                id="password"
+                className={FIELD_CLASSES}
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+              />
+            </div>
+
+            <Button
+              className="mt-2 w-full rounded-full bg-gradient-to-r from-[#c3f53c] to-[#2fd9c2] font-semibold text-[#10162a] shadow-[0_0_24px_rgba(97,224,167,0.35)] hover:opacity-90 active:opacity-80"
+              size="lg"
+              disabled={busy}
+              onClick={() => void tryApi(signIn)}
+            >
+              Sign in
+            </Button>
+          </div>
+
+          {/* PIN sign-in for commissioned devices — visually secondary to the
+              primary credential flow, same behaviour as before. */}
+          <div className="mt-8 space-y-1.5 border-t border-white/10 pt-6">
+            <div className="flex items-end gap-2">
+              <div className="flex-1 space-y-1.5">
+                <Label htmlFor="pin" className={LABEL_CLASSES}>
+                  Cashier PIN
+                </Label>
                 <Input
-                  id="workspace"
-                  value={workspace}
-                  onChange={(e) => setWorkspace(e.target.value)}
-                  placeholder="your-workspace"
-                  autoComplete="organization"
-                  aria-describedby="workspace-hint"
-                  aria-invalid={workspaceRequired || undefined}
-                />
-                <p id="workspace-hint" className="text-xs text-muted-foreground">
-                  {workspaceRequired
-                    ? 'Required: this email belongs to more than one workspace.'
-                    : 'Optional — leave blank if you only use one workspace.'}
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="username"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
+                  id="pin"
+                  className={FIELD_CLASSES}
+                  inputMode="numeric"
+                  placeholder="••••"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  aria-describedby={pinAvailable ? undefined : 'pin-hint'}
                 />
               </div>
               <Button
-                className="w-full"
+                variant="outline"
                 size="lg"
-                disabled={busy}
-                onClick={() => void tryApi(signIn)}
+                className="border-white/15 bg-white/[0.06] text-slate-100 hover:bg-white/10"
+                disabled={busy || pin.length < 4}
+                onClick={() => void tryApi(() => loginWithPin(pin))}
               >
-                Sign in
+                PIN sign in
               </Button>
             </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-end gap-2">
-                <div className="flex-1 space-y-1.5">
-                  <Label htmlFor="pin">Cashier PIN</Label>
-                  <Input
-                    id="pin"
-                    inputMode="numeric"
-                    placeholder="••••"
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    aria-describedby={pinAvailable ? undefined : 'pin-hint'}
-                  />
-                </div>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  disabled={busy || pin.length < 4}
-                  onClick={() => void tryApi(() => loginWithPin(pin))}
-                >
-                  PIN sign in
-                </Button>
-              </div>
-              {/* Stated before the attempt rather than after it: the API's answer
-                  to an unknown tenant is "Invalid PIN", which blames the cashier
-                  for a device that was never commissioned. */}
-              {!pinAvailable ? (
-                <p id="pin-hint" className="text-xs text-muted-foreground">
-                  Available once someone has signed in with an email and password on
-                  this device.
-                </p>
-              ) : null}
-            </div>
-
-            {error ? (
-              <p role="alert" className="text-sm text-danger">
-                {error}
+            {/* Stated before the attempt rather than after it: the API's answer
+                to an unknown tenant is "Invalid PIN", which blames the cashier
+                for a device that was never commissioned. */}
+            {!pinAvailable ? (
+              <p id="pin-hint" className="text-xs text-slate-400">
+                Available once someone has signed in with an email and password on
+                this device.
               </p>
             ) : null}
-          </CardContent>
-        </Card>
+          </div>
 
-      </div>
+          {error ? (
+            <p role="alert" className="mt-4 text-sm text-red-400">
+              {error}
+            </p>
+          ) : null}
+
+          <p className="mt-10 text-center text-xs text-slate-500">
+            Copyright © 2026 Axlo POS — All rights reserved.
+          </p>
+        </div>
+      </section>
     </main>
   );
 }
@@ -193,15 +274,15 @@ function LoginForm() {
  *
  * Slice 8.2 added `?workspace=` prefill, which is what pulled the hook in. Next
  * fails the build rather than silently opting the page out of prerendering, so the
- * boundary is explicit. The fallback mirrors the card's frame so the form does not
- * jump into place once the query string is read.
+ * boundary is explicit. The fallback shares the page's committed navy so the
+ * artwork never flashes against a white frame.
  */
 export default function LoginPage() {
   return (
     <React.Suspense
       fallback={
-        <main className="flex min-h-screen items-center justify-center bg-canvas p-4">
-          <p className="text-sm text-muted-foreground">Loading…</p>
+        <main className="flex min-h-screen items-center justify-center bg-[#161d2f] p-4">
+          <p className="text-sm text-slate-400">Loading…</p>
         </main>
       }
     >
