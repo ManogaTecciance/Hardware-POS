@@ -15,7 +15,9 @@ export type DocumentType =
   // sequence so the "RCV-000042" identifiers do not collide with sales,
   // returns or quotations, and so gaps caused by aborted transactions are
   // impossible on the same guarantees as every other document type.
-  | 'RECEIPT';
+  | 'RECEIPT'
+  // D47 — table reservations ("Reservation RSV-000047" over the phone).
+  | 'RESERVATION';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;

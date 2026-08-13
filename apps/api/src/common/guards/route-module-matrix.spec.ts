@@ -233,6 +233,13 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/branches/:branchId/kitchen-stations/:stationId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/branches/:branchId/kitchen-stations/:stationId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/dining-areas': { module: 'DINING', guard: 'ENFORCED', scope: T },
+  // D47 — the reservation book. List and create are branch-scoped (the
+  // Calendar is a per-branch view); the by-id mutations resolve the branch
+  // from the row like every other /restaurant/:id route.
+  'GET /restaurant/branches/:branchId/reservations': { module: 'RESERVATIONS', guard: 'ENFORCED', scope: B },
+  'POST /restaurant/branches/:branchId/reservations': { module: 'RESERVATIONS', guard: 'ENFORCED', scope: B },
+  'PATCH /restaurant/reservations/:reservationId': { module: 'RESERVATIONS', guard: 'ENFORCED', scope: T },
+  'POST /restaurant/reservations/:reservationId/status': { module: 'RESERVATIONS', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/table-sessions': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: B },
   'GET /restaurant/branches/:branchId/open-sessions': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/table-sessions/:sessionId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },

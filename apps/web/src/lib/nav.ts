@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  CalendarDays,
   ChefHat,
   // ClipboardList — reserved for the /menu icon; kept commented alongside the
   // commented-out nav entry below so a re-enable is a one-line change.
@@ -192,6 +193,14 @@ const RESTAURANT_NAV: NavGroup[] = [
         icon: UtensilsCrossed,
         permission: Permission.SALE_CREATE,
         module: 'TABLE_MANAGEMENT',
+      },
+      {
+        // D47 — the reservation book: day grid of tables × timeslots.
+        href: '/calendar',
+        label: 'Calendar',
+        icon: CalendarDays,
+        permission: Permission.RESERVATION_VIEW,
+        module: 'RESERVATIONS',
       },
     ],
   },

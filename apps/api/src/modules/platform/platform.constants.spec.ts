@@ -131,9 +131,18 @@ describe('platform constants', () => {
       ['KITCHEN_DISPLAY', ModuleKey.KITCHEN_DISPLAY],
       ['ONLINE_ORDERS', ModuleKey.ONLINE_ORDERS],
       ['DELIVERY_INTEGRATIONS', ModuleKey.DELIVERY_INTEGRATIONS],
-      ['RESERVATIONS', ModuleKey.RESERVATIONS],
     ])('keeps %s opt-in rather than default (Release 2 boundary)', (_label, moduleKey) => {
       expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.RESTAURANT]).not.toContain(moduleKey);
+    });
+
+    // D47 moved RESERVATIONS across the Release 1 / Release 2 boundary: the
+    // reservation calendar ships with the pilot, so food-service tenants get
+    // the module without a per-tenant opt-in.
+    it('RESERVATIONS is a food-service default since D47', () => {
+      expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.RESTAURANT]).toContain(ModuleKey.RESERVATIONS);
+      expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.CAFE]).toContain(ModuleKey.RESERVATIONS);
+      expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.HARDWARE]).not.toContain(ModuleKey.RESERVATIONS);
+      expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.TILE_SHOP]).not.toContain(ModuleKey.RESERVATIONS);
     });
 
     it('GENERAL gets only the shared core', () => {

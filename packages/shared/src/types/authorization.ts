@@ -170,6 +170,19 @@ export const Permission = {
   TABLE_EDIT_OWN: 'table:edit:own',
   /** Archive a Restaurant Table the caller created. */
   TABLE_ARCHIVE_OWN: 'table:archive:own',
+
+  // ── D47 — Table reservations ─────────────────────────────────────────────
+  //
+  // The reservation book is shared front-of-house state, NOT creator-owned:
+  // any staff member holding the permission can manage any reservation. A
+  // host stand cannot function if cancelling a colleague's booking needs
+  // that colleague present.
+  /** See the reservation calendar (contains customer names/phones). */
+  RESERVATION_VIEW: 'reservation:view',
+  /** Book a table for a timeslot. */
+  RESERVATION_CREATE: 'reservation:create',
+  /** Edit a reservation or move it through its lifecycle (seat / cancel / no-show / complete). */
+  RESERVATION_MANAGE: 'reservation:manage',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
@@ -277,6 +290,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     // Read-only: a manager sees which modules the tenant runs, but changing the
     // business type or accounting provider is an owner/admin decision.
     Permission.PLATFORM_PROFILE_READ,
+    // D47 — the reservation book is front-of-house state.
+    Permission.RESERVATION_VIEW,
+    Permission.RESERVATION_CREATE,
+    Permission.RESERVATION_MANAGE,
   ],
   CASHIER: [
     Permission.SALE_CREATE,
@@ -294,6 +311,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     // Read-only. Navigation is driven by the tenant's enabled modules, so a
     // cashier that could not read them could not render a POS screen at all.
     Permission.PLATFORM_PROFILE_READ,
+    // D47 — a cashier at the host stand takes and manages bookings.
+    Permission.RESERVATION_VIEW,
+    Permission.RESERVATION_CREATE,
+    Permission.RESERVATION_MANAGE,
   ],
   ACCOUNTANT: [
     Permission.SYNC_READ,

@@ -49,6 +49,7 @@ import type {
   UnifiedOrderView,
   VoidReportRow,
   WaiterPerformanceRow,
+  ReservationView,
 } from './types';
 
 function auth(session: Session) {
@@ -376,6 +377,69 @@ export const modifierGroups = {
     return api.patch<ModifierGroupView>(
       `/restaurant/modifier-groups/${groupId}`,
       body,
+      auth(session),
+    );
+  },
+};
+
+// ── Reservations (D47) ─────────────────────────────────────────────────────
+export const reservations = {
+  /**
+   * Everything intersecting `[from, to)`. The caller passes explicit instants
+   * (its local day window) — the server never guesses the display timezone.
+   */
+  list(session: Session, branchId: string, from: Date, to: Date, includeClosed = false) {
+    const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+    if (includeClosed) query.set('includeClosed', 'true');
+    return api.get<ReservationView[]>(
+      `/restaurant/branches/${branchId}/reservations?${query.toString()}`,
+      auth(session),
+    );
+  },
+  create(
+    session: Session,
+    branchId: string,
+    body: {
+      tableId: string;
+      customerId?: string;
+      customerName: string;
+      customerPhone?: string;
+      partySize: number;
+      startAt: string;
+      durationMinutes: number;
+      notes?: string;
+    },
+  ) {
+    return api.post<ReservationView>(
+      `/restaurant/branches/${branchId}/reservations`,
+      body,
+      auth(session),
+    );
+  },
+  update(
+    session: Session,
+    reservationId: string,
+    body: Partial<{
+      tableId: string;
+      customerId: string;
+      customerName: string;
+      customerPhone: string;
+      partySize: number;
+      startAt: string;
+      durationMinutes: number;
+      notes: string;
+    }>,
+  ) {
+    return api.patch<ReservationView>(`/restaurant/reservations/${reservationId}`, body, auth(session));
+  },
+  setStatus(
+    session: Session,
+    reservationId: string,
+    status: 'BOOKED' | 'SEATED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW',
+  ) {
+    return api.post<ReservationView>(
+      `/restaurant/reservations/${reservationId}/status`,
+      { status },
       auth(session),
     );
   },

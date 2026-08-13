@@ -72,9 +72,10 @@ const RETAIL_MODULES: readonly ModuleKey[] = [
  * Food-service modules, on top of the shared core.
  *
  * Deliberately excludes `QUOTATIONS`, `RETURNS`, `SUPPLIERS`, `QUICKBOOKS`, and
- * `EXCHANGES` (decision D2). `KITCHEN_DISPLAY`, `ONLINE_ORDERS`,
- * `DELIVERY_INTEGRATIONS`, and `RESERVATIONS` are opt-in rather than default,
- * matching the Release 1 / Release 2 boundary.
+ * `EXCHANGES` (decision D2). `KITCHEN_DISPLAY`, `ONLINE_ORDERS`, and
+ * `DELIVERY_INTEGRATIONS` are opt-in rather than default, matching the
+ * Release 1 / Release 2 boundary. `RESERVATIONS` moved from opt-in to the
+ * default set when the reservation calendar shipped (D47).
  */
 const RESTAURANT_MODULES: readonly ModuleKey[] = [
   ModuleKey.MENU_MANAGEMENT,
@@ -82,6 +83,7 @@ const RESTAURANT_MODULES: readonly ModuleKey[] = [
   ModuleKey.TABLE_MANAGEMENT,
   ModuleKey.TAKEAWAY,
   ModuleKey.KITCHEN,
+  ModuleKey.RESERVATIONS,
 ];
 
 /**

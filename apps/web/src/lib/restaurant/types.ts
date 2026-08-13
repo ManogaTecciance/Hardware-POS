@@ -233,6 +233,28 @@ export interface DiningAreaView {
   createdByUserId: string | null;
 }
 
+// D47 — table reservations. Timeslots are half-open [startAt, endAt);
+// instants travel as ISO strings. Contact fields are booking-time snapshots,
+// so a reservation renders even when its Customer row is gone.
+export type ReservationStatus = 'BOOKED' | 'SEATED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+
+export interface ReservationView {
+  id: string;
+  branchId: string;
+  tableId: string;
+  reservationNumber: string;
+  customerId: string | null;
+  customerName: string;
+  customerPhone: string | null;
+  partySize: number;
+  startAt: string;
+  endAt: string;
+  status: ReservationStatus;
+  notes: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+}
+
 export interface RestaurantTableView {
   id: string;
   areaId: string;

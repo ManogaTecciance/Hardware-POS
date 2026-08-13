@@ -17,7 +17,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [CUST](#cust--customers) · [CIMP](#cimp--customer-bulk-import) ·
 [SUP](#sup--suppliers-vendors) · [SIMP](#simp--vendor-bulk-import) ·
 [QB](#qb--quickbooks-integration) · [SET](#set--settings) ·
-[DOC](#doc--documents--printing) · [ADM](#adm--administration--multi-tenancy) ·
+[DOC](#doc--documents--printing) · [RSV](#rsv--table-reservations--calendar-d47) ·
+[ADM](#adm--administration--multi-tenancy) ·
 [UI](#ui--theme-layout--responsiveness) · [SEC](#sec--security)
 
 ---
@@ -431,6 +432,27 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DOC-014 | Signature chain on every doc type | Open quotation, invoice, return, exchange | All four blocks present on each | P | Passed |
 | DOC-015 | Signature row fits A4 width | Print a document with signature fields on | Four equal columns on one row, no wrap or overflow | P | Not Run |
 | DOC-016 | Uploaded signature/stamp fit their column | Upload a wide signature image, print | Image scales to column width, does not overlap "Checked by" | P | Not Run |
+
+## RSV — Table Reservations & Calendar (D47)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| RSV-001 | Book a table for a timeslot | Calendar → click empty slot → fill name/party/duration → save | Reservation created with RSV-###### number, block renders in the grid | P | Passed |
+| RSV-002 | Double-booking rejected | Book a second reservation overlapping the first on the same table | 409 naming the blocking reservation number | N | Passed |
+| RSV-003 | Back-to-back slots allowed | Book a slot starting exactly when the previous ends | Created — [start, end) intervals do not collide | P | Passed |
+| RSV-004 | Day list by window | Open the calendar for the booking's day | All reservations intersecting the day window shown | P | Passed |
+| RSV-005 | Lifecycle: seat then complete | BOOKED → Seat guests → Complete | Status transitions succeed, badge updates | P | Passed |
+| RSV-006 | Illegal transition refused | Attempt SEATED on a COMPLETED reservation | 409 status-conflict error | N | Passed |
+| RSV-007 | Past bookings refused | Create with a start hours in the past | 400 "cannot start in the past" | N | Passed |
+| RSV-008 | Walk-up grace | Create with a start a few minutes ago | Allowed (recording a walk-up) | P | Passed |
+| RSV-009 | Move a reservation | Edit → change table or time | Overlap re-checked at the new slot; move persists | P | Passed |
+| RSV-010 | Module gating | Retail/hardware tenant calls a reservation route | 403 Feature not available; no Calendar nav item | N | Passed |
+| RSV-011 | Past days read-only | Navigate the calendar to yesterday | History visible, click-to-book and New reservation disabled | P | Not Run |
+| RSV-012 | Cancel and no-show | BOOKED → Cancel / No-show | Terminal states; slot freed for rebooking | P | Not Run |
+| RSV-013 | Un-seat correction | SEATED → Un-seat | Returns to BOOKED only if the slot is still free | P | Not Run |
+| RSV-014 | Customer link optional | Book with free-text name/phone only | Reservation saves without a Customer row | P | Passed |
+| RSV-015 | Link existing customer | Search and pick an existing customer in the dialog | customerId linked; name/phone snapshotted | P | Not Run |
+| RSV-016 | Permissions | Sign in as a role without reservation:view | Calendar nav item absent; routes 403 | N | Not Run |
 
 ## ADM — Administration & Multi-Tenancy
 

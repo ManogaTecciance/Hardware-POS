@@ -133,6 +133,10 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       // Phase 2A: restaurant managers configure their own branch and stations.
       Permission.RESTAURANT_CONFIG_MANAGE,
       Permission.KITCHEN_STATION_MANAGE,
+      // D47: the reservation book.
+      Permission.RESERVATION_VIEW,
+      Permission.RESERVATION_CREATE,
+      Permission.RESERVATION_MANAGE,
     ],
   },
   {
@@ -151,6 +155,10 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.ORDER_SEND_TO_KITCHEN,
       Permission.KOT_VIEW,
       Permission.BILL_VIEW,
+      // D47: waiters take and manage bookings at the host stand.
+      Permission.RESERVATION_VIEW,
+      Permission.RESERVATION_CREATE,
+      Permission.RESERVATION_MANAGE,
       // Deliberately absent: ORDER_VOID_SENT and TABLE_TRANSFER/MERGE. Voiding an
       // order the kitchen has already started, and moving a table's bill, are the
       // two places where a waiter's mistake becomes someone else's loss — they
@@ -172,6 +180,10 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.BILL_VIEW,
       Permission.BILL_SPLIT,
       Permission.PAYMENT_COLLECT,
+      // D47: the cashier often doubles as the host answering the phone.
+      Permission.RESERVATION_VIEW,
+      Permission.RESERVATION_CREATE,
+      Permission.RESERVATION_MANAGE,
     ],
   },
   {

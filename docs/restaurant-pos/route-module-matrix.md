@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 245
-- Module-guarded routes: 185
+- Total routes: 249
+- Module-guarded routes: 189
 - Ungated routes: 60
 
 ## How to read the Guard column
@@ -336,6 +336,10 @@ reach production unclassified.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
+| GET | `/restaurant/branches/:branchId/reservations` | RESERVATIONS | ENFORCED | reservation:view |
+| POST | `/restaurant/branches/:branchId/reservations` | RESERVATIONS | ENFORCED | reservation:create |
+| PATCH | `/restaurant/reservations/:reservationId` | RESERVATIONS | ENFORCED | reservation:manage |
+| POST | `/restaurant/reservations/:reservationId/status` | RESERVATIONS | ENFORCED | reservation:manage |
 | POST | `/restaurant/branches/:branchId/table-sessions` | TABLE_MANAGEMENT | ENFORCED | table:open |
 | GET | `/restaurant/branches/:branchId/open-sessions` | TABLE_MANAGEMENT | ENFORCED | table:view |
 | GET | `/restaurant/table-sessions/:sessionId` | TABLE_MANAGEMENT | ENFORCED | table:view |

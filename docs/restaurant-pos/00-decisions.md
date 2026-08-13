@@ -1168,6 +1168,83 @@ migration structural test in `provider-contract.spec.ts` enforces the
 positive shape AND the mutation-provable absence of destructive
 statements.
 
+### D47 — Table reservations by timeslot; Calendar page; `RESERVATIONS` becomes a default food-service module
+
+Approved to let restaurant operators reserve tables for customers by
+timeslot, and to add a **Calendar** navigation item where the day's
+reservations are viewed on a tables × time grid, with navigation to past
+and future days.
+
+**Model.** New `TableReservation` + `ReservationStatus` enum
+(`BOOKED → SEATED → COMPLETED`, terminal `CANCELLED` / `NO_SHOW`).
+
+- Tenant/branch/table scoped, same cascade posture as `TableSession`.
+- A timeslot is a half-open interval `[startAt, endAt)` chosen at booking
+  (start time + duration). No fixed slot table: slots are a *rendering*
+  granularity (the Calendar draws 30-minute rows), not a storage concept,
+  so service hours or slot sizes can change without a migration.
+- `customerId` is an **optional** FK (`ON DELETE SET NULL`);
+  `customerName` / `customerPhone` are **snapshots** captured at booking.
+  Phone reservations must not force creating a Customer row, and the
+  calendar must render without a join and survive customer deletion —
+  same snapshot discipline as `RestaurantOrderItem` (AD-15).
+- `reservationNumber` `RSV-######` via the existing `DocumentSequence`
+  (`'RESERVATION'` joins the `DocumentType` union; no migration needed).
+- `createdByUserId` nullable-but-always-written, matching the
+  `DiningArea` creator pattern. Reservations are NOT creator-owned:
+  any staff member holding the permission can manage any reservation —
+  a shared front-of-house book, not a personal artifact.
+
+**Double-booking rule.** A table cannot hold two reservations in
+ACTIVE states (`BOOKED`, `SEATED`) whose intervals overlap. Enforced in
+the service inside the write transaction, serialized per table by a
+`SELECT … FOR UPDATE` on the `RestaurantTable` row — the same
+row-as-mutex shape used elsewhere; two clerks booking the same table
+race on the lock, and the loser gets a 409. A Postgres exclusion
+constraint was rejected: Prisma cannot model it, `migrate diff` drift
+checks would fight it, and the service is already the financial/state
+authority everywhere else. Reservations do NOT check `TableSession`
+occupancy — a table can legitimately be seated now and reserved for
+later; the front of house owns that judgement.
+
+**Permissions.** Three new active keys, `reservation:view`,
+`reservation:create`, `reservation:manage` (edit / status transitions).
+All three go to every food-service template that touches the floor
+(`RESTAURANT_MANAGER`, `WAITER`, `RESTAURANT_CASHIER`) and to the
+built-in `MANAGER` / `CASHIER` roles — a host stand cannot function if
+cancelling a booking needs a manager. OWNER/ADMIN derive as usual.
+
+**Module gating.** Routes live under `@RequireModule(ModuleKey.RESERVATIONS)`.
+`RESERVATIONS` **moves from opt-in to the default food-service module
+set** — the Release 1 / Release 2 boundary in `platform.constants.ts`
+moves deliberately: reservations are now part of the pilot scope. The
+two assertions that pinned it out of the defaults
+(`business-profile.service.spec.ts`, `platform.constants.spec.ts`) are
+updated citing this decision (permitted per D16: a decision record says
+otherwise). Retail tenants are untouched — the module is food-service
+only.
+
+**Calendar page.** New `/calendar` route + nav item (Service group,
+gated `module: RESERVATIONS`, `permission: reservation:view`). Day view:
+tables grouped by dining area on one axis, the service day as 30-minute
+slots on the other; reservations render as blocks spanning their
+interval. Prev / Today / Next plus a date input reach past and future
+days (past days are read-only history — no new bookings in the past).
+Clicking an empty slot opens the booking dialog pre-filled with that
+table + time; clicking a block opens edit / seat / cancel / no-show.
+The API lists by explicit `[from, to)` instants supplied by the client —
+the server does not guess the display timezone.
+
+**Deferred, deliberately.** Linking a seated reservation to the
+`TableSession` it becomes (would give per-cover analytics; lands
+additively later). Deposits/prepayment. Guest-facing booking. Reminder
+messaging. Capacity-aware overbooking warnings.
+
+**Migration.** `20260815000000_add_table_reservations`. Purely additive:
+one new enum, one new table, indexes + FKs (`ON DELETE CASCADE` from
+tenant/branch/table like `TableSession`; `SET NULL` for customer and
+creator). No DROP, no column changes to existing tables.
+
 ---
 
 ## Open decisions

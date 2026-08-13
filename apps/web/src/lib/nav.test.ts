@@ -38,6 +38,8 @@ const RESTAURANT_ONLY: ModuleKey[] = [
   'TABLE_MANAGEMENT',
   'TAKEAWAY',
   'KITCHEN',
+  // D47 — reservations became a food-service default.
+  'RESERVATIONS',
 ];
 
 const LEGACY_MODULES: ModuleKey[] = [...SHARED_CORE, ...RETAIL_ONLY];
@@ -130,6 +132,8 @@ describe('Restaurant navigation', () => {
       'Orders',
       'Kitchen',
       'Tables',
+      // D47 — the reservation calendar.
+      'Calendar',
       // Restaurant tenants label the shared product catalogue "Inventory"
       // so it reads as the single authoring surface for menu items. Retail
       // keeps "Products" — asserted in the Tile Shop block above.
@@ -188,6 +192,7 @@ describe('Restaurant navigation', () => {
       Orders: false,
       Kitchen: false,
       Tables: false,
+      Calendar: false,
       Inventory: false,
       Customers: false,
       Sales: false,

@@ -306,6 +306,7 @@ model Tenant {
   diningAreas                  DiningArea[]
   restaurantTables             RestaurantTable[]
   tableSessions                TableSession[]
+  tableReservations            TableReservation[]
   restaurantOrders             RestaurantOrder[]
   orderRounds                  OrderRound[]
   restaurantOrderItems         RestaurantOrderItem[]
@@ -433,6 +434,7 @@ model Branch {
   diningAreas         DiningArea[]
   restaurantTables    RestaurantTable[]
   tableSessions       TableSession[]
+  tableReservations   TableReservation[]
   restaurantOrders    RestaurantOrder[]
   branchInventory     BranchInventory[]
   stockMovements      StockMovement[]
@@ -506,28 +508,29 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  tenant                  Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch                  Branch?             @relation(fields: [branchId], references: [id])
-  customRole              Role?               @relation(fields: [roleId], references: [id])
-  branchAccess            BranchAccess[]
-  sales                   Sale[]
-  payments                Payment[]
-  approvedDiscounts       SaleItem[]          @relation("DiscountApprover")
-  auditLogs               AuditLog[]
-  returnsCreated          Return[]            @relation("ReturnCreatedBy")
-  returnsApproved         Return[]            @relation("ReturnApprovedBy")
-  refundPayments          RefundPayment[]
-  quotationsCreated       Quotation[]         @relation("QuotationCreatedBy")
-  quotationRevisions      QuotationRevision[] @relation("QuotationRevisionChangedBy")
-  quotationShares         QuotationShareLog[] @relation("QuotationShareSentBy")
-  refreshTokens           RefreshToken[]
+  tenant                   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                   Branch?             @relation(fields: [branchId], references: [id])
+  customRole               Role?               @relation(fields: [roleId], references: [id])
+  branchAccess             BranchAccess[]
+  sales                    Sale[]
+  payments                 Payment[]
+  approvedDiscounts        SaleItem[]          @relation("DiscountApprover")
+  auditLogs                AuditLog[]
+  returnsCreated           Return[]            @relation("ReturnCreatedBy")
+  returnsApproved          Return[]            @relation("ReturnApprovedBy")
+  refundPayments           RefundPayment[]
+  quotationsCreated        Quotation[]         @relation("QuotationCreatedBy")
+  quotationRevisions       QuotationRevision[] @relation("QuotationRevisionChangedBy")
+  quotationShares          QuotationShareLog[] @relation("QuotationShareSentBy")
+  refreshTokens            RefreshToken[]
   // Restaurant Pilot Change 1 — creator back-references so a user cannot be
   // hard-deleted while they still hold owned rows (FK is ON DELETE SET NULL,
   // which drops the ownership rather than the row, matching the fail-closed
   // posture: an ownerless row stays unmanageable).
-  createdDiningAreas      DiningArea[]        @relation("DiningAreaCreator")
-  createdRestaurantTables RestaurantTable[]   @relation("RestaurantTableCreator")
-  createdInventoryReceipts InventoryReceipt[] @relation("InventoryReceiptCreator")
+  createdDiningAreas       DiningArea[]        @relation("DiningAreaCreator")
+  createdRestaurantTables  RestaurantTable[]   @relation("RestaurantTableCreator")
+  createdTableReservations TableReservation[]  @relation("TableReservationCreator")
+  createdInventoryReceipts InventoryReceipt[]  @relation("InventoryReceiptCreator")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -656,72 +659,72 @@ model ProductSubcategory {
 /// and reorder point. `isActive` and the sync columns are system fields
 /// (QBO items have active status too; soft-delete keeps sale history intact).
 model Product {
-  id                    String     @id @default(cuid())
+  id                    String        @id @default(cuid())
   tenantId              String
   quickbooksItemId      String?
   name                  String
   /// QuickBooks item type: Inventory | NonInventory | Service.
-  type                  String     @default("Inventory")
+  type                  String        @default("Inventory")
   sku                   String?
   /// Sales description — appears on sales forms and receipts.
   description           String?
   categoryId            String?
   subcategoryId         String?
-  unitPrice             Decimal    @default(0) @db.Decimal(12, 2)
+  unitPrice             Decimal       @default(0) @db.Decimal(12, 2)
   /// QBO income account name (auto-resolved on sync; read-only in the UI).
   incomeAccount         String?
   /// Purchase description — what vendors see on purchase forms.
   purchaseDescription   String?
-  costPrice             Decimal?   @db.Decimal(12, 2)
+  costPrice             Decimal?      @db.Decimal(12, 2)
   /// QBO expense account name (auto-resolved on sync; read-only in the UI).
   expenseAccount        String?
-  quantityOnHand        Decimal    @default(0) @db.Decimal(12, 3)
+  quantityOnHand        Decimal       @default(0) @db.Decimal(12, 3)
   /// The date the quantity on hand was counted (QBO InvStartDate).
   quantityAsOfDate      DateTime?
-  reorderLevel          Decimal?   @db.Decimal(12, 3)
+  reorderLevel          Decimal?      @db.Decimal(12, 3)
   /// QBO inventory asset account name (auto-resolved; read-only in the UI).
   inventoryAssetAccount String?
   /// POS-side product photo (S3/LocalStack) — never pushed to QuickBooks.
   imageUrl              String?
-  isActive              Boolean    @default(true)
+  isActive              Boolean       @default(true)
   /// D44 — set once the product has one or more `ProductVariant` rows. Legacy
   /// (false) rows keep the pre-D44 single-SKU semantics: `unitPrice`,
   /// `costPrice`, `quantityOnHand` and the product-level SKU stay
   /// authoritative. When true the variant rows own price, cost, SKU, barcode,
   /// and per-branch stock; the parent-level `unitPrice` / `sku` /
   /// `quantityOnHand` remain as legacy fallbacks and are not read.
-  hasVariants           Boolean    @default(false)
+  hasVariants           Boolean       @default(false)
   /// D44 — weighted-average cost for legacy variant-less products.
   /// Recomputed on every InventoryReceipt. NULL until the first receipt.
   /// Variant products carry their `averageCost` on `ProductVariant` instead.
-  averageCost           Decimal?   @db.Decimal(12, 4)
+  averageCost           Decimal?      @db.Decimal(12, 4)
   /// D45 — Restaurant Product wizard fields. All nullable / defaulted so
   /// Retail (Tile Shop, Hardware) rows stay valid without a backfill.
   /// `foodType` reuses the D41 `MenuItemType` enum to avoid a second
   /// authority for FOOD / BEVERAGE / DESSERT.
   prepMinutes           Int?
-  dietaryTags           String[]   @default([])
+  dietaryTags           String[]      @default([])
   foodType              MenuItemType?
   lastSyncedAt          DateTime?
-  syncStatus            SyncStatus @default(NOT_SYNCED)
-  createdAt             DateTime   @default(now())
-  updatedAt             DateTime   @updatedAt
+  syncStatus            SyncStatus    @default(NOT_SYNCED)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  tenant              Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category            ProductCategory?            @relation(fields: [categoryId], references: [id])
-  subcategory         ProductSubcategory?         @relation(fields: [subcategoryId], references: [id])
-  saleItems           SaleItem[]
-  returnItems         ReturnItem[]
-  quotationItems      QuotationItem[]
-  menuItems           MenuItem[]
-  branchInventory     BranchInventory[]
-  stockMovements      StockMovement[]
-  variants            ProductVariant[]
-  variationDimensions ProductVariationDimension[]
-  receiptLines        InventoryReceiptLine[]
-  modifierGroups      ProductModifierGroup[]
-  stationLinks        ProductStationLink[]
-  promotionItems      PromotionItem[]
+  tenant               Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category             ProductCategory?            @relation(fields: [categoryId], references: [id])
+  subcategory          ProductSubcategory?         @relation(fields: [subcategoryId], references: [id])
+  saleItems            SaleItem[]
+  returnItems          ReturnItem[]
+  quotationItems       QuotationItem[]
+  menuItems            MenuItem[]
+  branchInventory      BranchInventory[]
+  stockMovements       StockMovement[]
+  variants             ProductVariant[]
+  variationDimensions  ProductVariationDimension[]
+  receiptLines         InventoryReceiptLine[]
+  modifierGroups       ProductModifierGroup[]
+  stationLinks         ProductStationLink[]
+  promotionItems       PromotionItem[]
   restaurantOrderItems RestaurantOrderItem[]
 
   @@unique([tenantId, quickbooksItemId])
@@ -777,10 +780,11 @@ model Customer {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  sales      Sale[]
-  returns    Return[]
-  quotations Quotation[]
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sales             Sale[]
+  returns           Return[]
+  quotations        Quotation[]
+  tableReservations TableReservation[]
 
   @@unique([tenantId, quickbooksCustomerId])
   @@index([tenantId])
@@ -1643,16 +1647,16 @@ model MenuItem {
   tenantId  String
   sectionId String
 
-  name        String
-  description String?
+  name             String
+  description      String?
   /// Base price per item, before modifiers. Menu prices are the source of truth
   /// for what the customer pays; `productId` (if set) is used for stock only.
-  basePrice   Decimal @db.Decimal(12, 2)
+  basePrice        Decimal @db.Decimal(12, 2)
   /// Optional link to the retail catalogue. When set, sending an order round
   /// decrements `Product.quantityOnHand` (LocalInventoryProvider) exactly as a
   /// retail sale would. When null, this item is a composed dish tracked
   /// elsewhere (Phase 3 or later may introduce ingredient recipes).
-  productId   String?
+  productId        String?
   /// D44 — optional link to a specific sellable variant of the linked Product.
   /// Set only when `productId` is also set. When set, this Menu Item routes to
   /// that variant's branch inventory rather than to the product rollup; POS
@@ -1934,7 +1938,8 @@ model RestaurantTable {
   area    DiningArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
   creator User?      @relation("RestaurantTableCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
-  sessions TableSession[]
+  sessions     TableSession[]
+  reservations TableReservation[]
 
   @@unique([areaId, code])
   @@index([tenantId])
@@ -2046,6 +2051,64 @@ model TableSession {
   @@index([tenantId])
   @@index([branchId])
   @@index([tableId])
+  @@index([status])
+}
+
+/// D47. BOOKED -> SEATED -> COMPLETED is the happy path; CANCELLED and
+/// NO_SHOW are terminal. Only BOOKED and SEATED block a timeslot.
+enum ReservationStatus {
+  BOOKED
+  SEATED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+/// D47. One booked timeslot `[startAt, endAt)` on one table. Customer link is
+/// optional — phone reservations must not force a Customer row — and the
+/// name/phone are snapshots so the calendar renders without a join and
+/// survives customer deletion (same discipline as RestaurantOrderItem).
+model TableReservation {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  tableId  String
+
+  /// Human-friendly reference; assigned via `DocumentSequence` at booking
+  /// ("Reservation RSV-000047" on the phone).
+  reservationNumber String
+
+  customerId    String?
+  customerName  String
+  customerPhone String?
+
+  partySize Int
+  /// Half-open interval: a 19:00-20:30 booking does not collide with one
+  /// starting exactly at 20:30. Slot size is a Calendar rendering choice,
+  /// not a storage concept (D47).
+  startAt   DateTime
+  endAt     DateTime
+
+  status ReservationStatus @default(BOOKED)
+  notes  String?
+
+  /// See DiningArea.createdByUserId — nullable only for FK hygiene; new
+  /// writes always populate it. Reservations are NOT creator-owned (D47).
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  table    RestaurantTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  customer Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  creator  User?           @relation("TableReservationCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, reservationNumber])
+  @@index([tenantId, branchId, startAt])
+  @@index([tableId, startAt])
+  @@index([customerId])
   @@index([status])
 }
 
@@ -2300,7 +2363,7 @@ model BranchInventory {
 /// captures the post-application value so a later reconciliation can walk
 /// the ledger without re-running Prisma transactions.
 model StockMovement {
-  id               String @id @default(cuid())
+  id               String  @id @default(cuid())
   tenantId         String
   branchId         String
   productId        String
@@ -2947,16 +3010,16 @@ model Promotion {
   /// hypothetical "public-holiday" flag) does not force a schema
   /// migration. Values are `MenuAvailabilityDayOfWeek` names —
   /// service-level validation enforces the vocabulary.
-  daysOfWeek   String[] @default([])
+  daysOfWeek   String[]  @default([])
   /// HH:MM local tenant time. Both NULL = whole day.
   startTime    String?
   endTime      String?
   /// Empty = every branch; else the specific branchIds the promotion
   /// applies to.
-  branchScope  String[] @default([])
+  branchScope  String[]  @default([])
   /// Empty = every channel; else `RestaurantOrderChannel` names
   /// (DINE_IN / TAKEAWAY / ONLINE).
-  channelScope String[] @default([])
+  channelScope String[]  @default([])
 
   /// Default (per brief): promotions do NOT stack unless explicitly
   /// allowed. Server evaluation refuses to apply a second promotion

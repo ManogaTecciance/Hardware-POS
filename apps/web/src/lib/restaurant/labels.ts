@@ -7,6 +7,7 @@
  */
 
 import type {
+  ReservationStatus,
   KitchenPrintAttemptStatus,
   KitchenTicketStatus,
   OrderRoundStatus,
@@ -50,6 +51,23 @@ export const TABLE_STATUS_TONES: Record<RestaurantTableStatus, BadgeTone> = {
 };
 
 // ── Sessions ──────────────────────────────────────────────────────────────
+// D47 — reservation lifecycle.
+export const RESERVATION_STATUS_LABELS: Record<ReservationStatus, string> = {
+  BOOKED: 'Booked',
+  SEATED: 'Seated',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+  NO_SHOW: 'No-show',
+};
+
+export const RESERVATION_STATUS_TONES: Record<ReservationStatus, BadgeTone> = {
+  BOOKED: 'info',
+  SEATED: 'positive',
+  COMPLETED: 'muted',
+  CANCELLED: 'neutral',
+  NO_SHOW: 'danger',
+};
+
 export const SESSION_STATUS_LABELS: Record<TableSessionStatus, string> = {
   OPEN: 'Open',
   BILLING: 'Billing',

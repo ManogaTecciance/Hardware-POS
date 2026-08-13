@@ -168,8 +168,9 @@ describe('BusinessProfileService (resolution)', () => {
       expect(dining).toEqual({ moduleKey: ModuleKey.DINING, isEnabled: false, isExplicit: true });
 
       // Never configured and not a restaurant default → omitted entirely rather
-      // than listed as a wall of `false`.
-      expect(states.map((s) => s.moduleKey)).not.toContain(ModuleKey.RESERVATIONS);
+      // than listed as a wall of `false`. RESERVATIONS became a food-service
+      // default in D47, so the Release-2 opt-ins carry the assertion now.
+      expect(states.map((s) => s.moduleKey)).not.toContain(ModuleKey.ONLINE_ORDERS);
     });
 
     it('marks default-derived modules as not explicit', async () => {

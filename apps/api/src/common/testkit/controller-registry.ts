@@ -52,6 +52,7 @@ import { ModifiersController } from '../../modules/menu/modifiers.controller';
 import { DiningAreasController } from '../../modules/dining/dining-areas.controller';
 import { RestaurantTablesController } from '../../modules/dining/restaurant-tables.controller';
 import { TableSessionsController } from '../../modules/table-sessions/table-sessions.controller';
+import { ReservationsController } from '../../modules/reservations/reservations.controller';
 import { KitchenPrintersController } from '../../modules/kitchen/kitchen-printers.controller';
 import { KitchenTicketsController } from '../../modules/kitchen/kitchen-tickets.controller';
 import { TakeawayController } from '../../modules/takeaway/takeaway.controller';
@@ -111,6 +112,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   DiningAreasController,
   RestaurantTablesController,
   TableSessionsController,
+  // D47 — table reservations.
+  ReservationsController,
   KitchenPrintersController,
   KitchenTicketsController,
   TakeawayController,
@@ -179,6 +182,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'dining-areas',
   'restaurant-tables',
   'table-sessions',
+  // D47 — table reservations.
+  'reservations',
   'kitchen-printers',
   'kitchen-tickets',
   'takeaway',

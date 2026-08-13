@@ -40,6 +40,7 @@ import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { DiningModule } from './modules/dining/dining.module';
 import { TableSessionsModule } from './modules/table-sessions/table-sessions.module';
+import { ReservationsModule } from './modules/reservations/reservations.module';
 import { KitchenModule } from './modules/kitchen/kitchen.module';
 import { TakeawayModule } from './modules/takeaway/takeaway.module';
 import { BillingModule } from './modules/billing/billing.module';
@@ -87,6 +88,7 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     MenuModule,
     DiningModule,
     TableSessionsModule,
+    ReservationsModule,
     KitchenModule,
     TakeawayModule,
     BillingModule,

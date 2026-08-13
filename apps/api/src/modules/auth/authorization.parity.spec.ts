@@ -166,6 +166,10 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
         // total-admin ones.
         Permission.INVENTORY_RECEIVE,
         Permission.PLATFORM_PROFILE_READ,
+        // D47 — the reservation book is front-of-house state.
+        Permission.RESERVATION_VIEW,
+        Permission.RESERVATION_CREATE,
+        Permission.RESERVATION_MANAGE,
       ].sort(),
     );
     // NEGATIVE: the escalations a manager must not have.
@@ -191,6 +195,10 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
         Permission.CUSTOMER_READ,
         Permission.CUSTOMER_MANAGE,
         Permission.PLATFORM_PROFILE_READ,
+        // D47 — a cashier at the host stand takes and manages bookings.
+        Permission.RESERVATION_VIEW,
+        Permission.RESERVATION_CREATE,
+        Permission.RESERVATION_MANAGE,
       ].sort(),
     );
     expect(roleHasPermission('CASHIER', Permission.PRODUCT_MANAGE)).toBe(false);
