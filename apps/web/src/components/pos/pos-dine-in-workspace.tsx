@@ -220,8 +220,8 @@ function DineInPicker({ session, branchId }: { session: Session; branchId: strin
       onModeChange={(next) =>
         router.push(`/pos?mode=${next.toLowerCase().replace('_', '-')}`)
       }
-      branchName="Main Dining"
-      registerName="Counter 1"
+      branchName={session.branchName}
+      registerName={session.registerName}
       workspace={workspace}
       rail={rail}
     />

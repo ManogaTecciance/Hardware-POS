@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getCachedDocumentProfile } from '@/lib/document-template-service';
 import { Select } from '@/components/ui/select';
 import { Sheet } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
@@ -233,7 +234,7 @@ export default function PaymentPage() {
         totalDiscount: totals.totalDiscount,
         orderDiscount: totals.orderDiscountAmount,
         taxAmount: totals.taxAmount,
-        storeName: 'Hardware POS',
+        storeName: getCachedDocumentProfile().companyName || undefined,
       };
       setReceiptCtx(ctx);
       setCompleted(sale);

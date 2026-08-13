@@ -23,6 +23,8 @@
 
 import * as React from 'react';
 
+import { forgetCurrency, primeTenantCurrency } from '@/lib/tenant-money';
+
 import { useAuth } from './auth';
 import { fetchPlatformProfile, type EffectiveBusinessProfile, type InventoryMode } from './platform-api';
 
@@ -63,6 +65,21 @@ export function PlatformProfileProvider({ children }: { children: React.ReactNod
   const [reloadKey, setReloadKey] = React.useState(0);
 
   const refresh = React.useCallback(() => setReloadKey((k) => k + 1), []);
+
+  /*
+   * D54 — resolve the tenant's display currency once for the whole shell, the
+   * same way this provider resolves the profile. Money is formatted in dozens
+   * of synchronous render paths that cannot each await the settings API, so
+   * the code is cached and read from there. Signing out forgets it: the next
+   * user on this device may belong to a tenant trading in another currency.
+   */
+  React.useEffect(() => {
+    if (!session) {
+      forgetCurrency();
+      return;
+    }
+    void primeTenantCurrency(session);
+  }, [session]);
 
   React.useEffect(() => {
     // Signing out must clear the profile, not merely stop using it: the next user

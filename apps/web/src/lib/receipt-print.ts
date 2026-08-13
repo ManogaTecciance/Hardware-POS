@@ -3,6 +3,7 @@ import type { Session } from './auth';
 import type { CartItem } from './cart';
 import { computeLine } from './cart';
 import type { CompletedSale } from './sales';
+import { getCachedDocumentProfile } from './document-template-service';
 import { formatMoney } from './utils';
 
 export interface ReceiptContext {
@@ -36,7 +37,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}td{padding:3px 0;vertic
 .row{display:flex;justify-content:space-between;padding:1px 0}.g{font-weight:bold;font-size:14px;border-top:1px solid #333;margin-top:3px;padding-top:3px}
 .btn{display:block;margin:0 auto 12px;padding:8px 16px;cursor:pointer}@media print{.btn{display:none}body{padding:0}}</style></head>
 <body><button class="btn" onclick="window.print()">Print</button>
-<h1>${esc(ctx.storeName ?? 'Hardware POS')}</h1>
+<h1>${esc(ctx.storeName ?? getCachedDocumentProfile().companyName ?? '')}</h1>
 <div class="sub">Sales Receipt · ${esc(sale.saleNumber)}<br>Customer: ${esc(ctx.customerName)}</div>
 <table>${rows}</table>
 <div class="tot">
@@ -117,6 +118,7 @@ export async function reprintCustomerReceipt(session: Session, saleId: string): 
  */
 export function printSplitBill(input: {
   storeName: string;
+  currency?: string;
   saleNumber: string;
   splitLabel: string;
   items: Array<{ name: string; quantity: string; lineTotal: string }>;
@@ -126,7 +128,7 @@ export function printSplitBill(input: {
   const rows = input.items
     .map(
       (it) =>
-        `<tr><td>${esc(it.name)}<br><span class="m">× ${esc(trimQty(it.quantity))}</span></td><td class="r">${esc(it.lineTotal)}</td></tr>`,
+        `<tr><td>${esc(it.name)}<br><span class="m">× ${esc(trimQty(it.quantity))}</span></td><td class="r">${esc(money(it.lineTotal, input.currency))}</td></tr>`,
     )
     .join('');
   const balance = (Number(input.share) - Number(input.paidAmount)).toFixed(2);
@@ -142,11 +144,19 @@ table{width:100%;border-collapse:collapse;font-size:12px}td{padding:3px 0;vertic
 <div class="sub">Split bill · ${esc(input.saleNumber)}<br>${esc(input.splitLabel)}</div>
 <table>${rows}</table>
 <div class="tot">
-<div class="row g"><span>Total</span><span>${esc(input.share)}</span></div>
-<div class="row"><span>Paid</span><span>${esc(input.paidAmount)}</span></div>
-<div class="row"><span>Balance</span><span>${esc(balance)}</span></div>
+<div class="row g"><span>Total</span><span>${esc(money(input.share, input.currency))}</span></div>
+<div class="row"><span>Paid</span><span>${esc(money(input.paidAmount, input.currency))}</span></div>
+<div class="row"><span>Balance</span><span>${esc(money(balance, input.currency))}</span></div>
 </div></body></html>`;
   openPrintWindow(html);
+}
+
+/**
+ * D54 — the split bill printed bare decimals with no currency at all, the one
+ * customer-facing document in the app without a unit.
+ */
+function money(value: string, currency?: string): string {
+  return formatMoney(Number(value), currency);
 }
 
 /** "2.000" reads badly on a bill; "2" and "0.5" do. */

@@ -1544,6 +1544,41 @@ platform-wide slice.
 columns on `RestaurantBranchConfig`, all defaulted so every existing branch
 keeps its current behaviour exactly.
 
+### D54 — Money is formatted in the tenant's currency; the vendor's brand never appears on a tenant's document
+
+Audit section F plus D5/D6. Three fallbacks put "Hardware POS" or "Axlo POS"
+onto documents a customer keeps, and every money formatter on the restaurant
+surface rendered `LKR` regardless of what the tenant had configured.
+
+**`AppSettings.currency` is honoured, not defaulted past.** It has existed and
+been API-writable all along. `utils.formatMoney` named its parameter
+`_currency` and discarded it — while `pos/payment/page.tsx` genuinely fetched
+the setting and passed it in. `labels.formatMoney` defaulted to the literal
+`'LKR'`, and since no call site passes a currency, that default was what every
+tenant got.
+
+**Resolved once per shell, read synchronously.** Money is formatted in dozens
+of render paths that cannot each await the settings API, so `tenant-money.ts`
+caches the resolved code in module memory and LocalStorage — the same pattern
+`document-template-service` already uses for the document profile.
+`PlatformProfileProvider` primes it, and signing out forgets it, because the
+next user on the device may belong to a tenant trading in another currency.
+
+**Only LKR keeps a display symbol.** `Rs.` is LKR-specific; every other
+currency renders as its ISO code. Inventing a symbol per currency would be
+worse than an honest `AED 1,250.00`, and the pilot's output is unchanged.
+
+**An unset company name renders empty, not as the vendor's brand.** A blank
+letterhead is visibly wrong to whoever is about to print it. "Hardware POS" on
+a tax document is not — it looks like a real company, and it is the wrong one.
+
+**The split bill I shipped in D51 printed bare decimals with no currency at
+all** — the only customer-facing document in the app without a unit — and
+computed its balance in the browser with `.toFixed(2)`. Both fixed here.
+
+Branch and register names in the three POS shells were the literals
+`"Main Dining"` and `"Counter 1"`; they now come from the session.
+
 ---
 
 ## Open decisions

@@ -63,8 +63,8 @@ that does not take `actorUserId`, and the controller already holds `actor.id`.
 | D2 | `RestaurantBranchConfig` has 4 business fields; `restaurantConfig.update()` exists in the web client with **zero callers** | `lib/restaurant/api.ts:71-86` | OPEN |
 | D3 | `defaultTicketTargetMinutes` stored, validated, audited, returned — **read by nothing** | schema `:1486` | OPEN |
 | D4 | `KitchenStationPrinter` is read but **never written**; no API links a station to a printer | `kitchen.service.ts:158` | OPEN |
-| D5 | `AppSettings.currency` exists; `formatMoney(v, currency = 'LKR')` hardcodes the default across the restaurant surface | `labels.ts:188` | OPEN |
-| D6 | `utils.ts` `formatMoney(amount, _currency?)` **discards** its currency argument — while `pos/payment/page.tsx:69` genuinely passes it | `utils.ts:16` | OPEN |
+| D5 | `AppSettings.currency` exists; `formatMoney(v, currency = 'LKR')` hardcodes the default across the restaurant surface | `labels.ts:188` | **FIXED (D54)** |
+| D6 | `utils.ts` `formatMoney(amount, _currency?)` **discards** its currency argument — while `pos/payment/page.tsx:69` genuinely passes it | `utils.ts:16` | **FIXED (D54)** |
 | D7 | `KitchenStation` / `KitchenPrinter` have full CRUD APIs and **no UI at all** | — | OPEN |
 | D8 | Branch-scoped `TenantSettings` rows are schema-legal; settings service only ever reads/writes `branchId: null` | `settings.service.ts:154`, `194`, `201` | OPEN |
 | D9 | Orders "Filters" panel says "stubbed for the pilot" while `OrdersQuery` already supports `paymentStatus`/`from`/`to`/`limit` | `orders-page.tsx:341` vs `api.ts:876-884` | OPEN |
@@ -100,12 +100,12 @@ anywhere in the app, even though the API accepts both.
 
 | # | Finding | Where | Status |
 |---|---|---|---|
-| F1 | **My own D51 split bill prints amounts with no currency at all**, and computes balance client-side with `.toFixed(2)` | `receipt-print.ts:145`, `:132` | OPEN |
-| F2 | `storeName: 'Hardware POS'` hardcoded on the thermal receipt | `pos/payment/page.tsx:236` | OPEN |
-| F3 | `profile.companyName \|\| 'Hardware POS'` on the A4 invoice — an *empty* company name silently becomes the vendor brand | `document-template-service.ts:110` | OPEN |
-| F4 | Same fallback on the offline receipt, which fires exactly when the server is down | `receipt-print.ts:39` | OPEN |
-| F5 | `storeName: session.branchName ?? 'Axlo POS'` — branch name used as business name on the split bill | `bill-screen.tsx:243` | OPEN |
-| F6 | `branchName="Main Dining"` / `registerName="Counter 1"` hardcoded in **all three** POS workspaces | `pos-dine-in-workspace.tsx:223-224`, `pos-takeaway-workspace.tsx:316-317`, `pos-third-party-workspace.tsx:58-59` | OPEN |
+| F1 | **My own D51 split bill prints amounts with no currency at all**, and computes balance client-side with `.toFixed(2)` | `receipt-print.ts:145`, `:132` | **FIXED (D54)** |
+| F2 | `storeName: 'Hardware POS'` hardcoded on the thermal receipt | `pos/payment/page.tsx:236` | **FIXED (D54)** |
+| F3 | `profile.companyName \|\| 'Hardware POS'` on the A4 invoice — an *empty* company name silently becomes the vendor brand | `document-template-service.ts:110` | **FIXED (D54)** |
+| F4 | Same fallback on the offline receipt, which fires exactly when the server is down | `receipt-print.ts:39` | **FIXED (D54)** |
+| F5 | `storeName: session.branchName ?? 'Axlo POS'` — branch name used as business name on the split bill | `bill-screen.tsx:243` | **FIXED (D54)** |
+| F6 | `branchName="Main Dining"` / `registerName="Counter 1"` hardcoded in **all three** POS workspaces | `pos-dine-in-workspace.tsx:223-224`, `pos-takeaway-workspace.tsx:316-317`, `pos-third-party-workspace.tsx:58-59` | **FIXED (D54)** |
 
 ## G. Simulated / stub integrations
 

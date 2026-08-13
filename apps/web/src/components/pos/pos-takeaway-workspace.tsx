@@ -313,8 +313,8 @@ export function PosTakeawayWorkspace({ session, branchId }: Props) {
           // new mode as a query param so the router history stays clean.
           router.push(`/pos?mode=${next.toLowerCase()}`);
         }}
-        branchName="Main Dining"
-        registerName="Counter 1"
+        branchName={session.branchName}
+        registerName={session.registerName}
         workspace={workspace}
         rail={rail}
       />

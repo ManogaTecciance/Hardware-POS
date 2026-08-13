@@ -12,7 +12,9 @@ import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
+import { getCachedDocumentProfile } from '@/lib/document-template-service';
 import { printSplitBill } from '@/lib/receipt-print';
+import { getActiveCurrency } from '@/lib/tenant-money';
 import type { BillLineItem, BillView, PaymentMethod } from '@/lib/restaurant/types';
 
 interface Props {
@@ -240,7 +242,8 @@ export function BillScreen({ session, saleId }: Props) {
                           leftIcon={<Printer className="h-4 w-4" />}
                           onClick={() =>
                             printSplitBill({
-                              storeName: session.branchName ?? 'Axlo POS',
+                              storeName: getCachedDocumentProfile().companyName || session.branchName || '',
+                              currency: getActiveCurrency(),
                               saleNumber: bill.saleNumber,
                               splitLabel: sp.label ?? `Split ${i + 1}`,
                               items: sp.items,

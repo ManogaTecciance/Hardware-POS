@@ -18,6 +18,7 @@ import type {
   TableSessionStatus,
   TakeawayOrderStatus,
 } from './types';
+import { getActiveCurrency } from '@/lib/tenant-money';
 
 /**
  * Tone the badge picks up. Semantic tokens the existing button uses so a
@@ -185,7 +186,12 @@ export const TAKEAWAY_STATUS_TONES: Record<TakeawayOrderStatus, BadgeTone> = {
  * precision. `formatMoney` adds thousand separators and the currency prefix
  * without moving the decimal point.
  */
-export function formatMoney(value: string | number, currency = 'LKR'): string {
+/**
+ * Money for the restaurant surface. The default was the literal `'LKR'`, and
+ * since no call site passes a currency that default was what every tenant got.
+ * It now resolves the tenant's configured currency (D54).
+ */
+export function formatMoney(value: string | number, currency = getActiveCurrency()): string {
   const n = typeof value === 'string' ? Number(value) : value;
   if (Number.isNaN(n)) return `${currency} 0.00`;
   return `${currency} ${n.toLocaleString('en-US', {

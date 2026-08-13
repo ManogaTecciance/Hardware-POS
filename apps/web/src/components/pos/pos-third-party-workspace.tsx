@@ -47,7 +47,7 @@ export function PosThirdPartyWorkspace({ session, branchId, externalOrderId }: P
   return <ExternalOrderList session={session} branchId={branchId} />;
 }
 
-function useShell(rail: React.ReactNode, workspace: React.ReactNode) {
+function useShell(session: Session, rail: React.ReactNode, workspace: React.ReactNode) {
   const router = useRouter();
   return (
     <PosShell
@@ -55,8 +55,8 @@ function useShell(rail: React.ReactNode, workspace: React.ReactNode) {
       onModeChange={(next) =>
         router.push(`/pos?mode=${next.toLowerCase().replace('_', '-')}`)
       }
-      branchName="Main Dining"
-      registerName="Counter 1"
+      branchName={session.branchName}
+      registerName={session.registerName}
       workspace={workspace}
       rail={rail}
       context={
@@ -155,7 +155,7 @@ function ExternalOrderList({ session, branchId }: { session: Session; branchId: 
     </Card>
   );
 
-  return useShell(rail, workspace);
+  return useShell(session, rail, workspace);
 }
 
 function ExternalOrderInspector({
@@ -307,7 +307,7 @@ function ExternalOrderInspector({
     </Card>
   );
 
-  return useShell(rail, workspace);
+  return useShell(session, rail, workspace);
 }
 
 function toneFor(

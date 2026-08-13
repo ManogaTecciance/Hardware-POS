@@ -107,7 +107,10 @@ export function saleMetaFromSession(
   },
 ): SaleDocumentMeta {
   return {
-    businessName: profile.companyName || 'Hardware POS',
+    // D54: never substitute the vendor's own brand onto a tenant's document.
+    // An unset company name renders empty, which is visibly wrong to whoever
+    // is about to print it — unlike a plausible-looking foreign brand.
+    businessName: profile.companyName || '',
     branchName: sale?.branch?.name ?? session.branchName,
     registerName: sale?.register?.name ?? session.registerName,
     cashierName: sale?.cashier?.name ?? session.user.name,

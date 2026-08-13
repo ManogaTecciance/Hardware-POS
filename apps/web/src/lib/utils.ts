@@ -1,4 +1,6 @@
 import { CURRENCY_SYMBOL, formatCurrency } from '@hardware-pos/shared';
+
+import { getActiveCurrency } from './tenant-money';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -8,13 +10,15 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 /**
- * Format a number as currency for display (Sri Lankan Rupees, e.g. `Rs. 1,250.00`).
+ * Format a number as currency for display, e.g. `Rs. 1,250.00`.
  *
- * All POS transactions are treated as LKR, so the optional `currency` argument is
- * retained only for call-site compatibility and no longer affects the output.
+ * The `currency` argument is honoured. It used to be discarded, so a tenant on
+ * any other currency saw `Rs.` on their receipts even where the call site had
+ * correctly fetched and passed `AppSettings.currency`. Omitted, the tenant's
+ * cached currency is used.
  */
-export function formatMoney(amount: number, _currency?: string): string {
-  return formatCurrency(amount);
+export function formatMoney(amount: number, currency?: string): string {
+  return formatCurrency(amount, currency ?? getActiveCurrency());
 }
 
 /**
