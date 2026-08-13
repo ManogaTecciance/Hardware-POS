@@ -22,24 +22,24 @@ paths let a guest be charged for food the kitchen is never told to cook.
 
 | # | Finding | Where | Consequence | Status |
 |---|---|---|---|---|
-| A1 | `taxAmount: new Prisma.Decimal(0)` hardcoded on every restaurant close | `table-sessions.service.ts:744` | Retail applies `settings.taxRatePercent` (`sales.service.ts:410`); restaurant never does. Verified on live data: every restaurant sale has tax `0.00`. A VAT-registered restaurant issues legally wrong bills. | OPEN |
+| A1 | `taxAmount: new Prisma.Decimal(0)` hardcoded on every restaurant close | `table-sessions.service.ts:744` | Retail applies `settings.taxRatePercent` (`sales.service.ts:410`); restaurant never does. Verified on live data: every restaurant sale has tax `0.00`. A VAT-registered restaurant issues legally wrong bills. | **FIXED (D52)** |
 | A2 | Client mirrors it: `const [taxPct, setTaxPct] = useState(0)` | `pos-counter-workspace.tsx:126` | Comment admits tenant settings are never fetched. Cashier quotes a total the server disagrees with. | OPEN |
 | A3 | `totalDiscount: 0` hardcoded; **no discount path exists at all** for a restaurant bill | `table-sessions.service.ts:743` | No endpoint can discount a restaurant bill. Staff will void items as a workaround. | OPEN |
 | A4 | Promotions are surfaced by the POS catalogue but never applied at close | `pos-catalogue.service.ts:150-165` vs close path | The guest sees a happy-hour badge, then pays full menu price. | OPEN |
-| A5 | `packagingCharge: 0` hardcoded | `table-sessions.service.ts:746` | Column and a UI row exist; nothing ever sets it. Schema comment already names the missing config. | OPEN |
-| A6 | Takeaway sets `total: subtotal` — no service charge, no tax | `takeaway.service.ts:237-239` | The same branch charges service on dine-in and silently drops it on takeaway. | OPEN |
+| A5 | `packagingCharge: 0` hardcoded | `table-sessions.service.ts:746` | Column and a UI row exist; nothing ever sets it. Schema comment already names the missing config. | **FIXED (D52)** |
+| A6 | Takeaway sets `total: subtotal` — no service charge, no tax | `takeaway.service.ts:237-239` | The same branch charges service on dine-in and silently drops it on takeaway. | **FIXED (D52)** |
 | A7 | Takeaway ignores `MenuItemChannelPrice` and drops modifiers (`modifierTotal: 0`) | `takeaway.service.ts:135-136` | Configured takeaway pricing never charged; paid add-ons given away free and absent from the KOT. | OPEN |
 | A8 | Reports coerce `Decimal` → float, then `.toFixed(2)` | `restaurant-reports.service.ts:81-84`, `129-137`, `182`, `205-210` | Report totals will not tie out to the payment ledger. | OPEN |
-| A9 | Modifier totals summed as floats then converted back to `Decimal` | `table-sessions.service.ts:505-508`, `567` | Contradicts the file's own comment 180 lines below. Cent drift on fractional modifier prices. | OPEN |
+| A9 | Modifier totals summed as floats then converted back to `Decimal` | `table-sessions.service.ts:505-508`, `567` | Contradicts the file's own comment 180 lines below. Cent drift on fractional modifier prices. | **FIXED (D52)** |
 
 ## B. Attribution is invented — BLOCKERS
 
 | # | Finding | Where | Consequence | Status |
 |---|---|---|---|---|
-| B1 | Register chosen by `findFirstOrThrow` with **no `orderBy`** | `table-sessions.service.ts:715-719` | Multi-register branches: every dine-in sale lands on an arbitrary till; X/Z reports and drawer reconciliation are wrong for both. Not even stable between two closes. | OPEN |
-| B2 | Cashier falls back to "first active user in tenant"; **not branch-scoped** | `table-sessions.service.ts:721-732` | Sales book against whoever the query returns (typically the owner). Branch B's bill can be attributed to a branch A user. | OPEN |
-| B3 | Takeaway repeats both heuristics | `takeaway.service.ts:223-229` | Same consequences on the takeaway path. | OPEN |
-| B4 | Sale stamped `COMPLETED` + `completedAt` before any money is taken | `table-sessions.service.ts:748-752` | Revenue reports filtering `status: COMPLETED` count unpaid and walked-out bills as banked revenue. `TableSessionStatus.BILLING` exists and is never used. | OPEN |
+| B1 | Register chosen by `findFirstOrThrow` with **no `orderBy`** | `table-sessions.service.ts:715-719` | Multi-register branches: every dine-in sale lands on an arbitrary till; X/Z reports and drawer reconciliation are wrong for both. Not even stable between two closes. | **FIXED (D52)** |
+| B2 | Cashier falls back to "first active user in tenant"; **not branch-scoped** | `table-sessions.service.ts:721-732` | Sales book against whoever the query returns (typically the owner). Branch B's bill can be attributed to a branch A user. | **FIXED (D52)** |
+| B3 | Takeaway repeats both heuristics | `takeaway.service.ts:223-229` | Same consequences on the takeaway path. | **FIXED (D52)** |
+| B4 | Sale stamped `COMPLETED` + `completedAt` before any money is taken | `table-sessions.service.ts:748-752` | Revenue reports filtering `status: COMPLETED` count unpaid and walked-out bills as banked revenue. `TableSessionStatus.BILLING` exists and is never used. | **DEFERRED (D52)** — financial-state redesign; changes what every report, returns and QB sync can see |
 
 **Note on B2:** needs no new API. `closeSession` is the only method in its class
 that does not take `actorUserId`, and the controller already holds `actor.id`.

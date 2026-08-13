@@ -117,4 +117,10 @@ export class CloseSessionDto {
    * `TableSession.finalSaleId` is `@unique`.
    */
   @IsOptional() @IsString() @Length(1, 128) idempotencyKey?: string;
+  /**
+   * D52 — the till that took the money. Optional: absent one the branch's
+   * first active register by code is used, which is deterministic where the
+   * previous unordered findFirst was not.
+   */
+  @IsOptional() @IsString() registerId?: string;
 }

@@ -10,6 +10,8 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { KitchenService } from '../kitchen/kitchen.service';
+import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
+import { SettingsService } from '../settings/settings.service';
 import { CreateTakeawayDto, UpdateTakeawayStatusDto } from './dto/takeaway.dto';
 
 export interface TakeawayView {
@@ -42,6 +44,7 @@ export class TakeawayService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly kitchen: KitchenService,
+    private readonly settings: SettingsService,
   ) {}
 
   async create(
@@ -185,6 +188,7 @@ export class TakeawayService {
     tenantId: string,
     profileId: string,
     dto: UpdateTakeawayStatusDto,
+    actorUserId: string,
   ): Promise<TakeawayView> {
     const existing = await this.prisma.takeawayOrderProfile.findFirst({
       where: { id: profileId, tenantId },
@@ -220,13 +224,37 @@ export class TakeawayService {
               subtotal = subtotal.plus(item.unitPrice.plus(item.modifierTotal).mul(item.quantity));
             }
           }
-          const register = await tx.register.findFirstOrThrow({
+          // D52: deterministic register, and the authenticated actor as the
+          // cashier — this used to pick "first active user in the tenant",
+          // which was not branch-scoped.
+          const register = await tx.register.findFirst({
             where: { branchId: session.branchId, isActive: true },
+            orderBy: { code: 'asc' },
             select: { id: true },
           });
-          const cashier = session.waiterUserId ?? (
-            await tx.user.findFirstOrThrow({ where: { tenantId, isActive: true }, select: { id: true } })
-          ).id;
+          if (!register) throw new NotFoundException('No active register on this branch');
+          const cashier = session.waiterUserId ?? actorUserId;
+
+          // D52: the same calculator dine-in uses. Takeaway previously wrote
+          // `total: subtotal` — no service charge, no packaging, no tax.
+          const branchConfig = await tx.restaurantBranchConfig.findUnique({
+            where: { branchId: session.branchId },
+            select: {
+              serviceChargePercent: true,
+              serviceChargeChannels: true,
+              serviceChargeTaxable: true,
+              packagingChargeAmount: true,
+            },
+          });
+          const appSettings = this.settings.getSettings(tenantId);
+          const totals = computeRestaurantTotals(subtotal, RestaurantOrderChannel.TAKEAWAY, {
+            serviceChargePercent: branchConfig?.serviceChargePercent ?? new Prisma.Decimal(0),
+            serviceChargeChannels: branchConfig?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
+            serviceChargeTaxable: branchConfig?.serviceChargeTaxable ?? true,
+            packagingChargeAmount: branchConfig?.packagingChargeAmount ?? new Prisma.Decimal(0),
+            taxRatePercent: appSettings.taxRatePercent,
+          });
+
           const sale = await tx.sale.create({
             data: {
               tenantId,
@@ -235,8 +263,11 @@ export class TakeawayService {
               cashierId: cashier,
               saleNumber: `S-${padSequence(await nextDocumentNumber(tx, tenantId, 'SALE'))}`,
               subtotal,
-              total: subtotal,
-              balanceAmount: subtotal,
+              serviceChargeAmount: totals.serviceChargeAmount,
+              packagingCharge: totals.packagingCharge,
+              taxAmount: totals.taxAmount,
+              total: totals.total,
+              balanceAmount: totals.total,
               paymentStatus: 'UNPAID',
               status: 'COMPLETED',
               completedAt: new Date(),

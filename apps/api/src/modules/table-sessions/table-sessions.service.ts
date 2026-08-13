@@ -14,6 +14,8 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { DiningService, type OpenTableReleaseSummary } from '../dining/dining.service';
+import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
+import { SettingsService } from '../settings/settings.service';
 import { KitchenService } from '../kitchen/kitchen.service';
 import {
   CloseSessionDto,
@@ -33,6 +35,7 @@ import {
   ProductNotFoundError,
   ProductVariantInactiveError,
   ProductVariantNotFoundError,
+  RegisterNotFoundError,
   RoundAlreadySubmittedError,
   SessionAlreadyClosedError,
   SessionNotFoundError,
@@ -119,6 +122,7 @@ export class TableSessionsService {
     private readonly prisma: PrismaService,
     private readonly kitchen: KitchenService,
     private readonly dining: DiningService,
+    private readonly settings: SettingsService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────
@@ -502,9 +506,12 @@ export class TableSessionsService {
         const selectedMods = (inputItem.modifiers ?? []).map((m) =>
           modifierMap.get(m.modifierOptionId),
         );
+        // D52: Decimal throughout. Summing price deltas as floats and
+        // converting back drifts on fractional modifiers (0.10 + 0.20), which
+        // contradicts this file's own money-precision rule 190 lines below.
         const modifierTotal = selectedMods.reduce(
-          (sum, m) => sum + (m ? Number(m.priceDelta) : 0),
-          0,
+          (sum, m) => (m ? sum.plus(m.priceDelta) : sum),
+          new Prisma.Decimal(0),
         );
 
         // Uniform snapshot fields — resolved to concrete values per
@@ -564,7 +571,7 @@ export class TableSessionsService {
             menuItemId: refId,
             menuItemName: refName,
             unitPrice,
-            modifierTotal: new Prisma.Decimal(modifierTotal),
+            modifierTotal,
             quantity: new Prisma.Decimal(inputItem.quantity),
             specialInstructions: inputItem.specialInstructions ?? null,
             status: RestaurantOrderItemStatus.SENT,
@@ -668,7 +675,8 @@ export class TableSessionsService {
   async closeSession(
     tenantId: string,
     sessionId: string,
-    _dto: CloseSessionDto,
+    dto: CloseSessionDto,
+    actorUserId: string,
   ): Promise<{
     session: TableSessionView;
     saleId: string;
@@ -697,39 +705,47 @@ export class TableSessionsService {
         }
       }
 
-      // Phase 8: apply the branch's service charge (D8). Default is 0
-      // (disabled), so a tenant that has never configured it pays only the
-      // subtotal. Rounded to 2 decimals to match money precision.
+      // D52: every charge on the bill comes from one shared calculator, so
+      // dine-in and takeaway cannot drift. Tax is the tenant's configured rate
+      // — it was hardcoded to zero here while retail applied it correctly.
       const config = await tx.restaurantBranchConfig.findUnique({
         where: { branchId: session.branchId },
-        select: { serviceChargePercent: true },
+        select: {
+          serviceChargePercent: true,
+          serviceChargeChannels: true,
+          serviceChargeTaxable: true,
+          packagingChargeAmount: true,
+        },
       });
-      const serviceChargePercent = config?.serviceChargePercent ?? new Prisma.Decimal(0);
-      const serviceChargeAmount = subtotal
-        .mul(serviceChargePercent)
-        .div(100)
-        .toDecimalPlaces(2);
-      const total = subtotal.plus(serviceChargeAmount);
-
-      // Register lookup: use the branch's first active register (matches
-      // resolveLocation() in auth.repository).
-      const register = await tx.register.findFirstOrThrow({
-        where: { branchId: session.branchId, isActive: true },
-        select: { id: true },
+      const appSettings = this.settings.getSettings(tenantId);
+      const totals = computeRestaurantTotals(subtotal, RestaurantOrderChannel.DINE_IN, {
+        serviceChargePercent: config?.serviceChargePercent ?? new Prisma.Decimal(0),
+        serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
+        serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
+        packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
+        taxRatePercent: appSettings.taxRatePercent,
       });
 
-      // The Sale needs a `cashierId` even though this is a restaurant close.
-      // Use the waiter as the natural cashier; if none is recorded on the
-      // session, fall back to the first active user in the tenant so the FK
-      // is satisfied. Phase 8 will introduce a proper billing user.
-      const cashierId =
-        session.waiterUserId ??
-        (
-          await tx.user.findFirstOrThrow({
-            where: { tenantId, isActive: true },
+      // D52: the till that took the money. An explicit registerId wins; the
+      // fallback is ordered by code so it is at least deterministic — the
+      // previous findFirstOrThrow had no orderBy and could return a different
+      // register between two closes on the same branch.
+      const register = dto.registerId
+        ? await tx.register.findFirst({
+            where: { id: dto.registerId, branchId: session.branchId, isActive: true },
             select: { id: true },
           })
-        ).id;
+        : await tx.register.findFirst({
+            where: { branchId: session.branchId, isActive: true },
+            orderBy: { code: 'asc' },
+            select: { id: true },
+          });
+      if (!register) throw new RegisterNotFoundError();
+
+      // D52: the human who closed the bill. Was "first active user in the
+      // tenant" — not branch-scoped, so it booked untagged sales to whoever
+      // the query returned, in practice the owner.
+      const cashierId = session.waiterUserId ?? actorUserId;
 
       const saleNumber = `S-${padSequence(await nextDocumentNumber(tx, tenantId, 'SALE'))}`;
       const sale = await tx.sale.create({
@@ -740,13 +756,15 @@ export class TableSessionsService {
           cashierId,
           saleNumber,
           subtotal,
+          // Discounts and promotions do not yet reach a restaurant bill — see
+          // D52's deferrals; there is no promotion pricing engine to call.
           totalDiscount: new Prisma.Decimal(0),
-          taxAmount: new Prisma.Decimal(0),
-          serviceChargeAmount,
-          packagingCharge: new Prisma.Decimal(0),
-          total,
+          taxAmount: totals.taxAmount,
+          serviceChargeAmount: totals.serviceChargeAmount,
+          packagingCharge: totals.packagingCharge,
+          total: totals.total,
           paidAmount: new Prisma.Decimal(0),
-          balanceAmount: total,
+          balanceAmount: totals.total,
           paymentStatus: 'UNPAID',
           status: 'COMPLETED',
           completedAt: new Date(),

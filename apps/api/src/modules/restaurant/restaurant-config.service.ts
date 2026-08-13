@@ -14,6 +14,12 @@ export interface RestaurantBranchConfigView {
   takeawayEnabled: boolean;
   dineInEnabled: boolean;
   defaultTicketTargetMinutes: number | null;
+  /** D52 — which channels levy the service charge. */
+  serviceChargeChannels: string[];
+  /** D52 — whether the service charge sits inside the taxable base. */
+  serviceChargeTaxable: boolean;
+  /** D52 — flat per-order packaging charge for TAKEAWAY / ONLINE. */
+  packagingChargeAmount: string;
   version: number;
   updatedAt: string;
 }
@@ -23,6 +29,9 @@ const CODE_DEFAULTS = {
   takeawayEnabled: false,
   dineInEnabled: true,
   defaultTicketTargetMinutes: null,
+  serviceChargeChannels: ['DINE_IN'],
+  serviceChargeTaxable: true,
+  packagingChargeAmount: '0.00',
   version: 0,
 };
 
@@ -73,6 +82,17 @@ export class RestaurantConfigService {
               dto.defaultTicketTargetMinutes !== undefined
                 ? dto.defaultTicketTargetMinutes
                 : undefined,
+            // D52 — per-channel service charge, taxable base, packaging.
+            serviceChargeChannels:
+              dto.serviceChargeChannels !== undefined
+                ? (dto.serviceChargeChannels as never)
+                : undefined,
+            serviceChargeTaxable:
+              dto.serviceChargeTaxable !== undefined ? dto.serviceChargeTaxable : undefined,
+            packagingChargeAmount:
+              dto.packagingChargeAmount !== undefined
+                ? new Prisma.Decimal(dto.packagingChargeAmount)
+                : undefined,
             version: { increment: 1 },
           },
         });
@@ -91,6 +111,15 @@ export class RestaurantConfigService {
           takeawayEnabled: dto.takeawayEnabled ?? false,
           dineInEnabled: dto.dineInEnabled ?? true,
           defaultTicketTargetMinutes: dto.defaultTicketTargetMinutes ?? null,
+          ...(dto.serviceChargeChannels !== undefined
+            ? { serviceChargeChannels: dto.serviceChargeChannels as never }
+            : {}),
+          ...(dto.serviceChargeTaxable !== undefined
+            ? { serviceChargeTaxable: dto.serviceChargeTaxable }
+            : {}),
+          ...(dto.packagingChargeAmount !== undefined
+            ? { packagingChargeAmount: dto.packagingChargeAmount }
+            : {}),
         },
       });
       return this.toView(created);
@@ -117,6 +146,9 @@ export class RestaurantConfigService {
       takeawayEnabled: row.takeawayEnabled,
       dineInEnabled: row.dineInEnabled,
       defaultTicketTargetMinutes: row.defaultTicketTargetMinutes,
+      serviceChargeChannels: row.serviceChargeChannels,
+      serviceChargeTaxable: row.serviceChargeTaxable,
+      packagingChargeAmount: row.packagingChargeAmount.toFixed(2),
       version: row.version,
       updatedAt: row.updatedAt.toISOString(),
     };

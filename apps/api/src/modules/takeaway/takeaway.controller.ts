@@ -59,7 +59,7 @@ export class TakeawayController {
     @Param('profileId') profileId: string,
     @Body() dto: UpdateTakeawayStatusDto,
   ): Promise<TakeawayView> {
-    const updated = await this.service.updateStatus(tenantId, profileId, dto);
+    const updated = await this.service.updateStatus(tenantId, profileId, dto, actor.id);
     await this.audit.record(tenantId, {
       userId: actor.id,
       action: 'TAKEAWAY_ORDER_STATUS_CHANGED',

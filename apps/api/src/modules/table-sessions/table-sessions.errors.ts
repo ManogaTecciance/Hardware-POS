@@ -49,6 +49,16 @@ export class TableReservedForOpenTableError extends ConflictException {
   }
 }
 
+/** D52 — the branch has no active register to book the sale against. */
+export class RegisterNotFoundError extends NotFoundException {
+  constructor() {
+    super({
+      code: 'REGISTER_NOT_FOUND',
+      message: 'No active register on this branch to record the sale against.',
+    });
+  }
+}
+
 export class TableAlreadyOpenError extends ConflictException {
   constructor() {
     super(

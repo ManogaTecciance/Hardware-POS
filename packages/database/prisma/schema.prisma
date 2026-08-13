@@ -1485,6 +1485,17 @@ model RestaurantBranchConfig {
   /// Phase 2A — Phase 6 will surface this on the kitchen display.
   defaultTicketTargetMinutes Int?
 
+  /// D52. Which channels levy the service charge. Defaults to dine-in only,
+  /// which is what the code did implicitly before this was configurable.
+  serviceChargeChannels RestaurantOrderChannel[] @default([DINE_IN])
+  /// D52. Whether the service charge sits inside the taxable base. Varies by
+  /// jurisdiction and cannot be guessed; true matches the pilot market.
+  serviceChargeTaxable  Boolean                  @default(true)
+  /// D52. Flat per-order packaging charge for TAKEAWAY / ONLINE. The
+  /// Sale.packagingCharge column and the bill row already existed with
+  /// nothing to fill them.
+  packagingChargeAmount Decimal                  @default(0) @db.Decimal(12, 2)
+
   version   Int      @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

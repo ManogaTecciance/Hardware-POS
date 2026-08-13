@@ -165,7 +165,7 @@ export class TableSessionsController {
     @Param('sessionId') sessionId: string,
     @Body() dto: CloseSessionDto,
   ) {
-    const result = await this.service.closeSession(tenantId, sessionId, dto);
+    const result = await this.service.closeSession(tenantId, sessionId, dto, actor.id);
     await this.audit.record(tenantId, {
       userId: actor.id,
       action: 'TABLE_SESSION_CLOSED',

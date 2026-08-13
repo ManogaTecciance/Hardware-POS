@@ -1,6 +1,8 @@
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -49,4 +51,23 @@ export class UpdateRestaurantBranchConfigDto {
   @IsInt()
   @Min(0)
   expectedVersion?: number;
+
+  /**
+   * D52 — channels that levy the service charge. Default `[DINE_IN]` matches
+   * what the code did implicitly before this became configurable.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsIn(['DINE_IN', 'TAKEAWAY', 'ONLINE'], { each: true })
+  serviceChargeChannels?: string[];
+
+  /** D52 — whether the service charge sits inside the taxable base. */
+  @IsOptional() @IsBoolean() serviceChargeTaxable?: boolean;
+
+  /** D52 — flat per-order packaging charge for TAKEAWAY / ONLINE. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  packagingChargeAmount?: number;
 }

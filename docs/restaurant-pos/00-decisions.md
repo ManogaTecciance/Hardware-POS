@@ -1470,6 +1470,80 @@ what they would be built from.
 cascade FKs. Purely additive — no existing table is touched, and a bill
 with no item assignments behaves exactly as it does today.
 
+### D52 — Restaurant bills compute tax, packaging and per-channel service charge; sales are attributed to the real actor
+
+The audit in [`hardcoded-audit.md`](./hardcoded-audit.md) found the restaurant
+close path hardcoding `taxAmount: 0`, `packagingCharge: 0` and `totalDiscount:
+0`, levying service charge on dine-in only by accident rather than by
+configuration, and attributing every sale to `findFirst` results. This
+decision fixes the money and the attribution.
+
+**One totals calculator, shared by every channel.** `restaurant-totals.ts` is
+pure and dependency-free (the `split-shares.ts` pattern): given a subtotal, a
+channel and the branch/tenant configuration it returns service charge,
+packaging, tax and total. `closeSession` and the takeaway handover both call
+it, which is what stops the two channels drifting — today dine-in charges
+service and takeaway silently does not.
+
+**Tax comes from the existing `AppSettings.taxRatePercent`,** read through the
+synchronous cache-backed `SettingsService.getSettings` that retail already uses
+(`sales.service.ts:410`). No new tax setting is introduced.
+
+**`taxInclusive` stays unhonoured — deliberately, and now documented.** The
+setting exists but is read by *nothing* in the platform, retail included.
+Implementing tax-inclusive pricing only for restaurants would make the two
+channels compute differently from the same tenant setting, which is worse than
+the current honest gap. It is recorded in the audit as an open item for a
+platform-wide slice.
+
+**Three new branch config fields, each replacing a hardcoded assumption:**
+
+- `serviceChargeChannels RestaurantOrderChannel[]`, default `[DINE_IN]` —
+  makes today's implicit behaviour explicit and configurable. A restaurant
+  that levies service on takeaway can now say so.
+- `packagingChargeAmount Decimal(12,2)`, default `0` — a flat per-order charge
+  applied to TAKEAWAY and ONLINE. The `Sale.packagingCharge` column and the
+  bill row already existed with nothing to fill them; the schema comment
+  already named this as the missing config.
+- `serviceChargeTaxable Boolean`, default `true` — whether service charge sits
+  inside the taxable base. This genuinely varies by jurisdiction and cannot be
+  guessed; `true` matches Sri Lankan practice, which is the pilot market.
+
+**Attribution: the actor, not a query result.**
+
+- `closeSession` now takes `actorUserId`. It was the only method in its class
+  that did not, while its controller already held `actor.id`. The cashier is
+  `session.waiterUserId ?? actorUserId` — never `findFirst` on `User`, which
+  was not branch-scoped and in practice booked every untagged sale to the
+  tenant owner.
+- The register is taken from an optional `registerId` on the close DTO,
+  validated to belong to the session's branch. Absent one, the fallback is
+  the branch's first active register **ordered by code** — deterministic,
+  where the previous `findFirstOrThrow` had no `orderBy` at all and could
+  return a different till between two closes. Binding a register to a device
+  at login is the real answer and is deferred to its own slice; this removes
+  the non-determinism without inventing that feature.
+
+**Deferred, with reasons rather than silence:**
+
+- **Promotion pricing at close.** Promotions are badged on the POS catalogue
+  and never discount the bill. This is not a small wiring gap: the promotions
+  module exports only `isPromotionActive`, an activity-window predicate. There
+  is no promotion *pricing* engine anywhere, so applying them is a feature to
+  design, not a bug to fix.
+- **Manual order-level discounts.** Retail resolves these with a manager
+  approval threshold; the restaurant equivalent needs the same approval flow
+  plus a UI, and belongs with promotion pricing.
+- **`Sale.status: COMPLETED` before payment.** A restaurant bill legitimately
+  exists unpaid — `paymentStatus: UNPAID` already records that. Moving it to
+  `DRAFT` would change which sales every existing report, the returns path and
+  the QuickBooks sync can see. That is a financial-state redesign needing its
+  own decision and a data story, not a line change inside this one.
+
+**Migration.** `20260819000000_add_restaurant_charge_config`: three additive
+columns on `RestaurantBranchConfig`, all defaulted so every existing branch
+keeps its current behaviour exactly.
+
 ---
 
 ## Open decisions
