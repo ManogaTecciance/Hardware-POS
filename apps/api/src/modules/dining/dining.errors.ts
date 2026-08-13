@@ -15,6 +15,7 @@ export const DINING_ERROR_CODES = {
   OPEN_TABLE_NOT_FOUND: 'OPEN_TABLE_NOT_FOUND',
   OPEN_TABLE_MEMBER_UNAVAILABLE: 'OPEN_TABLE_MEMBER_UNAVAILABLE',
   OPEN_TABLE_IN_SERVICE: 'OPEN_TABLE_IN_SERVICE',
+  TABLE_NOT_HELD_BY_OPEN_TABLE: 'TABLE_NOT_HELD_BY_OPEN_TABLE',
 } as const;
 
 const err = (code: string, message: string) => ({ code, message });
@@ -124,6 +125,25 @@ export class OpenTableInServiceError extends ConflictException {
       err(
         DINING_ERROR_CODES.OPEN_TABLE_IN_SERVICE,
         'This open table has a live session — close or settle its bill first.',
+      ),
+    );
+  }
+}
+
+/**
+ * D50. Refuses to "unreserve" a table that no open table is holding.
+ *
+ * This is the guard behind the PO's stated worry: the release action must
+ * never be able to free a table that is RESERVED for some other reason. The
+ * UI only offers it on held tables; this makes that a server rule rather than
+ * a rendering accident.
+ */
+export class TableNotHeldByOpenTableError extends ConflictException {
+  constructor() {
+    super(
+      err(
+        DINING_ERROR_CODES.TABLE_NOT_HELD_BY_OPEN_TABLE,
+        'This table is not held by an open table, so there is nothing to release.',
       ),
     );
   }

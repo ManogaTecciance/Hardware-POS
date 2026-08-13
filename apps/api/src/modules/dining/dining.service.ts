@@ -19,6 +19,7 @@ import {
   MemberTableUnavailableError,
   OpenTableInServiceError,
   OpenTableNotFoundError,
+  TableNotHeldByOpenTableError,
   TableCodeTakenError,
   TableInServiceError,
   TableNotFoundError,
@@ -50,6 +51,23 @@ export interface RestaurantTableView {
   status: RestaurantTableStatus;
   isActive: boolean;
   createdByUserId: string | null;
+}
+
+/**
+ * D50 — what a close/dissolve did to the arrangement's physical tables.
+ *
+ * `released` went back to AVAILABLE because this was their LAST open-table
+ * membership. `stillReserved` are still held by another open table, and carry
+ * who holds them — that list is what the billing reminder is built from.
+ */
+export interface OpenTableReleaseSummary {
+  released: Array<{ id: string; code: string; label: string | null }>;
+  stillReserved: Array<{
+    id: string;
+    code: string;
+    label: string | null;
+    heldBy: Array<{ id: string; code: string; label: string | null }>;
+  }>;
 }
 
 /** D49 — an open table plus the physical tables it absorbed. */
@@ -338,10 +356,15 @@ export class DiningService {
       // not a conflict — nothing to name without leaking another tenant's rows.
       if (members.length !== memberIds.length) throw new TableNotFoundError();
       for (const member of members) {
+        // D50: RESERVED joins AVAILABLE as an eligible status — one physical
+        // table may back several open tables (two unrelated parties sharing a
+        // four-top). Everything else is still refused: a table with a party
+        // physically at it is not shareable, and an OPEN table is not a member.
         const joinable =
           member.isActive &&
           member.kind === RestaurantTableKind.PHYSICAL &&
-          member.status === RestaurantTableStatus.AVAILABLE;
+          (member.status === RestaurantTableStatus.AVAILABLE ||
+            member.status === RestaurantTableStatus.RESERVED);
         if (!joinable) throw new MemberTableUnavailableError(member.code);
       }
 
@@ -377,7 +400,7 @@ export class DiningService {
     tenantId: string,
     branchId: string,
     openTableId: string,
-  ): Promise<OpenTableView> {
+  ): Promise<OpenTableView & { release: OpenTableReleaseSummary }> {
     return this.prisma.$transaction(async (tx) => {
       const row = await tx.restaurantTable.findFirst({
         where: {
@@ -404,13 +427,19 @@ export class DiningService {
       });
       if (liveSession) throw new OpenTableInServiceError();
 
-      await this.releaseOpenTable(tx, tenantId, row.id);
+      const release = await this.releaseOpenTable(tx, tenantId, row.id);
+      // D50: members are NOT uniformly AVAILABLE any more — one still held by
+      // another open table stays RESERVED. Report each member's real status.
+      const releasedIds = new Set(release.released.map((t) => t.id));
       return {
         ...this.tableToView({ ...row, isActive: false, status: RestaurantTableStatus.AVAILABLE }),
         members: row.openMembers.map((m) => ({
           ...m.memberTable,
-          status: RestaurantTableStatus.AVAILABLE,
+          status: releasedIds.has(m.memberTable.id)
+            ? RestaurantTableStatus.AVAILABLE
+            : RestaurantTableStatus.RESERVED,
         })),
+        release,
       };
     });
   }
@@ -419,28 +448,128 @@ export class DiningService {
    * The release half of the lifecycle, shared between manual dissolve and the
    * automatic bill-close hook (table-sessions.service). Runs inside the
    * CALLER's transaction so "bill closed" and "members released" cannot be
-   * observed apart. Members return to AVAILABLE, memberships are deleted, and
-   * the open-table row is archived — the arrangement ends with the tab (D49).
+   * observed apart.
+   *
+   * D50 — last one out. This open table's own memberships go and its row is
+   * archived, but a member returns to AVAILABLE only when NO live membership
+   * remains: two parties sharing a four-top each hold it, and the first bill
+   * to close must not free it under the second party. Members still held are
+   * reported back so billing can remind the operator to check them.
    */
   async releaseOpenTable(
     tx: Prisma.TransactionClient,
     tenantId: string,
     openTableId: string,
-  ): Promise<void> {
-    const memberships = await tx.openTableMember.findMany({
-      where: { openTableId, tenantId },
-      select: { memberTableId: true },
-    });
-    if (memberships.length > 0) {
-      await tx.restaurantTable.updateMany({
-        where: { id: { in: memberships.map((m) => m.memberTableId) } },
-        data: { status: RestaurantTableStatus.AVAILABLE },
-      });
-      await tx.openTableMember.deleteMany({ where: { openTableId, tenantId } });
-    }
+  ): Promise<OpenTableReleaseSummary> {
+    const memberIds = (
+      await tx.openTableMember.findMany({
+        where: { openTableId, tenantId },
+        select: { memberTableId: true },
+      })
+    ).map((m) => m.memberTableId);
+
+    await tx.openTableMember.deleteMany({ where: { openTableId, tenantId } });
     await tx.restaurantTable.update({
       where: { id: openTableId },
       data: { isActive: false, status: RestaurantTableStatus.AVAILABLE },
+    });
+    if (memberIds.length === 0) return { released: [], stillReserved: [] };
+
+    // Who still holds each former member? Filtered on the holder being live so
+    // a stale membership could never keep a table hostage.
+    const remaining = await tx.openTableMember.findMany({
+      where: {
+        tenantId,
+        memberTableId: { in: memberIds },
+        openTable: { isActive: true },
+      },
+      select: {
+        memberTableId: true,
+        openTable: { select: { id: true, code: true, label: true } },
+      },
+    });
+    const holdersByMember = new Map<string, Array<{ id: string; code: string; label: string | null }>>();
+    for (const row of remaining) {
+      const list = holdersByMember.get(row.memberTableId) ?? [];
+      list.push(row.openTable);
+      holdersByMember.set(row.memberTableId, list);
+    }
+
+    const releasableIds = memberIds.filter((id) => !holdersByMember.has(id));
+    if (releasableIds.length > 0) {
+      await tx.restaurantTable.updateMany({
+        where: { id: { in: releasableIds } },
+        data: { status: RestaurantTableStatus.AVAILABLE },
+      });
+    }
+
+    const rows = await tx.restaurantTable.findMany({
+      where: { id: { in: memberIds } },
+      select: { id: true, code: true, label: true },
+      orderBy: { code: 'asc' },
+    });
+    return {
+      released: rows.filter((r) => !holdersByMember.has(r.id)),
+      stillReserved: rows
+        .filter((r) => holdersByMember.has(r.id))
+        .map((r) => ({ ...r, heldBy: holdersByMember.get(r.id) ?? [] })),
+    };
+  }
+
+  /**
+   * D50 — manual early release of ONE physical table from every open table
+   * holding it.
+   *
+   * The escape hatch for compaction: two parties of three shared a four-top
+   * and a two-top; the first is billed, and the remaining three now fit on the
+   * four-top alone. Only a human can know that, so the server never does it on
+   * its own. Deliberately permitted even when this strips the last member of a
+   * live open table — refusing would invent a rule that blocks a real
+   * compaction, and the server cannot see the room.
+   */
+  async releaseMemberTable(
+    tenantId: string,
+    branchId: string,
+    tableId: string,
+  ): Promise<{ table: RestaurantTableView; releasedFrom: Array<{ id: string; code: string; label: string | null }> }> {
+    return this.prisma.$transaction(async (tx) => {
+      const table = await tx.restaurantTable.findFirst({
+        where: {
+          id: tableId,
+          tenantId,
+          branchId,
+          isActive: true,
+          kind: RestaurantTableKind.PHYSICAL,
+        },
+      });
+      if (!table) throw new TableNotFoundError();
+
+      const memberships = await tx.openTableMember.findMany({
+        where: { memberTableId: table.id, tenantId, openTable: { isActive: true } },
+        select: { id: true, openTable: { select: { id: true, code: true, label: true } } },
+      });
+      // Refused rather than silently flipping the status: this is exactly the
+      // failure the PO named — an operator must never be able to "unreserve" a
+      // table that no open table is holding.
+      if (memberships.length === 0) throw new TableNotHeldByOpenTableError();
+
+      const ownSession = await tx.tableSession.findFirst({
+        where: { tableId: table.id, status: IN_SERVICE_SESSION_STATUSES },
+        select: { id: true },
+      });
+      if (ownSession) throw new TableInServiceError();
+
+      await tx.openTableMember.deleteMany({
+        where: { id: { in: memberships.map((m) => m.id) } },
+      });
+      const updated = await tx.restaurantTable.update({
+        where: { id: table.id },
+        data: { status: RestaurantTableStatus.AVAILABLE },
+      });
+      return {
+        table: this.tableToView(updated),
+        releasedFrom: memberships.map((m) => m.openTable),
+      };
     });
   }
 

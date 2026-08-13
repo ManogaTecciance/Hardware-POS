@@ -13,7 +13,7 @@ import {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
-import { DiningService } from '../dining/dining.service';
+import { DiningService, type OpenTableReleaseSummary } from '../dining/dining.service';
 import { KitchenService } from '../kitchen/kitchen.service';
 import {
   CloseSessionDto,
@@ -669,7 +669,12 @@ export class TableSessionsService {
     tenantId: string,
     sessionId: string,
     _dto: CloseSessionDto,
-  ): Promise<{ session: TableSessionView; saleId: string }> {
+  ): Promise<{
+    session: TableSessionView;
+    saleId: string;
+    /** D50 — present only when an OPEN table closed; drives the billing reminder. */
+    openTableRelease?: OpenTableReleaseSummary;
+  }> {
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.tableSession.findFirst({
         where: { id: sessionId, tenantId },
@@ -766,13 +771,13 @@ export class TableSessionsService {
         select: { kind: true },
       });
       if (closedTable.kind === RestaurantTableKind.OPEN) {
-        await this.dining.releaseOpenTable(tx, tenantId, session.tableId);
-      } else {
-        await tx.restaurantTable.update({
-          where: { id: session.tableId },
-          data: { status: RestaurantTableStatus.AVAILABLE },
-        });
+        const openTableRelease = await this.dining.releaseOpenTable(tx, tenantId, session.tableId);
+        return { session: this.sessionToView(updated), saleId: sale.id, openTableRelease };
       }
+      await tx.restaurantTable.update({
+        where: { id: session.tableId },
+        data: { status: RestaurantTableStatus.AVAILABLE },
+      });
 
       return { session: this.sessionToView(updated), saleId: sale.id };
     });

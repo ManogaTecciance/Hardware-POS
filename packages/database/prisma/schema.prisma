@@ -2145,8 +2145,11 @@ model OpenTableMember {
   memberTable RestaurantTable @relation("OpenTableMemberTable", fields: [memberTableId], references: [id], onDelete: Cascade)
 
   @@unique([openTableId, memberTableId])
-  /// One live membership per physical table — a table cannot be absorbed twice.
-  @@unique([memberTableId])
+  /// D50: NO unique on memberTableId — one physical table may back several
+  /// open tables at once (two unrelated parties sharing a four-top, each with
+  /// its own tab). The pair unique above still stops the same table being
+  /// added twice to the SAME open table.
+  @@index([memberTableId])
   @@index([tenantId])
 }
 

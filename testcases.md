@@ -18,7 +18,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [SUP](#sup--suppliers-vendors) · [SIMP](#simp--vendor-bulk-import) ·
 [QB](#qb--quickbooks-integration) · [SET](#set--settings) ·
 [DOC](#doc--documents--printing) · [RSV](#rsv--table-reservations--calendar-d47) ·
-[OTBL](#otbl--open-tables-d49) ·
+[OTBL](#otbl--open-tables-d49d50) ·
 [ADM](#adm--administration--multi-tenancy) ·
 [UI](#ui--theme-layout--responsiveness) · [SEC](#sec--security)
 
@@ -455,7 +455,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | RSV-015 | Link existing customer | Search and pick an existing customer in the dialog | customerId linked; name/phone snapshotted | P | Not Run |
 | RSV-016 | Permissions | Sign in as a role without reservation:view | Calendar nav item absent; routes 403 | N | Not Run |
 
-## OTBL — Open Tables (D49)
+## OTBL — Open Tables (D49/D50)
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
@@ -471,6 +471,15 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | OTBL-010 | Reserved member cannot be archived | Archive a joined member table (owner menu) | 409 in-service refusal | N | Passed |
 | OTBL-011 | Permission gate | Role without open-table:manage | No New open table / Dissolve controls; POST 403 | N | Not Run |
 | OTBL-012 | Orders + KOT flow through | Send a round from the open table's session | Kitchen ticket prints like any table | P | Not Run |
+| OTBL-013 | Two parties share one table (D50) | Create 2 open tables both reserving the same four-top | Both created; table Reserved once | P | Passed |
+| OTBL-014 | First bill does not free a shared table | Close party A's bill | Table stays Reserved; close response lists it as still-reserved | P | Passed |
+| OTBL-015 | Last bill frees the shared table | Close party B's bill | Table returns to Available automatically | P | Passed |
+| OTBL-016 | Billing reminder appears | Close a bill leaving tables held by another party | Dialog lists each table + who holds it, offers Unreserve, then Continue to bill | P | Passed |
+| OTBL-017 | Manual unreserve (compaction) | Two threes on a four-top + two-top; close one, Unreserve the two-top | Two-top Available, four-top still Reserved for the remaining party | P | Passed |
+| OTBL-018 | Unreserve refused when not held | Release a table no open table holds | 409 "not held by an open table" — the safety rule | N | Passed |
+| OTBL-019 | Held-by indication on the floor | View a shared table's card | Shows "Held by <open tables>"; Unreserve renders only on held tables | P | Passed |
+| OTBL-020 | Picker offers shared tables | Open the create dialog while a table is Reserved by an open table | Table selectable, marked "shared" | P | Passed |
+| OTBL-021 | Occupied tables still refused | Try to join a table with its own live session | 409 naming the code | N | Passed |
 
 ## ADM — Administration & Multi-Tenancy
 

@@ -1347,6 +1347,70 @@ valid), `OpenTableMember` table with cascade FKs. No DROP, no SET NOT
 NULL, no rename; the widenings are named explicitly in the
 provider-contract structural test.
 
+### D50 — One physical table may back several open tables; release is last-one-out, with a manual early release
+
+Supersedes D49's "one live membership per physical table". The PO's two
+worked examples:
+
+- **Two parties, one table.** A four-top is free; two unrelated pairs
+  arrive. The waiter creates **two** open tables, each reserving the same
+  four-top. Each party gets its own tab. The four-top returns to
+  AVAILABLE when the **last** of the two bills closes.
+- **Two parties, two joined tables.** Two parties of three; a four-top
+  and a two-top remain. Both are joined, and **both** open tables reserve
+  **both** tables. When the first party is billed, the two-top *can* be
+  freed — the remaining three fit on the four-top — but only a human
+  knows that. So the system asks rather than assumes.
+
+**Membership is many-to-many.** `OpenTableMember`'s
+`@@unique([memberTableId])` is dropped; `@@unique([openTableId,
+memberTableId])` stays, so a table still cannot be added twice to the
+*same* open table.
+
+**Eligibility widens by exactly one status.** A member may now be
+`AVAILABLE` **or** `RESERVED` (already held by another open table).
+Everything else is still refused: SEATED / OCCUPIED / BILLING / CLEANING
+/ BLOCKED, archived rows, and `kind = OPEN`. A table with a party
+physically at it is not shareable; a table already shared is.
+
+**Release is last-one-out, and only that is automatic.** `closeSession`
+deletes the closing open table's own memberships and archives that open
+table, then returns each former member to AVAILABLE **only if no live
+membership remains**. A member still held by another open table stays
+RESERVED. This is the rule that makes example 1 correct without a prompt
+and example 2 refuse to guess.
+
+**Manual early release is the escape hatch.** `POST
+.../tables/:tableId/release` drops every live membership for one physical
+table and returns it to AVAILABLE. It exists because the server cannot
+know whether the parties still occupying an arrangement physically need
+all of its tables — compaction is a floor judgement. Deliberately
+permitted even when it strips the last member of a live open table: the
+alternative is inventing a rule that blocks a real compaction, and the
+server has no way to verify the room.
+
+**Billing reminds, it does not decide.** The close response carries a
+release summary — which members were auto-released, and which stay
+RESERVED with the open tables still holding them. When anything stays
+reserved, the web app interrupts the close→bill navigation with a dialog
+listing those tables and offering release inline. The dialog is a
+decision point, not a notification: dismissing it continues to the bill
+unchanged.
+
+**"Connected to an open table" must be legible.** A RESERVED table on the
+floor names the open tables holding it ("Held by Party A, Party B"), and
+the Unreserve action renders **only** for tables with a live open-table
+membership. A table reserved for any other reason is therefore never
+offered an unreserve control — the PO's stated failure mode (releasing
+something that was not an open-table hold) cannot be reached from the UI.
+The held-by map is derived client-side from the open-table list the floor
+already loads; no table-listing endpoint changes.
+
+**Migration.** `20260817000000_share_open_table_members`: drops one unique
+index. Data-safe and widening — every row satisfying the old constraint
+satisfies the new one. Named explicitly in the provider-contract test,
+which asserts the pair-unique survives.
+
 ---
 
 ## Open decisions

@@ -164,14 +164,24 @@ export class TableSessionsController {
     @CurrentUser() actor: AuthenticatedUser,
     @Param('sessionId') sessionId: string,
     @Body() dto: CloseSessionDto,
-  ): Promise<{ session: TableSessionView; saleId: string }> {
+  ) {
     const result = await this.service.closeSession(tenantId, sessionId, dto);
     await this.audit.record(tenantId, {
       userId: actor.id,
       action: 'TABLE_SESSION_CLOSED',
       entityType: 'TableSession',
       entityId: sessionId,
-      metadata: { saleId: result.saleId, sessionNumber: result.session.sessionNumber },
+      metadata: {
+        saleId: result.saleId,
+        sessionNumber: result.session.sessionNumber,
+        // D50: what the close did to a shared arrangement's physical tables.
+        ...(result.openTableRelease
+          ? {
+              releasedTableIds: result.openTableRelease.released.map((t) => t.id),
+              stillReservedTableIds: result.openTableRelease.stillReserved.map((t) => t.id),
+            }
+          : {}),
+      },
     });
     return result;
   }

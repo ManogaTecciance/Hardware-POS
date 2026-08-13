@@ -236,6 +236,8 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/branches/:branchId/open-tables': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/open-tables': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'DELETE /restaurant/branches/:branchId/open-tables/:openTableId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  // D50 — manual early release of one shared member table.
+  'POST /restaurant/branches/:branchId/open-tables/members/:tableId/release': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   // D47 — the reservation book. List and create are branch-scoped (the
   // Calendar is a per-branch view); the by-id mutations resolve the branch
   // from the row like every other /restaurant/:id route.

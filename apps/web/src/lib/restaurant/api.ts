@@ -49,6 +49,7 @@ import type {
   UnifiedOrderView,
   VoidReportRow,
   WaiterPerformanceRow,
+  OpenTableReleaseSummary,
   OpenTableView,
   ReservationView,
 } from './types';
@@ -505,8 +506,19 @@ export const openTables = {
     return api.post<OpenTableView>(`/restaurant/branches/${branchId}/open-tables`, body, auth(session));
   },
   dissolve(session: Session, branchId: string, openTableId: string) {
-    return api.del<OpenTableView>(
+    return api.del<OpenTableView & { release: OpenTableReleaseSummary }>(
       `/restaurant/branches/${branchId}/open-tables/${openTableId}`,
+      auth(session),
+    );
+  },
+  /** D50 — manually unreserve one shared member table (compaction). */
+  releaseMember(session: Session, branchId: string, tableId: string) {
+    return api.post<{
+      table: RestaurantTableView;
+      releasedFrom: Array<{ id: string; code: string; label: string | null }>;
+    }>(
+      `/restaurant/branches/${branchId}/open-tables/members/${tableId}/release`,
+      {},
       auth(session),
     );
   },
@@ -625,7 +637,12 @@ export const tableSessions = {
     );
   },
   close(session: Session, sessionId: string, body: { idempotencyKey?: string } = {}) {
-    return api.post<{ session: TableSessionView; saleId: string }>(
+    return api.post<{
+      session: TableSessionView;
+      saleId: string;
+      /** D50 — present only when an OPEN table closed; drives the reminder. */
+      openTableRelease?: OpenTableReleaseSummary;
+    }>(
       `/restaurant/table-sessions/${sessionId}/close`,
       body,
       auth(session),

@@ -1,6 +1,6 @@
 'use client';
 
-import { Minus, Plus, Receipt, Send, Trash2, Users } from 'lucide-react';
+import { Link2, Minus, Plus, Receipt, Send, Trash2, Unlink, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
@@ -19,6 +19,7 @@ import {
   menuSections,
   menus,
   modifierGroups as modifierGroupsApi,
+  openTables,
   tableSessions,
 } from '@/lib/restaurant/api';
 import {
@@ -32,6 +33,7 @@ import {
 import type {
   MenuItemView,
   ModifierGroupView,
+  OpenTableReleaseSummary,
   OrderView,
   RoundView,
   SectionView,
@@ -55,6 +57,13 @@ export function OrderEntry({ session, sessionId }: Props) {
   const canSend = hasPermission(Permission.ORDER_SEND_TO_KITCHEN);
   const canVoid = hasPermission(Permission.ORDER_VOID_SENT);
   const canClose = hasPermission(Permission.TABLE_CLOSE);
+  // D50 — closing a shared arrangement may leave tables reserved by another
+  // party; the operator is reminded and can release them inline.
+  const canManageOpenTables = hasPermission(Permission.OPEN_TABLE_MANAGE);
+  const [releaseReminder, setReleaseReminder] = React.useState<{
+    saleId: string;
+    stillReserved: OpenTableReleaseSummary['stillReserved'];
+  } | null>(null);
   const [closingBill, setClosingBill] = React.useState(false);
   const [closeError, setCloseError] = React.useState<string | null>(null);
   const [closeKey] = React.useState(() => cryptoRandomKey());
@@ -250,9 +259,19 @@ export function OrderEntry({ session, sessionId }: Props) {
     setClosingBill(true);
     setCloseError(null);
     try {
-      const { saleId } = await tableSessions.close(session, sessionId, {
+      const { saleId, openTableRelease } = await tableSessions.close(session, sessionId, {
         idempotencyKey: closeKey,
       });
+      // D50: when this was an open table sharing physical tables with another
+      // party, the server released only what it could prove was free. Stop
+      // before the bill and ask about the rest — the floor knows, the server
+      // cannot.
+      if (openTableRelease && openTableRelease.stillReserved.length > 0 && branchId) {
+        setShowCloseConfirm(false);
+        setReleaseReminder({ saleId, stillReserved: openTableRelease.stillReserved });
+        setClosingBill(false);
+        return;
+      }
       router.push(`/bills/${saleId}`);
     } catch (err) {
       setCloseError(err instanceof Error ? err.message : 'Failed to close session');
@@ -564,8 +583,15 @@ export function OrderEntry({ session, sessionId }: Props) {
           )}
         </Dialog>
       ) : null}
-      {/* Branch is captured but only surfaced when actions depend on it later
-          — kept in the render tree so a stale close-over never uses a null. */}
+      {releaseReminder && branchId ? (
+        <OpenTableReleaseReminder
+          session={session}
+          branchId={branchId}
+          stillReserved={releaseReminder.stillReserved}
+          canRelease={canManageOpenTables}
+          onContinue={() => router.push(`/bills/${releaseReminder.saleId}`)}
+        />
+      ) : null}
       <span aria-hidden="true" className="hidden">
         {branchId}
       </span>
@@ -804,3 +830,95 @@ function flattenSubmittedRounds(detail: SessionDetail): FlatRound[] {
 
 // cryptoRandomKey moved to components/pos/pos-utils.ts.
 
+
+/**
+ * D50 — the billing reminder.
+ *
+ * A close only frees a shared table when no other open table still holds it.
+ * Anything left over is a floor judgement — the remaining party may or may not
+ * still need it — so this interrupts the close→bill navigation once, names the
+ * tables and who holds them, and offers release inline. Dismissing it
+ * continues to the bill with nothing changed: it is a decision point, not a
+ * nag, and it never releases anything on its own.
+ */
+function OpenTableReleaseReminder({
+  session,
+  branchId,
+  stillReserved,
+  canRelease,
+  onContinue,
+}: {
+  session: Session;
+  branchId: string;
+  stillReserved: OpenTableReleaseSummary['stillReserved'];
+  canRelease: boolean;
+  onContinue: () => void;
+}) {
+  const [released, setReleased] = React.useState<Set<string>>(new Set());
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const release = async (tableId: string) => {
+    if (busyId) return;
+    setBusyId(tableId);
+    setError(null);
+    try {
+      await openTables.releaseMember(session, branchId, tableId);
+      setReleased((prev) => new Set(prev).add(tableId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not unreserve the table');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={onContinue}
+      title="Any tables to free up?"
+      description="The bill is closed. These tables stay reserved because another party is still using the arrangement."
+      footer={
+        <Button onClick={onContinue}>Continue to bill</Button>
+      }
+    >
+      <div className="space-y-3">
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        {stillReserved.map((t) => {
+          const done = released.has(t.id);
+          return (
+            <div
+              key={t.id}
+              className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{t.label ?? t.code}</p>
+                <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  Held by {t.heldBy.map((o) => o.label ?? o.code).join(', ')}
+                </p>
+              </div>
+              {done ? (
+                <span className="shrink-0 text-sm font-medium text-success">Freed</span>
+              ) : canRelease ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  leftIcon={<Unlink className="h-4 w-4" />}
+                  isLoading={busyId === t.id}
+                  onClick={() => void release(t.id)}
+                >
+                  Unreserve
+                </Button>
+              ) : null}
+            </div>
+          );
+        })}
+        <p className="text-xs text-muted-foreground">
+          Leave them reserved if the remaining party still needs the space — they
+          free themselves when the last tab closes.
+        </p>
+      </div>
+    </Dialog>
+  );
+}

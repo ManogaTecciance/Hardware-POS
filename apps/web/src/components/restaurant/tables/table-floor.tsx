@@ -1,6 +1,6 @@
 'use client';
 
-import { Archive, Building2, DoorOpen, Link2, MoreVertical, Pencil, Plus, Users } from 'lucide-react';
+import { Archive, Building2, DoorOpen, Link2, MoreVertical, Pencil, Plus, Unlink, Users } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -83,6 +83,10 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   const canManageOpenTables = hasPermission(Permission.OPEN_TABLE_MANAGE);
   const [showNewOpenTable, setShowNewOpenTable] = React.useState(false);
   const [dissolveTarget, setDissolveTarget] = React.useState<OpenTableView | null>(null);
+  const [releaseTarget, setReleaseTarget] = React.useState<{
+    table: RestaurantTableView;
+    heldBy: OpenTableView[];
+  } | null>(null);
   const canEditOwnArea = hasPermission(Permission.DINING_AREA_EDIT_OWN);
   const canArchiveOwnArea = hasPermission(Permission.DINING_AREA_ARCHIVE_OWN);
   const canEditOwnTable = hasPermission(Permission.TABLE_EDIT_OWN);
@@ -97,6 +101,24 @@ export function TableFloor({ session, branchId, canManage }: Props) {
    */
   const areaOwnsIt = (area: DiningAreaView) => area.createdByUserId === currentUserId;
   const tableOwnsIt = (table: RestaurantTableView) => table.createdByUserId === currentUserId;
+
+  /**
+   * D50 — which open tables hold each physical table. Derived from the
+   * open-table list rather than fetched: it is the same data, and a table
+   * that carries no entry here is RESERVED for some other reason and must
+   * never be offered an unreserve control.
+   */
+  const heldByTableId = React.useMemo(() => {
+    const map = new Map<string, OpenTableView[]>();
+    for (const open of state.snapshot.openTables) {
+      for (const member of open.members) {
+        const list = map.get(member.id) ?? [];
+        list.push(open);
+        map.set(member.id, list);
+      }
+    }
+    return map;
+  }, [state.snapshot.openTables]);
 
   const load = React.useCallback(async () => {
     try {
@@ -284,6 +306,11 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                         session={snapshot.sessionByTableId.get(t.id) ?? null}
                         canOpen={canOpenTable}
                         onOpenClick={() => setOpenTarget(t)}
+                        heldBy={heldByTableId.get(t.id) ?? []}
+                        canRelease={canManageOpenTables}
+                        onRelease={() =>
+                          setReleaseTarget({ table: t, heldBy: heldByTableId.get(t.id) ?? [] })
+                        }
                         ownsIt={tableOwnsIt(t)}
                         canEdit={canEditOwnTable}
                         canArchive={canArchiveOwnTable}
@@ -308,8 +335,9 @@ export function TableFloor({ session, branchId, canManage }: Props) {
             <div>
               <CardTitle>Open tables</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                Joined tables for parties that outgrow the floor plan. Released
-                automatically when the bill closes.
+                Joined tables for parties that outgrow the floor plan. Several
+                parties can share one table, each with its own tab; a table is
+                freed when the last of those tabs closes.
               </p>
             </div>
             {canManageOpenTables ? (
@@ -357,6 +385,19 @@ export function TableFloor({ session, branchId, canManage }: Props) {
           branchId={branchId}
           areas={snapshot.areas}
           tablesByArea={snapshot.tablesByArea}
+        />
+      ) : null}
+      {releaseTarget ? (
+        <ReleaseMemberDialog
+          onClose={() => setReleaseTarget(null)}
+          onReleased={async () => {
+            setReleaseTarget(null);
+            await load();
+          }}
+          session={session}
+          branchId={branchId}
+          table={releaseTarget.table}
+          heldBy={releaseTarget.heldBy}
         />
       ) : null}
       {dissolveTarget ? (
@@ -494,6 +535,9 @@ function TableCard({
   session,
   canOpen,
   onOpenClick,
+  heldBy,
+  canRelease,
+  onRelease,
   ownsIt,
   canEdit,
   canArchive,
@@ -504,6 +548,10 @@ function TableCard({
   session: (TableSessionView & { activeOrderId: string | null }) | null;
   canOpen: boolean;
   onOpenClick: () => void;
+  /** D50 — open tables currently holding this table; empty for every other reason a table is RESERVED. */
+  heldBy: OpenTableView[];
+  canRelease: boolean;
+  onRelease: () => void;
   ownsIt: boolean;
   canEdit: boolean;
   canArchive: boolean;
@@ -511,6 +559,7 @@ function TableCard({
   onArchive: () => void;
 }) {
   const isAvailable = table.status === 'AVAILABLE';
+  const isHeld = heldBy.length > 0;
   const showMenu = ownsIt && (canEdit || canArchive);
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
@@ -553,6 +602,15 @@ function TableCard({
           <span className="ml-auto">Open {formatElapsed(session.openedAt)}</span>
         ) : null}
       </div>
+      {/* D50 — why this table is Reserved. Naming the holders is what stops an
+          operator unreserving something that is reserved for another reason:
+          a table with no line here has no unreserve control at all. */}
+      {isHeld ? (
+        <p className="flex items-start gap-1 text-xs text-info">
+          <Link2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>Held by {heldBy.map((o) => o.label ?? o.code).join(', ')}</span>
+        </p>
+      ) : null}
       <div className="mt-auto flex gap-2 pt-1">
         {/* `size="md"` (44px) unconditionally — this is the card's primary
             action, and the sm variant (36px) sits just under the touch line
@@ -570,6 +628,16 @@ function TableCard({
             onClick={onOpenClick}
           >
             Open table
+          </Button>
+        ) : isHeld && canRelease ? (
+          <Button
+            size="md"
+            fullWidth
+            variant="outline"
+            leftIcon={<Unlink className="h-4 w-4" />}
+            onClick={onRelease}
+          >
+            Unreserve
           </Button>
         ) : (
           <div className="h-11" aria-hidden="true" />
@@ -1241,7 +1309,9 @@ function OpenTableCard({
     <div className="flex flex-col gap-2 rounded-xl border border-dashed border-border bg-card p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-base font-semibold">{table.label ?? table.code}</p>
+          <p className="truncate text-base font-semibold" title={table.label ?? table.code}>
+            {table.label ?? table.code}
+          </p>
           <p className="text-xs text-muted-foreground">{table.code}</p>
         </div>
         <StatusBadge
@@ -1259,7 +1329,9 @@ function OpenTableCard({
       <p className="text-xs text-muted-foreground">
         Joins {table.members.map((m) => m.label ?? m.code).join(' + ') || '—'}
       </p>
-      <div className="mt-auto flex gap-2 pt-1">
+      {/* Stacked, not side by side: these cards are one narrow grid cell wide,
+          and a second button on the same row overflows into its neighbour. */}
+      <div className="mt-auto flex flex-col gap-2 pt-1">
         {session ? (
           <Button asChild size="md" fullWidth variant="secondary">
             <Link href={`/tables/session/${session.id}`}>View order</Link>
@@ -1272,7 +1344,7 @@ function OpenTableCard({
           <div className="h-11" aria-hidden="true" />
         )}
         {!session && canDissolve ? (
-          <Button size="md" variant="outline" onClick={onDissolve}>
+          <Button size="md" fullWidth variant="outline" onClick={onDissolve}>
             Dissolve
           </Button>
         ) : null}
@@ -1302,13 +1374,17 @@ function CreateOpenTableDialog({
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Only AVAILABLE physical tables can be joined — the same rule the server
-  // enforces; filtering here just keeps the picker honest.
+  // D50: AVAILABLE **or** already-RESERVED physical tables can be joined —
+  // several parties may share one table, each with its own tab. Same rule the
+  // server enforces; filtering here just keeps the picker honest.
   const joinable = areas
     .map((area) => ({
       area,
       tables: (tablesByArea.get(area.id) ?? []).filter(
-        (t) => t.status === 'AVAILABLE' && t.isActive && t.kind === 'PHYSICAL',
+        (t) =>
+          (t.status === 'AVAILABLE' || t.status === 'RESERVED') &&
+          t.isActive &&
+          t.kind === 'PHYSICAL',
       ),
     }))
     .filter((g) => g.tables.length > 0);
@@ -1350,7 +1426,7 @@ function CreateOpenTableDialog({
       open
       onClose={onClose}
       title="New open table"
-      description="Join physical tables for a party that outgrows the floor plan. The joined tables go Reserved until this table's bill closes."
+      description="Join physical tables for a party that outgrows the floor plan. Tables already serving another party can be shared — each party keeps its own tab."
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={saving}>
@@ -1421,6 +1497,10 @@ function CreateOpenTableDialog({
                         <span>
                           {t.label ?? t.code}
                           <span className="ml-1 text-xs text-muted-foreground">({t.capacity})</span>
+                          {/* D50 — already backing another party's tab. */}
+                          {t.status === 'RESERVED' ? (
+                            <span className="ml-1 text-xs text-info">shared</span>
+                          ) : null}
                         </span>
                       </label>
                     ))}
@@ -1430,7 +1510,8 @@ function CreateOpenTableDialog({
             </div>
           )}
           <p className="text-xs text-muted-foreground">
-            Selected tables go Reserved and cannot be seated separately until release.
+            Selected tables go Reserved and cannot be seated separately. They are
+            freed when the last tab using them closes, or earlier via Unreserve.
           </p>
         </div>
       </div>
@@ -1485,6 +1566,76 @@ function DissolveOpenTableDialog({
       }
     >
       {error ? <p className="text-sm text-danger">{error}</p> : null}
+    </Dialog>
+  );
+}
+
+/**
+ * D50 — manual early release of one shared table. Confirmed rather than
+ * instant because there is no "add member" endpoint: putting the table back
+ * means dissolving and re-creating the arrangement.
+ */
+function ReleaseMemberDialog({
+  onClose,
+  onReleased,
+  session,
+  branchId,
+  table,
+  heldBy,
+}: {
+  onClose: () => void;
+  onReleased: () => Promise<void> | void;
+  session: Session;
+  branchId: string;
+  table: RestaurantTableView;
+  heldBy: OpenTableView[];
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const stillSeated = heldBy.filter((o) => o.status !== 'AVAILABLE');
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await openTables.releaseMember(session, branchId, table.id);
+      await onReleased();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not unreserve the table');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Unreserve ${table.label ?? table.code}?`}
+      description={`It will leave ${heldBy.map((o) => o.label ?? o.code).join(', ')} and return to Available.`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={() => void submit()} isLoading={busy}>
+            Unreserve
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-2 text-sm">
+        {error ? <p className="text-danger">{error}</p> : null}
+        {stillSeated.length > 0 ? (
+          <p className="text-muted-foreground">
+            {stillSeated.map((o) => o.label ?? o.code).join(', ')} still has a live
+            tab. Only do this once that party no longer needs this table.
+          </p>
+        ) : null}
+        <p className="text-muted-foreground">
+          The table cannot be added back to the same open table afterwards.
+        </p>
+      </div>
     </Dialog>
   );
 }

@@ -278,6 +278,20 @@ export interface RestaurantTableView {
   createdByUserId: string | null;
 }
 
+/**
+ * D50 — what a close/dissolve did to an arrangement's physical tables.
+ * `stillReserved` is what the billing reminder asks the operator to check.
+ */
+export interface OpenTableReleaseSummary {
+  released: Array<{ id: string; code: string; label: string | null }>;
+  stillReserved: Array<{
+    id: string;
+    code: string;
+    label: string | null;
+    heldBy: Array<{ id: string; code: string; label: string | null }>;
+  }>;
+}
+
 /** D49 — an open table plus the physical tables it absorbed. */
 export interface OpenTableView extends RestaurantTableView {
   members: Array<{
