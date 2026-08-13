@@ -13,8 +13,9 @@ import * as bcrypt from 'bcryptjs';
 
 import { AuthRepository } from './auth.repository';
 import { WorkspaceRequiredError } from './auth.errors';
-import { AuthTokenResult, JwtPayload } from './auth.types';
+import { AuthenticatedUser, AuthTokenResult, JwtPayload } from './auth.types';
 import { Permission, ROLE_PERMISSIONS } from './permissions';
+import { PermissionResolver } from './permission-resolver.service';
 import { LoginDto } from './dto/login.dto';
 
 function hashRefreshToken(token: string): string {
@@ -56,6 +57,7 @@ export class AuthService {
     private readonly authRepository: AuthRepository,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly permissions: PermissionResolver,
   ) {}
 
   /**
@@ -252,6 +254,15 @@ export class AuthService {
 
     await this.authRepository.touchLastLogin(user.id);
 
+    // Resolved, not derived: the client builds its navigation and every
+    // `hasPermission` check from this list, and a user on a custom role has an
+    // enum role that says nothing about what they may do.
+    const authority = await this.permissions.resolve({
+      id: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+    } as AuthenticatedUser);
+
     return {
       token,
       refreshToken,
@@ -262,6 +273,7 @@ export class AuthService {
         email: user.email,
         role: user.role,
       },
+      permissions: [...authority.permissions],
       branch: location.branch,
       register: location.register,
     };
@@ -297,7 +309,23 @@ export class AuthService {
     return this.issueToken(user, branchId);
   }
 
-  private toCurrentUserView(user: User): CurrentUserView {
+  /**
+   * The view `GET /auth/me` returns, and therefore the set the web app builds
+   * its navigation and its every `hasPermission` check from.
+   *
+   * The permissions MUST come from the same resolver `PermissionsGuard` uses.
+   * They used to be `ROLE_PERMISSIONS[user.role]` — the legacy enum fallback —
+   * which is only correct for a user whose authority still comes from their
+   * enum role. A user linked to a custom role (a waiter, say) got their enum's
+   * permissions here and their role's permissions at the guard, so the rail
+   * offered them screens that 403 on arrival.
+   */
+  private async toCurrentUserView(user: User): Promise<CurrentUserView> {
+    const authority = await this.permissions.resolve({
+      id: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+    } as AuthenticatedUser);
     return {
       id: user.id,
       tenantId: user.tenantId,
@@ -305,7 +333,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       branchId: user.branchId,
-      permissions: [...(ROLE_PERMISSIONS[user.role] ?? [])],
+      permissions: [...authority.permissions],
     };
   }
 }

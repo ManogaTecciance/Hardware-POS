@@ -175,6 +175,24 @@ async function main(): Promise<void> {
   const linked =
     (await linkUsersToRoles(prisma, tenant.id)) + (await linkUsersToRoles(prisma, restaurant.id));
 
+  /*
+   * The waiter is the one user whose permissions do NOT come from their enum
+   * role. `linkUsersToRoles` only links where the role key matches the enum
+   * value, and there is no `UserRole.WAITER` — so a floor waiter would
+   * otherwise resolve as a full CASHIER, which carries SALE_READ and would put
+   * Sales back in their rail. Link it explicitly.
+   */
+  const waiterRole = await prisma.role.findFirst({
+    where: { tenantId: restaurant.id, key: 'WAITER' },
+    select: { id: true },
+  });
+  if (waiterRole) {
+    await prisma.user.update({
+      where: { id: 'usr_resto_waiter' },
+      data: { roleId: waiterRole.id },
+    });
+  }
+
   /* eslint-disable no-console */
   console.log('Seeded tenant:', tenant.id);
   console.log(`Seeded ${MOCK_HARDWARE_PRODUCTS.length} products across ${mockCategoryNames().length} categories`);
@@ -192,6 +210,7 @@ async function main(): Promise<void> {
   console.log(`  Owner       ${RESTAURANT_OWNER_EMAIL}   workspace: restaurant-demo`);
   console.log('              password: see docs/restaurant-pos/09-phase-1-acceptance.md');
   console.log('  Cashier     restaurant.cashier@axlopos.test  (approval PIN 3333)');
+  console.log('  Waiter      waiter@axlopos.test  (approval PIN 4444) — no Kitchen/Sales/Reports, read-only catalogue');
   console.log('');
   console.log(`Permission catalogue: ${permissionCount} keys`);
   console.log(`Roles: ${tileRoles.length} for ${tenant.id}, ${restaurantRoles.length} for ${restaurant.id}`);
@@ -247,6 +266,7 @@ async function seedRestaurant(passwordHash: string) {
   });
 
   const pin3333 = await bcrypt.hash('3333', SALT_ROUNDS);
+  const pin4444 = await bcrypt.hash('4444', SALT_ROUNDS);
   const users = [
     {
       id: 'usr_resto_owner',
@@ -256,6 +276,23 @@ async function seedRestaurant(passwordHash: string) {
       passwordHash: passwordHash as string | null,
       pinHash: null as string | null,
       branchId: null as string | null,
+    },
+    /*
+     * A floor waiter. Deliberately created with the CASHIER enum role and then
+     * linked to the WAITER custom role below: `linkUsersToRoles` only links a
+     * user to a role whose key matches their enum value, and there is no
+     * `UserRole.WAITER`, so the link has to be explicit. The WAITER template is
+     * what removes Kitchen / Sales / Reports from their rail and makes the
+     * catalogue read-only.
+     */
+    {
+      id: 'usr_resto_waiter',
+      name: 'Restaurant Waiter',
+      email: 'waiter@axlopos.test',
+      role: UserRole.CASHIER,
+      passwordHash,
+      pinHash: pin4444,
+      branchId: branch.id,
     },
     // D48: email+password is the only login path; the PIN stays for approvals.
     {
@@ -294,33 +331,206 @@ async function seedRestaurant(passwordHash: string) {
     });
   }
 
-  const category = await prisma.productCategory.upsert({
-    where: { id: 'cat_resto_food' },
-    update: { name: 'Food', isActive: true },
-    create: { id: 'cat_resto_food', tenantId: tenant.id, name: 'Food' },
-  });
+  // ── The floor ────────────────────────────────────────────────
+  //
+  // Four areas with genuinely different table shapes, because one area of
+  // identical four-tops exercises none of the interesting paths: open tables
+  // (D49/D50) need a mix of sizes to join, reservations (D47) need enough
+  // tables for a calendar to be legible, and capacity rules need two-tops and
+  // ten-tops to differ.
+  const areas: Array<{ id: string; name: string; description: string; position: number }> = [
+    { id: 'area_resto_main', name: 'Main Hall', description: 'Ground floor, main service', position: 0 },
+    { id: 'area_resto_terrace', name: 'Terrace', description: 'Outdoor, weather permitting', position: 1 },
+    { id: 'area_resto_bar', name: 'Bar', description: 'High tops and bar rail', position: 2 },
+    { id: 'area_resto_private', name: 'Private Room', description: 'Bookable for functions', position: 3 },
+  ];
+  for (const a of areas) {
+    await prisma.diningArea.upsert({
+      where: { id: a.id },
+      update: { name: a.name, description: a.description, position: a.position, isActive: true },
+      create: {
+        id: a.id,
+        tenantId: tenant.id,
+        branchId: branch.id,
+        name: a.name,
+        description: a.description,
+        position: a.position,
+        createdByUserId: 'usr_resto_owner',
+      },
+    });
+  }
 
-  const products = [
-    { id: 'prd_resto_1', name: 'Chicken Fried Rice', sku: 'FR-CHK', unitPrice: 950 },
-    { id: 'prd_resto_2', name: 'Kottu Roti', sku: 'KTU-CHK', unitPrice: 1100 },
-    { id: 'prd_resto_3', name: 'Plain Tea', sku: 'BEV-TEA', unitPrice: 150 },
+  const tables: Array<{ id: string; areaId: string; code: string; capacity: number; label?: string }> = [
+    // Main Hall — the bulk of the covers, mixed sizes.
+    { id: 'tbl_resto_m1', areaId: 'area_resto_main', code: 'M1', capacity: 2 },
+    { id: 'tbl_resto_m2', areaId: 'area_resto_main', code: 'M2', capacity: 2 },
+    { id: 'tbl_resto_m3', areaId: 'area_resto_main', code: 'M3', capacity: 4 },
+    { id: 'tbl_resto_m4', areaId: 'area_resto_main', code: 'M4', capacity: 4 },
+    { id: 'tbl_resto_m5', areaId: 'area_resto_main', code: 'M5', capacity: 4 },
+    { id: 'tbl_resto_m6', areaId: 'area_resto_main', code: 'M6', capacity: 6 },
+    { id: 'tbl_resto_m7', areaId: 'area_resto_main', code: 'M7', capacity: 6 },
+    { id: 'tbl_resto_m8', areaId: 'area_resto_main', code: 'M8', capacity: 8, label: 'Long table' },
+    // Terrace — smaller, weather-dependent.
+    { id: 'tbl_resto_t1', areaId: 'area_resto_terrace', code: 'T1', capacity: 2 },
+    { id: 'tbl_resto_t2', areaId: 'area_resto_terrace', code: 'T2', capacity: 2 },
+    { id: 'tbl_resto_t3', areaId: 'area_resto_terrace', code: 'T3', capacity: 4 },
+    { id: 'tbl_resto_t4', areaId: 'area_resto_terrace', code: 'T4', capacity: 4 },
+    { id: 'tbl_resto_t5', areaId: 'area_resto_terrace', code: 'T5', capacity: 6 },
+    // Bar — high tops, the natural candidates for joining.
+    { id: 'tbl_resto_b1', areaId: 'area_resto_bar', code: 'B1', capacity: 2 },
+    { id: 'tbl_resto_b2', areaId: 'area_resto_bar', code: 'B2', capacity: 2 },
+    { id: 'tbl_resto_b3', areaId: 'area_resto_bar', code: 'B3', capacity: 3 },
+    { id: 'tbl_resto_b4', areaId: 'area_resto_bar', code: 'B4', capacity: 4 },
+    // Private room — one big table for functions.
+    { id: 'tbl_resto_p1', areaId: 'area_resto_private', code: 'P1', capacity: 10, label: 'Function table' },
+    { id: 'tbl_resto_p2', areaId: 'area_resto_private', code: 'P2', capacity: 6 },
+  ];
+  for (const t of tables) {
+    await prisma.restaurantTable.upsert({
+      where: { id: t.id },
+      update: { code: t.code, capacity: t.capacity, label: t.label ?? null, isActive: true },
+      create: {
+        id: t.id,
+        tenantId: tenant.id,
+        branchId: branch.id,
+        areaId: t.areaId,
+        code: t.code,
+        capacity: t.capacity,
+        label: t.label ?? null,
+        createdByUserId: 'usr_resto_owner',
+      },
+    });
+  }
+
+  // ── Kitchen stations ─────────────────────────────────────────
+  const stations = [
+    { id: 'kst_resto_kitchen', code: 'KIT', name: 'Main Kitchen', category: 'KITCHEN' },
+    { id: 'kst_resto_grill', code: 'GRL', name: 'Grill', category: 'GRILL' },
+    { id: 'kst_resto_bar', code: 'BAR', name: 'Bar', category: 'BAR' },
+    { id: 'kst_resto_dessert', code: 'DST', name: 'Pastry', category: 'DESSERT' },
+  ];
+  for (const st of stations) {
+    await prisma.kitchenStation.upsert({
+      where: { id: st.id },
+      update: { name: st.name, category: st.category, isActive: true },
+      create: {
+        id: st.id,
+        tenantId: tenant.id,
+        branchId: branch.id,
+        code: st.code,
+        name: st.name,
+        category: st.category,
+      },
+    });
+  }
+
+  // ── The menu ─────────────────────────────────────────────────
+  //
+  // Products, not MenuItems: D45 made the Product wizard the single authoring
+  // surface for a Restaurant tenant, and `GET /restaurant/pos-catalogue` reads
+  // Products. `foodType` drives the POS picker's sections, so every row sets
+  // one — a catalogue of nulls would collapse into a single "Other" tab.
+  const categories = [
+    { id: 'cat_resto_starters', name: 'Starters' },
+    { id: 'cat_resto_mains', name: 'Mains' },
+    { id: 'cat_resto_rice', name: 'Rice & Noodles' },
+    { id: 'cat_resto_sides', name: 'Sides' },
+    { id: 'cat_resto_desserts', name: 'Desserts' },
+    { id: 'cat_resto_hot', name: 'Hot Drinks' },
+    { id: 'cat_resto_cold', name: 'Cold Drinks' },
+    // Kept: the original id, so re-seeding an existing database does not
+    // orphan products that already point at it.
+    { id: 'cat_resto_food', name: 'Food' },
+  ];
+  for (const c of categories) {
+    await prisma.productCategory.upsert({
+      where: { id: c.id },
+      update: { name: c.name, isActive: true },
+      create: { id: c.id, tenantId: tenant.id, name: c.name },
+    });
+  }
+
+  type MenuRow = {
+    id: string;
+    name: string;
+    sku: string;
+    price: number;
+    cat: string;
+    food: 'FOOD' | 'BEVERAGE' | 'DESSERT';
+    station: string;
+    prep?: number;
+    tags?: string[];
+  };
+  const menu: MenuRow[] = [
+    // Starters
+    { id: 'prd_resto_10', name: 'Fish Cutlets (4 pc)', sku: 'ST-CUT', price: 650, cat: 'cat_resto_starters', food: 'FOOD', station: 'kst_resto_kitchen', prep: 10 },
+    { id: 'prd_resto_11', name: 'Devilled Cashew', sku: 'ST-CSH', price: 850, cat: 'cat_resto_starters', food: 'FOOD', station: 'kst_resto_kitchen', prep: 12, tags: ['Veg'] },
+    { id: 'prd_resto_12', name: 'Chicken Wings', sku: 'ST-WNG', price: 1150, cat: 'cat_resto_starters', food: 'FOOD', station: 'kst_resto_grill', prep: 18, tags: ['Spicy'] },
+    { id: 'prd_resto_13', name: 'Garlic Bread', sku: 'ST-GRB', price: 450, cat: 'cat_resto_starters', food: 'FOOD', station: 'kst_resto_kitchen', prep: 8, tags: ['Veg'] },
+    { id: 'prd_resto_14', name: 'Soup of the Day', sku: 'ST-SOP', price: 550, cat: 'cat_resto_starters', food: 'FOOD', station: 'kst_resto_kitchen', prep: 6, tags: ['Veg'] },
+    // Mains
+    { id: 'prd_resto_20', name: 'Grilled Seer Fish', sku: 'MN-SEE', price: 2450, cat: 'cat_resto_mains', food: 'FOOD', station: 'kst_resto_grill', prep: 25 },
+    { id: 'prd_resto_21', name: 'Chicken Curry', sku: 'MN-CHC', price: 1450, cat: 'cat_resto_mains', food: 'FOOD', station: 'kst_resto_kitchen', prep: 20, tags: ['Spicy'] },
+    { id: 'prd_resto_22', name: 'Beef Steak', sku: 'MN-STK', price: 3200, cat: 'cat_resto_mains', food: 'FOOD', station: 'kst_resto_grill', prep: 28 },
+    { id: 'prd_resto_23', name: 'Vegetable Curry', sku: 'MN-VEG', price: 1100, cat: 'cat_resto_mains', food: 'FOOD', station: 'kst_resto_kitchen', prep: 18, tags: ['Veg'] },
+    { id: 'prd_resto_24', name: 'Prawn Curry', sku: 'MN-PRW', price: 2650, cat: 'cat_resto_mains', food: 'FOOD', station: 'kst_resto_kitchen', prep: 22, tags: ['Spicy'] },
+    { id: 'prd_resto_25', name: 'Mixed Grill Platter', sku: 'MN-MGP', price: 3850, cat: 'cat_resto_mains', food: 'FOOD', station: 'kst_resto_grill', prep: 35 },
+    // Rice & noodles
+    { id: 'prd_resto_1', name: 'Chicken Fried Rice', sku: 'FR-CHK', price: 950, cat: 'cat_resto_rice', food: 'FOOD', station: 'kst_resto_kitchen', prep: 15 },
+    { id: 'prd_resto_2', name: 'Kottu Roti', sku: 'KTU-CHK', price: 1100, cat: 'cat_resto_rice', food: 'FOOD', station: 'kst_resto_kitchen', prep: 18, tags: ['Spicy'] },
+    { id: 'prd_resto_30', name: 'Seafood Fried Rice', sku: 'FR-SEA', price: 1450, cat: 'cat_resto_rice', food: 'FOOD', station: 'kst_resto_kitchen', prep: 16 },
+    { id: 'prd_resto_31', name: 'Vegetable Fried Rice', sku: 'FR-VEG', price: 800, cat: 'cat_resto_rice', food: 'FOOD', station: 'kst_resto_kitchen', prep: 14, tags: ['Veg'] },
+    { id: 'prd_resto_32', name: 'Egg Noodles', sku: 'ND-EGG', price: 900, cat: 'cat_resto_rice', food: 'FOOD', station: 'kst_resto_kitchen', prep: 14, tags: ['Egg'] },
+    { id: 'prd_resto_33', name: 'Rice & Curry (Chicken)', sku: 'RC-CHK', price: 1250, cat: 'cat_resto_rice', food: 'FOOD', station: 'kst_resto_kitchen', prep: 12, tags: ['Spicy'] },
+    // Sides
+    { id: 'prd_resto_40', name: 'French Fries', sku: 'SD-FRY', price: 550, cat: 'cat_resto_sides', food: 'FOOD', station: 'kst_resto_kitchen', prep: 8, tags: ['Veg'] },
+    { id: 'prd_resto_41', name: 'Papadam (4 pc)', sku: 'SD-PAP', price: 200, cat: 'cat_resto_sides', food: 'FOOD', station: 'kst_resto_kitchen', prep: 4, tags: ['Veg'] },
+    { id: 'prd_resto_42', name: 'Garden Salad', sku: 'SD-SAL', price: 650, cat: 'cat_resto_sides', food: 'FOOD', station: 'kst_resto_kitchen', prep: 6, tags: ['Veg', 'Gluten-Free'] },
+    { id: 'prd_resto_43', name: 'Steamed Rice', sku: 'SD-RIC', price: 300, cat: 'cat_resto_sides', food: 'FOOD', station: 'kst_resto_kitchen', prep: 5, tags: ['Veg'] },
+    // Desserts
+    { id: 'prd_resto_50', name: 'Watalappan', sku: 'DS-WAT', price: 600, cat: 'cat_resto_desserts', food: 'DESSERT', station: 'kst_resto_dessert', prep: 5, tags: ['Egg'] },
+    { id: 'prd_resto_51', name: 'Chocolate Biscuit Pudding', sku: 'DS-CBP', price: 750, cat: 'cat_resto_desserts', food: 'DESSERT', station: 'kst_resto_dessert', prep: 5 },
+    { id: 'prd_resto_52', name: 'Ice Cream (2 scoops)', sku: 'DS-ICE', price: 500, cat: 'cat_resto_desserts', food: 'DESSERT', station: 'kst_resto_dessert', prep: 3 },
+    { id: 'prd_resto_53', name: 'Fruit Platter', sku: 'DS-FRT', price: 850, cat: 'cat_resto_desserts', food: 'DESSERT', station: 'kst_resto_dessert', prep: 7, tags: ['Veg', 'Gluten-Free'] },
+    // Hot drinks
+    { id: 'prd_resto_3', name: 'Plain Tea', sku: 'BEV-TEA', price: 150, cat: 'cat_resto_hot', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 4 },
+    { id: 'prd_resto_60', name: 'Milk Tea', sku: 'BEV-MTE', price: 250, cat: 'cat_resto_hot', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 4 },
+    { id: 'prd_resto_61', name: 'Black Coffee', sku: 'BEV-COF', price: 300, cat: 'cat_resto_hot', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 4 },
+    { id: 'prd_resto_62', name: 'Cappuccino', sku: 'BEV-CAP', price: 550, cat: 'cat_resto_hot', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 6 },
+    // Cold drinks
+    { id: 'prd_resto_70', name: 'Lime Juice', sku: 'BEV-LIM', price: 350, cat: 'cat_resto_cold', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 5, tags: ['Veg'] },
+    { id: 'prd_resto_71', name: 'King Coconut', sku: 'BEV-KCO', price: 400, cat: 'cat_resto_cold', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 3, tags: ['Veg', 'Gluten-Free'] },
+    { id: 'prd_resto_72', name: 'Soft Drink (can)', sku: 'BEV-SFT', price: 300, cat: 'cat_resto_cold', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 2 },
+    { id: 'prd_resto_73', name: 'Fresh Fruit Juice', sku: 'BEV-FRJ', price: 650, cat: 'cat_resto_cold', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 6, tags: ['Veg'] },
+    { id: 'prd_resto_74', name: 'Mineral Water', sku: 'BEV-WAT', price: 150, cat: 'cat_resto_cold', food: 'BEVERAGE', station: 'kst_resto_bar', prep: 1, tags: ['Veg', 'Gluten-Free'] },
   ];
 
-  for (const p of products) {
+  for (const m of menu) {
     const data = {
-      name: p.name,
-      sku: p.sku,
-      categoryId: category.id,
-      unitPrice: p.unitPrice,
+      name: m.name,
+      sku: m.sku,
+      categoryId: m.cat,
+      unitPrice: m.price,
       quantityOnHand: 0,
       type: 'NonInventory',
       isActive: true,
       syncStatus: 'NOT_SYNCED' as const,
+      foodType: m.food,
+      prepMinutes: m.prep ?? null,
+      dietaryTags: m.tags ?? [],
     };
     await prisma.product.upsert({
-      where: { id: p.id },
+      where: { id: m.id },
       update: data,
-      create: { id: p.id, tenantId: tenant.id, ...data },
+      create: { id: m.id, tenantId: tenant.id, ...data },
+    });
+    // Route every dish to a station. Without this link `generateTicketsForRound`
+    // drops the item silently (audit C1), so a seeded menu that looked fine
+    // would produce orders the kitchen never sees.
+    await prisma.productStationLink.upsert({
+      where: { productId_stationId: { productId: m.id, stationId: m.station } },
+      update: {},
+      create: { productId: m.id, stationId: m.station },
     });
   }
 

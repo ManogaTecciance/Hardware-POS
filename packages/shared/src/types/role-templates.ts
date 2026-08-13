@@ -147,6 +147,16 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Opens tables, takes orders, sends them to the kitchen.',
     isBuiltIn: false,
     permissions: [
+      // Navigation is derived from the tenant's enabled modules, so a role that
+      // cannot read the platform profile renders an EMPTY rail — not a reduced
+      // one. Every other floor-facing template already carries this.
+      Permission.PLATFORM_PROFILE_READ,
+      // The POS and Tables rail entries are gated on SALE_CREATE, and closing a
+      // table is what creates the Sale — a waiter holding TABLE_CLOSE without
+      // it could reach neither screen they spend the shift on. Harmless
+      // otherwise: the retail POS route is behind the RETAIL_POS module, which
+      // a food-service tenant does not have.
+      Permission.SALE_CREATE,
       Permission.PRODUCT_READ,
       Permission.CUSTOMER_READ,
       Permission.TABLE_VIEW,
@@ -155,7 +165,6 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.ORDER_CREATE,
       Permission.ORDER_EDIT_DRAFT,
       Permission.ORDER_SEND_TO_KITCHEN,
-      Permission.KOT_VIEW,
       Permission.BILL_VIEW,
       // D47: waiters take and manage bookings at the host stand.
       Permission.RESERVATION_VIEW,
@@ -167,6 +176,14 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       // order the kitchen has already started, and moving a table's bill, are the
       // two places where a waiter's mistake becomes someone else's loss — they
       // belong to whoever is accountable for the shift.
+      //
+      // Also deliberately absent: KOT_VIEW. It is the permission the Kitchen
+      // rail entry is gated on, and a waiter has no business on the kitchen
+      // display — they send orders to it, they do not work it. Sending is
+      // ORDER_SEND_TO_KITCHEN, which they do hold. Likewise SALE_READ and
+      // REPORT_READ are absent, so Sales and Reports never appear for them,
+      // and PRODUCT_MANAGE / CATEGORY_MANAGE are absent so the catalogue and
+      // promotions are read-only.
     ],
   },
   {

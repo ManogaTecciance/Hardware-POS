@@ -142,7 +142,8 @@ is on.
 |---|---|
 | Workspace | `restaurant-demo` |
 | Owner | `restaurant.owner@axlopos.test` / `Restaurant123!` |
-| Cashier PIN | `3333` |
+| Cashier | `restaurant.cashier@axlopos.test` / `Restaurant123!` (approval PIN `3333`) |
+| Waiter | `waiter@axlopos.test` / `Restaurant123!` (approval PIN `4444`) |
 | Profile | `RESTAURANT` · `LOCAL` inventory · `NONE` accounting (explicit) |
 
 Development only. The password is **not printed by the seed** — echoing a

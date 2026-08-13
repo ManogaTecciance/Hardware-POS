@@ -220,6 +220,27 @@ describe('reserved permissions are reserved, not implemented', () => {
     expect(waiter.permissions).not.toContain(Permission.TABLE_TRANSFER);
     expect(waiter.permissions).not.toContain(Permission.TABLE_MERGE);
   });
+
+  it('a waiter cannot reach the kitchen board, sales, reports, or catalogue writes', () => {
+    const waiter = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === 'WAITER')!;
+    // These four are exactly what gate the Kitchen / Sales / Reports rail
+    // entries and the product-write actions, so their absence IS the rule.
+    for (const denied of [
+      Permission.KOT_VIEW,
+      Permission.SALE_READ,
+      Permission.REPORT_READ,
+      Permission.PRODUCT_MANAGE,
+      Permission.CATEGORY_MANAGE,
+      Permission.SETTINGS_MANAGE,
+    ]) {
+      expect(waiter.permissions).not.toContain(denied);
+    }
+    // Positive control: the read and send permissions they must keep, so the
+    // negatives above cannot be passing because the list is empty.
+    expect(waiter.permissions).toContain(Permission.PRODUCT_READ);
+    expect(waiter.permissions).toContain(Permission.ORDER_SEND_TO_KITCHEN);
+    expect(waiter.permissions).toContain(Permission.TABLE_OPEN);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

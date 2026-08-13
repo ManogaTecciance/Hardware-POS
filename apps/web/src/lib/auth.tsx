@@ -18,6 +18,11 @@ interface LoginResponse {
   token: string;
   refreshToken: string;
   user: Omit<SessionUser, 'permissions'>;
+  /**
+   * The permissions the SERVER resolved for this session. Absent only on a
+   * session minted before the field existed — see `toSession`.
+   */
+  permissions?: string[];
   branch: { id: string; name: string } | null;
   register: { id: string; name: string } | null;
 }
@@ -34,10 +39,21 @@ interface AuthContextValue {
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
 function toSession(res: LoginResponse): Session {
+  /*
+   * Use what the server resolved. Deriving the set from `user.role` — which is
+   * what this did — is only correct for a user whose authority still comes from
+   * their enum role. A user linked to a custom role (a waiter) has the enum
+   * role CASHIER and an entirely different authority, so the rail offered them
+   * Sales while the API refused it, and hid Orders which they could actually
+   * use. The enum fallback remains for a token minted before the field existed.
+   */
   return {
     token: res.token,
     refreshToken: res.refreshToken,
-    user: { ...res.user, permissions: permissionsForRole(res.user.role) },
+    user: {
+      ...res.user,
+      permissions: (res.permissions as Permission[] | undefined) ?? permissionsForRole(res.user.role),
+    },
     branchId: res.branch?.id ?? null,
     registerId: res.register?.id ?? null,
     branchName: res.branch?.name ?? 'No branch assigned',

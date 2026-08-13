@@ -48,6 +48,8 @@ jest.mock('bcryptjs', () => ({
 const bcrypt = require('bcryptjs') as { compare: jest.Mock };
 
 import { AuthService } from './auth.service';
+import { PermissionResolver } from './permission-resolver.service';
+import { ROLE_PERMISSIONS } from './permissions';
 import { AuthRepository } from './auth.repository';
 import { WorkspaceRequiredError } from './auth.errors';
 import { LoginDto } from './dto/login.dto';
@@ -121,7 +123,16 @@ function makeRepositoryStub(script: {
 function makeService(repo: jest.Mocked<AuthRepository>): AuthService {
   const jwt = { signAsync: jest.fn(async () => 'jwt.token.here') } as unknown as JwtService;
   const config = { get: jest.fn(() => 30) } as unknown as ConfigService;
-  return new AuthService(repo, jwt, config);
+  // GET /auth/me resolves permissions through the same resolver the guard
+  // uses, so the unit under test needs one. LEGACY_FALLBACK mirrors a user
+  // whose authority still comes from their enum role.
+  const permissions = {
+    resolve: jest.fn(async (user: { role: keyof typeof ROLE_PERMISSIONS }) => ({
+      source: 'LEGACY_FALLBACK' as const,
+      permissions: new Set(ROLE_PERMISSIONS[user.role] ?? []),
+    })),
+  } as unknown as PermissionResolver;
+  return new AuthService(repo, jwt, config, permissions);
 }
 
 function loginDto(over: Partial<LoginDto> = {}): LoginDto {

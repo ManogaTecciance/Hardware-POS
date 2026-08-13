@@ -43,6 +43,13 @@ export interface AuthTokenResult {
     email: string | null;
     role: UserRole;
   };
+  /**
+   * The permissions this session actually holds, resolved the same way
+   * `PermissionsGuard` resolves them. The client must not re-derive these from
+   * `user.role`: a user linked to a custom role (a waiter, say) has an enum
+   * role of CASHIER and an entirely different authority.
+   */
+  permissions: string[];
   /** Where this session sells from — the user's branch (or tenant default). */
   branch: { id: string; name: string } | null;
   /** The branch's default register. */
