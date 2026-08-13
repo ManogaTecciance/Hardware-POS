@@ -57,7 +57,6 @@ test.beforeAll(async () => {
 
 async function signInAsRestaurantOwner(page: import('@playwright/test').Page) {
   await page.goto('/login');
-  await page.locator('#workspace').fill(RESTAURANT_SEED.workspace);
   await page.locator('#email').fill(RESTAURANT_SEED.owner.email);
   await page.locator('#password').fill(RESTAURANT_SEED.owner.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -494,7 +493,6 @@ test.describe('POS-CTR-9 — cross-workspace regression', () => {
   }) => {
     // Log in as the Tile Shop owner using the SEED credentials.
     await page.goto('/login');
-    await page.locator('#workspace').fill(SEED.workspace);
     await page.locator('#email').fill(SEED.owner.email);
     await page.locator('#password').fill(SEED.owner.password);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();

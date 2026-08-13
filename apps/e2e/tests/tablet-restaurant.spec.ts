@@ -26,7 +26,6 @@ import { RESTAURANT_SEED } from '../src/api';
 
 async function signInAsRestaurantOwner(page: import('@playwright/test').Page) {
   await page.goto('/login');
-  await page.locator('#workspace').fill(RESTAURANT_SEED.workspace);
   await page.locator('#email').fill(RESTAURANT_SEED.owner.email);
   await page.locator('#password').fill(RESTAURANT_SEED.owner.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();

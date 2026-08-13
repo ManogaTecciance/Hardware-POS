@@ -21,10 +21,9 @@ import { API_URL, Api, apiLogin, RESTAURANT_SEED, SEED, uniq } from '../src/api'
 async function signIn(
   page: import('@playwright/test').Page,
   creds: { email: string; password: string },
-  workspace?: string,
 ) {
+  // D48 cont.: there is no workspace field — the email identifies the workspace.
   await page.goto('/login');
-  if (workspace) await page.locator('#workspace').fill(workspace);
   await page.locator('#email').fill(creds.email);
   await page.locator('#password').fill(creds.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -64,23 +63,22 @@ async function railLinkNames(page: import('@playwright/test').Page): Promise<str
 // ─────────────────────────────────────────────────────────────────────────────
 
 test.describe('WS-1 — workspace login', () => {
-  test('WS-101 owner signs in with workspace, email and password', async ({ page }) => {
-    await signIn(page, SEED.owner, SEED.workspace);
+  test('WS-101 owner signs in with email and password — workspace resolved from the email', async ({ page }) => {
+    await signIn(page, SEED.owner);
     await expect(page.getByRole('banner')).toBeVisible();
   });
 
-  test('WS-102 the restaurant owner signs in with its own workspace', async ({ page }) => {
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+  test('WS-102 the restaurant owner reaches its own workspace the same way', async ({ page }) => {
+    await signIn(page, RESTAURANT_SEED.owner);
     await expect(page.getByRole('banner')).toBeVisible();
   });
 
-  test('WS-103 the workspace field is remembered for the next sign-in', async ({ page }) => {
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
-    await page.getByRole('button', { name: /account menu/i }).click();
-    await page.getByRole('menuitem', { name: /log out/i }).click();
-    await page.waitForURL(/\/login/);
-
-    await expect(page.locator('#workspace')).toHaveValue(RESTAURANT_SEED.workspace);
+  test('WS-103 the login page renders no workspace field (D48 cont.)', async ({ page }) => {
+    await page.goto('/login');
+    // Positive control: the real form rendered…
+    await expect(page.locator('#email')).toBeVisible();
+    // …and asks for no workspace.
+    await expect(page.locator('#workspace')).toHaveCount(0);
   });
 
   test('WS-104 a wrong workspace cannot authenticate a real account', async () => {
@@ -106,27 +104,27 @@ test.describe('WS-1 — workspace login', () => {
   });
 });
 
-test.describe('WS-2 — cashier sign-in is workspace-scoped email login (D48)', () => {
+test.describe('WS-2 — cashier sign-in is email login (D48)', () => {
   test('WS-201 a restaurant cashier signs in with email + password', async ({ page }) => {
-    await signIn(page, RESTAURANT_SEED.cashier, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.cashier);
   });
 
-  test('WS-202 the restaurant workspace refuses the Tile Shop cashier', async ({ page }) => {
-    // A valid credential — in a different tenant — so this is the tenant
-    // boundary, not a "wrong password" case.
-    await page.goto('/login');
-    await page.locator('#workspace').fill(RESTAURANT_SEED.workspace);
-    await page.locator('#email').fill(SEED.cashier.email);
-    await page.locator('#password').fill(SEED.cashier.password);
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await expect(page.getByText(/invalid email or password/i)).toBeVisible();
-    await expect(page).toHaveURL(/\/login/);
+  test('WS-202 a workspace hint cannot widen a credential across tenants', async () => {
+    // A valid credential pinned to a DIFFERENT tenant's workspace — the tenant
+    // boundary, not a "wrong password" case. API-level: the form carries no
+    // workspace field any more, but ?workspace= links still pin one.
+    const ctx = await request.newContext();
+    const res = await ctx.post(`${API_URL}/auth/login`, {
+      data: { ...SEED.cashier, workspace: RESTAURANT_SEED.workspace },
+    });
+    expect(res.status()).toBe(401);
+    await ctx.dispose();
   });
 });
 
 test.describe('WS-3 — Tile Shop navigation is unchanged', () => {
   test('WS-301 the retail rail is present and complete', async ({ page }) => {
-    await signIn(page, SEED.owner, SEED.workspace);
+    await signIn(page, SEED.owner);
 
     const flat = await railLinkNames(page);
 
@@ -147,7 +145,7 @@ test.describe('WS-3 — Tile Shop navigation is unchanged', () => {
   });
 
   test('WS-302 no restaurant destination leaks into it', async ({ page }) => {
-    await signIn(page, SEED.owner, SEED.workspace);
+    await signIn(page, SEED.owner);
     const flat = await railLinkNames(page);
 
     for (const absent of ['Tables', 'Takeaway', 'Kitchen', 'Menu']) {
@@ -164,7 +162,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     // D45: `Menu` is intentionally NOT in this list — the Restaurant workspace
     // authors sellable items via Products (labelled "Inventory" in the rail)
     // and the runtime POS reads them from `/restaurant/pos-catalogue`.
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
     const flat = await railLinkNames(page);
 
     for (const expected of ['Dashboard', 'POS', 'Orders', 'Kitchen', 'Tables']) {
@@ -185,7 +183,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     // D45: `Menu` joins the absent list. The `/menu` route file is retained
     // for support-only access at `?view=legacy`, but the nav entry is gone
     // for every Restaurant tenant.
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
     const flat = await railLinkNames(page);
 
     for (const absent of ['Menu', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
@@ -196,7 +194,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
   test('WS-403 shared destinations are present for both profiles', async ({ page }) => {
     // Sale history is shared core by product-owner decision: a restaurant reads
     // what it has already sold.
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
     const flat = await railLinkNames(page);
 
     expect(flat.join(' | ')).toContain('Sales');
@@ -211,7 +209,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     // /orders is the new unified queue. Every route below asserts a small
     // positive signal so a page that renders nothing at all cannot silently
     // satisfy the "no shell copy" negative.
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
 
     const positiveSignals: Record<string, RegExp> = {
       '/tables': /show/i,          // area filter label at the top of the floor
@@ -243,7 +241,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     // The old top-level `/takeaway` page was deleted in Slice E; middleware
     // redirects `/takeaway*` → `/pos?mode=takeaway`. Verifies the shim
     // documented in `apps/web/src/middleware.ts`.
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
     await page.goto('/takeaway');
     await page.waitForURL(/\/pos\?mode=takeaway/);
     expect(page.url()).toContain('/pos?mode=takeaway');
@@ -254,7 +252,7 @@ test.describe('WS-5 — direct URLs to disabled modules are refused', () => {
   test('WS-501 a restaurant reaching /quickbooks gets a refusal, not the integration', async ({
     page,
   }) => {
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
     await page.goto('/quickbooks');
 
     await expect(page.getByText('Not part of this workspace')).toBeVisible();
@@ -264,7 +262,7 @@ test.describe('WS-5 — direct URLs to disabled modules are refused', () => {
 
   test('WS-502 the same route serves the Tile Shop normally', async ({ page }) => {
     // The positive control. Without it, a gate that blocked everyone would pass.
-    await signIn(page, SEED.owner, SEED.workspace);
+    await signIn(page, SEED.owner);
     await page.goto('/quickbooks');
 
     await expect(page.getByText('Not part of this workspace')).toHaveCount(0);
@@ -274,7 +272,7 @@ test.describe('WS-5 — direct URLs to disabled modules are refused', () => {
   test('WS-503 a restaurant is refused the other retail routes too', async ({ page }) => {
     // `/pos` is no longer retail-only after Pilot Change 2 — it dispatches
     // by business type. The three routes below remain retail-only.
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
 
     for (const path of ['/quotations', '/returns', '/suppliers']) {
       await page.goto(path);
@@ -291,7 +289,7 @@ test.describe('WS-5 — direct URLs to disabled modules are refused', () => {
     // Tile Shop resolves to the retail POS via business-type dispatch —
     // so it never renders the module-gate refusal. `/orders` is the new
     // TABLE_MANAGEMENT-gated route that a Tile Shop cannot reach.
-    await signIn(page, SEED.owner, SEED.workspace);
+    await signIn(page, SEED.owner);
 
     for (const path of ['/tables', '/orders', '/kitchen', '/menu']) {
       await page.goto(path);
@@ -304,7 +302,7 @@ test.describe('WS-5 — direct URLs to disabled modules are refused', () => {
 
   test('WS-505 shared routes stay reachable for both', async ({ page }) => {
     // Proves the gate is selective rather than a blanket refusal for one tenant.
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
 
     for (const path of ['/dashboard', '/products', '/sales', '/customers']) {
       await page.goto(path);
@@ -408,7 +406,7 @@ test.describe('WS-7 — tenant isolation', () => {
 
 test.describe('WS-8 — product management per inventory mode', () => {
   test('WS-801 a QUICKBOOKS tenant is offered synchronisation', async ({ page }) => {
-    await signIn(page, SEED.owner, SEED.workspace);
+    await signIn(page, SEED.owner);
     await page.goto('/products');
     await expect(page.getByRole('heading', { name: 'Products' })).toBeVisible();
 
@@ -421,7 +419,7 @@ test.describe('WS-8 — product management per inventory mode', () => {
   test('WS-802 a LOCAL tenant manages its catalogue with no QuickBooks anywhere', async ({
     page,
   }) => {
-    await signIn(page, RESTAURANT_SEED.owner, RESTAURANT_SEED.workspace);
+    await signIn(page, RESTAURANT_SEED.owner);
     await page.goto('/products');
 
     await expect(page.getByRole('heading', { name: 'Products' })).toBeVisible();

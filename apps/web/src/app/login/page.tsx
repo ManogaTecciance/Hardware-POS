@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/lib/auth';
 import { ApiError } from '@/lib/api';
-import { recallWorkspace, rememberWorkspace } from '@/lib/workspace-memory';
 
 /** The API's machine-readable "which workspace?" outcome. */
 const WORKSPACE_REQUIRED = 'AUTH_WORKSPACE_REQUIRED';
@@ -44,12 +43,13 @@ function LoginForm() {
   }, [isAuthenticated, router]);
 
   /*
-   * Prefill order: an explicit `?workspace=` link wins over whatever this device
-   * last used, because a link is a deliberate instruction and the remembered value
-   * is only a convenience. Never a password — see `workspace-memory.ts`.
+   * A `?workspace=` link is a deliberate instruction (an invite, a bookmark) and
+   * is honoured silently — there is no visible field to prefill any more. The
+   * old per-device workspace memory went with the field: silently replaying a
+   * stale remembered slug would fail a valid login with no visible cause.
    */
   React.useEffect(() => {
-    setWorkspace(searchParams.get('workspace')?.trim() || recallWorkspace());
+    setWorkspace(searchParams.get('workspace')?.trim() || '');
   }, [searchParams]);
 
   const signIn = async () => {
@@ -57,8 +57,6 @@ function LoginForm() {
     setError(null);
     try {
       await loginWithEmail(email, password, workspace);
-      // Only remembered once it has actually worked, so a typo is not persisted.
-      rememberWorkspace(workspace);
       router.replace('/dashboard');
       return;
     } catch (err) {
@@ -97,12 +95,12 @@ function LoginForm() {
         <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-[#0d1322]/90 to-transparent" />
         <div className="relative z-10 mt-auto max-w-xl p-12 pb-12">
           <h2 className="text-4xl font-semibold leading-tight tracking-tight text-white">
-            AXLO POS:
+            Axlo POS:
             <br />
             The Unified Platform for Every Business
           </h2>
           <p className="mt-4 text-lg text-slate-300">
-            Empowering restaurants, hardware stores, and every commerce domain.
+            Sell anything. Manage everything. Grow everywhere.
           </p>
         </div>
       </section>
@@ -114,30 +112,33 @@ function LoginForm() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/axlo-icon.svg" alt="Axlo POS" className="h-12 w-auto" />
           <h1 className="mt-5 text-3xl font-semibold tracking-tight text-white">
-            Sign In to Axlo POS.
+            Sign In to Axlo POS
           </h1>
 
           <div className="mt-6 space-y-3.5">
-            <div className="space-y-1.5">
-              <Label htmlFor="workspace" className={LABEL_CLASSES}>
-                Workspace
-              </Label>
-              <Input
-                id="workspace"
-                className={FIELD_CLASSES}
-                value={workspace}
-                onChange={(e) => setWorkspace(e.target.value)}
-                placeholder="e.g., cafe-pos"
-                autoComplete="organization"
-                aria-describedby="workspace-hint"
-                aria-invalid={workspaceRequired || undefined}
-              />
-              <p id="workspace-hint" className="text-xs text-slate-400">
-                {workspaceRequired
-                  ? 'Required: this email belongs to more than one workspace.'
-                  : 'Optional — leave blank if you only use one workspace.'}
-              </p>
-            </div>
+            {/* The workspace is identified from the email. This field exists only
+                for the rare email that lives in more than one workspace, and only
+                appears when the server says so (AUTH_WORKSPACE_REQUIRED). */}
+            {workspaceRequired ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="workspace" className={LABEL_CLASSES}>
+                  Workspace
+                </Label>
+                <Input
+                  id="workspace"
+                  className={FIELD_CLASSES}
+                  value={workspace}
+                  onChange={(e) => setWorkspace(e.target.value)}
+                  placeholder="e.g., cafe-pos"
+                  autoComplete="organization"
+                  aria-describedby="workspace-hint"
+                  aria-invalid
+                />
+                <p id="workspace-hint" className="text-xs text-slate-400">
+                  Required: this email belongs to more than one workspace.
+                </p>
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="email" className={LABEL_CLASSES}>
                 Email

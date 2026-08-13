@@ -1270,6 +1270,17 @@ Slice 8.8's WS-201/202 acceptance rows are superseded by this decision —
 the tenant-boundary claim they made is now asserted through
 workspace-scoped email login instead.
 
+**Continuation — the workspace field goes too.** The login form asks only
+for email and password; the workspace is identified from the email. The
+`AUTH_WORKSPACE_REQUIRED` flow (Slice 8.2) survives as progressive
+disclosure: the field renders ONLY after the server answers that the email
+lives in more than one workspace — otherwise a duplicate-email user would
+be locked out with no recourse. `?workspace=` deep links are still
+honoured, silently. The per-device workspace memory is deleted with the
+visible field: silently replaying a stale remembered slug would fail a
+valid login with no visible cause (a slug narrows the search, never widens
+it — WS-104).
+
 ---
 
 ## Open decisions

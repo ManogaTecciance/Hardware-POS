@@ -305,31 +305,21 @@ describe('accessibility — the shell is navigable without sight or a mouse', ()
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('8.2 — workspace login', () => {
-  it('offers a Workspace field, marked optional', async () => {
+  it('renders NO workspace field until the server demands one (D48 cont.)', async () => {
     render(<LoginPage />);
     await settle();
-    const field = screen.getByLabelText(/workspace/i);
-    expect(field).toBeDefined();
-    expect(document.body.textContent).toMatch(/optional/i);
+    // Positive control first — the real form rendered...
+    expect(screen.getByLabelText(/email/i)).toBeDefined();
+    // ...and identifies the workspace from the email alone.
+    expect(screen.queryByLabelText(/workspace/i)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/optional — leave blank/i);
   });
 
-  it('prefills from a ?workspace= link', async () => {
+  it('honours a ?workspace= link silently — sent with the login, never shown', async () => {
     searchParams = new URLSearchParams('workspace=restaurant-demo');
     render(<LoginPage />);
     await settle();
-    expect((screen.getByLabelText(/workspace/i) as HTMLInputElement).value).toBe('restaurant-demo');
-  });
-
-  it('sends the workspace when one is entered, and omits it when blank', async () => {
-    render(<LoginPage />);
-    await settle();
-
-    screen.getByRole('button', { name: /^sign in$/i }).click();
-    await settle();
-    expect(loginWithEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), '');
-
-    type(screen.getByLabelText(/workspace/i) as HTMLInputElement, 'restaurant-demo');
-    await settle();
+    expect(screen.queryByLabelText(/workspace/i)).toBeNull();
     screen.getByRole('button', { name: /^sign in$/i }).click();
     await settle();
     expect(loginWithEmail).toHaveBeenLastCalledWith(
@@ -339,7 +329,15 @@ describe('8.2 — workspace login', () => {
     );
   });
 
-  it('reveals the workspace requirement on AUTH_WORKSPACE_REQUIRED', async () => {
+  it('omits the workspace entirely on a plain sign-in', async () => {
+    render(<LoginPage />);
+    await settle();
+    screen.getByRole('button', { name: /^sign in$/i }).click();
+    await settle();
+    expect(loginWithEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), '');
+  });
+
+  it('reveals the workspace field on AUTH_WORKSPACE_REQUIRED, and sends what is typed', async () => {
     loginWithEmail.mockRejectedValueOnce(
       new ApiError(409, {
         statusCode: 409,
@@ -355,10 +353,22 @@ describe('8.2 — workspace login', () => {
 
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toMatch(/more than one workspace/i);
-    expect(screen.getByLabelText(/workspace/i).getAttribute('aria-invalid')).toBe('true');
+    const field = screen.getByLabelText(/workspace/i);
+    expect(field.getAttribute('aria-invalid')).toBe('true');
     // And it must not name any workspace — the API does not send one, and the UI
     // must not invent one.
     expect(alert.textContent).not.toMatch(/tile|cafe|restaurant-demo/i);
+
+    // The revealed field is live: typing a slug routes it into the retry.
+    type(field as HTMLInputElement, 'restaurant-demo');
+    await settle();
+    screen.getByRole('button', { name: /^sign in$/i }).click();
+    await settle();
+    expect(loginWithEmail).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      'restaurant-demo',
+    );
   });
 
   it('a generic failure does not claim a workspace is required', async () => {
@@ -374,25 +384,37 @@ describe('8.2 — workspace login', () => {
     screen.getByRole('button', { name: /^sign in$/i }).click();
     await settle();
     expect(screen.getByRole('alert').textContent).toMatch(/invalid email or password/i);
-    expect(screen.getByLabelText(/workspace/i).getAttribute('aria-invalid')).toBeNull();
+    // A generic failure must not reveal the workspace field either.
+    expect(screen.queryByLabelText(/workspace/i)).toBeNull();
   });
 
-  it('never stores a password, and only remembers the slug after success', async () => {
+  it('stores neither credentials nor workspace on the device (D48 cont.)', async () => {
+    // The per-device workspace memory went with the visible field — a silently
+    // replayed stale slug would fail a valid login with no visible cause.
+    searchParams = new URLSearchParams('workspace=restaurant-demo');
     render(<LoginPage />);
-    await settle();
-    type(screen.getByLabelText(/workspace/i) as HTMLInputElement, 'restaurant-demo');
     await settle();
     screen.getByRole('button', { name: /^sign in$/i }).click();
     await settle();
 
     const stored = JSON.stringify({ ...window.localStorage });
-    expect(stored).toContain('restaurant-demo');
+    expect(stored).not.toContain('restaurant-demo');
     expect(stored).not.toContain('password123');
     expect(stored.toLowerCase()).not.toContain('passw0rd');
   });
 
-  it('offers no workspace directory or lookup', async () => {
+  it('offers no workspace directory or lookup, even when the field is revealed', async () => {
+    loginWithEmail.mockRejectedValueOnce(
+      new ApiError(409, {
+        statusCode: 409,
+        code: 'AUTH_WORKSPACE_REQUIRED',
+        message: 'Please enter your workspace to continue.',
+        error: 'Conflict',
+      }),
+    );
     render(<LoginPage />);
+    await settle();
+    screen.getByRole('button', { name: /^sign in$/i }).click();
     await settle();
     // A dropdown of workspaces would be a tenant directory readable by anyone.
     expect(screen.queryByRole('combobox')).toBeNull();

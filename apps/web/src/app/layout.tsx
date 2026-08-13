@@ -6,8 +6,8 @@ import { ThemeProvider, themeInitScript } from '@/lib/theme';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Hardware POS',
-  description: 'Cashier sales front-end for hardware retail, synced with QuickBooks Online.',
+  title: 'Axlo POS',
+  description: 'The unified point-of-sale platform for every business.',
 };
 
 /**
