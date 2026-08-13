@@ -19,6 +19,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [QB](#qb--quickbooks-integration) · [SET](#set--settings) ·
 [DOC](#doc--documents--printing) · [RSV](#rsv--table-reservations--calendar-d47) ·
 [OTBL](#otbl--open-tables-d49d50) ·
+[BSPL](#bspl--bill-splitting-by-item-d51) ·
 [ADM](#adm--administration--multi-tenancy) ·
 [UI](#ui--theme-layout--responsiveness) · [SEC](#sec--security)
 
@@ -480,6 +481,25 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | OTBL-019 | Held-by indication on the floor | View a shared table's card | Shows "Held by <open tables>"; Unreserve renders only on held tables | P | Passed |
 | OTBL-020 | Picker offers shared tables | Open the create dialog while a table is Reserved by an open table | Table selectable, marked "shared" | P | Passed |
 | OTBL-021 | Occupied tables still refused | Try to join a table with its own live session | 409 naming the code | N | Passed |
+
+## BSPL — Bill Splitting by Item (D51)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| BSPL-001 | Bill shows its line items | Open a closed tab's bill | Items card lists each line with qty × unit price and line total | P | Passed |
+| BSPL-002 | Split by item creates a bill per guest | Assign lines to 2+ guests, Create bills | One split per guest, each listing its own items | P | Passed |
+| BSPL-003 | Shares sum to the bill total exactly | Compare Σ split shares to the total | Equal to the cent, including non-divisible totals | P | Passed |
+| BSPL-004 | A multi-unit line splits across guests | 3 × item assigned 2/1 to two guests | Each guest billed for their units only | P | Passed |
+| BSPL-005 | Service charge shared pro rata | Split a bill carrying a service charge | Each share = own items + proportional charge | P | Passed |
+| BSPL-006 | Partial assignment refused | Save with items unassigned | 400 naming the item and the shortfall; UI disables Create | N | Passed |
+| BSPL-007 | Foreign item refused | Assign an orderItemId from another bill | 400 "not on this bill" | N | Passed |
+| BSPL-008 | Payment allocates to its split | Collect for one split | That split's Paid rises; bill Paid rises; others unchanged | P | Passed |
+| BSPL-009 | Overpaying a split refused | Pay more than a split's remaining | 400 naming the split balance | N | Passed |
+| BSPL-010 | Re-split refused after payment | Split a bill that has a payment | 400 — reopen or refund first | N | Passed |
+| BSPL-011 | Paying all splits settles the bill | Collect each split in turn | Bill reaches PAID with paid == total | P | Passed |
+| BSPL-012 | Per-split printable bill | Click Print on a split | Print window shows that guest's items and amount only | P | Not Run |
+| BSPL-013 | Amount-based splitting still works | Use "By amount" | Existing even/arbitrary split unchanged | P | Not Run |
+| BSPL-014 | Permission gate | Role without bill:split | No split controls; POST 403 | N | Not Run |
 
 ## ADM — Administration & Multi-Tenancy
 

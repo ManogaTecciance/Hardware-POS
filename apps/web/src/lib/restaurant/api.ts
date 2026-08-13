@@ -774,7 +774,7 @@ export const billing = {
   collectPayment(
     session: Session,
     saleId: string,
-    body: { amount: number; method: PaymentMethod; reference?: string },
+    body: { amount: number; method: PaymentMethod; reference?: string; splitId?: string },
   ) {
     return api.post<BillView>(
       `/restaurant/bills/${saleId}/payments`,
@@ -789,6 +789,23 @@ export const billing = {
   ) {
     return api.post<BillView>(
       `/restaurant/bills/${saleId}/splits`,
+      body,
+      auth(session),
+    );
+  },
+  /** D51 — split by the lines each party ate; the server derives the money. */
+  splitByItems(
+    session: Session,
+    saleId: string,
+    body: {
+      splits: Array<{
+        label?: string;
+        items: Array<{ orderItemId: string; quantity: number }>;
+      }>;
+    },
+  ) {
+    return api.post<BillView>(
+      `/restaurant/bills/${saleId}/split-by-items`,
       body,
       auth(session),
     );

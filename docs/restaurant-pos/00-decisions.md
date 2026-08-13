@@ -1411,6 +1411,65 @@ index. Data-safe and widening — every row satisfying the old constraint
 satisfies the new one. Named explicitly in the provider-contract test,
 which asserts the pair-unique survives.
 
+### D51 — Bills split by item: a split carries the lines it covers, and its share is derived
+
+A group of friends wants a bill each for exactly what they ate. The
+operator opens the closed tab's bill, assigns each line to a named split,
+and every split becomes a separately payable, separately printable bill.
+
+**Item-backed splits, derived shares.** `BillSplitItem` joins a
+`BillSplit` to a `RestaurantOrderItem` with an assigned `quantity`, so a
+line of "3 × Beer" can go 2/1 across two friends. `BillSplit.share` stops
+being an operator input on this path and becomes a **computed** figure —
+the server owns the money, as everywhere else.
+
+**Both split modes coexist.** The existing amount-based `setSplits`
+(even split, arbitrary tenders) is untouched and still valid for "just
+halve it". `splitByItems` is the new path. A split created by amount has
+no items; a split created by items always does. Nothing about the
+existing endpoint changes.
+
+**Share = items + a proportional slice of everything else.** A split's
+share is its own line totals plus its pro-rata share of the difference
+between the sale's subtotal and its total — service charge, tax,
+packaging, discounts, whatever the tenant configured — weighted by the
+split's item subtotal. Rounding uses **largest remainder**: shares are
+rounded to 2dp and the leftover cent goes to the split with the biggest
+fractional part, so `Σ shares == total` **exactly**, always. A zero-value
+tab (all items comped) spreads the extras evenly by the same method
+rather than dividing by zero.
+
+**Every unit must be assigned.** `splitByItems` refuses unless the
+assigned quantities for each line sum exactly to that line's quantity.
+Partial assignment would make `Σ shares == total` false, which is the one
+invariant the payment path already depends on. The UI tracks what is left
+and blocks save until nothing is.
+
+**Splitting is refused once money has moved.** Any collected payment
+makes the sale ineligible for re-splitting — reallocating shares under a
+recorded tender is an accounting mess with no honest answer. Split
+first, then collect.
+
+**Payments allocate to a split.** `collectPayment` takes an optional
+`splitId` and increments that split's `paidAmount`, refusing more than
+the split's own remaining balance. This closes a real gap: the bill
+screen's "Collect for split" button already captured a split id and
+never sent it, so split `paidAmount` could never move off zero and every
+tender landed against the whole sale.
+
+**No new Sale rows, deliberately.** One tab stays one financial record;
+the splits are views of it that can each be paid and printed. Minting a
+Sale per split would double-count revenue unless the parent were voided,
+and would renumber and re-date financial documents for a presentation
+concern. Restaurant tenants run no accounting provider (D2), so there is
+nothing that needs a separate Sale to reconcile against. If per-split
+Sales are ever genuinely required, the item assignment recorded here is
+what they would be built from.
+
+**Migration.** `20260818000000_add_bill_split_items`: one new table with
+cascade FKs. Purely additive — no existing table is touched, and a bill
+with no item assignments behaves exactly as it does today.
+
 ---
 
 ## Open decisions

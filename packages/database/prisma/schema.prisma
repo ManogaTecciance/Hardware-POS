@@ -308,6 +308,7 @@ model Tenant {
   tableSessions                TableSession[]
   tableReservations            TableReservation[]
   openTableMembers             OpenTableMember[]
+  billSplitItems               BillSplitItem[]
   restaurantOrders             RestaurantOrder[]
   orderRounds                  OrderRound[]
   restaurantOrderItems         RestaurantOrderItem[]
@@ -2271,6 +2272,8 @@ model RestaurantOrderItem {
   product        Product?                      @relation(fields: [productId], references: [id], onDelete: SetNull)
   productVariant ProductVariant?               @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
   modifiers      RestaurantOrderItemModifier[]
+  /// D51 — which bill splits cover this line.
+  billSplitItems BillSplitItem[]
 
   @@index([tenantId])
   @@index([orderId])
@@ -2630,11 +2633,41 @@ model BillSplit {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sale   Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  items  BillSplitItem[]
 
   @@index([tenantId])
   @@index([saleId])
+}
+
+/// D51. One line of a bill assigned to one split, with how much of that line
+/// the split covers — a "3 x Beer" row can go 2/1 across two friends. The
+/// split's `share` is DERIVED from these rows plus a pro-rata slice of the
+/// sale's service charge / tax / packaging; it is never an operator input on
+/// this path.
+model BillSplitItem {
+  id          String @id @default(cuid())
+  tenantId    String
+  billSplitId String
+  /// The RestaurantOrderItem this covers. Cascade: a split's rows die with it.
+  orderItemId String
+
+  /// Assigned portion of that line. Matches RestaurantOrderItem.quantity's
+  /// precision so a fractional line (0.5 kg) can be split too.
+  quantity Decimal @db.Decimal(12, 3)
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  billSplit BillSplit           @relation(fields: [billSplitId], references: [id], onDelete: Cascade)
+  orderItem RestaurantOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  /// One row per (split, line): a second assignment of the same line to the
+  /// same split is an edit of the quantity, not another row.
+  @@unique([billSplitId, orderItemId])
+  @@index([tenantId])
+  @@index([orderItemId])
 }
 
 // ─────────────────────────────────────────────────────────────

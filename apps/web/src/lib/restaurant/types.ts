@@ -424,6 +424,18 @@ export interface TakeawayView {
 }
 
 // ── Billing ────────────────────────────────────────────────────────────────
+/** D51 — one orderable line on the bill, and how much of it is spoken for. */
+export interface BillLineItem {
+  orderItemId: string;
+  name: string;
+  variantName: string | null;
+  /** Unit price including snapshotted modifier deltas. */
+  unitPrice: string;
+  quantity: string;
+  lineTotal: string;
+  assignedQuantity: string;
+}
+
 export interface BillView {
   saleId: string;
   saleNumber: string;
@@ -434,11 +446,15 @@ export interface BillView {
   paidAmount: string;
   balanceAmount: string;
   paymentStatus: PaymentStatus;
+  /** D51 — the lines behind the totals. */
+  items: BillLineItem[];
   splits: {
     id: string;
     label: string | null;
     share: string;
     paidAmount: string;
+    /** D51 — lines this split covers; empty for an amount-only split. */
+    items: { orderItemId: string; name: string; quantity: string; lineTotal: string }[];
   }[];
   payments: {
     id: string;

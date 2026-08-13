@@ -52,7 +52,7 @@ ${ctx.orderDiscount > 0 ? `<div class="row"><span>Order discount</span><span>-${
 
 let printTimer: number | null = null;
 
-function openPrintWindow(html: string): void {
+export function openPrintWindow(html: string): void {
   // One *named* popup, reused across prints: repeated clicks replace the
   // receipt in place instead of stacking new windows and print dialogs
   // (which eventually hangs the tab).
@@ -107,4 +107,49 @@ export async function reprintCustomerReceipt(session: Session, saleId: string): 
   } finally {
     reprintInFlight = false;
   }
+}
+
+
+/**
+ * D51 — a printable bill for ONE split: the lines that party ate and what
+ * they owe. Reuses the shared named print window so repeated prints replace
+ * each other instead of stacking dialogs.
+ */
+export function printSplitBill(input: {
+  storeName: string;
+  saleNumber: string;
+  splitLabel: string;
+  items: Array<{ name: string; quantity: string; lineTotal: string }>;
+  share: string;
+  paidAmount: string;
+}): void {
+  const rows = input.items
+    .map(
+      (it) =>
+        `<tr><td>${esc(it.name)}<br><span class="m">× ${esc(trimQty(it.quantity))}</span></td><td class="r">${esc(it.lineTotal)}</td></tr>`,
+    )
+    .join('');
+  const balance = (Number(input.share) - Number(input.paidAmount)).toFixed(2);
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Bill ${esc(input.saleNumber)} — ${esc(input.splitLabel)}</title>
+<style>body{font-family:ui-monospace,monospace;max-width:320px;margin:0 auto;padding:16px;color:#111}
+h1{font-size:16px;text-align:center;margin:0}.sub{text-align:center;color:#666;font-size:12px;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;font-size:12px}td{padding:3px 0;vertical-align:top}.r{text-align:right;white-space:nowrap}
+.m{color:#777;font-size:11px}.tot{border-top:1px dashed #999;margin-top:8px;padding-top:8px;font-size:12px}
+.row{display:flex;justify-content:space-between;padding:1px 0}.g{font-weight:bold;font-size:14px;border-top:1px solid #333;margin-top:3px;padding-top:3px}
+.btn{display:block;margin:0 auto 12px;padding:8px 16px;cursor:pointer}@media print{.btn{display:none}body{padding:0}}</style></head>
+<body><button class="btn" onclick="window.print()">Print</button>
+<h1>${esc(input.storeName)}</h1>
+<div class="sub">Split bill · ${esc(input.saleNumber)}<br>${esc(input.splitLabel)}</div>
+<table>${rows}</table>
+<div class="tot">
+<div class="row g"><span>Total</span><span>${esc(input.share)}</span></div>
+<div class="row"><span>Paid</span><span>${esc(input.paidAmount)}</span></div>
+<div class="row"><span>Balance</span><span>${esc(balance)}</span></div>
+</div></body></html>`;
+  openPrintWindow(html);
+}
+
+/** "2.000" reads badly on a bill; "2" and "0.5" do. */
+function trimQty(q: string): string {
+  return String(Number(q));
 }

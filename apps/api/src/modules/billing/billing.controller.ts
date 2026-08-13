@@ -12,6 +12,7 @@ import {
   CollectPaymentDto,
   CreateSplitsDto,
   ReopenBillDto,
+  SplitByItemsDto,
 } from './dto/billing.dto';
 import { BillView, BillingService } from './billing.service';
 
@@ -50,6 +51,7 @@ export class BillingController {
         amount: dto.amount,
         method: dto.method,
         reference: dto.reference,
+        splitId: dto.splitId,
         newPaymentStatus: updated.paymentStatus,
       },
     });
@@ -71,6 +73,33 @@ export class BillingController {
       entityType: 'Sale',
       entityId: saleId,
       metadata: { splitCount: dto.splits.length },
+    });
+    return updated;
+  }
+
+  /**
+   * D51 — split by what each party ate. Shares are derived server-side from
+   * the assigned lines; the request carries no money at all.
+   */
+  @Post(':saleId/split-by-items')
+  @RequirePermissions(Permission.BILL_SPLIT)
+  async splitByItems(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('saleId') saleId: string,
+    @Body() dto: SplitByItemsDto,
+  ): Promise<BillView> {
+    const updated = await this.service.splitByItems(tenantId, saleId, dto.splits);
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'BILL_SPLIT_BY_ITEMS',
+      entityType: 'Sale',
+      entityId: saleId,
+      metadata: {
+        splitCount: dto.splits.length,
+        shares: updated.splits.map((s) => s.share),
+        itemCount: dto.splits.reduce((n, s) => n + s.items.length, 0),
+      },
     });
     return updated;
   }

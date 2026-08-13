@@ -266,6 +266,8 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/bills/:saleId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/bills/:saleId/payments': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/bills/:saleId/splits': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  // D51 — split by the lines each party ate; shares derived server-side.
+  'POST /restaurant/bills/:saleId/split-by-items': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/bills/:saleId/reopen': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/reports/branches/:branchId/sales-summary': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /restaurant/reports/branches/:branchId/top-items': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
