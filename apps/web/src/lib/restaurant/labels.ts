@@ -39,6 +39,8 @@ export const TABLE_STATUS_LABELS: Record<RestaurantTableStatus, string> = {
   BILLING: 'Bill requested',
   CLEANING: 'Cleaning',
   BLOCKED: 'Blocked',
+  // D49: absorbed into an open table.
+  RESERVED: 'Reserved',
 };
 
 export const TABLE_STATUS_TONES: Record<RestaurantTableStatus, BadgeTone> = {
@@ -48,6 +50,7 @@ export const TABLE_STATUS_TONES: Record<RestaurantTableStatus, BadgeTone> = {
   BILLING: 'warning',
   CLEANING: 'muted',
   BLOCKED: 'danger',
+  RESERVED: 'info',
 };
 
 // ── Sessions ──────────────────────────────────────────────────────────────

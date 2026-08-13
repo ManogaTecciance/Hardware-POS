@@ -73,6 +73,12 @@ vi.mock('@/lib/restaurant/api', () => ({
     update: vi.fn(),
     archive: vi.fn(),
   },
+  // D49 — the floor now lists open tables alongside the physical plan.
+  openTables: {
+    list: async () => [],
+    create: vi.fn(),
+    dissolve: vi.fn(),
+  },
   tableSessions: {
     listOpen: () => listOpen(),
     open: vi.fn(),
@@ -101,6 +107,7 @@ function table(over: Partial<RestaurantTableView> = {}): RestaurantTableView {
     id: 'tbl_1',
     areaId: 'area_1',
     branchId: 'brn_1',
+    kind: 'PHYSICAL',
     code: 'T1',
     label: null,
     capacity: 4,

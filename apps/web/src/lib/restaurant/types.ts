@@ -14,7 +14,12 @@ export type RestaurantTableStatus =
   | 'OCCUPIED'
   | 'BILLING'
   | 'CLEANING'
-  | 'BLOCKED';
+  | 'BLOCKED'
+  // D49: physically absorbed into an open table; refuses its own sessions.
+  | 'RESERVED';
+
+/** D49. PHYSICAL is the floor plan; OPEN is an ad-hoc joined arrangement. */
+export type RestaurantTableKind = 'PHYSICAL' | 'OPEN';
 
 export type TableSessionStatus = 'OPEN' | 'BILLING' | 'CLOSED' | 'CANCELLED';
 
@@ -257,17 +262,31 @@ export interface ReservationView {
 
 export interface RestaurantTableView {
   id: string;
-  areaId: string;
+  /** Null only for kind=OPEN — ad-hoc tables belong to no floor area (D49). */
+  areaId: string | null;
   branchId: string;
+  kind: RestaurantTableKind;
   code: string;
   label: string | null;
-  capacity: number;
+  /** Null only for kind=OPEN with no recorded seats (D49). */
+  capacity: number | null;
   positionX: number | null;
   positionY: number | null;
   status: RestaurantTableStatus;
   isActive: boolean;
   /** See DiningAreaView.createdByUserId — same rule, same reason. */
   createdByUserId: string | null;
+}
+
+/** D49 — an open table plus the physical tables it absorbed. */
+export interface OpenTableView extends RestaurantTableView {
+  members: Array<{
+    id: string;
+    code: string;
+    label: string | null;
+    areaId: string | null;
+    status: RestaurantTableStatus;
+  }>;
 }
 
 // ── Table sessions & orders ─────────────────────────────────────────────────

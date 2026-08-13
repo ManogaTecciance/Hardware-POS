@@ -231,7 +231,9 @@ export class ReservationsService {
   ): Promise<void> {
     await tx.$queryRaw`SELECT id FROM "RestaurantTable" WHERE id = ${tableId} FOR UPDATE`;
     const table = await tx.restaurantTable.findFirst({
-      where: { id: tableId, tenantId, branchId, isActive: true },
+      // kind: a transient open table (D49) has no business on the calendar —
+      // it dissolves when its bill closes, taking any booking with it.
+      where: { id: tableId, tenantId, branchId, isActive: true, kind: 'PHYSICAL' },
       select: { id: true },
     });
     if (!table) throw new TableNotFoundError();

@@ -1281,6 +1281,72 @@ visible field: silently replaying a stale remembered slug would fail a
 valid login with no visible cause (a slug narrows the search, never widens
 it — WS-104).
 
+### D49 — Open tables: ad-hoc joined tables with auto-release on bill close
+
+Approved for the situation the PO described: a party of six, no six-top
+free, so the floor joins a four-top and a two-top. The joined arrangement
+is an **open table** — named by the operator, optionally carrying a seat
+count, seatable like any table, and dissolved automatically when its bill
+closes.
+
+**Model: an open table IS a RestaurantTable.** `RestaurantTableKind`
+(`PHYSICAL` default | `OPEN`) discriminates. This keeps the entire session
+stack — open session → orders → rounds → KOT → bill — working on open
+tables with zero changes: `TableSession.tableId` points at it like any
+other table. The alternative (a separate entity) would have forked every
+downstream flow.
+
+- `capacity` and `areaId` become **nullable** (widening only): an open
+  table has "no registered seating capacity" unless the operator records
+  one, and it belongs to no floor plan area. Physical-table creation still
+  requires both — enforced at the service, where the invariant actually
+  lives; the columns carry the honest shape.
+- `code` is auto-assigned (`OPEN-<n>` via the tenant's `DocumentSequence`)
+  — the operator names the table via `label`; codes exist for staff
+  vocabulary and uniqueness, not for data entry.
+- `OpenTableMember` joins the open table to the physical tables it
+  absorbs. Membership rows are deleted on release; history lives in the
+  audit log, not in tombstones.
+
+**RESERVED is a new table status.** Members go `RESERVED` on creation and
+back to `AVAILABLE` on release — the PO's vocabulary, now a first-class
+`RestaurantTableStatus` value. `openSession` refuses a RESERVED table
+outright: a joined member must not be seatable on its own, otherwise the
+reservation is decorative. (This is the first status check in
+`openSession`; the pre-existing looseness around OCCUPIED is untouched.)
+
+**Member eligibility.** AVAILABLE + active + `PHYSICAL` only, at least
+one, all on the open table's branch, checked inside the create
+transaction. A table already absorbed into one open table cannot join a
+second.
+
+**Lifecycle.** Create (members → RESERVED) → seat → order → bill. On
+`closeSession` of an open table's session, in the same transaction: every
+member returns to AVAILABLE, memberships are deleted, and the open-table
+row is archived (`isActive=false`) — the arrangement ends with the tab,
+which is what "special situations" means. An open table that was never
+seated (the party left) is dissolved manually; dissolve refuses while a
+live session exists.
+
+**Permission.** One new active key, `open-table:manage` (create +
+dissolve). Front-of-house, like the reservation book: MANAGER, CASHIER,
+and the RESTAURANT_MANAGER / WAITER / RESTAURANT_CASHIER templates. NOT
+creator-owned — joining tables is a shift decision, not floor
+administration (deliberately unlike D-series `TABLE_CREATE`, which stays
+OWNER-only).
+
+**Out of scope, deliberately.** Reservations (D47) on open tables — the
+reservation service now refuses non-PHYSICAL tables; a transient
+arrangement has no business on the calendar. Auto-suggesting which tables
+to join. Cross-branch joins.
+
+**Migration.** `20260816000000_add_open_tables`: `RESERVED` enum value,
+`RestaurantTableKind` enum + `kind` column (default PHYSICAL),
+`capacity` / `areaId` DROP NOT NULL (widening — every existing row remains
+valid), `OpenTableMember` table with cascade FKs. No DROP, no SET NOT
+NULL, no rename; the widenings are named explicitly in the
+provider-contract structural test.
+
 ---
 
 ## Open decisions

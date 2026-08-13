@@ -1,10 +1,13 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
+  IsArray,
   IsInt,
   IsOptional,
   IsString,
   Length,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -55,4 +58,17 @@ export class UpdateTableDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) capacity?: number;
   @IsOptional() @Type(() => Number) @IsInt() positionX?: number;
   @IsOptional() @Type(() => Number) @IsInt() positionY?: number;
+}
+
+// ── Open table (D49) ─────────────────────────────────────────
+//
+// `name` becomes the table's label; the code is auto-assigned (OPEN-<n>).
+// `seats` is optional on purpose — an open table has no registered capacity
+// unless the operator records one. No `areaId`: an ad-hoc table belongs to
+// no floor plan area.
+export class CreateOpenTableDto {
+  @IsString() @Length(1, 80) name!: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) seats?: number;
+  /** The physical tables being joined; each goes RESERVED until release. */
+  @IsArray() @ArrayMinSize(1) @IsString({ each: true }) memberTableIds!: string[];
 }

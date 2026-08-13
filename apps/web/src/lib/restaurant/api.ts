@@ -49,6 +49,7 @@ import type {
   UnifiedOrderView,
   VoidReportRow,
   WaiterPerformanceRow,
+  OpenTableView,
   ReservationView,
 } from './types';
 
@@ -486,6 +487,26 @@ export const diningAreas = {
   archive(session: Session, branchId: string, areaId: string) {
     return api.del<DiningAreaView>(
       `/restaurant/branches/${branchId}/dining-areas/${areaId}`,
+      auth(session),
+    );
+  },
+};
+
+// ── Open tables (D49) ──────────────────────────────────────────────────────
+export const openTables = {
+  list(session: Session, branchId: string) {
+    return api.get<OpenTableView[]>(`/restaurant/branches/${branchId}/open-tables`, auth(session));
+  },
+  create(
+    session: Session,
+    branchId: string,
+    body: { name: string; seats?: number; memberTableIds: string[] },
+  ) {
+    return api.post<OpenTableView>(`/restaurant/branches/${branchId}/open-tables`, body, auth(session));
+  },
+  dissolve(session: Session, branchId: string, openTableId: string) {
+    return api.del<OpenTableView>(
+      `/restaurant/branches/${branchId}/open-tables/${openTableId}`,
       auth(session),
     );
   },

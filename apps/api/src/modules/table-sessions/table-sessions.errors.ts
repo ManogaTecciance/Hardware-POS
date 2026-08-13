@@ -36,6 +36,19 @@ export class TableNotFoundError extends NotFoundException {
     super(err(SESSION_ERROR_CODES.TABLE_NOT_FOUND, 'Table not found on this branch'));
   }
 }
+/**
+ * D49: the table is physically absorbed into an open table — seat the open
+ * table instead. The message names the recovery, not just the refusal.
+ */
+export class TableReservedForOpenTableError extends ConflictException {
+  constructor() {
+    super({
+      code: 'TABLE_RESERVED',
+      message: 'This table is joined into an open table — seat the open table instead.',
+    });
+  }
+}
+
 export class TableAlreadyOpenError extends ConflictException {
   constructor() {
     super(

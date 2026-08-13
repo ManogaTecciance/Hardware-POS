@@ -137,6 +137,8 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.RESERVATION_VIEW,
       Permission.RESERVATION_CREATE,
       Permission.RESERVATION_MANAGE,
+      // D49: joining tables is a shift decision.
+      Permission.OPEN_TABLE_MANAGE,
     ],
   },
   {
@@ -159,6 +161,8 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.RESERVATION_VIEW,
       Permission.RESERVATION_CREATE,
       Permission.RESERVATION_MANAGE,
+      // D49: joining tables is a shift decision.
+      Permission.OPEN_TABLE_MANAGE,
       // Deliberately absent: ORDER_VOID_SENT and TABLE_TRANSFER/MERGE. Voiding an
       // order the kitchen has already started, and moving a table's bill, are the
       // two places where a waiter's mistake becomes someone else's loss — they
@@ -184,6 +188,8 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.RESERVATION_VIEW,
       Permission.RESERVATION_CREATE,
       Permission.RESERVATION_MANAGE,
+      // D49: joining tables is a shift decision.
+      Permission.OPEN_TABLE_MANAGE,
     ],
   },
   {

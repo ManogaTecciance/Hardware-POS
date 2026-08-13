@@ -307,6 +307,7 @@ model Tenant {
   restaurantTables             RestaurantTable[]
   tableSessions                TableSession[]
   tableReservations            TableReservation[]
+  openTableMembers             OpenTableMember[]
   restaurantOrders             RestaurantOrder[]
   orderRounds                  OrderRound[]
   restaurantOrderItems         RestaurantOrderItem[]
@@ -1843,6 +1844,13 @@ model MenuItemStationLink {
 // here so a future `TableStatusChange` history table can be added additively
 // in Phase 5 without an ALTER.
 
+/// D49. PHYSICAL is the floor plan; OPEN is an ad-hoc joined arrangement
+/// (named by the operator, dissolved when its bill closes).
+enum RestaurantTableKind {
+  PHYSICAL
+  OPEN
+}
+
 enum RestaurantTableStatus {
   /// Ready for the next party.
   AVAILABLE
@@ -1856,6 +1864,8 @@ enum RestaurantTableStatus {
   CLEANING
   /// Explicit shutdown — booked out or blocked from seating.
   BLOCKED
+  /// D49: physically absorbed into an open table; refuses its own sessions.
+  RESERVED
 }
 
 /// A section of the floor plan — a dining room, a patio, a bar. Belongs to
@@ -1907,17 +1917,20 @@ model DiningArea {
 /// row the floor plan renders, without joining. A history table lands in
 /// Phase 5 additively, so audit does not require it here.
 model RestaurantTable {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   tenantId String
   branchId String
-  areaId   String
+  /// Null ONLY for kind=OPEN (D49) — an ad-hoc table belongs to no floor area.
+  areaId   String?
+
+  kind RestaurantTableKind @default(PHYSICAL)
 
   /// Unique operator-facing label per area, e.g. T1, T2, BAR-3.
   code      String
   /// Optional display name for a large or named table.
   label     String?
-  /// Nominal seat count.
-  capacity  Int
+  /// Nominal seat count. Null ONLY for kind=OPEN with no recorded seats (D49).
+  capacity  Int?
   /// Optional pixel-level layout coordinates for the floor plan (Phase 4 uses).
   positionX Int?
   positionY Int?
@@ -1933,13 +1946,17 @@ model RestaurantTable {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant  Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch  Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  area    DiningArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
-  creator User?      @relation("RestaurantTableCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant  Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch  Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  area    DiningArea? @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  creator User?       @relation("RestaurantTableCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   sessions     TableSession[]
   reservations TableReservation[]
+  /// D49: the physical tables this OPEN table absorbed…
+  openMembers  OpenTableMember[]  @relation("OpenTableParent")
+  /// …and the open table this PHYSICAL table is currently absorbed into.
+  memberOf     OpenTableMember[]  @relation("OpenTableMemberTable")
 
   @@unique([areaId, code])
   @@index([tenantId])
@@ -2110,6 +2127,27 @@ model TableReservation {
   @@index([tableId, startAt])
   @@index([customerId])
   @@index([status])
+}
+
+/// D49. One row per physical table absorbed into an open table. Rows are
+/// deleted on release (bill close or manual dissolve); the audit log keeps
+/// the history.
+model OpenTableMember {
+  id            String @id @default(cuid())
+  tenantId      String
+  openTableId   String
+  memberTableId String
+
+  createdAt DateTime @default(now())
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  openTable   RestaurantTable @relation("OpenTableParent", fields: [openTableId], references: [id], onDelete: Cascade)
+  memberTable RestaurantTable @relation("OpenTableMemberTable", fields: [memberTableId], references: [id], onDelete: Cascade)
+
+  @@unique([openTableId, memberTableId])
+  /// One live membership per physical table — a table cannot be absorbed twice.
+  @@unique([memberTableId])
+  @@index([tenantId])
 }
 
 /// The order book for a session. In dine-in there is one per session; in

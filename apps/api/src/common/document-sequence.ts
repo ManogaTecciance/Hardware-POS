@@ -17,7 +17,9 @@ export type DocumentType =
   // impossible on the same guarantees as every other document type.
   | 'RECEIPT'
   // D47 — table reservations ("Reservation RSV-000047" over the phone).
-  | 'RESERVATION';
+  | 'RESERVATION'
+  // D49 — auto-assigned codes for open tables ("OPEN-3" on the floor).
+  | 'OPEN_TABLE';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;

@@ -8,10 +8,12 @@ import {
   RestaurantOrderItemStatus,
   RestaurantTableStatus,
   TableSessionStatus,
+  RestaurantTableKind,
 } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { DiningService } from '../dining/dining.service';
 import { KitchenService } from '../kitchen/kitchen.service';
 import {
   CloseSessionDto,
@@ -37,6 +39,7 @@ import {
   SessionNotOpenError,
   TableAlreadyOpenError,
   TableNotFoundError,
+  TableReservedForOpenTableError,
   VariantNotOnProductError,
   VariantSelectionRequiredError,
 } from './table-sessions.errors';
@@ -115,6 +118,7 @@ export class TableSessionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly kitchen: KitchenService,
+    private readonly dining: DiningService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────
@@ -138,6 +142,11 @@ export class TableSessionsService {
         select: { id: true, status: true },
       });
       if (!table) throw new TableNotFoundError();
+      // D49: a physical table absorbed into an open table must not be seatable
+      // on its own — otherwise reserving the members is decorative.
+      if (table.status === RestaurantTableStatus.RESERVED) {
+        throw new TableReservedForOpenTableError();
+      }
 
       const openSessionExists = await tx.tableSession.findFirst({
         where: { tableId: table.id, status: TableSessionStatus.OPEN },
@@ -748,11 +757,22 @@ export class TableSessionsService {
           version: { increment: 1 },
         },
       });
-      // Release the physical table.
-      await tx.restaurantTable.update({
+      // Release the table. For an open table (D49) that means the whole
+      // arrangement: members back to AVAILABLE, memberships deleted, and the
+      // open-table row archived — in THIS transaction, so "bill closed" and
+      // "tables released" cannot be observed apart.
+      const closedTable = await tx.restaurantTable.findUniqueOrThrow({
         where: { id: session.tableId },
-        data: { status: RestaurantTableStatus.AVAILABLE },
+        select: { kind: true },
       });
+      if (closedTable.kind === RestaurantTableKind.OPEN) {
+        await this.dining.releaseOpenTable(tx, tenantId, session.tableId);
+      } else {
+        await tx.restaurantTable.update({
+          where: { id: session.tableId },
+          data: { status: RestaurantTableStatus.AVAILABLE },
+        });
+      }
 
       return { session: this.sessionToView(updated), saleId: sale.id };
     });

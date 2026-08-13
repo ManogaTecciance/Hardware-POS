@@ -183,6 +183,14 @@ export const Permission = {
   RESERVATION_CREATE: 'reservation:create',
   /** Edit a reservation or move it through its lifecycle (seat / cancel / no-show / complete). */
   RESERVATION_MANAGE: 'reservation:manage',
+
+  // ── D49 — Open tables ────────────────────────────────────────────────────
+  //
+  // Joining physical tables into an ad-hoc open table is a SHIFT decision
+  // (host stand, dinner rush), deliberately unlike TABLE_CREATE which is
+  // creator-owned floor administration. Not creator-owned.
+  /** Create and dissolve open tables (ad-hoc joined tables). */
+  OPEN_TABLE_MANAGE: 'open-table:manage',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
@@ -294,6 +302,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     Permission.RESERVATION_VIEW,
     Permission.RESERVATION_CREATE,
     Permission.RESERVATION_MANAGE,
+    // D49 — joining tables is a shift decision.
+    Permission.OPEN_TABLE_MANAGE,
   ],
   CASHIER: [
     Permission.SALE_CREATE,
@@ -315,6 +325,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     Permission.RESERVATION_VIEW,
     Permission.RESERVATION_CREATE,
     Permission.RESERVATION_MANAGE,
+    // D49 — joining tables is a shift decision.
+    Permission.OPEN_TABLE_MANAGE,
   ],
   ACCOUNTANT: [
     Permission.SYNC_READ,

@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, RestaurantTableStatus } from '@hardware-pos/database';
+import { Prisma, RestaurantTableKind, RestaurantTableStatus } from '@hardware-pos/database';
 
+import { nextDocumentNumber } from '../../common/document-sequence';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateDiningAreaDto,
+  CreateOpenTableDto,
   CreateTableDto,
   UpdateDiningAreaDto,
   UpdateTableDto,
@@ -14,6 +16,9 @@ import {
   AreaNotFoundError,
   BranchNotFoundError,
   ForbiddenNotCreatorError,
+  MemberTableUnavailableError,
+  OpenTableInServiceError,
+  OpenTableNotFoundError,
   TableCodeTakenError,
   TableInServiceError,
   TableNotFoundError,
@@ -32,16 +37,30 @@ export interface DiningAreaView {
 
 export interface RestaurantTableView {
   id: string;
-  areaId: string;
+  /** Null only for kind=OPEN — ad-hoc tables belong to no floor area (D49). */
+  areaId: string | null;
   branchId: string;
+  kind: RestaurantTableKind;
   code: string;
   label: string | null;
-  capacity: number;
+  /** Null only for kind=OPEN with no recorded seats (D49). */
+  capacity: number | null;
   positionX: number | null;
   positionY: number | null;
   status: RestaurantTableStatus;
   isActive: boolean;
   createdByUserId: string | null;
+}
+
+/** D49 — an open table plus the physical tables it absorbed. */
+export interface OpenTableView extends RestaurantTableView {
+  members: Array<{
+    id: string;
+    code: string;
+    label: string | null;
+    areaId: string | null;
+    status: RestaurantTableStatus;
+  }>;
 }
 
 /**
@@ -231,6 +250,15 @@ export class DiningService {
     if (activeSessions > 0) {
       throw new TableInServiceError();
     }
+    // D49: a table absorbed into an open table is in service by proxy —
+    // archiving it mid-arrangement would strand the membership row and
+    // resurrect the table as AVAILABLE underneath a seated party.
+    const membership = await this.prisma.openTableMember.count({
+      where: { memberTableId: existing.id },
+    });
+    if (membership > 0) {
+      throw new TableInServiceError();
+    }
     const updated = await this.prisma.restaurantTable.update({
       where: { id: existing.id },
       data: { isActive: false, status: 'AVAILABLE' },
@@ -259,6 +287,180 @@ export class DiningService {
       data: { status },
     });
     return this.tableToView(updated);
+  }
+
+  // ── Open tables (D49) ───────────────────────────────────────
+
+  async listOpenTables(tenantId: string, branchId: string): Promise<OpenTableView[]> {
+    await this.assertBranch(tenantId, branchId);
+    const rows = await this.prisma.restaurantTable.findMany({
+      where: { tenantId, branchId, kind: RestaurantTableKind.OPEN, isActive: true },
+      include: {
+        openMembers: {
+          include: {
+            memberTable: {
+              select: { id: true, code: true, label: true, areaId: true, status: true },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((row) => ({
+      ...this.tableToView(row),
+      members: row.openMembers.map((m) => m.memberTable),
+    }));
+  }
+
+  /**
+   * Join physical tables into a named open table (D49). Members go RESERVED
+   * inside the same transaction that creates the arrangement; the FOR UPDATE
+   * lock serialises two clerks grabbing the same table, and the
+   * OpenTableMember.memberTableId unique is the structural backstop.
+   */
+  async createOpenTable(
+    tenantId: string,
+    branchId: string,
+    actorUserId: string,
+    dto: CreateOpenTableDto,
+  ): Promise<OpenTableView> {
+    await this.assertBranch(tenantId, branchId);
+    const memberIds = [...new Set(dto.memberTableIds)];
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "RestaurantTable" WHERE id IN (${Prisma.join(memberIds)}) FOR UPDATE`;
+      const members = await tx.restaurantTable.findMany({
+        where: { id: { in: memberIds }, tenantId, branchId },
+        select: { id: true, code: true, status: true, isActive: true, kind: true },
+      });
+      // A requested id that resolved to nothing in this tenant/branch is a 404,
+      // not a conflict — nothing to name without leaking another tenant's rows.
+      if (members.length !== memberIds.length) throw new TableNotFoundError();
+      for (const member of members) {
+        const joinable =
+          member.isActive &&
+          member.kind === RestaurantTableKind.PHYSICAL &&
+          member.status === RestaurantTableStatus.AVAILABLE;
+        if (!joinable) throw new MemberTableUnavailableError(member.code);
+      }
+
+      const sequence = await nextDocumentNumber(tx, tenantId, 'OPEN_TABLE');
+      const openTable = await tx.restaurantTable.create({
+        data: {
+          tenantId,
+          branchId,
+          areaId: null,
+          kind: RestaurantTableKind.OPEN,
+          code: `OPEN-${sequence}`,
+          label: dto.name.trim(),
+          capacity: dto.seats ?? null,
+          createdByUserId: actorUserId,
+        },
+      });
+      await tx.openTableMember.createMany({
+        data: memberIds.map((memberTableId) => ({ tenantId, openTableId: openTable.id, memberTableId })),
+      });
+      await tx.restaurantTable.updateMany({
+        where: { id: { in: memberIds } },
+        data: { status: RestaurantTableStatus.RESERVED },
+      });
+      return openTable;
+    });
+
+    const [view] = await this.listOpenTablesById(tenantId, created.id);
+    return view;
+  }
+
+  /** Manual dissolve — the party never sat down. Refuses a live session. */
+  async dissolveOpenTable(
+    tenantId: string,
+    branchId: string,
+    openTableId: string,
+  ): Promise<OpenTableView> {
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.restaurantTable.findFirst({
+        where: {
+          id: openTableId,
+          tenantId,
+          branchId,
+          kind: RestaurantTableKind.OPEN,
+          isActive: true,
+        },
+        include: {
+          openMembers: {
+            include: {
+              memberTable: {
+                select: { id: true, code: true, label: true, areaId: true, status: true },
+              },
+            },
+          },
+        },
+      });
+      if (!row) throw new OpenTableNotFoundError();
+      const liveSession = await tx.tableSession.findFirst({
+        where: { tableId: row.id, status: IN_SERVICE_SESSION_STATUSES },
+        select: { id: true },
+      });
+      if (liveSession) throw new OpenTableInServiceError();
+
+      await this.releaseOpenTable(tx, tenantId, row.id);
+      return {
+        ...this.tableToView({ ...row, isActive: false, status: RestaurantTableStatus.AVAILABLE }),
+        members: row.openMembers.map((m) => ({
+          ...m.memberTable,
+          status: RestaurantTableStatus.AVAILABLE,
+        })),
+      };
+    });
+  }
+
+  /**
+   * The release half of the lifecycle, shared between manual dissolve and the
+   * automatic bill-close hook (table-sessions.service). Runs inside the
+   * CALLER's transaction so "bill closed" and "members released" cannot be
+   * observed apart. Members return to AVAILABLE, memberships are deleted, and
+   * the open-table row is archived — the arrangement ends with the tab (D49).
+   */
+  async releaseOpenTable(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    openTableId: string,
+  ): Promise<void> {
+    const memberships = await tx.openTableMember.findMany({
+      where: { openTableId, tenantId },
+      select: { memberTableId: true },
+    });
+    if (memberships.length > 0) {
+      await tx.restaurantTable.updateMany({
+        where: { id: { in: memberships.map((m) => m.memberTableId) } },
+        data: { status: RestaurantTableStatus.AVAILABLE },
+      });
+      await tx.openTableMember.deleteMany({ where: { openTableId, tenantId } });
+    }
+    await tx.restaurantTable.update({
+      where: { id: openTableId },
+      data: { isActive: false, status: RestaurantTableStatus.AVAILABLE },
+    });
+  }
+
+  private async listOpenTablesById(tenantId: string, id: string): Promise<OpenTableView[]> {
+    const rows = await this.prisma.restaurantTable.findMany({
+      where: { id, tenantId },
+      include: {
+        openMembers: {
+          include: {
+            memberTable: {
+              select: { id: true, code: true, label: true, areaId: true, status: true },
+            },
+          },
+        },
+      },
+    });
+    return rows.map((row) => ({
+      ...this.tableToView(row),
+      members: row.openMembers.map((m) => m.memberTable),
+    }));
   }
 
   // ── Ownership + tenant scoping ──────────────────────────────
@@ -329,6 +531,7 @@ export class DiningService {
       id: row.id,
       areaId: row.areaId,
       branchId: row.branchId,
+      kind: row.kind,
       code: row.code,
       label: row.label,
       capacity: row.capacity,

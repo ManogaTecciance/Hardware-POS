@@ -589,7 +589,7 @@ function ReservationFormDialog({
           <Select value={tableId} onChange={(e) => setTableId(e.target.value)}>
             {tables.map((t) => (
               <option key={t.id} value={t.id}>
-                {(areaName.get(t.areaId) ? `${areaName.get(t.areaId)} — ` : '') + (t.label ?? t.code)} ({t.capacity} seats)
+                {(t.areaId && areaName.get(t.areaId) ? `${areaName.get(t.areaId)} — ` : '') + (t.label ?? t.code)} ({t.capacity ?? '—'} seats)
               </option>
             ))}
           </Select>

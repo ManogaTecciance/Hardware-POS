@@ -11,6 +11,10 @@ export const DINING_ERROR_CODES = {
   TABLE_IN_SERVICE: 'TABLE_IN_SERVICE',
   /** The caller is not the creator of this row. Message is deliberately generic. */
   FORBIDDEN_NOT_CREATOR: 'FORBIDDEN_NOT_CREATOR',
+  // D49 — open tables.
+  OPEN_TABLE_NOT_FOUND: 'OPEN_TABLE_NOT_FOUND',
+  OPEN_TABLE_MEMBER_UNAVAILABLE: 'OPEN_TABLE_MEMBER_UNAVAILABLE',
+  OPEN_TABLE_IN_SERVICE: 'OPEN_TABLE_IN_SERVICE',
 } as const;
 
 const err = (code: string, message: string) => ({ code, message });
@@ -85,6 +89,41 @@ export class ForbiddenNotCreatorError extends ForbiddenException {
       err(
         DINING_ERROR_CODES.FORBIDDEN_NOT_CREATOR,
         `You can only edit ${subject === 'dining area' ? 'dining areas' : 'tables'} that you created.`,
+      ),
+    );
+  }
+}
+
+// ── D49 — open tables ────────────────────────────────────────
+
+export class OpenTableNotFoundError extends NotFoundException {
+  constructor() {
+    super(err(DINING_ERROR_CODES.OPEN_TABLE_NOT_FOUND, 'Open table not found'));
+  }
+}
+
+/**
+ * Names the table code, not just "a table": the operator picked several and
+ * needs to know which one was taken while the dialog was open.
+ */
+export class MemberTableUnavailableError extends ConflictException {
+  constructor(code: string) {
+    super(
+      err(
+        DINING_ERROR_CODES.OPEN_TABLE_MEMBER_UNAVAILABLE,
+        `Table ${code} is not available to join — it is in service, archived, or already part of another open table`,
+      ),
+    );
+  }
+}
+
+/** Refuses to dissolve an open table whose session is still live. */
+export class OpenTableInServiceError extends ConflictException {
+  constructor() {
+    super(
+      err(
+        DINING_ERROR_CODES.OPEN_TABLE_IN_SERVICE,
+        'This open table has a live session — close or settle its bill first.',
       ),
     );
   }

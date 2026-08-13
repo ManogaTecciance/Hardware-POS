@@ -292,7 +292,7 @@ function NeedsAttentionCard({
               <div className="min-w-0">
                 <p className="text-sm font-semibold">{t.label ?? `Table ${t.code}`}</p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {areaById.get(t.areaId) ?? 'Unknown area'} · seats {t.capacity}
+                  {(t.areaId ? areaById.get(t.areaId) : null) ?? 'Open table'} · seats {t.capacity ?? '—'}
                 </p>
               </div>
               <StatusBadge

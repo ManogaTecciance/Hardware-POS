@@ -1,6 +1,6 @@
 'use client';
 
-import { Archive, Building2, DoorOpen, MoreVertical, Pencil, Plus, Users } from 'lucide-react';
+import { Archive, Building2, DoorOpen, Link2, MoreVertical, Pencil, Plus, Users } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -15,6 +15,7 @@ import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import {
   diningAreas,
+  openTables,
   restaurantTables,
   tableSessions,
 } from '@/lib/restaurant/api';
@@ -25,6 +26,7 @@ import {
 } from '@/lib/restaurant/labels';
 import type {
   DiningAreaView,
+  OpenTableView,
   RestaurantTableView,
   TableSessionView,
 } from '@/lib/restaurant/types';
@@ -39,12 +41,15 @@ interface Snapshot {
   areas: DiningAreaView[];
   tablesByArea: Map<string, RestaurantTableView[]>;
   sessionByTableId: Map<string, TableSessionView & { activeOrderId: string | null }>;
+  /** D49 — live ad-hoc joined tables for this branch. */
+  openTables: OpenTableView[];
 }
 
 const EMPTY: Snapshot = {
   areas: [],
   tablesByArea: new Map(),
   sessionByTableId: new Map(),
+  openTables: [],
 };
 
 /**
@@ -74,6 +79,10 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   const [archiveTable, setArchiveTable] = React.useState<RestaurantTableView | null>(null);
   const canCreateArea = hasPermission(Permission.DINING_AREA_CREATE);
   const canCreateTable = hasPermission(Permission.TABLE_CREATE);
+  // D49: joining tables is a shift decision, not creator-owned floor admin.
+  const canManageOpenTables = hasPermission(Permission.OPEN_TABLE_MANAGE);
+  const [showNewOpenTable, setShowNewOpenTable] = React.useState(false);
+  const [dissolveTarget, setDissolveTarget] = React.useState<OpenTableView | null>(null);
   const canEditOwnArea = hasPermission(Permission.DINING_AREA_EDIT_OWN);
   const canArchiveOwnArea = hasPermission(Permission.DINING_AREA_ARCHIVE_OWN);
   const canEditOwnTable = hasPermission(Permission.TABLE_EDIT_OWN);
@@ -91,9 +100,10 @@ export function TableFloor({ session, branchId, canManage }: Props) {
 
   const load = React.useCallback(async () => {
     try {
-      const [areas, openSessionsRaw] = await Promise.all([
+      const [areas, openSessionsRaw, liveOpenTables] = await Promise.all([
         diningAreas.list(session, branchId, false),
         tableSessions.listOpen(session, branchId).catch(() => []),
+        openTables.list(session, branchId).catch(() => []),
       ]);
       const areaSorted = areas.slice().sort((a, b) => a.position - b.position);
       const lists = await Promise.all(
@@ -116,7 +126,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
       );
       setState({
         status: 'ready',
-        snapshot: { areas: areaSorted, tablesByArea, sessionByTableId },
+        snapshot: { areas: areaSorted, tablesByArea, sessionByTableId, openTables: liveOpenTables },
       });
     } catch (err) {
       setState({
@@ -288,6 +298,79 @@ export function TableFloor({ session, branchId, canManage }: Props) {
           );
         })
       )}
+
+      {/* D49 — open tables: ad-hoc joined arrangements. Shown whenever any
+          exist, plus the create affordance for shift staff. Rendered after
+          the physical floor so the plan stays the primary geography. */}
+      {status === 'ready' && (snapshot.openTables.length > 0 || canManageOpenTables) ? (
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle>Open tables</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Joined tables for parties that outgrow the floor plan. Released
+                automatically when the bill closes.
+              </p>
+            </div>
+            {canManageOpenTables ? (
+              <Button
+                size="sm"
+                leftIcon={<Link2 className="h-4 w-4" />}
+                onClick={() => setShowNewOpenTable(true)}
+              >
+                New open table
+              </Button>
+            ) : null}
+          </CardHeader>
+          <CardContent>
+            {snapshot.openTables.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No open tables right now.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {snapshot.openTables.map((t) => (
+                  <OpenTableCard
+                    key={t.id}
+                    table={t}
+                    session={snapshot.sessionByTableId.get(t.id) ?? null}
+                    canOpen={canOpenTable}
+                    onOpenClick={() => setOpenTarget(t)}
+                    canDissolve={canManageOpenTables}
+                    onDissolve={() => setDissolveTarget(t)}
+                  />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canManageOpenTables && showNewOpenTable ? (
+        <CreateOpenTableDialog
+          onClose={() => setShowNewOpenTable(false)}
+          onCreated={async () => {
+            setShowNewOpenTable(false);
+            await load();
+          }}
+          session={session}
+          branchId={branchId}
+          areas={snapshot.areas}
+          tablesByArea={snapshot.tablesByArea}
+        />
+      ) : null}
+      {dissolveTarget ? (
+        <DissolveOpenTableDialog
+          onClose={() => setDissolveTarget(null)}
+          onDissolved={async () => {
+            setDissolveTarget(null);
+            await load();
+          }}
+          session={session}
+          branchId={branchId}
+          table={dissolveTarget}
+        />
+      ) : null}
 
       {canManage && showNewArea ? (
         <NewAreaDialog
@@ -465,7 +548,7 @@ function TableCard({
       </div>
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         <Users className="h-3.5 w-3.5" aria-hidden="true" />
-        <span>Seats {table.capacity}</span>
+        <span>{table.capacity != null ? `Seats ${table.capacity}` : 'Seats as arranged'}</span>
         {session ? (
           <span className="ml-auto">Open {formatElapsed(session.openedAt)}</span>
         ) : null}
@@ -511,11 +594,12 @@ function OpenTableDialog({
   branchId: string;
   table: RestaurantTableView;
 }) {
-  const [guestCount, setGuestCount] = React.useState(String(Math.min(table.capacity, 2)));
+  const [guestCount, setGuestCount] = React.useState(String(Math.min(table.capacity ?? 2, 2)));
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const guestNum = Number(guestCount);
-  const valid = Number.isInteger(guestNum) && guestNum >= 1 && guestNum <= table.capacity;
+  // An open table (D49) has no registered capacity — any positive count is fine.
+  const valid = Number.isInteger(guestNum) && guestNum >= 1 && (table.capacity == null || guestNum <= table.capacity);
 
   const submit = async () => {
     if (!valid) return;
@@ -539,7 +623,7 @@ function OpenTableDialog({
       open
       onClose={onClose}
       title={`Open ${table.label ?? table.code}`}
-      description={`Seats up to ${table.capacity} guests.`}
+      description={table.capacity != null ? `Seats up to ${table.capacity} guests.` : 'Seating as arranged — no registered capacity.'}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={saving}>
@@ -565,7 +649,9 @@ function OpenTableDialog({
           />
           {guestCount && !valid ? (
             <p className="text-xs text-danger">
-              Between 1 and {table.capacity} (the table&apos;s capacity).
+              {table.capacity != null
+                ? `Between 1 and ${table.capacity} (the table's capacity).`
+                : 'The number of guests being seated.'}
             </p>
           ) : null}
         </div>
@@ -1014,7 +1100,7 @@ function EditTableDialog({
   table: RestaurantTableView;
 }) {
   const [label, setLabel] = React.useState(table.label ?? '');
-  const [capacity, setCapacity] = React.useState(String(table.capacity));
+  const [capacity, setCapacity] = React.useState(String(table.capacity ?? ''));
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const capacityNum = Number(capacity);
@@ -1024,7 +1110,7 @@ function EditTableDialog({
     setSaving(true);
     setError(null);
     try {
-      await restaurantTables.update(session, table.areaId, table.id, {
+      await restaurantTables.update(session, table.areaId ?? '', table.id, {
         label: label.trim() || undefined,
         capacity: capacityNum,
       });
@@ -1098,7 +1184,7 @@ function ArchiveTableDialog({
     setSaving(true);
     setError(null);
     try {
-      await restaurantTables.archive(session, table.areaId, table.id);
+      await restaurantTables.archive(session, table.areaId ?? '', table.id);
       onArchived();
     } catch (err) {
       setError(translateError(err));
@@ -1129,6 +1215,276 @@ function ArchiveTableDialog({
           Historical orders and reports will remain available.
         </p>
       )}
+    </Dialog>
+  );
+}
+
+// ── Open tables (D49) ─────────────────────────────────────────────────────
+
+function OpenTableCard({
+  table,
+  session,
+  canOpen,
+  onOpenClick,
+  canDissolve,
+  onDissolve,
+}: {
+  table: OpenTableView;
+  session: (TableSessionView & { activeOrderId: string | null }) | null;
+  canOpen: boolean;
+  onOpenClick: () => void;
+  canDissolve: boolean;
+  onDissolve: () => void;
+}) {
+  const isAvailable = table.status === 'AVAILABLE';
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-dashed border-border bg-card p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-base font-semibold">{table.label ?? table.code}</p>
+          <p className="text-xs text-muted-foreground">{table.code}</p>
+        </div>
+        <StatusBadge
+          label={TABLE_STATUS_LABELS[table.status]}
+          tone={TABLE_STATUS_TONES[table.status]}
+        />
+      </div>
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Users className="h-3.5 w-3.5" aria-hidden="true" />
+        <span>{table.capacity != null ? `Seats ${table.capacity}` : 'Seats as arranged'}</span>
+        {session ? <span className="ml-auto">Open {formatElapsed(session.openedAt)}</span> : null}
+      </div>
+      {/* The joined physical tables — the operator's answer to "where do I
+          actually put these people". */}
+      <p className="text-xs text-muted-foreground">
+        Joins {table.members.map((m) => m.label ?? m.code).join(' + ') || '—'}
+      </p>
+      <div className="mt-auto flex gap-2 pt-1">
+        {session ? (
+          <Button asChild size="md" fullWidth variant="secondary">
+            <Link href={`/tables/session/${session.id}`}>View order</Link>
+          </Button>
+        ) : isAvailable && canOpen ? (
+          <Button size="md" fullWidth leftIcon={<DoorOpen className="h-4 w-4" />} onClick={onOpenClick}>
+            Open table
+          </Button>
+        ) : (
+          <div className="h-11" aria-hidden="true" />
+        )}
+        {!session && canDissolve ? (
+          <Button size="md" variant="outline" onClick={onDissolve}>
+            Dissolve
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CreateOpenTableDialog({
+  onClose,
+  onCreated,
+  session,
+  branchId,
+  areas,
+  tablesByArea,
+}: {
+  onClose: () => void;
+  onCreated: () => Promise<void> | void;
+  session: Session;
+  branchId: string;
+  areas: DiningAreaView[];
+  tablesByArea: Map<string, RestaurantTableView[]>;
+}) {
+  const [name, setName] = React.useState('');
+  const [seats, setSeats] = React.useState('');
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  // Only AVAILABLE physical tables can be joined — the same rule the server
+  // enforces; filtering here just keeps the picker honest.
+  const joinable = areas
+    .map((area) => ({
+      area,
+      tables: (tablesByArea.get(area.id) ?? []).filter(
+        (t) => t.status === 'AVAILABLE' && t.isActive && t.kind === 'PHYSICAL',
+      ),
+    }))
+    .filter((g) => g.tables.length > 0);
+
+  const seatsNum = seats.trim() === '' ? undefined : Number(seats);
+  const valid =
+    name.trim().length > 0 &&
+    selected.size >= 1 &&
+    (seatsNum === undefined || (Number.isInteger(seatsNum) && seatsNum >= 1));
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const submit = async () => {
+    if (!valid || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await openTables.create(session, branchId, {
+        name: name.trim(),
+        seats: seatsNum,
+        memberTableIds: [...selected],
+      });
+      await onCreated();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not create the open table');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="New open table"
+      description="Join physical tables for a party that outgrows the floor plan. The joined tables go Reserved until this table's bill closes."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={() => void submit()} isLoading={saving} disabled={!valid}>
+            Create open table
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="open-table-name">
+              Name
+            </label>
+            <Input
+              id="open-table-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Party of six"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="open-table-seats">
+              Seats (optional)
+            </label>
+            <Input
+              id="open-table-seats"
+              type="number"
+              min={1}
+              value={seats}
+              onChange={(e) => setSeats(e.target.value)}
+              placeholder="No registered capacity"
+            />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">Tables to join</p>
+          {joinable.length === 0 ? (
+            <p className="rounded-xl border border-border p-3 text-sm text-muted-foreground">
+              No available tables to join right now.
+            </p>
+          ) : (
+            <div className="max-h-64 space-y-3 overflow-y-auto rounded-xl border border-border p-3">
+              {joinable.map(({ area, tables }) => (
+                <div key={area.id}>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {area.name}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {tables.map((t) => (
+                      <label
+                        key={t.id}
+                        className={
+                          'flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ' +
+                          (selected.has(t.id) ? 'border-primary bg-primary/10' : 'border-border')
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-primary"
+                          checked={selected.has(t.id)}
+                          onChange={() => toggle(t.id)}
+                        />
+                        <span>
+                          {t.label ?? t.code}
+                          <span className="ml-1 text-xs text-muted-foreground">({t.capacity})</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Selected tables go Reserved and cannot be seated separately until release.
+          </p>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+function DissolveOpenTableDialog({
+  onClose,
+  onDissolved,
+  session,
+  branchId,
+  table,
+}: {
+  onClose: () => void;
+  onDissolved: () => Promise<void> | void;
+  session: Session;
+  branchId: string;
+  table: OpenTableView;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await openTables.dissolve(session, branchId, table.id);
+      await onDissolved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not dissolve the open table');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Dissolve ${table.label ?? table.code}?`}
+      description={`${table.members.map((m) => m.label ?? m.code).join(', ')} will return to Available.`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={() => void submit()} isLoading={busy}>
+            Dissolve
+          </Button>
+        </>
+      }
+    >
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
     </Dialog>
   );
 }

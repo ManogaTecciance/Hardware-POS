@@ -170,6 +170,8 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
         Permission.RESERVATION_VIEW,
         Permission.RESERVATION_CREATE,
         Permission.RESERVATION_MANAGE,
+        // D49 — joining tables is a shift decision.
+        Permission.OPEN_TABLE_MANAGE,
       ].sort(),
     );
     // NEGATIVE: the escalations a manager must not have.
@@ -199,6 +201,8 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
         Permission.RESERVATION_VIEW,
         Permission.RESERVATION_CREATE,
         Permission.RESERVATION_MANAGE,
+        // D49 — joining tables is a shift decision.
+        Permission.OPEN_TABLE_MANAGE,
       ].sort(),
     );
     expect(roleHasPermission('CASHIER', Permission.PRODUCT_MANAGE)).toBe(false);

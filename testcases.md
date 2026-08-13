@@ -18,6 +18,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [SUP](#sup--suppliers-vendors) · [SIMP](#simp--vendor-bulk-import) ·
 [QB](#qb--quickbooks-integration) · [SET](#set--settings) ·
 [DOC](#doc--documents--printing) · [RSV](#rsv--table-reservations--calendar-d47) ·
+[OTBL](#otbl--open-tables-d49) ·
 [ADM](#adm--administration--multi-tenancy) ·
 [UI](#ui--theme-layout--responsiveness) · [SEC](#sec--security)
 
@@ -453,6 +454,23 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | RSV-014 | Customer link optional | Book with free-text name/phone only | Reservation saves without a Customer row | P | Passed |
 | RSV-015 | Link existing customer | Search and pick an existing customer in the dialog | customerId linked; name/phone snapshotted | P | Not Run |
 | RSV-016 | Permissions | Sign in as a role without reservation:view | Calendar nav item absent; routes 403 | N | Not Run |
+
+## OTBL — Open Tables (D49)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| OTBL-001 | Create an open table joining two tables | Tables → New open table → name, select 2 available tables | Open table appears with auto code OPEN-n; members badge Reserved | P | Passed |
+| OTBL-002 | Optional seat count | Create with and without Seats | With: "Seats N"; without: "Seats as arranged" | P | Passed |
+| OTBL-003 | Reserved member refuses its own session | Try to seat a joined member table | 409 "joined into an open table — seat the open table instead" | N | Passed |
+| OTBL-004 | Member cannot be joined twice | Create a second open table selecting a reserved member | 409 naming the table code | N | Passed |
+| OTBL-005 | Members must be available | Select an occupied/archived table (API) | 409 naming the code; UI never offers them | N | Passed |
+| OTBL-006 | Bill close auto-releases | Seat the open table, close its bill | Members return to Available; open table disappears | P | Passed |
+| OTBL-007 | Manual dissolve | Dissolve a never-seated open table | Members released; arrangement archived | P | Passed |
+| OTBL-008 | Dissolve refused mid-service | Dissolve while its session is live | 409 "close or settle its bill first" | N | Passed |
+| OTBL-009 | No reservations on open tables | Book the open table on the Calendar (API) | 404 — transient tables have no calendar presence | N | Passed |
+| OTBL-010 | Reserved member cannot be archived | Archive a joined member table (owner menu) | 409 in-service refusal | N | Passed |
+| OTBL-011 | Permission gate | Role without open-table:manage | No New open table / Dissolve controls; POST 403 | N | Not Run |
+| OTBL-012 | Orders + KOT flow through | Send a round from the open table's session | Kitchen ticket prints like any table | P | Not Run |
 
 ## ADM — Administration & Multi-Tenancy
 

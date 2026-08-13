@@ -50,6 +50,7 @@ import { MenuSectionsController } from '../../modules/menu/menu-sections.control
 import { MenusController } from '../../modules/menu/menus.controller';
 import { ModifiersController } from '../../modules/menu/modifiers.controller';
 import { DiningAreasController } from '../../modules/dining/dining-areas.controller';
+import { OpenTablesController } from '../../modules/dining/open-tables.controller';
 import { RestaurantTablesController } from '../../modules/dining/restaurant-tables.controller';
 import { TableSessionsController } from '../../modules/table-sessions/table-sessions.controller';
 import { ReservationsController } from '../../modules/reservations/reservations.controller';
@@ -111,6 +112,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   ModifiersController,
   DiningAreasController,
   RestaurantTablesController,
+  // D49 — open tables.
+  OpenTablesController,
   TableSessionsController,
   // D47 — table reservations.
   ReservationsController,
@@ -181,6 +184,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'modifiers',
   'dining-areas',
   'restaurant-tables',
+  // D49 — open tables.
+  'open-tables',
   'table-sessions',
   // D47 — table reservations.
   'reservations',
