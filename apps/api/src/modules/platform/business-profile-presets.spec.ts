@@ -40,9 +40,10 @@ describe('business profile presets', () => {
   });
 
   it('keeps retail on the legacy QuickBooks pair', () => {
-    // Provisioning a tile shop must produce the configuration every existing
-    // tenant already runs, not a new one (D16).
-    expect(BUSINESS_PROFILE_PRESETS[BusinessType.TILE_SHOP]).toEqual({
+    // Provisioning a hardware tenant must produce the configuration the pilot
+    // already runs, not a new one (D16). D57 renamed the value from TILE_SHOP;
+    // the pair is unchanged.
+    expect(BUSINESS_PROFILE_PRESETS[BusinessType.HARDWARE]).toEqual({
       inventoryMode: InventoryMode.QUICKBOOKS,
       accountingProvider: AccountingProviderKind.QUICKBOOKS,
     });

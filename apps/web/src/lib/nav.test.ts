@@ -73,7 +73,7 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
   it('renders exactly the pre-Slice-8 list, in the pre-Slice-8 order', () => {
     // The literal list that shipped before this slice. An exact sequence, not a
     // set: a reordered sidebar is a visible change to an existing screen.
-    expect(labels(nav('TILE_SHOP', LEGACY_MODULES))).toEqual([
+    expect(labels(nav('HARDWARE', LEGACY_MODULES))).toEqual([
       'Dashboard',
       'POS',
       'Sales',
@@ -88,7 +88,7 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
   });
 
   it('keeps its group headings', () => {
-    expect(nav('TILE_SHOP', LEGACY_MODULES).map((g) => g.label)).toEqual([
+    expect(nav('HARDWARE', LEGACY_MODULES).map((g) => g.label)).toEqual([
       null,
       'Operations',
       'Catalog',
@@ -96,14 +96,23 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
     ]);
   });
 
-  it('HARDWARE and RETAIL resolve to the same list', () => {
-    const tile = labels(nav('TILE_SHOP', LEGACY_MODULES));
-    expect(labels(nav('HARDWARE', LEGACY_MODULES))).toEqual(tile);
-    expect(labels(nav('RETAIL', LEGACY_MODULES))).toEqual(tile);
+  it('an unregistered business type renders the empty rail, never the retail one (D56/D57)', () => {
+    /*
+     * TILE_SHOP and RETAIL were removed from the enum (D57), and the registry
+     * has no fallback (D56) — the `?? RETAIL_NAV` this replaced is exactly
+     * the mechanism that handed HOTEL the wrong screens. A stale value from
+     * an old token or a mis-wired caller gets a visibly empty rail, not a
+     * plausibly wrong retail one.
+     */
+    expect(nav('TILE_SHOP' as never, LEGACY_MODULES)).toEqual([]);
+    expect(nav('RETAIL' as never, LEGACY_MODULES)).toEqual([]);
+    // Positive counterpart, so the two negatives cannot pass by the resolver
+    // returning [] for everything.
+    expect(labels(nav('HARDWARE', LEGACY_MODULES)).length).toBeGreaterThan(0);
   });
 
   it('marks nothing as upcoming — every retail destination is built', () => {
-    const upcoming = nav('TILE_SHOP', LEGACY_MODULES)
+    const upcoming = nav('HARDWARE', LEGACY_MODULES)
       .flatMap((g) => g.items)
       .filter((i) => i.upcoming);
     expect(upcoming).toEqual([]);
@@ -154,7 +163,7 @@ describe('Restaurant navigation', () => {
     // Positive control: the retail list also does not contain Menu, so if
     // both flipped to including it the test above and this one would agree.
     // Assert against the RETAIL nav here so the intent is visible.
-    expect(labels(nav('TILE_SHOP', LEGACY_MODULES))).not.toContain('Menu');
+    expect(labels(nav('HARDWARE', LEGACY_MODULES))).not.toContain('Menu');
   });
 
   it('shows no retail-only destination', () => {
@@ -167,7 +176,7 @@ describe('Restaurant navigation', () => {
     }
     // POSITIVE CONTROL: the same names ARE present for a retail tenant, so the
     // absences above are the module filter working rather than an empty result.
-    const retail = labels(nav('TILE_SHOP', LEGACY_MODULES));
+    const retail = labels(nav('HARDWARE', LEGACY_MODULES));
     for (const present of ['Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect({ present, shown: retail.includes(present) }).toEqual({ present, shown: true });
     }
@@ -227,12 +236,12 @@ describe('Restaurant navigation', () => {
 
   it('HOTEL is not the retail navigation', () => {
     expect(labels(nav('HOTEL', RESTAURANT_MODULES))).not.toEqual(
-      labels(nav('TILE_SHOP', LEGACY_MODULES)),
+      labels(nav('HARDWARE', LEGACY_MODULES)),
     );
   });
 
   it('is genuinely different from the retail list', () => {
-    expect(labels(restaurant)).not.toEqual(labels(nav('TILE_SHOP', LEGACY_MODULES)));
+    expect(labels(restaurant)).not.toEqual(labels(nav('HARDWARE', LEGACY_MODULES)));
   });
 
   it('still reaches Products — a restaurant owns its own catalogue', () => {
@@ -249,19 +258,19 @@ describe('Restaurant navigation', () => {
 describe('module and permission are both required', () => {
   it('a disabled module removes its entry even for an owner', () => {
     const withoutSuppliers = LEGACY_MODULES.filter((m) => m !== 'SUPPLIERS');
-    expect(labels(nav('TILE_SHOP', withoutSuppliers))).not.toContain('Suppliers');
-    expect(labels(nav('TILE_SHOP', LEGACY_MODULES))).toContain('Suppliers');
+    expect(labels(nav('HARDWARE', withoutSuppliers))).not.toContain('Suppliers');
+    expect(labels(nav('HARDWARE', LEGACY_MODULES))).toContain('Suppliers');
   });
 
   it('a missing permission removes its entry even when the module is on', () => {
     // A cashier holds no SETTINGS_MANAGE, so Settings is hidden although the
     // tenant has the module.
-    expect(labels(nav('TILE_SHOP', LEGACY_MODULES, 'CASHIER'))).not.toContain('Settings');
-    expect(labels(nav('TILE_SHOP', LEGACY_MODULES, 'OWNER'))).toContain('Settings');
+    expect(labels(nav('HARDWARE', LEGACY_MODULES, 'CASHIER'))).not.toContain('Settings');
+    expect(labels(nav('HARDWARE', LEGACY_MODULES, 'OWNER'))).toContain('Settings');
   });
 
   it('a cashier sees the operational entries they can actually use', () => {
-    const cashier = labels(nav('TILE_SHOP', LEGACY_MODULES, 'CASHIER'));
+    const cashier = labels(nav('HARDWARE', LEGACY_MODULES, 'CASHIER'));
     expect(cashier).toContain('POS');
     expect(cashier).toContain('Products');
     expect(cashier).not.toContain('QuickBooks');
@@ -269,7 +278,7 @@ describe('module and permission are both required', () => {
   });
 
   it('an accountant sees the read-only surface, not the tills', () => {
-    const accountant = labels(nav('TILE_SHOP', LEGACY_MODULES, 'ACCOUNTANT'));
+    const accountant = labels(nav('HARDWARE', LEGACY_MODULES, 'ACCOUNTANT'));
     expect(accountant).toContain('QuickBooks');
     expect(accountant).toContain('Suppliers');
     expect(accountant).not.toContain('POS');
@@ -283,7 +292,7 @@ describe('module and permission are both required', () => {
     // entry however many modules are revoked — which the assertion below states
     // outright rather than letting this case quietly stop testing collapse.
     const noSystem = LEGACY_MODULES.filter((m) => !['QUICKBOOKS', 'SETTINGS'].includes(m));
-    const groups = nav('TILE_SHOP', noSystem).map((g) => g.label);
+    const groups = nav('HARDWARE', noSystem).map((g) => g.label);
 
     expect(groups).not.toContain('System');
     expect(groups).toContain('Operations');
@@ -295,7 +304,7 @@ describe('module and permission are both required', () => {
     const noRetail = LEGACY_MODULES.filter(
       (m) => !['RETAIL_POS', 'QUOTATIONS', 'RETURNS'].includes(m),
     );
-    const operations = nav('TILE_SHOP', noRetail).find((g) => g.label === 'Operations');
+    const operations = nav('HARDWARE', noRetail).find((g) => g.label === 'Operations');
 
     expect(operations?.items.map((i) => i.label)).toEqual(['Sales']);
   });
@@ -311,22 +320,24 @@ describe('an unresolved profile renders nothing rather than a guess', () => {
   });
 
   it('returns an empty list when the modules are unknown', () => {
-    expect(nav('TILE_SHOP', null)).toEqual([]);
+    expect(nav('HARDWARE', null)).toEqual([]);
   });
 
   it('does not fall back to the retail list', () => {
     // The specific bug: a restaurant operator watching POS and QuickBooks flash on
     // every page load, and forever if the profile request failed.
-    expect(nav(null, null)).not.toEqual(nav('TILE_SHOP', LEGACY_MODULES));
+    expect(nav(null, null)).not.toEqual(nav('HARDWARE', LEGACY_MODULES));
     expect(nav(null, null)).toEqual([]);
   });
 
-  it('an unrecognised business type falls back to retail rather than breaking', () => {
-    // A new BusinessType added server-side must not blank the sidebar; retail is
-    // the safe default because it is the existing product.
-    expect(labels(nav('SOMETHING_NEW', LEGACY_MODULES))).toEqual(
-      labels(nav('TILE_SHOP', LEGACY_MODULES)),
-    );
+  it('an unrecognised business type renders nothing rather than a retail guess (D56)', () => {
+    /*
+     * Inverted from the pre-D56 assertion, on record: the old resolver fell
+     * back to the retail list for any unknown string, which is the mechanism
+     * that would hand a mis-wired future domain the wrong product. Unknown
+     * now behaves like unresolved — visibly empty, never plausibly wrong.
+     */
+    expect(nav('SOMETHING_NEW', LEGACY_MODULES)).toEqual([]);
   });
 });
 
@@ -337,7 +348,7 @@ describe('an unresolved profile renders nothing rather than a guess', () => {
 describe('every navigation entry points somewhere real', () => {
   it('no two entries share an href within one workspace', () => {
     for (const [type, modules] of [
-      ['TILE_SHOP', LEGACY_MODULES],
+      ['HARDWARE', LEGACY_MODULES],
       ['RESTAURANT', RESTAURANT_MODULES],
     ] as const) {
       const seen = hrefs(nav(type, modules));
@@ -473,7 +484,7 @@ describe('moduleForPath', () => {
     expect(salesEntries).toHaveLength(2);
     expect(salesEntries.map((item) => item.module)).toEqual([undefined, undefined]);
 
-    expect(labels(nav('TILE_SHOP', [...SHARED_CORE]))).toContain('Sales');
+    expect(labels(nav('HARDWARE', [...SHARED_CORE]))).toContain('Sales');
     expect(labels(nav('RESTAURANT', RESTAURANT_MODULES))).toContain('Sales');
   });
 
@@ -515,7 +526,7 @@ describe('the navigation assertions can actually fail', () => {
 
   it('an unresolved profile silently defaulting to retail would be detected', () => {
     const safe = nav(null, null);
-    const defaulted = nav('TILE_SHOP', LEGACY_MODULES);
+    const defaulted = nav('HARDWARE', LEGACY_MODULES);
     expect(safe).not.toEqual(defaulted);
     expect(() => expect(defaulted).toEqual([])).toThrow();
   });

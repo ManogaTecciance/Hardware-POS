@@ -8,6 +8,7 @@
  * is not — a gate that rendered an empty page always would satisfy the negatives
  * alone.
  */
+import { domainFor } from '@hardware-pos/shared';
 import { cleanup, render, screen } from '@testing-library/react';
 import * as React from 'react';
 
@@ -89,6 +90,8 @@ function profile(businessType: string, enabledModules: ModuleKey[]): EffectiveBu
     inventoryMode: businessType === 'RESTAURANT' ? 'LOCAL' : 'QUICKBOOKS',
     accountingProvider: businessType === 'RESTAURANT' ? 'NONE' : 'QUICKBOOKS',
     enabledModules,
+    // D56: resolved exactly as the server would resolve it.
+    capabilities: domainFor(businessType as EffectiveBusinessProfile['businessType']).capabilities,
     version: 1,
     updatedAt: null,
   };
@@ -116,14 +119,14 @@ afterEach(cleanup);
 
 describe('a tenant that has the module', () => {
   it('renders the page untouched', () => {
-    renderAt('/quickbooks', ready('TILE_SHOP', LEGACY));
+    renderAt('/quickbooks', ready('HARDWARE', LEGACY));
 
     expect(screen.getByText(CONTENT)).toBeTruthy();
     expect(screen.queryByText('Not part of this workspace')).toBeNull();
   });
 
   it('renders a gated child route too', () => {
-    renderAt('/quickbooks/sync-log', ready('TILE_SHOP', LEGACY));
+    renderAt('/quickbooks/sync-log', ready('HARDWARE', LEGACY));
     expect(screen.getByText(CONTENT)).toBeTruthy();
   });
 
@@ -163,7 +166,7 @@ describe('a tenant that does not have the module', () => {
     // rendering handles the Tile-Shop case by simply not applying the
     // Restaurant redirect card, and the API refuses the underlying reads.
     for (const path of ['/tables', '/orders', '/kitchen']) {
-      renderAt(path, ready('TILE_SHOP', LEGACY));
+      renderAt(path, ready('HARDWARE', LEGACY));
       expect({ path, shown: !!screen.queryByText(CONTENT) }).toEqual({ path, shown: false });
       cleanup();
     }

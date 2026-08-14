@@ -116,7 +116,7 @@ describe('a tenant with no profile row', () => {
 
     expect(res.status).toBe(200);
     expect(res.data.source).toBe('LEGACY_DEFAULT');
-    expect(res.data.businessType).toBe(BusinessType.TILE_SHOP);
+    expect(res.data.businessType).toBe(BusinessType.HARDWARE);
     expect(res.data.inventoryMode).toBe(InventoryMode.QUICKBOOKS);
     expect(res.data.accountingProvider).toBe(AccountingProviderKind.QUICKBOOKS);
   });
@@ -290,7 +290,7 @@ describe('an explicit Restaurant profile', () => {
 
     const tileProfile = await getProfile(ownerToken(tile));
     expect(tileProfile.data.source).toBe('LEGACY_DEFAULT');
-    expect(tileProfile.data.businessType).toBe(BusinessType.TILE_SHOP);
+    expect(tileProfile.data.businessType).toBe(BusinessType.HARDWARE);
   });
 });
 
@@ -308,7 +308,7 @@ describe('tenant isolation', () => {
 
     // Tile's own answer, never the restaurant's.
     expect(res.data.source).toBe('LEGACY_DEFAULT');
-    expect(res.data.businessType).toBe(BusinessType.TILE_SHOP);
+    expect(res.data.businessType).toBe(BusinessType.HARDWARE);
     expect(res.data.inventoryMode).not.toBe(InventoryMode.LOCAL);
   });
 
@@ -320,7 +320,7 @@ describe('tenant isolation', () => {
 
     expect(res.status).toBe(200);
     expect(res.data.source).toBe('LEGACY_DEFAULT');
-    expect(res.data.businessType).toBe(BusinessType.TILE_SHOP);
+    expect(res.data.businessType).toBe(BusinessType.HARDWARE);
   });
 
   it("tenant A cannot update tenant B's profile via a header", async () => {
@@ -537,7 +537,7 @@ describe('duplicate TenantModule rows are prevented', () => {
     await prisma.tenantBusinessProfile.create({
       data: {
         tenantId: tile.tenantId,
-        businessType: BusinessType.RETAIL,
+        businessType: BusinessType.HARDWARE,
         inventoryMode: InventoryMode.LOCAL,
         accountingProvider: AccountingProviderKind.NONE,
       },
@@ -559,7 +559,7 @@ describe('duplicate TenantModule rows are prevented', () => {
 describe('a failed module update rolls back the whole profile transaction', () => {
   it('leaves neither the profile nor the modules changed when validation rejects the request', async () => {
     await patchProfile(ownerToken(tile), {
-      businessType: BusinessType.RETAIL,
+      businessType: BusinessType.HARDWARE,
       enabledModules: [ModuleKey.RETAIL_POS, ModuleKey.INVENTORY],
     });
     const before = await prisma.tenantBusinessProfile.findUniqueOrThrow({
@@ -581,7 +581,7 @@ describe('a failed module update rolls back the whole profile transaction', () =
     });
     // The business type must NOT have moved to RESTAURANT while the module list
     // stayed retail — that half-applied state is the failure mode being excluded.
-    expect(after.businessType).toBe(BusinessType.RETAIL);
+    expect(after.businessType).toBe(BusinessType.HARDWARE);
     expect(after.version).toBe(before.version);
     expect(
       await prisma.tenantModule.findMany({
@@ -602,7 +602,7 @@ describe('a failed module update rolls back the whole profile transaction', () =
    * survive and this test would fail.
    */
   it('rolls back the profile write when the module write fails mid-transaction', async () => {
-    await patchProfile(ownerToken(tile), { businessType: BusinessType.RETAIL });
+    await patchProfile(ownerToken(tile), { businessType: BusinessType.HARDWARE });
     const before = await prisma.tenantBusinessProfile.findUniqueOrThrow({
       where: { tenantId: tile.tenantId },
     });
@@ -624,7 +624,7 @@ describe('a failed module update rolls back the whole profile transaction', () =
     });
     // The business type must NOT be CAFE with no module rows — that half-applied
     // state is precisely what the transaction exists to prevent.
-    expect(after.businessType).toBe(BusinessType.RETAIL);
+    expect(after.businessType).toBe(BusinessType.HARDWARE);
     expect(after.version).toBe(before.version);
     expect(after.updatedAt).toEqual(before.updatedAt);
     expect(await prisma.tenantModule.count({ where: { tenantId: tile.tenantId } })).toBe(0);
@@ -637,7 +637,7 @@ describe('a failed module update rolls back the whole profile transaction', () =
 
 describe('profile lifecycle', () => {
   it('increments version on every update — an optimistic-concurrency token', async () => {
-    const first = await patchProfile(ownerToken(tile), { businessType: BusinessType.RETAIL });
+    const first = await patchProfile(ownerToken(tile), { businessType: BusinessType.HARDWARE });
     const second = await patchProfile(ownerToken(tile), { businessType: BusinessType.HARDWARE });
 
     expect(first.data.version).toBe(1);

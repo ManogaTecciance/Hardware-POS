@@ -12,17 +12,16 @@ import type {
   InventoryMode,
   ModuleKey,
 } from './platform-api';
+import { BUSINESS_TYPE_VALUES, domainFor } from '@hardware-pos/shared';
 
-export const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
-  TILE_SHOP: 'Tile shop',
-  HARDWARE: 'Hardware store',
-  RETAIL: 'Retail',
-  RESTAURANT: 'Restaurant',
-  CAFE: 'Café',
-  BAKERY: 'Bakery',
-  HOTEL: 'Hotel',
-  GENERAL: 'General',
-};
+/**
+ * D56: labels come from the domain registry — one declaration, shared with the
+ * API and the console. A business type without a label is a compile error in
+ * the registry, not a blank cell here.
+ */
+export const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = Object.fromEntries(
+  BUSINESS_TYPE_VALUES.map((t) => [t, domainFor(t).label]),
+) as Record<BusinessType, string>;
 
 /** Phrased as *where stock is mastered*, which is what the mode actually decides. */
 export const INVENTORY_MODE_LABELS: Record<InventoryMode, string> = {

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 279.79 188.73">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: url(#linear-gradient);
+      }
+
+      .cls-2 {
+        fill: #fff;
+      }
+    </style>
+    <linearGradient id="linear-gradient" x1="139.9" y1="188.73" x2="139.9" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c7ff3d" stop-opacity="0"/>
+      <stop offset=".3" stop-color="#c7ff3d"/>
+      <stop offset=".5" stop-color="#00d4c7"/>
+      <stop offset=".7" stop-color="#00d4c7"/>
+      <stop offset="1" stop-color="#00d4c7" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <g id="Layer_1-2" data-name="Layer 1">
+    <g id="axlo-digital-icon">
+      <polygon class="cls-2" points="152.1 55.76 132.97 71.28 85.56 30.17 122.38 30.22 152.1 55.76"/>
+      <polygon class="cls-2" points="167.6 101.39 186.73 85.87 234.2 127.1 197.26 127.04 167.6 101.39"/>
+      <polygon class="cls-1" points="240.19 0 0 188.68 37.36 188.73 279.79 .06 240.19 0"/>
+    </g>
+  </g>
+</svg>

@@ -56,7 +56,7 @@ beforeEach(async () => {
 });
 
 async function migrate(tenant: SeededTenant) {
-  await seedTenantRoles(prisma, tenant.tenantId, 'TILE_SHOP');
+  await seedTenantRoles(prisma, tenant.tenantId, 'HARDWARE');
   return linkUsersToRoles(prisma, tenant.tenantId);
 }
 
@@ -165,7 +165,7 @@ describe('failing closed rather than falling back', () => {
 
   it('a role from another tenant is never usable', async () => {
     await migrate(tile);
-    await seedTenantRoles(prisma, other.tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, other.tenantId, 'HARDWARE');
     const foreign = await prisma.role.findUniqueOrThrow({
       where: { tenantId_key: { tenantId: other.tenantId, key: 'OWNER' } },
     });
@@ -212,7 +212,7 @@ describe('the readiness report describes reality', () => {
 
   it('reports a clean migration once both tenants are linked', async () => {
     await migrate(tile);
-    await seedTenantRoles(prisma, other.tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, other.tenantId, 'HARDWARE');
     await linkUsersToRoles(prisma, other.tenantId);
 
     const report = await buildReport(prisma);
@@ -226,7 +226,7 @@ describe('the readiness report describes reality', () => {
 
   it('names a cross-tenant link rather than hiding it', async () => {
     await migrate(tile);
-    await seedTenantRoles(prisma, other.tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, other.tenantId, 'HARDWARE');
     const foreign = await prisma.role.findUniqueOrThrow({
       where: { tenantId_key: { tenantId: other.tenantId, key: 'OWNER' } },
     });

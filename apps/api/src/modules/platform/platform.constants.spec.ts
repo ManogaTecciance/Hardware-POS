@@ -17,8 +17,8 @@ import {
  */
 describe('platform constants', () => {
   describe('legacy defaults preserve current Tile Shop behaviour', () => {
-    it('is a QuickBooks-mastered tile shop', () => {
-      expect(LEGACY_TENANT_DEFAULTS.businessType).toBe(BusinessType.TILE_SHOP);
+    it('is a QuickBooks-mastered hardware tenant (D57: was TILE_SHOP)', () => {
+      expect(LEGACY_TENANT_DEFAULTS.businessType).toBe(BusinessType.HARDWARE);
       expect(LEGACY_TENANT_DEFAULTS.inventoryMode).toBe(InventoryMode.QUICKBOOKS);
       expect(LEGACY_TENANT_DEFAULTS.accountingProvider).toBe(AccountingProviderKind.QUICKBOOKS);
     });
@@ -92,7 +92,8 @@ describe('platform constants', () => {
       }
     });
 
-    it.each([BusinessType.TILE_SHOP, BusinessType.HARDWARE, BusinessType.RETAIL])(
+    // D57: HARDWARE is the vertical's one value; TILE_SHOP/RETAIL removed.
+    it.each([BusinessType.HARDWARE])(
       '%s matches the legacy retail set exactly',
       (businessType) => {
         expect([...DEFAULT_MODULES_BY_BUSINESS_TYPE[businessType]].sort()).toEqual(
@@ -142,7 +143,6 @@ describe('platform constants', () => {
       expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.RESTAURANT]).toContain(ModuleKey.RESERVATIONS);
       expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.CAFE]).toContain(ModuleKey.RESERVATIONS);
       expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.HARDWARE]).not.toContain(ModuleKey.RESERVATIONS);
-      expect(DEFAULT_MODULES_BY_BUSINESS_TYPE[BusinessType.TILE_SHOP]).not.toContain(ModuleKey.RESERVATIONS);
     });
 
     it('GENERAL gets only the shared core', () => {

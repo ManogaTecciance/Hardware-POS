@@ -29,6 +29,7 @@
  * provider from the authenticated session and refuses a QuickBooks push for a LOCAL
  * or DISABLED tenant whatever the browser sends.
  */
+import { domainFor } from '@hardware-pos/shared';
 import type { BusinessType, InventoryMode } from '@/lib/platform-api';
 
 import type { ProductSyncStatus } from '@/lib/products-api';
@@ -59,14 +60,14 @@ export type ProductBusinessKind = 'RESTAURANT' | 'RETAIL';
  */
 export function resolveBusinessKind(businessType: BusinessType | null): ProductBusinessKind | null {
   if (businessType === null) return null;
-  if (
-    businessType === 'RESTAURANT' ||
-    businessType === 'CAFE' ||
-    businessType === 'BAKERY'
-  ) {
-    return 'RESTAURANT';
-  }
-  return 'RETAIL';
+  /*
+   * D56: answered by the domain registry, not by an if-chain that each new
+   * vertical had to remember to extend — the chain this replaced omitted
+   * HOTEL, so a hotel tenant got the retail wizard with no food type, no
+   * dietary tags and no modifier step. `catalogue.preparation` is the
+   * capability that decides whether the restaurant authoring chrome renders.
+   */
+  return domainFor(businessType).capabilities.catalogue.preparation ? 'RESTAURANT' : 'RETAIL';
 }
 
 /**

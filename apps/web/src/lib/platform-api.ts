@@ -8,59 +8,36 @@
  * as it is until then.
  *
  * Mirrors the backend `EffectiveBusinessProfile` / `ModuleState` shapes from
- * `apps/api/src/modules/platform/platform.types.ts`. The union members are
- * duplicated here rather than imported from `@hardware-pos/database` because that
- * package pulls in the Prisma client, which must not reach the browser bundle.
+ * `apps/api/src/modules/platform/platform.types.ts`.
+ *
+ * D56: the vocabulary unions come from `@hardware-pos/shared` — browser-safe
+ * by design — instead of being hand-maintained copies here. The old copies
+ * were guarded by a regex over this file's source text, which broke twice
+ * during D55; `platform-vocabulary.spec.ts` on the API now compares the
+ * shared values against the Prisma enums at runtime instead.
  */
+import type { TenantCapabilities } from '@hardware-pos/shared';
+
 import { api } from './api';
 import type { Session } from './session-store';
+
+export type {
+  AccountingProviderKind,
+  BusinessType,
+  InventoryMode,
+  ModuleKey,
+  TenantCapabilities,
+} from '@hardware-pos/shared';
+import type {
+  AccountingProviderKind,
+  BusinessType,
+  InventoryMode,
+  ModuleKey,
+} from '@hardware-pos/shared';
 
 function auth(session: Session) {
   return { token: session.token, tenantId: session.user.tenantId };
 }
-
-/** `HOTEL` (D55) is the hotel workspace template; it mirrors RESTAURANT for now. */
-export type BusinessType =
-  | 'TILE_SHOP'
-  | 'HARDWARE'
-  | 'RETAIL'
-  | 'RESTAURANT'
-  | 'CAFE'
-  | 'BAKERY'
-  | 'HOTEL'
-  | 'GENERAL';
-
-export type InventoryMode = 'LOCAL' | 'QUICKBOOKS' | 'EXTERNAL' | 'DISABLED';
-
-export type AccountingProviderKind = 'NONE' | 'QUICKBOOKS' | 'FUTURE_EXTERNAL';
-
-/**
- * Switchable feature modules. `PAYMENTS` is intentionally absent — taking payment
- * is core to every business profile and is never switchable off.
- */
-export type ModuleKey =
-  | 'RETAIL_POS'
-  | 'INVENTORY'
-  | 'CUSTOMERS'
-  | 'QUOTATIONS'
-  | 'RETURNS'
-  | 'EXCHANGES'
-  | 'SUPPLIERS'
-  | 'REPORTING'
-  | 'USERS'
-  | 'BRANCHES'
-  | 'SETTINGS'
-  | 'BRANDING'
-  | 'QUICKBOOKS'
-  | 'MENU_MANAGEMENT'
-  | 'DINING'
-  | 'TABLE_MANAGEMENT'
-  | 'TAKEAWAY'
-  | 'KITCHEN'
-  | 'KITCHEN_DISPLAY'
-  | 'ONLINE_ORDERS'
-  | 'DELIVERY_INTEGRATIONS'
-  | 'RESERVATIONS';
 
 /**
  * `LEGACY_DEFAULT` means the tenant has no stored profile and is running the
@@ -75,6 +52,12 @@ export interface EffectiveBusinessProfile {
   inventoryMode: InventoryMode;
   accountingProvider: AccountingProviderKind;
   enabledModules: ModuleKey[];
+  /**
+   * D56 — what this tenant's users can do, resolved server-side from the
+   * domain registry. Pages read these instead of comparing `businessType`;
+   * they are affordances only — every route guard still applies.
+   */
+  capabilities: TenantCapabilities;
   /** Optimistic-concurrency token, or null for a legacy default. */
   version: number | null;
   updatedAt: string | null;

@@ -213,7 +213,7 @@ describe('legacy tenant (no profile row) is unchanged', () => {
 describe('an explicit QUICKBOOKS tenant behaves identically to a legacy tenant', () => {
   it('produces field-identical Sale rows', async () => {
     const legacy = await paidSale(tile, owner);
-    await giveProfile(other, AccountingProviderKind.QUICKBOOKS, BusinessType.TILE_SHOP);
+    await giveProfile(other, AccountingProviderKind.QUICKBOOKS, BusinessType.HARDWARE);
     const explicit = await paidSale(other, otherOwner);
 
     const compare = (s: Sale) => ({
@@ -234,7 +234,7 @@ describe('an explicit QUICKBOOKS tenant behaves identically to a legacy tenant',
     const legacy = await paidSale(tile, owner);
     const legacyJob = await prisma.syncJob.findFirstOrThrow({ where: { entityId: legacy.id } });
 
-    await giveProfile(other, AccountingProviderKind.QUICKBOOKS, BusinessType.TILE_SHOP);
+    await giveProfile(other, AccountingProviderKind.QUICKBOOKS, BusinessType.HARDWARE);
     const explicit = await paidSale(other, otherOwner);
     const explicitJob = await prisma.syncJob.findFirstOrThrow({ where: { entityId: explicit.id } });
 
@@ -245,7 +245,7 @@ describe('an explicit QUICKBOOKS tenant behaves identically to a legacy tenant',
     const legacy = await paidSale(tile, owner);
     const legacyLog = await prisma.syncLog.findFirstOrThrow({ where: { entityId: legacy.id } });
 
-    await giveProfile(other, AccountingProviderKind.QUICKBOOKS, BusinessType.TILE_SHOP);
+    await giveProfile(other, AccountingProviderKind.QUICKBOOKS, BusinessType.HARDWARE);
     const explicit = await paidSale(other, otherOwner);
     const explicitLog = await prisma.syncLog.findFirstOrThrow({ where: { entityId: explicit.id } });
 
@@ -253,7 +253,7 @@ describe('an explicit QUICKBOOKS tenant behaves identically to a legacy tenant',
   });
 
   it('applies the same customer requirement', async () => {
-    await giveProfile(other, AccountingProviderKind.QUICKBOOKS, BusinessType.TILE_SHOP);
+    await giveProfile(other, AccountingProviderKind.QUICKBOOKS, BusinessType.HARDWARE);
 
     await expect(
       sales.complete(other.tenantId, otherOwner, {

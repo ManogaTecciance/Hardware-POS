@@ -85,7 +85,7 @@ describe('seeding a retail tenant', () => {
   it('creates exactly the five built-in roles with the authority’s permissions', async () => {
     const tenantId = await makeTenant('tnt_retail', 'retail');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     const roles = await rolesOf(tenantId);
     expect(roles.map((r) => r.key as string)).toEqual(
@@ -103,7 +103,7 @@ describe('seeding a retail tenant', () => {
   it('creates no restaurant role', async () => {
     const tenantId = await makeTenant('tnt_retail2', 'retail2');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     const keys = (await rolesOf(tenantId)).map((r) => r.key);
     for (const template of RESTAURANT_ROLE_TEMPLATES) {
@@ -119,7 +119,7 @@ describe('seeding a retail tenant', () => {
   it('marks built-in roles as system roles, so a tenant cannot delete them', async () => {
     const tenantId = await makeTenant('tnt_retail3', 'retail3');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     expect((await rolesOf(tenantId)).every((r) => r.isSystem)).toBe(true);
   });
@@ -159,7 +159,7 @@ describe('roles never cross a tenant boundary (D36)', () => {
     const a = await makeTenant('tnt_a', 'a');
     const b = await makeTenant('tnt_b', 'b');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, a, 'TILE_SHOP');
+    await seedTenantRoles(prisma, a, 'HARDWARE');
     await seedTenantRoles(prisma, b, 'RESTAURANT');
 
     const aRows = await prisma.role.findMany({ where: { tenantId: a }, select: { id: true, key: true } });
@@ -180,7 +180,7 @@ describe('roles never cross a tenant boundary (D36)', () => {
   it('a role key is unique within a tenant but not across tenants', async () => {
     const a = await makeTenant('tnt_c', 'c');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, a, 'TILE_SHOP');
+    await seedTenantRoles(prisma, a, 'HARDWARE');
 
     // The database, not the application, is what enforces this.
     await expect(
@@ -192,8 +192,8 @@ describe('roles never cross a tenant boundary (D36)', () => {
     const a = await makeTenant('tnt_d', 'd');
     const b = await makeTenant('tnt_e', 'e');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, a, 'TILE_SHOP');
-    await seedTenantRoles(prisma, b, 'TILE_SHOP');
+    await seedTenantRoles(prisma, a, 'HARDWARE');
+    await seedTenantRoles(prisma, b, 'HARDWARE');
 
     await prisma.role.update({
       where: { tenantId_key: { tenantId: a, key: 'MANAGER' } },
@@ -213,13 +213,13 @@ describe('re-seeding an existing tenant', () => {
     // it would be discovered by an operator, not by a test.
     const tenantId = await makeTenant('tnt_rename', 'rename');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     await prisma.role.update({
       where: { tenantId_key: { tenantId, key: 'MANAGER' } },
       data: { name: 'Shift Supervisor' },
     });
-    await seedTenantRoles(prisma, tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     const manager = await prisma.role.findUnique({
       where: { tenantId_key: { tenantId, key: 'MANAGER' } },
@@ -233,13 +233,13 @@ describe('re-seeding an existing tenant', () => {
     // semantics a permission removed from a template would live on forever.
     const tenantId = await makeTenant('tnt_repair', 'repair');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     await prisma.role.update({
       where: { tenantId_key: { tenantId, key: 'CASHIER' } },
       data: { permissions: { connect: [{ key: Permission.SETTINGS_MANAGE }] } },
     });
-    await seedTenantRoles(prisma, tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     const cashier = (await rolesOf(tenantId)).find((r) => r.key === 'CASHIER')!;
     expect(cashier.permissions).toEqual([...ROLE_PERMISSIONS.CASHIER].sort());
@@ -265,7 +265,7 @@ describe('the seeding assertions can actually fail', () => {
   it('a role seeded with the wrong permissions would be detected', async () => {
     const tenantId = await makeTenant('tnt_mutate', 'mutate');
     await syncPermissionCatalogue(prisma);
-    await seedTenantRoles(prisma, tenantId, 'TILE_SHOP');
+    await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     const cashier = (await rolesOf(tenantId)).find((r) => r.key === 'CASHIER')!;
     expect(cashier.permissions).toEqual([...ROLE_PERMISSIONS.CASHIER].sort());

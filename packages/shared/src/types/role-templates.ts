@@ -250,16 +250,8 @@ export const ALL_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   ...RESTAURANT_ROLE_TEMPLATES,
 ];
 
-/** Templates a tenant of this business type is provisioned with. */
-export function roleTemplatesForBusinessType(businessType: string): readonly RoleTemplate[] {
-  // D55: HOTEL joins the food-service set — its template mirrors restaurant,
-  // so it gets the same waiter / kitchen / bar roles.
-  const foodService =
-    businessType === 'RESTAURANT' ||
-    businessType === 'CAFE' ||
-    businessType === 'BAKERY' ||
-    businessType === 'HOTEL';
-  return foodService
-    ? [...BUILT_IN_ROLE_TEMPLATES, ...RESTAURANT_ROLE_TEMPLATES]
-    : BUILT_IN_ROLE_TEMPLATES;
-}
+// D56: `roleTemplatesForBusinessType` moved to `domains/registry.ts`. The
+// business-type → roles question is answered by the domain descriptor now,
+// not by an if-chain here that each new vertical had to remember to extend
+// (this one silently handed an unknown type the built-in roles only).
+// Consumers importing it from the package root are unaffected.

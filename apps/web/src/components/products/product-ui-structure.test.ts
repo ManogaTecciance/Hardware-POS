@@ -127,7 +127,14 @@ describe('inventory-mode decisions live in the resolver, not in JSX', () => {
 
   it('the resolver is pure — no session, no fetch, no React', () => {
     const resolver = readFileSync(`${SRC}/${RESOLVER}`, 'utf8');
-    expect(importsOf(resolver).every((spec) => spec.startsWith('@/lib/'))).toBe(true);
+    // D56: `@hardware-pos/shared` joined the allowed set — it is the pure,
+    // browser-safe domain registry the resolver reads `businessKind` from.
+    // Still no components, no api client, no React.
+    expect(
+      importsOf(resolver).every(
+        (spec) => spec.startsWith('@/lib/') || spec === '@hardware-pos/shared',
+      ),
+    ).toBe(true);
     const code = stripComments(resolver);
     expect(code).not.toContain('useState');
     expect(code).not.toContain('fetch(');
@@ -238,7 +245,15 @@ describe('36/37 — nothing outside the product screens changed', () => {
     const nav = stripComments(readFileSync(`${SRC}/lib/nav.ts`, 'utf8'));
     expect(nav).toContain('enabledModules');
     expect(nav).toContain('businessType');
-    expect(nav).toContain('/products');
+    // D56 moved the nav LISTS to the shared domain descriptors; the positive
+    // control ("the catalogue destination really exists") reads them there.
+    const sharedNav = stripComments(
+      readFileSync(
+        `${SRC}/../../../packages/shared/src/domains/navigation.ts`,
+        'utf8',
+      ),
+    );
+    expect(sharedNav).toContain('/products');
     // Stock authority is a product-screen concern. A navigation entry that appeared
     // or vanished with the inventory mode would be a second, competing authority.
     expect(nav).not.toContain('inventoryMode');

@@ -8,6 +8,7 @@
  * positive assertion that the values are actually on screen, so a page that
  * rendered nothing could not pass.
  */
+import { domainFor } from '@hardware-pos/shared';
 import { cleanup, render, screen } from '@testing-library/react';
 import * as React from 'react';
 
@@ -99,10 +100,12 @@ function show(
         ? null
         : {
             source: 'EXPLICIT',
-            businessType: 'TILE_SHOP',
+            // D57: the pilot's value; TILE_SHOP was removed from the enum.
+            businessType: 'HARDWARE',
             inventoryMode: 'QUICKBOOKS',
             accountingProvider: 'QUICKBOOKS',
             enabledModules: LEGACY,
+            capabilities: domainFor('HARDWARE').capabilities,
             version: 1,
             updatedAt: null,
             ...overrides,
@@ -119,10 +122,10 @@ afterEach(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('what the page reports', () => {
-  it('describes a QuickBooks Tile Shop in the operator’s words', () => {
+  it('describes a QuickBooks hardware tenant in the operator’s words (D57: label was “Tile shop”)', () => {
     show();
 
-    expect(screen.getByText('Tile shop')).toBeTruthy();
+    expect(screen.getByText('Hardware store')).toBeTruthy();
     expect(screen.getByText('Tracked in QuickBooks Online')).toBeTruthy();
     expect(screen.getByText('QuickBooks Online')).toBeTruthy();
   });
@@ -232,7 +235,7 @@ describe('the page is read-only', () => {
   it('still renders the configuration it refuses to edit', () => {
     // Pairs with the above: a page rendering nothing also has no controls.
     show();
-    expect(screen.getByText('Tile shop')).toBeTruthy();
+    expect(screen.getByText('Hardware store')).toBeTruthy();
   });
 
   it('says where a change comes from instead', () => {
@@ -246,27 +249,27 @@ describe('states other than ready', () => {
     show({}, { status: 'loading' });
 
     expect(screen.getByRole('status').textContent).toBe('Loading configuration…');
-    expect(screen.queryByText('Tile shop')).toBeNull();
+    expect(screen.queryByText('Hardware store')).toBeNull();
   });
 
   it('refuses to guess after a failed read', () => {
     show({}, { status: 'error' });
 
     expect(screen.getByText('Configuration unavailable')).toBeTruthy();
-    expect(screen.queryByText('Tile shop')).toBeNull();
+    expect(screen.queryByText('Hardware store')).toBeNull();
   });
 
   it('refuses a cashier who typed the URL', () => {
     show({}, { as: 'CASHIER' });
 
     expect(screen.getByText('You don’t have access to settings')).toBeTruthy();
-    expect(screen.queryByText('Tile shop')).toBeNull();
+    expect(screen.queryByText('Hardware store')).toBeNull();
   });
 
   it('admits an admin', () => {
     // The other direction — a page that refused everyone would pass the above.
     show({}, { as: 'ADMIN' });
-    expect(screen.getByText('Tile shop')).toBeTruthy();
+    expect(screen.getByText('Hardware store')).toBeTruthy();
   });
 });
 

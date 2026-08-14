@@ -105,7 +105,7 @@ describe('legacy default module resolution preserves current Tile Shop routes', 
 
 describe('the module guard allows an enabled module', () => {
   it('allows a RETAIL tenant, whose defaults include QUOTATIONS', async () => {
-    await giveProfile(restaurant, BusinessType.RETAIL);
+    await giveProfile(restaurant, BusinessType.HARDWARE);
     expect((await listQuotations(restaurant)).status).toBe(200);
   });
 
@@ -126,7 +126,7 @@ describe('the module guard rejects a disabled module', () => {
   });
 
   it('rejects a RETAIL tenant that has explicitly revoked QUOTATIONS', async () => {
-    await giveProfile(restaurant, BusinessType.RETAIL, [
+    await giveProfile(restaurant, BusinessType.HARDWARE, [
       { moduleKey: ModuleKey.QUOTATIONS, isEnabled: false },
     ]);
 
@@ -191,7 +191,7 @@ describe('module gating is per tenant', () => {
   });
 
   it('revoking the module takes effect immediately', async () => {
-    await giveProfile(restaurant, BusinessType.RETAIL);
+    await giveProfile(restaurant, BusinessType.HARDWARE);
     expect((await listQuotations(restaurant)).status).toBe(200);
 
     await prisma.tenantModule.create({

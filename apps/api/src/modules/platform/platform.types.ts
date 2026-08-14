@@ -1,4 +1,5 @@
 import { AccountingProviderKind, BusinessType, InventoryMode, ModuleKey } from '@hardware-pos/database';
+import type { TenantCapabilities } from '@hardware-pos/shared';
 
 /**
  * Where a resolved profile came from.
@@ -22,6 +23,12 @@ export interface EffectiveBusinessProfile {
   accountingProvider: AccountingProviderKind;
   /** Enabled modules, in `ModuleKey` declaration order. */
   enabledModules: ModuleKey[];
+  /**
+   * D56 — what this tenant's users can do, resolved from the domain registry.
+   * The client reads these instead of comparing `businessType`; they are
+   * affordances, never permission — every route guard still applies.
+   */
+  capabilities: TenantCapabilities;
   /**
    * Optimistic-concurrency token of the persisted row, or `null` for a legacy
    * default (there is no row to version).

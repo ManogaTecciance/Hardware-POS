@@ -190,12 +190,16 @@ enum ShareStatus {
 // Platform business profile (AxloPOS multi-profile support)
 // ─────────────────────────────────────────────────────────────
 
-/// What kind of business a tenant runs. Drives the default module set and the
-/// front-end profile, never the correctness of a shared code path.
+/// What kind of business a tenant runs. Drives the domain registry
+/// (`@hardware-pos/shared` `domainFor`), never the correctness of a shared
+/// code path.
+///
+/// D57: one value per workspace template. `TILE_SHOP` and `RETAIL` were
+/// removed — the pilot tile shop IS a hardware-template business (PO,
+/// 2026-08-14), and `RETAIL` was speculative and never used. Both carried
+/// zero data; migration 20260821000000 recreated the type without them.
 enum BusinessType {
-  TILE_SHOP
   HARDWARE
-  RETAIL
   RESTAURANT
   CAFE
   BAKERY
@@ -343,10 +347,10 @@ model Tenant {
  * where inventory lives, and which accounting system (if any) receives its
  * documents.
  * A tenant may have NO row. That is a first-class, supported state: it resolves
- * to the legacy Tile Shop configuration (TILE_SHOP / QUICKBOOKS / QUICKBOOKS and
- * the full retail module set), which is exactly how every tenant behaved before
- * this table existed. Existing tenants are therefore never backfilled and never
- * have to run a setup wizard.
+ * to the legacy configuration (HARDWARE / QUICKBOOKS / QUICKBOOKS and the full
+ * retail module set — D57 renamed the value from TILE_SHOP), which is exactly
+ * how every tenant behaved before this table existed. The pilot tenant HAS an
+ * explicit row since D57; the no-row path remains supported.
  * `version` is an optimistic-concurrency counter incremented on every write, so
  * two administrators editing the profile concurrently cannot silently overwrite
  * one another once a compare-and-set caller is added.

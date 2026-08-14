@@ -79,10 +79,10 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   // than load-bearing — it keeps the workspace usable if a tenant with an
   // unresolved profile lands here before the profile has loaded.
   const { profile } = useEffectiveProfile();
-  const isRestaurantProfile =
-    profile?.businessType === 'RESTAURANT' ||
-    profile?.businessType === 'CAFE' ||
-    profile?.businessType === 'BAKERY';
+  // D56: a capability read, not a business-type comparison. The inline
+  // predicate this replaced omitted HOTEL in every copy of itself — the
+  // capability is resolved once, server-side, from the domain registry.
+  const isRestaurantProfile = profile?.capabilities.fulfilment.kind === 'TABLE_SERVICE';
 
   // Both hooks always run — React requires stable hook order. The unused
   // branch resolves to EMPTY_MENU without a network round-trip because the

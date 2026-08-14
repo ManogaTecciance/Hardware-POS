@@ -1,28 +1,28 @@
 /**
- * The inventory/accounting pair a newly created tenant of each business type gets
- * (Slice 8.9).
+ * The inventory/accounting pair a newly created tenant of each business type
+ * gets.
  *
- * ## Why this lives in the database package
+ * ## D56: derived from the domain registry, not restated
  *
- * Two callers need it and neither can import from the API: `prisma/seed.ts` and
- * `prisma/provision-tenant.ts`. Writing the pair inline in both would put the
- * question "what does a new restaurant run on?" in two places that nothing checks
- * against each other, and the failure mode is a provisioned tenant whose profile
- * combination the API refuses to accept.
+ * The pairs are declared once, on each `DomainDescriptor` in
+ * `@hardware-pos/shared` — the same declaration the API and the web read. This
+ * module keeps its export shape because two callers need it here and neither
+ * can import from the API: `prisma/seed.ts` and `prisma/provision-tenant.ts`.
  *
  * ## Which side is authoritative
  *
- * `apps/api/src/modules/platform/profile-combinations.ts` is. This table is a
- * *selection* from that allow-list, never an extension of it: a pair here that the
- * API does not support would produce a tenant the platform cannot serve. An API
- * spec enumerates this map and fails if any entry falls outside the allow-list —
- * which is the only reason it is safe to state the pairs twice.
+ * `apps/api/src/modules/platform/profile-combinations.ts` is. A descriptor's
+ * pair is a *selection* from that allow-list, never an extension of it: a pair
+ * the API does not support would produce a tenant the platform cannot serve.
+ * An API spec enumerates this map against the allow-list, which is the only
+ * reason it is safe to state the pairs at all.
  *
- * `TILE_SHOP` keeps the QuickBooks pair because that is what every existing tenant
- * runs and what a tenant with no profile row resolves to. Provisioning a tile shop
- * must not quietly hand it a different configuration from the ones already live.
+ * The cast from the shared string union to the Prisma enums is sound because
+ * `platform-vocabulary.spec.ts` (D56) asserts the two vocabularies are equal
+ * at runtime, in both directions.
  */
 import type { AccountingProviderKind, BusinessType, InventoryMode } from '@prisma/client';
+import { BUSINESS_TYPE_VALUES, domainFor } from '@hardware-pos/shared';
 
 export interface BusinessProfilePreset {
   inventoryMode: InventoryMode;
@@ -30,18 +30,18 @@ export interface BusinessProfilePreset {
 }
 
 /** Total over `BusinessType`: a type added to the enum fails the build here. */
-export const BUSINESS_PROFILE_PRESETS: Record<BusinessType, BusinessProfilePreset> = {
-  TILE_SHOP: { inventoryMode: 'QUICKBOOKS', accountingProvider: 'QUICKBOOKS' },
-  HARDWARE: { inventoryMode: 'QUICKBOOKS', accountingProvider: 'QUICKBOOKS' },
-  RETAIL: { inventoryMode: 'QUICKBOOKS', accountingProvider: 'QUICKBOOKS' },
-  RESTAURANT: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
-  CAFE: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
-  BAKERY: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
-  // D55: the hotel template currently mirrors restaurant in every map. Its own
-  // BusinessType so hotel workspaces are distinguishable before they diverge.
-  HOTEL: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
-  // A catalogue without stock tracking — the third supported pair.
-  GENERAL: { inventoryMode: 'DISABLED', accountingProvider: 'NONE' },
-};
+export const BUSINESS_PROFILE_PRESETS: Record<BusinessType, BusinessProfilePreset> =
+  Object.fromEntries(
+    BUSINESS_TYPE_VALUES.map((businessType) => {
+      const { inventoryMode, accountingProvider } = domainFor(businessType).profile;
+      return [
+        businessType,
+        {
+          inventoryMode: inventoryMode as InventoryMode,
+          accountingProvider: accountingProvider as AccountingProviderKind,
+        },
+      ];
+    }),
+  ) as Record<BusinessType, BusinessProfilePreset>;
 
 export const BUSINESS_TYPES = Object.keys(BUSINESS_PROFILE_PRESETS) as BusinessType[];

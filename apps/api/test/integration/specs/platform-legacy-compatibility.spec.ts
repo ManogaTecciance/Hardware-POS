@@ -238,7 +238,7 @@ describe.each(BOTH_SHAPES)('with %s', (_label, setUpProfile) => {
 
     expect(profile.inventoryMode).toBe(InventoryMode.QUICKBOOKS);
     expect(profile.accountingProvider).toBe(AccountingProviderKind.QUICKBOOKS);
-    expect(profile.businessType).toBe(BusinessType.TILE_SHOP);
+    expect(profile.businessType).toBe(BusinessType.HARDWARE);
     expect(profile.enabledModules).toContain(ModuleKey.QUICKBOOKS);
   });
 });

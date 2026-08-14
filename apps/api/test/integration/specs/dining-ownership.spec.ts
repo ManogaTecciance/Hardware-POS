@@ -86,7 +86,7 @@ beforeEach(async () => {
   });
 
   await syncPermissionCatalogue(prisma);
-  await seedTenantRoles(prisma, tile.tenantId, 'TILE_SHOP');
+  await seedTenantRoles(prisma, tile.tenantId, 'HARDWARE');
   await seedTenantRoles(prisma, restaurant.tenantId, 'RESTAURANT');
   await linkUsersToRoles(prisma, tile.tenantId);
   await linkUsersToRoles(prisma, restaurant.tenantId);

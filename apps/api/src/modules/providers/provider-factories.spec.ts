@@ -9,6 +9,7 @@
  * throw, and asserted *not* to return one of the working providers.
  */
 
+import { domainFor } from '@hardware-pos/shared';
 import { AccountingProviderKind, BusinessType, InventoryMode } from '@hardware-pos/database';
 
 import { BusinessProfileService } from '../platform/business-profile.service';
@@ -31,6 +32,7 @@ import {
 const LEGACY_PROFILE: EffectiveBusinessProfile = {
   source: 'LEGACY_DEFAULT',
   businessType: LEGACY_TENANT_DEFAULTS.businessType,
+  capabilities: domainFor(LEGACY_TENANT_DEFAULTS.businessType).capabilities,
   inventoryMode: LEGACY_TENANT_DEFAULTS.inventoryMode,
   accountingProvider: LEGACY_TENANT_DEFAULTS.accountingProvider,
   enabledModules: [...LEGACY_TENANT_DEFAULTS.enabledModules],

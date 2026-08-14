@@ -45,10 +45,10 @@ export default function PosPage() {
 
   if (!session) return null;
 
-  const isRestaurantProfile =
-    profile?.businessType === 'RESTAURANT' ||
-    profile?.businessType === 'CAFE' ||
-    profile?.businessType === 'BAKERY';
+  // D56: a capability read, not a business-type comparison. The inline
+  // predicate this replaced omitted HOTEL in every copy of itself — the
+  // capability is resolved once, server-side, from the domain registry.
+  const isRestaurantProfile = profile?.capabilities.fulfilment.kind === 'TABLE_SERVICE';
 
   if (!isRestaurantProfile) {
     return <PosRetailCheckout />;

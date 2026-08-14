@@ -6,6 +6,7 @@
  * a flash of retail navigation, that the login form exposes the workspace field and
  * reacts to `WORKSPACE_REQUIRED`, and that every control has an accessible name.
  */
+import { domainFor } from '@hardware-pos/shared';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -114,6 +115,8 @@ function profile(businessType: string, enabledModules: ModuleKey[]): EffectiveBu
     inventoryMode: businessType === 'RESTAURANT' ? 'LOCAL' : 'QUICKBOOKS',
     accountingProvider: businessType === 'RESTAURANT' ? 'NONE' : 'QUICKBOOKS',
     enabledModules,
+    // D56: resolved exactly as the server would resolve it.
+    capabilities: domainFor(businessType as EffectiveBusinessProfile['businessType']).capabilities,
     version: 1,
     updatedAt: null,
   };
@@ -167,7 +170,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   role = 'OWNER';
   searchParams = new URLSearchParams();
-  profileState = { status: 'ready', profile: profile('TILE_SHOP', LEGACY) };
+  profileState = { status: 'ready', profile: profile('HARDWARE', LEGACY) };
   window.localStorage.clear();
 });
 

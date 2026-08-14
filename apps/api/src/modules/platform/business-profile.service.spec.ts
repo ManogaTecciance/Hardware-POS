@@ -56,11 +56,11 @@ describe('BusinessProfileService (resolution)', () => {
   describe('no profile row', () => {
     const persisted: PersistedProfile = { profile: null, modules: [] };
 
-    it('resolves the legacy Tile Shop configuration', async () => {
+    it('resolves the legacy retail configuration (D57: value renamed to HARDWARE)', async () => {
       const effective = await build(persisted).getEffectiveProfile('tnt_a');
 
       expect(effective.source).toBe('LEGACY_DEFAULT');
-      expect(effective.businessType).toBe(BusinessType.TILE_SHOP);
+      expect(effective.businessType).toBe(BusinessType.HARDWARE);
       expect(effective.inventoryMode).toBe(InventoryMode.QUICKBOOKS);
       expect(effective.accountingProvider).toBe(AccountingProviderKind.QUICKBOOKS);
       expect([...effective.enabledModules].sort()).toEqual(

@@ -112,7 +112,8 @@ export class BusinessProfileRepository {
         : await tx.tenantBusinessProfile.create({
             data: {
               tenantId,
-              businessType: write.businessType ?? BusinessType.TILE_SHOP,
+              // D57: TILE_SHOP was removed; HARDWARE is the legacy-compatible default.
+              businessType: write.businessType ?? BusinessType.HARDWARE,
               inventoryMode: write.inventoryMode ?? InventoryMode.QUICKBOOKS,
               accountingProvider: write.accountingProvider ?? AccountingProviderKind.QUICKBOOKS,
             },

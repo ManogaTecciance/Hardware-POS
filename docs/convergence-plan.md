@@ -1,6 +1,10 @@
 # AxloPOS convergence plan — one catalogue, one settlement document, N pluggable domains
 
-**Status:** proposal, awaiting Product Owner sign-off. Nothing here is implemented.
+**Status:** in delivery. **Phase 0 shipped** (D56/D57, 2026-08-14): domain
+packs, capabilities on the profile, the seven inline predicates deleted, the
+HOTEL defects D-1/D-2 fixed and browser-verified, `TILE_SHOP`/`RETAIL` removed
+from the enum, and the pilot classified as an explicit HARDWARE tenant.
+Phases 1+ remain proposals.
 **Author:** architecture review, 2026-08-14.
 **Scope:** `apps/api`, `apps/web`, `packages/database`, `packages/shared`.
 **Extends:** D28, D31, D36, D37, D44, D45, D46, D52, D55.
@@ -1008,7 +1012,7 @@ Pre-existing, independent of whether the convergence proceeds. **None fixed** �
 this document was requested as analysis only. Four of the seven are direct
 consequences of the missing §4.
 
-### D-1 — A HOTEL workspace gets the retail POS 🔴 **HIGH**
+### D-1 — A HOTEL workspace gets the retail POS 🔴 **HIGH — FIXED in Phase 0**
 
 `apps/web/src/app/(app)/pos/page.tsx:49-55`
 
@@ -1032,14 +1036,14 @@ is true — I verified the module set and the navigation. I did not verify the p
 bodies, and the page bodies are where this breaks. The hotel template is correct
 in the data and incomplete in the UI.
 
-### D-2 — Same defect in the wizard, dashboard and menu pages 🔴 **HIGH**
+### D-2 — Same defect in the wizard, dashboard and menu pages 🔴 **HIGH — FIXED in Phase 0**
 
 `resolveBusinessKind` (`product-presentation.ts:60`) omits `HOTEL`, so a hotel
 tenant gets the **retail** product wizard: no Food/Beverage/Dessert selector, no
 dietary tags, no prep time, no modifier or station step. Same for
 `dashboard/page.tsx:39` and the three `menu/**` pages.
 
-### D-3 — `NAV_BY_BUSINESS_TYPE` is not compile-checked 🟡 **MEDIUM**
+### D-3 — `NAV_BY_BUSINESS_TYPE` is not compile-checked 🟡 **MEDIUM — FIXED in Phase 0**
 
 `web/nav.ts:274` declares `Record<string, NavGroup[]>` and `:321` reads
 `NAV_BY_BUSINESS_TYPE[input.businessType] ?? RETAIL_NAV`. A new business type
@@ -1119,7 +1123,7 @@ Given the PO's constraint that QuickBooks serves the hardware template only,
 this coupling now scales with the number of domains rather than staying
 constant. §4.9 and §8.10.
 
-### D-10 — `RETAIL` is preset to QuickBooks with no template behind it 🟢 **LOW — resolution decided**
+### D-10 — `RETAIL` is preset to QuickBooks with no template behind it 🟢 **LOW — FIXED in Phase 0 (values removed)**
 
 `BUSINESS_PROFILE_PRESETS` gives `RETAIL` the `QUICKBOOKS`/`QUICKBOOKS` pair.
 No workspace template exposes `RETAIL`, so nothing creates such a tenant today —

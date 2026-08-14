@@ -161,7 +161,7 @@ async function main(): Promise<void> {
     // with none must fail closed once authorization reads them, so this is part of
     // creating a tenant rather than a follow-up step someone can forget.
     await syncPermissionCatalogue(tx);
-    roleCount = (await seedTenantRoles(tx, t.id, businessType ?? 'TILE_SHOP')).length;
+    roleCount = (await seedTenantRoles(tx, t.id, businessType ?? 'HARDWARE')).length;
 
     for (const user of users) {
       await tx.user.create({
@@ -190,7 +190,7 @@ async function main(): Promise<void> {
   } else {
     // Stated, not silent: the operator should know they provisioned a QuickBooks
     // retail tenant by omission rather than by choice.
-    console.log('  Profile  none — resolves to the legacy TILE_SHOP / QuickBooks configuration\n');
+    console.log('  Profile  none — resolves to the legacy HARDWARE / QuickBooks configuration (D57)\n');
   }
   console.log('  Logins (email / password / PIN):');
   for (const user of users) {

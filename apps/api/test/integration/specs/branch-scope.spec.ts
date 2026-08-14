@@ -58,7 +58,7 @@ beforeEach(async () => {
   tile = await seedTileShopWithQuickBooks(prisma);
   other = await seedSecondTenant(prisma);
   await syncPermissionCatalogue(prisma);
-  await seedTenantRoles(prisma, tile.tenantId, 'TILE_SHOP');
+  await seedTenantRoles(prisma, tile.tenantId, 'HARDWARE');
   await seedTenantRoles(prisma, other.tenantId, 'RESTAURANT');
   await linkUsersToRoles(prisma, tile.tenantId);
   await linkUsersToRoles(prisma, other.tenantId);

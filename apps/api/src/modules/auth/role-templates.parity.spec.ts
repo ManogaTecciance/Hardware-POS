@@ -141,7 +141,8 @@ describe('template keys are stable identifiers', () => {
 
 describe('templates are selected by business type', () => {
   it('a retail tenant gets the built-in roles and no restaurant role', () => {
-    for (const type of ['TILE_SHOP', 'HARDWARE', 'RETAIL', 'GENERAL']) {
+    // D57: HARDWARE is the retail vertical's one value.
+    for (const type of ['HARDWARE', 'GENERAL']) {
       const keys = roleTemplatesForBusinessType(type).map((t) => t.key);
       expect({ type, keys: keys.sort() }).toEqual({
         type,
@@ -151,7 +152,7 @@ describe('templates are selected by business type', () => {
   });
 
   it('a food-service tenant gets both sets', () => {
-    for (const type of ['RESTAURANT', 'CAFE', 'BAKERY']) {
+    for (const type of ['RESTAURANT', 'CAFE', 'BAKERY', 'HOTEL']) {
       const keys = roleTemplatesForBusinessType(type).map((t) => t.key);
       expect({ type, count: keys.length }).toEqual({
         type,
@@ -161,12 +162,22 @@ describe('templates are selected by business type', () => {
     }
   });
 
-  it('an unrecognised business type still gets the built-in roles', () => {
-    // Failing closed here would mean a tenant with no roles at all, which once
-    // authorization reads these rows is an account nobody can use.
-    expect(roleTemplatesForBusinessType('SOMETHING_NEW').length).toBe(
-      BUILT_IN_ROLE_TEMPLATES.length,
+  it('an unrecognised business type is refused, loudly (D56)', () => {
+    /*
+     * This inverts the previous assertion, deliberately and on record. The
+     * old fallback handed an unknown type the built-in roles — the exact
+     * silent-wrong-default pattern that gave HOTEL the retail screens. The
+     * enum is closed and provisioning validates its input, so the only way
+     * to reach this branch is a bug or garbage input; aborting the
+     * provisioning transaction beats creating a half-configured tenant.
+     * The error names the valid values so the failure is self-explaining.
+     */
+    expect(() => roleTemplatesForBusinessType('SOMETHING_NEW')).toThrow(
+      /Unknown business type "SOMETHING_NEW".*HARDWARE.*GENERAL/,
     );
+    // Positive counterpart: a valid value does NOT throw — the guard rejects
+    // unknowns, it does not reject everything.
+    expect(() => roleTemplatesForBusinessType('HARDWARE')).not.toThrow();
   });
 });
 

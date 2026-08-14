@@ -173,7 +173,24 @@ async function main(): Promise<void> {
   // Phase 1.5: the permission catalogue is global; roles are per tenant (D36).
   // Landed inert — nothing resolves authorization from these rows yet.
   const permissionCount = await syncPermissionCatalogue(prisma);
-  const tileRoles = await seedTenantRoles(prisma, tenant.id, 'TILE_SHOP');
+  const tileRoles = await seedTenantRoles(prisma, tenant.id, 'HARDWARE');
+
+  /*
+   * D57: the pilot tenant is classified for real. It ran for months with no
+   * profile row, resolving through LEGACY_TENANT_DEFAULTS — verified
+   * behaviour-preserving to make explicit, because HARDWARE's default module
+   * set is exactly the legacy 13-module list. The seed mirrors what the
+   * production backfill script (backfill-pilot-profile.ts) does there.
+   */
+  await prisma.tenantBusinessProfile.upsert({
+    where: { tenantId: tenant.id },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      businessType: 'HARDWARE',
+      ...BUSINESS_PROFILE_PRESETS.HARDWARE,
+    },
+  });
 
   const platform = await seedPlatformConsole(await bcrypt.hash(PLATFORM_ADMIN_PASSWORD, SALT_ROUNDS));
   const restaurant = await seedRestaurant(await bcrypt.hash(RESTAURANT_OWNER_PASSWORD, SALT_ROUNDS));

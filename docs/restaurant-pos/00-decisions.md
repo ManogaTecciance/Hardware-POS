@@ -1715,6 +1715,89 @@ and its own verification, so it is not bundled into this one.
 
 ---
 
+## 2026-08-14 — Convergence Phase 0
+
+### D56 — Domain packs: one descriptor per vertical; capabilities replace business-type comparisons
+
+Implements Phase 0 of [`docs/convergence-plan.md`](../convergence-plan.md)
+(§4, §5). Adding a vertical used to touch fifteen places, eleven of which
+failed silently — `NAV_BY_BUSINESS_TYPE[t] ?? RETAIL_NAV` handed an unknown
+domain the retail rail, `resolveBusinessKind` fell back to retail chrome, and
+six page bodies compared `businessType` inline. HOTEL shipped missing seven of
+them, which is how a hotel workspace got the restaurant sidebar with the
+retail POS behind it.
+
+**Domain packs.** `packages/shared/src/domains/` holds one `DomainDescriptor`
+per vertical (hardware, food-service, hotel, general) declaring label,
+template copy, profile preset, module set, navigation (as data, icons by
+name), role templates and capabilities. `DOMAIN_REGISTRY` is a total
+`Record<BusinessType, DomainDescriptor>` with **no fallback**: a value without
+an entry is a compile error, never a wrong screen. The seven scattered maps
+(`BUSINESS_PROFILE_PRESETS`, `DEFAULT_MODULES_BY_BUSINESS_TYPE`,
+`BUSINESS_TYPE_LABELS`, `NAV_BY_BUSINESS_TYPE`,
+`roleTemplatesForBusinessType`, `WORKSPACE_TEMPLATES`, the web `BusinessType`
+union) become derivations or re-exports of the registry.
+
+**Capabilities.** `TenantCapabilities` — what a tenant's users can actually do
+(catalogue.variants/modifiers/preparation, fulfilment.kind/channels, charges,
+documents) — is declared per descriptor and returned on
+`GET /v1/platform/profile`. Pages and services read a capability, never a
+business type; D31's rule generalised from the product screens to the whole
+platform. Capabilities are affordances only: the server still refuses what the
+guard refuses. Unshipped features (`collections`, `components`) are declared
+`false` until their phase flips them.
+
+**Hotel re-declares, never aliases.** `hotel.domain.ts` re-declares the
+food-service values (Q7): a redundant-looking file today is a one-file edit
+when hotels diverge; an alias would be a refactor. A parity spec pins the
+values equal until a divergence is a visible edit.
+
+**The web unions move to `@hardware-pos/shared`.** The web must never import
+the Prisma client, so it hand-maintained copies of `BusinessType`/`ModuleKey`,
+guarded by a regex over source text that broke twice during D55. The shared
+package is browser-safe; the unions live there once as `as const` arrays with
+derived types, and the API contract spec compares them against the Prisma
+enums **at runtime**, both directions, no regex.
+
+### D57 — One business type per template: the pilot is HARDWARE; TILE_SHOP and RETAIL are removed
+
+PO decision (2026-08-14): the Hardware template and the Tile Shop are the same
+entity, and there is no Retail template. (Plan §4.8.1; plan-appendix id D71.)
+
+The `BusinessType` enum was ten days old and the three retail values carried
+**zero data** — `TenantBusinessProfile.businessType` is the enum's only column
+and no row held `TILE_SHOP`, `HARDWARE` or `RETAIL`; the pilot tenant has no
+profile row and resolved through `LEGACY_TENANT_DEFAULTS` (code, not data). So
+the values are removed outright rather than deprecated: a transition for
+ghosts protects nothing.
+
+- `LEGACY_TENANT_DEFAULTS.businessType` and the
+  `business-profile.repository` write-fallback repoint `TILE_SHOP` →
+  `HARDWARE`. Verified behaviour-preserving: HARDWARE's default module set is
+  exactly the legacy 13-module list and the provider pair is identical. The
+  one visible change is the Settings → Business label reading "Hardware
+  store" instead of "Tile shop". (The D55 "known gap" note assumed the module
+  lists might differ; they are the same set — that note is corrected by this
+  record.)
+- The pilot tenant is **classified for real**: an explicit
+  `TenantBusinessProfile` row (`HARDWARE`, `QUICKBOOKS`/`QUICKBOOKS`) written
+  by `packages/database/prisma/backfill-pilot-profile.ts` — an operational
+  script with a production guard, never part of `migrate deploy`. This closes
+  D55's "Legacy default" console gap: the pilot shows as a Hardware-template
+  workspace because it genuinely is one.
+- **Migration** `20260821000000_remove_tile_shop_and_retail_business_types`:
+  recreates the enum without the two values (Postgres cannot `DROP` an enum
+  value in place). Non-additive by nature — this record is its authorisation,
+  and the per-migration proof in `provider-contract.spec.ts` scopes an
+  explicit exception for exactly this recreation while continuing to forbid
+  every other destructive shape. The migration refuses to run if any row
+  carries a removed value.
+- Existing specs that passed `'TILE_SHOP'` to role seeding are mechanically
+  renamed to `'HARDWARE'` under this record (their assertions are unchanged —
+  both values always resolved to identical roles).
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

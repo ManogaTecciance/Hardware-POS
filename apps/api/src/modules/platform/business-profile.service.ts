@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InventoryMode, ModuleKey } from '@hardware-pos/database';
 
 import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto';
+import { domainFor } from '@hardware-pos/shared';
+
 import {
   DEFAULT_MODULES_BY_BUSINESS_TYPE,
   LEGACY_TENANT_DEFAULTS,
@@ -212,6 +214,9 @@ export class BusinessProfileService {
         inventoryMode: LEGACY_TENANT_DEFAULTS.inventoryMode,
         accountingProvider: LEGACY_TENANT_DEFAULTS.accountingProvider,
         enabledModules: sortModules(LEGACY_TENANT_DEFAULTS.enabledModules),
+        // D56: resolved from the registry so the legacy path answers with the
+        // same capability object an explicit HARDWARE profile would.
+        capabilities: domainFor(LEGACY_TENANT_DEFAULTS.businessType).capabilities,
         version: null,
         updatedAt: null,
       };
@@ -223,6 +228,7 @@ export class BusinessProfileService {
       inventoryMode: profile.inventoryMode,
       accountingProvider: profile.accountingProvider,
       enabledModules: this.resolveModules(persisted),
+      capabilities: domainFor(profile.businessType).capabilities,
       version: profile.version,
       updatedAt: profile.updatedAt,
     };
