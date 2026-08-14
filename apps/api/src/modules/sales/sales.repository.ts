@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, Product, QuickBooksDocumentType } from '@hardware-pos/database';
 
+import { mirrorExternalRef } from '../quickbooks/external-ref';
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { AccountingSubmissionResult, StockLine } from '../providers/provider.types';
@@ -440,14 +441,28 @@ export class SalesRepository {
         where: { id: sale.id },
         data: { syncStatus: 'SYNCED', quickbooksDocumentId: qboDocId, syncError: null },
       });
+      // D63 dual-write — same transaction, same facts.
+      await mirrorExternalRef(tx, sale.tenantId, 'SALE', sale.id, {
+        externalId: qboDocId,
+        externalType: sale.quickbooksDocumentType,
+        syncStatus: 'SYNCED',
+        syncError: null,
+        lastSyncedAt: new Date(),
+      });
       for (const [i, p] of sale.payments.entries()) {
+        const paymentExternalId =
+          p.quickbooksPaymentId ?? external.paymentIds?.[i] ?? `QBO-PMT-${sale.saleNumber}-${i + 1}`;
         await tx.payment.update({
           where: { id: p.id },
           data: {
             syncStatus: 'SYNCED',
-            quickbooksPaymentId:
-              p.quickbooksPaymentId ?? external.paymentIds?.[i] ?? `QBO-PMT-${sale.saleNumber}-${i + 1}`,
+            quickbooksPaymentId: paymentExternalId,
           },
+        });
+        await mirrorExternalRef(tx, sale.tenantId, 'PAYMENT', p.id, {
+          externalId: paymentExternalId,
+          syncStatus: 'SYNCED',
+          lastSyncedAt: new Date(),
         });
       }
       await tx.syncJob.updateMany({

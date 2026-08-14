@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Customer, CustomerType, Prisma } from '@hardware-pos/database';
 
+import { mirrorExternalRef } from '../quickbooks/external-ref';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface CustomerListFilters {
@@ -58,6 +59,8 @@ export class CustomersRepository {
   async queueQuickBooksSync(tenantId: string, id: string): Promise<Customer> {
     return this.prisma.$transaction(async (tx) => {
       const customer = await tx.customer.update({ where: { id }, data: { syncStatus: 'PENDING' } });
+      // D63 dual-write.
+      await mirrorExternalRef(tx, tenantId, 'CUSTOMER', id, { syncStatus: 'PENDING' });
       await tx.syncLog.create({
         data: {
           tenantId,

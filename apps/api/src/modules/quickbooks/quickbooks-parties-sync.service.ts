@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
 
+import { mirrorExternalRef } from './external-ref';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   queryAllCustomers,
@@ -142,6 +143,12 @@ export class QuickBooksPartiesSyncService {
             where: { id: local.id },
             data: { syncStatus: 'SYNCED', lastSyncedAt: now },
           });
+          // D63 dual-write.
+          await mirrorExternalRef(this.prisma, tenantId, 'CUSTOMER', local.id, {
+            externalId: local.quickbooksCustomerId,
+            syncStatus: 'SYNCED',
+            lastSyncedAt: now,
+          });
           refreshed++;
         }
         continue;
@@ -152,6 +159,11 @@ export class QuickBooksPartiesSyncService {
         await this.prisma.customer.update({
           where: { id: local.id },
           data: { quickbooksCustomerId: match.Id, syncStatus: 'SYNCED', lastSyncedAt: now },
+        });
+        await mirrorExternalRef(this.prisma, tenantId, 'CUSTOMER', local.id, {
+          externalId: match.Id,
+          syncStatus: 'SYNCED',
+          lastSyncedAt: now,
         });
         linked++;
       }
@@ -256,6 +268,11 @@ export class QuickBooksPartiesSyncService {
             qbStatus: 'CONNECTED',
             qbLastSyncedAt: now,
           },
+        });
+        await mirrorExternalRef(this.prisma, tenantId, 'SUPPLIER', supplier.id, {
+          externalId: match.Id,
+          syncStatus: 'SYNCED',
+          lastSyncedAt: now,
         });
         linked++;
       }

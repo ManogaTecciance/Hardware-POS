@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, SyncJob } from '@hardware-pos/database';
 
+import { mirrorExternalRef } from '../../quickbooks/external-ref';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SyncDirection, SyncEntityType, SyncJobType } from './sync-queue.constants';
 
@@ -227,6 +228,11 @@ export class SyncQueueService {
         data: { syncStatus: 'PENDING', syncError: null },
       }),
     ]);
+    // D63 dual-write.
+    await mirrorExternalRef(this.prisma, tenantId, 'SALE', saleId, {
+      syncStatus: 'PENDING',
+      syncError: null,
+    });
 
     return { id: job.id, syncStatus: 'PENDING' };
   }
@@ -261,6 +267,11 @@ export class SyncQueueService {
         data: { syncStatus: 'PENDING', syncError: null },
       }),
     ]);
+    // D63 dual-write.
+    await mirrorExternalRef(this.prisma, tenantId, 'RETURN', returnId, {
+      syncStatus: 'PENDING',
+      syncError: null,
+    });
 
     return { id: job.id, syncStatus: 'PENDING' };
   }

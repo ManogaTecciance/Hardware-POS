@@ -2020,6 +2020,51 @@ items — the old numbers could count food later voided at the table.
 removed no earlier than two releases after the successor — each removal its
 own decision.
 
+### D63 — External identity lives in `ExternalEntityRef`; the QuickBooks quarantine begins
+
+Implements Phase 6 steps 1–4 of the convergence plan (§4.9, §8.10). Eight
+Layer-1 models carry QuickBooks columns and ten domain-neutral modules read
+them (plan defect D-9) — a coupling every future domain would inherit. The
+PO's constraint (D68 in the plan's numbering): QuickBooks serves the hardware
+template only.
+
+**Step 1 — the satellite.** `ExternalEntityRef` generalises the barely-used
+`QuickBooksMapping` by a `provider` column: one home for
+`(tenant, provider, entityType, localId) → external identity + sync state`.
+Its only FK is the tenant — it can never cascade into a core row, and a ref
+outliving its entity is a reconciliation signal, not corruption.
+
+**Step 2 — dual-write, live.** Every write of vendor identity or sync state
+(the four QBO sync services, the sync queue's PENDING resets, the retail
+`markSynced` path, product import commit, supplier map/unmap, customer
+queueing, product PENDING marks) now mirrors into the satellite in the same
+transaction via one helper (`mirrorExternalRef`). Column defaults need no
+mirror: reconciliation reads absence as agreeing with `NOT_SYNCED`/no-id.
+
+**Steps 3–4 — backfill + reconciliation, proven.**
+`backfill-external-entity-refs.ts` (copy, never move; dry-run/write/
+idempotent; includes the `QuickBooksMapping` rows) and READ-ONLY
+`reconcile-external-entity-refs.ts` (exit 0 only on zero mismatches). Run
+locally: 1,557 refs copied, reconciliation clean; a deliberately staged
+pre-instrumentation drift was caught by the reconciler (named the sale and
+both values) and trued up by re-running the backfill — the exact operational
+loop production will use.
+
+**The read switch (step 5) is NOT in this change, by the plan's own design**:
+it deploys only after the reconciler reports clean across a full PRODUCTION
+sync cycle (risk R10 — the only paying integration). The code change is then
+mechanical: the ten readers move to the satellite, the tripwire's ratchet
+list goes to `[]`, and step 6 gates `syncStatus` out of the public DTOs.
+
+**The ratchet.** `quickbooks-isolation.spec.ts` pins the EXACT current
+vendor-column reader set outside the integration modules — it may only
+shrink; file eleven fails by name — and pins the satellite + mirror to the
+integration and the instrumented legacy write sites, so `ExternalEntityRef`
+cannot grow the disease the columns had.
+
+No QuickBooks behaviour a hardware tenant can observe changes in this phase;
+if one can tell it happened, it is wrong (plan non-goal).
+
 ---
 
 ## Open decisions

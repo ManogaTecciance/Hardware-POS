@@ -318,6 +318,7 @@ model Tenant {
   quickbooksMappings           QuickBooksMapping[]
   saleItemModifiers            SaleItemModifier[]
   catalogueEntries             CatalogueEntry[]
+  externalEntityRefs           ExternalEntityRef[]
   auditLogs                    AuditLog[]
   printJobs                    PrintJob[]
   returns                      Return[]
@@ -1152,6 +1153,45 @@ model QuickBooksConnection {
   updatedAt             DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+/// D63 — the ONE home for a local entity's identity in an EXTERNAL system
+/// (convergence plan §4.9.4). Generalises QuickBooksMapping by `provider`, so
+/// a second integration needs rows, not columns on Layer-1 models.
+///
+/// Phase 6 status: dual-written alongside the legacy vendor columns; the
+/// read switch (plan §8.10 step 5) lands only after a production
+/// reconciliation cycle proves the satellite complete. Rule from then on:
+/// no model outside a provider implementation may reference this table, and
+/// no Layer-1 model gains a vendor-named column again.
+model ExternalEntityRef {
+  id       String @id @default(cuid())
+  tenantId String
+
+  /// 'QUICKBOOKS' today. Comes from the provider, never a caller.
+  provider   String
+  /// 'PRODUCT' | 'PRODUCT_CATEGORY' | 'CUSTOMER' | 'SUPPLIER' | 'SALE' |
+  /// 'PAYMENT' | 'RETURN' | 'REFUND_PAYMENT'
+  entityType String
+  /// The AxloPOS id. Loose by design: this table must never cascade-delete a
+  /// core row, and a ref outliving its entity is a reconciliation signal.
+  localId    String
+
+  externalId   String?
+  externalType String?
+
+  syncStatus   SyncStatus @default(NOT_SYNCED)
+  syncError    String?
+  lastSyncedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, entityType, localId])
+  @@index([tenantId, provider, syncStatus])
+  @@index([tenantId, provider, entityType, externalId])
 }
 
 model QuickBooksMapping {

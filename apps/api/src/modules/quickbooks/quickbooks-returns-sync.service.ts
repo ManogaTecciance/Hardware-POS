@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
 
+import { mirrorExternalRef } from './external-ref';
 import { PrismaService } from '../../prisma/prisma.service';
 import { round2 } from '../../common/money';
 import { SettingsService } from '../settings/settings.service';
@@ -269,10 +270,29 @@ export class QuickBooksReturnsSyncService {
         where: { id: ret.id },
         data: { syncStatus: 'SYNCED', quickbooksDocumentId: documentId, syncError: null },
       });
+      // D63 dual-write — same transaction, same facts, satellite copy.
+      await mirrorExternalRef(tx, ret.tenantId, 'RETURN', ret.id, {
+        externalId: documentId,
+        externalType: ret.quickbooksDocumentType,
+        syncStatus: 'SYNCED',
+        syncError: null,
+        lastSyncedAt: new Date(),
+      });
+      const refundRows = await tx.refundPayment.findMany({
+        where: { returnId: ret.id },
+        select: { id: true },
+      });
       await tx.refundPayment.updateMany({
         where: { returnId: ret.id },
         data: { syncStatus: 'SYNCED', quickbooksPaymentId: documentId },
       });
+      for (const row of refundRows) {
+        await mirrorExternalRef(tx, ret.tenantId, 'REFUND_PAYMENT', row.id, {
+          externalId: documentId,
+          syncStatus: 'SYNCED',
+          lastSyncedAt: new Date(),
+        });
+      }
       await tx.syncJob.updateMany({
         where: {
           tenantId: ret.tenantId,
@@ -315,6 +335,11 @@ export class QuickBooksReturnsSyncService {
       await tx.return.update({
         where: { id: ret.id },
         data: { syncStatus: 'FAILED', syncError: message },
+      });
+      // D63 dual-write.
+      await mirrorExternalRef(tx, ret.tenantId, 'RETURN', ret.id, {
+        syncStatus: 'FAILED',
+        syncError: message,
       });
       await tx.syncJob.updateMany({
         where: {

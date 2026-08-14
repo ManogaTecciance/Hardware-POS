@@ -8,6 +8,8 @@ import {
 import { Prisma, Product, UserRole } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { mirrorExternalRef } from '../quickbooks/external-ref';
+import { PrismaService } from '../../prisma/prisma.service';
 import { paginate } from '../../common/pagination';
 import { StorageService } from '../../common/storage/storage.service';
 import { CatalogSyncProviderFactory } from '../providers/catalog/catalog-sync-provider.factory';
@@ -24,6 +26,7 @@ export class ProductsService {
     private readonly productsRepository: ProductsRepository,
     private readonly catalogProviders: CatalogSyncProviderFactory,
     private readonly storage: StorageService,
+      private readonly prisma: PrismaService,
   ) {}
 
   async list(tenantId: string, query: QueryProductsDto): Promise<Paginated<Product>> {
@@ -249,6 +252,8 @@ export class ProductsService {
     if (result.disposition !== 'QUEUED') {
       throw new BadRequestException('QuickBooks is not connected');
     }
+    // D63 dual-write.
+    await mirrorExternalRef(this.prisma, tenantId, 'PRODUCT', id, { syncStatus: 'PENDING' });
     return this.productsRepository.update(id, { syncStatus: 'PENDING' });
   }
 
@@ -281,6 +286,10 @@ export class ProductsService {
    */
   private async applyCatalogSync(product: Product, result: CatalogSyncResult): Promise<Product> {
     if (result.disposition !== 'QUEUED') return product;
+    // D63 dual-write.
+    await mirrorExternalRef(this.prisma, product.tenantId, 'PRODUCT', product.id, {
+      syncStatus: 'PENDING',
+    });
     return this.productsRepository.update(product.id, { syncStatus: 'PENDING' });
   }
 

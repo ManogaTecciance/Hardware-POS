@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 
+import { mirrorExternalRef } from './external-ref';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QuickBooksConfig } from './quickbooks.config';
 import { QuickBooksRepository } from './quickbooks.repository';
@@ -116,10 +117,16 @@ export class QuickBooksSyncService {
       lastSyncedAt: new Date(),
     };
 
-    await this.prisma.product.upsert({
+    const upserted = await this.prisma.product.upsert({
       where: { tenantId_quickbooksItemId: { tenantId, quickbooksItemId } },
       update: data,
       create: { tenantId, quickbooksItemId, ...data },
+    });
+    // D63 dual-write.
+    await mirrorExternalRef(this.prisma, tenantId, 'PRODUCT', upserted.id, {
+      externalId: quickbooksItemId,
+      syncStatus: 'SYNCED',
+      lastSyncedAt: new Date(),
     });
 
     return existing ? 'updated' : 'created';
@@ -150,6 +157,12 @@ export class QuickBooksSyncService {
           data: { tenantId, quickbooksItemId: qboId, name: item.Name },
         });
       }
+      // D63 dual-write.
+      await mirrorExternalRef(this.prisma, tenantId, 'PRODUCT_CATEGORY', category.id, {
+        externalId: qboId,
+        syncStatus: 'SYNCED',
+        lastSyncedAt: new Date(),
+      });
       localIdByQboId.set(qboId, category.id);
     }
     return localIdByQboId;
