@@ -242,6 +242,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /platform-admin/workspaces': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /platform-admin/workspaces/:workspaceId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'PATCH /platform-admin/workspaces/:workspaceId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /platform-admin/workspaces/:workspaceId/roles': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /platform-admin/workspaces/:workspaceId/users': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /platform-admin/workspaces/:workspaceId/users': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'PATCH /platform-admin/workspaces/:workspaceId/users/:userId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },

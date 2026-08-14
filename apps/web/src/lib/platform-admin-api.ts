@@ -33,9 +33,30 @@ export interface WorkspaceUserView {
   id: string;
   name: string;
   email: string | null;
+  /** The `UserRole` enum underneath. Not what grants authority — see `roleKey`. */
   role: string;
   isActive: boolean;
+  /**
+   * The workspace role in force, which is what `PermissionResolver` reads.
+   * Null means the account resolves from the enum above instead — a real state
+   * for users created before roles were rows.
+   */
+  roleId: string | null;
   roleKey: string | null;
+}
+
+/**
+ * A role this workspace can assign. Which roles exist is decided by the
+ * workspace's template — a restaurant or hotel workspace has Waiter, Kitchen
+ * Staff and the rest on top of the five built-ins; a hardware one does not.
+ * Addressed by `id` because `key` is nullable server-side.
+ */
+export interface WorkspaceRoleView {
+  id: string;
+  key: string | null;
+  name: string;
+  description: string | null;
+  isSystem: boolean;
 }
 
 function auth(session: Session) {
@@ -69,6 +90,12 @@ export const platformAdmin = {
   updateWorkspace(session: Session, id: string, body: { name?: string; isActive?: boolean }) {
     return api.patch<WorkspaceView>(`/platform-admin/workspaces/${id}`, body, auth(session));
   },
+  listRoles(session: Session, workspaceId: string) {
+    return api.get<WorkspaceRoleView[]>(
+      `/platform-admin/workspaces/${workspaceId}/roles`,
+      auth(session),
+    );
+  },
   listUsers(session: Session, workspaceId: string) {
     return api.get<WorkspaceUserView[]>(
       `/platform-admin/workspaces/${workspaceId}/users`,
@@ -78,7 +105,7 @@ export const platformAdmin = {
   createUser(
     session: Session,
     workspaceId: string,
-    body: { name: string; email: string; password: string; role: string },
+    body: { name: string; email: string; password: string; roleId: string },
   ) {
     return api.post<WorkspaceUserView>(
       `/platform-admin/workspaces/${workspaceId}/users`,
@@ -90,7 +117,7 @@ export const platformAdmin = {
     session: Session,
     workspaceId: string,
     userId: string,
-    body: { name?: string; role?: string; isActive?: boolean },
+    body: { name?: string; roleId?: string; isActive?: boolean },
   ) {
     return api.patch<WorkspaceUserView>(
       `/platform-admin/workspaces/${workspaceId}/users/${userId}`,

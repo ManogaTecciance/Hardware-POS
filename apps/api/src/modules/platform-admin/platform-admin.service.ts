@@ -20,6 +20,7 @@ import {
   UpdateWorkspaceDto,
   UpdateWorkspaceUserDto,
 } from './dto/platform-admin.dto';
+import { baseUserRoleFor } from './workspace-roles';
 import { WORKSPACE_TEMPLATES, templateByKey } from './workspace-templates';
 
 const SALT_ROUNDS = 10;
@@ -42,9 +43,32 @@ export interface WorkspaceUserView {
   id: string;
   name: string;
   email: string | null;
+  /** The `UserRole` enum column. Not what grants authority once `roleId` is set. */
   role: UserRole;
   isActive: boolean;
+  /**
+   * The workspace role in force. Null means the user is on `LEGACY_FALLBACK`
+   * resolution — their authority comes from the enum above — which is a real
+   * state for accounts created before roles were rows, and one the console
+   * shows rather than papers over.
+   */
+  roleId: string | null;
   roleKey: string | null;
+}
+
+export interface WorkspaceRoleView {
+  /**
+   * The console addresses roles by id, not by key. `Role.key` is nullable —
+   * documented as "nullable only so the column could be added without a
+   * backfill" — so a key-addressed console would silently be unable to assign
+   * any role that lacks one. The id is what `User.roleId` stores anyway.
+   */
+  id: string;
+  key: string | null;
+  name: string;
+  description: string | null;
+  /** A built-in platform role. The template's own roles are not. */
+  isSystem: boolean;
 }
 
 /**
@@ -184,6 +208,28 @@ export class PlatformAdminService {
     return this.getWorkspace(id);
   }
 
+  /**
+   * The roles this workspace can actually assign (D55.1).
+   *
+   * Read from the workspace's own `Role` rows rather than from the templates,
+   * because the rows are what `PermissionResolver` consults and a tenant may
+   * have renamed or deactivated one. Which rows exist is decided by the
+   * template: `seedTenantRoles` gives a food-service workspace the restaurant
+   * roles — Waiter, Kitchen Staff and the rest — on top of the five built-ins,
+   * and a hardware workspace only the five.
+   */
+  async listRoles(workspaceId: string): Promise<WorkspaceRoleView[]> {
+    await this.getWorkspace(workspaceId);
+    const rows = await this.prisma.role.findMany({
+      where: { tenantId: workspaceId, isActive: true },
+      select: { id: true, key: true, name: true, description: true, isSystem: true },
+      // Built-ins first, then the template's own roles; alphabetical within each
+      // so the list does not reorder itself as roles are renamed.
+      orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
+    });
+    return rows;
+  }
+
   async listUsers(workspaceId: string): Promise<WorkspaceUserView[]> {
     await this.getWorkspace(workspaceId);
     const rows = await this.prisma.user.findMany({
@@ -197,6 +243,7 @@ export class PlatformAdminService {
       email: u.email,
       role: u.role,
       isActive: u.isActive,
+      roleId: u.roleId,
       roleKey: u.customRole?.key ?? null,
     }));
   }
@@ -212,19 +259,16 @@ export class PlatformAdminService {
       orderBy: { code: 'asc' },
       select: { id: true },
     });
-    const role = await this.prisma.role.findFirst({
-      where: { tenantId: workspaceId, key: dto.role },
-      select: { id: true },
-    });
+    const role = await this.requireWorkspaceRole(workspaceId, dto.roleId);
     const created = await this.prisma.user.create({
       data: {
         tenantId: workspaceId,
         branchId: branch?.id ?? null,
         name: dto.name.trim(),
         email,
-        role: dto.role as UserRole,
+        role: baseUserRoleFor(role.key),
         passwordHash: await bcrypt.hash(dto.password, SALT_ROUNDS),
-        roleId: role?.id ?? null,
+        roleId: role.id,
       },
       include: { customRole: { select: { key: true } } },
     });
@@ -234,6 +278,7 @@ export class PlatformAdminService {
       email: created.email,
       role: created.role,
       isActive: created.isActive,
+      roleId: created.roleId,
       roleKey: created.customRole?.key ?? null,
     };
   }
@@ -244,17 +289,15 @@ export class PlatformAdminService {
     dto: UpdateWorkspaceUserDto,
   ): Promise<WorkspaceUserView> {
     const user = await this.requireWorkspaceUser(workspaceId, userId);
-    const role = dto.role
-      ? await this.prisma.role.findFirst({
-          where: { tenantId: workspaceId, key: dto.role },
-          select: { id: true },
-        })
-      : null;
+    const role =
+      dto.roleId !== undefined ? await this.requireWorkspaceRole(workspaceId, dto.roleId) : null;
     const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
-        ...(dto.role !== undefined ? { role: dto.role as UserRole, roleId: role?.id ?? null } : {}),
+        // Both columns move together. Leaving the enum behind when the linked
+        // role changes is how a demoted OWNER keeps cross-branch visibility.
+        ...(role ? { role: baseUserRoleFor(role.key), roleId: role.id } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },
       include: { customRole: { select: { key: true } } },
@@ -265,6 +308,7 @@ export class PlatformAdminService {
       email: updated.email,
       role: updated.role,
       isActive: updated.isActive,
+      roleId: updated.roleId,
       roleKey: updated.customRole?.key ?? null,
     };
   }
@@ -281,6 +325,34 @@ export class PlatformAdminService {
     });
     // Every existing session keeps working until its refresh token expires;
     // revoking them is a separate decision and would sign the user out mid-shift.
+  }
+
+  /**
+   * Resolve a role key against the workspace's own rows (D55.1).
+   *
+   * A key that does not belong to this workspace is a 400 naming what does,
+   * never a silent `roleId: null`. That fallback was the earlier behaviour and
+   * it fails open: an unrecognised key would have left the user on
+   * `LEGACY_FALLBACK`, resolving their authority from the enum column — so a
+   * typo'd "WAITOR" would have produced a working cashier instead of an error.
+   */
+  private async requireWorkspaceRole(workspaceId: string, roleId: string) {
+    // Scoped by tenantId as well as id, so a role belonging to another
+    // workspace cannot be attached even if its id is guessed or copied.
+    const role = await this.prisma.role.findFirst({
+      where: { id: roleId, tenantId: workspaceId, isActive: true },
+      select: { id: true, key: true },
+    });
+    if (role) return role;
+
+    const available = await this.listRoles(workspaceId);
+    throw new BadRequestException(
+      available.length === 0
+        ? 'This workspace has no roles configured, so no role can be assigned.'
+        : `That role does not belong to this workspace. Choose one of: ${available
+            .map((r) => r.name)
+            .join(', ')}.`,
+    );
   }
 
   private async requireWorkspaceUser(workspaceId: string, userId: string) {

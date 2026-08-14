@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 262
+- Total routes: 263
 - Module-guarded routes: 194
-- Ungated routes: 68
+- Ungated routes: 69
 
 ## How to read the Guard column
 
@@ -341,6 +341,7 @@ reach production unclassified.
 | POST | `/platform-admin/workspaces` | SHARED_CORE | shared-core | _platform admin_ |
 | GET | `/platform-admin/workspaces/:workspaceId` | SHARED_CORE | shared-core | _platform admin_ |
 | PATCH | `/platform-admin/workspaces/:workspaceId` | SHARED_CORE | shared-core | _platform admin_ |
+| GET | `/platform-admin/workspaces/:workspaceId/roles` | SHARED_CORE | shared-core | _platform admin_ |
 | GET | `/platform-admin/workspaces/:workspaceId/users` | SHARED_CORE | shared-core | _platform admin_ |
 | POST | `/platform-admin/workspaces/:workspaceId/users` | SHARED_CORE | shared-core | _platform admin_ |
 | PATCH | `/platform-admin/workspaces/:workspaceId/users/:userId` | SHARED_CORE | shared-core | _platform admin_ |

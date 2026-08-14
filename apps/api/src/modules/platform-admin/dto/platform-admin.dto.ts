@@ -1,7 +1,6 @@
 import { Type } from 'class-transformer';
 import {
   IsBoolean,
-  IsIn,
   IsOptional,
   IsString,
   Length,
@@ -10,7 +9,6 @@ import {
 } from 'class-validator';
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
-const ROLES = ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'] as const;
 
 export class CreateWorkspaceDto {
   @IsString() @Length(2, 120) name!: string;
@@ -32,16 +30,24 @@ export class UpdateWorkspaceDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
+/*
+ * D55.1: the role is a `Role` row belonging to THIS workspace, not a member of a
+ * fixed list. A restaurant workspace is seeded with eleven roles and a hardware
+ * one with five, so a literal `@IsIn([...])` here could only ever be right for
+ * one template — and would have rejected `WAITER`, which is precisely the role a
+ * restaurant workspace exists to assign. The service validates the id against
+ * the workspace's own rows, which is the only authority that knows the answer.
+ */
 export class CreateWorkspaceUserDto {
   @IsString() @Length(1, 120) name!: string;
   @IsString() @Length(3, 160) email!: string;
   @IsString() @MinLength(8) password!: string;
-  @IsIn(ROLES) role!: (typeof ROLES)[number];
+  @IsString() @Length(1, 64) roleId!: string;
 }
 
 export class UpdateWorkspaceUserDto {
   @IsOptional() @IsString() @Length(1, 120) name?: string;
-  @IsOptional() @IsIn(ROLES) role?: (typeof ROLES)[number];
+  @IsOptional() @IsString() @Length(1, 64) roleId?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 

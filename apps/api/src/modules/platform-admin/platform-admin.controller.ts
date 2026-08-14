@@ -91,6 +91,19 @@ export class PlatformAdminController {
     return updated;
   }
 
+  /**
+   * D55.1 — the roles this workspace can assign, which its template decided.
+   *
+   * A restaurant or hotel workspace answers with the five built-ins plus Waiter,
+   * Restaurant Manager, Restaurant Cashier, Kitchen Manager, Kitchen Staff and
+   * Bar Staff; a hardware workspace answers with the five. The console has no
+   * business hard-coding either list.
+   */
+  @Get('workspaces/:workspaceId/roles')
+  listRoles(@Param('workspaceId') workspaceId: string) {
+    return this.service.listRoles(workspaceId);
+  }
+
   @Get('workspaces/:workspaceId/users')
   listUsers(@Param('workspaceId') workspaceId: string) {
     return this.service.listUsers(workspaceId);
@@ -112,7 +125,14 @@ export class PlatformAdminController {
       action: 'WORKSPACE_USER_CREATED',
       entityType: 'User',
       entityId: created.id,
-      metadata: { byPlatformAdmin: actor.id, email: created.email, role: created.role },
+      // Both: the role in force and the enum underneath it, since for a
+        // custom role like WAITER they differ and only one is the answer.
+        metadata: {
+          byPlatformAdmin: actor.id,
+          email: created.email,
+          roleKey: created.roleKey,
+          baseRole: created.role,
+        },
     });
     return created;
   }
@@ -134,7 +154,12 @@ export class PlatformAdminController {
       action: 'WORKSPACE_USER_UPDATED',
       entityType: 'User',
       entityId: userId,
-      metadata: { byPlatformAdmin: actor.id, role: updated.role, isActive: updated.isActive },
+      metadata: {
+        byPlatformAdmin: actor.id,
+        roleKey: updated.roleKey,
+        baseRole: updated.role,
+        isActive: updated.isActive,
+      },
     });
     return updated;
   }

@@ -1656,6 +1656,53 @@ custom workspace role keeps an enum role underneath — the seeded waiter is enu
 enum would tell an operator that a waiter is a cashier, so the workspace role
 is named separately and the enum select is labelled as its fallback.
 
+**D55.1 — the role a new user gets is the workspace's own, not a fixed five.**
+The console shipped with `['OWNER','ADMIN','MANAGER','CASHIER','ACCOUNTANT']`
+written into the Add-user dialog and into the DTO's `@IsIn`. That list is
+correct for a hardware workspace, which is what made it survivable: it could
+not assign `WAITER` — the role a restaurant workspace exists to assign — and
+`role: dto.role as UserRole` would have written an invalid enum value if it
+ever received one.
+
+The roles now come from `GET /platform-admin/workspaces/:id/roles`, read from
+the workspace's own `Role` rows. Which rows exist was already decided by the
+template: `seedTenantRoles` gives a food-service workspace the restaurant
+roles on top of the five built-ins — eleven in total, not the two the request
+sketched — and a hardware workspace five. The rows are also what
+`PermissionResolver` consults, and a tenant may have renamed one, so reading
+them beats deriving the list from the templates a second time.
+
+**Addressed by id, not by key.** `Role.key` is nullable — documented as
+nullable only so the column could be added without a backfill — so a
+key-addressed console would silently fail to offer any role lacking one. The
+id is what `User.roleId` stores anyway, and the lookup is scoped by
+`tenantId` as well as `id` so a role from another workspace cannot be
+attached even if its id is known.
+
+**The enum column still matters, so the fallback is CASHIER.** A user on a
+custom role must still store something in `User.role`. It is not inert:
+`BranchScopeGuard` and `UsersService` treat OWNER/ADMIN as cross-branch and
+`QuotationsService` gates admin actions on it, and it is what
+`LEGACY_FALLBACK` resolves from if the linked role row is later deleted.
+`baseUserRoleFor` therefore maps a built-in key to itself and everything else
+to the least-privileged built-in, so both paths fail closed: a waiter does not
+gain cross-branch visibility from a column that had to hold a value, and does
+not inherit manager permissions if their role row goes away. This matches what
+the seed already does for the restaurant waiter.
+
+**An unknown role is a 400, never a silent null.** The earlier code fell back
+to `roleId: null` when the key did not match, which fails *open* — the user
+would resolve from the enum instead, so a typo produced a working cashier
+rather than an error. The lookup now refuses, naming the workspace's actual
+roles.
+
+Verified live: a waiter created through the console resolves to a permission
+set identical to the seeded waiter's; a hardware workspace is refused the
+waiter role and a restaurant workspace is refused a hardware role. The picker
+is mutation-proven — reintroducing the hardcoded five fails two of the five
+render tests while the hardware-only assertion stays green, which is exactly
+the asymmetry that let the original bug through.
+
 **Known gap, deliberately not closed here.** The seeded hardware tenant
 (`tnt_dev`) has no `TenantBusinessProfile` row at all: it resolves through
 `LEGACY_TENANT_DEFAULTS` to `TILE_SHOP`/QuickBooks. It is therefore linked to

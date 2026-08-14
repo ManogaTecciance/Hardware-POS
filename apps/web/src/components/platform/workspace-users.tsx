@@ -13,11 +13,10 @@ import { ApiError } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import {
   platformAdmin,
+  type WorkspaceRoleView,
   type WorkspaceUserView,
   type WorkspaceView,
 } from '@/lib/platform-admin-api';
-
-const ROLES = ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'] as const;
 
 /**
  * D55 — user administration for one workspace.
@@ -39,6 +38,7 @@ export function WorkspaceUsers({
   onChanged: () => Promise<void> | void;
 }) {
   const [users, setUsers] = React.useState<WorkspaceUserView[]>([]);
+  const [roles, setRoles] = React.useState<WorkspaceRoleView[]>([]);
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
@@ -46,7 +46,18 @@ export function WorkspaceUsers({
 
   const load = React.useCallback(async () => {
     try {
-      setUsers(await platformAdmin.listUsers(session, workspace.id));
+      /*
+       * The roles come from the workspace, not from a constant here. Which ones
+       * exist was decided by its template: a restaurant or hotel workspace can
+       * assign Waiter and the kitchen roles, a hardware one cannot, and a list
+       * hard-coded in this component could only ever be right for one of them.
+       */
+      const [u, r] = await Promise.all([
+        platformAdmin.listUsers(session, workspace.id),
+        platformAdmin.listRoles(session, workspace.id),
+      ]);
+      setUsers(u);
+      setRoles(r);
       setStatus('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load users');
@@ -64,8 +75,8 @@ export function WorkspaceUsers({
     await onChanged();
   };
 
-  const setRole = async (user: WorkspaceUserView, role: string) => {
-    await platformAdmin.updateUser(session, workspace.id, user.id, { role });
+  const setRole = async (user: WorkspaceUserView, roleId: string) => {
+    await platformAdmin.updateUser(session, workspace.id, user.id, { roleId });
     await load();
   };
 
@@ -74,6 +85,7 @@ export function WorkspaceUsers({
       <AddUserDialog
         session={session}
         workspace={workspace}
+        roles={roles}
         onClose={() => setAdding(false)}
         onCreated={async () => {
           setAdding(false);
@@ -119,20 +131,11 @@ export function WorkspaceUsers({
         ) : status === 'error' ? (
           <p className="text-sm text-danger">{error}</p>
         ) : (
-          users.map((u) => {
-            /*
-             * A user linked to a custom workspace role (a waiter) keeps an enum
-             * role underneath — the seeded waiter is enum CASHIER — and the
-             * permission resolver uses the linked role, not the enum. Showing
-             * only the enum would tell the operator this waiter is a cashier,
-             * so the role actually in force is named separately.
-             */
-            const workspaceRole = u.roleKey && u.roleKey !== u.role ? u.roleKey : null;
-            return (
-              <div
-                key={u.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3"
-              >
+          users.map((u) => (
+            <div
+              key={u.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3"
+            >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
                     {u.name}
@@ -143,24 +146,35 @@ export function WorkspaceUsers({
                     )}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">{u.email ?? 'No email'}</p>
-                  {workspaceRole ? (
+                  {u.roleId ? null : (
+                    /*
+                     * Not linked to a role row, so their authority comes from
+                     * the `UserRole` enum instead. Said plainly rather than
+                     * shown as a blank select: the operator needs to know the
+                     * account predates roles-as-rows, and that picking a role
+                     * here is what moves it onto the workspace's own roles.
+                     */
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Workspace role{' '}
-                      <span className="font-medium text-foreground">{workspaceRole}</span> — what
-                      the API enforces. The role beside is only its fallback.
+                      No workspace role — running on the built-in{' '}
+                      <span className="font-medium text-foreground">{u.role}</span> permissions.
                     </p>
-                  ) : null}
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Select
-                    value={u.role}
-                    aria-label={`Base role for ${u.name}`}
-                    className="w-44"
+                    value={u.roleId ?? ''}
+                    aria-label={`Role for ${u.name}`}
+                    className="w-48"
                     onChange={(e) => void setRole(u, e.target.value)}
                   >
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
+                    {u.roleId ? null : (
+                      <option value="" disabled>
+                        Not set
+                      </option>
+                    )}
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
                       </option>
                     ))}
                   </Select>
@@ -176,9 +190,8 @@ export function WorkspaceUsers({
                     {u.isActive ? 'Deactivate' : 'Reactivate'}
                   </Button>
                 </div>
-              </div>
-            );
-          })
+            </div>
+          ))
         )}
       </div>
     </Dialog>
@@ -188,22 +201,27 @@ export function WorkspaceUsers({
 function AddUserDialog({
   session,
   workspace,
+  roles,
   onClose,
   onCreated,
 }: {
   session: Session;
   workspace: WorkspaceView;
+  roles: WorkspaceRoleView[];
   onClose: () => void;
   onCreated: () => Promise<void>;
 }) {
   const [name, setName] = React.useState('');
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
-  const [role, setRole] = React.useState<string>('CASHIER');
+  // Defaults to the workspace's own first role rather than a named constant —
+  // there is no role this component can assume every template has.
+  const [roleId, setRoleId] = React.useState<string>(roles[0]?.id ?? '');
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const valid = name.trim().length > 0 && email.includes('@') && password.length >= 8;
+  const selected = roles.find((r) => r.id === roleId) ?? null;
+  const valid = name.trim().length > 0 && email.includes('@') && password.length >= 8 && !!roleId;
 
   const submit = async () => {
     if (!valid || saving) return;
@@ -214,7 +232,7 @@ function AddUserDialog({
         name: name.trim(),
         email: email.trim(),
         password,
-        role,
+        roleId,
       });
       await onCreated();
     } catch (err) {
@@ -262,15 +280,21 @@ function AddUserDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="u-role">Role</Label>
-            <Select id="u-role" value={role} onChange={(e) => setRole(e.target.value)}>
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
+            <Select id="u-role" value={roleId} onChange={(e) => setRoleId(e.target.value)}>
+              {roles.length === 0 ? <option value="">No roles configured</option> : null}
+              {roles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
                 </option>
               ))}
             </Select>
           </div>
         </div>
+        {/* The role's own description, so the operator is choosing on what the
+            role does rather than on a name they have to already know. */}
+        {selected?.description ? (
+          <p className="text-xs text-muted-foreground">{selected.description}</p>
+        ) : null}
       </div>
     </Dialog>
   );
