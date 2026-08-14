@@ -1,4 +1,7 @@
+import { FOOD_SERVICE_CAPABILITIES } from '@hardware-pos/shared';
+
 import { PosCatalogueService } from './pos-catalogue.service';
+import { SellableService } from '../products/sellable.service';
 import { PromotionsRepository } from '../promotions/promotions.repository';
 
 /**
@@ -33,15 +36,31 @@ function productRow(overrides: Partial<any> = {}) {
 
 function buildService(products: any[], promotions: any[] = []) {
   const findMany = jest.fn(async () => products);
-  const prisma = { product: { findMany } };
+  const count = jest.fn(async () => products.length);
+  const prisma = { product: { findMany, count } };
   const repo: jest.Mocked<PromotionsRepository> = {
     listForCatalogue: jest.fn(async () => promotions),
     // Unused entry points — the endpoint uses only `listForCatalogue`.
     findById: jest.fn(),
     list: jest.fn(),
   } as unknown as jest.Mocked<PromotionsRepository>;
+  /*
+   * D62: the query logic lives in SellableService now; this spec exercises
+   * the SAME behaviour through the legacy adapter, so it is a parity proof
+   * for both layers at once. `DISABLED` inventory keeps the stock block out
+   * of the shape, matching the legacy contract the adapter preserves (the
+   * mock rows carry no Decimal quantityOnHand either).
+   */
+  const profiles = {
+    getEffectiveProfile: jest.fn(async () => ({
+      businessType: 'RESTAURANT',
+      inventoryMode: 'DISABLED',
+      capabilities: FOOD_SERVICE_CAPABILITIES,
+    })),
+  };
+  const sellable = new SellableService(prisma as any, repo, profiles as any);
   return {
-    service: new PosCatalogueService(prisma as any, repo),
+    service: new PosCatalogueService(sellable),
     findMany,
     promotions: repo.listForCatalogue as jest.Mock,
   };

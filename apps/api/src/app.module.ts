@@ -45,6 +45,7 @@ import { TableSessionsModule } from './modules/table-sessions/table-sessions.mod
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { KitchenModule } from './modules/kitchen/kitchen.module';
 import { TakeawayModule } from './modules/takeaway/takeaway.module';
+import { CatalogueModule } from './modules/catalogue/catalogue.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { RestaurantReportsModule } from './modules/restaurant-reports/restaurant-reports.module';
 import { DeliveryHubModule } from './modules/delivery-hub/delivery-hub.module';
@@ -94,6 +95,7 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     ReservationsModule,
     KitchenModule,
     TakeawayModule,
+    CatalogueModule,
     BillingModule,
     RestaurantReportsModule,
     DeliveryHubModule,

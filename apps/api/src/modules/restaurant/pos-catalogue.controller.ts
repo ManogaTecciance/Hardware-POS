@@ -1,4 +1,6 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, UseInterceptors } from '@nestjs/common';
+
+import { deprecatedRoute } from '../../common/interceptors/deprecation.interceptor';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { ModuleKey } from '@hardware-pos/database';
 
@@ -38,6 +40,10 @@ export class QueryPosCatalogueDto {
 }
 
 @Controller('restaurant/pos-catalogue')
+// D62: superseded by GET /products/sellable — the one capability-shaped POS
+// read model. This alias keeps the legacy number-typed contract and says so
+// in-band; it is removed no earlier than two releases after Phase 5.
+@UseInterceptors(deprecatedRoute('/v1/products/sellable', 'Sat, 31 Oct 2026 00:00:00 GMT'))
 // D45 hotfix — the Restaurant Counter POS reads this endpoint. `RETAIL_POS`
 // was the initial guess but Restaurant tenants don't have it in their
 // default module set. `MENU_MANAGEMENT` is the module that governs

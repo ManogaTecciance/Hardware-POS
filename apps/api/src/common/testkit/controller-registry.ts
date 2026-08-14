@@ -72,6 +72,12 @@ import { ProductModifiersController } from '../../modules/products/product-modif
 import { ProductStationsController } from '../../modules/products/product-stations.controller';
 import { PromotionsController } from '../../modules/promotions/promotions.controller';
 import { PosCatalogueController } from '../../modules/restaurant/pos-catalogue.controller';
+import { SellableController } from '../../modules/products/sellable.controller';
+import { ProductModifierGroupsController } from '../../modules/products/product-modifier-groups.controller';
+import { CatalogueEntriesController } from '../../modules/catalogue/catalogue-entries.controller';
+import { CollectionController } from '../../modules/catalogue/collection.controller';
+import { CollectionSectionsController } from '../../modules/catalogue/collection-sections.controller';
+import { CollectionsController } from '../../modules/catalogue/collections.controller';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
@@ -137,6 +143,13 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   ProductStationsController,
   PromotionsController,
   PosCatalogueController,
+  // D62 — Phase 5 API surface.
+  SellableController,
+  ProductModifierGroupsController,
+  CollectionsController,
+  CollectionController,
+  CollectionSectionsController,
+  CatalogueEntriesController,
 ];
 
 /**
@@ -211,4 +224,11 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'product-stations',
   'promotions',
   'pos-catalogue',
+  // D62 — Phase 5 API surface.
+  'sellable',
+  'product-modifier-groups',
+  'collections',
+  'collection',
+  'collection-sections',
+  'catalogue-entries',
 ];

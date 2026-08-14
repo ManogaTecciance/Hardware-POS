@@ -136,21 +136,26 @@ interface ApiItem {
   description: string | null;
   imageUrl: string | null;
   unitPrice: string | number | null;
-  prepMinutes: number | null;
-  dietaryTags: string[];
-  foodType: PosCatalogueFoodType | null;
+  // D62 — /products/sellable is capability-shaped: these keys are ABSENT
+  // (not empty) for tenants without the capability. A food-service session
+  // always has them; the mapper still defaults so a mid-flight capability
+  // change cannot crash the grid.
+  prepMinutes?: number | null;
+  dietaryTags?: string[];
+  foodType?: PosCatalogueFoodType | null;
   category: { id: string; name: string } | null;
   subcategory: { id: string; name: string } | null;
   hasVariants: boolean;
-  variants: ApiVariant[];
-  modifierGroups: ApiModifierGroup[];
-  stations: PosCatalogueStation[];
+  variants?: ApiVariant[];
+  modifierGroups?: ApiModifierGroup[];
+  stations?: PosCatalogueStation[];
   promotions: PosCataloguePromotion[];
 }
 
 interface ApiResponse {
   items: ApiItem[];
   total: number;
+  nextCursor?: string | null;
 }
 
 function auth(session: Session): { token: string; tenantId: string } {
@@ -196,15 +201,15 @@ function toItem(i: ApiItem): PosCatalogueItem {
     description: i.description,
     imageUrl: i.imageUrl,
     unitPrice: i.unitPrice != null ? Number(i.unitPrice) : null,
-    prepMinutes: i.prepMinutes,
-    dietaryTags: i.dietaryTags,
-    foodType: i.foodType,
+    prepMinutes: i.prepMinutes ?? null,
+    dietaryTags: i.dietaryTags ?? [],
+    foodType: i.foodType ?? null,
     category: i.category,
     subcategory: i.subcategory,
     hasVariants: i.hasVariants,
-    variants: i.variants.map(toVariant),
-    modifierGroups: i.modifierGroups.map(toModifierGroup),
-    stations: i.stations,
+    variants: (i.variants ?? []).map(toVariant),
+    modifierGroups: (i.modifierGroups ?? []).map(toModifierGroup),
+    stations: i.stations ?? [],
     promotions: i.promotions,
   };
 }
@@ -226,6 +231,9 @@ export async function fetchPosCatalogue(
   if (query.channel) params.push(`channel=${encodeURIComponent(query.channel)}`);
   if (query.foodType) params.push(`foodType=${encodeURIComponent(query.foodType)}`);
   if (query.search) params.push(`search=${encodeURIComponent(query.search)}`);
-  const res = await api.get<ApiResponse>(`/restaurant/pos-catalogue?${params.join('&')}`, auth(session));
+  // D62: the one POS read model. The legacy /restaurant/pos-catalogue alias
+  // still answers (with Deprecation headers) until its sunset; this client
+  // moved on the day the successor shipped.
+  const res = await api.get<ApiResponse>(`/products/sellable?${params.join('&')}`, auth(session));
   return { items: res.items.map(toItem), total: res.total };
 }

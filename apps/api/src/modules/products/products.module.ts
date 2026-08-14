@@ -1,3 +1,9 @@
+import { MenuModule } from '../menu/menu.module';
+import { ProductModifierGroupsController } from './product-modifier-groups.controller';
+import { PlatformModule } from '../platform/platform.module';
+import { PromotionsModule } from '../promotions/promotions.module';
+import { SellableController } from './sellable.controller';
+import { SellableService } from './sellable.service';
 import { Module } from '@nestjs/common';
 
 import { AuditLogModule } from '../audit-log/audit-log.module';
@@ -35,16 +41,17 @@ import { ProductVariantsService } from './variants/product-variants.service';
   // AuditLogModule is imported for D45: the Product ↔ ModifierGroup and
   // Product ↔ KitchenStation attachment endpoints record a mutation audit
   // event so the wizard's changes are traceable per-tenant.
-  imports: [ProvidersModule, AuditLogModule],
+  imports: [ProvidersModule, AuditLogModule, PromotionsModule, PlatformModule, MenuModule],
   controllers: [
+    // SellableController FIRST: /products/sellable must register before
+    // ProductsController's GET /products/:id, or ':id' captures 'sellable'.
+    SellableController,
     ProductsController,
     ProductImagesController,
     ProductVariantsController,
-    // D45 — Product-side attachment endpoints. ModifierGroup / KitchenStation
-    // catalogues stay owned by their respective modules; only the junctions
-    // live here.
-    ProductModifiersController,
+    // D45 — Product-side attachment endpoints. ModifierGroup / KitchenStation     // catalogues stay owned by their respective modules; only the junctions     // live here.     ProductModifiersController,
     ProductStationsController,
+    ProductModifierGroupsController,
   ],
   providers: [
     ProductsService,
@@ -54,8 +61,7 @@ import { ProductVariantsService } from './variants/product-variants.service';
     ProductVariantsService,
     ProductVariantsRepository,
     ProductModifiersService,
-    ProductStationsService,
-  ],
-  exports: [ProductsService],
+    ProductStationsService, SellableService],
+  exports: [ProductsService, SellableService],
 })
 export class ProductsModule {}

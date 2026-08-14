@@ -1976,6 +1976,50 @@ is would be ceremony. The factory serves kind-agnostic callers (Phase 5's
 reporting, future settlement surfaces). The provider-contract importer sets
 gained the two modules under this record.
 
+### D62 — Catalogue REST surface: `/products` is canonical, `/products/sellable` is the POS read model
+
+Implements Phase 5 of the convergence plan (§9). Paths that were already
+correct stay; concepts that were never restaurant-specific leave
+`/restaurant`; every alias says so in-band and dies on a schedule.
+
+**`GET /products/sellable`** — the one POS read model, for every domain.
+SHARED CORE like `/products` itself: which BLOCKS the response carries is
+decided by the tenant's capabilities, not a module key — a retail tenant
+gets NO `modifierGroups` key (absent, not `[]`: §9.5's rule that absent
+means "does not have this concept"). Money is decimal STRINGS. Price
+resolution happens server-side, once — base → collection override → channel
+override — and `priceSource` says which rule won. Keyset pagination
+(`cursor`/`limit` capped at 200). `stockState` includes `UNTRACKED` as a
+real state distinct from `OUT`. The legacy `/restaurant/pos-catalogue`
+became a thin adapter over the same service preserving its number-typed
+contract, wearing `Deprecation`/`Sunset`/`Link successor-version` headers.
+
+**Modifier groups moved home.** `/products/modifier-groups` is canonical —
+"cut to 3 keys +$6" and "add bacon +$2" are the same feature — with the
+`/restaurant/modifier-groups` alias deprecated in place. One service serves
+both.
+
+**Collections** — `/branches/:id/collections`, `/collections/:id/sections`,
+`/sections/:id/entries` — are the successor authoring surface the D60 410s
+point at: `Menu`/`MenuSection` under their real job description, holding
+`CatalogueEntry` placements of PRODUCTS. `priceOverride` is the only price a
+placement may own; entry deletion is archive (D42/D43 heritage). Gated on
+MENU_MANAGEMENT like the surface they replace; retail gains the module when
+Phase 9 flips `catalogue.collections` on — routes ready first.
+
+**Reports re-backed.** Five of the six restaurant reports now read the
+settlement document (`Sale`/`SaleItem`) — the same source retail reporting
+reads — with waiter performance attributed by `servedByUserId` (D58/Q6) and
+channels by `Sale.channel`. Voids stay operational (an order-lifecycle fact
+with no sale-level analogue). One recorded semantic shift: financial figures
+now measure SETTLED documents rather than ordered-but-possibly-unsettled
+items — the old numbers could count food later voided at the table.
+
+**Deprecation policy** (plan §9.1): aliased routes keep working, carry
+`Deprecation: true`, `Sunset`, and a `Link rel="successor-version"`, and are
+removed no earlier than two releases after the successor — each removal its
+own decision.
+
 ---
 
 ## Open decisions

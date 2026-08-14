@@ -1,7 +1,23 @@
 import { Injectable } from '@nestjs/common';
-import { RestaurantOrderChannel } from '@hardware-pos/database';
+import { FulfilmentKind, OrderChannel } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
+
+/*
+ * D62 — re-backed by the settlement document (convergence plan §9.2).
+ *
+ * These reports existed as a parallel stack because restaurant sales had no
+ * SaleItem rows (plan defect D-3). D58 fixed that, so the FINANCIAL figures
+ * now read Sale/SaleItem — the same source retail reporting reads — while
+ * the operational counts (sessions handled, rounds submitted, voids) stay on
+ * the operational store, which is what they are about.
+ *
+ * One recorded semantic shift: revenue and item figures now measure SETTLED
+ * documents (completedAt in range) rather than ordered-but-possibly-unsettled
+ * items. The bill a customer has not yet paid is service in progress, not
+ * revenue — the old numbers could count food that was later voided at the
+ * table or sitting on a still-open session.
+ */
 
 interface DateRange {
   from: Date;
@@ -55,42 +71,41 @@ export class RestaurantReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async salesSummary(tenantId: string, branchId: string, range: DateRange): Promise<SalesSummary> {
-    const sessions = await this.prisma.tableSession.findMany({
+    // Financial figures from the settlement document; ordersServed stays an
+    // operational count over the settled sessions' orders.
+    const sales = await this.prisma.sale.findMany({
       where: {
         tenantId,
         branchId,
-        status: 'CLOSED',
-        closedAt: { gte: range.from, lte: range.to },
+        fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
+        completedAt: { gte: range.from, lte: range.to },
       },
-      include: {
-        orders: {
-          include: { items: { where: { status: { not: 'VOIDED' } } } },
-        },
-      },
+      include: { items: { select: { quantity: true } } },
     });
-    const saleIds = sessions.map((s) => s.finalSaleId).filter((id): id is string => !!id);
-    const sales = saleIds.length
-      ? await this.prisma.sale.findMany({ where: { id: { in: saleIds } } })
-      : [];
     const bySaleStatus: Record<string, number> = {};
     let paymentsCollected = 0;
     let serviceChargeCollected = 0;
     let netRevenue = 0;
+    let itemsSold = 0;
     for (const sale of sales) {
       bySaleStatus[sale.status] = (bySaleStatus[sale.status] ?? 0) + 1;
       paymentsCollected += Number(sale.paidAmount);
       serviceChargeCollected += Number(sale.serviceChargeAmount);
       netRevenue += Number(sale.total);
+      itemsSold += sale.items.reduce((a, i) => a + Number(i.quantity), 0);
     }
-    const itemsSold = sessions
-      .flatMap((s) => s.orders.flatMap((o) => o.items.map((i) => Number(i.quantity))))
-      .reduce((a, b) => a + b, 0);
+    const sessionIds = sales
+      .filter((s) => s.sourceRefKind === 'TABLE_SESSION' && s.sourceRefId)
+      .map((s) => s.sourceRefId as string);
+    const ordersServed = sessionIds.length
+      ? await this.prisma.restaurantOrder.count({ where: { sessionId: { in: sessionIds } } })
+      : 0;
     return {
       branchId,
       from: range.from.toISOString(),
       to: range.to.toISOString(),
-      sessionsClosed: sessions.length,
-      ordersServed: sessions.flatMap((s) => s.orders).length,
+      sessionsClosed: sessionIds.length,
+      ordersServed,
       itemsSold: itemsSold.toFixed(3),
       netRevenue: netRevenue.toFixed(2),
       serviceChargeCollected: serviceChargeCollected.toFixed(2),
@@ -105,29 +120,28 @@ export class RestaurantReportsService {
     range: DateRange,
     limit = 10,
   ): Promise<TopMenuItem[]> {
-    // Aggregate per menu item across the range's non-voided items.
-    const items = await this.prisma.restaurantOrderItem.findMany({
+    // Aggregate SETTLED lines from the sale document — the same source
+    // product-level retail reporting reads. The response keeps its shape:
+    // `menuItemId` carries the product id (the one reference D60 converged
+    // on), falling back to a name key for unmigrated legacy lines.
+    const items = await this.prisma.saleItem.findMany({
       where: {
-        tenantId,
-        status: { not: 'VOIDED' },
-        createdAt: { gte: range.from, lte: range.to },
-        order: { branchId },
+        sale: {
+          tenantId,
+          branchId,
+          fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
+          completedAt: { gte: range.from, lte: range.to },
+        },
       },
-      select: {
-        menuItemId: true,
-        menuItemName: true,
-        quantity: true,
-        unitPrice: true,
-        modifierTotal: true,
-      },
+      select: { productId: true, productName: true, quantity: true, lineTotal: true },
     });
     const map = new Map<string, { name: string; qty: number; revenue: number }>();
     for (const i of items) {
-      const existing = map.get(i.menuItemId) ?? { name: i.menuItemName, qty: 0, revenue: 0 };
+      const key = i.productId ?? `name:${i.productName}`;
+      const existing = map.get(key) ?? { name: i.productName, qty: 0, revenue: 0 };
       existing.qty += Number(i.quantity);
-      existing.revenue +=
-        (Number(i.unitPrice) + Number(i.modifierTotal)) * Number(i.quantity);
-      map.set(i.menuItemId, existing);
+      existing.revenue += Number(i.lineTotal);
+      map.set(key, existing);
     }
     return [...map.entries()]
       .map(([menuItemId, v]) => ({
@@ -167,19 +181,24 @@ export class RestaurantReportsService {
       view.roundsSubmitted += s.orders.reduce((n, o) => n + o.rounds.length, 0);
       map.set(key, view);
     }
-    // Sum revenue from the closed sessions' Sales.
-    const closed = sessions.filter((s) => s.finalSaleId);
-    const saleIds = closed.map((s) => s.finalSaleId!) as string[];
-    const sales = saleIds.length
-      ? await this.prisma.sale.findMany({ where: { id: { in: saleIds } } })
-      : [];
-    const bySession = new Map(closed.map((s) => [s.finalSaleId!, s.waiterUserId!]));
-    for (const sale of sales) {
-      const waiter = bySession.get(sale.id);
-      if (!waiter) continue;
-      const v = map.get(waiter);
+    // Revenue from the settlement document's own attribution (D58/Q6:
+    // servedByUserId is who served; cashierId is who took the money) —
+    // no join back through the session needed.
+    const revenue = await this.prisma.sale.groupBy({
+      by: ['servedByUserId'],
+      where: {
+        tenantId,
+        branchId,
+        fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
+        completedAt: { gte: range.from, lte: range.to },
+        servedByUserId: { not: null },
+      },
+      _sum: { total: true },
+    });
+    for (const row of revenue) {
+      const v = map.get(row.servedByUserId!);
       if (!v) continue;
-      v.totalRevenue = (Number(v.totalRevenue) + Number(sale.total)).toFixed(2);
+      v.totalRevenue = Number(row._sum.total ?? 0).toFixed(2);
     }
     return [...map.values()].sort((a, b) => Number(b.totalRevenue) - Number(a.totalRevenue));
   }
@@ -239,13 +258,18 @@ export class RestaurantReportsService {
     tenantId: string,
     branchId: string,
     range: DateRange,
-  ): Promise<{ channel: RestaurantOrderChannel; orders: number }[]> {
-    const rows = await this.prisma.restaurantOrder.groupBy({
+  ): Promise<{ channel: OrderChannel; orders: number }[]> {
+    // D62: the channel lives on the settlement document now (D58 — before,
+    // this joined through the operational order). `orders` counts settled
+    // sales per channel; a bill not yet paid is service in progress, not a
+    // channel statistic.
+    const rows = await this.prisma.sale.groupBy({
       by: ['channel'],
       where: {
         tenantId,
         branchId,
-        createdAt: { gte: range.from, lte: range.to },
+        fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
+        completedAt: { gte: range.from, lte: range.to },
       },
       _count: { _all: true },
     });

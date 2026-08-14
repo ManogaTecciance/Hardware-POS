@@ -175,6 +175,25 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /products/import/template': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/report': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/search': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // D62 — Phase 5 API surface. The sellable read model and modifier groups
+  // are SHARED CORE like /products itself (capabilities shape the payload,
+  // not a module guard); collections are the successor to the frozen menu
+  // surface and keep its MENU_MANAGEMENT gate.
+  'GET /products/sellable': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /products/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/modifier-groups/:groupId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /products/modifier-groups/:groupId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /branches/:branchId/collections': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'POST /branches/:branchId/collections': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'PATCH /collections/:collectionId': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'GET /collections/:collectionId/sections': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'POST /collections/:collectionId/sections': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'PATCH /sections/:sectionId': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'GET /sections/:sectionId/entries': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'POST /sections/:sectionId/entries': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'PATCH /entries/:entryId': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'DELETE /entries/:entryId': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /products/sync/mock': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
   // D45 — Promotions module. Gated on MENU_MANAGEMENT (D45 hotfix): the
   // Promotions admin lives under Inventory tabs on Restaurant tenants,

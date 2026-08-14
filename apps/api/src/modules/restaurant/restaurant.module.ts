@@ -1,3 +1,4 @@
+import { ProductsModule } from '../products/products.module';
 import { Module } from '@nestjs/common';
 
 import { AuditLogModule } from '../audit-log/audit-log.module';
@@ -14,7 +15,7 @@ import { RestaurantConfigService } from './restaurant-config.service';
   // so the POS Catalogue service can consume `PromotionsRepository` and the
   // evaluator through the DI container rather than reaching into another
   // module's internals.
-  imports: [AuditLogModule, PromotionsModule],
+  imports: [AuditLogModule, PromotionsModule, ProductsModule],
   controllers: [
     RestaurantConfigController,
     KitchenStationsController,
