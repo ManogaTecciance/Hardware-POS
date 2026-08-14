@@ -39,7 +39,7 @@
  * Keep `docs/restaurant-pos/route-module-matrix.md` in step with this table — a
  * test below asserts the document lists the same totals.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
@@ -48,6 +48,34 @@ import {
 } from '../testkit/controller-registry';
 import { collectRoutes, discoverControllerFiles } from '../testkit/route-inventory';
 import { BranchScopeKind } from '../decorators/branch-scope.decorator';
+
+/**
+ * Local copies of the shared analyser's comment-strip and tree-walk (see
+ * `modules/providers/testkit/source-analysis.ts`). Local, deliberately: the
+ * provider-contract spec pins the exact importer set of `providers/`, and a
+ * guards spec joining that set to borrow two helpers would widen the surface
+ * the tripwire exists to keep small — the same trade quickbooks-isolation
+ * made.
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+function discoverModuleFiles(root: string): string[] {
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.module.ts')) found.push(full);
+    }
+  };
+  walk(root);
+  if (found.length === 0) {
+    throw new Error(`discoverModuleFiles found nothing under ${root} — the path is wrong`);
+  }
+  return found.sort();
+}
 
 const API_SRC = resolve(__dirname, '../..');
 const MATRIX_DOC = resolve(
@@ -180,6 +208,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // not a module guard); collections are the successor to the frozen menu
   // surface and keep its MENU_MANAGEMENT gate.
   'GET /products/sellable': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/attribute-schema': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/modifier-groups/:groupId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
@@ -437,6 +466,63 @@ describe('7.6 — every route is classified', () => {
     // its routes invisible to every assertion in this spec.
     expect(ALL_CONTROLLERS.length).toBe(REGISTERED_CONTROLLER_FILES.length);
     expect(new Set(ALL_CONTROLLERS.map((c) => c.name)).size).toBe(ALL_CONTROLLERS.length);
+  });
+
+  /**
+   * The names registered in some Nest module's `controllers: […]` array —
+   * comment-stripped, because a controller folded into a `//` comment is
+   * precisely a controller Nest will NOT serve.
+   *
+   * This closes the gap the rest of this spec cannot see: the inventory above
+   * reads decorator metadata off the controller CLASSES, which exists whether
+   * or not any module registers the class. In Phase 5 an editing accident
+   * left `ProductModifiersController` inside a comment in products.module.ts;
+   * its routes 404ed live while every assertion here stayed green.
+   */
+  function controllersRegisteredInModules(): Set<string> {
+    const registered = new Set<string>();
+    let arrays = 0;
+    for (const file of discoverModuleFiles(API_SRC)) {
+      const code = stripComments(readFileSync(file, 'utf8'));
+      for (const m of code.matchAll(/controllers:\s*\[([^\]]*)\]/g)) {
+        arrays += 1;
+        for (const id of m[1]!.match(/\b[A-Za-z0-9_]+Controller\b/g) ?? []) registered.add(id);
+      }
+    }
+    if (arrays === 0) {
+      throw new Error('no controllers: [...] array found in any module — the scanner is broken');
+    }
+    return registered;
+  }
+
+  it('every controller class is registered, uncommented, in a Nest module', () => {
+    // Exact sets both ways: an unregistered controller (commented out or just
+    // forgotten) fails by name, and so does a registration of a class that no
+    // longer exists on disk.
+    expect([...controllersRegisteredInModules()].sort()).toEqual(
+      ALL_CONTROLLERS.map((c) => c.name).sort(),
+    );
+  });
+
+  it('mutation proof: commenting a registration out is detected', () => {
+    // Replay the actual Phase 5 defect: the same scanner over products.module.ts
+    // with ProductModifiersController folded into a line comment must lose
+    // exactly that name. Proves stripComments does the discriminating work.
+    const source = readFileSync(
+      resolve(API_SRC, 'modules/products/products.module.ts'),
+      'utf8',
+    );
+    const extract = (code: string) =>
+      [...stripComments(code).matchAll(/controllers:\s*\[([^\]]*)\]/g)].flatMap(
+        (m) => m[1]!.match(/\b[A-Za-z0-9_]+Controller\b/g) ?? [],
+      );
+    expect(extract(source)).toContain('ProductModifiersController');
+    const mutated = source.replace(
+      /^(\s*)ProductModifiersController,/m,
+      '$1// ProductModifiersController,',
+    );
+    expect(mutated).not.toBe(source); // the mutation really landed
+    expect(extract(mutated)).not.toContain('ProductModifiersController');
   });
 
   it('every classification names a real module or SHARED_CORE', () => {

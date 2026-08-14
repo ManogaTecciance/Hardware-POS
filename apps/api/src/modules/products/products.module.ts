@@ -1,4 +1,6 @@
 import { MenuModule } from '../menu/menu.module';
+import { ProductAttributeSchemaController } from './product-attribute-schema.controller';
+import { ProductAttributesService } from './product-attributes.service';
 import { ProductModifierGroupsController } from './product-modifier-groups.controller';
 import { PlatformModule } from '../platform/platform.module';
 import { PromotionsModule } from '../promotions/promotions.module';
@@ -43,13 +45,18 @@ import { ProductVariantsService } from './variants/product-variants.service';
   // event so the wizard's changes are traceable per-tenant.
   imports: [ProvidersModule, AuditLogModule, PromotionsModule, PlatformModule, MenuModule],
   controllers: [
-    // SellableController FIRST: /products/sellable must register before
-    // ProductsController's GET /products/:id, or ':id' captures 'sellable'.
+    // Static /products/* routes FIRST: they must register before
+    // ProductsController's GET /products/:id, or ':id' captures the segment
+    // ('sellable', 'attribute-schema').
     SellableController,
+    ProductAttributeSchemaController,
     ProductsController,
     ProductImagesController,
     ProductVariantsController,
-    // D45 — Product-side attachment endpoints. ModifierGroup / KitchenStation     // catalogues stay owned by their respective modules; only the junctions     // live here.     ProductModifiersController,
+    // D45 — Product-side attachment endpoints. ModifierGroup / KitchenStation
+    // catalogues stay owned by their respective modules; only the junctions
+    // live here.
+    ProductModifiersController,
     ProductStationsController,
     ProductModifierGroupsController,
   ],
@@ -61,7 +68,10 @@ import { ProductVariantsService } from './variants/product-variants.service';
     ProductVariantsService,
     ProductVariantsRepository,
     ProductModifiersService,
-    ProductStationsService, SellableService],
+    ProductStationsService,
+    ProductAttributesService,
+    SellableService,
+  ],
   exports: [ProductsService, SellableService],
 })
 export class ProductsModule {}

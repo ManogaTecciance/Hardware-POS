@@ -31,4 +31,18 @@ export const HOTEL_DOMAIN: DomainDescriptor = {
   navigation: FOOD_SERVICE_NAVIGATION,
   roleTemplates: ALL_ROLE_TEMPLATES,
   capabilities: FOOD_SERVICE_CAPABILITIES,
+  catalogue: {
+    /**
+     * The plan's §4.6 worked example, live (D64). All OPTIONAL for now,
+     * deliberately: the same wizard authors a hotel's food and beverage
+     * products, and a required `bedCount` would block every burger. The
+     * required flags arrive with STAY_UNIT authoring, when requiredness can
+     * hang off the sellable kind instead of the whole domain.
+     */
+    attributeSchema: [
+      { key: 'bedCount', label: 'Beds', type: 'integer', min: 1, max: 12 },
+      { key: 'maxOccupancy', label: 'Sleeps', type: 'integer', min: 1, max: 20 },
+      { key: 'viewType', label: 'View', type: 'enum', options: ['Sea', 'Garden', 'City'] },
+    ],
+  },
 };

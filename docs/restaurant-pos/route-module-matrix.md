@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 278
+- Total routes: 279
 - Module-guarded routes: 204
-- Ungated routes: 74
+- Ungated routes: 75
 
 ## How to read the Guard column
 
@@ -221,6 +221,15 @@ reach production unclassified.
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
 | GET | `/products/sellable` | SHARED_CORE | shared-core | product:read |
+
+### ProductAttributeSchemaController
+
+D64: the tenant domain's declared catalogue attribute fields — one list
+drives the wizard's generic attributes step and the server-side validator.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/products/attribute-schema` | SHARED_CORE | shared-core | product:read |
 
 ### ProductModifierGroupsController
 

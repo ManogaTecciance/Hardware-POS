@@ -126,6 +126,7 @@ function makeProduct(overrides: Partial<ManagedProduct> = {}): ManagedProduct {
     lastSyncedAt: null,
     hasVariants: false,
     averageCost: 155,
+    attributes: {},
     ...overrides,
   };
 }

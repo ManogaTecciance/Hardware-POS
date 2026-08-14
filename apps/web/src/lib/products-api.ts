@@ -55,6 +55,12 @@ export interface ManagedProduct {
    * fresh Inventory item until the first receipt lands.
    */
   averageCost: number | null;
+  /**
+   * D64 — domain attributes, keyed per the tenant descriptor's attribute
+   * schema (`GET /products/attribute-schema`). `{}` for every tenant whose
+   * domain declares none.
+   */
+  attributes: Record<string, unknown>;
 }
 
 export interface ProductsPage {
@@ -106,6 +112,12 @@ export interface ProductInput {
   foodType?: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null;
   prepMinutes?: number | null;
   dietaryTags?: string[];
+  /**
+   * D64 — domain attributes. REPLACE semantics: when present the object is
+   * the whole stored document; omit the key to leave it unchanged. Only sent
+   * when the tenant's attribute schema is non-empty.
+   */
+  attributes?: Record<string, string | number | boolean>;
 }
 
 export interface Category {

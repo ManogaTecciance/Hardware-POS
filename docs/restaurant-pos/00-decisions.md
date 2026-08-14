@@ -2065,6 +2065,65 @@ cannot grow the disease the columns had.
 No QuickBooks behaviour a hardware tenant can observe changes in this phase;
 if one can tell it happened, it is wrong (plan non-goal).
 
+### D64 — `Product.attributes`: domain catalogue fields without a migration per domain
+
+Implements Phase 7 of the convergence plan (§4.6). The rule that decides
+where a product field lives, now enforced end to end:
+
+> **Behaviour goes in columns. Description goes in `attributes`.** If the
+> engine must branch on it — inventory, pricing, tax, settlement — it is a
+> typed column and a migration with a decision record. If only the domain UI
+> and reports read it, it is a validated key in `Product.attributes`.
+
+**Storage.** `attributes JSONB NOT NULL DEFAULT '{}'` + GIN index
+(migration `20260826000000`, self-backfilling — every existing row is the
+valid empty document). Values are scalars only; a key that wants structure
+is a key that wants promotion to a column.
+
+**One declarative schema, three consumers.** Each `DomainDescriptor` now
+REQUIRES `catalogue.attributeSchema` — a descriptor must say "no
+attributes" rather than get it by omission. The same list drives:
+
+1. `GET /products/attribute-schema` — what the tenant's wizard renders;
+2. the server-side validator (`validateAttributes` in `@hardware-pos/shared`,
+   applied by `ProductAttributesService` on create and update) — refusals
+   are `400 PRODUCT_ATTRIBUTES_INVALID` with per-key issues;
+3. the sellable listing's `attr[key]=value` filters — keys checked against
+   the schema, values coerced to the field's type, unknown key or
+   uncoercible value a 400 naming itself, never a silently-empty page.
+
+So a new vertical's catalogue fields are one descriptor edit: no migration,
+no DTO change, no wizard code — the generic attributes step renders any
+schema, and only appears when the schema is non-empty.
+
+**Declared today.** HOTEL carries the plan's worked example (bedCount,
+maxOccupancy, viewType) — all OPTIONAL for now, deliberately: the same
+wizard authors a hotel's food, and a required `bedCount` would block every
+burger. Requiredness arrives with STAY_UNIT authoring, hung off the
+sellable kind. Hardware, food service and GENERAL declare `[]`, and an
+empty schema is a CLOSED door: every `attributes` key is refused, which is
+what keeps the column from growing schemaless sprawl.
+
+**Semantics.** The document is replaced whole when provided (`undefined`
+leaves it untouched); an optional key is cleared by omission, never by
+`null`. `attr[…]` filters ride the restored Express `extended` query parser
+(Express 5 dropped it; `main.ts` and the integration harness set it back)
+so a nested `attr` object passes the whitelist pipe as one declared key.
+
+**Found and fixed while wiring the route:** Phase 5's module edit had folded
+`ProductModifiersController` into a `//` comment in `products.module.ts` —
+its `GET/PUT /products/:productId/modifier-groups` routes 404ed live while
+the route matrix stayed green, because the matrix reads decorator metadata
+off controller CLASSES, which exist whether or not any module registers
+them. The controller is re-registered (verified live), and the matrix spec
+gained the missing tripwire: every controller class must appear, comment-
+stripped, in some module's `controllers: […]` array — exact sets both ways,
+with an inline mutation proof that replays the actual defect.
+
+Attributes are deliberately absent from `SellableItem` (the POS grid does
+not render them) and from every money/stock path — the D30 spec suite pins
+the validator's whole refusal surface, including the empty-schema case.
+
 ---
 
 ## Open decisions

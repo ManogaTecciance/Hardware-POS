@@ -68,6 +68,7 @@ const singleVariantProduct: ManagedProduct = {
   lastSyncedAt: null,
   hasVariants: false,
   averageCost: null,
+  attributes: {},
 };
 
 /** One live variant, seeded with a weighted-average so cost-jump assertions bite. */

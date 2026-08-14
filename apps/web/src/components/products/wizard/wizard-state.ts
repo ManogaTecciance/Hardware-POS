@@ -9,6 +9,8 @@
  * (React key stability) and only turn into real ids after the batch POST.
  */
 
+import { validateAttributes, type AttributeField } from '@hardware-pos/shared';
+
 import type { ProductBusinessKind } from '@/lib/products/product-presentation';
 import type { ManagedProduct, ProductItemType } from '@/lib/products-api';
 import type {
@@ -19,9 +21,23 @@ import type {
 /** Restaurant Category (Food / Beverage / Dessert). Empty when not chosen yet. */
 export type RestaurantFoodType = '' | 'FOOD' | 'BEVERAGE' | 'DESSERT';
 
-export type StepKey = 'details' | 'variations' | 'pricing' | 'review';
+export type StepKey = 'details' | 'attributes' | 'variations' | 'pricing' | 'review';
 
-export const STEP_ORDER: StepKey[] = ['details', 'variations', 'pricing', 'review'];
+/**
+ * The FULL step order. The `attributes` step (D64) only renders for tenants
+ * whose domain declares a non-empty attribute schema — the wizard shell
+ * filters it out otherwise (`visibleSteps`), but validation iterates this
+ * list unconditionally, which is safe: an empty schema validates `{}` to no
+ * errors.
+ */
+export const STEP_ORDER: StepKey[] = ['details', 'attributes', 'variations', 'pricing', 'review'];
+
+/** The steps the stepper shows this tenant (D64 — see STEP_ORDER). */
+export function visibleSteps(attributeSchema: readonly AttributeField[]): StepKey[] {
+  return attributeSchema.length > 0
+    ? STEP_ORDER
+    : STEP_ORDER.filter((s) => s !== 'attributes');
+}
 
 /**
  * A variation dimension in draft form.
@@ -117,6 +133,14 @@ export interface WizardState {
    * for the exact orchestration.
    */
   promotionIds: string[];
+
+  /**
+   * D64 — domain attribute inputs, RAW: every value is the input's string
+   * ('' = not entered; booleans are 'true'/'false'). Conversion to the typed
+   * document happens once, in `buildAttributesDocument`, against the schema —
+   * keeping the state shape uniform with every other wizard field.
+   */
+  attributes: Record<string, string>;
 }
 
 /**
@@ -160,6 +184,7 @@ export function initialState(): WizardState {
     modifierGroupIds: [],
     kitchenStationIds: [],
     promotionIds: [],
+    attributes: {},
   };
 }
 
@@ -253,6 +278,10 @@ export function hydrateFromProduct(
     modifierGroupIds: restaurant.modifierGroupIds ?? [],
     kitchenStationIds: restaurant.kitchenStationIds ?? [],
     promotionIds: restaurant.promotionIds ?? [],
+    // D64 — back to raw input strings; booleans render as 'true'/'false'.
+    attributes: Object.fromEntries(
+      Object.entries(product.attributes ?? {}).map(([k, v]) => [k, String(v)]),
+    ),
   };
 }
 
@@ -323,6 +352,12 @@ export interface ValidateContext {
    * safe as `inventoryMode: null`.
    */
   businessKind?: ProductBusinessKind | null;
+  /**
+   * D64 — the tenant domain's attribute schema. `[]` (or absent) skips the
+   * attributes step entirely; the server validates against the same list, so
+   * client validation here is usability, not authority.
+   */
+  attributeSchema?: readonly AttributeField[];
 }
 
 export const MAX_COMBINATIONS = 500;
@@ -352,6 +387,16 @@ export function validateStep(
       if (!Number.isFinite(n) || n < 0 || n > 360) {
         errors.prepMinutes = 'Preparation time is 0-360 minutes.';
       }
+    }
+  }
+
+  if (step === 'attributes') {
+    // D64 — run the SAME validator the server refuses with, over the typed
+    // document the payload builder will send. Errors keyed `attr-<key>` so
+    // the step highlights the exact field.
+    const schema = ctx.attributeSchema ?? [];
+    for (const issue of validateAttributes(schema, buildAttributesDocument(state, schema))) {
+      errors[issue.key ? `attr-${issue.key}` : 'attributes'] = issue.message;
     }
   }
 
@@ -437,6 +482,39 @@ export function validateStep(
 
 // ── Payload builders ─────────────────────────────────────────────────────────
 
+/**
+ * D64 — the typed attributes document from the raw input strings, per the
+ * schema. An empty input means "not entered" and produces NO key (the server
+ * treats absence as cleared under replace semantics); a non-empty input is
+ * converted to the field's type. Uncoercible numbers pass through as the raw
+ * string so the validator rejects them with the field's own message instead
+ * of a silent NaN.
+ */
+export function buildAttributesDocument(
+  state: WizardState,
+  schema: readonly AttributeField[],
+): Record<string, string | number | boolean> {
+  const doc: Record<string, string | number | boolean> = {};
+  for (const field of schema) {
+    const raw = (state.attributes[field.key] ?? '').trim();
+    if (raw === '') continue;
+    switch (field.type) {
+      case 'integer':
+      case 'number': {
+        const n = Number(raw);
+        doc[field.key] = Number.isFinite(n) ? n : raw;
+        break;
+      }
+      case 'boolean':
+        doc[field.key] = raw === 'true';
+        break;
+      default:
+        doc[field.key] = raw;
+    }
+  }
+  return doc;
+}
+
 export interface ProductCreatePayload {
   name: string;
   type: ProductItemType;
@@ -458,12 +536,19 @@ export interface ProductCreatePayload {
   foodType?: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null;
   prepMinutes?: number | null;
   dietaryTags?: string[];
+  /**
+   * D64 — domain attributes (replace semantics). Present only when the
+   * tenant's schema declares fields; a tenant with none never sends the key,
+   * so the payload cannot trip the server's unknown-key refusal.
+   */
+  attributes?: Record<string, string | number | boolean>;
 }
 
 /** Build the `POST /products` body — Step 3 already validated the numbers. */
 export function buildCreateInput(
   state: WizardState,
   imageUrl: string | null,
+  attributeSchema: readonly AttributeField[] = [],
 ): ProductCreatePayload {
   const simple = state.simple;
   const useSimpleForRoot = !state.hasVariations;
@@ -491,6 +576,11 @@ export function buildCreateInput(
     foodType: state.foodType || null,
     prepMinutes: state.prepMinutes ? Number(state.prepMinutes) || null : null,
     dietaryTags: state.dietaryTags,
+    // D64 — the whole document, every save (replace semantics), but only for
+    // tenants whose domain declares fields at all.
+    ...(attributeSchema.length > 0
+      ? { attributes: buildAttributesDocument(state, attributeSchema) }
+      : {}),
   };
 }
 

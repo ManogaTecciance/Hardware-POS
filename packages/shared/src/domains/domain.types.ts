@@ -26,6 +26,7 @@ import type {
   InventoryMode,
   ModuleKey,
 } from '../types/platform.js';
+import type { AttributeField } from './attributes.js';
 import type { TenantCapabilities } from './capabilities.js';
 import type { NavGroupSpec } from './navigation.js';
 
@@ -65,4 +66,20 @@ export interface DomainDescriptor {
 
   /** What this domain's tenants can do. See `capabilities.ts`. */
   readonly capabilities: TenantCapabilities;
+
+  /**
+   * Catalogue authoring, declared as data (Phase 7, D64). Required — not
+   * optional — so a new descriptor must SAY "no attributes" rather than get
+   * it by omission; the silent-fallback failure mode is the one this whole
+   * module exists to end.
+   */
+  readonly catalogue: {
+    /**
+     * Declarative field list for `Product.attributes` — drives the generic
+     * wizard step AND the server-side validator (see `attributes.ts`).
+     * Empty = this vertical stores no domain attributes, and every key is
+     * refused.
+     */
+    readonly attributeSchema: readonly AttributeField[];
+  };
 }

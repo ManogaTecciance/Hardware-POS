@@ -74,6 +74,8 @@ export async function createHttpIntegrationApp(): Promise<HttpIntegrationApp> {
   const app = moduleRef.createNestApplication<NestExpressApplication>();
   app.useLogger(false);
   app.setGlobalPrefix(API_VERSION);
+  // Identical to main.ts (D64): nested `attr[key]=value` query filters.
+  app.set('query parser', 'extended');
   // Identical flags to main.ts: `forbidNonWhitelisted` is what turns an unexpected
   // body field (a client-supplied `tenantId`, say) into a 400 instead of a silent
   // no-op, so a spec asserting that must use the same configuration.

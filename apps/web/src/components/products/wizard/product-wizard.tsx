@@ -47,7 +47,13 @@ import {
   type ProductVariationDimension,
 } from '@/lib/products/variants-api';
 
+import {
+  fetchProductAttributeSchema,
+  type AttributeField,
+} from '@/lib/products/attributes-api';
+
 import { ProductPreview } from './product-preview';
+import { StepAttributes } from './step-attributes';
 import { StepDetails } from './step-details';
 import { StepPricingInventory } from './step-pricing-inventory';
 import { StepReview } from './step-review';
@@ -61,18 +67,21 @@ import {
   initialState,
   STEP_ORDER,
   validateStep,
+  visibleSteps,
   type StepKey,
   type WizardState,
 } from './wizard-state';
 
-// Steps declared once here so the stepper and the switch below cannot disagree
-// about ordering or labels.
-const WIZARD_STEPS: { index: number; key: StepKey; label: string }[] = [
-  { index: 0, key: 'details', label: 'Product details' },
-  { index: 1, key: 'variations', label: 'Variations' },
-  { index: 2, key: 'pricing', label: 'Pricing & inventory' },
-  { index: 3, key: 'review', label: 'Review & save' },
-];
+// Labels declared once here so the stepper and the switch below cannot
+// disagree. The step LIST is computed per-tenant: the attributes step (D64)
+// only exists for domains whose attribute schema declares fields.
+const STEP_LABELS: Record<StepKey, string> = {
+  details: 'Product details',
+  attributes: 'Business details',
+  variations: 'Variations',
+  pricing: 'Pricing & inventory',
+  review: 'Review & save',
+};
 
 interface CreateProps {
   mode: 'create';
@@ -128,6 +137,9 @@ export function ProductWizard(props: Props) {
   );
   const [categories, setCategories] = React.useState<CategoryNode[]>(props.categories ?? []);
   const [branches, setBranches] = React.useState<BranchSummary[]>([]);
+  // D64 — [] until resolved (and on fetch failure): the safe default is no
+  // attributes step, mirroring the profile's unresolved-shows-nothing rule.
+  const [attributeSchema, setAttributeSchema] = React.useState<readonly AttributeField[]>([]);
   const [dimensions, setDimensions] = React.useState<ProductVariationDimension[]>([]);
   const [originalVariants, setOriginalVariants] = React.useState<ProductVariant[]>([]);
   const [loading, setLoading] = React.useState(mode === 'edit');
@@ -150,15 +162,17 @@ export function ProductWizard(props: Props) {
   React.useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [cats, brs] = await Promise.all([
+      const [cats, brs, attrs] = await Promise.all([
         props.categories && props.categories.length > 0
           ? Promise.resolve(props.categories)
           : fetchCategoryTree(session).catch(() => [] as CategoryNode[]),
         fetchBranches(session).catch(() => [] as BranchSummary[]),
+        fetchProductAttributeSchema(session).catch(() => ({ fields: [] as AttributeField[] })),
       ]);
       if (cancelled) return;
       setCategories(cats);
       setBranches(brs);
+      setAttributeSchema(attrs.fields);
     };
     void load();
     return () => {
@@ -222,7 +236,19 @@ export function ProductWizard(props: Props) {
     setState((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  const currentStep = WIZARD_STEPS[stepIndex]!.key;
+  // D64 — the visible step list is per-tenant data. Recomputed when the
+  // schema lands; index-addressed state below always goes through this list.
+  const wizardSteps = React.useMemo(
+    () =>
+      visibleSteps(attributeSchema).map((stepKey, index) => ({
+        index,
+        key: stepKey,
+        label: STEP_LABELS[stepKey],
+      })),
+    [attributeSchema],
+  );
+  const currentStep = wizardSteps[Math.min(stepIndex, wizardSteps.length - 1)]!.key;
+  const validateCtx = { inventoryMode, businessKind, attributeSchema };
 
   const goTo = (nextIndex: number) => {
     setStepIndex(nextIndex);
@@ -232,12 +258,12 @@ export function ProductWizard(props: Props) {
   };
 
   const onContinue = () => {
-    const stepErrors = validateStep(currentStep, state, { inventoryMode, businessKind });
+    const stepErrors = validateStep(currentStep, state, validateCtx);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
       return;
     }
-    if (stepIndex < WIZARD_STEPS.length - 1) {
+    if (stepIndex < wizardSteps.length - 1) {
       goTo(stepIndex + 1);
     }
   };
@@ -252,7 +278,9 @@ export function ProductWizard(props: Props) {
   };
 
   const onEditFrom = (target: StepKey) => {
-    const nextIndex = STEP_ORDER.indexOf(target);
+    // Index into the VISIBLE list, not STEP_ORDER — they differ when the
+    // attributes step is present (D64).
+    const nextIndex = wizardSteps.findIndex((s) => s.key === target);
     if (nextIndex >= 0) goTo(nextIndex);
   };
 
@@ -260,7 +288,6 @@ export function ProductWizard(props: Props) {
 
   const persist = async () => {
     // Final validation across every step; the earliest failure wins the focus.
-    const validateCtx = { inventoryMode, businessKind };
     const allErrors: Record<string, string> = {};
     for (const key of STEP_ORDER.filter((s) => s !== 'review')) {
       Object.assign(allErrors, validateStep(key, state, validateCtx));
@@ -270,7 +297,7 @@ export function ProductWizard(props: Props) {
       const earliest = STEP_ORDER.find(
         (k) => Object.keys(validateStep(k, state, validateCtx)).length > 0,
       );
-      if (earliest) goTo(STEP_ORDER.indexOf(earliest));
+      if (earliest) onEditFrom(earliest);
       return;
     }
 
@@ -278,9 +305,9 @@ export function ProductWizard(props: Props) {
     setSaveError(null);
     try {
       if (mode === 'create') {
-        await runCreate(session, state, patchStateAfterCreate);
+        await runCreate(session, state, attributeSchema, patchStateAfterCreate);
       } else {
-        await runEdit(session, props.initialProductId, state, originalVariants);
+        await runEdit(session, props.initialProductId, state, attributeSchema, originalVariants);
       }
       // Restaurant links: after the product exists and variants are batched,
       // patch modifier-group + station links + promotion memberships. Kept
@@ -330,7 +357,7 @@ export function ProductWizard(props: Props) {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,2.6fr)_minmax(280px,1fr)]">
       <div className="space-y-5">
-        <Stepper steps={WIZARD_STEPS} currentIndex={stepIndex} onStepClick={goTo} />
+        <Stepper steps={wizardSteps} currentIndex={stepIndex} onStepClick={goTo} />
 
         <div
           key={stepAnimKey}
@@ -344,6 +371,15 @@ export function ProductWizard(props: Props) {
               categories={categories}
               session={session}
               businessKind={businessKind}
+              onChange={patchState}
+            />
+          ) : null}
+          {currentStep === 'attributes' ? (
+            <StepAttributes
+              state={state}
+              errors={errors}
+              schema={attributeSchema}
+              positionLabel={`Step ${stepIndex + 1} of ${wizardSteps.length}`}
               onChange={patchState}
             />
           ) : null}
@@ -491,9 +527,10 @@ export function ProductWizard(props: Props) {
 async function runCreate(
   session: Session,
   state: WizardState,
+  attributeSchema: readonly AttributeField[],
   setCreatedId: (id: string) => void,
 ): Promise<void> {
-  const input = buildCreateInput(state, state.imageUrl || null);
+  const input = buildCreateInput(state, state.imageUrl || null, attributeSchema);
   // Discard fields the platform-profile hides — the server accepts them but
   // sending them from a UI that pretends they don't exist is misleading.
   const created = await createProduct(session, input);
@@ -635,9 +672,10 @@ async function runEdit(
   session: Session,
   productId: string,
   state: WizardState,
+  attributeSchema: readonly AttributeField[],
   originalVariants: ProductVariant[],
 ): Promise<void> {
-  const input = buildCreateInput(state, state.imageUrl || null);
+  const input = buildCreateInput(state, state.imageUrl || null, attributeSchema);
   await updateProduct(session, productId, input);
 
   if (!state.hasVariations) return;

@@ -27,13 +27,18 @@ import { StepReview } from './step-review';
 import { StepVariations } from './step-variations';
 import { Stepper } from './stepper';
 import {
+  buildAttributesDocument,
+  buildCreateInput,
   buildVariantsBatchInput,
   enumerateCombinations,
   initialState,
   validateStep,
+  visibleSteps,
   type StepKey,
   type WizardState,
 } from './wizard-state';
+import { StepAttributes } from './step-attributes';
+import type { AttributeField } from '@hardware-pos/shared';
 
 afterEach(cleanup);
 
@@ -676,6 +681,112 @@ describe('StepReview', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // wizard-state — pure helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D64 — the generic domain-attributes step and its state helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HOTEL_SCHEMA: readonly AttributeField[] = [
+  { key: 'bedCount', label: 'Beds', type: 'integer', min: 1, max: 12 },
+  { key: 'viewType', label: 'View', type: 'enum', options: ['Sea', 'Garden', 'City'] },
+];
+
+describe('D64 — attributes step visibility and payload', () => {
+  it('visibleSteps includes the attributes step ONLY for a declaring schema', () => {
+    // POSITIVE — a declaring domain gets the step, in order, after details.
+    expect(visibleSteps(HOTEL_SCHEMA)).toEqual([
+      'details',
+      'attributes',
+      'variations',
+      'pricing',
+      'review',
+    ]);
+    // NEGATIVE — the empty schema (hardware, restaurant, general today)
+    // renders the historical four-step wizard, unchanged.
+    expect(visibleSteps([])).toEqual(['details', 'variations', 'pricing', 'review']);
+  });
+
+  it('buildAttributesDocument converts raw inputs by field type and drops blanks', () => {
+    const s = initialState();
+    s.attributes = { bedCount: '2', viewType: '' };
+    expect(buildAttributesDocument(s, HOTEL_SCHEMA)).toEqual({ bedCount: 2 });
+    // An uncoercible number passes through raw so the SHARED validator words
+    // the refusal — not a silent NaN.
+    s.attributes = { bedCount: 'two', viewType: 'Sea' };
+    expect(buildAttributesDocument(s, HOTEL_SCHEMA)).toEqual({
+      bedCount: 'two',
+      viewType: 'Sea',
+    });
+  });
+
+  it('buildCreateInput sends the document only when the schema declares fields', () => {
+    const s = initialState();
+    s.name = 'Sea Room';
+    s.simple.unitPrice = '100';
+    s.attributes = { bedCount: '3' };
+    // POSITIVE — declaring tenant: the whole document rides on the payload.
+    expect(buildCreateInput(s, null, HOTEL_SCHEMA).attributes).toEqual({ bedCount: 3 });
+    // NEGATIVE — non-declaring tenant: no `attributes` key AT ALL, so the
+    // payload cannot trip the server's unknown-key refusal.
+    expect('attributes' in buildCreateInput(s, null)).toBe(false);
+  });
+
+  it("validateStep('attributes') keys errors per field and passes valid input", () => {
+    const s = initialState();
+    s.attributes = { bedCount: '0' }; // below min
+    const errs = validateStep('attributes', s, {
+      inventoryMode: 'LOCAL',
+      attributeSchema: HOTEL_SCHEMA,
+    });
+    expect(errs['attr-bedCount']).toMatch(/at least 1/i);
+    s.attributes = { bedCount: '2', viewType: 'Sea' };
+    expect(
+      validateStep('attributes', s, { inventoryMode: 'LOCAL', attributeSchema: HOTEL_SCHEMA }),
+    ).toEqual({});
+    // No schema in ctx (every non-declaring tenant): the step validates to
+    // nothing, which is what lets persist() iterate STEP_ORDER blindly.
+    expect(validateStep('attributes', s, { inventoryMode: 'LOCAL' })).toEqual({});
+  });
+});
+
+describe('StepAttributes', () => {
+  function Harness({ state }: { state: WizardState }) {
+    const h = useHarness(state);
+    const errors = validateStep('attributes', h.state, {
+      inventoryMode: 'LOCAL',
+      attributeSchema: HOTEL_SCHEMA,
+    });
+    return (
+      <StepAttributes
+        state={h.state}
+        errors={errors}
+        schema={HOTEL_SCHEMA}
+        positionLabel="Step 2 of 5"
+        onChange={h.patch}
+      />
+    );
+  }
+
+  it('renders one control per schema field, typed by the field kind', () => {
+    render(<Harness state={initialState()} />);
+    // Integer → text input with the field's label; enum → select with options.
+    expect(screen.getByLabelText('Beds')).toBeDefined();
+    const view = screen.getByLabelText('View') as HTMLSelectElement;
+    expect(Array.from(view.options).map((o) => o.textContent)).toEqual([
+      'Not set',
+      'Sea',
+      'Garden',
+      'City',
+    ]);
+  });
+
+  it('surfaces the shared validator message against the offending field', () => {
+    const s = initialState();
+    s.attributes = { bedCount: 'two' };
+    render(<Harness state={s} />);
+    expect(screen.getByRole('alert').textContent).toMatch(/beds must be a number/i);
+  });
+});
 
 describe('wizard-state helpers', () => {
   it('enumerateCombinations cross-products in variations order', () => {

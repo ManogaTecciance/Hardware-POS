@@ -29,6 +29,7 @@ import { DocumentsController } from '../../modules/documents/documents.controlle
 import { PaymentsController } from '../../modules/payments/payments.controller';
 import { PlatformController } from '../../modules/platform/platform.controller';
 import { PlatformAdminController } from '../../modules/platform-admin/platform-admin.controller';
+import { ProductAttributeSchemaController } from '../../modules/products/product-attribute-schema.controller';
 import { ProductsController } from '../../modules/products/products.controller';
 import { QuickBooksController } from '../../modules/quickbooks/quickbooks.controller';
 import { PublicQuotationsController } from '../../modules/quotations/public-quotations.controller';
@@ -145,6 +146,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   PosCatalogueController,
   // D62 — Phase 5 API surface.
   SellableController,
+  // D64 — Phase 7 attribute schema read.
+  ProductAttributeSchemaController,
   ProductModifierGroupsController,
   CollectionsController,
   CollectionController,
@@ -179,6 +182,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'product-categories',
   'product-subcategories',
   'products',
+  // D64 — Phase 7.
+  'product-attribute-schema',
   'public-quotations',
   'quickbooks',
   'quotations',

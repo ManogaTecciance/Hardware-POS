@@ -28,4 +28,6 @@ export const GENERAL_DOMAIN: DomainDescriptor = {
   navigation: RETAIL_NAVIGATION,
   roleTemplates: BUILT_IN_ROLE_TEMPLATES,
   capabilities: GENERAL_CAPABILITIES,
+  // No domain attributes (D64) — GENERAL is the deliberately-plain template.
+  catalogue: { attributeSchema: [] },
 };

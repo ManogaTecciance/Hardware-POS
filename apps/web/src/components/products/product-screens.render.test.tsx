@@ -119,6 +119,7 @@ const product: ManagedProduct = {
   lastSyncedAt: null,
   hasVariants: false,
   averageCost: null,
+  attributes: {},
 };
 
 const syncProductToQuickBooks = vi.fn().mockResolvedValue(product);

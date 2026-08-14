@@ -1,4 +1,5 @@
 /** Domain packs (convergence plan Phase 0, D56). See `domain.types.ts`. */
+export * from './attributes.js';
 export * from './capabilities.js';
 export * from './domain.types.js';
 export * from './modules.js';

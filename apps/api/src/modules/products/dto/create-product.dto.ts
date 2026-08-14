@@ -6,6 +6,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -128,4 +129,14 @@ export class CreateProductDto {
   @IsIn(PRODUCT_FOOD_TYPES)
   @IsOptional()
   foodType?: ProductFoodType;
+
+  /**
+   * D64 — domain attributes, validated against the tenant descriptor's
+   * `catalogue.attributeSchema` by `ProductAttributesService` (the decorator
+   * only enforces the container shape; keys and value types are the domain
+   * schema's business, not class-validator's).
+   */
+  @IsObject()
+  @IsOptional()
+  attributes?: Record<string, unknown>;
 }

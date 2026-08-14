@@ -6,6 +6,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -111,4 +112,13 @@ export class UpdateProductDto {
   @IsIn(PRODUCT_FOOD_TYPES)
   @IsOptional()
   foodType?: ProductFoodType;
+
+  /**
+   * D64 — domain attributes. REPLACE semantics when provided (the payload is
+   * the whole document — required keys are re-checked); `undefined` leaves
+   * the stored document unchanged. See CreateProductDto.
+   */
+  @IsObject()
+  @IsOptional()
+  attributes?: Record<string, unknown>;
 }

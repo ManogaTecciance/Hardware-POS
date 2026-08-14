@@ -750,6 +750,12 @@ model Product {
   prepMinutes           Int?
   dietaryTags           String[]      @default([])
   foodType              MenuItemType?
+  /// D64 — domain-specific attributes, validated against the tenant
+  /// descriptor's `catalogue.attributeSchema` (plan §4.6). Behaviour goes in
+  /// columns; description goes here. Never read by pricing, tax, inventory
+  /// or settlement — those read typed columns only. GIN-indexed so domain
+  /// screens can filter on it.
+  attributes            Json          @default("{}")
   lastSyncedAt          DateTime?
   syncStatus            SyncStatus    @default(NOT_SYNCED)
   createdAt             DateTime      @default(now())
@@ -779,6 +785,7 @@ model Product {
   @@index([tenantId, name])
   @@index([categoryId])
   @@index([subcategoryId])
+  @@index([attributes], type: Gin)
 }
 
 // ─────────────────────────────────────────────────────────────

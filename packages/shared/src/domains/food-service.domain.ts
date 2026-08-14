@@ -30,4 +30,8 @@ export const FOOD_SERVICE_DOMAIN: DomainDescriptor = {
   // Built-ins plus the restaurant operational roles (Waiter, Kitchen Staff, …).
   roleTemplates: ALL_ROLE_TEMPLATES,
   capabilities: FOOD_SERVICE_CAPABILITIES,
+  // No domain attributes (D64): a dish's descriptive fields (prepMinutes,
+  // dietaryTags, foodType) predate the attributes column and stay typed —
+  // moving them would be a demotion for no gain.
+  catalogue: { attributeSchema: [] },
 };

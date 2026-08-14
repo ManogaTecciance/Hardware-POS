@@ -14,6 +14,7 @@ import { paginate } from '../../common/pagination';
 import { StorageService } from '../../common/storage/storage.service';
 import { CatalogSyncProviderFactory } from '../providers/catalog/catalog-sync-provider.factory';
 import { CatalogSyncResult, ProductCatalogShape } from '../providers/provider.types';
+import { ProductAttributesService } from './product-attributes.service';
 import { MockSyncSummary, ProductsRepository } from './products.repository';
 import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
@@ -26,7 +27,8 @@ export class ProductsService {
     private readonly productsRepository: ProductsRepository,
     private readonly catalogProviders: CatalogSyncProviderFactory,
     private readonly storage: StorageService,
-      private readonly prisma: PrismaService,
+    private readonly prisma: PrismaService,
+    private readonly attributes: ProductAttributesService,
   ) {}
 
   async list(tenantId: string, query: QueryProductsDto): Promise<Paginated<Product>> {
@@ -73,6 +75,9 @@ export class ProductsService {
 
   /** Create a locally-managed product (not yet in QuickBooks → NOT_SYNCED). */
   async create(tenantId: string, dto: CreateProductDto): Promise<Product> {
+    // D64 — the empty document counts as a full document, so a domain with
+    // required attributes refuses a create that omits them entirely.
+    await this.attributes.assertValidDocument(tenantId, dto.attributes ?? {});
     const link = await this.resolveCategoryLink(tenantId, dto.categoryId, dto.subcategoryId);
     const data: Prisma.ProductUncheckedCreateInput = {
       tenantId,
@@ -101,6 +106,9 @@ export class ProductsService {
       prepMinutes: dto.prepMinutes ?? null,
       dietaryTags: dto.dietaryTags ?? [],
       foodType: dto.foodType ?? null,
+      // D64 — validated above; stored verbatim. The schema default covers the
+      // omitted case, but passing it explicitly keeps create shape stable.
+      attributes: (dto.attributes ?? {}) as Prisma.InputJsonValue,
       syncStatus: 'NOT_SYNCED',
     };
     // One provider for the operation, resolved from the authenticated tenant before
@@ -128,6 +136,12 @@ export class ProductsService {
     actorRole: UserRole,
   ): Promise<Product> {
     const existing = await this.getById(tenantId, id);
+
+    // D64 — replace semantics: a provided document is validated whole
+    // (required keys included); undefined leaves the stored one untouched.
+    if (dto.attributes !== undefined) {
+      await this.attributes.assertValidDocument(tenantId, dto.attributes);
+    }
 
     const changingStock =
       dto.quantityOnHand !== undefined &&
@@ -179,6 +193,9 @@ export class ProductsService {
       prepMinutes: dto.prepMinutes,
       dietaryTags: dto.dietaryTags,
       foodType: dto.foodType,
+      // D64 — undefined = leave unchanged (Prisma's semantics); a provided
+      // document replaces the stored one wholesale.
+      attributes: dto.attributes as Prisma.InputJsonValue | undefined,
     };
     const catalog = await this.catalogProviders.forTenant(tenantId);
     try {

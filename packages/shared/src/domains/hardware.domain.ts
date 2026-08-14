@@ -33,4 +33,8 @@ export const HARDWARE_DOMAIN: DomainDescriptor = {
   navigation: RETAIL_NAVIGATION,
   roleTemplates: BUILT_IN_ROLE_TEMPLATES,
   capabilities: RETAIL_CAPABILITIES,
+  // No domain attributes (D64): everything the hardware vertical stores about
+  // a product is behaviour, and behaviour lives in typed columns. An empty
+  // schema means every `attributes` key is refused — declared, not defaulted.
+  catalogue: { attributeSchema: [] },
 };

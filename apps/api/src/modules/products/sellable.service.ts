@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { OrderChannel, Prisma, SellableKind } from '@hardware-pos/database';
+import { coerceAttributeQueryValue, domainFor } from '@hardware-pos/shared';
 import type { TenantCapabilities } from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -40,6 +41,8 @@ export interface SellableQuery {
   search?: string;
   cursor?: string;
   limit?: number;
+  /** D64 — raw `attr[key]=value` filters; validated against the domain schema. */
+  attr?: Record<string, string>;
 }
 
 export type PriceSource = 'BASE' | 'COLLECTION_OVERRIDE' | 'CHANNEL_OVERRIDE';
@@ -144,6 +147,30 @@ export class SellableService {
           { subcategory: { name: { contains: query.search, mode: 'insensitive' } } },
         ],
       });
+    }
+    // D64 — attribute filters. Keys must exist in the tenant domain's schema
+    // and values must coerce to the field's type: an unknown key or an
+    // uncoercible value is a 400 naming itself, never a silently-empty page.
+    if (query.attr && Object.keys(query.attr).length > 0) {
+      const schema = domainFor(profile.businessType).catalogue.attributeSchema;
+      const byKey = new Map(schema.map((f) => [f.key, f]));
+      for (const [attrKey, raw] of Object.entries(query.attr)) {
+        const field = byKey.get(attrKey);
+        if (!field) {
+          throw new BadRequestException({
+            code: 'PRODUCT_ATTRIBUTE_FILTER_INVALID',
+            message: `Unknown attribute filter "${attrKey}" for this business type.`,
+          });
+        }
+        const coerced = coerceAttributeQueryValue(field, raw);
+        if (!coerced.ok) {
+          throw new BadRequestException({
+            code: 'PRODUCT_ATTRIBUTE_FILTER_INVALID',
+            message: coerced.message,
+          });
+        }
+        and.push({ attributes: { path: [attrKey], equals: coerced.value } });
+      }
     }
     // The keyset clause pages; the clauses above FILTER. `total` counts the
     // filter only, so it is stable across pages.

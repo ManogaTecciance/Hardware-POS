@@ -28,6 +28,11 @@ async function bootstrap(): Promise<void> {
   });
 
   app.setGlobalPrefix(API_VERSION);
+  // D64 — Express 5 dropped the `extended` (qs) query parser this API started
+  // on. Restore it: `attr[bedCount]=2` must parse into a nested `attr` object
+  // so the sellable listing's attribute filters can pass the whitelist pipe as
+  // ONE declared key. Plain `?a=b` queries are unaffected.
+  app.set('query parser', 'extended');
   // Serve uploaded product images (outside the versioned API prefix), e.g.
   // /uploads/<key>. Mounted as middleware rather than a controller so the path
   // stays clear of the version prefix; the handler streams from disk or

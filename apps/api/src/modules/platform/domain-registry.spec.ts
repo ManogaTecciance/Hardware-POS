@@ -141,6 +141,13 @@ describe('the extensibility contract (plan §13.4)', () => {
         ...RETAIL_CAPABILITIES,
         catalogue: { ...RETAIL_CAPABILITIES.catalogue, modifiers: true },
       } satisfies TenantCapabilities,
+      // D64 — a composed vertical declares its catalogue fields as data too.
+      catalogue: {
+        attributeSchema: [
+          { key: 'organic', label: 'Organic', type: 'boolean' },
+          { key: 'originCountry', label: 'Country of origin', type: 'text', maxLength: 60 },
+        ],
+      },
     };
     const testRegistry = { ...DOMAIN_REGISTRY, GROCERY: grocery };
 

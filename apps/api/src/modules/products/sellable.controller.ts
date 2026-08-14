@@ -1,6 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsObject, IsOptional, IsString, Max, Min } from 'class-validator';
 import { OrderChannel, SellableKind } from '@hardware-pos/database';
 
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
@@ -30,6 +30,14 @@ export class QuerySellableDto {
   @IsOptional() @IsString() search?: string;
   @IsOptional() @IsString() cursor?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) limit?: number;
+  /**
+   * D64 — domain-attribute filters: `?attr[viewType]=Sea&attr[bedCount]=2`
+   * (the extended query parser nests the brackets). Keys are validated
+   * against the tenant descriptor's attribute schema and values are coerced
+   * to the field's type in the service — an unknown key is a 400, not an
+   * empty result.
+   */
+  @IsOptional() @IsObject() attr?: Record<string, string>;
 }
 
 @Controller('products/sellable')
