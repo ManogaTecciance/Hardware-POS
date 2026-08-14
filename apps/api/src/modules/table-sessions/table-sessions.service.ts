@@ -9,12 +9,18 @@ import {
   RestaurantTableStatus,
   TableSessionStatus,
   RestaurantTableKind,
+  FulfilmentKind,
+  OrderChannel,
 } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { DiningService, type OpenTableReleaseSummary } from '../dining/dining.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
+import {
+  assertProjectionMatchesSubtotal,
+  projectOrderItems,
+} from '../restaurant/settlement-projection';
 import { SettingsService } from '../settings/settings.service';
 import { KitchenService } from '../kitchen/kitchen.service';
 import {
@@ -687,7 +693,15 @@ export class TableSessionsService {
       const session = await tx.tableSession.findFirst({
         where: { id: sessionId, tenantId },
         include: {
-          orders: { include: { items: { where: { status: { not: RestaurantOrderItemStatus.VOIDED } } } } },
+          orders: {
+            include: {
+              items: {
+                where: { status: { not: RestaurantOrderItemStatus.VOIDED } },
+                // D58: the projection copies the frozen modifier snapshots too.
+                include: { modifiers: true },
+              },
+            },
+          },
         },
       });
       if (!session) throw new SessionNotFoundError();
@@ -715,6 +729,7 @@ export class TableSessionsService {
           serviceChargeChannels: true,
           serviceChargeTaxable: true,
           packagingChargeAmount: true,
+          taxRatePercent: true,
         },
       });
       const appSettings = this.settings.getSettings(tenantId);
@@ -723,7 +738,13 @@ export class TableSessionsService {
         serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
         serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
         packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
-        taxRatePercent: appSettings.taxRatePercent,
+        // D59/Q5: the branch override wins when set; NULL inherits the
+        // tenant-wide rate. 0 is a real rate, which is why the column is
+        // nullable rather than defaulted.
+        taxRatePercent:
+          config?.taxRatePercent != null
+            ? config.taxRatePercent.toNumber()
+            : appSettings.taxRatePercent,
       });
 
       // D52: the till that took the money. An explicit registerId wins; the
@@ -748,6 +769,13 @@ export class TableSessionsService {
       const cashierId = session.waiterUserId ?? actorUserId;
 
       const saleNumber = `S-${padSequence(await nextDocumentNumber(tx, tenantId, 'SALE'))}`;
+      /*
+       * D58: the settled document carries its lines, projected from the order
+       * items inside THIS transaction — a copy of the submit-time snapshots,
+       * with the sum invariant asserted before anything persists.
+       */
+      const projected = projectOrderItems(session.orders.flatMap((o) => o.items));
+      assertProjectionMatchesSubtotal(projected, subtotal);
       const sale = await tx.sale.create({
         data: {
           tenantId,
@@ -768,8 +796,23 @@ export class TableSessionsService {
           paymentStatus: 'UNPAID',
           status: 'COMPLETED',
           completedAt: new Date(),
+          // D58 — what kind of sale this was, on the document itself.
+          fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
+          channel: OrderChannel.DINE_IN,
+          sourceRefKind: 'TABLE_SESSION',
+          sourceRefId: session.id,
+          servedByUserId: session.waiterUserId,
         },
       });
+      for (const line of projected) {
+        const { modifiers, ...data } = line;
+        const saleItem = await tx.saleItem.create({ data: { saleId: sale.id, ...data } });
+        if (modifiers.length > 0) {
+          await tx.saleItemModifier.createMany({
+            data: modifiers.map((m) => ({ tenantId, saleItemId: saleItem.id, ...m })),
+          });
+        }
+      }
 
       const updated = await tx.tableSession.update({
         where: { id: session.id },

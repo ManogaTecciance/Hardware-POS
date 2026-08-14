@@ -248,6 +248,8 @@ describe('an explicit Restaurant profile', () => {
       'inventoryMode',
       'accountingProvider',
       'enabledModules',
+      // D56 — capabilities resolved from the domain registry.
+      'capabilities',
       'version',
       'updatedAt',
     ]);

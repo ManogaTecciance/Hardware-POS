@@ -130,7 +130,16 @@ export class ReturnsService {
 
   async getReturnableItems(tenantId: string, saleId: string): Promise<ReturnableItem[]> {
     const sale = await this.loadSale(tenantId, saleId);
-    return sale.items.map((it) => {
+    /*
+     * D58: a projected restaurant line may carry no productId (a legacy
+     * MenuItem sale). Restaurant returns are explicitly deferred — the
+     * RETURNS module is not in the food-service set — so a productless line
+     * is not returnable here rather than half-returnable. Retail lines
+     * always carry a product; this filters nothing for them.
+     */
+    return sale.items
+      .filter((it): it is (typeof it) & { productId: string } => it.productId !== null)
+      .map((it) => {
       const purchased = Number(it.quantity);
       const previously = Number(it.returnedQuantity);
       return {
@@ -466,6 +475,18 @@ export class ReturnsService {
         throw new BadRequestException(`Sale item ${input.saleItemId} appears twice`);
       }
       seen.add(input.saleItemId);
+      /*
+       * D58: a projected restaurant line may have no product. Restaurant
+       * returns are deferred (the RETURNS module is not in the food-service
+       * set), so such a line is refused loudly rather than returned without a
+       * stock identity. Retail lines always carry a product.
+       */
+      const productId = si.productId;
+      if (productId === null) {
+        throw new BadRequestException(
+          `${si.productName} was sold without a product reference and cannot be returned here`,
+        );
+      }
 
       const purchased = Number(si.quantity);
       const previously = Number(si.returnedQuantity);
@@ -501,7 +522,7 @@ export class ReturnsService {
 
       previewItems.push({
         saleItemId: si.id,
-        productId: si.productId,
+        productId,
         productName: si.productName,
         sku: si.sku,
         returnQuantity: qty,
@@ -518,7 +539,7 @@ export class ReturnsService {
 
       persistItems.push({
         originalSaleItemId: si.id,
-        productId: si.productId,
+        productId,
         productNameSnapshot: si.productName,
         skuSnapshot: si.sku,
         imageUrlSnapshot: null,

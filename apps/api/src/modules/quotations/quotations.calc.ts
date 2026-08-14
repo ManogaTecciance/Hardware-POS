@@ -1,4 +1,11 @@
-import { round2, sum2 } from '../../common/money';
+import { OrderChannel } from '@hardware-pos/database';
+
+import {
+  RETAIL_CHARGE_CONFIG,
+  computeDocumentLine,
+  computeDocumentTotals,
+} from '../../common/money/document-totals';
+import { round2 } from '../../common/money';
 
 /**
  * Pure quotation money maths. Mirrors the Sale pricing pipeline so a quotation
@@ -56,27 +63,23 @@ export interface QuotationTotals {
   grandTotal: number;
 }
 
-/** A discount amount can never exceed the base it applies to. */
-function discountAmount(base: number, type: DiscountTypeCode | null, value: number | null): number {
-  if (!type || value == null || value <= 0) return 0;
-  if (type === 'PERCENTAGE') return Math.min(base, round2((base * value) / 100));
-  return Math.min(base, round2(value));
-}
-
 export function computeQuotationLine(input: QuotationLineInput): ComputedQuotationLine {
-  const unitPrice = round2(input.unitPrice);
-  const lineSubtotal = round2(unitPrice * input.quantity);
-  const type = input.discountType ?? null;
-  const value = input.discountValue ?? null;
-  const lineDiscount = discountAmount(lineSubtotal, type, value);
-  return {
-    unitPrice,
+  // D59: delegated to the one document-totals engine (Prisma.Decimal). The
+  // number boundary is exact: every engine output is a 2dp figure.
+  const line = computeDocumentLine({
+    unitPrice: round2(input.unitPrice),
     quantity: input.quantity,
-    lineSubtotal,
-    discountType: type,
-    discountValue: value,
-    discountAmount: lineDiscount,
-    lineTotal: round2(lineSubtotal - lineDiscount),
+    discountType: input.discountType ?? null,
+    discountValue: input.discountValue ?? null,
+  });
+  return {
+    unitPrice: line.unitPrice.toNumber(),
+    quantity: input.quantity,
+    lineSubtotal: line.lineSubtotal.toNumber(),
+    discountType: line.discountType,
+    discountValue: input.discountValue ?? null,
+    discountAmount: line.discountAmount.toNumber(),
+    lineTotal: line.lineTotal.toNumber(),
     taxAmount: 0,
   };
 }
@@ -86,19 +89,39 @@ export function computeQuotationTotals(
   orderDiscount: QuotationDiscountInput | null | undefined,
   taxRatePercent: number,
 ): QuotationTotals {
-  const lines = lineInputs.map(computeQuotationLine);
+  // D59: the whole pipeline runs in the shared Decimal engine; a quotation is
+  // an immediate-fulfilment document with zero service/packaging charges.
+  const totals = computeDocumentTotals(
+    lineInputs.map((l) => ({
+      unitPrice: round2(l.unitPrice),
+      quantity: l.quantity,
+      discountType: l.discountType ?? null,
+      discountValue: l.discountValue ?? null,
+    })),
+    OrderChannel.COUNTER,
+    { ...RETAIL_CHARGE_CONFIG, taxRatePercent },
+    { type: orderDiscount?.type ?? null, value: orderDiscount?.value ?? null },
+  );
 
-  const subtotal = sum2(lines.map((l) => l.lineSubtotal));
-  const productDiscountTotal = sum2(lines.map((l) => l.discountAmount));
+  const lines: ComputedQuotationLine[] = totals.lines.map((line, i) => ({
+    unitPrice: line.unitPrice.toNumber(),
+    quantity: lineInputs[i].quantity,
+    lineSubtotal: line.lineSubtotal.toNumber(),
+    discountType: line.discountType,
+    discountValue: lineInputs[i].discountValue ?? null,
+    discountAmount: line.discountAmount.toNumber(),
+    lineTotal: line.lineTotal.toNumber(),
+    taxAmount: 0,
+  }));
+
+  const subtotal = totals.subtotal.toNumber();
+  const productDiscountTotal = totals.totalLineDiscount.toNumber();
   const discountedSubtotal = round2(subtotal - productDiscountTotal);
-
   const qType = orderDiscount?.type ?? null;
   const qValue = orderDiscount?.value ?? null;
-  const quotationDiscountAmount = discountAmount(discountedSubtotal, qType, qValue);
-
-  const taxable = round2(discountedSubtotal - quotationDiscountAmount);
-  const taxAmount = taxRatePercent > 0 ? round2((taxable * taxRatePercent) / 100) : 0;
-  const grandTotal = round2(taxable + taxAmount);
+  const quotationDiscountAmount = totals.orderDiscountAmount.toNumber();
+  const taxAmount = totals.taxAmount.toNumber();
+  const grandTotal = totals.total.toNumber();
 
   // Spread the order-level tax across lines proportionally to lineTotal so the
   // per-line tax column sums back to taxAmount exactly (remainder to the last line).

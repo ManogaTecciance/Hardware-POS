@@ -5,12 +5,18 @@ import {
   RestaurantTableStatus,
   TableSessionStatus,
   TakeawayOrderStatus,
+  FulfilmentKind,
+  OrderChannel,
 } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { KitchenService } from '../kitchen/kitchen.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
+import {
+  assertProjectionMatchesSubtotal,
+  projectOrderItems,
+} from '../restaurant/settlement-projection';
 import { SettingsService } from '../settings/settings.service';
 import { CreateTakeawayDto, UpdateTakeawayStatusDto } from './dto/takeaway.dto';
 
@@ -212,7 +218,13 @@ export class TakeawayService {
           where: { id: updated.order.sessionId },
           include: {
             orders: {
-              include: { items: { where: { status: { not: 'VOIDED' } } } },
+              include: {
+                items: {
+                  where: { status: { not: 'VOIDED' } },
+                  // D58: the projection copies the frozen modifier snapshots.
+                  include: { modifiers: true },
+                },
+              },
             },
           },
         });
@@ -244,6 +256,7 @@ export class TakeawayService {
               serviceChargeChannels: true,
               serviceChargeTaxable: true,
               packagingChargeAmount: true,
+              taxRatePercent: true,
             },
           });
           const appSettings = this.settings.getSettings(tenantId);
@@ -252,9 +265,17 @@ export class TakeawayService {
             serviceChargeChannels: branchConfig?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
             serviceChargeTaxable: branchConfig?.serviceChargeTaxable ?? true,
             packagingChargeAmount: branchConfig?.packagingChargeAmount ?? new Prisma.Decimal(0),
-            taxRatePercent: appSettings.taxRatePercent,
+            // D59/Q5: branch override wins when set; NULL inherits.
+            taxRatePercent:
+              branchConfig?.taxRatePercent != null
+                ? branchConfig.taxRatePercent.toNumber()
+                : appSettings.taxRatePercent,
           });
 
+          // D58: the settled document carries its lines — the same projection
+          // and sum invariant the dine-in close uses.
+          const projected = projectOrderItems(session.orders.flatMap((o) => o.items));
+          assertProjectionMatchesSubtotal(projected, subtotal);
           const sale = await tx.sale.create({
             data: {
               tenantId,
@@ -271,8 +292,24 @@ export class TakeawayService {
               paymentStatus: 'UNPAID',
               status: 'COMPLETED',
               completedAt: new Date(),
+              fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
+              channel: OrderChannel.TAKEAWAY,
+              sourceRefKind: 'TABLE_SESSION',
+              sourceRefId: session.id,
+              // Who served: the waiter who owns the session when there is one,
+              // else the operator handing the order over.
+              servedByUserId: session.waiterUserId ?? actorUserId,
             },
           });
+          for (const line of projected) {
+            const { modifiers, ...data } = line;
+            const saleItem = await tx.saleItem.create({ data: { saleId: sale.id, ...data } });
+            if (modifiers.length > 0) {
+              await tx.saleItemModifier.createMany({
+                data: modifiers.map((m) => ({ tenantId, saleItemId: saleItem.id, ...m })),
+              });
+            }
+          }
           await tx.tableSession.update({
             where: { id: session.id },
             data: { status: 'CLOSED', closedAt: new Date(), finalSaleId: sale.id },

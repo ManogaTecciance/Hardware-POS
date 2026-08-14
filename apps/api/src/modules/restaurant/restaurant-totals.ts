@@ -1,4 +1,6 @@
-import { Prisma, RestaurantOrderChannel } from '@hardware-pos/database';
+import { OrderChannel, Prisma, RestaurantOrderChannel } from '@hardware-pos/database';
+
+import { computeDocumentTotals } from '../../common/money/document-totals';
 
 /**
  * D52 — the one place restaurant bill money is computed.
@@ -54,28 +56,31 @@ export function computeRestaurantTotals(
   channel: RestaurantOrderChannel,
   config: RestaurantChargeConfig,
 ): RestaurantTotals {
-  const levies = config.serviceChargeChannels.includes(channel);
-  const serviceChargeAmount = levies
-    ? subtotal.mul(config.serviceChargePercent).div(100).toDecimalPlaces(2)
-    : ZERO;
-
-  const packagingCharge = PACKAGED_CHANNELS.includes(channel)
-    ? config.packagingChargeAmount.toDecimalPlaces(2)
-    : ZERO;
-
-  const taxable = subtotal
-    .plus(packagingCharge)
-    .plus(config.serviceChargeTaxable ? serviceChargeAmount : ZERO);
-  const taxAmount =
-    config.taxRatePercent > 0
-      ? taxable.mul(config.taxRatePercent).div(100).toDecimalPlaces(2)
-      : ZERO;
-
+  /*
+   * D59: delegated to the ONE document-totals engine. This wrapper keeps the
+   * D52 call shape (a pre-summed subtotal, restaurant channel values) and its
+   * spec passing verbatim — which is the parity proof that the shared engine
+   * reproduces the food-service pipeline exactly. A bill has no line or
+   * order discounts yet (D52 deferral), so the subtotal passes through as a
+   * single undiscounted line.
+   */
+  const totals = computeDocumentTotals(
+    [{ unitPrice: subtotal, quantity: 1 }],
+    channel as OrderChannel,
+    {
+      taxRatePercent: config.taxRatePercent,
+      serviceChargePercent: config.serviceChargePercent,
+      serviceChargeChannels: config.serviceChargeChannels as readonly OrderChannel[],
+      serviceChargeTaxable: config.serviceChargeTaxable,
+      packagingChargeAmount: config.packagingChargeAmount,
+      packagedChannels: PACKAGED_CHANNELS as readonly OrderChannel[],
+    },
+  );
   return {
     subtotal,
-    serviceChargeAmount,
-    packagingCharge,
-    taxAmount,
-    total: subtotal.plus(serviceChargeAmount).plus(packagingCharge).plus(taxAmount),
+    serviceChargeAmount: totals.serviceChargeAmount,
+    packagingCharge: totals.packagingCharge,
+    taxAmount: totals.taxAmount,
+    total: totals.total,
   };
 }

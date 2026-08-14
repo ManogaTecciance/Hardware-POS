@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import {
+import { Prisma,
   AccountingProviderKind,
   DiscountType,
   PaymentStatus,
@@ -9,6 +9,7 @@ import { CURRENCY_SYMBOL, type Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
+import { computeDocumentLine } from '../../common/money/document-totals';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { DiscountsService, ORDER_DISCOUNT_KEY } from '../discounts/discounts.service';
 import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
@@ -36,6 +37,14 @@ import {
   PersistSaleInput,
   SaleListItem,
 } from './sales.types';
+
+/** D58 — see the draft-completion mapping below. */
+function requireProductId(productId: string | null, saleItemId: string): string {
+  if (productId === null) {
+    throw new Error(`Draft sale item ${saleItemId} has no productId — refusing to complete`);
+  }
+  return productId;
+}
 
 @Injectable()
 export class SalesService {
@@ -121,7 +130,10 @@ export class SalesService {
         throw new NotFoundException(`Draft sale ${dto.saleId} not found`);
       }
       items = draft.items.map((it) => ({
-        productId: it.productId,
+        // D58: nullable only for PROJECTED restaurant lines. A retail draft's
+        // lines were written by this module with a product, so a null here is
+        // corruption, not a state — fail the completion rather than sell air.
+        productId: requireProductId(it.productId, it.id),
         quantity: Number(it.quantity),
         discountType: it.discountType,
         discountValue: it.discountValue != null ? Number(it.discountValue) : null,
@@ -356,8 +368,16 @@ export class SalesService {
           }
         }
 
-        const lineSubtotal = round2(cachedPrice * quantity);
-        const discountAmount = computeDiscount(lineSubtotal, item.discountType, item.discountValue);
+        // D59: line money runs in the shared Decimal engine; the number
+        // boundary is exact because every engine output is a 2dp figure.
+        const computedLine = computeDocumentLine({
+          unitPrice: cachedPrice,
+          quantity,
+          discountType: item.discountType ?? null,
+          discountValue: item.discountValue ?? null,
+        });
+        const lineSubtotal = computedLine.lineSubtotal.toNumber();
+        const discountAmount = computedLine.discountAmount.toNumber();
         const effectivePercent = lineSubtotal > 0 ? (discountAmount / lineSubtotal) * 100 : 0;
 
         // Enforce the role-based discount limit; over-limit lines need a covering
@@ -390,15 +410,21 @@ export class SalesService {
           approvedByUserId,
           taxAmount: 0,
           lineSubtotal,
-          lineTotal: round2(lineSubtotal - discountAmount),
+          lineTotal: computedLine.lineTotal.toNumber(),
         };
       }),
     );
 
-    const subtotal = sum2(lines.map((l) => l.lineSubtotal));
-    const totalDiscount = sum2(lines.map((l) => l.discountAmount));
+    // D59: sums and tax in Decimal. Line figures are 2dp, so these sums are
+    // exact; sum2's float accumulation could drift a hair below a half.
+    const subtotal = lines
+      .reduce((acc, l) => acc.plus(l.lineSubtotal), new Prisma.Decimal(0))
+      .toNumber();
+    const totalDiscount = lines
+      .reduce((acc, l) => acc.plus(l.discountAmount), new Prisma.Decimal(0))
+      .toNumber();
     // Order-level discount applies to the subtotal AFTER per-line discounts.
-    const discountedSubtotal = round2(subtotal - totalDiscount);
+    const discountedSubtotal = new Prisma.Decimal(subtotal).minus(totalDiscount).toNumber();
     const orderDiscount = await this.resolveOrderDiscount(
       tenantId,
       actor,
@@ -406,9 +432,12 @@ export class SalesService {
       orderDiscountInput,
     );
 
-    const taxable = round2(discountedSubtotal - orderDiscount.amount);
-    const taxAmount = settings.taxRatePercent > 0 ? round2((taxable * settings.taxRatePercent) / 100) : 0;
-    const total = round2(taxable + taxAmount);
+    const taxableD = new Prisma.Decimal(discountedSubtotal).minus(orderDiscount.amount);
+    const taxAmount =
+      settings.taxRatePercent > 0
+        ? taxableD.mul(settings.taxRatePercent).div(100).toDecimalPlaces(2).toNumber()
+        : 0;
+    const total = taxableD.plus(taxAmount).toNumber();
 
     return {
       lines,
@@ -560,11 +589,15 @@ function computeDiscount(
   type: DiscountType | null | undefined,
   value: number | null | undefined,
 ): number {
-  if (!type || value == null || value <= 0) {
-    return 0;
-  }
-  if (type === 'PERCENTAGE') {
-    return Math.min(lineSubtotal, round2((lineSubtotal * value) / 100));
-  }
-  return Math.min(lineSubtotal, round2(value));
+  /*
+   * D59: delegated to the one Decimal engine. Same signature, same
+   * cannot-exceed-base rule; the float arithmetic this replaced mis-rounded
+   * exact half-cent boundaries (10% of 19.85 → 1.98 instead of 1.99).
+   */
+  return computeDocumentLine({
+    unitPrice: lineSubtotal,
+    quantity: 1,
+    discountType: type ?? null,
+    discountValue: value ?? null,
+  }).discountAmount.toNumber();
 }

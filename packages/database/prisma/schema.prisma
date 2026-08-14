@@ -72,6 +72,31 @@ enum QuickBooksDocumentType {
   INVOICE
 }
 
+/// D58 — which fulfilment lifecycle settled a sale. Total over the enum:
+/// a new FulfilmentProvider (Phase 4) must add its value here.
+enum FulfilmentKind {
+  IMMEDIATE
+  TABLE_SERVICE
+}
+
+/// D58 — sales channel on the settlement document. COUNTER is the
+/// immediate-fulfilment (retail) channel; the three food-service values keep
+/// the names of RestaurantOrderChannel so no data changes meaning.
+enum OrderChannel {
+  COUNTER
+  DINE_IN
+  TAKEAWAY
+  ONLINE
+}
+
+/// D58 — where a SaleItem line came from. RETAIL_CART is the default so every
+/// pre-existing retail row keeps its semantics; RESTAURANT_ORDER_ITEM marks a
+/// line projected from an order round at close.
+enum SaleItemSourceKind {
+  RETAIL_CART
+  RESTAURANT_ORDER_ITEM
+}
+
 enum SaleStatus {
   DRAFT
   COMPLETED
@@ -291,6 +316,7 @@ model Tenant {
   syncLogs                     SyncLog[]
   quickbooksConnection         QuickBooksConnection?
   quickbooksMappings           QuickBooksMapping[]
+  saleItemModifiers            SaleItemModifier[]
   auditLogs                    AuditLog[]
   printJobs                    PrintJob[]
   returns                      Return[]
@@ -841,6 +867,19 @@ model Sale {
   syncStatus                SyncStatus              @default(NOT_SYNCED)
   syncError                 String?
   completedAt               DateTime?
+  /// D58 — which lifecycle settled this sale. Domain-neutral.
+  fulfilmentKind            FulfilmentKind          @default(IMMEDIATE)
+  /// D58 — sales channel. COUNTER for retail; DINE_IN/TAKEAWAY/ONLINE for
+  /// food service. Supersedes joining through TableSession → RestaurantOrder.
+  channel                   OrderChannel            @default(COUNTER)
+  /// D58 — typed reference to the operational work unit this sale settled
+  /// ('TABLE_SESSION' today). Null for a counter sale. Loose by design: the
+  /// operational row may be archived independently of the financial document.
+  sourceRefKind             String?
+  sourceRefId               String?
+  /// D58 (plan Q6) — who served, as distinct from cashierId ("who took the
+  /// money"). session.waiterUserId at close. Loose reference, no FK.
+  servedByUserId            String?
   /// Phase 8: optimistic-concurrency token for cross-cashier billing.
   billingVersion            Int                     @default(1)
   /// Phase 8: idempotency key for the closing operation.
@@ -868,12 +907,16 @@ model Sale {
   @@index([customerId])
   @@index([syncStatus])
   @@index([createdAt])
+  @@index([channel])
+  @@index([tenantId, completedAt])
 }
 
 model SaleItem {
   id                  String           @id @default(cuid())
   saleId              String
-  productId           String
+  /// D58 — nullable: a line projected from a legacy MenuItem has no Product;
+  /// `productName` and the snapshots below carry the document's meaning.
+  productId           String?
   /// D44 — optional link to the exact sellable variant this line represents.
   /// NULL for legacy (variant-less) product sales. When set, the sale reduces
   /// the *variant's* branch inventory rather than the product's rollup.
@@ -887,6 +930,21 @@ model SaleItem {
   variantNameSnapshot String?
   unitPrice           Decimal          @db.Decimal(12, 2)
   quantity            Decimal          @db.Decimal(12, 3)
+  /// D58 — which fulfilment lifecycle produced this line.
+  sourceKind          SaleItemSourceKind @default(RETAIL_CART)
+  /// D58 — the operational row projected from (RestaurantOrderItem.id when
+  /// sourceKind = RESTAURANT_ORDER_ITEM). Typed by sourceKind, never reused
+  /// for a different entity — the lesson of the polymorphic `menuItemId`.
+  sourceItemId        String?
+  /// D58 — modifier price-deltas frozen onto the line, so bill maths never
+  /// needs the child rows.
+  modifierTotal       Decimal          @default(0) @db.Decimal(12, 2)
+  /// D58 — the note that reached the preparer ("no nuts"): it can change
+  /// what was actually delivered, so it belongs on the settled document.
+  notes               String?
+  /// D58/Q1 — set only by the historical backfill, never by a live close, so
+  /// reconstructed financial detail stays distinguishable forever.
+  backfilledAt        DateTime?
   discountId          String?
   discountType        DiscountType?
   discountValue       Decimal?         @db.Decimal(12, 2)
@@ -901,16 +959,41 @@ model SaleItem {
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
 
-  sale           Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  product        Product         @relation(fields: [productId], references: [id])
-  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id])
-  discount       Discount?       @relation(fields: [discountId], references: [id])
-  approvedBy     User?           @relation("DiscountApprover", fields: [approvedByUserId], references: [id])
+  sale           Sale               @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product        Product?           @relation(fields: [productId], references: [id])
+  productVariant ProductVariant?    @relation(fields: [productVariantId], references: [id])
+  discount       Discount?          @relation(fields: [discountId], references: [id])
+  approvedBy     User?              @relation("DiscountApprover", fields: [approvedByUserId], references: [id])
   returnItems    ReturnItem[]
+  modifiers      SaleItemModifier[]
 
   @@index([saleId])
   @@index([productId])
   @@index([productVariantId])
+  @@index([sourceKind, sourceItemId])
+}
+
+/// D58 — frozen modifier selections on a settled line. Mirrors
+/// RestaurantOrderItemModifier field-for-field so the projection at close is
+/// a copy with no interpretation.
+model SaleItemModifier {
+  id         String @id @default(cuid())
+  tenantId   String
+  saleItemId String
+
+  /// Loose: the option may be deleted later; the snapshots below survive.
+  modifierOptionId String?
+  optionName       String
+  groupName        String
+  priceDelta       Decimal @default(0) @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  saleItem SaleItem @relation(fields: [saleItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([saleItemId])
 }
 
 model Payment {
@@ -1506,6 +1589,12 @@ model RestaurantBranchConfig {
   /// Sale.packagingCharge column and the bill row already existed with
   /// nothing to fill them.
   packagingChargeAmount Decimal                  @default(0) @db.Decimal(12, 2)
+
+  /// D59 (plan Q5). Per-branch tax rate. NULL = inherit the tenant-wide
+  /// `TenantSettings.taxRatePercent` — nullable rather than defaulted to 0
+  /// because 0 is a meaningful rate and must be distinguishable from "unset".
+  /// No UI yet, deliberately; the column and fallback ship first.
+  taxRatePercent        Decimal?                 @db.Decimal(5, 2)
 
   version   Int      @default(1)
   createdAt DateTime @default(now())

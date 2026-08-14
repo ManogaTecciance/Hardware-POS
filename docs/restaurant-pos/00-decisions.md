@@ -1796,6 +1796,97 @@ ghosts protects nothing.
   renamed to `'HARDWARE'` under this record (their assertions are unchanged —
   both values always resolved to identical roles).
 
+### D58 — The settlement document is universal: every completed transaction writes SaleItem rows
+
+Implements Phase 1 of [`docs/convergence-plan.md`](../convergence-plan.md)
+(§3.2, §8.1–8.2, §12.3.2). A restaurant sale wrote a `Sale` header with zero
+`SaleItem` rows, which made returns, item-level reporting, receipts and
+accounting sync structurally retail-only and forced a parallel reporting
+stack over `RestaurantOrderItem`.
+
+**The projection.** Closing a table session (and handing over a takeaway) now
+projects every non-voided order item into a `SaleItem` inside the SAME
+transaction that creates the `Sale` — a field-for-field copy of the snapshots
+frozen at submit time, never a recomputation. A `SaleItemModifier` child
+mirrors `RestaurantOrderItemModifier` the same way. An in-transaction
+invariant asserts `Σ lineTotal == subtotal`; a close that fails it aborts
+rather than persisting a document that disagrees with itself.
+
+**New columns.** `SaleItem`: `sourceKind` (`RETAIL_CART` default, so every
+existing retail row keeps its meaning; `RESTAURANT_ORDER_ITEM` for projected
+lines), `sourceItemId` (typed by sourceKind, never reused for another
+entity — the lesson of D-6's polymorphic `menuItemId`), `modifierTotal`,
+`notes`, `backfilledAt`. `Sale`: `fulfilmentKind` (default `IMMEDIATE`),
+`channel` (default `COUNTER` — correct for every existing retail sale, which
+is why those defaults were chosen), `sourceRefKind`/`sourceRefId`, and
+`servedByUserId` (open decision Q6, resolved per the plan's recommendation:
+`cashierId` keeps meaning "who took the money", `servedByUserId` is who
+served the table — loose reference, no FK, so serving staff churn never
+blocks a settlement write).
+
+**`SaleItem.productId` becomes nullable** — the one widening `ALTER` in the
+migration. A projected line from a legacy MenuItem has no product; the
+snapshots carry the document's meaning. The per-migration proof in
+`provider-contract.spec.ts` scopes `DROP NOT NULL` as permitted for exactly
+this migration while `SET NOT NULL` stays forbidden everywhere.
+
+**Historical backfill (open decision Q1, resolved: yes).**
+`prisma/backfill-restaurant-sale-items.ts` reconstructs `SaleItem` rows for
+already-closed sessions from `TableSession.finalSaleId → RestaurantOrder →
+RestaurantOrderItem` — dry-run first, idempotent, every reconstructed row
+stamped `backfilledAt`, and a per-sale sum invariant under which a
+discrepant sale gets NO rows and a report line instead: a wrong
+reconstruction is worse than an absent one. Run as an operational step,
+never inside `migrate deploy`.
+
+**Explicitly deferred, with reasons.** (a) Pointing `billing.service`'s
+settled-bill reads at `SaleItem`: `BillSplitItem` anchors splits to
+`RestaurantOrderItem` ids, and switching the read source while splits are
+mid-flight risks live bills for zero user-visible gain until the shared
+consumers (returns, receipts) actually read the projection — revisit in
+Phase 5 with the reports re-backing. (b) Restaurant returns through the
+shared `ReturnsService`: the RETURNS module is not in the food-service
+module set, so no UI can reach it; enabling the path without the module
+decision would be dead code asserting nothing.
+
+### D59 — One money engine, `Prisma.Decimal` throughout, for sales, bills and quotations
+
+Implements Phase 2 of the convergence plan (§8.7, §13.3). Three calculators
+existed: retail sales and quotations computed money in binary floating point
+with `round2()` at each step; the restaurant bill used `Prisma.Decimal`
+(D52). `computeDocumentTotals` (`common/money/document-totals.ts`) is now the
+superset pipeline — line discounts + order discount + service charge +
+packaging + tax — and all three callers delegate to it:
+
+- `restaurant-totals.ts` became a thin wrapper whose unchanged D52 spec is
+  the parity proof for the food-service half.
+- `quotations.calc.ts` and `sales.service.ts` delegate at a number boundary
+  (exact — every engine output is a 2dp figure); their unchanged specs are
+  the parity proof for the retail half.
+
+**The differential proof, and the one recorded behaviour change.** The spec
+preserves the legacy float formulas verbatim and runs both engines over
+5,000 seeded carts. Measured result: wherever no intermediate sits on an
+exact half-cent, the engines agree to the cent, unconditionally. AT an exact
+half-cent the float engine's answer depended on the value's magnitude — the
+`+ Number.EPSILON` nudge rescued small figures (10% of 19.85 → 1.99, both
+engines agree) but is below one ulp for large ones (15% of 15,185.50 = 
+2,277.825 exactly; float computed 227782.49999999997 and charged 2,277.82).
+The Decimal engine rounds every mathematical half up: **at exact half-cent
+boundaries a total can change by one cent, upward, and that is the defect
+(plan D-7) being fixed, not a regression.** Pinned in the spec so it cannot
+regress into silence. Existing behavioural assertions were NOT edited — all
+pinned totals in the sales/quotations/restaurant specs pass unchanged.
+
+**Per-branch tax (plan Q5, resolved per recommendation).**
+`RestaurantBranchConfig.taxRatePercent` — nullable; NULL inherits the
+tenant-wide `TenantSettings.taxRatePercent`; 0 is a real rate and stays
+distinguishable from unset. Wired into both restaurant close paths. No UI
+yet, deliberately.
+
+**Migrations.** `20260823000000_add_branch_tax_rate_override` (one nullable
+column). The settlement migration is D58's.
+
 ---
 
 ## Open decisions

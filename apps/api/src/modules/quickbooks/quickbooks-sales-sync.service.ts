@@ -189,7 +189,12 @@ export class QuickBooksSalesSyncService {
     tenantId: string,
     sale: SaleWithSyncRelations,
   ): Promise<QboSalesLine[]> {
-    const productIds = [...new Set(sale.items.map((it) => it.productId))];
+    // D58 made SaleItem.productId nullable for projected restaurant lines.
+    // A QuickBooks tenant's sales are retail and always carry a product; the
+    // filter is type honesty, not a behaviour change.
+    const productIds = [
+      ...new Set(sale.items.map((it) => it.productId).filter((id): id is string => id !== null)),
+    ];
     const products = await this.prisma.product.findMany({
       where: { tenantId, id: { in: productIds } },
       select: { id: true, quickbooksItemId: true },
@@ -203,7 +208,7 @@ export class QuickBooksSalesSyncService {
       const lineTotal = Number(item.lineTotal); // net of the line discount
 
       // Make sale line items use quickbooksItemId when available.
-      const quickbooksItemId = itemIdByProduct.get(item.productId);
+      const quickbooksItemId = item.productId ? itemIdByProduct.get(item.productId) : undefined;
       const itemRef: QboRef | undefined = quickbooksItemId
         ? { value: quickbooksItemId }
         : undefined;
