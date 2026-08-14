@@ -3,7 +3,6 @@ import {
   KitchenPrintAttemptStatus,
   KitchenTicketStatus,
   Prisma,
-  RestaurantOrderItemSourceKind,
 } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -83,24 +82,22 @@ export class KitchenService {
     });
     if (items.length === 0) return [];
 
-    // D46 — the round can now carry a mix of MENU_ITEM and PRODUCT rows,
-    // and each source has its own routing junction. Load both in
-    // parallel, keyed by their respective source id, so an item whose
-    // Product was linked to Grill still routes to Grill.
+    /*
+     * D60 — routing keys off the PRODUCT whenever the line carries one,
+     * regardless of sourceKind: the catalogue-convergence backfill stamps
+     * `productId` onto MENU_ITEM-sourced lines and copies their station
+     * links to `ProductStationLink`, so one junction serves everything. The
+     * MenuItemStationLink lookup remains only as the fallback for an
+     * unmigrated legacy line (productId null), and dies with the deferred
+     * drop.
+     */
     const menuItemIds = [
-      ...new Set(
-        items
-          .filter((i) => i.sourceKind === RestaurantOrderItemSourceKind.MENU_ITEM)
-          .map((i) => i.menuItemId),
-      ),
+      ...new Set(items.filter((i) => i.productId === null).map((i) => i.menuItemId)),
     ];
     const productIds = [
       ...new Set(
         items
-          .filter(
-            (i): i is typeof i & { productId: string } =>
-              i.sourceKind === RestaurantOrderItemSourceKind.PRODUCT && i.productId !== null,
-          )
+          .filter((i): i is typeof i & { productId: string } => i.productId !== null)
           .map((i) => i.productId),
       ),
     ];
@@ -137,12 +134,9 @@ export class KitchenService {
       // Look up in the junction that matches the item's source. An item
       // with NO station routing (either junction empty) falls back to a
       // synthetic "unrouted" bucket so it doesn't silently disappear.
-      const stationIds =
-        item.sourceKind === RestaurantOrderItemSourceKind.PRODUCT
-          ? item.productId
-            ? stationsByProduct.get(item.productId) ?? []
-            : []
-          : stationsByMenuItem.get(item.menuItemId) ?? [];
+      const stationIds = item.productId
+        ? stationsByProduct.get(item.productId) ?? []
+        : stationsByMenuItem.get(item.menuItemId) ?? [];
       const targets = stationIds.length > 0 ? stationIds : ['__unrouted__'];
       for (const stationId of targets) {
         if (stationId === '__unrouted__') continue;

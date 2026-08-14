@@ -2,11 +2,9 @@
 
 import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import * as React from 'react';
 
 import { PageHeader } from '@/components/page-header';
-import { MenuItemWizard } from '@/components/restaurant/menu/wizard/menu-item-wizard';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
@@ -32,7 +30,6 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
 export default function NewMenuItemPage() {
   const { session, hasPermission } = useAuth();
   const { profile } = useEffectiveProfile();
-  const search = useSearchParams();
 
   if (!session) return null;
 
@@ -57,13 +54,13 @@ export default function NewMenuItemPage() {
     );
   }
 
-  // D56: a capability read, not a business-type comparison. The inline
-  // predicate this replaced omitted HOTEL in every copy of itself — the
-  // capability is resolved once, server-side, from the domain registry.
-  const isRestaurantProfile = profile?.capabilities.fulfilment.kind === 'TABLE_SERVICE';
-
-  if (isRestaurantProfile) {
-    return (
+  /*
+   * D60: menu authoring is gone for EVERY profile, not just food service —
+   * the API answers 410 to menu-item writes, so offering the legacy wizard
+   * to anyone would be offering a form that cannot save. The pointer card
+   * is the page now; the wizard import went with it.
+   */
+  return (
       <div className="space-y-6">
         <PageHeader
           title="Add menu item"
@@ -86,20 +83,4 @@ export default function NewMenuItemPage() {
         </Card>
       </div>
     );
-  }
-
-  return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Add menu item"
-        description="Create a new dish, drink or sellable menu item."
-      />
-      <MenuItemWizard
-        session={session}
-        branchId={session.branchId}
-        mode="create"
-        initialSectionId={search.get('sectionId') ?? undefined}
-      />
-    </div>
-  );
 }

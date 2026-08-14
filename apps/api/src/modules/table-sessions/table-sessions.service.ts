@@ -21,6 +21,7 @@ import {
   assertProjectionMatchesSubtotal,
   projectOrderItems,
 } from '../restaurant/settlement-projection';
+import { resolveMenuItemPricing } from '../menu/menu-item-pricing';
 import { SettingsService } from '../settings/settings.service';
 import { KitchenService } from '../kitchen/kitchen.service';
 import {
@@ -404,6 +405,9 @@ export class TableSessionsService {
       ]);
 
       const menuItemMap = new Map(menuItems.map((m) => [m.id, m]));
+      // D60 — transitional pricing for MENU_ITEM sources: placement override
+      // ?? product price ?? frozen basePrice. See menu-item-pricing.ts.
+      const menuItemPricing = await resolveMenuItemPricing(tx, tenantId, menuItemIds);
       const productMap = new Map(products.map((p) => [p.id, p]));
       const variantMap = new Map(productVariants.map((v) => [v.id, v]));
 
@@ -537,9 +541,18 @@ export class TableSessionsService {
         if (r.kind === 'MENU_ITEM') {
           refId = r.menuItem.id;
           refName = r.menuItem.name;
-          unitPrice = r.menuItem.basePrice;
+          // D60: the product price (with placement override) is authoritative
+          // for a migrated item; basePrice only survives for unmigrated ones.
+          const pricing = menuItemPricing.get(r.menuItem.id);
+          // Same table, same tenant filter as the batch above — a miss here
+          // is a bug, not a state, and pricing from a stale local copy would
+          // put basePrice reads back outside menu-item-pricing.ts.
+          if (!pricing) throw new MenuItemNotFoundError();
+          unitPrice = pricing.unitPrice;
           sourceKind = RestaurantOrderItemSourceKind.MENU_ITEM;
-          productIdSnapshot = null;
+          // Stamped so kitchen routing and reporting read ONE reference; the
+          // convergence backfill does the same for historical rows.
+          productIdSnapshot = pricing?.productId ?? null;
           productVariantIdSnapshot = null;
           variantNameSnapshot = null;
           variantPriceSnapshot = null;

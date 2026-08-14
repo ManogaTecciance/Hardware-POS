@@ -17,6 +17,7 @@ import {
   assertProjectionMatchesSubtotal,
   projectOrderItems,
 } from '../restaurant/settlement-projection';
+import { resolveMenuItemPricing } from '../menu/menu-item-pricing';
 import { SettingsService } from '../settings/settings.service';
 import { CreateTakeawayDto, UpdateTakeawayStatusDto } from './dto/takeaway.dto';
 
@@ -127,21 +128,26 @@ export class TakeawayService {
           throw new BadRequestException('menuItemId is required');
         }
       }
-      const menuItems = await tx.menuItem.findMany({
-        where: { id: { in: dto.items.map((i) => i.menuItemId!) }, tenantId },
-      });
-      const map = new Map(menuItems.map((m) => [m.id, m]));
+      // D60 — the same transitional pricing rule the dine-in path uses:
+      // placement override ?? product price ?? frozen basePrice, with the
+      // product reference stamped for routing and reporting.
+      const pricing = await resolveMenuItemPricing(
+        tx,
+        tenantId,
+        dto.items.map((i) => i.menuItemId!),
+      );
       for (const input of dto.items) {
-        const mi = map.get(input.menuItemId!);
-        if (!mi) throw new NotFoundException(`Menu item ${input.menuItemId} not found`);
+        const resolved = pricing.get(input.menuItemId!);
+        if (!resolved) throw new NotFoundException(`Menu item ${input.menuItemId} not found`);
         await tx.restaurantOrderItem.create({
           data: {
             tenantId,
             orderId: order.id,
             roundId: round.id,
-            menuItemId: mi.id,
-            menuItemName: mi.name,
-            unitPrice: mi.basePrice,
+            menuItemId: resolved.menuItem.id,
+            menuItemName: resolved.menuItem.name,
+            unitPrice: resolved.unitPrice,
+            productId: resolved.productId,
             modifierTotal: new Prisma.Decimal(0),
             quantity: new Prisma.Decimal(input.quantity),
             specialInstructions: input.specialInstructions ?? null,

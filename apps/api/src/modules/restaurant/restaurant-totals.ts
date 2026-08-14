@@ -31,8 +31,6 @@ export interface RestaurantTotals {
   total: Prisma.Decimal;
 }
 
-const ZERO = new Prisma.Decimal(0);
-
 /** Channels that pay a packaging charge — the food leaves the building. */
 const PACKAGED_CHANNELS: readonly RestaurantOrderChannel[] = ['TAKEAWAY', 'ONLINE'];
 

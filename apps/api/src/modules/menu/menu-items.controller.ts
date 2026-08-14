@@ -23,6 +23,7 @@ import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
 import { CreateItemDto, UpdateItemDto } from './dto/menu.dto';
 import { MenuItemView, MenuItemsService } from './menu-items.service';
+import { assertMenuWritesAllowed } from './menu-writes-gone';
 
 @Controller('restaurant/menu-sections/:sectionId/items')
 @RequireModule(ModuleKey.MENU_MANAGEMENT)
@@ -50,6 +51,7 @@ export class MenuItemsController {
     @Param('sectionId') sectionId: string,
     @Body() dto: CreateItemDto,
   ): Promise<MenuItemView> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const created = await this.service.create(tenantId, sectionId, dto);
     await this.audit.record(tenantId, {
       userId: actor.id,
@@ -75,6 +77,7 @@ export class MenuItemsController {
     @Param('itemId') itemId: string,
     @Body() dto: UpdateItemDto,
   ): Promise<MenuItemView> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const before = await this.service.get(tenantId, itemId);
     const after = await this.service.update(tenantId, itemId, dto);
     await this.audit.record(tenantId, {
@@ -114,6 +117,7 @@ export class MenuItemsController {
     @Param('sectionId') sectionId: string,
     @Param('itemId') itemId: string,
   ): Promise<void> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const before = await this.service.get(tenantId, itemId);
     await this.service.remove(tenantId, itemId);
     await this.audit.record(tenantId, {
@@ -140,6 +144,7 @@ export class MenuItemsController {
     @Param('itemId') itemId: string,
     @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
   ): Promise<MenuItemView> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const updated = await this.service.setImage(tenantId, itemId, file);
     await this.audit.record(tenantId, {
       userId: actor.id,
@@ -159,6 +164,7 @@ export class MenuItemsController {
     @Param('sectionId') sectionId: string,
     @Param('itemId') itemId: string,
   ): Promise<MenuItemView> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const updated = await this.service.removeImage(tenantId, itemId);
     await this.audit.record(tenantId, {
       userId: actor.id,

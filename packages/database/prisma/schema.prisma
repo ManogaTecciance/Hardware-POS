@@ -317,6 +317,7 @@ model Tenant {
   quickbooksConnection         QuickBooksConnection?
   quickbooksMappings           QuickBooksMapping[]
   saleItemModifiers            SaleItemModifier[]
+  catalogueEntries             CatalogueEntry[]
   auditLogs                    AuditLog[]
   printJobs                    PrintJob[]
   returns                      Return[]
@@ -737,6 +738,10 @@ model Product {
   /// Recomputed on every InventoryReceipt. NULL until the first receipt.
   /// Variant products carry their `averageCost` on `ProductVariant` instead.
   averageCost           Decimal?      @db.Decimal(12, 4)
+  /// D60 — see the SellableKind enum. Defaulted so every existing row is
+  /// valid unchanged; the convergence backfill reclassifies Service rows and
+  /// D45 restaurant products.
+  sellableKind          SellableKind  @default(STOCK_ITEM)
   /// D45 — Restaurant Product wizard fields. All nullable / defaulted so
   /// Retail (Tile Shop, Hardware) rows stay valid without a backfill.
   /// `foodType` reuses the D41 `MenuItemType` enum to avoid a second
@@ -765,6 +770,7 @@ model Product {
   stationLinks         ProductStationLink[]
   promotionItems       PromotionItem[]
   restaurantOrderItems RestaurantOrderItem[]
+  catalogueEntries     CatalogueEntry[]
 
   @@unique([tenantId, quickbooksItemId])
   @@unique([tenantId, sku])
@@ -1696,6 +1702,27 @@ enum ModifierSelection {
 /// valid (legacy items were created before the wizard existed). String enum
 /// rather than a free-form field so the /menu filters and future POS
 /// styling (bar layout, dessert grid) can key off a stable value.
+/// D60 — what kind of sellable thing a Product IS, in AxloPOS's own
+/// vocabulary. Drives inventory behaviour; `foodType` stays presentation and
+/// the QuickBooks `type` string stays provider data.
+///
+///  STOCK_ITEM    — depletes 1:1 when sold. A bolt, a bottled beer.
+///  COMPOSED_ITEM — assembled from components (Phase 8 recipes); with no
+///                  component list it depletes 1:1 like a stock item.
+///  SERVICE       — no stock. Key cutting, corkage, a delivery fee.
+///  BUNDLE        — sold as one line, composed of other products.
+///  TIME_SLOT / STAY_UNIT — named now, unused: the two shapes we know are
+///                  coming (salon, hotel rooms), so nobody invents
+///                  `Product.type = 'Room'` in the meantime.
+enum SellableKind {
+  STOCK_ITEM
+  COMPOSED_ITEM
+  SERVICE
+  BUNDLE
+  TIME_SLOT
+  STAY_UNIT
+}
+
 enum MenuItemType {
   FOOD
   BEVERAGE
@@ -1746,6 +1773,7 @@ model MenuSection {
   tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   menu   Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
   items  MenuItem[]
+  entries CatalogueEntry[]
 
   @@unique([menuId, name])
   @@index([tenantId])
@@ -1798,6 +1826,12 @@ model MenuItem {
   /// URL to the item image. Uses whatever media backend Product already uses
   /// (see Product.imageUrl at schema:600) — no new media pipeline.
   imageUrl String?
+
+  /// D60 — the Product this menu item was migrated into (set for UNLINKED
+  /// items, where the backfill created one; linked items keep `productId`).
+  /// Audit trail plus the source for the order-item productId backfill.
+  /// MenuItem is FROZEN from D60: writes 410, reads stay for reprints.
+  migratedProductId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1943,6 +1977,69 @@ model MenuItemStationLink {
 
   @@unique([menuItemId, stationId])
   @@index([stationId])
+}
+
+/// D60 — REPLACES the fat MenuItem: a thin placement of a Product in a menu
+/// section. `priceOverride` is the ONLY price a placement may own — an
+/// override of the product's price, never a second authority (plan P1).
+model CatalogueEntry {
+  id        String @id @default(cuid())
+  tenantId  String
+  sectionId String
+
+  productId        String
+  /// Pin the placement to one variant; null = operator picks at the till.
+  productVariantId String?
+
+  /// Null = the product's price applies.
+  priceOverride Decimal? @db.Decimal(12, 2)
+
+  position Int     @default(0)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  section        MenuSection             @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  product        Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant?         @relation(fields: [productVariantId], references: [id])
+  availability   CatalogueAvailability[]
+  channelPrices  CatalogueChannelPrice[]
+
+  @@unique([sectionId, productId, productVariantId])
+  @@index([tenantId])
+  @@index([productId])
+}
+
+/// D60 — placement availability windows (re-homed from MenuAvailability).
+/// When any row exists the entry is available ONLY in matching windows.
+model CatalogueAvailability {
+  id      String @id @default(cuid())
+  entryId String
+
+  dayOfWeek MenuAvailabilityDayOfWeek
+  /// HH:MM in the tenant's local time, inclusive.
+  startTime String
+  endTime   String
+
+  entry CatalogueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+}
+
+/// D60 — placement channel price override (re-homed from MenuItemChannelPrice).
+model CatalogueChannelPrice {
+  id      String  @id @default(cuid())
+  entryId String
+  /// String rather than enum so tenants can add channels without a migration.
+  channel String
+  price   Decimal @db.Decimal(12, 2)
+
+  entry CatalogueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, channel])
+  @@index([entryId])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3026,6 +3123,7 @@ model ProductVariant {
   stockMovements       StockMovement[]
   receiptLines         InventoryReceiptLine[]
   restaurantOrderItems RestaurantOrderItem[]
+  catalogueEntries CatalogueEntry[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])

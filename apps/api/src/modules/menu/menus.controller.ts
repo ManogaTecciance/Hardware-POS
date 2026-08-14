@@ -9,6 +9,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
 import { CreateMenuDto, UpdateMenuDto } from './dto/menu.dto';
+import { assertMenuWritesAllowed } from './menu-writes-gone';
 import { MenuService, MenuView } from './menu.service';
 
 @Controller('restaurant/branches/:branchId/menus')
@@ -37,6 +38,7 @@ export class MenusController {
     @Param('branchId') branchId: string,
     @Body() dto: CreateMenuDto,
   ): Promise<MenuView> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const created = await this.service.createMenu(tenantId, branchId, dto);
     await this.audit.record(tenantId, {
       userId: actor.id,
@@ -57,6 +59,7 @@ export class MenusController {
     @Param('menuId') menuId: string,
     @Body() dto: UpdateMenuDto,
   ): Promise<MenuView> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const before = await this.service.listMenus(tenantId, branchId, true).then((rows) => rows.find((m) => m.id === menuId));
     const after = await this.service.updateMenu(tenantId, branchId, menuId, dto);
     await this.audit.record(tenantId, {
@@ -87,6 +90,7 @@ export class MenusController {
     @Param('branchId') branchId: string,
     @Param('menuId') menuId: string,
   ): Promise<void> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const before = await this.service
       .listMenus(tenantId, branchId, true)
       .then((rows) => rows.find((m) => m.id === menuId));

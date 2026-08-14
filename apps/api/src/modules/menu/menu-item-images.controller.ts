@@ -7,6 +7,7 @@ import { RequirePermissions } from '../../common/decorators/permissions.decorato
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
 import { MenuItemsService } from './menu-items.service';
+import { assertMenuWritesAllowed } from './menu-writes-gone';
 
 /**
  * Standalone upload endpoint used by the Add Menu Item wizard (D43).
@@ -32,6 +33,7 @@ export class MenuItemImagesController {
     @TenantId() tenantId: string,
     @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
   ): Promise<{ imageUrl: string }> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     return this.service.uploadImage(tenantId, file);
   }
 }

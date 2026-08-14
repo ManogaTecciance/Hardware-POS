@@ -9,6 +9,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
 import { CreateSectionDto, UpdateSectionDto } from './dto/menu.dto';
+import { assertMenuWritesAllowed } from './menu-writes-gone';
 import { MenuService, SectionView } from './menu.service';
 
 @Controller('restaurant/menus/:menuId/sections')
@@ -36,6 +37,7 @@ export class MenuSectionsController {
     @Param('menuId') menuId: string,
     @Body() dto: CreateSectionDto,
   ): Promise<SectionView> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const created = await this.service.createSection(tenantId, menuId, dto);
     await this.audit.record(tenantId, {
       userId: actor.id,
@@ -56,6 +58,7 @@ export class MenuSectionsController {
     @Param('sectionId') sectionId: string,
     @Body() dto: UpdateSectionDto,
   ): Promise<SectionView> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const updated = await this.service.updateSection(tenantId, menuId, sectionId, dto);
     await this.audit.record(tenantId, {
       userId: actor.id,
@@ -76,6 +79,7 @@ export class MenuSectionsController {
     @Param('menuId') menuId: string,
     @Param('sectionId') sectionId: string,
   ): Promise<void> {
+    assertMenuWritesAllowed(); // D60 — frozen; see menu-writes-gone.ts
     const before = await this.service
       .listSections(tenantId, menuId)
       .then((rows) => rows.find((s) => s.id === sectionId));

@@ -1887,6 +1887,58 @@ yet, deliberately.
 **Migrations.** `20260823000000_add_branch_tax_rate_override` (one nullable
 column). The settlement migration is D58's.
 
+### D60 — `Product` is the only catalogue; `MenuItem` becomes a placement and is frozen
+
+Implements Phase 3 of the convergence plan (§8.3, §8.5–8.6, §8.9, §12.3.3).
+D45 made `Product` the authoring surface but left `MenuItem` alive as a
+complete second catalogue with its own name, price, image, modifiers and
+station routing, and a `sourceKind` discriminator threaded through every
+consumer. This decision finishes the convergence.
+
+**`Product.sellableKind`** — AxloPOS's own vocabulary for what a sellable
+thing IS (`STOCK_ITEM` default / `COMPOSED_ITEM` / `SERVICE` / `BUNDLE`,
+with `TIME_SLOT` and `STAY_UNIT` named now, unused, so nobody invents
+`Product.type = 'Room'` later). Distinct from the QuickBooks `type` string
+(provider data, untouched) and from `foodType` (presentation). Backfill
+maps `type = 'Service'` → SERVICE and D45 restaurant products carrying a
+`foodType` → COMPOSED_ITEM — a component-less COMPOSED_ITEM depletes 1:1,
+so packaged drinks marked COMPOSED lose nothing.
+
+**`CatalogueEntry`** — the thin placement `MenuItem` actually was: which
+product appears in which menu section, in what order, optionally at what
+price. `priceOverride` is the ONLY price a placement may own, and it is an
+override of the product's price, never a second authority (plan P1).
+`CatalogueAvailability` and `CatalogueChannelPrice` re-home the placement
+concerns. `MenuItem.migratedProductId` records the mapping for audit and
+for the order-item backfill.
+
+**Backfill (plan Q2, resolved: auto-create).**
+`backfill-catalogue-convergence.ts`, dry-run first: linked menu items get a
+`CatalogueEntry` (+ junction copies for modifier groups and station links);
+UNLINKED menu items get a new `Product` first (scalars copied,
+`sellableKind = COMPOSED_ITEM`), with a case-insensitive duplicate-name
+report for the tenant to merge — D45's "no auto-conversion" was about not
+forcing UX change, not about stranding data. Historical
+`RestaurantOrderItem` rows with `sourceKind = MENU_ITEM` get `productId`
+stamped from the mapping.
+
+**Transitional pricing rule.** A MENU_ITEM-sourced order line now resolves
+its price as `CatalogueEntry.priceOverride ?? Product.unitPrice`, falling
+back to the frozen `basePrice` only for an unmigrated item. At backfill
+time these are equal by construction (the override is written only where
+`basePrice` differed); afterwards the product price is authoritative —
+which is the point. Item writes (`POST`/`PATCH` menu items, sections,
+menus) return `410 Gone` naming the successor; reads stay for reprints and
+the support-only legacy browser.
+
+**Kitchen routing** prefers `ProductStationLink` whenever the order line
+carries a `productId` (all lines, after backfill) and keeps the
+`MenuItemStationLink` fallback only for unmigrated legacy rows.
+
+**Frozen, not dropped.** `MenuItem` and its children stop being written and
+stay readable indefinitely; the drop is a separate decision two releases
+out, per the plan's deferred-drops rule.
+
 ---
 
 ## Open decisions
