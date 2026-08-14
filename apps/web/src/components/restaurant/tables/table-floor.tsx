@@ -4,6 +4,7 @@ import { Archive, Building2, DoorOpen, Link2, MoreVertical, Pencil, Plus, Unlink
 import Link from 'next/link';
 import * as React from 'react';
 
+import { AreaChip } from '@/components/restaurant/area-chip';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -213,6 +214,57 @@ export function TableFloor({ session, branchId, canManage }: Props) {
         ) : null}
       </div>
 
+      {/* D49 — open tables: ad-hoc joined arrangements. Shown whenever any
+          exist, plus the create affordance for shift staff. Rendered FIRST,
+          above the physical floor: an open table is a live party that someone
+          is serving right now, whereas the floor plan is mostly static
+          furniture — so it is what staff need without scrolling past every
+          area to reach it. */}
+      {status === 'ready' && (snapshot.openTables.length > 0 || canManageOpenTables) ? (
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle>Open tables</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Joined tables for parties that outgrow the floor plan. Several
+                parties can share one table, each with its own tab; a table is
+                freed when the last of those tabs closes.
+              </p>
+            </div>
+            {canManageOpenTables ? (
+              <Button
+                size="sm"
+                leftIcon={<Link2 className="h-4 w-4" />}
+                onClick={() => setShowNewOpenTable(true)}
+              >
+                New open table
+              </Button>
+            ) : null}
+          </CardHeader>
+          <CardContent>
+            {snapshot.openTables.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No open tables right now.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {snapshot.openTables.map((t) => (
+                  <OpenTableCard
+                    key={t.id}
+                    table={t}
+                    session={snapshot.sessionByTableId.get(t.id) ?? null}
+                    canOpen={canOpenTable}
+                    onOpenClick={() => setOpenTarget(t)}
+                    canDissolve={canManageOpenTables}
+                    onDissolve={() => setDissolveTarget(t)}
+                  />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {status === 'loading' ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
@@ -325,54 +377,6 @@ export function TableFloor({ session, branchId, canManage }: Props) {
           );
         })
       )}
-
-      {/* D49 — open tables: ad-hoc joined arrangements. Shown whenever any
-          exist, plus the create affordance for shift staff. Rendered after
-          the physical floor so the plan stays the primary geography. */}
-      {status === 'ready' && (snapshot.openTables.length > 0 || canManageOpenTables) ? (
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <div>
-              <CardTitle>Open tables</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Joined tables for parties that outgrow the floor plan. Several
-                parties can share one table, each with its own tab; a table is
-                freed when the last of those tabs closes.
-              </p>
-            </div>
-            {canManageOpenTables ? (
-              <Button
-                size="sm"
-                leftIcon={<Link2 className="h-4 w-4" />}
-                onClick={() => setShowNewOpenTable(true)}
-              >
-                New open table
-              </Button>
-            ) : null}
-          </CardHeader>
-          <CardContent>
-            {snapshot.openTables.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                No open tables right now.
-              </p>
-            ) : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                {snapshot.openTables.map((t) => (
-                  <OpenTableCard
-                    key={t.id}
-                    table={t}
-                    session={snapshot.sessionByTableId.get(t.id) ?? null}
-                    canOpen={canOpenTable}
-                    onOpenClick={() => setOpenTarget(t)}
-                    canDissolve={canManageOpenTables}
-                    onDissolve={() => setDissolveTarget(t)}
-                  />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
 
       {canManageOpenTables && showNewOpenTable ? (
         <CreateOpenTableDialog
@@ -497,36 +501,6 @@ export function TableFloor({ session, branchId, canManage }: Props) {
         />
       ) : null}
     </div>
-  );
-}
-
-function AreaChip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  // h-11 unconditionally: the floor plan is a touch-priority screen and the
-  // extra 8px keeps the chip on the 44px touch-target line even on desktop.
-  // `data-active` tells the parent ChipRow which chip to scroll into view
-  // when the selection is restored from state.
-  // `shrink-0` prevents flex-parent squish inside the scrollable ChipRow.
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-active={active}
-      className={`inline-flex h-11 shrink-0 items-center rounded-full px-4 text-sm font-medium transition-colors ${
-        active
-          ? 'bg-primary text-primary-foreground'
-          : 'bg-muted text-foreground hover:bg-border'
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 

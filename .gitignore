@@ -45,6 +45,10 @@ pnpm-debug.log*
 
 # Test / coverage
 coverage/
+# Playwright run artefacts. apps/e2e has its own; a stray run from another
+# workspace drops these at that workspace's root.
+test-results/
+playwright-report/
 
 # Uploaded product images (local dev storage)
 apps/api/uploads/

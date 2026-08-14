@@ -3,9 +3,11 @@
 import * as React from 'react';
 import { ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 
+import { AreaChip } from '@/components/restaurant/area-chip';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ChipRow } from '@/components/ui/chip-row';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -83,6 +85,16 @@ export function ReservationCalendar({
 }) {
   const [dateInput, setDateInput] = React.useState(() => toDateInputValue(new Date()));
   const [showClosed, setShowClosed] = React.useState(false);
+  /*
+   * Area filter. 'ALL' is the default and is a real selection, not the absence
+   * of one — a branch with four floors wants the whole book most of the time,
+   * and only narrows to work one section during service.
+   *
+   * It filters the CHART only. The reservation dialogs keep offering every
+   * table, because "show me the terrace" is a viewing choice and must not
+   * quietly become "you may only book the terrace".
+   */
+  const [selectedArea, setSelectedArea] = React.useState<string>('ALL');
   const [state, setState] = React.useState<{
     status: 'loading' | 'ready' | 'error';
     snapshot: Snapshot;
@@ -142,19 +154,40 @@ export function ReservationCalendar({
     setDateInput(toDateInputValue(next));
   };
 
+  const visibleAreas = React.useMemo(
+    () =>
+      selectedArea === 'ALL'
+        ? state.snapshot.areas
+        : state.snapshot.areas.filter((a) => a.id === selectedArea),
+    [state.snapshot.areas, selectedArea],
+  );
+
+  // Rows the chart will actually draw. Separate from `allTables` because the
+  // "no tables at all" empty state and the "this area is empty" one are
+  // different problems with different fixes.
+  const visibleTables = React.useMemo(
+    () => visibleAreas.flatMap((a) => state.snapshot.tablesByArea.get(a.id) ?? []),
+    [visibleAreas, state.snapshot.tablesByArea],
+  );
+
   // Visible window: the default service hours, widened to fit every booking
   // loaded for the day so nothing can render off-chart.
   const { firstHour, lastHour } = React.useMemo(() => {
     let first = DEFAULT_FIRST_HOUR;
     let last = DEFAULT_LAST_HOUR;
+    // Only the bookings on screen widen it. Filtering to the terrace must not
+    // leave the chart stretched to 02:00 by a late booking on another floor,
+    // with nothing drawn out there to explain the empty space.
+    const shown = new Set(visibleTables.map((t) => t.id));
     for (const r of state.snapshot.reservations) {
+      if (!shown.has(r.tableId)) continue;
       const s = new Date(r.startAt);
       const e = new Date(r.endAt);
       if (s >= dayStart) first = Math.min(first, s.getHours());
       if (e <= dayEnd) last = Math.max(last, Math.min(24, e.getHours() + (e.getMinutes() > 0 ? 1 : 0)));
     }
     return { firstHour: first, lastHour: last };
-  }, [state.snapshot.reservations, dayStart, dayEnd]);
+  }, [state.snapshot.reservations, visibleTables, dayStart, dayEnd]);
 
   const windowStart = React.useMemo(
     () => new Date(dayStart.getTime() + firstHour * 3_600_000),
@@ -240,6 +273,36 @@ export function ReservationCalendar({
         </div>
       </div>
 
+      {/* Area filter. Mirrors the Tables page chip strip so the same gesture
+          works on both restaurant screens. Hidden when there is nothing to
+          choose between — a one-area branch gains only clutter from it. */}
+      {state.snapshot.areas.length > 1 ? (
+        <div className="flex items-center gap-3">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Show
+          </span>
+          <ChipRow
+            ariaLabel="Filter by dining area"
+            activeKey={selectedArea}
+            className="min-w-0 flex-1"
+          >
+            <AreaChip
+              label="All areas"
+              active={selectedArea === 'ALL'}
+              onClick={() => setSelectedArea('ALL')}
+            />
+            {state.snapshot.areas.map((a) => (
+              <AreaChip
+                key={a.id}
+                label={a.name}
+                active={selectedArea === a.id}
+                onClick={() => setSelectedArea(a.id)}
+              />
+            ))}
+          </ChipRow>
+        </div>
+      ) : null}
+
       {isPastDay ? (
         <p className="text-sm text-muted-foreground">
           Viewing a past day — reservation history is read-only.
@@ -267,6 +330,18 @@ export function ReservationCalendar({
             No tables yet — add dining areas and tables on the Tables page first.
           </CardContent>
         </Card>
+      ) : visibleTables.length === 0 ? (
+        // The branch HAS tables; this area does not. Said distinctly from the
+        // message above, and with the way out, so the filter never looks like
+        // a calendar that failed to load.
+        <Card>
+          <CardContent className="space-y-4 py-16 text-center">
+            <p className="text-sm text-muted-foreground">No tables in this area.</p>
+            <Button variant="outline" onClick={() => setSelectedArea('ALL')}>
+              Show all areas
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <Card>
           <CardContent className="p-0">
@@ -292,7 +367,7 @@ export function ReservationCalendar({
                   </div>
                 </div>
 
-                {state.snapshot.areas.map((area) => {
+                {visibleAreas.map((area) => {
                   const tables = state.snapshot.tablesByArea.get(area.id) ?? [];
                   if (tables.length === 0) return null;
                   return (
