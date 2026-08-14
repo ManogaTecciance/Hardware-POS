@@ -8,6 +8,10 @@ import { NoCatalogSyncProvider } from './catalog/no-catalog-sync.provider';
 import { QuickBooksCatalogSyncProvider } from './catalog/quickbooks-catalog-sync.provider';
 import { NoAccountingProvider } from './accounting/no-accounting.provider';
 import { QuickBooksAccountingProvider } from './accounting/quickbooks-accounting.provider';
+import { DiningModule } from '../dining/dining.module';
+import { FulfilmentProviderFactory } from './fulfilment/fulfilment-provider.factory';
+import { ImmediateFulfilmentProvider } from './fulfilment/immediate-fulfilment.provider';
+import { TableServiceFulfilmentProvider } from './fulfilment/table-service-fulfilment.provider';
 import { InventoryProviderFactory } from './inventory/inventory-provider.factory';
 import { LocalInventoryProvider } from './inventory/local-inventory.provider';
 import { NoInventoryProvider } from './inventory/no-inventory.provider';
@@ -58,7 +62,8 @@ import { QuickBooksInventoryProvider } from './inventory/quickbooks-inventory.pr
  * Nest resolves them from the application graph anyway.
  */
 @Module({
-  imports: [PlatformModule, SyncModule],
+  // D61: DiningModule for the table-service fulfilment provider's release path.
+  imports: [PlatformModule, SyncModule, DiningModule],
   providers: [
     QuickBooksInventoryProvider,
     LocalInventoryProvider,
@@ -70,7 +75,18 @@ import { QuickBooksInventoryProvider } from './inventory/quickbooks-inventory.pr
     QuickBooksCatalogSyncProvider,
     NoCatalogSyncProvider,
     CatalogSyncProviderFactory,
+    // D61 — the third provider axis: fulfilment.
+    ImmediateFulfilmentProvider,
+    TableServiceFulfilmentProvider,
+    FulfilmentProviderFactory,
   ],
-  exports: [InventoryProviderFactory, AccountingProviderFactory, CatalogSyncProviderFactory],
+  exports: [
+    InventoryProviderFactory,
+    AccountingProviderFactory,
+    CatalogSyncProviderFactory,
+    FulfilmentProviderFactory,
+    ImmediateFulfilmentProvider,
+    TableServiceFulfilmentProvider,
+  ],
 })
 export class ProvidersModule {}

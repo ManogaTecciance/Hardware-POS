@@ -17,11 +17,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { DiningService, type OpenTableReleaseSummary } from '../dining/dining.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
-import {
-  assertProjectionMatchesSubtotal,
-  projectOrderItems,
-} from '../restaurant/settlement-projection';
+import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
 import { resolveMenuItemPricing } from '../menu/menu-item-pricing';
+import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
 import { SettingsService } from '../settings/settings.service';
 import { KitchenService } from '../kitchen/kitchen.service';
 import {
@@ -130,6 +128,10 @@ export class TableSessionsService {
     private readonly kitchen: KitchenService,
     private readonly dining: DiningService,
     private readonly settings: SettingsService,
+      // D61 — the concrete provider, not the factory: this service IS the
+    // table-service lifecycle; resolving by tenant would re-read the profile
+    // per close to learn what this file already is.
+    private readonly fulfilment: TableServiceFulfilmentProvider,
   ) {}
 
   // ─────────────────────────────────────────────────────────────
@@ -787,7 +789,13 @@ export class TableSessionsService {
        * items inside THIS transaction — a copy of the submit-time snapshots,
        * with the sum invariant asserted before anything persists.
        */
-      const projected = projectOrderItems(session.orders.flatMap((o) => o.items));
+      // D61: collection goes through the fulfilment provider — an independent
+      // query over the same rows the subtotal loop read, so the invariant
+      // below compares two computations rather than one restated.
+      const projected = await this.fulfilment.collectSettlementLines(tx, tenantId, {
+        kind: 'TABLE_SESSION',
+        sessionId: session.id,
+      });
       assertProjectionMatchesSubtotal(projected, subtotal);
       const sale = await tx.sale.create({
         data: {
@@ -836,22 +844,23 @@ export class TableSessionsService {
           version: { increment: 1 },
         },
       });
-      // Release the table. For an open table (D49) that means the whole
-      // arrangement: members back to AVAILABLE, memberships deleted, and the
-      // open-table row archived — in THIS transaction, so "bill closed" and
-      // "tables released" cannot be observed apart.
-      const closedTable = await tx.restaurantTable.findUniqueOrThrow({
-        where: { id: session.tableId },
-        select: { kind: true },
+      /*
+       * D61: resource release belongs to the fulfilment provider — the same
+       * transaction, so "bill closed" and "tables released" cannot be
+       * observed apart. Physical tables go AVAILABLE; an open table (D49)
+       * dissolves the whole arrangement.
+       */
+      const release = await this.fulfilment.releaseResources(tx, tenantId, {
+        kind: 'TABLE_SESSION',
+        sessionId: session.id,
       });
-      if (closedTable.kind === RestaurantTableKind.OPEN) {
-        const openTableRelease = await this.dining.releaseOpenTable(tx, tenantId, session.tableId);
-        return { session: this.sessionToView(updated), saleId: sale.id, openTableRelease };
+      if (release.openTableRelease !== undefined) {
+        return {
+          session: this.sessionToView(updated),
+          saleId: sale.id,
+          openTableRelease: release.openTableRelease,
+        };
       }
-      await tx.restaurantTable.update({
-        where: { id: session.tableId },
-        data: { status: RestaurantTableStatus.AVAILABLE },
-      });
 
       return { session: this.sessionToView(updated), saleId: sale.id };
     });

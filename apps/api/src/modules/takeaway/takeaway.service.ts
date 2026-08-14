@@ -13,11 +13,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { KitchenService } from '../kitchen/kitchen.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
-import {
-  assertProjectionMatchesSubtotal,
-  projectOrderItems,
-} from '../restaurant/settlement-projection';
+import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
 import { resolveMenuItemPricing } from '../menu/menu-item-pricing';
+import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
 import { SettingsService } from '../settings/settings.service';
 import { CreateTakeawayDto, UpdateTakeawayStatusDto } from './dto/takeaway.dto';
 
@@ -52,6 +50,7 @@ export class TakeawayService {
     private readonly prisma: PrismaService,
     private readonly kitchen: KitchenService,
     private readonly settings: SettingsService,
+      private readonly fulfilment: TableServiceFulfilmentProvider,
   ) {}
 
   async create(
@@ -225,11 +224,9 @@ export class TakeawayService {
           include: {
             orders: {
               include: {
-                items: {
-                  where: { status: { not: 'VOIDED' } },
-                  // D58: the projection copies the frozen modifier snapshots.
-                  include: { modifiers: true },
-                },
+                // Subtotal only — the provider queries its own rows for the
+                // projection (see the dine-in close for why).
+                items: { where: { status: { not: 'VOIDED' } } },
               },
             },
           },
@@ -278,9 +275,13 @@ export class TakeawayService {
                 : appSettings.taxRatePercent,
           });
 
-          // D58: the settled document carries its lines — the same projection
-          // and sum invariant the dine-in close uses.
-          const projected = projectOrderItems(session.orders.flatMap((o) => o.items));
+          // D58/D61: collection via the fulfilment provider — the same
+          // projection and sum invariant the dine-in close uses, from an
+          // independent query over the same rows.
+          const projected = await this.fulfilment.collectSettlementLines(tx, tenantId, {
+            kind: 'TABLE_SESSION',
+            sessionId: session.id,
+          });
           assertProjectionMatchesSubtotal(projected, subtotal);
           const sale = await tx.sale.create({
             data: {
@@ -320,9 +321,11 @@ export class TakeawayService {
             where: { id: session.id },
             data: { status: 'CLOSED', closedAt: new Date(), finalSaleId: sale.id },
           });
-          await tx.restaurantTable.update({
-            where: { id: session.tableId },
-            data: { status: RestaurantTableStatus.AVAILABLE },
+          // D61: release via the provider (a takeaway session sits on the
+          // synthetic walk-in table; the provider frees whatever kind it is).
+          await this.fulfilment.releaseResources(tx, tenantId, {
+            kind: 'TABLE_SESSION',
+            sessionId: session.id,
           });
           finalSaleId = sale.id;
         }

@@ -217,6 +217,10 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
     'modules/returns',
     'modules/products',
     'modules/inventory-receipts',
+    // D61 — the fulfilment axis made the table-service close paths provider
+    // consumers too.
+    'modules/table-sessions',
+    'modules/takeaway',
   ];
 
   /**
@@ -429,6 +433,11 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
       'modules/products/products.module.ts',
       'modules/returns/returns.module.ts',
       'modules/sales/sales.module.ts',
+      // D61 — the fulfilment provider axis: the two table-service close
+      // paths resolve TableServiceFulfilmentProvider for settlement-line
+      // collection and resource release.
+      'modules/table-sessions/table-sessions.module.ts',
+      'modules/takeaway/takeaway.module.ts',
     ]);
   });
 
@@ -460,6 +469,11 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
       'modules/sales/sales.module.ts',
       'modules/sales/sales.repository.ts',
       'modules/sales/sales.service.ts',
+      // D61 — fulfilment provider consumers.
+      'modules/table-sessions/table-sessions.module.ts',
+      'modules/table-sessions/table-sessions.service.ts',
+      'modules/takeaway/takeaway.module.ts',
+      'modules/takeaway/takeaway.service.ts',
     ]);
     // Every offender is inside an adopted module — stated separately so a future
     // path outside sales/returns fails loudly even if someone updates the list.

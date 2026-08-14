@@ -1939,6 +1939,43 @@ carries a `productId` (all lines, after backfill) and keeps the
 stay readable indefinitely; the drop is a separate decision two releases
 out, per the plan's deferred-drops rule.
 
+### D61 — `FulfilmentProvider`: the third provider axis, alongside inventory and accounting
+
+Implements Phase 4 of the convergence plan (§4.5). A fulfilment provider owns
+HOW a sale comes into being — the operational lifecycle between "the customer
+wants this" and "the money settled" — while the settlement document
+(`Sale`/`SaleItem`, D58) stays Layer-1 invariant core. This is the phase the
+plan's extension contract rests on (its risk register R9 warned it would feel
+skippable): a future vertical's lifecycle — an appointment, a room-night, a
+repair job — becomes one class implementing one interface, its own
+operational tables, its own routes, and NOTHING else, because settlement,
+reporting, receipts and returns consume `SaleItem`.
+
+**The interface.** `collectSettlementLines(tx, tenantId, ref)` returns
+not-yet-settled lines in the universal projection shape;
+`releaseResources(tx, tenantId, ref)` frees what the work unit held, in the
+settlement transaction, so "bill settled" and "resources released" cannot be
+observed apart. The work-unit ref is a tagged union — `TABLE_SESSION` has a
+persisted work unit, `IMMEDIATE` deliberately has none (the priced cart IS
+the work unit; plan §3.3 rejected inventing an order row for retail) — so
+both shapes are first-class rather than one pretending to be the other.
+
+**Implementations.** `TableServiceFulfilmentProvider` collects via an
+INDEPENDENT query over the same rows the bill's subtotal was computed from —
+so the D58 sum invariant now compares two reads, not one restated — and owns
+the table-release logic that lived inline in `closeSession` (physical →
+AVAILABLE; open table → dissolve, D49/D50). `ImmediateFulfilmentProvider` is
+honestly thin: pass-through collection, nothing to release; it exists because
+`FulfilmentProviderFactory` holds a total `Record<FulfilmentKind, …>` with no
+fallback (the D56 rule), so a kind without a provider is a compile error.
+
+**Consumers.** Both table-service close paths (dine-in, takeaway) resolve the
+concrete provider — not the factory; the service IS the table-service
+lifecycle and re-reading the profile per close to learn what the file already
+is would be ceremony. The factory serves kind-agnostic callers (Phase 5's
+reporting, future settlement surfaces). The provider-contract importer sets
+gained the two modules under this record.
+
 ---
 
 ## Open decisions
