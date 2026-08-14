@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, ExternalLink, Loader2, Plus, Sparkles, Timer, Utensils, X } from 'lucide-react';
+import { Check, ExternalLink, ListTree, Loader2, Plus, Sparkles, Timer, Utensils, X } from 'lucide-react';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -18,8 +18,9 @@ import {
 } from '@/lib/products/promotions-api';
 import { modifierGroups as modifierGroupsApi, kitchenStations as kitchenStationsApi } from '@/lib/restaurant/api';
 import type { KitchenStationView, ModifierGroupView } from '@/lib/restaurant/types';
+import { ProductSelectorDialog } from '@/components/restaurant/menu/item-add/product-selector-dialog';
 
-import type { WizardState } from './wizard-state';
+import type { ComponentDraft, WizardState } from './wizard-state';
 
 /**
  * Restaurant additions to Step 3 (D45).
@@ -51,12 +52,25 @@ import type { WizardState } from './wizard-state';
  */
 interface Props {
   state: WizardState;
+  errors: Record<string, string>;
   session: Session;
   branchId: string | null;
+  /**
+   * D65 — `capabilities.catalogue.components`, resolved by the wizard shell
+   * (D31: this component compares no business type or capability itself).
+   */
+  showRecipe: boolean;
   onChange: (patch: Partial<WizardState>) => void;
 }
 
-export function StepRestaurantAdditions({ state, session, branchId, onChange }: Props) {
+export function StepRestaurantAdditions({
+  state,
+  errors,
+  session,
+  branchId,
+  showRecipe,
+  onChange,
+}: Props) {
   return (
     <div className="space-y-4">
       <ModifierGroupsCard
@@ -69,6 +83,9 @@ export function StepRestaurantAdditions({ state, session, branchId, onChange }: 
         selectedIds={state.promotionIds}
         onChange={(ids) => onChange({ promotionIds: ids })}
       />
+      {showRecipe ? (
+        <RecipeCard state={state} errors={errors} session={session} onChange={onChange} />
+      ) : null}
       <AvailabilityKitchenCard
         state={state}
         session={session}
@@ -409,6 +426,151 @@ function ModifierGroupCreateSheet({
         ) : null}
       </div>
     </Sheet>
+  );
+}
+
+// ── Card D: Recipe / components (D65) ────────────────────────────────────────
+
+/**
+ * The recipe a composed item consumes when a round is submitted (Phase 8).
+ * One level, no nesting; wastage entered as a percentage. Persisted after
+ * save via `PUT /products/:id/components` — replace-all, like modifiers.
+ */
+function RecipeCard({
+  state,
+  errors,
+  session,
+  onChange,
+}: {
+  state: WizardState;
+  errors: Record<string, string>;
+  session: Session;
+  onChange: (patch: Partial<WizardState>) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+
+  const patchRow = (index: number, patch: Partial<ComponentDraft>) => {
+    onChange({
+      components: state.components.map((c, i) => (i === index ? { ...c, ...patch } : c)),
+    });
+  };
+  const removeRow = (index: number) => {
+    onChange({ components: state.components.filter((_, i) => i !== index) });
+  };
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="inline-flex items-center gap-2 text-sm font-semibold">
+            <ListTree className="h-4 w-4 text-primary" aria-hidden="true" />
+            Recipe / components
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            What one unit consumes from stock when a round is sent. Leave empty if stock
+            isn&apos;t tracked for this item.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          leftIcon={<Plus className="h-3.5 w-3.5" />}
+          onClick={() => setPickerOpen(true)}
+        >
+          Add component
+        </Button>
+      </header>
+
+      {state.components.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-muted-foreground">
+          No components. Without a recipe this item moves no stock when ordered.
+        </p>
+      ) : (
+        <ul className="space-y-2" role="group" aria-label="Recipe components">
+          {state.components.map((c, ci) => (
+            <li
+              key={c.componentProductId}
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface p-3"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{c.componentName}</p>
+                {c.componentSku ? (
+                  <p className="text-[11px] text-muted-foreground">{c.componentSku}</p>
+                ) : null}
+              </div>
+              <div className="w-24">
+                <Input
+                  inputMode="decimal"
+                  value={c.quantity}
+                  onChange={(e) => patchRow(ci, { quantity: e.target.value })}
+                  aria-label={`Quantity of ${c.componentName}`}
+                  aria-invalid={!!errors[`component-qty-${ci}`]}
+                  placeholder="Qty"
+                />
+              </div>
+              <div className="relative w-24">
+                <Input
+                  inputMode="decimal"
+                  value={c.wastagePercent}
+                  onChange={(e) => patchRow(ci, { wastagePercent: e.target.value })}
+                  aria-label={`Wastage percent for ${c.componentName}`}
+                  aria-invalid={!!errors[`component-wastage-${ci}`]}
+                  placeholder="Waste"
+                  className="pr-7"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-medium text-muted-foreground">
+                  %
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => removeRow(ci)}
+                className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-danger"
+                aria-label={`Remove ${c.componentName}`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+              {errors[`component-qty-${ci}`] ? (
+                <p className="w-full text-xs text-danger" role="alert">
+                  {errors[`component-qty-${ci}`]}
+                </p>
+              ) : null}
+              {errors[`component-wastage-${ci}`] ? (
+                <p className="w-full text-xs text-danger" role="alert">
+                  {errors[`component-wastage-${ci}`]}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {pickerOpen ? (
+        <ProductSelectorDialog
+          session={session}
+          onBack={() => setPickerOpen(false)}
+          onSelect={(product) => {
+            setPickerOpen(false);
+            // One row per component; picking an already-listed product is a
+            // no-op rather than a duplicate the server would refuse.
+            if (state.components.some((c) => c.componentProductId === product.id)) return;
+            onChange({
+              components: [
+                ...state.components,
+                {
+                  componentProductId: product.id,
+                  componentName: product.name,
+                  componentSku: product.sku,
+                  quantity: '1',
+                  wastagePercent: '',
+                },
+              ],
+            });
+          }}
+        />
+      ) : null}
+    </section>
   );
 }
 

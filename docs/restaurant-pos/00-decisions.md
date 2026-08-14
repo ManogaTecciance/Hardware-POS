@@ -2124,6 +2124,59 @@ Attributes are deliberately absent from `SellableItem` (the POS grid does
 not render them) and from every money/stock path — the D30 spec suite pins
 the validator's whole refusal surface, including the empty-schema case.
 
+### D65 — components, and rounds finally move stock
+
+Implements Phase 8 of the convergence plan (§8.8), closing defect D-5:
+`StockMovementReason.ORDER_ROUND` was declared and never written — a
+food-service tenant's stock was purchase-side only. Open decision Q4 is
+resolved as the plan recommended: **depletion happens at round SUBMIT**, in
+the round's own transaction (the same reasoning as D53 — food reaching the
+kitchen is the event that matters), **with a compensating movement on
+void**.
+
+**The model.** `ProductComponent` — what a COMPOSED_ITEM or BUNDLE consumes
+per unit sold, ONE level, no recursion. Authored via
+`GET/PUT /products/:productId/components` (replace-all, wizard card D,
+audit-logged); writes are refused `403 COMPONENTS_NOT_ENABLED` for tenants
+whose domain does not declare `capabilities.catalogue.components` — flipped
+TRUE for food service (hotel inherits) in this change, false elsewhere.
+
+**What depletes, by sellable kind.** STOCK_ITEM → itself, 1:1 (the bottled
+drink in a restaurant, D-5's worked example). COMPOSED_ITEM / BUNDLE → its
+recipe rows at `qty × quantity × (1 + wastageRate)`. SERVICE / TIME_SLOT /
+STAY_UNIT → nothing. The oversell guard is the provider's own
+(`reduceStock`): a round the shelf cannot support is refused WHOLE, exactly
+as a retail cart is; the recourse is a stock adjustment.
+
+**Deliberate deviation from the plan's "absent = 1:1" note.** A
+COMPOSED_ITEM with NO recipe depletes NOTHING. Sticking to the plan text
+would have broken every restaurant at deploy (every dish sits at quantity 0)
+and contradicted D62, which already displays componentless COMPOSED items
+UNTRACKED because their stock number is a number nothing maintains.
+Authoring a recipe is the per-product opt-in that §12.3.5 pairs with an
+opening stock-take; a packaged drink misclassified COMPOSED is fixed by
+reclassifying it. To that end the D60 backfill's Stage A rule now ALSO runs
+at authoring time (`deriveSellableKind` in ProductsService): Service →
+SERVICE, foodType set → COMPOSED_ITEM, else STOCK_ITEM — re-derived on
+update only when an input of the rule changes, so authored rows can no
+longer drift from backfilled ones.
+
+**The ledger.** One `StockMovement` per (order item × depleted product):
+negative delta, `ORDER_ROUND`, `refType RESTAURANT_ORDER_ITEM`, `refId` the
+item, `balanceAfter` read back in-transaction. A void mirrors the RECORDED
+movements (`…_VOID`, positive delta) — never a re-expansion, so a recipe
+edited between submit and void still restores exactly what was taken; the
+presence of a compensation row makes the restore idempotent. Takeaway
+depletes through the same engine. Tenants with DISABLED inventory are a
+full no-op — no ledger noise. Per §12.3.5, NOTHING is backfilled: history
+stays purchase-side; depletion starts at cutover, forward only.
+
+Engine: `providers/inventory/round-depletion.service.ts`, writing only
+through the caller's transaction like every provider. Verified live end to
+end: deplete 50 → 47.8 (2 × 1.1 wastage), void restore → 50, double-void
+inert, oversell refused naming the ingredient, ledger pair
+`-2.200/47.800` then `+2.200/50.000`.
+
 ---
 
 ## Open decisions

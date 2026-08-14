@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Product, UserRole } from '@hardware-pos/database';
+import { Prisma, Product, SellableKind, UserRole } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
 import { mirrorExternalRef } from '../quickbooks/external-ref';
@@ -16,7 +16,7 @@ import { CatalogSyncProviderFactory } from '../providers/catalog/catalog-sync-pr
 import { CatalogSyncResult, ProductCatalogShape } from '../providers/provider.types';
 import { ProductAttributesService } from './product-attributes.service';
 import { MockSyncSummary, ProductsRepository } from './products.repository';
-import { CreateProductDto } from './dto/create-product.dto';
+import { CreateProductDto, type ProductFoodType } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { SearchProductsDto } from './dto/search-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -109,6 +109,11 @@ export class ProductsService {
       // D64 — validated above; stored verbatim. The schema default covers the
       // omitted case, but passing it explicitly keeps create shape stable.
       attributes: (dto.attributes ?? {}) as Prisma.InputJsonValue,
+      // D65 — the same classification rule the D60 backfill applied, now at
+      // authoring time so new rows cannot drift from backfilled ones: a
+      // Service is a SERVICE, a dish (foodType set) is COMPOSED_ITEM,
+      // everything else is a plain STOCK_ITEM.
+      sellableKind: deriveSellableKind(dto.type ?? 'Inventory', dto.foodType ?? null),
       syncStatus: 'NOT_SYNCED',
     };
     // One provider for the operation, resolved from the authenticated tenant before
@@ -196,6 +201,16 @@ export class ProductsService {
       // D64 — undefined = leave unchanged (Prisma's semantics); a provided
       // document replaces the stored one wholesale.
       attributes: dto.attributes as Prisma.InputJsonValue | undefined,
+      // D65 — re-derive ONLY when an input of the rule changes; an untouched
+      // patch leaves the classification alone. (BUNDLE has no authoring
+      // surface yet; when it does, this derivation moves behind it.)
+      sellableKind:
+        dto.type !== undefined || dto.foodType !== undefined
+          ? deriveSellableKind(
+              dto.type ?? existing.type,
+              dto.foodType !== undefined ? dto.foodType : (existing.foodType as ProductFoodType | null),
+            )
+          : undefined,
     };
     const catalog = await this.catalogProviders.forTenant(tenantId);
     try {
@@ -367,6 +382,22 @@ export class ProductsService {
  * this product" whichever catalogue that is. Quantities, images and category links
  * are deliberately not passed — a catalogue has no business reading them.
  */
+/**
+ * D65 — one classification rule for `sellableKind`, identical to the D60
+ * backfill's Stage A, so an authored row and a backfilled row cannot
+ * disagree. This is what the depletion engine branches on: SERVICE claims no
+ * stock, COMPOSED_ITEM depletes via its recipe (or not at all without one),
+ * STOCK_ITEM depletes 1:1.
+ */
+function deriveSellableKind(
+  type: string,
+  foodType: ProductFoodType | null,
+): SellableKind {
+  if (type === 'Service') return 'SERVICE';
+  if (foodType != null) return 'COMPOSED_ITEM';
+  return 'STOCK_ITEM';
+}
+
 function toCatalogShape(product: Product): ProductCatalogShape {
   const num = (v: unknown): number | null => (v == null ? null : Number(v));
   return {

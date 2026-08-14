@@ -28,6 +28,7 @@ import { StepVariations } from './step-variations';
 import { Stepper } from './stepper';
 import {
   buildAttributesDocument,
+  buildComponentsPayload,
   buildCreateInput,
   buildVariantsBatchInput,
   enumerateCombinations,
@@ -785,6 +786,39 @@ describe('StepAttributes', () => {
     s.attributes = { bedCount: 'two' };
     render(<Harness state={s} />);
     expect(screen.getByRole('alert').textContent).toMatch(/beds must be a number/i);
+  });
+});
+
+describe('D65 — recipe drafts', () => {
+  const draft = (over: Partial<import('./wizard-state').ComponentDraft> = {}) => ({
+    componentProductId: 'p-bun',
+    componentName: 'Bun',
+    componentSku: 'BUN',
+    quantity: '1',
+    wastagePercent: '',
+    ...over,
+  });
+
+  it('buildComponentsPayload converts the percent to a 0–1 rate and omits zero wastage', () => {
+    const s = initialState();
+    s.components = [draft(), draft({ componentProductId: 'p-patty', quantity: '0.15', wastagePercent: '5' })];
+    expect(buildComponentsPayload(s)).toEqual([
+      { componentProductId: 'p-bun', quantity: 1 },
+      { componentProductId: 'p-patty', quantity: 0.15, wastageRate: 0.05 },
+    ]);
+  });
+
+  it('validateStep(pricing) refuses unusable rows and passes clean ones', () => {
+    const s = initialState();
+    s.simple.sku = 'DISH-1';
+    s.simple.unitPrice = '10';
+    s.components = [draft({ quantity: '' }), draft({ componentProductId: 'p2', wastagePercent: '100' })];
+    const errs = validateStep('pricing', s, { inventoryMode: 'LOCAL' });
+    expect(errs['component-qty-0']).toMatch(/quantity/i);
+    expect(errs['component-wastage-1']).toMatch(/0–99\.99/);
+    // Positive control — the same rows, corrected, validate clean.
+    s.components = [draft(), draft({ componentProductId: 'p2', wastagePercent: '5' })];
+    expect(validateStep('pricing', s, { inventoryMode: 'LOCAL' })).toEqual({});
   });
 });
 

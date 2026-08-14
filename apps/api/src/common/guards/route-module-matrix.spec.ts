@@ -195,6 +195,8 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // business profile carries (D35), so these stay SHARED_CORE alongside the
   // rest of `/products`.
   'GET /products/:productId/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /products/:productId/components': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PUT /products/:productId/components': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'PUT /products/:productId/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/:productId/kitchen-stations': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'PUT /products/:productId/kitchen-stations': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },

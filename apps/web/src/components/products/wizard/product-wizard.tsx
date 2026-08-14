@@ -28,6 +28,10 @@ import {
   putProductModifierGroups,
 } from '@/lib/products/product-modifiers-api';
 import {
+  fetchProductComponents,
+  putProductComponents,
+} from '@/lib/products/components-api';
+import {
   fetchProductStations,
   putProductStations,
 } from '@/lib/products/product-stations-api';
@@ -60,6 +64,7 @@ import { StepReview } from './step-review';
 import { StepVariations } from './step-variations';
 import { Stepper } from './stepper';
 import {
+  buildComponentsPayload,
   buildCreateInput,
   buildVariantsBatchInput,
   buildVariationsPayload,
@@ -124,6 +129,9 @@ export function ProductWizard(props: Props) {
   // themselves (D31 — the resolver is the single authority), so the shell
   // derives it once here and passes it as a prop.
   const businessKind = resolveBusinessKind(profile?.businessType ?? null);
+  // D65 — the recipe card exists only for tenants whose capabilities declare
+  // it. Unresolved profile → no card, same fail-safe as everything else.
+  const showRecipe = profile?.capabilities.catalogue.components === true;
   // `showOpeningStock` gates the opening-stock column, the branch select, and
   // the "opening stock only on LOCAL" info banner in Step 3. Reading it from
   // the resolver's `managementMode` — not from `inventoryMode` — keeps D31's
@@ -192,7 +200,7 @@ export function ProductWizard(props: Props) {
     const isRestaurantEdit = businessKind === 'RESTAURANT';
     (async () => {
       try {
-        const [variantsRes, dimsRes, mgRes, ksRes, promoRes] = await Promise.all([
+        const [variantsRes, dimsRes, mgRes, ksRes, promoRes, compRes] = await Promise.all([
           fetchVariants(session, props.initialProductId).catch(() => [] as ProductVariant[]),
           fetchVariations(session, props.initialProductId).catch(() => ({ dimensions: [] })),
           isRestaurantEdit
@@ -209,6 +217,13 @@ export function ProductWizard(props: Props) {
                 total: 0,
               }))
             : Promise.resolve({ items: [], total: 0 }),
+          // D65 — the recipe. Restaurant-gated like its siblings; the card
+          // itself is additionally capability-gated at render.
+          isRestaurantEdit
+            ? fetchProductComponents(session, props.initialProductId).catch(() => ({
+                components: [],
+              }))
+            : Promise.resolve({ components: [] }),
         ]);
         if (cancelled) return;
         setDimensions(dimsRes.dimensions);
@@ -218,6 +233,15 @@ export function ProductWizard(props: Props) {
             modifierGroupIds: mgRes.modifierGroups.map((g) => g.id),
             kitchenStationIds: ksRes.stations.map((s) => s.id),
             promotionIds: promoRes.items.map((p) => p.id),
+            components: compRes.components.map((c) => ({
+              componentProductId: c.componentProductId,
+              componentName: c.componentName,
+              componentSku: c.componentSku,
+              quantity: c.quantity,
+              // API stores a 0–1 rate; the card edits a percentage.
+              wastagePercent:
+                Number(c.wastageRate) > 0 ? String(Number(c.wastageRate) * 100) : '',
+            })),
           }),
         );
       } finally {
@@ -319,7 +343,12 @@ export function ProductWizard(props: Props) {
         mode === 'edit' ? props.initialProductId : (lastCreatedIdRef.current ?? '');
       let linkNote: string | null = null;
       if (productId && businessKind === 'RESTAURANT') {
-        linkNote = await persistRestaurantLinks(session, productId, state);
+        linkNote = await persistRestaurantLinks(session, productId, state, {
+          // D65 — PUT the recipe only for capability-declaring tenants; in
+          // edit mode an empty list is a deliberate clear, on create it is
+          // a wasted call.
+          putComponents: showRecipe && (state.components.length > 0 || mode === 'edit'),
+        });
       }
 
       setSaveState('saved');
@@ -395,6 +424,7 @@ export function ProductWizard(props: Props) {
               businessKind={businessKind}
               session={session}
               branchId={session.branchId}
+              showRecipe={showRecipe}
               onChange={patchState}
             />
           ) : null}
@@ -587,6 +617,7 @@ async function persistRestaurantLinks(
   session: Session,
   productId: string,
   state: WizardState,
+  options: { putComponents: boolean },
 ): Promise<string | null> {
   const modifierPromise =
     state.modifierGroupIds.length > 0 || state.hasVariations /* empty PUT is safe */
@@ -596,8 +627,16 @@ async function persistRestaurantLinks(
     state.kitchenStationIds.length > 0
       ? putProductStations(session, productId, state.kitchenStationIds).catch(() => null)
       : Promise.resolve(null);
+  // D65 — replace-all recipe PUT, same degrade-to-toast policy as the others.
+  const componentsPromise = options.putComponents
+    ? putProductComponents(session, productId, buildComponentsPayload(state)).catch(() => null)
+    : Promise.resolve(null);
 
-  const [mgResult, ksResult] = await Promise.all([modifierPromise, stationPromise]);
+  const [mgResult, ksResult, compResult] = await Promise.all([
+    modifierPromise,
+    stationPromise,
+    componentsPromise,
+  ]);
 
   // Promotion links — fetch each promotion, add the new product to its item
   // list (if not already there), and PATCH. Parallel because they don't
@@ -649,7 +688,8 @@ async function persistRestaurantLinks(
 
   const linkFailures =
     (mgResult === null && state.modifierGroupIds.length > 0 ? 1 : 0) +
-    (ksResult === null && state.kitchenStationIds.length > 0 ? 1 : 0);
+    (ksResult === null && state.kitchenStationIds.length > 0 ? 1 : 0) +
+    (compResult === null && options.putComponents ? 1 : 0);
 
   if (promoFailures > 0 && linkFailures === 0) {
     return `Product saved, but ${promoFailures} promotion link${

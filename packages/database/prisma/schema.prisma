@@ -319,6 +319,7 @@ model Tenant {
   saleItemModifiers            SaleItemModifier[]
   catalogueEntries             CatalogueEntry[]
   externalEntityRefs           ExternalEntityRef[]
+  productComponents            ProductComponent[]
   auditLogs                    AuditLog[]
   printJobs                    PrintJob[]
   returns                      Return[]
@@ -778,6 +779,10 @@ model Product {
   promotionItems       PromotionItem[]
   restaurantOrderItems RestaurantOrderItem[]
   catalogueEntries     CatalogueEntry[]
+  /// D65 — this product's recipe (when COMPOSED_ITEM / BUNDLE).
+  components           ProductComponent[]          @relation("AssembledProduct")
+  /// D65 — recipes this product appears in as an ingredient.
+  usedInComponents     ProductComponent[]          @relation("ComponentProduct")
 
   @@unique([tenantId, quickbooksItemId])
   @@unique([tenantId, sku])
@@ -786,6 +791,49 @@ model Product {
   @@index([categoryId])
   @@index([subcategoryId])
   @@index([attributes], type: Gin)
+}
+
+/// D65 — what a COMPOSED_ITEM (or BUNDLE) consumes per unit sold (convergence
+/// plan §8.8, Phase 8). ONE level, no recursion: depletion expands a sold
+/// line through these rows exactly once — a component that is itself
+/// composed is depleted as a product, its own components untouched.
+///
+/// A COMPOSED_ITEM with NO rows here depletes NOTHING (deliberate deviation
+/// from the plan's "absent = 1:1" note, recorded in D65): its stock number is
+/// a number nothing maintains, and the sellable listing already reports it
+/// UNTRACKED (D62). 1:1 depletion belongs to STOCK_ITEM — a packaged drink
+/// misclassified COMPOSED is fixed by reclassifying it, with a stock-take.
+///
+/// Deliberately out of scope (plan §8.8): recursive nesting, yield
+/// management, par levels, theoretical-vs-actual variance.
+model ProductComponent {
+  id       String @id @default(cuid())
+  tenantId String
+
+  productId        String
+  /// Loose reference (no FK), per plan: recipes-per-variant arrive with a
+  /// wizard surface for them; the column exists so data written then needs
+  /// no migration.
+  productVariantId String?
+
+  componentProductId String
+  componentVariantId String?
+
+  quantity    Decimal @db.Decimal(12, 4)
+  unit        String?
+  /// Proportional loss (trim, evaporation). 0.05 = 5%.
+  wastageRate Decimal @default(0) @db.Decimal(5, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant           Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product          Product @relation("AssembledProduct", fields: [productId], references: [id], onDelete: Cascade)
+  componentProduct Product @relation("ComponentProduct", fields: [componentProductId], references: [id])
+
+  @@unique([productId, productVariantId, componentProductId, componentVariantId])
+  @@index([tenantId])
+  @@index([componentProductId])
 }
 
 // ─────────────────────────────────────────────────────────────

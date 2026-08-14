@@ -16,6 +16,10 @@ import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
 import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
 import { resolveMenuItemPricing } from '../menu/menu-item-pricing';
 import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
+import {
+  RoundDepletionService,
+  type RoundDepletionItem,
+} from '../providers/inventory/round-depletion.service';
 import { SettingsService } from '../settings/settings.service';
 import { CreateTakeawayDto, UpdateTakeawayStatusDto } from './dto/takeaway.dto';
 
@@ -50,7 +54,9 @@ export class TakeawayService {
     private readonly prisma: PrismaService,
     private readonly kitchen: KitchenService,
     private readonly settings: SettingsService,
-      private readonly fulfilment: TableServiceFulfilmentProvider,
+    private readonly fulfilment: TableServiceFulfilmentProvider,
+    // D65 — takeaway rounds deplete exactly as dine-in rounds do.
+    private readonly roundDepletion: RoundDepletionService,
   ) {}
 
   async create(
@@ -135,10 +141,11 @@ export class TakeawayService {
         tenantId,
         dto.items.map((i) => i.menuItemId!),
       );
+      const depletionItems: RoundDepletionItem[] = [];
       for (const input of dto.items) {
         const resolved = pricing.get(input.menuItemId!);
         if (!resolved) throw new NotFoundException(`Menu item ${input.menuItemId} not found`);
-        await tx.restaurantOrderItem.create({
+        const item = await tx.restaurantOrderItem.create({
           data: {
             tenantId,
             orderId: order.id,
@@ -153,7 +160,21 @@ export class TakeawayService {
             status: 'SENT',
           },
         });
+        depletionItems.push({
+          orderItemId: item.id,
+          productId: resolved.productId,
+          quantity: input.quantity,
+        });
       }
+      // D65 — same submit-time depletion as a dine-in round (Q4). An
+      // unmigrated menu item (null productId) simply has nothing to deplete.
+      await this.roundDepletion.depleteSubmittedItems(
+        tx,
+        tenantId,
+        dto.branchId,
+        depletionItems,
+        actorUserId,
+      );
       await this.kitchen.generateTicketsForRound(tx, tenantId, dto.branchId, round.id);
 
       const profile = await tx.takeawayOrderProfile.create({

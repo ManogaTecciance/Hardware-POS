@@ -43,6 +43,8 @@ interface Props {
   session?: Session;
   /** Branch scope for kitchen-station catalogue fetches. */
   branchId?: string | null;
+  /** D65 — `capabilities.catalogue.components`, resolved by the shell. */
+  showRecipe?: boolean;
   onChange: (patch: Partial<WizardState>) => void;
 }
 
@@ -54,6 +56,7 @@ export function StepPricingInventory({
   businessKind,
   session,
   branchId,
+  showRecipe,
   onChange,
 }: Props) {
   const isLocal = showOpeningStock;
@@ -97,8 +100,10 @@ export function StepPricingInventory({
       {isRestaurant && session ? (
         <StepRestaurantAdditions
           state={state}
+          errors={errors}
           session={session}
           branchId={branchId ?? null}
+          showRecipe={showRecipe ?? false}
           onChange={onChange}
         />
       ) : null}

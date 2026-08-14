@@ -1,5 +1,7 @@
 import { MenuModule } from '../menu/menu.module';
 import { ProductAttributeSchemaController } from './product-attribute-schema.controller';
+import { ProductComponentsController } from './product-components.controller';
+import { ProductComponentsService } from './product-components.service';
 import { ProductAttributesService } from './product-attributes.service';
 import { ProductModifierGroupsController } from './product-modifier-groups.controller';
 import { PlatformModule } from '../platform/platform.module';
@@ -57,6 +59,8 @@ import { ProductVariantsService } from './variants/product-variants.service';
     // catalogues stay owned by their respective modules; only the junctions
     // live here.
     ProductModifiersController,
+    // D65 — the recipe junction (Phase 8), same shape as modifiers/stations.
+    ProductComponentsController,
     ProductStationsController,
     ProductModifierGroupsController,
   ],
@@ -70,6 +74,7 @@ import { ProductVariantsService } from './variants/product-variants.service';
     ProductModifiersService,
     ProductStationsService,
     ProductAttributesService,
+    ProductComponentsService,
     SellableService,
   ],
   exports: [ProductsService, SellableService],

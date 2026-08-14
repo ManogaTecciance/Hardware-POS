@@ -30,6 +30,7 @@ import { PaymentsController } from '../../modules/payments/payments.controller';
 import { PlatformController } from '../../modules/platform/platform.controller';
 import { PlatformAdminController } from '../../modules/platform-admin/platform-admin.controller';
 import { ProductAttributeSchemaController } from '../../modules/products/product-attribute-schema.controller';
+import { ProductComponentsController } from '../../modules/products/product-components.controller';
 import { ProductsController } from '../../modules/products/products.controller';
 import { QuickBooksController } from '../../modules/quickbooks/quickbooks.controller';
 import { PublicQuotationsController } from '../../modules/quotations/public-quotations.controller';
@@ -148,6 +149,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   SellableController,
   // D64 — Phase 7 attribute schema read.
   ProductAttributeSchemaController,
+  // D65 — Phase 8 recipe junction.
+  ProductComponentsController,
   ProductModifierGroupsController,
   CollectionsController,
   CollectionController,
@@ -184,6 +187,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'products',
   // D64 — Phase 7.
   'product-attribute-schema',
+  // D65 — Phase 8.
+  'product-components',
   'public-quotations',
   'quickbooks',
   'quotations',

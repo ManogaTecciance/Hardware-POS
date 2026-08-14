@@ -14,6 +14,7 @@ import { ImmediateFulfilmentProvider } from './fulfilment/immediate-fulfilment.p
 import { TableServiceFulfilmentProvider } from './fulfilment/table-service-fulfilment.provider';
 import { InventoryProviderFactory } from './inventory/inventory-provider.factory';
 import { LocalInventoryProvider } from './inventory/local-inventory.provider';
+import { RoundDepletionService } from './inventory/round-depletion.service';
 import { NoInventoryProvider } from './inventory/no-inventory.provider';
 import { QuickBooksInventoryProvider } from './inventory/quickbooks-inventory.provider';
 
@@ -69,6 +70,8 @@ import { QuickBooksInventoryProvider } from './inventory/quickbooks-inventory.pr
     LocalInventoryProvider,
     NoInventoryProvider,
     InventoryProviderFactory,
+    // D65 — submit-time round depletion (Phase 8).
+    RoundDepletionService,
     QuickBooksAccountingProvider,
     NoAccountingProvider,
     AccountingProviderFactory,
@@ -82,6 +85,7 @@ import { QuickBooksInventoryProvider } from './inventory/quickbooks-inventory.pr
   ],
   exports: [
     InventoryProviderFactory,
+    RoundDepletionService,
     AccountingProviderFactory,
     CatalogSyncProviderFactory,
     FulfilmentProviderFactory,

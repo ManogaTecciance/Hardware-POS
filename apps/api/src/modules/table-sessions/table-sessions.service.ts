@@ -20,6 +20,10 @@ import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
 import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
 import { resolveMenuItemPricing } from '../menu/menu-item-pricing';
 import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
+import {
+  RoundDepletionService,
+  type RoundDepletionItem,
+} from '../providers/inventory/round-depletion.service';
 import { SettingsService } from '../settings/settings.service';
 import { KitchenService } from '../kitchen/kitchen.service';
 import {
@@ -132,6 +136,9 @@ export class TableSessionsService {
     // table-service lifecycle; resolving by tenant would re-read the profile
     // per close to learn what this file already is.
     private readonly fulfilment: TableServiceFulfilmentProvider,
+    // D65 — submit-time stock depletion (Q4): the round transaction is where
+    // "the kitchen got the ticket" and "the shelf count moved" must coincide.
+    private readonly roundDepletion: RoundDepletionService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────
@@ -500,6 +507,9 @@ export class TableSessionsService {
       }
 
       const previousRoundCount = await tx.orderRound.count({ where: { orderId: order.id } });
+      // D65 — collected as the snapshot rows are written, depleted once the
+      // session (and its branch) is in hand below.
+      const depletionItems: RoundDepletionItem[] = [];
       const round = await tx.orderRound.create({
         data: {
           tenantId,
@@ -603,6 +613,11 @@ export class TableSessionsService {
             variantPriceSnapshot,
           },
         });
+        depletionItems.push({
+          orderItemId: item.id,
+          productId: productIdSnapshot,
+          quantity: inputItem.quantity,
+        });
         for (const modOpt of selectedMods) {
           if (!modOpt) continue;
           await tx.restaurantOrderItemModifier.create({
@@ -645,6 +660,17 @@ export class TableSessionsService {
         data: { status: RestaurantTableStatus.OCCUPIED },
       });
 
+      // D65 — deplete stock for this round, same transaction (Q4: submit).
+      // A tracked line the shelf cannot support refuses the WHOLE round,
+      // exactly as a retail sale would refuse the cart.
+      await this.roundDepletion.depleteSubmittedItems(
+        tx,
+        tenantId,
+        session.branchId,
+        depletionItems,
+        actorUserId,
+      );
+
       // Phase 6: generate KOTs inside the same transaction so a round and
       // its tickets are visible together. Scenario 20 requires the round
       // to be persisted even if printer wiring later fails; the tickets
@@ -669,23 +695,32 @@ export class TableSessionsService {
     dto: VoidItemDto,
     actorUserId: string,
   ): Promise<void> {
-    const existing = await this.prisma.restaurantOrderItem.findFirst({
-      where: { id: itemId, tenantId },
-      select: { id: true, status: true },
-    });
-    if (!existing) throw new OrderNotFoundError();
-    if (existing.status === RestaurantOrderItemStatus.VOIDED) {
-      // Idempotent no-op.
-      return;
-    }
-    await this.prisma.restaurantOrderItem.update({
-      where: { id: existing.id },
-      data: {
-        status: RestaurantOrderItemStatus.VOIDED,
-        voidReason: dto.reason,
-        voidedByUserId: actorUserId,
-        voidedAt: new Date(),
-      },
+    // D65 — one transaction: the status flip and the compensating stock
+    // movement must not be observable apart, and the status check inside it
+    // is what keeps a double-void from double-restoring.
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.restaurantOrderItem.findFirst({
+        where: { id: itemId, tenantId },
+        select: { id: true, status: true },
+      });
+      if (!existing) throw new OrderNotFoundError();
+      if (existing.status === RestaurantOrderItemStatus.VOIDED) {
+        // Idempotent no-op.
+        return;
+      }
+      await tx.restaurantOrderItem.update({
+        where: { id: existing.id },
+        data: {
+          status: RestaurantOrderItemStatus.VOIDED,
+          voidReason: dto.reason,
+          voidedByUserId: actorUserId,
+          voidedAt: new Date(),
+        },
+      });
+      // Mirrors the item's RECORDED ORDER_ROUND movements (not a re-expansion
+      // of the recipe, which may have changed since submit). No-ops for items
+      // that never depleted.
+      await this.roundDepletion.restoreVoidedItem(tx, tenantId, existing.id, actorUserId);
     });
   }
 

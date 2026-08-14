@@ -159,6 +159,10 @@ beforeEach(async () => {
       type: 'Inventory',
       sku: 'RST-JUICE',
       unitPrice: '5.00',
+      // D65 — rounds now DEPLETE StockItem lines at submit; a zero-stock
+      // fixture would refuse every round in this spec, which is the depletion
+      // spec's business (round-depletion.spec.ts), not this one's.
+      quantityOnHand: '100.000',
       isActive: true,
     },
   });
@@ -175,6 +179,7 @@ beforeEach(async () => {
       type: 'Inventory',
       sku: 'RST-BURGER',
       unitPrice: '10.00', // legacy fallback — NOT what the variant charges
+      quantityOnHand: '100.000', // D65 — see the Fresh Juice comment above
       hasVariants: true,
       isActive: true,
     },

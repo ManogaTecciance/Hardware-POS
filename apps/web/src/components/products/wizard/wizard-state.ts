@@ -141,6 +141,23 @@ export interface WizardState {
    * keeping the state shape uniform with every other wizard field.
    */
   attributes: Record<string, string>;
+
+  /**
+   * D65 — the recipe (Step 3, card D; only when the tenant's capabilities
+   * declare `catalogue.components`). Raw input strings like every other
+   * wizard field; `wastagePercent` is the operator-facing percentage — the
+   * PUT converts to the API's 0–1 rate.
+   */
+  components: ComponentDraft[];
+}
+
+/** D65 — one recipe row. Name/SKU cached from the picker for display. */
+export interface ComponentDraft {
+  componentProductId: string;
+  componentName: string;
+  componentSku: string | null;
+  quantity: string;
+  wastagePercent: string;
 }
 
 /**
@@ -185,6 +202,7 @@ export function initialState(): WizardState {
     kitchenStationIds: [],
     promotionIds: [],
     attributes: {},
+    components: [],
   };
 }
 
@@ -212,6 +230,8 @@ export interface RestaurantHydration {
   modifierGroupIds?: string[];
   kitchenStationIds?: string[];
   promotionIds?: string[];
+  /** D65 — existing recipe rows, pre-converted to drafts by the shell. */
+  components?: ComponentDraft[];
 }
 
 export function hydrateFromProduct(
@@ -282,6 +302,7 @@ export function hydrateFromProduct(
     attributes: Object.fromEntries(
       Object.entries(product.attributes ?? {}).map(([k, v]) => [k, String(v)]),
     ),
+    components: restaurant.components ?? [],
   };
 }
 
@@ -475,9 +496,35 @@ export function validateStep(
         errors['simple-price'] = 'Enter a selling price.';
       }
     }
+
+    // D65 — recipe rows (card D). Every listed component needs a usable
+    // quantity; wastage is a percentage and cannot reach 100.
+    state.components.forEach((c, ci) => {
+      const q = Number(c.quantity);
+      if (c.quantity.trim() === '' || !Number.isFinite(q) || q <= 0) {
+        errors[`component-qty-${ci}`] = `Enter a quantity for ${c.componentName}.`;
+      }
+      if (c.wastagePercent.trim() !== '') {
+        const w = Number(c.wastagePercent);
+        if (!Number.isFinite(w) || w < 0 || w >= 100) {
+          errors[`component-wastage-${ci}`] = 'Wastage is 0–99.99%.';
+        }
+      }
+    });
   }
 
   return errors;
+}
+
+/** D65 — drafts → the PUT body (percent → 0–1 rate). Validated above. */
+export function buildComponentsPayload(state: WizardState) {
+  return state.components.map((c) => ({
+    componentProductId: c.componentProductId,
+    quantity: Number(c.quantity),
+    ...(c.wastagePercent.trim() !== '' && Number(c.wastagePercent) > 0
+      ? { wastageRate: Number(c.wastagePercent) / 100 }
+      : {}),
+  }));
 }
 
 // ── Payload builders ─────────────────────────────────────────────────────────

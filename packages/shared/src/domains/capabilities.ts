@@ -16,9 +16,10 @@
  *
  * ## A capability describes what works TODAY
  *
- * `collections` and `components` are declared false everywhere until the
- * phases that build them flip them on. A capability that is true with nothing
- * behind it would teach consumers to distrust the object.
+ * `collections` and `components` were declared false everywhere until the
+ * phases that built them flipped them on (components: Phase 8/D65 for food
+ * service). A capability that is true with nothing behind it would teach
+ * consumers to distrust the object.
  */
 
 /**
@@ -98,7 +99,8 @@ export const FOOD_SERVICE_CAPABILITIES: TenantCapabilities = {
     modifiers: true,
     preparation: true,
     collections: false,
-    components: false,
+    // D65 (Phase 8): recipes are authorable and rounds deplete through them.
+    components: true,
   },
   fulfilment: {
     kind: 'TABLE_SERVICE',
