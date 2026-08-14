@@ -1,10 +1,13 @@
 # AxloPOS convergence plan — one catalogue, one settlement document, N pluggable domains
 
-**Status:** in delivery. **Phase 0 shipped** (D56/D57, 2026-08-14): domain
-packs, capabilities on the profile, the seven inline predicates deleted, the
-HOTEL defects D-1/D-2 fixed and browser-verified, `TILE_SHOP`/`RETAIL` removed
-from the enum, and the pilot classified as an explicit HARDWARE tenant.
-Phases 1+ remain proposals.
+**Status:** DELIVERED — all phases 0–9 shipped, 2026-08-14. Decision records
+D56–D66 in `docs/restaurant-pos/00-decisions.md` are the authoritative
+account of what was built and where delivery deviated from this text (D65's
+"absent recipe depletes nothing"; D66's SHARED_CORE collections routes
+superseding the MENU_MANAGEMENT note). Outstanding by design: Phase 6's read
+switch (§8.10 step 5) and payload scope (step 6) await a clean PRODUCTION
+reconciliation cycle per R10; the deferred drops (§11) await their own
+record, ≥ two releases out.
 **Author:** architecture review, 2026-08-14.
 **Scope:** `apps/api`, `apps/web`, `packages/database`, `packages/shared`.
 **Extends:** D28, D31, D36, D37, D44, D45, D46, D52, D55.
