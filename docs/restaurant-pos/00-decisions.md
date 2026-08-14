@@ -2177,6 +2177,45 @@ end: deplete 50 → 47.8 (2 × 1.1 wastage), void restore → 50, double-void
 inert, oversell refused naming the ingredient, ledger pair
 `-2.200/47.800` then `+2.200/50.000`.
 
+### D66 — collections for every domain, and channel-scoped assortments
+
+Implements Phase 9, the last phase of the convergence plan. Two changes and
+one supersession:
+
+**The surface opens.** The D62 collections routes
+(`/branches/:id/collections` and descendants) are reclassified SHARED_CORE
+— the catalogue is shared core, the same doctrine as `/products` and
+`/products/sellable`. This SUPERSEDES D62's forward note that retail would
+"gain the MENU_MANAGEMENT module": handing retail that module would have
+opened the LEGACY `/restaurant/menus…` routes to hardware tenants, changing
+what D60's gate assertions mean. Instead, writes follow the D65 components
+pattern — refused `403 COLLECTIONS_NOT_ENABLED` for tenants whose domain
+does not declare `capabilities.catalogue.collections`, reads open. The
+capability flips TRUE for retail ("Trade counter", "Seasonal" — the plan's
+original motivation for renaming menus) and for food service (menus ARE
+collections; the capability now says so). GENERAL keeps false as the living
+negative control, and the legacy `/restaurant` menu reads keep their
+MENU_MANAGEMENT gate untouched.
+
+**Channel scope.** `Menu.channels OrderChannel[] @default([])` (migration
+`20260828000000`, additive — the empty default means what every existing
+row already meant: all channels). Create/update accept it; the collections
+list filters by `?channel=`; and `/products/sellable` honours it — asking a
+DINE_IN-only assortment for TAKEAWAY yields an empty page, not the
+collection anyway.
+
+**The menu admin dies.** `components/restaurant/menu/**` is deleted
+(browser, item wizard, CRUD dialogs, `?view=legacy` escape hatch — every
+editing control had answered 410 since D60, and a browser of dead buttons
+is a broken UI, not a fallback). `/menu` stays as a pointer card so
+bookmarks explain themselves. `ProductSelectorDialog` — a generic product
+search, not a menu concept — moved to `components/products/`, where the
+promotion editor and the D65 recipe card import it.
+
+Verified live on the hardware tenant: create scoped collection → section →
+priced entry → sellable serves it (`COLLECTION_OVERRIDE`, 111.50), wrong
+channel serves zero, channel list filter includes/excludes correctly.
+
 ---
 
 ## Open decisions

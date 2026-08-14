@@ -13,7 +13,7 @@ import {
 import { useRouter, useSearchParams } from 'next/navigation';
 import * as React from 'react';
 
-import { ProductSelectorDialog } from '@/components/restaurant/menu/item-add/product-selector-dialog';
+import { ProductSelectorDialog } from '@/components/products/product-selector-dialog';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';

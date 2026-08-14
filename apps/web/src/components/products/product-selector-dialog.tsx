@@ -17,7 +17,11 @@ interface Props {
 }
 
 /**
- * Search + pick an existing inventory Product to link to a Menu Item.
+ * Search + pick an existing inventory Product.
+ *
+ * Moved out of the menu admin tree when D66 deleted it — the picker is a
+ * generic product search used by the promotion editor and the wizard's
+ * recipe card, not a menu concept.
  *
  * Uses the existing tenant-scoped `GET /products?search=…` (Paginated<Product>)
  * so tenant isolation is enforced by the server — nothing about this dialog

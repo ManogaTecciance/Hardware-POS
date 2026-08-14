@@ -1,24 +1,27 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import { ModuleKey } from '@hardware-pos/database';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
 import { CatalogueService } from './catalogue.service';
-import { CreateCollectionDto } from './dto/catalogue.dto';
+import { CreateCollectionDto, ListCollectionsQueryDto } from './dto/catalogue.dto';
 
 /**
  * D62 — collections, sections and entries: the successor to the frozen menu
- * authoring surface (plan §9.2). Gated on MENU_MANAGEMENT like the surface
- * it replaces; retail tenants gain the module when Phase 9 flips their
- * `catalogue.collections` capability on — the routes are ready first.
+ * authoring surface (plan §9.2).
+ *
+ * D66 — SHARED CORE since Phase 9, superseding D62's note that retail would
+ * gain MENU_MANAGEMENT: the catalogue is shared core (the same doctrine as
+ * `/products` and `/products/sellable`), and handing retail the menu module
+ * would have opened the LEGACY restaurant menu routes to hardware tenants,
+ * changing what D60's gate assertions mean. Instead, writes are refused by
+ * the service for tenants whose domain does not declare
+ * `capabilities.catalogue.collections` — the D65 components pattern.
  */
 @Controller('branches/:branchId/collections')
-@RequireModule(ModuleKey.MENU_MANAGEMENT)
 export class CollectionsController {
   constructor(
     private readonly service: CatalogueService,
@@ -27,8 +30,12 @@ export class CollectionsController {
 
   @Get()
   @RequirePermissions(Permission.PRODUCT_READ)
-  list(@TenantId() tenantId: string, @Param('branchId') branchId: string) {
-    return this.service.listCollections(tenantId, branchId);
+  list(
+    @TenantId() tenantId: string,
+    @Param('branchId') branchId: string,
+    @Query() query: ListCollectionsQueryDto,
+  ) {
+    return this.service.listCollections(tenantId, branchId, query.channel);
   }
 
   @Post()

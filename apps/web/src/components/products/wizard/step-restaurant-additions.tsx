@@ -18,7 +18,7 @@ import {
 } from '@/lib/products/promotions-api';
 import { modifierGroups as modifierGroupsApi, kitchenStations as kitchenStationsApi } from '@/lib/restaurant/api';
 import type { KitchenStationView, ModifierGroupView } from '@/lib/restaurant/types';
-import { ProductSelectorDialog } from '@/components/restaurant/menu/item-add/product-selector-dialog';
+import { ProductSelectorDialog } from '@/components/products/product-selector-dialog';
 
 import type { ComponentDraft, WizardState } from './wizard-state';
 

@@ -1835,6 +1835,10 @@ model Menu {
 
   name        String
   description String?
+  /// D66 — which sales channels this collection applies to (Phase 9,
+  /// "channel-scoped assortments"). Empty = all channels, which is what
+  /// every pre-existing row means unchanged.
+  channels    OrderChannel[] @default([])
   isActive    Boolean  @default(true)
   version     Int      @default(1)
   createdAt   DateTime @default(now())

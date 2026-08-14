@@ -187,7 +187,29 @@ export class SellableService {
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(caps.catalogue.preparation && query.foodType ? { foodType: query.foodType } : {}),
       ...(query.collectionId
-        ? { catalogueEntries: { some: { section: { menuId: query.collectionId }, isActive: true } } }
+        ? {
+            catalogueEntries: {
+              some: {
+                isActive: true,
+                section: {
+                  menuId: query.collectionId,
+                  // D66 — a channel-scoped assortment only serves its
+                  // channels: asking a DINE_IN-only collection for TAKEAWAY
+                  // yields an empty page, not the collection anyway.
+                  ...(query.channel
+                    ? {
+                        menu: {
+                          OR: [
+                            { channels: { isEmpty: true } },
+                            { channels: { has: query.channel } },
+                          ],
+                        },
+                      }
+                    : {}),
+                },
+              },
+            },
+          }
         : {}),
       AND: and,
     };

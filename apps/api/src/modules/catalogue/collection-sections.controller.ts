@@ -1,8 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import { ModuleKey } from '@hardware-pos/database';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuditLogService } from '../audit-log/audit-log.service';
@@ -18,7 +16,6 @@ import { CreateEntryDto, UpdateSectionDto } from './dto/catalogue.dto';
  * `catalogue.collections` capability on — the routes are ready first.
  */
 @Controller('sections/:sectionId')
-@RequireModule(ModuleKey.MENU_MANAGEMENT)
 export class CollectionSectionsController {
   constructor(
     private readonly service: CatalogueService,

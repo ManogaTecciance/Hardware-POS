@@ -6,8 +6,8 @@ route metadata off the real controller classes. **Do not edit the totals by hand
 that spec fails when this document and the code disagree.
 
 - Total routes: 281
-- Module-guarded routes: 204
-- Ungated routes: 77
+- Module-guarded routes: 194
+- Ungated routes: 87
 
 ## How to read the Guard column
 
@@ -257,20 +257,23 @@ sunset.
 
 ### Collections (CollectionsController, CollectionController, CollectionSectionsController, CatalogueEntriesController)
 
-D62: the successor to the frozen menu authoring surface (D60).
+D62: the successor to the frozen menu authoring surface (D60). D66 (Phase 9)
+reclassified the surface SHARED_CORE — the catalogue is shared core, and the
+service refuses writes for tenants without the collections capability. The
+LEGACY `/restaurant/menus…` reads keep their MENU_MANAGEMENT gate unchanged.
 
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
-| GET | `/branches/:branchId/collections` | MENU_MANAGEMENT | ENFORCED | product:read |
-| POST | `/branches/:branchId/collections` | MENU_MANAGEMENT | ENFORCED | product:manage |
-| PATCH | `/collections/:collectionId` | MENU_MANAGEMENT | ENFORCED | product:manage |
-| GET | `/collections/:collectionId/sections` | MENU_MANAGEMENT | ENFORCED | product:read |
-| POST | `/collections/:collectionId/sections` | MENU_MANAGEMENT | ENFORCED | product:manage |
-| PATCH | `/sections/:sectionId` | MENU_MANAGEMENT | ENFORCED | product:manage |
-| GET | `/sections/:sectionId/entries` | MENU_MANAGEMENT | ENFORCED | product:read |
-| POST | `/sections/:sectionId/entries` | MENU_MANAGEMENT | ENFORCED | product:manage |
-| PATCH | `/entries/:entryId` | MENU_MANAGEMENT | ENFORCED | product:manage |
-| DELETE | `/entries/:entryId` | MENU_MANAGEMENT | ENFORCED | product:manage |
+| GET | `/branches/:branchId/collections` | SHARED_CORE | shared-core | product:read |
+| POST | `/branches/:branchId/collections` | SHARED_CORE | shared-core | product:manage |
+| PATCH | `/collections/:collectionId` | SHARED_CORE | shared-core | product:manage |
+| GET | `/collections/:collectionId/sections` | SHARED_CORE | shared-core | product:read |
+| POST | `/collections/:collectionId/sections` | SHARED_CORE | shared-core | product:manage |
+| PATCH | `/sections/:sectionId` | SHARED_CORE | shared-core | product:manage |
+| GET | `/sections/:sectionId/entries` | SHARED_CORE | shared-core | product:read |
+| POST | `/sections/:sectionId/entries` | SHARED_CORE | shared-core | product:manage |
+| PATCH | `/entries/:entryId` | SHARED_CORE | shared-core | product:manage |
+| DELETE | `/entries/:entryId` | SHARED_CORE | shared-core | product:manage |
 
 ### PublicQuotationsController
 

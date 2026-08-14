@@ -84,7 +84,9 @@ export const RETAIL_CAPABILITIES: TenantCapabilities = {
     variants: true,
     modifiers: false,
     preparation: false,
-    collections: false,
+    // D66 (Phase 9): retail curates collections too ("Trade counter",
+    // "Seasonal") — the plan's original motivation for renaming menus.
+    collections: true,
     components: false,
   },
   fulfilment: { kind: 'IMMEDIATE', stationRouting: false, rounds: false, channels: ['COUNTER'] },
@@ -98,7 +100,8 @@ export const FOOD_SERVICE_CAPABILITIES: TenantCapabilities = {
     variants: true,
     modifiers: true,
     preparation: true,
-    collections: false,
+    // D66 (Phase 9): menus ARE collections — the capability now says so.
+    collections: true,
     // D65 (Phase 8): recipes are authorable and rounds deplete through them.
     components: true,
   },

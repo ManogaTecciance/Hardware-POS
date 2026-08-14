@@ -1,7 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@hardware-pos/database';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { OrderChannel, Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { BusinessProfileService } from '../platform/business-profile.service';
 
 /**
  * D62 — collections: the successor authoring surface for placements
@@ -11,6 +17,12 @@ import { PrismaService } from '../../prisma/prisma.service';
  * their real job description, holding `CatalogueEntry` placements of
  * PRODUCTS. The legacy `/restaurant/menus…` write routes 410 and point here;
  * these routes are why that pointer is honest.
+ *
+ * D66 (Phase 9) — collections for every domain: reads are open, WRITES are
+ * refused for tenants whose domain does not declare
+ * `capabilities.catalogue.collections` (the D65 components pattern —
+ * hiding is usability, refusal is the server's). A collection may scope
+ * itself to sales channels; empty = all.
  */
 
 export interface CollectionView {
@@ -18,6 +30,8 @@ export interface CollectionView {
   branchId: string;
   name: string;
   description: string | null;
+  /** D66 — channels this collection applies to. Empty = all. */
+  channels: OrderChannel[];
   isActive: boolean;
   version: number;
 }
@@ -47,13 +61,28 @@ export interface CatalogueEntryView {
 
 @Injectable()
 export class CatalogueService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly profiles: BusinessProfileService,
+  ) {}
 
   // ── collections ──────────────────────────────────────────────────────────
 
-  async listCollections(tenantId: string, branchId: string): Promise<CollectionView[]> {
+  async listCollections(
+    tenantId: string,
+    branchId: string,
+    channel?: OrderChannel,
+  ): Promise<CollectionView[]> {
     const rows = await this.prisma.menu.findMany({
-      where: { tenantId, branchId },
+      where: {
+        tenantId,
+        branchId,
+        // D66 — a channel filter returns the assortments that APPLY there:
+        // scoped to it, or unscoped (empty = all channels).
+        ...(channel
+          ? { OR: [{ channels: { isEmpty: true } }, { channels: { has: channel } }] }
+          : {}),
+      },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
     return rows.map((r) => this.toCollection(r));
@@ -62,8 +91,9 @@ export class CatalogueService {
   async createCollection(
     tenantId: string,
     branchId: string,
-    input: { name: string; description?: string },
+    input: { name: string; description?: string; channels?: OrderChannel[] },
   ): Promise<CollectionView> {
+    await this.assertCollectionsEnabled(tenantId);
     const branch = await this.prisma.branch.findFirst({
       where: { id: branchId, tenantId },
       select: { id: true },
@@ -75,7 +105,13 @@ export class CatalogueService {
     });
     if (existing) throw new BadRequestException(`A collection named "${input.name}" already exists`);
     const row = await this.prisma.menu.create({
-      data: { tenantId, branchId, name: input.name, description: input.description ?? null },
+      data: {
+        tenantId,
+        branchId,
+        name: input.name,
+        description: input.description ?? null,
+        channels: input.channels ?? [],
+      },
     });
     return this.toCollection(row);
   }
@@ -83,14 +119,21 @@ export class CatalogueService {
   async updateCollection(
     tenantId: string,
     collectionId: string,
-    input: { name?: string; description?: string | null; isActive?: boolean },
+    input: {
+      name?: string;
+      description?: string | null;
+      channels?: OrderChannel[];
+      isActive?: boolean;
+    },
   ): Promise<CollectionView> {
+    await this.assertCollectionsEnabled(tenantId);
     await this.requireCollection(tenantId, collectionId);
     const row = await this.prisma.menu.update({
       where: { id: collectionId },
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.channels !== undefined ? { channels: input.channels } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
         version: { increment: 1 },
       },
@@ -114,6 +157,7 @@ export class CatalogueService {
     collectionId: string,
     input: { name: string; description?: string; position?: number },
   ): Promise<CollectionSectionView> {
+    await this.assertCollectionsEnabled(tenantId);
     await this.requireCollection(tenantId, collectionId);
     const dupe = await this.prisma.menuSection.findFirst({
       where: { menuId: collectionId, name: input.name },
@@ -137,6 +181,7 @@ export class CatalogueService {
     sectionId: string,
     input: { name?: string; description?: string | null; position?: number; isActive?: boolean },
   ): Promise<CollectionSectionView> {
+    await this.assertCollectionsEnabled(tenantId);
     await this.requireSection(tenantId, sectionId);
     const row = await this.prisma.menuSection.update({
       where: { id: sectionId },
@@ -172,6 +217,7 @@ export class CatalogueService {
       position?: number;
     },
   ): Promise<CatalogueEntryView> {
+    await this.assertCollectionsEnabled(tenantId);
     await this.requireSection(tenantId, sectionId);
     const product = await this.prisma.product.findFirst({
       where: { id: input.productId, tenantId },
@@ -215,6 +261,7 @@ export class CatalogueService {
     entryId: string,
     input: { priceOverride?: string | number | null; position?: number; isActive?: boolean },
   ): Promise<CatalogueEntryView> {
+    await this.assertCollectionsEnabled(tenantId);
     const existing = await this.prisma.catalogueEntry.findFirst({
       where: { id: entryId, tenantId },
       select: { id: true },
@@ -244,6 +291,17 @@ export class CatalogueService {
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
+  /** D66 — writes only for domains that declare the collections capability. */
+  private async assertCollectionsEnabled(tenantId: string): Promise<void> {
+    const profile = await this.profiles.getEffectiveProfile(tenantId);
+    if (!profile.capabilities.catalogue.collections) {
+      throw new ForbiddenException({
+        code: 'COLLECTIONS_NOT_ENABLED',
+        message: 'Catalogue collections are not enabled for this business type.',
+      });
+    }
+  }
+
   private async requireCollection(tenantId: string, collectionId: string) {
     const row = await this.prisma.menu.findFirst({
       where: { id: collectionId, tenantId },
@@ -265,6 +323,7 @@ export class CatalogueService {
     branchId: string;
     name: string;
     description: string | null;
+    channels: OrderChannel[];
     isActive: boolean;
     version: number;
   }): CollectionView {
@@ -273,6 +332,7 @@ export class CatalogueService {
       branchId: r.branchId,
       name: r.name,
       description: r.description,
+      channels: r.channels,
       isActive: r.isActive,
       version: r.version,
     };
