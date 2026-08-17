@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, Plus, Search, Users } from 'lucide-react';
+import { Building2, Plus, Search, Users, X } from 'lucide-react';
 import * as React from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -125,13 +125,30 @@ function ConsoleContent() {
           className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
           aria-hidden
         />
+        {/* type="search" + autoComplete="off": when a password field opens
+            elsewhere on this page, Chrome hunts for a "username" input to
+            pair with it — this box was its pick, and the autofilled admin
+            email fired a search. A search control is never a credential. */}
         <Input
-          className="pl-9"
+          type="search"
+          name="workspace-search"
+          autoComplete="off"
+          className="px-9 [&::-webkit-search-cancel-button]:hidden"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by name or slug…"
           aria-label="Search workspaces"
         />
+        {search ? (
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Clear search"
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        ) : null}
       </div>
 
       {status === 'loading' ? (
@@ -325,6 +342,7 @@ function CreateWorkspaceDialog({
             <Label htmlFor="ws-name">Workspace name</Label>
             <Input
               id="ws-name"
+              autoComplete="off"
               value={name}
               onChange={(e) => setNameAndSlug(e.target.value)}
               placeholder="Seaside Hotel"
@@ -334,6 +352,7 @@ function CreateWorkspaceDialog({
             <Label htmlFor="ws-slug">Slug</Label>
             <Input
               id="ws-slug"
+              autoComplete="off"
               value={slug}
               onChange={(e) => {
                 setSlugTouched(true);
@@ -352,22 +371,33 @@ function CreateWorkspaceDialog({
           <div className="mt-2 grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="ws-owner">Name</Label>
-              <Input id="ws-owner" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
+              <Input
+                id="ws-owner"
+                autoComplete="off"
+                value={ownerName}
+                onChange={(e) => setOwnerName(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ws-email">Email</Label>
+              {/* The NEW owner's address — never the admin's saved one. */}
               <Input
                 id="ws-email"
                 type="email"
+                autoComplete="off"
                 value={ownerEmail}
                 onChange={(e) => setOwnerEmail(e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ws-pass">Password</Label>
+              {/* `new-password`: without it the browser pairs this field with
+                  the admin's saved login and autofills their credentials
+                  across the dialog. */}
               <Input
                 id="ws-pass"
                 type="password"
+                autoComplete="new-password"
                 value={ownerPassword}
                 onChange={(e) => setOwnerPassword(e.target.value)}
                 placeholder="At least 8 characters"

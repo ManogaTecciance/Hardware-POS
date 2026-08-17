@@ -261,18 +261,36 @@ function AddUserDialog({
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <div className="space-y-1.5">
           <Label htmlFor="u-name">Name</Label>
-          <Input id="u-name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input
+            id="u-name"
+            autoComplete="off"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="u-email">Email</Label>
-          <Input id="u-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          {/* A NEW user's address — the admin's own must never be suggested. */}
+          <Input
+            id="u-email"
+            type="email"
+            autoComplete="off"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="u-pass">Password</Label>
+            {/* `new-password` keeps Chrome's password manager out of the
+                console: without it the browser treats this dialog as a login
+                form and autofills the ADMIN's saved credentials — including
+                dumping their email into the nearest text input (the
+                workspace search box fired a search for it). */}
             <Input
               id="u-pass"
               type="password"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="At least 8 characters"
@@ -366,9 +384,12 @@ function ResetPasswordDialog({
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="pw-new">New password</Label>
+              {/* See the Add-user password field: `new-password` stops the
+                  browser autofilling the admin's own credentials here. */}
               <Input
                 id="pw-new"
                 type="password"
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="At least 8 characters"
