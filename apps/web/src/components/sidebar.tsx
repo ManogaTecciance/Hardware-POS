@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { PanelLeftClose, PanelLeftOpen, Store } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import * as React from 'react';
 
 import { resolveNavigation } from '@/lib/nav';
@@ -20,9 +20,10 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
         collapsed ? 'justify-center px-0' : 'px-6',
       )}
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-        <Store className="h-5 w-5" />
-      </span>
+      {/* The brand logo (same asset as the login page and the platform
+          console), not a generic glyph (PO request, 2026-08-17). */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/brand/axlo-icon.svg" alt="" className="h-9 w-auto shrink-0" aria-hidden />
       {!collapsed ? (
         <span className="text-base font-semibold tracking-tight">Axlo POS</span>
       ) : null}

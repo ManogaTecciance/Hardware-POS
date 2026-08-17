@@ -1,9 +1,7 @@
 'use client';
 
-import { ShoppingBag, Truck, UtensilsCrossed } from 'lucide-react';
+import { ShoppingBag, Truck, UtensilsCrossed, X } from 'lucide-react';
 import * as React from 'react';
-
-import { Dialog } from '@/components/ui/dialog';
 
 import type { PosMode } from './pos-mode-selector';
 
@@ -45,8 +43,14 @@ const OPTIONS: readonly Option[] = [
  *
  * One click on a card selects the mode and opens the workspace — no
  * Continue button, no second confirmation, no wasted taps. Escape or the
- * dialog backdrop cancels back to wherever the operator came from
- * (usually /dashboard or /orders).
+ * X cancels back to wherever the operator came from (usually /dashboard
+ * or /orders).
+ *
+ * NOT a viewport modal (PO request, 2026-08-17): the old full-screen
+ * Dialog dimmed the sidebar and header too, which read as the whole app
+ * being locked. This chooser is the page's only content, so it renders as
+ * a centred panel INSIDE the content area — the navigation stays visible
+ * and usable, and walking away is just clicking any nav item.
  *
  * Keyboard: Arrow-Up/Down move focus, Enter selects. `role="radiogroup"`
  * on the container so a screen reader announces "3 of 3, radio" for the
@@ -70,13 +74,33 @@ export function PosOrderTypeModal({ onSelect, onCancel }: Props) {
     }
   };
 
+  // Escape still cancels, exactly as the old dialog did.
+  React.useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onCancel();
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onCancel]);
+
   return (
-    <Dialog
-      open
-      onClose={onCancel}
-      title="Start new order"
-      description="How will this order be served?"
-    >
+    <div className="flex min-h-[70svh] w-full items-center justify-center">
+      <div
+        role="dialog"
+        aria-label="Start new order"
+        className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 shadow-pop"
+      >
+        <div className="flex items-start justify-between gap-4 pb-4">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Start new order</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">How will this order be served?</p>
+          </div>
+          <button
+            onClick={onCancel}
+            aria-label="Close"
+            className="rounded-lg p-1 text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
       <div
         role="radiogroup"
         aria-label="Order type"
@@ -104,10 +128,11 @@ export function PosOrderTypeModal({ onSelect, onCancel }: Props) {
           </button>
         ))}
       </div>
-      <p className="mt-3 text-xs text-muted-foreground">
-        You can change the mode later from the POS header — as long as the cart is empty
-        or the change is safe.
-      </p>
-    </Dialog>
+        <p className="mt-3 text-xs text-muted-foreground">
+          You can change the mode later from the POS header — as long as the cart is empty
+          or the change is safe.
+        </p>
+      </div>
+    </div>
   );
 }
