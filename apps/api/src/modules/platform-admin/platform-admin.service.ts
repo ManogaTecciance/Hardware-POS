@@ -140,7 +140,15 @@ export class PlatformAdminService {
     const slug = dto.slug.trim().toLowerCase();
     const email = dto.ownerEmail.trim().toLowerCase();
 
-    if (await this.prisma.tenant.findFirst({ where: { slug }, select: { id: true } })) {
+    // Case-insensitive: the value is stored lower-cased (above), so new rows
+    // can only collide exactly — but a legacy row with "ABC-abc" must still
+    // block "abc-abc", because the two are the same identifier.
+    if (
+      await this.prisma.tenant.findFirst({
+        where: { slug: { equals: slug, mode: 'insensitive' } },
+        select: { id: true },
+      })
+    ) {
       throw new ConflictException(`A workspace with the slug "${slug}" already exists`);
     }
     // Login resolves a user by email across ALL tenants when no workspace is

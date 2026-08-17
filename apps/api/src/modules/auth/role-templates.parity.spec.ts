@@ -37,16 +37,30 @@ import { collectRoutes } from '../../common/testkit/route-inventory';
 // Built-in templates mirror ROLE_PERMISSIONS exactly
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('built-in role templates match the permission authority', () => {
-  it('there is exactly one template per persisted UserRole', () => {
-    expect(BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual(
-      [...Object.values(PrismaUserRole)].sort(),
-    );
+describe('the template catalogue is exactly what the workspace templates staff', () => {
+  it('exactly five templates exist — the removed ones stay removed', () => {
+    /*
+     * PO decision, 2026-08-17: the unstaffed blueprints (Admin, Manager,
+     * Accountant, Restaurant Manager, Kitchen Manager, Kitchen Staff, Bar
+     * Staff) were DELETED, not parked. Exact set both ways: a template
+     * added back — or dropped — fails here by name. The UserRole ENUM keeps
+     * all five values (persisted data, legacy-fallback authority); this is
+     * about what NEW workspaces are seeded with.
+     */
+    expect(ALL_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual([
+      'CASHIER',
+      'OWNER',
+      'RECEPTIONIST',
+      'RESTAURANT_CASHIER',
+      'WAITER',
+    ]);
   });
 
-  it('each template grants exactly what ROLE_PERMISSIONS grants that role', () => {
+  it('each surviving built-in template grants exactly what ROLE_PERMISSIONS grants', () => {
     // Exact sets per role, not a total count: two roles could swap permission
-    // sets and keep the total identical.
+    // sets and keep the total identical. The enum authority still has five
+    // entries; only OWNER and CASHIER retain templates.
+    expect(BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual(['CASHIER', 'OWNER']);
     for (const template of BUILT_IN_ROLE_TEMPLATES) {
       const authority = ROLE_PERMISSIONS[template.key as UserRole];
       expect({ role: template.key, granted: [...template.permissions].sort() }).toEqual({
@@ -54,6 +68,11 @@ describe('built-in role templates match the permission authority', () => {
         granted: [...authority].sort(),
       });
     }
+    // The authority the templates no longer mirror is still whole — removing
+    // a TEMPLATE must not have touched the enum's permission sets.
+    expect(Object.keys(ROLE_PERMISSIONS).sort()).toEqual(
+      [...Object.values(PrismaUserRole)].sort(),
+    );
   });
 
   it('every built-in template is marked built-in, and no other template is', () => {
@@ -61,7 +80,7 @@ describe('built-in role templates match the permission authority', () => {
     expect(RESTAURANT_ROLE_TEMPLATES.every((t) => !t.isBuiltIn)).toBe(true);
     // Positive control: both collections are populated, so neither `every` is
     // vacuously true.
-    expect(BUILT_IN_ROLE_TEMPLATES.length).toBe(5);
+    expect(BUILT_IN_ROLE_TEMPLATES.length).toBe(2);
     expect(RESTAURANT_ROLE_TEMPLATES.length).toBeGreaterThan(0);
   });
 
@@ -70,30 +89,6 @@ describe('built-in role templates match the permission authority', () => {
     // grows — including permissions whose features do not exist yet.
     const owner = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === 'OWNER')!;
     expect([...owner.permissions].sort()).toEqual([...ALL_PERMISSIONS].sort());
-  });
-
-  it('admin holds the catalogue MINUS the six creator-scoped permissions (Restaurant Pilot Change 1)', () => {
-    // The six DINING_AREA_/TABLE_ *_CREATE / _EDIT_OWN / _ARCHIVE_OWN keys
-    // name capabilities that only make sense paired with the ownership check
-    // inside the service. Granting them at the role level to anyone above
-    // that check — even ADMIN — would let a role bypass ownership the moment
-    // the check moved. `authorization.ts` filters them out of ADMIN's set;
-    // this parity spec pins the derivation so a future "make ADMIN total
-    // again" edit trips a red test.
-    const admin = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === 'ADMIN')!;
-    const excluded: readonly Permission[] = [
-      Permission.DINING_AREA_CREATE,
-      Permission.DINING_AREA_EDIT_OWN,
-      Permission.DINING_AREA_ARCHIVE_OWN,
-      Permission.TABLE_CREATE,
-      Permission.TABLE_EDIT_OWN,
-      Permission.TABLE_ARCHIVE_OWN,
-    ];
-    const expected = ALL_PERMISSIONS.filter((p) => !excluded.includes(p));
-    expect([...admin.permissions].sort()).toEqual([...expected].sort());
-    for (const missing of excluded) {
-      expect(admin.permissions).not.toContain(missing);
-    }
   });
 });
 
@@ -150,9 +145,9 @@ describe('templates are selected by business type', () => {
     expect(keys.sort()).toEqual(['CASHIER', 'OWNER']);
   });
 
-  it('a GENERAL tenant keeps the five built-ins — the deliberately-plain template', () => {
+  it('a GENERAL tenant gets the surviving built-ins: Owner and Cashier', () => {
     const keys = roleTemplatesForBusinessType('GENERAL').map((t) => t.key);
-    expect(keys.sort()).toEqual(BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort());
+    expect(keys.sort()).toEqual(['CASHIER', 'OWNER']);
   });
 
   it('a food-service tenant gets Owner, Waiter and (Restaurant) Cashier', () => {

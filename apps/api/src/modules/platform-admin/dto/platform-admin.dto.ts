@@ -9,12 +9,14 @@ import {
 } from 'class-validator';
 
 /**
- * Hyphen-separated lower-case alphanumeric words: no leading, trailing or
- * doubled hyphen. The slug is a unique public identifier (`Tenant.slug` is
- * `@unique`), so the format is pinned here and the service turns the unique
- * constraint into a 409 — never a raw database error.
+ * Hyphen-separated alphanumeric words: no leading, trailing or doubled
+ * hyphen. Case-INSENSITIVE here, deliberately: slugs are case-insensitively
+ * unique ("ABC-abc" IS "abc-abc"), so the service lower-cases the value and
+ * an upper-case duplicate must reach the uniqueness check and earn its 409 —
+ * a format 400 would misreport why it was refused. `Tenant.slug` is
+ * `@unique`, and the service turns that constraint into the same 409.
  */
-const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/i;
 
 export class CreateWorkspaceDto {
   @IsString() @Length(2, 120) name!: string;
@@ -22,7 +24,7 @@ export class CreateWorkspaceDto {
   @Length(2, 64)
   @Matches(SLUG, {
     message:
-      'slug must be lower-case letters, digits and single hyphens (no leading, trailing or doubled hyphen)',
+      'slug must be letters, digits and single hyphens (no leading, trailing or doubled hyphen)',
   })
   slug!: string;
   /** One of `WORKSPACE_TEMPLATES` — validated against the list in the service. */

@@ -16,17 +16,15 @@
  * either creates a duplicate or silently grants nothing. `key` is the identifier;
  * `name` is presentation.
  *
- * ## Restaurant roles are data, not enum members
+ * ## Operational roles are data, not enum members
  *
- * `UserRole` stays at the five built-in platform roles. Waiter, Kitchen Staff and
- * the rest are *rows*, because adding them to a persisted enum would commit the
- * whole platform to a vocabulary before the features exist, and enum values cannot
- * be removed without a destructive migration.
- *
- * Their permissions are **reserved** ones (see `RESERVED_PERMISSIONS`): declared,
- * assignable, and enforced by nothing, because no restaurant operational feature
- * is implemented. Seeding a Waiter role does not make waiting tables possible; it
- * makes the role available to configure against features that arrive later.
+ * `UserRole` stays at the five built-in platform roles. The Waiter, the
+ * food-service Cashier and the Receptionist are *rows*, because adding them to
+ * a persisted enum would commit the whole platform to a vocabulary before the
+ * features exist, and enum values cannot be removed without a destructive
+ * migration. (That is also why trimming the template catalogue on 2026-08-17
+ * deleted template OBJECTS below but no enum value: the enum is persisted
+ * data with production users on it; a template is only a seeding blueprint.)
  */
 import { Permission, ROLE_PERMISSIONS, UserRole } from './authorization.js';
 
@@ -45,12 +43,20 @@ export interface RoleTemplate {
 }
 
 /**
- * The five platform roles, mirroring `ROLE_PERMISSIONS` exactly.
+ * Templates for the built-in platform roles that workspaces still SEED.
  *
- * Derived from it rather than restated, so the two cannot disagree — a second
- * hand-maintained copy of a permission set is precisely the drift Slice 7.3 was
- * written to end. The parity spec still asserts the equality, because deriving it
- * here would not stop someone replacing the derivation with a literal later.
+ * Only Owner and Cashier remain (PO decision, 2026-08-17): the ADMIN,
+ * MANAGER and ACCOUNTANT templates were removed outright with the rest of
+ * the unstaffed catalogue — a blueprint no template list references is not
+ * dormant, it is an invitation to reintroduce the sprawl. The `UserRole`
+ * ENUM keeps all five values: it is a persisted database enum, existing
+ * users sit on those values and resolve through `ROLE_PERMISSIONS` on the
+ * legacy fallback, and existing tenants keep their already-seeded rows.
+ * Removing a template stops NEW seeding; it rewrites no one's authority.
+ *
+ * Each surviving template derives its permissions from `ROLE_PERMISSIONS`
+ * rather than restating them, so the two cannot disagree; the parity spec
+ * still asserts the equality.
  */
 export const BUILT_IN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   {
@@ -59,27 +65,6 @@ export const BUILT_IN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Full access to every feature the tenant has enabled.',
     isBuiltIn: true,
     permissions: ROLE_PERMISSIONS.OWNER,
-  },
-  {
-    key: UserRole.Admin,
-    name: 'Administrator',
-    description: 'Full access. Intended for staff who administer the system.',
-    isBuiltIn: true,
-    permissions: ROLE_PERMISSIONS.ADMIN,
-  },
-  {
-    key: UserRole.Manager,
-    name: 'Manager',
-    description: 'Runs the shop floor: sales, returns, quotations, approvals.',
-    isBuiltIn: true,
-    permissions: ROLE_PERMISSIONS.MANAGER,
-  },
-  {
-    key: UserRole.Accountant,
-    name: 'Accountant',
-    description: 'Read-only across sales, returns and accounting integration.',
-    isBuiltIn: true,
-    permissions: ROLE_PERMISSIONS.ACCOUNTANT,
   },
   {
     key: UserRole.Cashier,
@@ -91,56 +76,15 @@ export const BUILT_IN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
 ];
 
 /**
- * Restaurant operational roles.
+ * Food-service operational roles: the Waiter and the (restaurant) Cashier.
  *
- * Seeded only for tenants whose business profile is food-service. Every
- * permission below is reserved — **none of these roles can currently do
- * anything**, because none of the features exists. They are here so that the
- * permission model, the role UI and the assignment paths can be built and tested
- * against realistic data before Restaurant Phase 2 delivers the features.
- *
- * `PRODUCT_READ` and `SALE_READ` are the exceptions: those are active permissions
- * on shared-core routes, and a restaurant manager genuinely needs them today.
+ * The wider catalogue this section used to carry — Restaurant Manager,
+ * Kitchen Manager, Kitchen Staff, Bar Staff — was removed with the other
+ * unstaffed templates (2026-08-17). Their permissions remain in the
+ * catalogue and any rows already seeded from them remain in their tenants;
+ * only the blueprints are gone.
  */
 export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
-  {
-    key: 'RESTAURANT_MANAGER',
-    name: 'Restaurant Manager',
-    description: 'Runs service: tables, orders, bills and staff on shift.',
-    isBuiltIn: false,
-    permissions: [
-      Permission.SALE_READ,
-      Permission.PRODUCT_READ,
-      Permission.CUSTOMER_READ,
-      Permission.REPORT_READ,
-      Permission.PLATFORM_PROFILE_READ,
-      Permission.TABLE_VIEW,
-      Permission.TABLE_OPEN,
-      Permission.TABLE_TRANSFER,
-      Permission.TABLE_MERGE,
-      Permission.TABLE_CLOSE,
-      Permission.ORDER_CREATE,
-      Permission.ORDER_EDIT_DRAFT,
-      Permission.ORDER_SEND_TO_KITCHEN,
-      Permission.ORDER_VOID_SENT,
-      Permission.KOT_VIEW,
-      Permission.KOT_PRINT,
-      Permission.TAKEAWAY_VIEW,
-      Permission.TAKEAWAY_CREATE,
-      Permission.BILL_VIEW,
-      Permission.BILL_SPLIT,
-      Permission.PAYMENT_COLLECT,
-      // Phase 2A: restaurant managers configure their own branch and stations.
-      Permission.RESTAURANT_CONFIG_MANAGE,
-      Permission.KITCHEN_STATION_MANAGE,
-      // D47: the reservation book.
-      Permission.RESERVATION_VIEW,
-      Permission.RESERVATION_CREATE,
-      Permission.RESERVATION_MANAGE,
-      // D49: joining tables is a shift decision.
-      Permission.OPEN_TABLE_MANAGE,
-    ],
-  },
   {
     key: 'WAITER',
     name: 'Waiter',
@@ -213,39 +157,6 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       // D49: joining tables is a shift decision.
       Permission.OPEN_TABLE_MANAGE,
     ],
-  },
-  {
-    key: 'KITCHEN_MANAGER',
-    name: 'Kitchen Manager',
-    description: 'Runs the kitchen: ticket queue, station status, reprints.',
-    isBuiltIn: false,
-    permissions: [
-      Permission.PRODUCT_READ,
-      Permission.KOT_VIEW,
-      Permission.KOT_PRINT,
-      Permission.KITCHEN_STATUS_UPDATE,
-      Permission.ORDER_VOID_SENT,
-      Permission.TAKEAWAY_VIEW,
-      // Phase 2A: kitchen managers configure their own stations.
-      Permission.KITCHEN_STATION_MANAGE,
-    ],
-  },
-  {
-    key: 'KITCHEN_STAFF',
-    name: 'Kitchen Staff',
-    description: 'Sees the ticket queue and marks items as they are prepared.',
-    isBuiltIn: false,
-    permissions: [Permission.KOT_VIEW, Permission.KITCHEN_STATUS_UPDATE],
-  },
-  {
-    key: 'BAR_STAFF',
-    name: 'Bar Staff',
-    description: 'Sees drink tickets and marks them as they are poured.',
-    isBuiltIn: false,
-    // Identical to kitchen staff today. Station routing is what will make them
-    // different, and that is Phase 6 — so the roles are separate now rather than
-    // one role that has to be split later, when it already has users attached.
-    permissions: [Permission.KOT_VIEW, Permission.KITCHEN_STATUS_UPDATE],
   },
 ];
 

@@ -27,18 +27,19 @@ describe('baseUserRoleFor', () => {
     expect(mapped).toEqual(Object.values(UserRole).map((role) => [role, role]));
   });
 
-  it('maps each restaurant role to CASHIER — the least-privileged built-in', () => {
-    // The keys `RESTAURANT_ROLE_TEMPLATES` actually seeds. Named literally so a
-    // renamed template does not quietly stop being covered.
+  it('maps each operational role to CASHIER — the least-privileged built-in', () => {
+    // The keys the templates actually seed (WAITER, RESTAURANT_CASHIER,
+    // RECEPTIONIST), plus the keys of templates REMOVED on 2026-08-17 —
+    // rows seeded from them still exist in older tenants, and those users
+    // must keep failing closed too.
     for (const key of [
       'WAITER',
-      'RESTAURANT_MANAGER',
       'RESTAURANT_CASHIER',
+      'RECEPTIONIST',
+      'RESTAURANT_MANAGER',
       'KITCHEN_MANAGER',
       'KITCHEN_STAFF',
       'BAR_STAFF',
-      // The hotel front desk (2026-08-17) — same least-privilege floor.
-      'RECEPTIONIST',
     ]) {
       expect(baseUserRoleFor(key)).toBe(UserRole.CASHIER);
     }
