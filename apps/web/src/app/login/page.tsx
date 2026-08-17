@@ -11,6 +11,7 @@ import { ApiError } from '@/lib/api';
 
 /** The API's machine-readable "which workspace?" outcome. */
 const WORKSPACE_REQUIRED = 'AUTH_WORKSPACE_REQUIRED';
+const ACCOUNT_DEACTIVATED = 'AUTH_ACCOUNT_DEACTIVATED';
 
 /*
  * The login screen is deliberately theme-blind: the hero artwork is dark navy,
@@ -72,6 +73,10 @@ function LoginForm() {
       if (code === WORKSPACE_REQUIRED) {
         setWorkspaceRequired(true);
         setError('This email is used in more than one workspace. Enter your workspace to continue.');
+      } else if (code === ACCOUNT_DEACTIVATED) {
+        // Only ever sent after the password verified server-side, so showing
+        // the real reason leaks nothing to a password guesser.
+        setError('This account has been deactivated. Contact your administrator to restore access.');
       } else {
         setError(err instanceof Error ? err.message : 'Login failed');
       }

@@ -263,8 +263,15 @@ describe('tenant hint is a narrowing hint, never an authorisation', () => {
   });
 
   it('does not let a hint resurrect an INACTIVE user', async () => {
+    // 2026-08-17: still refused — no token is ever issued — but with the
+    // honest reason, because the CORRECT password was presented. A wrong
+    // password on the same account stays the generic 401 (asserted in
+    // auth-hardening.spec.ts), so nothing here is probeable.
     await prisma.user.update({ where: { id: cafeUserId }, data: { isActive: false } });
     await expect(login(SHARED_EMAIL, CAFE_PASSWORD, cafeTenantId)).rejects.toThrow(
+      'This account has been deactivated',
+    );
+    await expect(login(SHARED_EMAIL, 'wrong-password-1', cafeTenantId)).rejects.toThrow(
       'Invalid email or password',
     );
   });
@@ -450,9 +457,16 @@ describe('single-tenant login is unchanged', () => {
     await expect(login(SHARED_EMAIL, 'nope-not-it')).rejects.toThrow('Invalid email or password');
   });
 
-  it('still rejects an inactive user', async () => {
+  it('still rejects an inactive user — now with the honest reason (2026-08-17)', async () => {
     await prisma.user.update({ where: { id: tileUserId }, data: { isActive: false } });
-    await expect(login(SHARED_EMAIL, TILE_PASSWORD)).rejects.toThrow('Invalid email or password');
+    // Refused either way; the deactivated message only ever follows a
+    // VERIFIED password, so it discloses nothing to a guesser.
+    await expect(login(SHARED_EMAIL, TILE_PASSWORD)).rejects.toThrow(
+      'This account has been deactivated',
+    );
+    await expect(login(SHARED_EMAIL, 'wrong-password-1')).rejects.toThrow(
+      'Invalid email or password',
+    );
   });
 
   it('still rejects a user with no password hash (PIN-only staff)', async () => {

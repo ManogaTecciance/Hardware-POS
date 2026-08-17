@@ -65,6 +65,20 @@ export class AuthRepository {
     return this.prisma.user.findFirst({ where: { tenantId, email, isActive: true } });
   }
 
+  /**
+   * Like the two "Active" lookups above but INCLUDING deactivated rows — used
+   * only by the login path, which must be able to tell "deactivated" from
+   * "wrong password" AFTER the password verifies (AccountDeactivatedError).
+   * Nothing else may want these: every other caller means "usable account".
+   */
+  findUsersByEmailAnyStatus(email: string): Promise<User[]> {
+    return this.prisma.user.findMany({ where: { email }, orderBy: { tenantId: 'asc' } });
+  }
+
+  findByTenantAndEmailAnyStatus(tenantId: string, email: string): Promise<User | null> {
+    return this.prisma.user.findFirst({ where: { tenantId, email } });
+  }
+
   /** Active users in a tenant that have a PIN set (for PIN login / approval). */
   findActivePinUsers(tenantId: string): Promise<User[]> {
     return this.prisma.user.findMany({

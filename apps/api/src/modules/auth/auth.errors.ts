@@ -10,6 +10,8 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 export enum AuthErrorCode {
   /** The email exists in more than one workspace; the caller must say which. */
   WORKSPACE_REQUIRED = 'AUTH_WORKSPACE_REQUIRED',
+  /** Credentials verified, but the account has been deactivated. */
+  ACCOUNT_DEACTIVATED = 'AUTH_ACCOUNT_DEACTIVATED',
 }
 
 /**
@@ -44,6 +46,37 @@ export class WorkspaceRequiredError extends HttpException {
         error: 'Conflict',
       },
       HttpStatus.CONFLICT,
+    );
+  }
+}
+
+/**
+ * The password verified, but the account is deactivated (2026-08-17).
+ *
+ * ## Why this may be distinguishable from a wrong password
+ *
+ * Account-enumeration protection only has to hold against callers who do NOT
+ * hold the credentials. This error is thrown strictly AFTER the bcrypt
+ * comparison succeeds — a caller who reaches it has proven possession of the
+ * password, so telling them the true reason discloses nothing a guesser could
+ * harvest: every wrong-password and unknown-email attempt still gets the same
+ * generic 401 at the same bcrypt cost. Without this, a deactivated employee
+ * retyping a correct password sees "Invalid email or password" and has no way
+ * to learn that no password will ever work.
+ *
+ * 403 rather than 401: the caller IS authenticated in the credential sense;
+ * what they lack is authorisation to hold a session at all.
+ */
+export class AccountDeactivatedError extends HttpException {
+  constructor() {
+    super(
+      {
+        statusCode: HttpStatus.FORBIDDEN,
+        code: AuthErrorCode.ACCOUNT_DEACTIVATED,
+        message: 'This account has been deactivated. Contact your administrator.',
+        error: 'Forbidden',
+      },
+      HttpStatus.FORBIDDEN,
     );
   }
 }

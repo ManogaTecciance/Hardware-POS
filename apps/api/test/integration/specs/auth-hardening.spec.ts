@@ -279,6 +279,94 @@ describe('7.2 — workspace-first login', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Deactivated accounts at login (2026-08-17)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('deactivated accounts at login', () => {
+  const DEACTIVATED_EMAIL = 'deactivated@axlo.test';
+  const DEACTIVATED_PASSWORD = 'deactivated-pass-1';
+
+  // beforeEach, not beforeAll: the file-level beforeEach resets the database
+  // before every test, so suite-scoped fixtures would be wiped.
+  beforeEach(async () => {
+    await prisma.user.create({
+      data: {
+        tenantId: tile.tenantId,
+        branchId: tile.branchId,
+        role: 'CASHIER',
+        name: 'Former Employee',
+        email: DEACTIVATED_EMAIL,
+        passwordHash: bcrypt.hashSync(DEACTIVATED_PASSWORD, 4),
+        isActive: false,
+      },
+    });
+  });
+
+  it('the CORRECT password earns the true reason: 403 AUTH_ACCOUNT_DEACTIVATED', async () => {
+    // The caller has proven possession of the credentials, so the honest
+    // answer discloses nothing a guesser could harvest.
+    const res = await login(
+      { workspace: 'tile-shop', email: DEACTIVATED_EMAIL, password: DEACTIVATED_PASSWORD },
+      ip(),
+    );
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ code: 'AUTH_ACCOUNT_DEACTIVATED' });
+  });
+
+  it('the WRONG password stays the generic 401 — deactivation is not probeable', async () => {
+    const wrongOnDeactivated = await login(
+      { workspace: 'tile-shop', email: DEACTIVATED_EMAIL, password: WRONG_PASSWORD },
+      ip(),
+    );
+    const unknownEmail = await login(
+      { workspace: 'tile-shop', email: 'nobody@axlo.test', password: WRONG_PASSWORD },
+      ip(),
+    );
+    expect(wrongOnDeactivated.status).toBe(401);
+    expect(comparableError(wrongOnDeactivated.body)).toEqual(comparableError(unknownEmail.body));
+  });
+
+  it('the no-workspace path resolves a sole deactivated holder the same way', async () => {
+    const res = await login(
+      { email: DEACTIVATED_EMAIL, password: DEACTIVATED_PASSWORD },
+      ip(),
+    );
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ code: 'AUTH_ACCOUNT_DEACTIVATED' });
+  });
+
+  it('an ACTIVE holder still wins resolution over a deactivated namesake', async () => {
+    // The lookup now sees deactivated rows; this pins that it did not change
+    // WHO an active user logs in as.
+    const email = 'part-active@axlo.test';
+    const password = 'part-active-pass-1';
+    await prisma.user.create({
+      data: {
+        tenantId: tile.tenantId,
+        role: 'CASHIER',
+        name: 'Active Here',
+        email,
+        passwordHash: bcrypt.hashSync(password, 4),
+      },
+    });
+    await prisma.user.create({
+      data: {
+        tenantId: cafe.tenantId,
+        role: 'CASHIER',
+        name: 'Deactivated There',
+        email,
+        passwordHash: bcrypt.hashSync(password, 4),
+        isActive: false,
+      },
+    });
+
+    const res = await login({ email, password }, ip());
+    expect(res.status).toBe(200);
+    expect((res.data as { user: { tenantId: string } }).user.tenantId).toBe(tile.tenantId);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 7.1 — throttling
 // ─────────────────────────────────────────────────────────────────────────────
 

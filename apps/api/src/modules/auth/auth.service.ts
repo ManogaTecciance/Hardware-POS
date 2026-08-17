@@ -12,7 +12,7 @@ import { User, UserRole } from '@hardware-pos/database';
 import * as bcrypt from 'bcryptjs';
 
 import { AuthRepository } from './auth.repository';
-import { WorkspaceRequiredError } from './auth.errors';
+import { AccountDeactivatedError, WorkspaceRequiredError } from './auth.errors';
 import { AuthenticatedUser, AuthTokenResult, JwtPayload } from './auth.types';
 import { Permission, ROLE_PERMISSIONS } from './permissions';
 import { PermissionResolver } from './permission-resolver.service';
@@ -91,6 +91,14 @@ export class AuthService {
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
 
+    // Strictly AFTER the password verified: the caller has proven possession
+    // of the credentials, so the true reason discloses nothing a guesser
+    // could harvest — wrong passwords above stay the generic 401. See
+    // AccountDeactivatedError for the full argument.
+    if (!user.isActive) {
+      throw new AccountDeactivatedError();
+    }
+
     return this.issueToken(user);
   }
 
@@ -118,25 +126,33 @@ export class AuthService {
   ): Promise<User | null> {
     const email = dto.email;
 
+    /*
+     * Lookups include DEACTIVATED rows (2026-08-17): the caller must be able
+     * to tell a deactivated account from a wrong password, and it can only do
+     * that if the candidate resolves. The disclosure stays safe because
+     * `login` checks `isActive` strictly AFTER the password verifies — a
+     * candidate with the wrong password still collapses into the generic 401.
+     */
     if (dto.workspace) {
       const tenant = await this.authRepository.findActiveTenantBySlug(dto.workspace);
       if (!tenant) return null;
-      return this.authRepository.findActiveByTenantAndEmail(tenant.id, email);
+      return this.authRepository.findByTenantAndEmailAnyStatus(tenant.id, email);
     }
 
     if (tenantHint) {
-      return this.authRepository.findActiveByTenantAndEmail(tenantHint, email);
+      return this.authRepository.findByTenantAndEmailAnyStatus(tenantHint, email);
     }
 
-    const candidates = await this.authRepository.findActiveUsersByEmail(email);
-    if (candidates.length === 1) {
-      return candidates[0];
+    const all = await this.authRepository.findUsersByEmailAnyStatus(email);
+    const active = all.filter((u) => u.isActive);
+    if (active.length === 1) {
+      return active[0];
     }
 
-    if (candidates.length > 1) {
+    if (active.length > 1) {
       // Do not log the email — it would put a user identifier in the logs.
       this.logger.warn(
-        `Ambiguous email login refused: ${candidates.length} tenants hold this address. ` +
+        `Ambiguous email login refused: ${active.length} tenants hold this address. ` +
           'The client must supply a workspace.',
       );
       // The one branch that is intentionally distinguishable. The alternative is a
@@ -144,7 +160,12 @@ export class AuthService {
       // `auth.errors.ts` for the disclosure this does and does not make.
       throw new WorkspaceRequiredError();
     }
-    return null;
+
+    // No active holder. A single deactivated one may still resolve — so its
+    // (verified) owner learns the truth. Several deactivated holders stay
+    // generic: there is no one account to verify against.
+    const inactive = all.filter((u) => !u.isActive);
+    return inactive.length === 1 ? inactive[0] : null;
   }
 
   /** PIN login (cashier / manager), scoped to the given tenant. */

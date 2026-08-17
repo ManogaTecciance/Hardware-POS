@@ -87,22 +87,28 @@ function user(overrides: Partial<User> = {}): User {
  * observed against inputs we control.
  */
 function makeRepositoryStub(script: {
+  /*
+   * 2026-08-17: the login path reads the AnyStatus lookups (it must see
+   * deactivated rows to say AUTH_ACCOUNT_DEACTIVATED after the password
+   * verifies). The script keys keep their names — every existing test
+   * scripts active users, and an active user answers both lookups alike.
+   */
   activeUsersByEmail?: (email: string) => User[];
   activeUserByTenantAndEmail?: (tenantId: string, email: string) => User | null;
   activeTenantBySlug?: (slug: string) => { id: string } | null;
 } = {}): jest.Mocked<AuthRepository> {
-  const findActiveUsersByEmail = jest.fn(async (email: string) =>
+  const findUsersByEmailAnyStatus = jest.fn(async (email: string) =>
     (script.activeUsersByEmail ?? (() => []))(email),
   );
-  const findActiveByTenantAndEmail = jest.fn(async (tenantId: string, email: string) =>
+  const findByTenantAndEmailAnyStatus = jest.fn(async (tenantId: string, email: string) =>
     (script.activeUserByTenantAndEmail ?? (() => null))(tenantId, email),
   );
   const findActiveTenantBySlug = jest.fn(async (slug: string) =>
     (script.activeTenantBySlug ?? (() => null))(slug),
   );
   return {
-    findActiveUsersByEmail,
-    findActiveByTenantAndEmail,
+    findUsersByEmailAnyStatus,
+    findByTenantAndEmailAnyStatus,
     findActiveTenantBySlug,
     findById: jest.fn(),
     findActivePinUsers: jest.fn(),
