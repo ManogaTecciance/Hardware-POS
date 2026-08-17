@@ -162,11 +162,15 @@ export class Api {
 
 export const SEED = {
   owner: { email: 'owner@hardwarepos.test', password: 'password123' },
-  accountant: { email: 'accountant@hardwarepos.test', password: 'password123' },
-  manager: { email: 'manager@hardwarepos.test', password: 'password123' },
   cashier: { email: 'cashier@hardwarepos.test', password: 'password123' },
-  /** Approval PINs (discount / return prompts) — no longer a login credential (D48). */
-  managerPin: '2222',
+  /**
+   * Approval PINs (discount / return prompts) — no longer a login credential
+   * (D48). 2026-08-17: the hardware template staffs Owner + Cashier only, so
+   * the OWNER holds the approver PIN; the old manager/accountant demo users
+   * are gone. The manager-cap negative lives in the API integration spec
+   * (discount-approval.spec.ts), whose fixtures own a MANAGER user.
+   */
+  approverPin: '2222',
   cashierPin: '1111',
   tenantId: 'tnt_dev',
   branchId: 'brn_dev',

@@ -1,32 +1,28 @@
 /**
- * D55 — the client half of the platform/workspace boundary.
+ * D55 — the client half of the platform/workspace boundary, at ONE url.
  *
  * The server half (`PlatformBoundaryGuard`) already refuses the wrong token in
- * both directions, so nothing here is a security control. What it is: the two
- * redirects that stop a user landing on a shell that cannot load. A platform
+ * both directions, so nothing here is a security control. What it is: the
+ * branching that stops a user landing on a shell that cannot load. A platform
  * admin inside the workspace shell would 403 on the profile fetch and sit in
- * front of an empty sidebar; a workspace user inside the console would 403 on
- * every list.
+ * front of an empty sidebar; a workspace user must never see the console.
  *
- * Both directions are asserted, and each is asserted to NOT fire for the other
- * role — a one-directional redirect passes half of this file and fails the
- * other half.
- *
- * Mutation-proven: dropping the `isPlatformAdmin` branch from `Protected` (both
- * the redirect and the render guard) fails exactly one test here — "sends a
- * platform admin to the console instead of rendering the shell" — and leaves the
- * other six green, so the two directions are genuinely independent rather than
- * one assertion counted twice.
+ * Since 2026-08-17 the console renders AT /dashboard through
+ * `PlatformConsoleBoundary`, so the assertions compose the boundary with
+ * `Protected` exactly as the (app) layout does. Both directions are asserted,
+ * and each is asserted NOT to fire for the other role — a one-directional
+ * branch passes half of this file and fails the other half.
  */
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const replace = vi.fn();
+let pathname = '/dashboard';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace, push: vi.fn(), back: vi.fn(), refresh: vi.fn() }),
-  usePathname: () => '/',
+  usePathname: () => pathname,
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -56,7 +52,7 @@ vi.mock('@/lib/auth', () => ({
 }));
 
 // Imported after the mocks so both components see them.
-import PlatformLayout from '@/app/platform/layout';
+import { PlatformConsoleBoundary } from '@/components/platform/platform-console-boundary';
 import { Protected } from '@/components/protected';
 
 // No global setup file, so RTL's auto-cleanup is not registered. Without this
@@ -66,100 +62,92 @@ afterEach(cleanup);
 
 beforeEach(() => {
   replace.mockClear();
+  pathname = '/dashboard';
   auth = { isPlatformAdmin: false, authenticated: true, loading: false };
 });
 
-describe('Protected — the workspace shell', () => {
-  it('renders the workspace shell for a workspace user, and redirects nowhere', async () => {
-    render(
+/** The exact composition the (app) layout uses. */
+function Shell() {
+  return (
+    <PlatformConsoleBoundary console={<p>console content</p>}>
       <Protected>
         <p>workspace content</p>
-      </Protected>,
-    );
+      </Protected>
+    </PlatformConsoleBoundary>
+  );
+}
+
+describe('a workspace user', () => {
+  it('gets the workspace shell, never the console, and redirects nowhere', async () => {
+    render(<Shell />);
 
     expect(await screen.findByText('workspace content')).toBeTruthy();
+    expect(screen.queryByText('console content')).toBeNull();
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it('sends a platform admin to the console instead of rendering the shell', async () => {
-    auth.isPlatformAdmin = true;
-
-    render(
-      <Protected>
-        <p>workspace content</p>
-      </Protected>,
-    );
-
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/platform'));
-    // Not merely redirected — the shell must not render at all, or its profile
-    // fetch fires and 403s on the way out.
-    expect(screen.queryByText('workspace content')).toBeNull();
-  });
-
-  it('sends an unauthenticated visitor to the login page', async () => {
+  it('is sent to the login page when unauthenticated', async () => {
     auth.authenticated = false;
 
-    render(
-      <Protected>
-        <p>workspace content</p>
-      </Protected>,
-    );
+    render(<Shell />);
 
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
-    expect(replace).not.toHaveBeenCalledWith('/platform');
+    expect(screen.queryByText('console content')).toBeNull();
+    expect(replace).not.toHaveBeenCalledWith('/dashboard');
   });
 });
 
-describe('PlatformLayout — the console shell', () => {
-  it('renders the console for a platform admin, and redirects nowhere', async () => {
+describe('a platform admin', () => {
+  beforeEach(() => {
     auth.isPlatformAdmin = true;
+  });
 
-    render(
-      <PlatformLayout>
-        <p>console content</p>
-      </PlatformLayout>,
-    );
+  it('sees the console at /dashboard — the workspace shell never mounts', async () => {
+    render(<Shell />);
 
     expect(await screen.findByText('console content')).toBeTruthy();
+    // Not merely covered — the shell must not render at all, or its profile
+    // fetch fires and 403s underneath the console.
+    expect(screen.queryByText('workspace content')).toBeNull();
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it('sends a workspace user back to their own app', async () => {
+  it('is sent to /dashboard from any other workspace route', async () => {
+    pathname = '/products';
+
+    render(<Shell />);
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/dashboard'));
+    expect(screen.queryByText('workspace content')).toBeNull();
+    expect(screen.queryByText('console content')).toBeNull();
+  });
+
+  it('still bounces off a bare Protected used outside the boundary', async () => {
+    // Defence in depth: Protected's own redirect, for any usage that is not
+    // wrapped by the boundary. Must target /dashboard, where the boundary
+    // renders the console — so the pair cannot loop.
     render(
-      <PlatformLayout>
-        <p>console content</p>
-      </PlatformLayout>,
+      <Protected>
+        <p>workspace content</p>
+      </Protected>,
     );
 
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/dashboard'));
-    expect(screen.queryByText('console content')).toBeNull();
+    expect(screen.queryByText('workspace content')).toBeNull();
   });
+});
 
-  it('sends an unauthenticated visitor to the login page', async () => {
-    auth.authenticated = false;
-
-    render(
-      <PlatformLayout>
-        <p>console content</p>
-      </PlatformLayout>,
-    );
-
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
-    expect(replace).not.toHaveBeenCalledWith('/dashboard');
-  });
-
-  it('redirects nobody while the session is still loading', () => {
+describe('an unresolved session', () => {
+  it('redirects nobody and renders neither product while loading', () => {
     auth.loading = true;
 
-    render(
-      <PlatformLayout>
-        <p>console content</p>
-      </PlatformLayout>,
-    );
+    render(<Shell />);
 
     // An unresolved session is its own state: guessing here would bounce a
-    // signed-in admin to /login on every hard refresh.
+    // signed-in admin to /login — or flash the wrong product — on every hard
+    // refresh.
     expect(replace).not.toHaveBeenCalled();
     expect(screen.queryByText('console content')).toBeNull();
+    expect(screen.queryByText('workspace content')).toBeNull();
   });
 });

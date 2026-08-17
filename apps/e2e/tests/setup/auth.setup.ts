@@ -27,16 +27,6 @@ setup('owner storage state', async ({ page }) => {
   await page.context().storageState({ path: authPath('owner') });
 });
 
-setup('accountant storage state', async ({ page }) => {
-  await emailLogin(page, SEED.accountant.email, SEED.accountant.password);
-  await page.context().storageState({ path: authPath('accountant') });
-});
-
-setup('manager storage state', async ({ page }) => {
-  await emailLogin(page, SEED.manager.email, SEED.manager.password);
-  await page.context().storageState({ path: authPath('manager') });
-});
-
 setup('cashier storage state', async ({ page }) => {
   await emailLogin(page, SEED.cashier.email, SEED.cashier.password);
   await page.context().storageState({ path: authPath('cashier') });

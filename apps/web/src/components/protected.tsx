@@ -20,10 +20,12 @@ export function Protected({ children }: { children: React.ReactNode }) {
     /*
      * D55: a platform admin has no workspace, and the API refuses their token on
      * every route this shell calls — the profile fetch alone would 403 and leave
-     * them staring at a broken sidebar. Send them to their own console instead.
-     * The reverse redirect lives in `app/platform/layout.tsx`.
+     * them staring at a broken sidebar. `PlatformConsoleBoundary` normally
+     * intercepts them before this mounts; this redirect is defence for any
+     * Protected usage outside that boundary. /dashboard is safe: the boundary
+     * renders the console there, so this cannot loop.
      */
-    if (isPlatformAdmin) router.replace('/platform');
+    if (isPlatformAdmin) router.replace('/dashboard');
   }, [loading, isAuthenticated, isPlatformAdmin, router]);
 
   if (loading || !isAuthenticated || isPlatformAdmin) {

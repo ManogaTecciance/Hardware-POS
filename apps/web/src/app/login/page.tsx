@@ -40,10 +40,10 @@ function LoginForm() {
 
   React.useEffect(() => {
     if (!isAuthenticated) return;
-    // D55: a platform admin has no workspace to land in — every workspace
-    // route would refuse their token — so they go to the console instead.
-    router.replace(session?.isPlatformAdmin ? '/platform' : '/dashboard');
-  }, [isAuthenticated, session, router]);
+    // D55 (2026-08-17): /dashboard is the one post-login URL — the (app)
+    // layout's boundary renders the console there for platform admins.
+    router.replace('/dashboard');
+  }, [isAuthenticated, router]);
 
   /*
    * A `?workspace=` link is a deliberate instruction (an invite, a bookmark) and
@@ -59,8 +59,8 @@ function LoginForm() {
     setBusy(true);
     setError(null);
     try {
-      const signedIn = await loginWithEmail(email, password, workspace);
-      router.replace(signedIn?.isPlatformAdmin ? '/platform' : '/dashboard');
+      await loginWithEmail(email, password, workspace);
+      router.replace('/dashboard');
       return;
     } catch (err) {
       /*

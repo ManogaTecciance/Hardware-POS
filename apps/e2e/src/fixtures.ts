@@ -10,8 +10,6 @@ type Fixtures = Record<never, never>;
 
 interface WorkerFixtures {
   ownerApi: Api;
-  accountantApi: Api;
-  managerApi: Api;
   cashierApi: Api;
 }
 
@@ -19,8 +17,6 @@ import * as path from 'node:path';
 
 export const AUTH = {
   owner: path.resolve(__dirname, '../.auth/owner.json'),
-  accountant: path.resolve(__dirname, '../.auth/accountant.json'),
-  manager: path.resolve(__dirname, '../.auth/manager.json'),
   cashier: path.resolve(__dirname, '../.auth/cashier.json'),
 } as const;
 
@@ -28,20 +24,6 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
   ownerApi: [
     async ({}, use) => {
       const auth = await apiLogin(SEED.owner.email, SEED.owner.password);
-      await use(await Api.create(auth));
-    },
-    { scope: 'worker' },
-  ],
-  accountantApi: [
-    async ({}, use) => {
-      const auth = await apiLogin(SEED.accountant.email, SEED.accountant.password);
-      await use(await Api.create(auth));
-    },
-    { scope: 'worker' },
-  ],
-  managerApi: [
-    async ({}, use) => {
-      const auth = await apiLogin(SEED.manager.email, SEED.manager.password);
       await use(await Api.create(auth));
     },
     { scope: 'worker' },

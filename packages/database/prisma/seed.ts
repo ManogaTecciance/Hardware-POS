@@ -74,35 +74,24 @@ async function main(): Promise<void> {
     bcrypt.hash('1111', SALT_ROUNDS),
   ]);
 
+  /*
+   * 2026-08-17: the hardware template staffs an Owner and Cashiers, so the
+   * demo does too — the old Manager and Accountant users are gone (and
+   * `removeRetiredDemoUsers` below clears them from a re-seeded database, so
+   * the console never shows a user whose role no longer exists). The OWNER
+   * carries the approval PIN now: in a two-role shop the owner is who answers
+   * the in-POS approval prompts (D48: PINs answer prompts, not the login
+   * form), and their unlimited discount cap covers everything a manager's did.
+   */
   const users = [
     {
       id: 'usr_owner',
       name: 'Owner',
       email: 'owner@hardwarepos.test',
       role: UserRole.OWNER,
-      passwordHash: password123,
-      pinHash: null as string | null,
-      branchId: null as string | null,
-    },
-    {
-      id: 'usr_accountant',
-      name: 'Accountant',
-      email: 'accountant@hardwarepos.test',
-      role: UserRole.ACCOUNTANT,
-      passwordHash: password123,
-      pinHash: null,
-      branchId: null,
-    },
-    // D48: login is email+password only. Manager and Cashier keep their PINs —
-    // those answer the in-POS approval prompts, not the login form.
-    {
-      id: 'usr_manager',
-      name: 'Manager',
-      email: 'manager@hardwarepos.test' as string | null,
-      role: UserRole.MANAGER,
       passwordHash: password123 as string | null,
-      pinHash: pin2222,
-      branchId: branch.id,
+      pinHash: pin2222 as string | null,
+      branchId: null as string | null,
     },
     {
       id: 'usr_cashier',
@@ -220,13 +209,41 @@ async function main(): Promise<void> {
     });
   }
 
+  /*
+   * Same reasoning for the restaurant cashier: their enum is CASHIER, but the
+   * food-service tenant's cashier row is RESTAURANT_CASHIER (displayed
+   * "Cashier"), so `linkUsersToRoles` cannot match it — and an unlinked user
+   * shows "Not set" in the platform console.
+   */
+  const restoCashierRole = await prisma.role.findFirst({
+    where: { tenantId: restaurant.id, key: 'RESTAURANT_CASHIER' },
+    select: { id: true },
+  });
+  if (restoCashierRole) {
+    await prisma.user.update({
+      where: { id: 'usr_resto_cashier' },
+      data: { roleId: restoCashierRole.id },
+    });
+  }
+
+  // 2026-08-17: clear the retired demo users from a database seeded before
+  // the role trim. Delete where nothing references them; deactivate where
+  // history does — a re-run must converge, not crash.
+  for (const id of ['usr_manager', 'usr_accountant']) {
+    try {
+      await prisma.user.delete({ where: { id } });
+    } catch {
+      await prisma.user
+        .update({ where: { id }, data: { isActive: false } })
+        .catch(() => undefined); // absent on a fresh database — nothing to do
+    }
+  }
+
   /* eslint-disable no-console */
   console.log('Seeded tenant:', tenant.id);
   console.log(`Seeded ${MOCK_HARDWARE_PRODUCTS.length} products across ${mockCategoryNames().length} categories`);
   console.log('Login users:');
-  console.log('  Owner       owner@hardwarepos.test / password123');
-  console.log('  Accountant  accountant@hardwarepos.test / password123');
-  console.log('  Manager     manager@hardwarepos.test / password123  (approval PIN 2222)');
+  console.log('  Owner       owner@hardwarepos.test / password123  (approval PIN 2222)');
   console.log('  Cashier     cashier@hardwarepos.test / password123  (approval PIN 1111)');
   console.log('');
   console.log('Seeded tenant:', restaurant.id, '(RESTAURANT · LOCAL inventory · no accounting)');
