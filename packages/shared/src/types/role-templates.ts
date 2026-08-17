@@ -188,7 +188,12 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   },
   {
     key: 'RESTAURANT_CASHIER',
-    name: 'Restaurant Cashier',
+    // Displayed as plain "Cashier": inside a food-service workspace the
+    // qualifier is noise (PO request, 2026-08-17). The KEY keeps its
+    // qualified form — it is the stable identifier, and the built-in retail
+    // CASHIER key must stay distinct from it. No name collision is possible:
+    // the food-service template list no longer includes the built-in Cashier.
+    name: 'Cashier',
     description: 'Settles bills and collects payment.',
     isBuiltIn: false,
     permissions: [
@@ -244,10 +249,91 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   },
 ];
 
+/**
+ * Hotel operational roles.
+ *
+ * A hotel workspace is food service under another name today (Q7), so the
+ * receptionist is the front desk of THAT product: the person who takes
+ * bookings, seats guests, looks after guest records and settles bills at the
+ * desk. Room-night permissions arrive with the STAY fulfilment provider and
+ * will be added to this template, not to a new one.
+ */
+export const HOTEL_ROLE_TEMPLATES: readonly RoleTemplate[] = [
+  {
+    key: 'RECEPTIONIST',
+    name: 'Receptionist',
+    description: 'Front desk: bookings, guest records, check-in and bills.',
+    isBuiltIn: false,
+    permissions: [
+      // Navigation derives from the platform profile — without this the rail
+      // renders empty, same reasoning as the waiter template.
+      Permission.PLATFORM_PROFILE_READ,
+      Permission.PRODUCT_READ,
+      Permission.SALE_READ,
+      // Guest records are the front desk's data.
+      Permission.CUSTOMER_READ,
+      Permission.CUSTOMER_MANAGE,
+      // Check-in, today, is seating a session on the floor plan.
+      Permission.TABLE_VIEW,
+      Permission.TABLE_OPEN,
+      // The booking diary is the core of the job.
+      Permission.RESERVATION_VIEW,
+      Permission.RESERVATION_CREATE,
+      Permission.RESERVATION_MANAGE,
+      // Bills settle at the desk on the way out.
+      Permission.BILL_VIEW,
+      Permission.PAYMENT_COLLECT,
+      // Deliberately absent: everything kitchen-facing (KOT_VIEW), order
+      // authoring, voids, transfers, reports and configuration — the desk
+      // neither works the floor nor runs the shift.
+    ],
+  },
+];
+
 /** Every template, for iteration in seeds and tests. */
 export const ALL_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   ...BUILT_IN_ROLE_TEMPLATES,
   ...RESTAURANT_ROLE_TEMPLATES,
+  ...HOTEL_ROLE_TEMPLATES,
+];
+
+/** Lookup helpers for composing the per-template lists below. Throw rather
+ *  than return undefined: a misspelled key must fail the build's tests, not
+ *  seed a tenant with a missing role. */
+function template(key: string): RoleTemplate {
+  const found = ALL_ROLE_TEMPLATES.find((t) => t.key === key);
+  if (!found) throw new Error(`No role template with key "${key}"`);
+  return found;
+}
+
+/*
+ * Which roles each workspace template offers (PO decision, 2026-08-17):
+ * fewer, job-shaped options instead of the whole catalogue. The trimmed
+ * templates still EXIST above — an existing tenant's rows are untouched, and
+ * `seedTenantRoles` never deletes a role — but a NEW workspace is seeded with
+ * only the roles its business actually staffs, and the console's role picker
+ * (which reads the workspace's own rows, D55.1) shrinks to match. The Owner
+ * is every list's first entry because a workspace is created around one.
+ */
+
+/** Hardware / retail: Owner and Cashier. */
+export const HARDWARE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
+  template(UserRole.Owner),
+  template(UserRole.Cashier),
+];
+
+/** Food service (restaurant / cafe / bakery): Owner, Waiter, Cashier. */
+export const FOOD_SERVICE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
+  template(UserRole.Owner),
+  template('WAITER'),
+  template('RESTAURANT_CASHIER'),
+];
+
+/** Hotel: Owner, Waiter, Receptionist. */
+export const HOTEL_WORKSPACE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
+  template(UserRole.Owner),
+  template('WAITER'),
+  template('RECEPTIONIST'),
 ];
 
 // D56: `roleTemplatesForBusinessType` moved to `domains/registry.ts`. The

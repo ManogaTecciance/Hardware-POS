@@ -215,6 +215,27 @@ describe('the readiness report describes reality', () => {
     await seedTenantRoles(prisma, other.tenantId, 'HARDWARE');
     await linkUsersToRoles(prisma, other.tenantId);
 
+    // The hardware template offers Owner and Cashier only (2026-08-17), so
+    // the fixtures' enum-MANAGER users have no matching row and linking
+    // rightly leaves them on the legacy path — the report must SAY so
+    // before it can go clean.
+    const interim = await buildReport(prisma);
+    expect(interim.usersOnLegacyFallback).toBe(2);
+    expect(isReadyToRetireLegacyRole(interim)).toBe(false);
+
+    // Completing the migration for those users is an operator decision:
+    // re-role them onto a role the template still offers.
+    for (const tenant of [tile, other]) {
+      const cashierRole = await prisma.role.findUniqueOrThrow({
+        where: { tenantId_key: { tenantId: tenant.tenantId, key: 'CASHIER' } },
+        select: { id: true },
+      });
+      await prisma.user.update({
+        where: { id: tenant.managerId },
+        data: { roleId: cashierRole.id },
+      });
+    }
+
     const report = await buildReport(prisma);
 
     expect(report.usersOnLegacyFallback).toBe(0);

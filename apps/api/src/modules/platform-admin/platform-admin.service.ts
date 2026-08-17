@@ -7,6 +7,7 @@ import {
 import {
   BUSINESS_PROFILE_PRESETS,
   BusinessType,
+  Prisma,
   UserRole,
   seedTenantRoles,
 } from '@hardware-pos/database';
@@ -149,49 +150,62 @@ export class PlatformAdminService {
     }
 
     const passwordHash = await bcrypt.hash(dto.ownerPassword, SALT_ROUNDS);
-    const tenantId = await this.prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.create({ data: { name: dto.name.trim(), slug } });
-      await tx.tenantBusinessProfile.create({
-        data: {
-          tenantId: tenant.id,
-          businessType: template.businessType,
-          ...BUSINESS_PROFILE_PRESETS[template.businessType],
-        },
+    const tenantId = await this.prisma
+      .$transaction(async (tx) => {
+        const tenant = await tx.tenant.create({ data: { name: dto.name.trim(), slug } });
+        await tx.tenantBusinessProfile.create({
+          data: {
+            tenantId: tenant.id,
+            businessType: template.businessType,
+            ...BUSINESS_PROFILE_PRESETS[template.businessType],
+          },
+        });
+        // Modules are the template's defaults, written explicitly so the
+        // workspace's configuration is inspectable rather than implied.
+        const modules = DEFAULT_MODULES_BY_BUSINESS_TYPE[template.businessType];
+        await tx.tenantModule.createMany({
+          data: modules.map((moduleKey) => ({ tenantId: tenant.id, moduleKey, isEnabled: true })),
+        });
+        const branch = await tx.branch.create({
+          data: { tenantId: tenant.id, name: 'Main Branch', code: 'MAIN' },
+        });
+        await tx.register.create({
+          data: { tenantId: tenant.id, branchId: branch.id, name: 'Register 1', code: 'R1' },
+        });
+        await seedTenantRoles(tx, tenant.id, template.businessType);
+        const owner = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            branchId: branch.id,
+            name: dto.ownerName.trim(),
+            email,
+            role: UserRole.OWNER,
+            passwordHash,
+          },
+        });
+        // Resolve the owner's authority from the database like every other
+        // seeded user, rather than leaving them on the legacy enum fallback.
+        const ownerRole = await tx.role.findFirst({
+          where: { tenantId: tenant.id, key: 'OWNER' },
+          select: { id: true },
+        });
+        if (ownerRole) {
+          await tx.user.update({ where: { id: owner.id }, data: { roleId: ownerRole.id } });
+        }
+        return tenant.id;
+      })
+      .catch((err: unknown) => {
+        // The slug pre-check above races a concurrent create; `Tenant.slug`
+        // is unique at the database, and that loser must see the same 409 as
+        // the pre-check — not a raw P2002.
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          throw new ConflictException(`A workspace with the slug "${slug}" already exists`);
+        }
+        throw err;
       });
-      // Modules are the template's defaults, written explicitly so the
-      // workspace's configuration is inspectable rather than implied.
-      const modules = DEFAULT_MODULES_BY_BUSINESS_TYPE[template.businessType];
-      await tx.tenantModule.createMany({
-        data: modules.map((moduleKey) => ({ tenantId: tenant.id, moduleKey, isEnabled: true })),
-      });
-      const branch = await tx.branch.create({
-        data: { tenantId: tenant.id, name: 'Main Branch', code: 'MAIN' },
-      });
-      await tx.register.create({
-        data: { tenantId: tenant.id, branchId: branch.id, name: 'Register 1', code: 'R1' },
-      });
-      await seedTenantRoles(tx, tenant.id, template.businessType);
-      const owner = await tx.user.create({
-        data: {
-          tenantId: tenant.id,
-          branchId: branch.id,
-          name: dto.ownerName.trim(),
-          email,
-          role: UserRole.OWNER,
-          passwordHash,
-        },
-      });
-      // Resolve the owner's authority from the database like every other
-      // seeded user, rather than leaving them on the legacy enum fallback.
-      const ownerRole = await tx.role.findFirst({
-        where: { tenantId: tenant.id, key: 'OWNER' },
-        select: { id: true },
-      });
-      if (ownerRole) {
-        await tx.user.update({ where: { id: owner.id }, data: { roleId: ownerRole.id } });
-      }
-      return tenant.id;
-    });
 
     return this.getWorkspace(tenantId);
   }
@@ -214,9 +228,10 @@ export class PlatformAdminService {
    * Read from the workspace's own `Role` rows rather than from the templates,
    * because the rows are what `PermissionResolver` consults and a tenant may
    * have renamed or deactivated one. Which rows exist is decided by the
-   * template: `seedTenantRoles` gives a food-service workspace the restaurant
-   * roles — Waiter, Kitchen Staff and the rest — on top of the five built-ins,
-   * and a hardware workspace only the five.
+   * template (2026-08-17): a hardware workspace seeds Owner + Cashier, a
+   * food-service one Owner + Waiter + Cashier, a hotel one Owner + Waiter +
+   * Receptionist. Workspaces created before the trim keep whatever they were
+   * seeded with — this list reflects that, by reading the rows.
    */
   async listRoles(workspaceId: string): Promise<WorkspaceRoleView[]> {
     await this.getWorkspace(workspaceId);

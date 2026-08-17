@@ -11,7 +11,7 @@
  * and omits the QUICKBOOKS module, and a tripwire enforces that a copy-pasted
  * descriptor cannot silently carry the integration into a new vertical.
  */
-import { BUILT_IN_ROLE_TEMPLATES } from '../types/role-templates.js';
+import { HARDWARE_ROLE_TEMPLATES } from '../types/role-templates.js';
 import { RETAIL_CAPABILITIES } from './capabilities.js';
 import type { DomainDescriptor } from './domain.types.js';
 import { RETAIL_MODULES, SHARED_CORE_MODULES } from './modules.js';
@@ -31,7 +31,8 @@ export const HARDWARE_DOMAIN: DomainDescriptor = {
   profile: { inventoryMode: 'QUICKBOOKS', accountingProvider: 'QUICKBOOKS' },
   modules: [...SHARED_CORE_MODULES, ...RETAIL_MODULES],
   navigation: RETAIL_NAVIGATION,
-  roleTemplates: BUILT_IN_ROLE_TEMPLATES,
+  // PO decision 2026-08-17: a hardware shop staffs an Owner and Cashiers.
+  roleTemplates: HARDWARE_ROLE_TEMPLATES,
   capabilities: RETAIL_CAPABILITIES,
   // No domain attributes (D64): everything the hardware vertical stores about
   // a product is behaviour, and behaviour lives in typed columns. An empty

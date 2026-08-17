@@ -342,10 +342,12 @@ describe('lockout protection', () => {
     // The positive control. Without it, a service that refused every assignment
     // would pass the case above.
     await linkUsersToRoles(prisma, tile.tenantId);
-    const admin = await prisma.role.findFirstOrThrow({
-      where: { tenantId: tile.tenantId, key: 'ADMIN' },
+    // The hardware template seeds Owner and Cashier only (2026-08-17), so the
+    // "other administrator" is a second user on the OWNER role.
+    const ownerRole = await prisma.role.findFirstOrThrow({
+      where: { tenantId: tile.tenantId, key: 'OWNER' },
     });
-    await prisma.user.update({ where: { id: tile.managerId }, data: { roleId: admin.id } });
+    await prisma.user.update({ where: { id: tile.managerId }, data: { roleId: ownerRole.id } });
 
     const created = await createCustom(tile, { permissions: ['product:read'] });
     const weak = created.data.id;

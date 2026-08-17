@@ -140,26 +140,34 @@ describe('template keys are stable identifiers', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('templates are selected by business type', () => {
-  it('a retail tenant gets the built-in roles and no restaurant role', () => {
-    // D57: HARDWARE is the retail vertical's one value.
-    for (const type of ['HARDWARE', 'GENERAL']) {
+  /*
+   * PO decision, 2026-08-17: each workspace template offers the roles its
+   * business actually staffs, not the whole catalogue. EXACT sets per type —
+   * a role added to or dropped from a template fails here by name.
+   */
+  it('a hardware tenant gets Owner and Cashier, and no restaurant role', () => {
+    const keys = roleTemplatesForBusinessType('HARDWARE').map((t) => t.key);
+    expect(keys.sort()).toEqual(['CASHIER', 'OWNER']);
+  });
+
+  it('a GENERAL tenant keeps the five built-ins — the deliberately-plain template', () => {
+    const keys = roleTemplatesForBusinessType('GENERAL').map((t) => t.key);
+    expect(keys.sort()).toEqual(BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort());
+  });
+
+  it('a food-service tenant gets Owner, Waiter and (Restaurant) Cashier', () => {
+    for (const type of ['RESTAURANT', 'CAFE', 'BAKERY']) {
       const keys = roleTemplatesForBusinessType(type).map((t) => t.key);
       expect({ type, keys: keys.sort() }).toEqual({
         type,
-        keys: BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort(),
+        keys: ['OWNER', 'RESTAURANT_CASHIER', 'WAITER'],
       });
     }
   });
 
-  it('a food-service tenant gets both sets', () => {
-    for (const type of ['RESTAURANT', 'CAFE', 'BAKERY', 'HOTEL']) {
-      const keys = roleTemplatesForBusinessType(type).map((t) => t.key);
-      expect({ type, count: keys.length }).toEqual({
-        type,
-        count: BUILT_IN_ROLE_TEMPLATES.length + RESTAURANT_ROLE_TEMPLATES.length,
-      });
-      expect(keys).toContain('WAITER');
-    }
+  it('a hotel tenant gets Owner, Waiter and Receptionist', () => {
+    const keys = roleTemplatesForBusinessType('HOTEL').map((t) => t.key);
+    expect(keys.sort()).toEqual(['OWNER', 'RECEPTIONIST', 'WAITER']);
   });
 
   it('an unrecognised business type is refused, loudly (D56)', () => {

@@ -7,7 +7,7 @@
  * descriptor rather than a migration across live tenants. The same reasoning
  * D55 applied to HOTEL.
  */
-import { ALL_ROLE_TEMPLATES } from '../types/role-templates.js';
+import { FOOD_SERVICE_ROLE_TEMPLATES } from '../types/role-templates.js';
 import { FOOD_SERVICE_CAPABILITIES } from './capabilities.js';
 import type { DomainDescriptor } from './domain.types.js';
 import { FOOD_SERVICE_MODULES, SHARED_CORE_MODULES } from './modules.js';
@@ -27,8 +27,9 @@ export const FOOD_SERVICE_DOMAIN: DomainDescriptor = {
   profile: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
   modules: [...SHARED_CORE_MODULES, ...FOOD_SERVICE_MODULES],
   navigation: FOOD_SERVICE_NAVIGATION,
-  // Built-ins plus the restaurant operational roles (Waiter, Kitchen Staff, …).
-  roleTemplates: ALL_ROLE_TEMPLATES,
+  // PO decision 2026-08-17: Owner, Waiter and Cashier — the roles a floor
+  // actually staffs, not the whole catalogue.
+  roleTemplates: FOOD_SERVICE_ROLE_TEMPLATES,
   capabilities: FOOD_SERVICE_CAPABILITIES,
   // No domain attributes (D64): a dish's descriptive fields (prepMinutes,
   // dietaryTags, foodType) predate the attributes column and stay typed —

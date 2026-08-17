@@ -37,6 +37,8 @@ describe('baseUserRoleFor', () => {
       'KITCHEN_MANAGER',
       'KITCHEN_STAFF',
       'BAR_STAFF',
+      // The hotel front desk (2026-08-17) — same least-privilege floor.
+      'RECEPTIONIST',
     ]) {
       expect(baseUserRoleFor(key)).toBe(UserRole.CASHIER);
     }

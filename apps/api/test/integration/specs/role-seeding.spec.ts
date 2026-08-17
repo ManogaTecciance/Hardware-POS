@@ -13,7 +13,6 @@
  */
 import {
   ALL_PERMISSIONS,
-  BUILT_IN_ROLE_TEMPLATES,
   Permission,
   RESTAURANT_ROLE_TEMPLATES,
   ROLE_PERMISSIONS,
@@ -82,15 +81,15 @@ describe('the permission catalogue', () => {
 });
 
 describe('seeding a retail tenant', () => {
-  it('creates exactly the five built-in roles with the authority’s permissions', async () => {
+  it('creates exactly Owner and Cashier with the authority’s permissions', async () => {
+    // PO decision 2026-08-17: a hardware workspace staffs an Owner and
+    // Cashiers — the other built-ins are no longer part of its template.
     const tenantId = await makeTenant('tnt_retail', 'retail');
     await syncPermissionCatalogue(prisma);
     await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     const roles = await rolesOf(tenantId);
-    expect(roles.map((r) => r.key as string)).toEqual(
-      BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort(),
-    );
+    expect(roles.map((r) => r.key as string)).toEqual(['CASHIER', 'OWNER']);
 
     for (const role of roles) {
       expect({ key: role.key, permissions: role.permissions }).toEqual({
@@ -196,14 +195,14 @@ describe('roles never cross a tenant boundary (D36)', () => {
     await seedTenantRoles(prisma, b, 'HARDWARE');
 
     await prisma.role.update({
-      where: { tenantId_key: { tenantId: a, key: 'MANAGER' } },
-      data: { name: 'Supervisor' },
+      where: { tenantId_key: { tenantId: a, key: 'CASHIER' } },
+      data: { name: 'Till Operator' },
     });
 
-    const bManager = await prisma.role.findUnique({
-      where: { tenantId_key: { tenantId: b, key: 'MANAGER' } },
+    const bCashier = await prisma.role.findUnique({
+      where: { tenantId_key: { tenantId: b, key: 'CASHIER' } },
     });
-    expect(bManager!.name).toBe('Manager');
+    expect(bCashier!.name).toBe('Cashier');
   });
 });
 
@@ -216,15 +215,15 @@ describe('re-seeding an existing tenant', () => {
     await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
     await prisma.role.update({
-      where: { tenantId_key: { tenantId, key: 'MANAGER' } },
+      where: { tenantId_key: { tenantId, key: 'CASHIER' } },
       data: { name: 'Shift Supervisor' },
     });
     await seedTenantRoles(prisma, tenantId, 'HARDWARE');
 
-    const manager = await prisma.role.findUnique({
-      where: { tenantId_key: { tenantId, key: 'MANAGER' } },
+    const cashier = await prisma.role.findUnique({
+      where: { tenantId_key: { tenantId, key: 'CASHIER' } },
     });
-    expect(manager!.name).toBe('Shift Supervisor');
+    expect(cashier!.name).toBe('Shift Supervisor');
   });
 
   it('does re-apply permission assignments, including revocations', async () => {

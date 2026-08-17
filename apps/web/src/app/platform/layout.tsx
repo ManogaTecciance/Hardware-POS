@@ -39,7 +39,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/brand/axlo-icon.svg" alt="" className="h-8 w-auto" aria-hidden />
             <div>
-              <p className="text-base font-semibold tracking-tight">Axlo Platform</p>
+              <p className="text-base font-semibold tracking-tight">Axlo POS</p>
               <p className="text-xs text-muted-foreground">Workspaces and user administration</p>
             </div>
           </div>

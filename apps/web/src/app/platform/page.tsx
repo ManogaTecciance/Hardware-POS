@@ -33,14 +33,22 @@ export default function PlatformConsolePage() {
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
+  // Debounced copy of `search` — the list query fires on THIS, not on every
+  // keystroke. 250 ms, matching the product picker's debounce.
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [creating, setCreating] = React.useState(false);
   const [openWorkspace, setOpenWorkspace] = React.useState<WorkspaceView | null>(null);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const load = React.useCallback(async () => {
     if (!session) return;
     try {
       const [ws, tpl] = await Promise.all([
-        platformAdmin.listWorkspaces(session, search.trim() || undefined),
+        platformAdmin.listWorkspaces(session, debouncedSearch.trim() || undefined),
         platformAdmin.templates(session),
       ]);
       setWorkspaces(ws);
@@ -50,7 +58,7 @@ export default function PlatformConsolePage() {
       setError(err instanceof Error ? err.message : 'Failed to load workspaces');
       setStatus('error');
     }
-  }, [session, search]);
+  }, [session, debouncedSearch]);
 
   React.useEffect(() => {
     void load();
@@ -199,7 +207,10 @@ function CreateWorkspaceDialog({
 
   const valid =
     name.trim().length >= 2 &&
-    /^[a-z0-9][a-z0-9-]*$/.test(slug) &&
+    // Mirrors the server's rule exactly: hyphen-separated lower-case words,
+    // no leading, trailing or doubled hyphen. The server is the authority;
+    // matching here just keeps the button honest.
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) &&
     !!templateKey &&
     ownerName.trim().length > 0 &&
     ownerEmail.includes('@') &&
