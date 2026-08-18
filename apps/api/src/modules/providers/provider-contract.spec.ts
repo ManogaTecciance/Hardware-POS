@@ -472,7 +472,10 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
       'modules/sales/sales.module.ts',
       'modules/sales/sales.repository.ts',
       'modules/sales/sales.service.ts',
-      // D61 — fulfilment provider consumers.
+      // D61 — fulfilment provider consumers. (round-item-resolution,
+      // 2026-08-18: the shared resolver returns the D65 depletion inputs,
+      // so it imports the RoundDepletionItem TYPE.)
+      'modules/table-sessions/round-item-resolution.ts',
       'modules/table-sessions/table-sessions.module.ts',
       'modules/table-sessions/table-sessions.service.ts',
       'modules/takeaway/takeaway.module.ts',

@@ -4,11 +4,9 @@ import {
   RestaurantOrderChannel,
   RestaurantOrderStatus,
   OrderRoundStatus,
-  RestaurantOrderItemSourceKind,
   RestaurantOrderItemStatus,
   RestaurantTableStatus,
   TableSessionStatus,
-  RestaurantTableKind,
   FulfilmentKind,
   OrderChannel,
 } from '@hardware-pos/database';
@@ -18,32 +16,20 @@ import { nextDocumentNumber, padSequence } from '../../common/document-sequence'
 import { DiningService, type OpenTableReleaseSummary } from '../dining/dining.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
 import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
-import { resolveMenuItemPricing } from '../menu/menu-item-pricing';
 import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
-import {
-  RoundDepletionService,
-  type RoundDepletionItem,
-} from '../providers/inventory/round-depletion.service';
+import { RoundDepletionService } from '../providers/inventory/round-depletion.service';
 import { SettingsService } from '../settings/settings.service';
 import { KitchenService } from '../kitchen/kitchen.service';
+import { resolveRoundItemInputs, writeRoundItems } from './round-item-resolution';
 import {
   CloseSessionDto,
   OpenSessionDto,
-  OrderItemInputDto,
-  RestaurantOrderItemSourceKindDto,
   SubmitRoundDto,
   VoidItemDto,
 } from './dto/table-sessions.dto';
 import {
   BranchNotFoundError,
-  MenuItemInactiveError,
-  MenuItemNotFoundError,
-  ModifierOptionNotOnItemError,
   OrderNotFoundError,
-  ProductInactiveError,
-  ProductNotFoundError,
-  ProductVariantInactiveError,
-  ProductVariantNotFoundError,
   RegisterNotFoundError,
   RoundAlreadySubmittedError,
   SessionAlreadyClosedError,
@@ -52,8 +38,6 @@ import {
   TableAlreadyOpenError,
   TableNotFoundError,
   TableReservedForOpenTableError,
-  VariantNotOnProductError,
-  VariantSelectionRequiredError,
 } from './table-sessions.errors';
 
 export interface TableSessionView {
@@ -355,161 +339,14 @@ export class TableSessionsService {
       if (!order) throw new OrderNotFoundError();
       if (order.session.status !== TableSessionStatus.OPEN) throw new SessionNotOpenError();
 
-      // D46 — the round DTO now carries two sources of round items:
-      // legacy MenuItem-sourced (default) and Product-sourced (with an
-      // optional variant). Split up front so each authority is loaded in
-      // its own tenant-scoped batch — one query per source, not one per
-      // item — and rejected uniformly if the row is missing / inactive /
-      // on the wrong parent.
-      const sourceOf = (it: OrderItemInputDto): RestaurantOrderItemSourceKindDto =>
-        it.sourceKind ?? RestaurantOrderItemSourceKindDto.MENU_ITEM;
-      const menuInputs = dto.items.filter(
-        (it) => sourceOf(it) === RestaurantOrderItemSourceKindDto.MENU_ITEM,
-      );
-      const productInputs = dto.items.filter(
-        (it) => sourceOf(it) === RestaurantOrderItemSourceKindDto.PRODUCT,
-      );
-
-      const menuItemIds = menuInputs.map((it) => it.menuItemId!);
-      const productIds = productInputs.map((it) => it.productId!);
-      const productVariantIds = productInputs
-        .map((it) => it.productVariantId)
-        .filter((id): id is string => Boolean(id));
-
-      // Three tenant-scoped batches in parallel. Each empty-set query is
-      // skipped so an all-MENU_ITEM round never touches the Product tables
-      // (and vice versa).
-      const [menuItems, products, productVariants] = await Promise.all([
-        menuItemIds.length
-          ? tx.menuItem.findMany({
-              where: { id: { in: menuItemIds }, tenantId },
-              include: {
-                modifierGroups: {
-                  select: { modifierGroupId: true },
-                },
-              },
-            })
-          : Promise.resolve([]),
-        productIds.length
-          ? tx.product.findMany({
-              where: { id: { in: productIds }, tenantId },
-              include: {
-                modifierGroups: {
-                  select: { modifierGroupId: true },
-                },
-              },
-            })
-          : Promise.resolve([]),
-        productVariantIds.length
-          ? tx.productVariant.findMany({
-              where: { id: { in: productVariantIds }, tenantId },
-              include: {
-                // Composed variant label ("Small / Red") for the snapshot
-                // and for the KOT print. Falls back to SKU when the
-                // variant was created without option values.
-                optionValues: { include: { option: { select: { name: true } } } },
-              },
-            })
-          : Promise.resolve([]),
-      ]);
-
-      const menuItemMap = new Map(menuItems.map((m) => [m.id, m]));
-      // D60 — transitional pricing for MENU_ITEM sources: placement override
-      // ?? product price ?? frozen basePrice. See menu-item-pricing.ts.
-      const menuItemPricing = await resolveMenuItemPricing(tx, tenantId, menuItemIds);
-      const productMap = new Map(products.map((p) => [p.id, p]));
-      const variantMap = new Map(productVariants.map((v) => [v.id, v]));
-
-      // Per-input resolution. Each iteration produces a `Resolved` record
-      // the write loop below turns into a snapshot row — no second pass
-      // over the DTO, no divergent field-population per source. This is
-      // where every D46 rejection surfaces so no invalid row ever reaches
-      // the write path.
-      type ResolvedMenuItem = { kind: 'MENU_ITEM'; menuItem: (typeof menuItems)[number] };
-      type ResolvedProduct = {
-        kind: 'PRODUCT';
-        product: (typeof products)[number];
-        variant: (typeof productVariants)[number] | null;
-      };
-      type Resolved = ResolvedMenuItem | ResolvedProduct;
-      const resolved: Resolved[] = [];
-      for (const inputItem of dto.items) {
-        const kind = sourceOf(inputItem);
-        if (kind === RestaurantOrderItemSourceKindDto.MENU_ITEM) {
-          const mi = menuItemMap.get(inputItem.menuItemId!);
-          if (!mi) throw new MenuItemNotFoundError();
-          if (!mi.isActive) throw new MenuItemInactiveError(mi.name);
-          resolved.push({ kind: 'MENU_ITEM', menuItem: mi });
-          continue;
-        }
-        const product = productMap.get(inputItem.productId!);
-        if (!product) throw new ProductNotFoundError();
-        if (!product.isActive) throw new ProductInactiveError(product.name);
-
-        let variant: (typeof productVariants)[number] | null = null;
-        if (inputItem.productVariantId) {
-          variant = variantMap.get(inputItem.productVariantId) ?? null;
-          if (!variant) throw new ProductVariantNotFoundError();
-          if (variant.productId !== product.id) throw new VariantNotOnProductError();
-          if (!variant.isActive) throw new ProductVariantInactiveError(variant.sku);
-        } else {
-          // No variantId sent. If the Product has any active variant, the
-          // client MUST pick one — otherwise the price is ambiguous. We
-          // ask the DB directly here (rather than trusting `hasVariants`)
-          // because `hasVariants` can be true while every variant is
-          // inactive, in which case the parent Product's `unitPrice`
-          // legitimately applies.
-          const activeVariantCount = await tx.productVariant.count({
-            where: { productId: product.id, tenantId, isActive: true },
-          });
-          if (activeVariantCount > 0) {
-            throw new VariantSelectionRequiredError(product.name);
-          }
-        }
-        resolved.push({ kind: 'PRODUCT', product, variant });
-      }
-
-      // Modifier options (if any) — snapshot their names + deltas.
-      const modifierOptionIds = dto.items.flatMap(
-        (it) => it.modifiers?.map((m) => m.modifierOptionId) ?? [],
-      );
-      const modifierOptions = modifierOptionIds.length
-        ? await tx.modifierOption.findMany({
-            where: { id: { in: modifierOptionIds }, tenantId },
-            include: { group: { select: { id: true, name: true } } },
-          })
-        : [];
-      const modifierMap = new Map(modifierOptions.map((o) => [o.id, o]));
-
-      // D46 — service-layer guard: a modifier option must belong to a
-      // group that is actually attached to the ordered item. A
-      // ModifierGroup is intentionally reusable across items, so the DB
-      // cannot express "this option is valid for THIS item only". Without
-      // this check a client could send any tenant-scoped modifier and
-      // its priceDelta would silently flow into the snapshot.
-      for (let i = 0; i < dto.items.length; i++) {
-        const inputItem = dto.items[i];
-        if (!inputItem.modifiers?.length) continue;
-        const r = resolved[i];
-        const allowedGroupIds = new Set(
-          r.kind === 'MENU_ITEM'
-            ? r.menuItem.modifierGroups.map((g) => g.modifierGroupId)
-            : r.product.modifierGroups.map((g) => g.modifierGroupId),
-        );
-        for (const m of inputItem.modifiers) {
-          const opt = modifierMap.get(m.modifierOptionId);
-          // A missing option is treated as "not on the item" — same
-          // effect for the caller: refuse the round, refuse the write.
-          if (!opt || !allowedGroupIds.has(opt.groupId)) {
-            throw new ModifierOptionNotOnItemError();
-          }
-        }
-      }
+      // D46 — resolution and validation live in the shared resolver
+      // (round-item-resolution.ts, 2026-08-18) so this path and takeaway
+      // intake cannot drift: both accept the same MENU_ITEM / PRODUCT
+      // sources, apply the same variant and modifier guards, and snapshot
+      // the same fields.
+      const resolvedItems = await resolveRoundItemInputs(tx, tenantId, dto.items);
 
       const previousRoundCount = await tx.orderRound.count({ where: { orderId: order.id } });
-      // D65 — collected as the snapshot rows are written, depleted once the
-      // session (and its branch) is in hand below.
-      const depletionItems: RoundDepletionItem[] = [];
       const round = await tx.orderRound.create({
         data: {
           tenantId,
@@ -522,116 +359,12 @@ export class TableSessionsService {
         },
       });
 
-      for (let i = 0; i < dto.items.length; i++) {
-        const inputItem = dto.items[i];
-        const r = resolved[i];
-        const selectedMods = (inputItem.modifiers ?? []).map((m) =>
-          modifierMap.get(m.modifierOptionId),
-        );
-        // D52: Decimal throughout. Summing price deltas as floats and
-        // converting back drifts on fractional modifiers (0.10 + 0.20), which
-        // contradicts this file's own money-precision rule 190 lines below.
-        const modifierTotal = selectedMods.reduce(
-          (sum, m) => (m ? sum.plus(m.priceDelta) : sum),
-          new Prisma.Decimal(0),
-        );
-
-        // Uniform snapshot fields — resolved to concrete values per
-        // source so the write below is a single shape. `menuItemId` stays
-        // a loose string reference for both sources (a PRODUCT-sourced
-        // row stores the Product id there, matching D46's decision to
-        // keep the legacy field for reprint / order-detail / KOT lookup).
-        let refId: string;
-        let refName: string;
-        let unitPrice: Prisma.Decimal;
-        let sourceKind: RestaurantOrderItemSourceKind;
-        let productIdSnapshot: string | null;
-        let productVariantIdSnapshot: string | null;
-        let variantNameSnapshot: string | null;
-        let variantPriceSnapshot: Prisma.Decimal | null;
-
-        if (r.kind === 'MENU_ITEM') {
-          refId = r.menuItem.id;
-          refName = r.menuItem.name;
-          // D60: the product price (with placement override) is authoritative
-          // for a migrated item; basePrice only survives for unmigrated ones.
-          const pricing = menuItemPricing.get(r.menuItem.id);
-          // Same table, same tenant filter as the batch above — a miss here
-          // is a bug, not a state, and pricing from a stale local copy would
-          // put basePrice reads back outside menu-item-pricing.ts.
-          if (!pricing) throw new MenuItemNotFoundError();
-          unitPrice = pricing.unitPrice;
-          sourceKind = RestaurantOrderItemSourceKind.MENU_ITEM;
-          // Stamped so kitchen routing and reporting read ONE reference; the
-          // convergence backfill does the same for historical rows.
-          productIdSnapshot = pricing?.productId ?? null;
-          productVariantIdSnapshot = null;
-          variantNameSnapshot = null;
-          variantPriceSnapshot = null;
-        } else {
-          refId = r.product.id;
-          refName = r.product.name;
-          sourceKind = RestaurantOrderItemSourceKind.PRODUCT;
-          productIdSnapshot = r.product.id;
-          if (r.variant) {
-            unitPrice = r.variant.unitPrice;
-            productVariantIdSnapshot = r.variant.id;
-            // Compose "Small / Red"; fall back to SKU when the variant
-            // has no option values (a wizard shortcut path). Mirrors the
-            // pos-catalogue variant-name convention so what the operator
-            // saw in the picker matches what prints on the KOT.
-            const composed = r.variant.optionValues
-              .map((ov) => ov.option?.name ?? '')
-              .filter(Boolean)
-              .join(' / ');
-            variantNameSnapshot = composed.length > 0 ? composed : r.variant.sku;
-            variantPriceSnapshot = r.variant.unitPrice;
-          } else {
-            unitPrice = r.product.unitPrice;
-            productVariantIdSnapshot = null;
-            variantNameSnapshot = null;
-            variantPriceSnapshot = null;
-          }
-        }
-
-        const item = await tx.restaurantOrderItem.create({
-          data: {
-            tenantId,
-            orderId: order.id,
-            roundId: round.id,
-            menuItemId: refId,
-            menuItemName: refName,
-            unitPrice,
-            modifierTotal,
-            quantity: new Prisma.Decimal(inputItem.quantity),
-            specialInstructions: inputItem.specialInstructions ?? null,
-            status: RestaurantOrderItemStatus.SENT,
-            sourceKind,
-            productId: productIdSnapshot,
-            productVariantId: productVariantIdSnapshot,
-            variantNameSnapshot,
-            variantPriceSnapshot,
-          },
-        });
-        depletionItems.push({
-          orderItemId: item.id,
-          productId: productIdSnapshot,
-          quantity: inputItem.quantity,
-        });
-        for (const modOpt of selectedMods) {
-          if (!modOpt) continue;
-          await tx.restaurantOrderItemModifier.create({
-            data: {
-              tenantId,
-              itemId: item.id,
-              modifierOptionId: modOpt.id,
-              optionName: modOpt.name,
-              groupName: modOpt.group.name,
-              priceDelta: modOpt.priceDelta,
-            },
-          });
-        }
-      }
+      // One writer for both intake paths; returns the D65 depletion inputs.
+      const { depletionItems } = await writeRoundItems(
+        tx,
+        { tenantId, orderId: order.id, roundId: round.id },
+        resolvedItems,
+      );
 
       // Order status transitions from DRAFT to SUBMITTED on first round.
       if (order.status === RestaurantOrderStatus.DRAFT) {

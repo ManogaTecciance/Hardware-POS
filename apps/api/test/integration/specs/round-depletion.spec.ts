@@ -324,6 +324,91 @@ describe('D65 — submit-time depletion', () => {
     ).toBe(1);
   });
 
+  it('takeaway accepts PRODUCT-sourced items — the counter POS path (2026-08-18)', async () => {
+    /*
+     * The counter POS routes every mode (its "dine-in" included) through
+     * POST /restaurant/takeaway with PRODUCT-sourced lines. This used to be
+     * refused with "Takeaway does not yet accept Product-sourced items" at
+     * the payment step; intake now rides the same resolver as a dine-in
+     * round, modifiers included.
+     */
+    const group = await prisma.modifierGroup.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        name: 'Serving',
+        selection: 'SINGLE',
+        minSelections: 0,
+        maxSelections: 1,
+        options: { create: [{ tenantId: restaurant.tenantId, name: 'Chilled', priceDelta: '0.50' }] },
+      },
+      include: { options: true },
+    });
+    await prisma.productModifierGroup.create({
+      data: { productId: beerId, modifierGroupId: group.id },
+    });
+
+    const res = await http.request<{ orderId: string }>('POST', '/restaurant/takeaway', {
+      token: ownerToken(restaurant),
+      body: {
+        branchId,
+        idempotencyKey: 'takeaway-product-1',
+        items: [
+          {
+            sourceKind: 'PRODUCT',
+            productId: beerId,
+            quantity: 2,
+            modifiers: [{ modifierOptionId: group.options[0].id }],
+          },
+        ],
+      },
+    });
+    expect(res.status).toBe(201);
+
+    // The row snapshots exactly as a dine-in round would: PRODUCT source,
+    // price from the product, the modifier frozen with its delta.
+    const item = await prisma.restaurantOrderItem.findFirstOrThrow({
+      where: { tenantId: restaurant.tenantId, productId: beerId, sourceKind: 'PRODUCT' },
+      include: { modifiers: true },
+    });
+    expect(item.unitPrice.toFixed(2)).toBe('4.00');
+    expect(item.modifierTotal.toFixed(2)).toBe('0.50');
+    expect(item.modifiers).toHaveLength(1);
+    expect(item.modifiers[0]).toMatchObject({ optionName: 'Chilled', groupName: 'Serving' });
+
+    // And it depletes (D65), exactly like dine-in.
+    expect(await qty(beerId)).toBe(8);
+
+    // NEGATIVE — the shared guard applies here too: a modifier option not
+    // attached to the ordered product refuses the whole create.
+    const orphanGroup = await prisma.modifierGroup.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        name: 'Unattached',
+        selection: 'SINGLE',
+        minSelections: 0,
+        maxSelections: 1,
+        options: { create: [{ tenantId: restaurant.tenantId, name: 'Nope', priceDelta: '1.00' }] },
+      },
+      include: { options: true },
+    });
+    const refused = await http.request('POST', '/restaurant/takeaway', {
+      token: ownerToken(restaurant),
+      body: {
+        branchId,
+        idempotencyKey: 'takeaway-product-2',
+        items: [
+          {
+            sourceKind: 'PRODUCT',
+            productId: beerId,
+            quantity: 1,
+            modifiers: [{ modifierOptionId: orphanGroup.options[0].id }],
+          },
+        ],
+      },
+    });
+    expect(refused.status).toBe(400);
+  });
+
   it('the takeaway path depletes through the linked product exactly like dine-in', async () => {
     const menu = await prisma.menu.create({
       data: { tenantId: restaurant.tenantId, branchId, name: 'Takeaway Menu' },

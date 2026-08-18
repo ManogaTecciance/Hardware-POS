@@ -14,12 +14,12 @@ import { nextDocumentNumber, padSequence } from '../../common/document-sequence'
 import { KitchenService } from '../kitchen/kitchen.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
 import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
-import { resolveMenuItemPricing } from '../menu/menu-item-pricing';
 import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
+import { RoundDepletionService } from '../providers/inventory/round-depletion.service';
 import {
-  RoundDepletionService,
-  type RoundDepletionItem,
-} from '../providers/inventory/round-depletion.service';
+  resolveRoundItemInputs,
+  writeRoundItems,
+} from '../table-sessions/round-item-resolution';
 import { SettingsService } from '../settings/settings.service';
 import { CreateTakeawayDto, UpdateTakeawayStatusDto } from './dto/takeaway.dto';
 
@@ -118,54 +118,22 @@ export class TakeawayService {
         },
       });
 
-      // Takeaway is still MENU_ITEM-only (the counter POS's D46 widening
-      // is scoped to the dine-in `submitRound` path). If a client sends a
-      // PRODUCT-sourced item to the takeaway endpoint we refuse up front
-      // — that path would otherwise crash with a Prisma NOT NULL error
-      // because `menuItemId` is optional on the shared DTO now.
-      for (const input of dto.items) {
-        if (input.sourceKind && input.sourceKind !== 'MENU_ITEM') {
-          throw new BadRequestException(
-            'Takeaway does not yet accept Product-sourced items',
-          );
-        }
-        if (!input.menuItemId) {
-          throw new BadRequestException('menuItemId is required');
-        }
-      }
-      // D60 — the same transitional pricing rule the dine-in path uses:
-      // placement override ?? product price ?? frozen basePrice, with the
-      // product reference stamped for routing and reporting.
-      const pricing = await resolveMenuItemPricing(
+      /*
+       * 2026-08-18: intake goes through the SAME resolver as a dine-in round
+       * (round-item-resolution.ts). The counter POS routes every mode
+       * through this endpoint and — since the catalogue convergence — sends
+       * PRODUCT-sourced lines, which the old MENU_ITEM-only guard refused at
+       * the payment step ("Takeaway does not yet accept Product-sourced
+       * items"). The shared path also fixes a quieter defect: this loop used
+       * to write `modifierTotal: 0` and no modifier snapshots, silently
+       * dropping paid modifiers from takeaway bills.
+       */
+      const resolvedItems = await resolveRoundItemInputs(tx, tenantId, dto.items);
+      const { depletionItems } = await writeRoundItems(
         tx,
-        tenantId,
-        dto.items.map((i) => i.menuItemId!),
+        { tenantId, orderId: order.id, roundId: round.id },
+        resolvedItems,
       );
-      const depletionItems: RoundDepletionItem[] = [];
-      for (const input of dto.items) {
-        const resolved = pricing.get(input.menuItemId!);
-        if (!resolved) throw new NotFoundException(`Menu item ${input.menuItemId} not found`);
-        const item = await tx.restaurantOrderItem.create({
-          data: {
-            tenantId,
-            orderId: order.id,
-            roundId: round.id,
-            menuItemId: resolved.menuItem.id,
-            menuItemName: resolved.menuItem.name,
-            unitPrice: resolved.unitPrice,
-            productId: resolved.productId,
-            modifierTotal: new Prisma.Decimal(0),
-            quantity: new Prisma.Decimal(input.quantity),
-            specialInstructions: input.specialInstructions ?? null,
-            status: 'SENT',
-          },
-        });
-        depletionItems.push({
-          orderItemId: item.id,
-          productId: resolved.productId,
-          quantity: input.quantity,
-        });
-      }
       // D65 — same submit-time depletion as a dine-in round (Q4). An
       // unmigrated menu item (null productId) simply has nothing to deplete.
       await this.roundDepletion.depleteSubmittedItems(
