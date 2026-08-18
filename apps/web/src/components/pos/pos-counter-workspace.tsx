@@ -25,7 +25,7 @@ import { PosModeChip } from './pos-mode-chip';
 import type { PosMode } from './pos-mode-selector';
 import { PosOrderTypeModal } from './pos-order-type-modal';
 import type { DraftLine } from './pos-types';
-import { cryptoRandomKey, draftSubtotal } from './pos-utils';
+import { addDraftLine, cryptoRandomKey, draftSubtotal } from './pos-utils';
 import { useMenuData, usePosCatalogue } from './use-menu-data';
 
 interface Props {
@@ -138,9 +138,15 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const addOrEdit = (line: DraftLine, editingKey?: string) => {
     setDraft((rows) => {
       if (editingKey) {
+        // Edits REPLACE in place, never merge: an operator adjusting a line
+        // expects it to stay where it is, and a mid-edit merge into another
+        // row would silently move (and re-count) what they are looking at.
         return rows.map((r) => (r.key === editingKey ? { ...line, key: editingKey } : r));
       }
-      return [...rows, line];
+      // Adds merge into an identical existing line (2026-08-18): same
+      // product AND variant, same modifier set, same instructions, and no
+      // line discount involved — see draftLineMergeKey for the exact rule.
+      return addDraftLine(rows, line);
     });
   };
 

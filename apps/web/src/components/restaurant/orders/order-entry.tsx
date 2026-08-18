@@ -6,7 +6,7 @@ import * as React from 'react';
 
 import { ModifierPickerDialog } from '@/components/pos/modifier-picker-dialog';
 import { EMPTY_MENU, type DraftLine, type MenuData } from '@/components/pos/pos-types';
-import { cryptoRandomKey } from '@/components/pos/pos-utils';
+import { addDraftLine, cryptoRandomKey } from '@/components/pos/pos-utils';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -177,9 +177,10 @@ export function OrderEntry({ session, sessionId }: Props) {
       setModifierTarget(item);
       return;
     }
-    setDraft((rows) => [
-      ...rows,
-      {
+    // Merges into an identical existing line instead of stacking duplicate
+    // rows (2026-08-18) — see draftLineMergeKey for the exact identity rule.
+    setDraft((rows) =>
+      addDraftLine(rows, {
         key: cryptoRandomKey(),
         menuItemId: item.id,
         name: item.name,
@@ -187,8 +188,8 @@ export function OrderEntry({ session, sessionId }: Props) {
         quantity: 1,
         specialInstructions: '',
         modifiers: [],
-      },
-    ]);
+      }),
+    );
   };
 
   const changeQty = (key: string, delta: number) => {
@@ -541,7 +542,9 @@ export function OrderEntry({ session, sessionId }: Props) {
           groupsById={menuData.modifierGroupsById}
           onCancel={() => setModifierTarget(null)}
           onConfirm={(lines) => {
-            setDraft((rows) => [...rows, ...lines]);
+            // Same merge rule as the fast add: a customised line only merges
+            // when its whole configuration is identical to an existing row.
+            setDraft((rows) => lines.reduce(addDraftLine, rows));
             setModifierTarget(null);
           }}
         />
