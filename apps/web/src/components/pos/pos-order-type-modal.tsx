@@ -21,7 +21,7 @@ const OPTIONS: readonly Option[] = [
   {
     mode: 'DINE_IN',
     title: 'Dine In',
-    hint: 'Guest is at the counter — payment collected now, no table.',
+    hint: 'Waiter takes the order at a table. Items fire to the kitchen as they are added; the bill prints when the table is closed.',
     icon: <UtensilsCrossed className="h-6 w-6" />,
   },
   {

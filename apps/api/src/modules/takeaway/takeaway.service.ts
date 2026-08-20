@@ -16,6 +16,7 @@ import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
 import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
 import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
 import { RoundDepletionService } from '../providers/inventory/round-depletion.service';
+import { PrintingService } from '../printing/printing.service';
 import {
   resolveRoundItemInputs,
   writeRoundItems,
@@ -57,6 +58,8 @@ export class TakeawayService {
     private readonly fulfilment: TableServiceFulfilmentProvider,
     // D65 — takeaway rounds deplete exactly as dine-in rounds do.
     private readonly roundDepletion: RoundDepletionService,
+    // D67 — same auto-printing as dine-in: KOTs at create, bill at handover.
+    private readonly printing: PrintingService,
   ) {}
 
   async create(
@@ -72,7 +75,7 @@ export class TakeawayService {
       throw new BadRequestException('Takeaway is disabled on this branch');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const branch = await tx.branch.findFirst({
         where: { id: dto.branchId, tenantId, isActive: true },
         select: { id: true },
@@ -143,7 +146,28 @@ export class TakeawayService {
         depletionItems,
         actorUserId,
       );
-      await this.kitchen.generateTicketsForRound(tx, tenantId, dto.branchId, round.id);
+      await this.kitchen.generateTicketsForRound(
+        tx,
+        tenantId,
+        dto.branchId,
+        round.id,
+        actorUserId,
+      );
+
+      /*
+       * D67 (PO, 2026-08-20) — a takeaway is taken by the CASHIER, so the
+       * bill belongs on paper at placement, next to the kitchen ticket, not
+       * later at handover. No Sale exists yet; the job points at the order
+       * and is priced by the same calculator the close uses. Queuing it here
+       * also makes the handover path skip its own bill, so a takeaway
+       * produces exactly one.
+       */
+      await this.printing.enqueueOrderBill(tx, {
+        tenantId,
+        branchId: dto.branchId,
+        orderId: order.id,
+        createdByUserId: actorUserId,
+      });
 
       const profile = await tx.takeawayOrderProfile.create({
         data: {
@@ -164,6 +188,10 @@ export class TakeawayService {
       // A freshly-created takeaway has no Sale yet — it lands on handover.
       return this.toView(profile, order.orderNumber, null);
     });
+    // D67 — print the KOTs the round just queued, without making the
+    // response wait for a printer.
+    this.printing.kick();
+    return created;
   }
 
   async list(tenantId: string, branchId: string): Promise<TakeawayView[]> {
@@ -196,7 +224,7 @@ export class TakeawayService {
     });
     if (!existing) throw new NotFoundException('Takeaway order not found');
 
-    return this.prisma.$transaction(async (tx) => {
+    const view = await this.prisma.$transaction(async (tx) => {
       const nextStatus = dto.status as TakeawayOrderStatus;
       const handoverAt =
         nextStatus === 'HANDED_OVER' && !existing.handoverAt ? new Date() : existing.handoverAt;
@@ -316,11 +344,27 @@ export class TakeawayService {
             kind: 'TABLE_SESSION',
             sessionId: session.id,
           });
+          /*
+           * D67 — handover settles the order. The bill normally printed at
+           * PLACEMENT (the cashier took the order), so print one here only
+           * if that did not happen — e.g. a branch that had auto-bill off
+           * then and on now. Otherwise the customer would get two.
+           */
+          if (!(await this.printing.orderBillExists(tx, existing.orderId))) {
+            await this.printing.enqueueBillForSale(tx, {
+              tenantId,
+              branchId: existing.order.branchId,
+              saleId: sale.id,
+              createdByUserId: actorUserId,
+            });
+          }
           finalSaleId = sale.id;
         }
       }
       return this.toView(updated, updated.order.orderNumber, finalSaleId);
     });
+    this.printing.kick();
+    return view;
   }
 
   private async ensureWalkInTable(

@@ -118,6 +118,24 @@ export class EnvironmentVariables {
   @IsOptional()
   SYNC_WORKER_ENABLED = 'true';
 
+  // ── D67 print worker ──
+  // Drains the print outbox (kitchen tickets + bills). Disable ('false') in
+  // tests, so specs drive the dispatcher explicitly and never race a timer.
+  @IsString()
+  @IsOptional()
+  PRINT_WORKER_ENABLED = 'true';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(250)
+  @IsOptional()
+  PRINT_WORKER_INTERVAL_MS = 5_000;
+
+  /** Where MOCK printers spool. Overridden by the integration harness. */
+  @IsString()
+  @IsOptional()
+  PRINT_MOCK_SPOOL_DIR?: string;
+
   @Type(() => Number)
   @IsInt()
   @Min(250)

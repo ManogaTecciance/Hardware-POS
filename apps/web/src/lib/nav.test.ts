@@ -150,6 +150,10 @@ describe('Restaurant navigation', () => {
       'Customers',
       'Sales',
       'Reports',
+      // D67 — every floor user picks their own printers, so Printing sits in
+      // the rail for a WAITER too (gated on PLATFORM_PROFILE_READ, unlike
+      // Settings which needs SETTINGS_MANAGE).
+      'Printing',
       'Settings',
     ]);
   });
@@ -206,6 +210,7 @@ describe('Restaurant navigation', () => {
       Customers: false,
       Sales: false,
       Reports: false,
+      Printing: false,
       Settings: false,
     });
   });

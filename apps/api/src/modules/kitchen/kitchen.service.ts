@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   KitchenPrintAttemptStatus,
   KitchenTicketStatus,
@@ -6,6 +6,7 @@ import {
 } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { resolveKitchenPrinterIdForUser } from '../printing/printing.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 
 export interface KitchenTicketView {
@@ -49,6 +50,8 @@ export interface KitchenTicketView {
  */
 @Injectable()
 export class KitchenService {
+  private readonly logger = new Logger(KitchenService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -62,6 +65,13 @@ export class KitchenService {
     tenantId: string,
     branchId: string,
     roundId: string,
+    /**
+     * D67 — who submitted the round. When that user has picked their own
+     * kitchen printer, the tickets print there instead of on the station's
+     * printers (see `resolveKitchenPrinterIdForUser`). Optional so existing
+     * callers and tests are unaffected.
+     */
+    actorUserId?: string | null,
   ): Promise<string[]> {
     const items = await tx.restaurantOrderItem.findMany({
       where: { tenantId, roundId },
@@ -128,32 +138,101 @@ export class KitchenService {
       stationsByProduct.set(link.productId, list);
     }
 
+    /*
+     * D67 — the single-station fallback.
+     *
+     * An item with no station link used to be dropped silently: no ticket,
+     * nothing on the pass, and the kitchen never learns the dish was
+     * ordered. That is indefensible once tickets print automatically. When
+     * the branch has exactly ONE active station there is no routing decision
+     * to make, so unrouted items go there. With two or more stations the
+     * choice is a real one the operator must configure — guessing would send
+     * food to the wrong line — so those items stay unrouted and are logged
+     * by name, which is how an operator finds the missing link.
+     */
+    const branchStations = await tx.kitchenStation.findMany({
+      where: { tenantId, branchId, isActive: true },
+      select: { id: true },
+    });
+    const soleStationId = branchStations.length === 1 ? branchStations[0]!.id : null;
+
     // Aggregate items per station.
     const perStation = new Map<string, typeof items>();
+    const unrouted: string[] = [];
     for (const item of items) {
-      // Look up in the junction that matches the item's source. An item
-      // with NO station routing (either junction empty) falls back to a
-      // synthetic "unrouted" bucket so it doesn't silently disappear.
+      // Look up in the junction that matches the item's source.
       const stationIds = item.productId
         ? stationsByProduct.get(item.productId) ?? []
         : stationsByMenuItem.get(item.menuItemId) ?? [];
-      const targets = stationIds.length > 0 ? stationIds : ['__unrouted__'];
+      const targets =
+        stationIds.length > 0 ? stationIds : soleStationId ? [soleStationId] : [];
+      if (targets.length === 0) {
+        unrouted.push(item.menuItemName);
+        continue;
+      }
       for (const stationId of targets) {
-        if (stationId === '__unrouted__') continue;
         const list = perStation.get(stationId) ?? [];
         list.push(item);
         perStation.set(stationId, list);
       }
     }
+    if (unrouted.length > 0) {
+      this.logger.warn(
+        `Round ${roundId}: ${unrouted.length} item(s) reached no kitchen station and will not ` +
+          `print — link them to a station in Settings → Printing (${unrouted.join(', ')})`,
+      );
+    }
+
+    /*
+     * D67 — the printer this round's tickets go to, in precedence order:
+     *   1. the acting user's own default (their tablet, their printer);
+     *   2. the station's configured printers (a shop that routes grill vs
+     *      bar means it, and that routing is per-item, not per-person);
+     *   3. the branch's default kitchen printer (the owner's one-time
+     *      workspace setting, so a user who picked nothing still prints).
+     * The user's choice REPLACES the station list rather than adding to it —
+     * printing the same ticket twice is a duplicate, not redundancy.
+     */
+    const userPrinterId = await resolveKitchenPrinterIdForUser(tx, actorUserId ?? null);
+    const branchConfig = await tx.restaurantBranchConfig.findUnique({
+      where: { branchId },
+      select: { defaultKitchenPrinterId: true },
+    });
+    const fallbackPrinterId = userPrinterId ?? branchConfig?.defaultKitchenPrinterId ?? null;
+    const fallbackPrinter = fallbackPrinterId
+      ? await tx.kitchenPrinter.findFirst({
+          where: { id: fallbackPrinterId, tenantId, isActive: true },
+          select: { id: true },
+        })
+      : null;
+    const userPrinter = userPrinterId && fallbackPrinter?.id === userPrinterId ? fallbackPrinter : null;
 
     const ticketIds: string[] = [];
     for (const [stationId, stationItems] of perStation) {
-      // Choose the station's primary printer.
-      const stationPrinters = await tx.kitchenStationPrinter.findMany({
-        where: { stationId },
-        orderBy: { isPrimary: 'desc' },
-        select: { printerId: true, isPrimary: true },
-      });
+      /*
+       * Printer targets for this ticket: the user's own choice when they
+       * have one, else the station's configured printers (primary first).
+       * A user preference REPLACES the station list rather than adding to
+       * it — printing the same ticket on both is a duplicate, not
+       * redundancy.
+       */
+      const linked = userPrinter
+        ? [{ printerId: userPrinter.id, isPrimary: true }]
+        : await tx.kitchenStationPrinter.findMany({
+            where: { stationId },
+            orderBy: { isPrimary: 'desc' },
+            select: { printerId: true, isPrimary: true },
+          });
+      // Nothing linked and no personal choice → the branch default, if the
+      // owner set one. Empty means the ticket is queued with no attempt:
+      // it shows on the KDS and can be printed by hand, which is strictly
+      // better than inventing a target.
+      const stationPrinters =
+        linked.length > 0
+          ? linked
+          : fallbackPrinter
+            ? [{ printerId: fallbackPrinter.id, isPrimary: true }]
+            : [];
       const primaryPrinterId = stationPrinters[0]?.printerId ?? null;
 
       const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');

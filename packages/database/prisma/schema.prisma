@@ -108,6 +108,9 @@ enum PrintJobType {
   CUSTOMER_RECEIPT
   WAREHOUSE_PICKING
   RETURN_RECEIPT
+  /// D67 — the finalised restaurant bill, printed on the CASHIER printer when
+  /// a waiter closes/completes a table order (or a takeaway is handed over).
+  ORDER_BILL
 }
 
 enum PrintJobStatus {
@@ -320,6 +323,8 @@ model Tenant {
   catalogueEntries             CatalogueEntry[]
   externalEntityRefs           ExternalEntityRef[]
   productComponents            ProductComponent[]
+  printerPreferences           UserPrinterPreference[]
+  printAgents                  PrintAgent[]
   auditLogs                    AuditLog[]
   printJobs                    PrintJob[]
   returns                      Return[]
@@ -483,6 +488,8 @@ model Branch {
   externalOrders      ExternalOrder[]
   webhookDeliveryLogs WebhookDeliveryLog[]
 
+  printAgents            PrintAgent[]
+
   @@unique([tenantId, code])
   @@index([tenantId])
 }
@@ -573,6 +580,9 @@ model User {
   createdRestaurantTables  RestaurantTable[]   @relation("RestaurantTableCreator")
   createdTableReservations TableReservation[]  @relation("TableReservationCreator")
   createdInventoryReceipts InventoryReceipt[]  @relation("InventoryReceiptCreator")
+
+  /// D67 — this user's own printer choices.
+  printerPreference UserPrinterPreference?
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -1117,7 +1127,12 @@ model Receipt {
 model PrintJob {
   id              String         @id @default(cuid())
   tenantId        String
-  saleId          String
+  /// D67 — nullable since takeaway: a bill printed AT PLACEMENT has no Sale
+  /// yet (the Sale is created on handover), so the job points at the order
+  /// instead and the renderer prices it with the same calculator the close
+  /// uses. Every pre-D67 row still carries a sale.
+  saleId          String?
+  orderId         String?
   returnId        String?
   receiptId       String?
   type            PrintJobType
@@ -1129,15 +1144,35 @@ model PrintJob {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  sale    Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  return  Return?  @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  /// D67 — auto-printing. A job written by the restaurant close/handover
+  /// path carries the branch it belongs to and the resolved CASHIER printer;
+  /// the dispatcher renders ESC/POS from the Sale at print time (nothing is
+  /// stored as bytes, so a reprint always reflects the current bill).
+  /// NULL `printerId` = no cashier printer configured → the job stays PENDING
+  /// and the operator prints from the browser, exactly as before D67.
+  branchId     String?
+  printerId    String?
+  /// Delivery bookkeeping: how many times the dispatcher has tried, and why
+  /// the last try failed. Retries stop at PRINT_MAX_ATTEMPTS.
+  attemptCount Int     @default(0)
+  lastError    String?
+  /// D67 — see KitchenPrintAttempt: held by an on-site agent while printing.
+  leaseId      String?
+  leasedAt     DateTime?
+  leasedBy     String?
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sale    Sale?            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  order   RestaurantOrder? @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  return  Return?          @relation(fields: [returnId], references: [id], onDelete: Cascade)
   receipt Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([saleId])
   @@index([returnId])
   @@index([status])
+  @@index([branchId])
+  @@index([orderId])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1690,6 +1725,25 @@ model RestaurantBranchConfig {
   /// Sale.packagingCharge column and the bill row already existed with
   /// nothing to fill them.
   packagingChargeAmount Decimal                  @default(0) @db.Decimal(12, 2)
+
+  /// D67 — auto-printing. KOTs print on the station printers the instant a
+  /// round is submitted; the finalised bill prints on the branch's CASHIER
+  /// printer when the order is closed. Both default ON: a branch that has
+  /// configured no printers enqueues nothing that can print, so the switches
+  /// are only interesting for a branch that HAS printers and wants manual
+  /// control.
+  autoPrintKot            Boolean                  @default(true)
+  autoPrintBill           Boolean                  @default(true)
+  /// Copies of the finalised bill. 1..3.
+  billCopies              Int                      @default(1)
+  /// The branch's cashier printer (a KitchenPrinter row with role CASHIER).
+  /// NULL = no auto bill print; the browser path stays the only one.
+  defaultReceiptPrinterId String?
+  /// The branch's kitchen printer — the workspace-wide default an owner sets
+  /// once so a user who has picked nothing still gets tickets. Sits BELOW
+  /// station links in the routing chain: a shop that routes grill/bar
+  /// separately keeps doing so.
+  defaultKitchenPrinterId String?
 
   /// D59 (plan Q5). Per-branch tax rate. NULL = inherit the tenant-wide
   /// `TenantSettings.taxRatePercent` — nullable rather than defaulted to 0
@@ -2488,6 +2542,9 @@ model RestaurantOrder {
   items           RestaurantOrderItem[]
   takeawayProfile TakeawayOrderProfile?
 
+  /// D67 — bills printed for this order before it settled.
+  printJobs      PrintJob[]
+
   @@unique([tenantId, orderNumber])
   @@index([tenantId])
   @@index([branchId])
@@ -2765,6 +2822,88 @@ enum KitchenPrinterKind {
   MOCK
 }
 
+/// D67 — an on-site Print Agent (PO constraint, 2026-08-18).
+///
+/// The web app is on Amplify and the API on EC2; the printers are on the
+/// SHOP's LAN behind NAT. Nothing in the cloud can open a socket to
+/// 192.168.x.x, and a browser cannot speak raw ESC/POS at all — so a small
+/// daemon runs on a machine inside the shop (the POS PC, the KDS box), dials
+/// OUT over HTTPS, and drains the same print queue rows the server-side
+/// dispatcher drains when the API itself is on-prem.
+///
+/// Transport is chosen automatically, never configured: a branch with a
+/// LIVE agent (heartbeat inside the freshness window) is served by that
+/// agent; a branch without one falls back to the API printing directly,
+/// which is what a single-machine/on-prem install does. No flag to get
+/// wrong, and a dead agent degrades to "queued, not printed" rather than to
+/// silence.
+model PrintAgent {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  name String
+  /// SHA-256 of the pairing token. The plaintext is shown once, at pairing,
+  /// and never stored — the same discipline as a password.
+  tokenHash String @unique
+
+  isActive   Boolean   @default(true)
+  lastSeenAt DateTime?
+  /// Agent build string, reported on each heartbeat, so a stale install is
+  /// visible in settings instead of being guessed at from behaviour.
+  version    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([branchId])
+}
+
+/// D67 — each USER's own printer choices (PO request, 2026-08-18).
+///
+/// A waiter works from a tablet that is on the shop's network but wired to
+/// nothing: the printer is reached over the LAN by whichever process holds
+/// the socket (the API), and WHICH printer is a per-person choice — the
+/// upstairs waiter's tickets belong on the upstairs printer. These override
+/// the branch-wide routing:
+///
+///   KOT  : user preference → station links → the branch's sole station
+///   BILL : user preference → branch `defaultReceiptPrinterId`
+///
+/// Both nullable: an unset preference means "use the branch's routing",
+/// which is exactly what every existing user has.
+model UserPrinterPreference {
+  id       String @id @default(cuid())
+  tenantId String
+  userId   String @unique
+
+  kitchenPrinterId String?
+  cashierPrinterId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kitchenPrinter KitchenPrinter? @relation("UserKitchenPrinter", fields: [kitchenPrinterId], references: [id], onDelete: SetNull)
+  cashierPrinter KitchenPrinter? @relation("UserCashierPrinter", fields: [cashierPrinterId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+}
+
+/// D67 — what a printer is FOR. The registry (still called KitchenPrinter,
+/// deliberately un-renamed: a rename migration would buy nothing) now serves
+/// both roles. KITCHEN devices are reached through station links; CASHIER
+/// devices through the branch's `defaultReceiptPrinterId`.
+enum PrinterRole {
+  KITCHEN
+  CASHIER
+}
+
 enum KitchenTicketStatus {
   QUEUED
   PRINTED
@@ -2788,6 +2927,17 @@ model KitchenPrinter {
   kind     KitchenPrinterKind
   address  String
   isActive Boolean            @default(true)
+
+  /// D67 — KITCHEN (station-routed KOTs) or CASHIER (bills). Existing rows
+  /// backfill to KITCHEN: that is the only thing they were used for.
+  role     PrinterRole        @default(KITCHEN)
+  /// Characters per line: 48 for 80 mm paper, 32 for 58 mm. Drives the
+  /// ESC/POS renderer's wrapping and column maths.
+  columns  Int                @default(48)
+
+  /// D67 — users who picked this device as their kitchen / cashier printer.
+  kitchenPreferences UserPrinterPreference[] @relation("UserKitchenPrinter")
+  cashierPreferences UserPrinterPreference[] @relation("UserCashierPrinter")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2867,6 +3017,14 @@ model KitchenPrintAttempt {
   error       String?
   attemptedAt DateTime                  @default(now())
   completedAt DateTime?
+
+  /// D67 — held by an on-site agent while it prints. The lease expires
+  /// (PRINT_LEASE_TTL) so an agent that dies mid-print releases the row
+  /// instead of stranding it; that is also why a crash can reprint one
+  /// ticket rather than lose it.
+  leaseId   String?
+  leasedAt  DateTime?
+  leasedBy  String?
 
   tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   ticket  KitchenTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)

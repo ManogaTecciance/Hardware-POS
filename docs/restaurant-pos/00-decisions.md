@@ -2216,6 +2216,60 @@ Verified live on the hardware tenant: create scoped collection → section →
 priced entry → sellable serves it (`COLLECTION_OVERRIDE`, 111.50), wrong
 channel serves zero, channel list filter includes/excludes correctly.
 
+### D67 — auto-printing, and dine-in as a waiter flow
+
+PO requirements, 2026-08-18/20. Two things that turned out to be one change:
+the dine-in POS mode assumed a guest paying at the counter, and nothing in
+the system ever drove a printer.
+
+**Dine-in belongs to the waiter.** `/pos → Dine In` opened the counter cart
+whenever no session was named — "guest is at the counter, payment collected
+now, no table", the opposite of table service. It now always opens the table
+picker → order entry. That screen also stopped reading the FROZEN legacy
+menu tables (D60) and now reads the same converged catalogue as the counter
+POS, sending PRODUCT-sourced lines: on a migrated workspace the legacy tree
+is nearly empty, so the waiter was picking from a menu that no longer
+exists.
+
+**Printing is an outbox, drained after commit.** Phase 6 already wrote
+`KitchenTicket` + `KitchenPrintAttempt` rows inside the round transaction
+and never drove them. Now: submitting a round kicks a dispatcher that
+renders ESC/POS and sends it; closing a table queues the bill in the close
+transaction and prints it after commit. D53 is preserved absolutely —
+printing can delay paper, never fail or slow an order. A failing printer
+retries three times, then the ticket goes FAILED and surfaces on the KDS
+with its reprint button.
+
+**Takeaway prints both at placement** (PO, 2026-08-20): the cashier takes
+that order, so the bill belongs on paper with the ticket. No Sale exists
+yet, so the job points at the RestaurantOrder and is priced by
+`computeRestaurantTotals` — the SAME calculator the close uses (D52/D59), so
+paper and the Sale written minutes later cannot disagree. Handover then
+skips its own bill, so a takeaway yields exactly one.
+
+**Routing is owner-configured, user-overridable.** The owner adds printers
+once per workspace (network scan or by IP) and marks each KITCHEN or
+CASHIER; every user then picks their own defaults from that list. KOT: user
+→ station links → branch default. Bill: user → branch default. An unrouted
+item used to be dropped silently; it now falls back to a sole active station
+and is logged by name otherwise.
+
+**Two transports, chosen automatically.** The web app is on Amplify and the
+API on EC2, and neither can open a socket to a printer on a shop LAN — while
+a browser cannot speak raw ESC/POS at all (no TCP; HTTPS→private-IP is
+blocked by mixed content, CORS and Private Network Access; `window.print()`
+reaches exactly one OS-installed printer per device, so it cannot serve a
+kitchen AND a cashier printer). So: an on-site agent (`apps/print-agent`)
+dials out, leases work, prints on the LAN, acks. A branch whose agent has
+checked in within two minutes is served by it and the server-side dispatcher
+leaves those rows alone; a branch without one is printed directly by the API
+(on-prem/single-machine installs). Leases with a TTL arbitrate, making
+delivery at-least-once: a duplicate ticket is recoverable, a missing one is
+not.
+
+The ESC/POS encoder is in-repo (~15 commands) rather than a dependency, and
+every template is asserted as real bytes.
+
 ---
 
 ## Open decisions

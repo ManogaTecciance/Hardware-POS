@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
 import { ModifierPickerDialog } from '@/components/pos/modifier-picker-dialog';
-import { EMPTY_MENU, type DraftLine, type MenuData } from '@/components/pos/pos-types';
+import { type DraftLine } from '@/components/pos/pos-types';
 import { addDraftLine, cryptoRandomKey } from '@/components/pos/pos-utils';
+import { usePosCatalogue } from '@/components/pos/use-menu-data';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,9 +16,6 @@ import { Input } from '@/components/ui/input';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import {
-  menuItems as menuItemsApi,
-  menuSections,
-  menus,
   modifierGroups as modifierGroupsApi,
   openTables,
   tableSessions,
@@ -70,7 +68,6 @@ export function OrderEntry({ session, sessionId }: Props) {
   const [showCloseConfirm, setShowCloseConfirm] = React.useState(false);
 
   const [detail, setDetail] = React.useState<SessionDetail | null>(null);
-  const [menuData, setMenuData] = React.useState<MenuData>(EMPTY_MENU);
   const [loadState, setLoadState] = React.useState<'loading' | 'ready' | 'error'>('loading');
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [selectedMenuId, setSelectedMenuId] = React.useState<string | null>(null);
@@ -87,13 +84,20 @@ export function OrderEntry({ session, sessionId }: Props) {
 
   const branchId = detail?.session.branchId ?? null;
 
+  /*
+   * 2026-08-18 — the waiter picks from the SAME catalogue the counter POS
+   * shows (`GET /products/sellable` via the POS-catalogue adapter), not the
+   * frozen legacy menu tree this screen used to read. Menu authoring moved
+   * to Products in D45/D60: a waiter reading `menus → sections → items` saw
+   * whatever legacy rows happened to survive the convergence, which on a
+   * fresh workspace is nothing at all.
+   */
+  const { data: menuData } = usePosCatalogue(session, branchId, 'DINE_IN');
+
   const load = React.useCallback(async () => {
     try {
       const fetched = await tableSessions.getDetail(session, sessionId);
       setDetail(fetched);
-      if (fetched.session.branchId && menuData === EMPTY_MENU) {
-        await loadMenus(fetched.session.branchId);
-      }
       setLoadState('ready');
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load session');
@@ -101,51 +105,6 @@ export function OrderEntry({ session, sessionId }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, sessionId]);
-
-  const loadMenus = React.useCallback(
-    async (branch: string) => {
-      const menuRows = await menus.list(session, branch, false).catch(() => []);
-      const active = menuRows.filter((m) => m.isActive);
-      const sections = await Promise.all(
-        active.map((m) => menuSections.list(session, m.id).catch(() => [])),
-      );
-      const sectionsByMenu = new Map<string, SectionView[]>();
-      const items = new Map<string, MenuItemView[]>();
-      const allSectionIds: string[] = [];
-      active.forEach((m, i) => {
-        const secs = (sections[i] ?? [])
-          .filter((s) => s.isActive)
-          .sort((a, b) => a.position - b.position);
-        sectionsByMenu.set(m.id, secs);
-        for (const s of secs) allSectionIds.push(s.id);
-      });
-      const itemLists = await Promise.all(
-        allSectionIds.map((sid) => menuItemsApi.list(session, sid, false).catch(() => [])),
-      );
-      allSectionIds.forEach((sid, i) => {
-        const rows = (itemLists[i] ?? [])
-          .filter((it) => it.isActive)
-          .sort((a, b) => a.position - b.position);
-        items.set(sid, rows);
-      });
-      const groupRows = await modifierGroupsApi
-        .list(session, false)
-        .catch(() => [] as ModifierGroupView[]);
-      const modifierGroupsById = new Map<string, ModifierGroupView>();
-      for (const g of groupRows) modifierGroupsById.set(g.id, g);
-      setMenuData({ menus: active, sectionsByMenu, itemsBySection: items, modifierGroupsById });
-      // Pick the first menu + section by default so the grid never starts empty.
-      if (active.length > 0) {
-        const first = active[0];
-        if (first) {
-          setSelectedMenuId((s) => s ?? first.id);
-          const firstSec = sectionsByMenu.get(first.id)?.[0];
-          if (firstSec) setSelectedSectionId((s) => s ?? firstSec.id);
-        }
-      }
-    },
-    [session],
-  );
 
   React.useEffect(() => {
     void load();
@@ -166,6 +125,16 @@ export function OrderEntry({ session, sessionId }: Props) {
     return () => clearInterval(t);
   }, [loadState, session, sessionId]);
 
+  // Default the chips to the first menu/section once the catalogue lands, so
+  // the grid never starts empty.
+  React.useEffect(() => {
+    const first = menuData.menus[0];
+    if (!first) return;
+    setSelectedMenuId((current) => current ?? first.id);
+    const firstSection = menuData.sectionsByMenu.get(first.id)?.[0];
+    if (firstSection) setSelectedSectionId((current) => current ?? firstSection.id);
+  }, [menuData]);
+
   const currentSections =
     selectedMenuId ? menuData.sectionsByMenu.get(selectedMenuId) ?? [] : [];
   const currentItems =
@@ -173,10 +142,14 @@ export function OrderEntry({ session, sessionId }: Props) {
 
   // ── Draft edits ────────────────────────────────────────────────────────
   const addSimpleItem = (item: MenuItemView) => {
-    if (item.modifierGroupIds.length > 0) {
+    // D46 — a Product with variants must open the customise dialog even with
+    // no modifier groups, or the waiter cannot choose the size.
+    const hasVariants = (item.variants ?? []).length > 0;
+    if (item.modifierGroupIds.length > 0 || hasVariants) {
       setModifierTarget(item);
       return;
     }
+    const isProductSource = item.catalogueSource === 'PRODUCT';
     // Merges into an identical existing line instead of stacking duplicate
     // rows (2026-08-18) — see draftLineMergeKey for the exact identity rule.
     setDraft((rows) =>
@@ -188,6 +161,8 @@ export function OrderEntry({ session, sessionId }: Props) {
         quantity: 1,
         specialInstructions: '',
         modifiers: [],
+        sourceKind: isProductSource ? 'PRODUCT' : 'MENU_ITEM',
+        ...(isProductSource ? { productId: item.id } : {}),
       }),
     );
   };
@@ -230,12 +205,26 @@ export function OrderEntry({ session, sessionId }: Props) {
       await tableSessions.submitRound(session, orderId, {
         idempotencyKey,
         channel: 'DINE_IN',
-        items: draft.map((r) => ({
-          menuItemId: r.menuItemId,
-          quantity: r.quantity,
-          specialInstructions: r.specialInstructions.trim() || undefined,
-          modifiers: r.modifiers.map((m) => ({ modifierOptionId: m.optionId })),
-        })),
+        // D46 — PRODUCT-sourced lines carry their own wire shape (the server
+        // resolves the variant and snapshots price/name); legacy MENU_ITEM
+        // lines keep the historic shape byte-for-byte.
+        items: draft.map((r) =>
+          r.sourceKind === 'PRODUCT'
+            ? {
+                sourceKind: 'PRODUCT' as const,
+                productId: r.productId!,
+                productVariantId: r.productVariantId,
+                quantity: r.quantity,
+                specialInstructions: r.specialInstructions.trim() || undefined,
+                modifiers: r.modifiers.map((m) => ({ modifierOptionId: m.optionId })),
+              }
+            : {
+                menuItemId: r.menuItemId,
+                quantity: r.quantity,
+                specialInstructions: r.specialInstructions.trim() || undefined,
+                modifiers: r.modifiers.map((m) => ({ modifierOptionId: m.optionId })),
+              },
+        ),
       });
       setDraft([]);
       setIdempotencyKey(cryptoRandomKey());

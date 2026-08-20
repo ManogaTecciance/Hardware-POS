@@ -393,6 +393,9 @@ export interface KitchenTicketView {
   createdAt: string;
 }
 
+/** D67 — KITCHEN devices are station-routed; CASHIER devices print bills. */
+export type PrinterRole = 'KITCHEN' | 'CASHIER';
+
 export interface KitchenPrinterView {
   id: string;
   branchId: string;
@@ -401,6 +404,10 @@ export interface KitchenPrinterView {
   kind: KitchenPrinterKind;
   address: string;
   isActive: boolean;
+  role: PrinterRole;
+  /** Characters per line: 48 = 80 mm paper, 32 = 58 mm. */
+  columns: number;
+  stationIds: string[];
 }
 
 // ── Takeaway ────────────────────────────────────────────────────────────────

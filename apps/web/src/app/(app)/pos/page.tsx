@@ -25,11 +25,15 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
  *     modal on mount (per Pilot Change 3 Section 1).
  *   * `?mode=takeaway` or `?mode=third-party` → the workspace opens
  *     straight into that mode.
- *   * `?mode=dine-in&sessionId=…` → still routes to the pre-existing
- *     `PosDineInWorkspace` (table-service session order-entry), because
- *     table service is a separate flow we preserve unchanged.
- *   * `?mode=dine-in` (no sessionId) → the counter workspace opens
- *     Dine-In counter mode (no table, immediate payment).
+ *   * `?mode=dine-in` → the waiter's table-service flow
+ *     (`PosDineInWorkspace`): pick a table or an open session, then order
+ *     entry. With `&sessionId=…` it opens that session directly.
+ *
+ *     2026-08-18 (PO): dine-in is a WAITER flow, not a counter one. It used
+ *     to fall through to the counter workspace when no session was named —
+ *     which assumed the guest was standing at the till paying immediately,
+ *     the opposite of table service. Items now go to the kitchen as the
+ *     waiter adds them and the bill is settled when they close the table.
  *   * `?mode=third-party&externalOrderId=…` → still routes to the
  *     `PosThirdPartyWorkspace` platform inspector for accepting inbound
  *     external orders. New Delivery-counter orders (composed here) use
@@ -81,7 +85,7 @@ export default function PosPage() {
           : null;
 
   // Deep-link exceptions that still route to the pre-existing screens.
-  if (mode === 'DINE_IN' && sessionId) {
+  if (mode === 'DINE_IN') {
     return (
       <PosDineInWorkspace
         session={session}

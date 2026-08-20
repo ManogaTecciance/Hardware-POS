@@ -25,7 +25,9 @@ describe('PosOrderTypeModal', () => {
     ]);
     // POSITIVE CONTROL: options carry hints so a screen reader user does
     // not have to guess what each mode means.
-    for (const label of ['at the counter', 'picks up', 'rider']) {
+    // Dine In is the WAITER flow since 2026-08-18 — the hint must say so,
+    // not describe a guest paying at the till.
+    for (const label of ['at a table', 'picks up', 'rider']) {
       expect(document.body.textContent).toMatch(new RegExp(label, 'i'));
     }
   });

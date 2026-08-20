@@ -29,6 +29,7 @@ export const NAV_ICON_NAMES = [
   'ListChecks',
   'Package',
   'ReceiptText',
+  'Printer',
   'Settings',
   'ShoppingCart',
   'Truck',
@@ -248,6 +249,19 @@ export const FOOD_SERVICE_NAVIGATION: readonly NavGroupSpec[] = [
         icon: 'BarChart3',
         permission: Permission.REPORT_READ,
         module: 'REPORTING',
+      },
+      {
+        /*
+         * D67 — every floor user picks their own kitchen/cashier printer
+         * here, so this entry is gated on the permission a WAITER actually
+         * holds (PLATFORM_PROFILE_READ), not on SETTINGS_MANAGE. The
+         * owner-only blocks inside the page are gated separately.
+         */
+        href: '/settings/printing',
+        label: 'Printing',
+        icon: 'Printer',
+        permission: Permission.PLATFORM_PROFILE_READ,
+        module: 'KITCHEN',
       },
       {
         href: '/settings',
