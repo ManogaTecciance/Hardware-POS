@@ -379,11 +379,13 @@ Reuse the print-job queue; this is what it exists for.
 | GET | `/kitchen/tickets?station=KITCHEN&status=PENDING` | KDS screen or print agent |
 | POST | `/print-jobs/:id/mark-printed` | already exists — reused |
 
-**Physical printing** is intentionally out of the backend's body: a small print-agent
-daemon on the venue LAN polls the endpoint above and drives ESC/POS printers, marking
-jobs printed. The backend contract (poll + ack) is fully defined by this phase; the
-agent is a separate deliverable. A browser-based KDS (kitchen display) works with
-zero extra backend work and is the recommended v1.
+**Physical printing** was intentionally out of the backend's body, on the assumption
+that a small print-agent daemon on the venue LAN would poll the endpoint above and
+drive ESC/POS printers. That daemon was built (D67) and withdrawn a day later
+(**D68**): the kitchen takes its tickets from the board, and the only thing that
+prints is the bill, which the cashier sends from the browser. The last line of this
+paragraph turned out to be the whole answer — "a browser-based KDS works with zero
+extra backend work and is the recommended v1".
 
 **Deliverables:** 1 migration (enum value + 2 nullable columns), kitchen module
 (feed endpoint + template), fire-transaction integration.
@@ -506,8 +508,9 @@ flow with tickets.
 
 - Reservations / waitlists; table merge & split-tab-by-seat billing (model fields
   `seat` already captured to enable it later); recipe/ingredient-level inventory;
-  happy-hour price schedules; the physical print-agent daemon (contract defined
-  here, implementation separate); the restaurant web/PWA front-end; KDS UI.
+  happy-hour price schedules; the restaurant web/PWA front-end. (The physical
+  print-agent daemon left this list, shipped as D67, and was withdrawn by D68 —
+  see §8.)
 
 ## 14. Risks and mitigations
 
