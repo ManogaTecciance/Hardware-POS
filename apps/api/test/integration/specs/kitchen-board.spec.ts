@@ -339,3 +339,155 @@ describe('D68 — the kitchen role reaches the board and nothing else', () => {
     expect(order.status).toBe(403);
   });
 });
+
+/**
+ * D70 — a waiter sees the sessions THEY opened, and no others.
+ *
+ * ## Why every case is a pair
+ *
+ * "Waiter A cannot see Waiter B's table" passes trivially against a build
+ * that returns nothing to anybody, so each refusal is asserted alongside the
+ * same waiter succeeding on their OWN session, through the same endpoint, in
+ * the same test. And each is asserted against a supervisor who still sees
+ * both — a scope that hid the floor from the cashier would be a worse bug
+ * than the one being fixed, and silent.
+ */
+describe('D70 — session visibility is scoped to the waiter', () => {
+  let waiterA: string;
+  let waiterB: string;
+  let sessionA: string;
+  let sessionB: string;
+  let cashier: string;
+
+  const tokenFor = (userId: string) =>
+    http.tokenFor({
+      userId,
+      tenantId: restaurant.tenantId,
+      role: 'CASHIER',
+      activeBranchId: branchId,
+    });
+
+  beforeEach(async () => {
+    const waiterRole = await prisma.role.findFirstOrThrow({
+      where: { tenantId: restaurant.tenantId, key: 'WAITER' },
+      select: { id: true },
+    });
+    const cashierRole = await prisma.role.findFirstOrThrow({
+      where: { tenantId: restaurant.tenantId, key: 'RESTAURANT_CASHIER' },
+      select: { id: true },
+    });
+    const mk = async (name: string, email: string, roleId: string) =>
+      (
+        await prisma.user.create({
+          data: { tenantId: restaurant.tenantId, name, email, role: 'CASHIER', roleId, branchId },
+        })
+      ).id;
+    waiterA = await mk('Waiter A', 'a@fixture.test', waiterRole.id);
+    waiterB = await mk('Waiter B', 'b@fixture.test', waiterRole.id);
+    cashier = await mk('Till', 'till@fixture.test', cashierRole.id);
+
+    const area = await prisma.diningArea.create({
+      data: { tenantId: restaurant.tenantId, branchId, name: 'Bar' },
+    });
+    const seat = async (code: string, waiterUserId: string) => {
+      const table = await prisma.restaurantTable.create({
+        data: { tenantId: restaurant.tenantId, branchId, areaId: area.id, code, capacity: 2 },
+      });
+      const res = await http.request<{ id: string }>(
+        'POST',
+        `/restaurant/branches/${branchId}/table-sessions`,
+        { token: tokenFor(waiterUserId), body: { tableId: table.id, waiterUserId } },
+      );
+      expect(res.status).toBe(201);
+      return res.data.id;
+    };
+    sessionA = await seat('B1', waiterA);
+    sessionB = await seat('B2', waiterB);
+  });
+
+  it('lists only the caller\'s own open sessions', async () => {
+    const forA = await http.request<{ id: string }[]>(
+      'GET',
+      `/restaurant/branches/${branchId}/open-sessions`,
+      { token: tokenFor(waiterA) },
+    );
+    // POSITIVE — A's own table is there…
+    expect(forA.data.map((s) => s.id)).toContain(sessionA);
+    // …NEGATIVE — and B's is not.
+    expect(forA.data.map((s) => s.id)).not.toContain(sessionB);
+
+    // The mirror image, so this is a per-caller scope and not a filter that
+    // happens to favour whoever asked first.
+    const forB = await http.request<{ id: string }[]>(
+      'GET',
+      `/restaurant/branches/${branchId}/open-sessions`,
+      { token: tokenFor(waiterB) },
+    );
+    expect(forB.data.map((s) => s.id)).toEqual([sessionB]);
+  });
+
+  it('still shows the whole floor to the cashier and the owner', async () => {
+    for (const token of [tokenFor(cashier), ownerToken()]) {
+      const res = await http.request<{ id: string }[]>(
+        'GET',
+        `/restaurant/branches/${branchId}/open-sessions`,
+        { token },
+      );
+      const ids = res.data.map((s) => s.id);
+      expect(ids).toContain(sessionA);
+      expect(ids).toContain(sessionB);
+    }
+  });
+
+  it('refuses to read another waiter\'s session by id, on every read route', async () => {
+    for (const path of [
+      `/restaurant/table-sessions/${sessionB}`,
+      `/restaurant/table-sessions/${sessionB}/detail`,
+    ]) {
+      const mine = path.replace(sessionB, sessionA);
+      // POSITIVE — the same route, the same token, A's own session: 200.
+      expect((await http.request('GET', mine, { token: tokenFor(waiterA) })).status).toBe(200);
+      // NEGATIVE — B's session: refused. 404 rather than 403, so the response
+      // does not confirm that the session exists and belongs to someone else.
+      expect((await http.request('GET', path, { token: tokenFor(waiterA) })).status).toBe(404);
+    }
+  });
+
+  it('refuses to WRITE to another waiter\'s session — hiding it is not enough', async () => {
+    // Ordering onto someone else's table, and closing it out from under them,
+    // are the two writes reachable by guessing an id.
+    expect(
+      (
+        await http.request('POST', `/restaurant/table-sessions/${sessionB}/orders`, {
+          token: tokenFor(waiterA),
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await http.request('POST', `/restaurant/table-sessions/${sessionB}/close`, {
+          token: tokenFor(waiterA),
+          body: { idempotencyKey: 'x1' },
+        })
+      ).status,
+    ).toBe(404);
+
+    // POSITIVE CONTROL — A can do both on their own table, so the refusals
+    // above are about ownership and not about the routes being broken.
+    expect(
+      (
+        await http.request('POST', `/restaurant/table-sessions/${sessionA}/orders`, {
+          token: tokenFor(waiterA),
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await http.request('POST', `/restaurant/table-sessions/${sessionA}/close`, {
+          token: tokenFor(waiterA),
+          body: { idempotencyKey: 'x2' },
+        })
+      ).status,
+    ).toBe(200);
+  });
+});

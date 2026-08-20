@@ -8,6 +8,7 @@ import { RequirePermissions } from '../../common/decorators/permissions.decorato
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
+import { PermissionResolver } from '../auth/permission-resolver.service';
 import { Permission } from '../auth/permissions';
 import {
   CloseSessionDto,
@@ -30,7 +31,23 @@ export class TableSessionsController {
   constructor(
     private readonly service: TableSessionsService,
     private readonly audit: AuditLogService,
+    private readonly permissions: PermissionResolver,
   ) {}
+
+  /**
+   * D70 — whose sessions this caller may touch.
+   *
+   * Returns null for a caller holding TABLE_SESSION_VIEW_ALL (owner, cashier,
+   * front desk) and their own id otherwise, which every session-addressed
+   * endpoint below passes straight through to the service. Resolved in ONE
+   * place on purpose: six endpoints reach a session, and a scope computed
+   * per-endpoint is a scope that will eventually be computed differently in
+   * one of them.
+   */
+  private async sessionScope(actor: AuthenticatedUser): Promise<string | null> {
+    const authority = await this.permissions.resolve(actor);
+    return authority.permissions.has(Permission.TABLE_SESSION_VIEW_ALL) ? null : actor.id;
+  }
 
   @Post('branches/:branchId/table-sessions')
   @HttpCode(HttpStatus.CREATED)
@@ -60,8 +77,12 @@ export class TableSessionsController {
 
   @Get('table-sessions/:sessionId')
   @RequirePermissions(Permission.TABLE_VIEW)
-  get(@TenantId() tenantId: string, @Param('sessionId') sessionId: string): Promise<TableSessionView> {
-    return this.service.getSession(tenantId, sessionId);
+  async get(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('sessionId') sessionId: string,
+  ): Promise<TableSessionView> {
+    return this.service.getSession(tenantId, sessionId, await this.sessionScope(actor));
   }
 
   /**
@@ -71,11 +92,12 @@ export class TableSessionsController {
    */
   @Get('branches/:branchId/open-sessions')
   @RequirePermissions(Permission.TABLE_VIEW)
-  listOpen(
+  async listOpen(
     @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
     @Param('branchId') branchId: string,
   ): Promise<OpenSessionSummary[]> {
-    return this.service.listOpenSessions(tenantId, branchId);
+    return this.service.listOpenSessions(tenantId, branchId, await this.sessionScope(actor));
   }
 
   /**
@@ -87,11 +109,12 @@ export class TableSessionsController {
    */
   @Get('table-sessions/:sessionId/detail')
   @RequirePermissions(Permission.TABLE_VIEW)
-  getDetail(
+  async getDetail(
     @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
     @Param('sessionId') sessionId: string,
   ): Promise<SessionDetailView> {
-    return this.service.getSessionDetail(tenantId, sessionId);
+    return this.service.getSessionDetail(tenantId, sessionId, await this.sessionScope(actor));
   }
 
   @Post('table-sessions/:sessionId/orders')
@@ -102,7 +125,12 @@ export class TableSessionsController {
     @CurrentUser() actor: AuthenticatedUser,
     @Param('sessionId') sessionId: string,
   ): Promise<OrderView> {
-    const order = await this.service.createOrder(tenantId, sessionId, RestaurantOrderChannel.DINE_IN);
+    const order = await this.service.createOrder(
+      tenantId,
+      sessionId,
+      RestaurantOrderChannel.DINE_IN,
+      await this.sessionScope(actor),
+    );
     await this.audit.record(tenantId, {
       userId: actor.id,
       action: 'RESTAURANT_ORDER_CREATED',
@@ -165,7 +193,13 @@ export class TableSessionsController {
     @Param('sessionId') sessionId: string,
     @Body() dto: CloseSessionDto,
   ) {
-    const result = await this.service.closeSession(tenantId, sessionId, dto, actor.id);
+    const result = await this.service.closeSession(
+      tenantId,
+      sessionId,
+      dto,
+      actor.id,
+      await this.sessionScope(actor),
+    );
     await this.audit.record(tenantId, {
       userId: actor.id,
       action: 'TABLE_SESSION_CLOSED',

@@ -291,7 +291,9 @@ function Picker({
           <div>
             <p className="text-sm font-semibold">Which table?</p>
             <p className="text-xs text-muted-foreground">
-              Seat a table to start a session, or carry on with one that is already open.
+              {/* D70 — "yours" is the honest word: the server only returns
+                  sessions this user opened, unless they supervise the floor. */}
+              Seat a table to start a session, or carry on with one of yours.
             </p>
           </div>
           <Button
@@ -319,7 +321,7 @@ function Picker({
             {open.length > 0 ? (
               <div>
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Open sessions
+                  Your open tables
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {open.map((s) => {

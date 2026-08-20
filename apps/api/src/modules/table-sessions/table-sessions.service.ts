@@ -180,11 +180,16 @@ export class TableSessionsService {
     });
   }
 
-  async getSession(tenantId: string, sessionId: string): Promise<TableSessionView> {
+  async getSession(
+    tenantId: string,
+    sessionId: string,
+    onlyWaiterUserId: string | null = null,
+  ): Promise<TableSessionView> {
     const row = await this.prisma.tableSession.findFirst({
       where: { id: sessionId, tenantId },
     });
     if (!row) throw new SessionNotFoundError();
+    assertOwnedBy(row.waiterUserId, onlyWaiterUserId);
     return this.sessionToView(row);
   }
 
@@ -194,9 +199,27 @@ export class TableSessionsService {
    * or items — the summary is small and cacheable; the order-entry screen
    * calls `getSessionDetail` for the full tree.
    */
-  async listOpenSessions(tenantId: string, branchId: string): Promise<OpenSessionSummary[]> {
+  /**
+   * D70 — open sessions on the branch.
+   *
+   * `onlyWaiterUserId` is the caller's own id when they lack
+   * TABLE_SESSION_VIEW_ALL, and null when they hold it. The narrowing is a
+   * WHERE clause, not a filter over the result: a waiter must not be able to
+   * read another waiter's session number, guest count or order id out of a
+   * response the client then hides.
+   */
+  async listOpenSessions(
+    tenantId: string,
+    branchId: string,
+    onlyWaiterUserId: string | null = null,
+  ): Promise<OpenSessionSummary[]> {
     const rows = await this.prisma.tableSession.findMany({
-      where: { tenantId, branchId, status: TableSessionStatus.OPEN },
+      where: {
+        tenantId,
+        branchId,
+        status: TableSessionStatus.OPEN,
+        ...(onlyWaiterUserId ? { waiterUserId: onlyWaiterUserId } : {}),
+      },
       include: {
         orders: {
           where: { status: { not: 'CANCELLED' } },
@@ -220,7 +243,11 @@ export class TableSessionsService {
    * precision preserved). Voided items are included so the running bill
    * can render them struck through.
    */
-  async getSessionDetail(tenantId: string, sessionId: string): Promise<SessionDetailView> {
+  async getSessionDetail(
+    tenantId: string,
+    sessionId: string,
+    onlyWaiterUserId: string | null = null,
+  ): Promise<SessionDetailView> {
     const row = await this.prisma.tableSession.findFirst({
       where: { id: sessionId, tenantId },
       include: {
@@ -241,6 +268,7 @@ export class TableSessionsService {
       },
     });
     if (!row) throw new SessionNotFoundError();
+    assertOwnedBy(row.waiterUserId, onlyWaiterUserId);
     return {
       session: this.sessionToView(row),
       orders: row.orders.map((order) => ({
@@ -282,13 +310,15 @@ export class TableSessionsService {
     tenantId: string,
     sessionId: string,
     channel: RestaurantOrderChannel = RestaurantOrderChannel.DINE_IN,
+    onlyWaiterUserId: string | null = null,
   ): Promise<OrderView> {
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.tableSession.findFirst({
         where: { id: sessionId, tenantId },
-        select: { id: true, branchId: true, status: true },
+        select: { id: true, branchId: true, status: true, waiterUserId: true },
       });
       if (!session) throw new SessionNotFoundError();
+      assertOwnedBy(session.waiterUserId, onlyWaiterUserId);
       if (session.status !== TableSessionStatus.OPEN) throw new SessionNotOpenError();
 
       const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
@@ -467,6 +497,7 @@ export class TableSessionsService {
     sessionId: string,
     dto: CloseSessionDto,
     actorUserId: string,
+    onlyWaiterUserId: string | null = null,
   ): Promise<{
     session: TableSessionView;
     saleId: string;
@@ -489,6 +520,7 @@ export class TableSessionsService {
         },
       });
       if (!session) throw new SessionNotFoundError();
+      assertOwnedBy(session.waiterUserId, onlyWaiterUserId);
       if (session.status === TableSessionStatus.CLOSED) throw new SessionAlreadyClosedError();
 
       // Sum all non-voided items. Money is Decimal(12,2); use Prisma.Decimal
@@ -682,4 +714,22 @@ export class TableSessionsService {
       itemIds: row.items.map((i) => i.id),
     };
   }
+}
+
+/**
+ * D70 — refuse a session that belongs to a different waiter.
+ *
+ * `onlyWaiterUserId` is null for a caller holding TABLE_SESSION_VIEW_ALL, in
+ * which case nothing is refused. Otherwise the session must be theirs — and
+ * an UNCLAIMED session (waiterUserId null, e.g. the synthetic walk-in table
+ * behind counter and takeaway orders) is refused too: it is nobody's, and
+ * "nobody's" must not read as "everybody's".
+ *
+ * Raised as not-found rather than forbidden, deliberately: a 403 on a
+ * specific id confirms the session exists and that somebody else has it,
+ * which is exactly the fact a waiter is not entitled to.
+ */
+function assertOwnedBy(sessionWaiterUserId: string | null, onlyWaiterUserId: string | null): void {
+  if (onlyWaiterUserId === null) return;
+  if (sessionWaiterUserId !== onlyWaiterUserId) throw new SessionNotFoundError();
 }

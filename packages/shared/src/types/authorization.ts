@@ -112,6 +112,21 @@ export const Permission = {
   // must fail closed. A key that is known-but-unused is inert; a key that is
   // unknown is a hole.
   TABLE_VIEW: 'table:view',
+  /**
+   * D70 — see EVERY open session on the branch, not only your own.
+   *
+   * `TABLE_VIEW` alone answers "may this person look at the floor". It does
+   * not answer "whose tables", and a waiter should be looking at their own:
+   * another waiter's party is somebody else's responsibility, and a floor
+   * list that mixes them is how a table gets served twice or not at all.
+   *
+   * Expressed as the WIDER grant rather than as a `_OWN` narrowing, so the
+   * restrictive case is the default. A role that forgets to mention this
+   * permission sees less than it might; the reverse — a role that forgets to
+   * mention a narrowing — sees everything, which is the failure that must
+   * not be reachable by omission.
+   */
+  TABLE_SESSION_VIEW_ALL: 'table-session:view:all',
   TABLE_OPEN: 'table:open',
   TABLE_TRANSFER: 'table:transfer',
   TABLE_MERGE: 'table:merge',

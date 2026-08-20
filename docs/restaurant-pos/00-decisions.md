@@ -2371,6 +2371,43 @@ optional and the server does not default it to the caller, so the kitchen
 board showed tickets with no name on them and the close path fell back to
 whoever pressed the button.
 
+### D70 — a waiter sees their own tables
+
+PO decision, 2026-08-21. Waiter A must not see the sessions Waiter B is
+serving: those are somebody else's responsibility, and a floor list that
+mixes them is how a table gets served twice or not at all.
+
+**Expressed as a permission, granted as the WIDER case.**
+`TABLE_SESSION_VIEW_ALL` means "every open session on the branch, not only
+your own". Owner and Admin hold it through the full catalogue; the
+restaurant Cashier holds it because the till settles whichever table asks;
+the hotel Receptionist holds it because the desk IS the whole floor's view.
+The Waiter template does not.
+
+The direction matters. A `_OWN` narrowing would make the permissive case the
+default, so a role that forgot to mention it would see everything — the
+failure that must not be reachable by omission. This way a forgetful role
+sees less than it might, which is recoverable.
+
+**Enforced on the server, at every route that reaches a session.** Hiding
+the list would have been cosmetic: the session id is in a URL, and both
+"order onto this table" and "close this table" are addressable by it. So the
+list narrows in its WHERE clause — a waiter must not be able to read another
+waiter's guest count out of a response the client then hides — and `get`,
+`detail`, `createOrder` and `close` each refuse a session that is not
+theirs.
+
+**Refused as not-found, not forbidden.** A 403 on a specific id confirms
+that the session exists and that somebody else has it, which is precisely
+the fact being withheld.
+
+**An unclaimed session is refused too.** `waiterUserId` is nullable — the
+synthetic walk-in table behind counter and takeaway orders has no waiter —
+and "nobody's" must not read as "everybody's". The POS records the waiter
+when it seats a table, so a dine-in session always has one.
+
+Frontend copy follows the rule rather than restating it: "Your open tables".
+
 ---
 
 ## Open decisions

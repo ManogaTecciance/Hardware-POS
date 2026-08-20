@@ -123,6 +123,11 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       // two places where a waiter's mistake becomes someone else's loss — they
       // belong to whoever is accountable for the shift.
       //
+      // D70, deliberately absent: TABLE_SESSION_VIEW_ALL. A waiter sees the
+      // sessions THEY opened. Another waiter's party is somebody else's
+      // responsibility, and a floor list that mixes them is how a table gets
+      // served twice or not at all.
+      //
       // Also deliberately absent: KOT_VIEW. It is the permission the Kitchen
       // rail entry is gated on, and a waiter has no business on the kitchen
       // display — they send orders to it, they do not work it. Sending is
@@ -179,6 +184,9 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.BILL_VIEW,
       Permission.BILL_SPLIT,
       Permission.PAYMENT_COLLECT,
+      // D70 — the till settles whichever table asks for the bill, so the
+      // cashier sees every open session. The waiter deliberately does not.
+      Permission.TABLE_SESSION_VIEW_ALL,
       // D47: the cashier often doubles as the host answering the phone.
       Permission.RESERVATION_VIEW,
       Permission.RESERVATION_CREATE,
@@ -223,6 +231,8 @@ export const HOTEL_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       // Bills settle at the desk on the way out.
       Permission.BILL_VIEW,
       Permission.PAYMENT_COLLECT,
+      // D70 — the desk is the whole floor's view by definition.
+      Permission.TABLE_SESSION_VIEW_ALL,
       // Deliberately absent: everything kitchen-facing (KOT_VIEW), order
       // authoring, voids, transfers, reports and configuration — the desk
       // neither works the floor nor runs the shift.
