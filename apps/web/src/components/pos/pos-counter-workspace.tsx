@@ -15,6 +15,7 @@ import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
 
 import { CustomerCapturePopup, type ChosenCustomer } from './counter/customer-capture-popup';
+import { TableBillSheet } from './dine-in/table-bill-sheet';
 import { TableSessionPanel, type ActiveTableSession } from './dine-in/table-session-panel';
 import { ItemDiscountDialog, type LineDiscount } from './counter/item-discount-dialog';
 import { OrderCompletionScreen, type CompletionSummary } from './counter/order-completion-screen';
@@ -75,6 +76,12 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
    * one role this flow exists for looking at a disabled button.
    */
   const canSendToKitchen = hasPermission(Permission.ORDER_SEND_TO_KITCHEN);
+  /*
+   * D71 — the waiter divides the bill because the waiter is the one the
+   * guests are talking to. BILL_SPLIT allocates shares; it does not take
+   * money, so a role can split four ways and still not settle any of them.
+   */
+  const canSplitBill = hasPermission(Permission.BILL_SPLIT);
   const canDiscount = hasPermission(Permission.DISCOUNT_APPROVE);
   const discountLimit = discountLimitFor(session.user.role);
 
@@ -84,11 +91,14 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const [tableSession, setTableSession] = React.useState<ActiveTableSession | null>(null);
   const [roundsSent, setRoundsSent] = React.useState(0);
   const [sending, setSending] = React.useState(false);
-  const [closingSession, setClosingSession] = React.useState(false);
   const [dineInError, setDineInError] = React.useState<string | null>(null);
-  const [closedBill, setClosedBill] = React.useState<{ saleId: string; table: string } | null>(
-    null,
-  );
+  /** D71 — the bill sheet: review, split, close. */
+  const [billOpen, setBillOpen] = React.useState(false);
+  const [closedBill, setClosedBill] = React.useState<{
+    saleId: string;
+    table: string;
+    splitCount: number;
+  } | null>(null);
 
   // D45: Restaurant / Cafe / Bakery tenants read the new POS catalogue
   // endpoint (Products the wizard published as POS-sellable). Retail
@@ -290,35 +300,6 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
     }
   };
 
-  /** Guests are finished: close the table, which raises the bill. */
-  const closeSession = async () => {
-    if (!tableSession || closingSession) return;
-    if (
-      draft.length > 0 &&
-      !window.confirm(
-        'The cart still has items that were never sent to the kitchen. Close the session anyway?',
-      )
-    ) {
-      return;
-    }
-    setClosingSession(true);
-    setDineInError(null);
-    try {
-      const result = await tableSessions.close(session, tableSession.id, {
-        idempotencyKey: cryptoRandomKey(),
-      });
-      setClosedBill({ saleId: result.saleId, table: tableSession.tableLabel });
-      setTableSession(null);
-      setRoundsSent(0);
-      setDraft([]);
-      setIdempotencyKey(cryptoRandomKey());
-    } catch (err) {
-      setDineInError(err instanceof Error ? err.message : 'Could not close the session');
-    } finally {
-      setClosingSession(false);
-    }
-  };
-
   // ── Stage transitions ──────────────────────────────────────────────────
   const openCustomer = () => {
     if (draft.length === 0 || !canPlaceTakeaway) return;
@@ -413,8 +394,7 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
               setClosedBill(null);
               setDineInError(null);
             }}
-            onCloseSession={() => void closeSession()}
-            closing={closingSession}
+            onOpenBill={() => setBillOpen(true)}
             roundsSent={roundsSent}
           />
           {dineInError ? (
@@ -426,8 +406,11 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
           {closedBill ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-success/40 bg-success-soft/50 p-3 text-sm">
               <span>
-                {closedBill.table} closed. The bill is ready for the cashier to settle and
-                print.
+                {closedBill.table} closed
+                {closedBill.splitCount > 1
+                  ? ` into ${closedBill.splitCount} bills`
+                  : ''}
+                . Ready for the cashier to settle and print.
               </span>
               <button
                 type="button"
@@ -554,6 +537,28 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
           total={total}
         />
       </Sheet>
+
+      {/* D71 — the waiter's bill: the full order, the real totals, and the
+          split, without leaving the screen they take orders on. */}
+      {isDineIn && billOpen && tableSession ? (
+        <TableBillSheet
+          session={session}
+          sessionId={tableSession.id}
+          tableLabel={tableSession.tableLabel}
+          hasUnsentDraft={draft.length > 0}
+          canSplit={canSplitBill}
+          onClose={() => setBillOpen(false)}
+          onClosed={({ saleId, splitCount, warning }) => {
+            setBillOpen(false);
+            setClosedBill({ saleId, table: tableSession.tableLabel, splitCount });
+            setDineInError(warning ?? null);
+            setTableSession(null);
+            setRoundsSent(0);
+            setDraft([]);
+            setIdempotencyKey(cryptoRandomKey());
+          }}
+        />
+      ) : null}
 
       {modifierTarget ? (
         <ModifierPickerDialog

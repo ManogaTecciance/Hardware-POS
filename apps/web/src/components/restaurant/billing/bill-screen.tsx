@@ -23,6 +23,8 @@ import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import { getCachedDocumentProfile } from '@/lib/document-template-service';
 import { printSplitBill, printTableBill } from '@/lib/receipt-print';
+
+import { ItemSplitAssigner } from './item-split-assigner';
 import { getActiveCurrency } from '@/lib/tenant-money';
 import type { BillLineItem, BillView, PaymentMethod } from '@/lib/restaurant/types';
 
@@ -791,21 +793,12 @@ function trimQuantity(q: string): string {
   return String(Number(q));
 }
 
-interface DraftSplit {
-  key: string;
-  label: string;
-  /** orderItemId → assigned quantity for this split. */
-  assigned: Map<string, number>;
-}
-
 /**
  * D51 — split the bill by what each person ate.
  *
- * Interaction: pick whose bill you are building (the chips), then add lines to
- * it. A line with several units can be shared — the stepper moves one unit at
- * a time — which is what makes "a round of three beers, one each" expressible.
- * Save stays disabled until every unit is assigned, because the server refuses
- * a partial division: the shares have to sum to the bill total exactly.
+ * D71 moved the assignment surface into `ItemSplitAssigner` so the waiter can
+ * do this at the table through the identical control. What remains here is
+ * the cashier's half: an existing Sale, split in place.
  */
 function ItemSplitDialog({
   bill,
@@ -818,97 +811,8 @@ function ItemSplitDialog({
   onSaved: () => Promise<void>;
   session: Session;
 }) {
-  const [splits, setSplits] = React.useState<DraftSplit[]>(() => [
-    { key: cryptoRandomKey(), label: 'Guest 1', assigned: new Map() },
-    { key: cryptoRandomKey(), label: 'Guest 2', assigned: new Map() },
-  ]);
-  const [activeKey, setActiveKey] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-
-  const active = splits.find((s) => s.key === activeKey) ?? splits[0];
-  React.useEffect(() => {
-    if (!activeKey && splits[0]) setActiveKey(splits[0].key);
-  }, [activeKey, splits]);
-
-  const assignedTotal = (itemId: string) =>
-    splits.reduce((n, s) => n + (s.assigned.get(itemId) ?? 0), 0);
-  const remainingOf = (item: BillLineItem) =>
-    Number(item.quantity) - assignedTotal(item.orderItemId);
-  const unassignedUnits = bill.items.reduce((n, it) => n + remainingOf(it), 0);
-
-  const splitSubtotal = (split: DraftSplit) =>
-    bill.items.reduce((sum, it) => {
-      const qty = split.assigned.get(it.orderItemId) ?? 0;
-      return sum + qty * Number(it.unitPrice);
-    }, 0);
-
-  const mutateActive = (fn: (m: Map<string, number>) => void) => {
-    if (!active) return;
-    setSplits((prev) =>
-      prev.map((s) => {
-        if (s.key !== active.key) return s;
-        const next = new Map(s.assigned);
-        fn(next);
-        return { ...s, assigned: next };
-      }),
-    );
-  };
-
-  const add = (item: BillLineItem, units: number) => {
-    const room = remainingOf(item);
-    const step = Math.min(units, room);
-    if (step <= 0) return;
-    mutateActive((m) => m.set(item.orderItemId, (m.get(item.orderItemId) ?? 0) + step));
-  };
-  const remove = (item: BillLineItem, units: number) => {
-    mutateActive((m) => {
-      const cur = m.get(item.orderItemId) ?? 0;
-      const next = Math.max(0, cur - units);
-      if (next === 0) m.delete(item.orderItemId);
-      else m.set(item.orderItemId, next);
-    });
-  };
-
-  const addSplit = () =>
-    setSplits((prev) => {
-      const next = [
-        ...prev,
-        { key: cryptoRandomKey(), label: `Guest ${prev.length + 1}`, assigned: new Map() },
-      ];
-      return next;
-    });
-
-  const removeSplit = (key: string) =>
-    setSplits((prev) => {
-      const next = prev.filter((s) => s.key !== key);
-      if (key === activeKey) setActiveKey(next[0]?.key ?? null);
-      return next;
-    });
-
-  const nonEmpty = splits.filter((s) => s.assigned.size > 0);
-  const valid = unassignedUnits === 0 && nonEmpty.length > 0;
-
-  const submit = async () => {
-    if (!valid || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await billing.splitByItems(session, bill.saleId, {
-        splits: nonEmpty.map((s) => ({
-          label: s.label.trim() || undefined,
-          items: [...s.assigned.entries()].map(([orderItemId, quantity]) => ({
-            orderItemId,
-            quantity,
-          })),
-        })),
-      });
-      await onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to split the bill');
-      setSaving(false);
-    }
-  };
 
   return (
     <Dialog
@@ -917,152 +821,24 @@ function ItemSplitDialog({
       title="Split by item"
       description="Pick whose bill you are building, then add what they had. Every item must be assigned."
       className="sm:max-w-2xl"
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void submit()} isLoading={saving} disabled={!valid}>
-            Create {nonEmpty.length || ''} bill{nonEmpty.length === 1 ? '' : 's'}
-          </Button>
-        </>
-      }
     >
-      <div className="space-y-4">
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-
-        {/* Whose bill am I building? */}
-        <div className="flex flex-wrap items-center gap-2">
-          {splits.map((s) => {
-            const isActive = s.key === active?.key;
-            return (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => setActiveKey(s.key)}
-                className={
-                  'flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm ' +
-                  (isActive ? 'border-primary bg-primary/10 font-medium' : 'border-border')
-                }
-              >
-                <span>{s.label}</span>
-                <span className="text-xs text-muted-foreground">
-                  {formatMoney(splitSubtotal(s).toFixed(2))}
-                </span>
-              </button>
-            );
-          })}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={addSplit}
-            leftIcon={<Plus className="h-4 w-4" />}
-          >
-            Add guest
-          </Button>
-        </div>
-
-        {active ? (
-          <div className="flex items-center gap-2">
-            <Input
-              value={active.label}
-              aria-label="Guest name"
-              onChange={(e) =>
-                setSplits((prev) =>
-                  prev.map((s) => (s.key === active.key ? { ...s, label: e.target.value } : s)),
-                )
-              }
-              placeholder="Name on this bill"
-            />
-            {splits.length > 1 ? (
-              <Button
-                size="icon-md"
-                variant="ghost"
-                aria-label={`Remove ${active.label}`}
-                onClick={() => removeSplit(active.key)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* The lines */}
-        <div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
-          {bill.items.map((it) => {
-            const mine = active?.assigned.get(it.orderItemId) ?? 0;
-            const left = remainingOf(it);
-            const others = assignedTotal(it.orderItemId) - mine;
-            return (
-              <div
-                key={it.orderItemId}
-                className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-sm hover:bg-surface-muted"
-              >
-                <div className="min-w-0">
-                  <p className="truncate">
-                    {it.name}
-                    {it.variantName ? (
-                      <span className="ml-1 text-xs text-muted-foreground">{it.variantName}</span>
-                    ) : null}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatMoney(it.unitPrice)} each · {trimQuantity(it.quantity)} total
-                    {others > 0 ? ` · ${trimQuantity(String(others))} with others` : ''}
-                    {left > 0 ? (
-                      <span className="text-warning">
-                        {' '}
-                        · {trimQuantity(String(left))} unassigned
-                      </span>
-                    ) : null}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`Remove one ${it.name}`}
-                    disabled={mine <= 0}
-                    onClick={() => remove(it, 1)}
-                  >
-                    <Minus className="h-4 w-4" />
-                  </Button>
-                  <span className="w-6 text-center tabular-nums">{trimQuantity(String(mine))}</span>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`Add one ${it.name}`}
-                    disabled={left <= 0}
-                    onClick={() => add(it, 1)}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center justify-between text-sm">
-          <span className={unassignedUnits > 0 ? 'text-warning' : 'text-success'}>
-            {unassignedUnits > 0
-              ? `${trimQuantity(String(unassignedUnits))} item${unassignedUnits === 1 ? '' : 's'} still unassigned`
-              : 'Everything assigned'}
-          </span>
-          {unassignedUnits > 0 && active ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => bill.items.forEach((it) => add(it, remainingOf(it)))}
-            >
-              Assign rest to {active.label}
-            </Button>
-          ) : null}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Service charge and other bill-level amounts are shared across the new bills in proportion
-          to what each covers.
-        </p>
-      </div>
+      <ItemSplitAssigner
+        items={bill.items}
+        busy={saving}
+        error={error}
+        onCancel={onClose}
+        onSubmit={async (splits) => {
+          setSaving(true);
+          setError(null);
+          try {
+            await billing.splitByItems(session, bill.saleId, { splits });
+            await onSaved();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to split the bill');
+            setSaving(false);
+          }
+        }}
+      />
     </Dialog>
   );
 }

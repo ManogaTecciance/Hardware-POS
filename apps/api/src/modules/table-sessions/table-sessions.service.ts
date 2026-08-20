@@ -88,6 +88,38 @@ export interface OpenSessionSummary extends TableSessionView {
  * `/detail` route rather than mutating the existing `getSession` shape so
  * existing consumers (spec/integration harness) stay stable.
  */
+/**
+ * D71 — the running bill for a session that has NOT closed.
+ *
+ * The waiter is the one standing at the table when the guests ask "what do
+ * we owe", so they need the same numbers the cashier will see, before the
+ * close creates them. Priced by `computeRestaurantTotals` — the SAME
+ * function the close uses (D52/D59) — so the paper the guests are shown and
+ * the Sale written a minute later cannot disagree.
+ *
+ * `orderItemId` is the RestaurantOrderItem id, which is exactly what
+ * `BillingService.splitByItems` assigns against. That is why a split
+ * composed at the table survives the close unchanged.
+ */
+export interface SessionBillPreview {
+  sessionId: string;
+  items: {
+    orderItemId: string;
+    name: string;
+    variantName: string | null;
+    /** Unit price INCLUDING snapshotted modifier deltas, as the bill shows it. */
+    unitPrice: string;
+    quantity: string;
+    lineTotal: string;
+    roundNumber: number | null;
+  }[];
+  subtotal: string;
+  serviceChargeAmount: string;
+  packagingCharge: string;
+  taxAmount: string;
+  total: string;
+}
+
 export interface SessionDetailView {
   session: TableSessionView;
   orders: {
@@ -98,6 +130,8 @@ export interface SessionDetailView {
         id: string;
         menuItemId: string;
         menuItemName: string;
+        /** D71 — "Medium" vs "Large" is what a guest is being charged for. */
+        variantName: string | null;
         unitPrice: string;
         modifierTotal: string;
         quantity: string;
@@ -200,6 +234,85 @@ export class TableSessionsService {
    * calls `getSessionDetail` for the full tree.
    */
   /**
+   * D71 — the running bill, for the waiter standing at the table.
+   *
+   * Reads the same rows the close will read (non-voided items across every
+   * order on the session) and prices them with the same calculator, so this
+   * is a preview of the real number rather than a second opinion about it.
+   * Nothing is written; the session stays open.
+   */
+  async previewBill(
+    tenantId: string,
+    sessionId: string,
+    onlyWaiterUserId: string | null = null,
+  ): Promise<SessionBillPreview> {
+    const session = await this.prisma.tableSession.findFirst({
+      where: { id: sessionId, tenantId },
+      include: {
+        orders: {
+          include: {
+            items: {
+              where: { status: { not: RestaurantOrderItemStatus.VOIDED } },
+              orderBy: { createdAt: 'asc' },
+              include: { round: { select: { roundNumber: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!session) throw new SessionNotFoundError();
+    assertOwnedBy(session.waiterUserId, onlyWaiterUserId);
+
+    const items = session.orders.flatMap((order) => order.items);
+    let subtotal = new Prisma.Decimal(0);
+    for (const item of items) {
+      subtotal = subtotal.plus(item.unitPrice.plus(item.modifierTotal).mul(item.quantity));
+    }
+
+    const config = await this.prisma.restaurantBranchConfig.findUnique({
+      where: { branchId: session.branchId },
+      select: {
+        serviceChargePercent: true,
+        serviceChargeChannels: true,
+        serviceChargeTaxable: true,
+        packagingChargeAmount: true,
+        taxRatePercent: true,
+      },
+    });
+    const appSettings = this.settings.getSettings(tenantId);
+    const totals = computeRestaurantTotals(subtotal, RestaurantOrderChannel.DINE_IN, {
+      serviceChargePercent: config?.serviceChargePercent ?? new Prisma.Decimal(0),
+      serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
+      serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
+      packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
+      taxRatePercent:
+        config?.taxRatePercent != null
+          ? config.taxRatePercent.toNumber()
+          : appSettings.taxRatePercent,
+    });
+
+    return {
+      sessionId: session.id,
+      items: items.map((item) => ({
+        orderItemId: item.id,
+        name: item.menuItemName,
+        variantName: item.variantNameSnapshot,
+        // Modifiers are folded into the unit price, exactly as BillView does
+        // it — the two surfaces show a guest the same number for a line.
+        unitPrice: item.unitPrice.plus(item.modifierTotal).toFixed(2),
+        quantity: item.quantity.toFixed(3),
+        lineTotal: item.unitPrice.plus(item.modifierTotal).mul(item.quantity).toFixed(2),
+        roundNumber: item.round?.roundNumber ?? null,
+      })),
+      subtotal: totals.subtotal.toFixed(2),
+      serviceChargeAmount: totals.serviceChargeAmount.toFixed(2),
+      packagingCharge: totals.packagingCharge.toFixed(2),
+      taxAmount: totals.taxAmount.toFixed(2),
+      total: totals.total.toFixed(2),
+    };
+  }
+
+  /**
    * D70 — open sessions on the branch.
    *
    * `onlyWaiterUserId` is the caller's own id when they lack
@@ -286,6 +399,7 @@ export class TableSessionsService {
             id: item.id,
             menuItemId: item.menuItemId,
             menuItemName: item.menuItemName,
+            variantName: item.variantNameSnapshot,
             unitPrice: item.unitPrice.toFixed(2),
             modifierTotal: item.modifierTotal.toFixed(2),
             quantity: item.quantity.toFixed(3),

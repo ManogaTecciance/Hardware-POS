@@ -76,8 +76,7 @@ const panel = (active: ActiveTableSession | null, onPick = vi.fn()) =>
       branchId="br_1"
       active={active}
       onPick={onPick}
-      onCloseSession={vi.fn()}
-      closing={false}
+      onOpenBill={vi.fn()}
       roundsSent={0}
     />,
   );
@@ -219,7 +218,7 @@ describe('picking a table', () => {
 
 describe('an active session', () => {
   it('replaces the picker with a strip that can close the session', async () => {
-    const onCloseSession = vi.fn();
+    const onOpenBill = vi.fn();
     render(
       <TableSessionPanel
         session={session}
@@ -233,8 +232,7 @@ describe('an active session', () => {
           orderId: 'ord_1',
         }}
         onPick={vi.fn()}
-        onCloseSession={onCloseSession}
-        closing={false}
+        onOpenBill={onOpenBill}
         roundsSent={2}
       />,
     );
@@ -251,8 +249,11 @@ describe('an active session', () => {
     // NEGATIVE — the picker is gone, so this is a swap and not an addition.
     expect(screen.queryByText(/Which table\?/)).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /Close session/ }));
-    expect(onCloseSession).toHaveBeenCalledTimes(1);
+    // D71 — one door to the money. The strip opens the bill sheet; it no
+    // longer closes the session directly, because reviewing and splitting
+    // happen before the close and the waiter must see both first.
+    fireEvent.click(screen.getByRole('button', { name: 'Bill' }));
+    expect(onOpenBill).toHaveBeenCalledTimes(1);
   });
 
   it('re-opens the picker on demand and collapses it again on a new pick', async () => {
@@ -270,8 +271,7 @@ describe('an active session', () => {
           orderId: 'ord_1',
         }}
         onPick={onPick}
-        onCloseSession={vi.fn()}
-        closing={false}
+        onOpenBill={vi.fn()}
         roundsSent={2}
       />,
     );

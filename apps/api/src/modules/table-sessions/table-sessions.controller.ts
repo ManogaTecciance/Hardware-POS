@@ -19,6 +19,7 @@ import {
 import {
   OpenSessionSummary,
   OrderView,
+  SessionBillPreview,
   RoundView,
   SessionDetailView,
   TableSessionView,
@@ -115,6 +116,23 @@ export class TableSessionsController {
     @Param('sessionId') sessionId: string,
   ): Promise<SessionDetailView> {
     return this.service.getSessionDetail(tenantId, sessionId, await this.sessionScope(actor));
+  }
+
+  /**
+   * D71 — the running bill for an OPEN session.
+   *
+   * BILL_VIEW, not BILL_SPLIT: reading what a table owes is what a waiter
+   * does every time a guest asks. Scoped by D70 like every other
+   * session-addressed route, so a waiter cannot price somebody else's table.
+   */
+  @Get('table-sessions/:sessionId/bill-preview')
+  @RequirePermissions(Permission.BILL_VIEW)
+  async billPreview(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('sessionId') sessionId: string,
+  ): Promise<SessionBillPreview> {
+    return this.service.previewBill(tenantId, sessionId, await this.sessionScope(actor));
   }
 
   @Post('table-sessions/:sessionId/orders')

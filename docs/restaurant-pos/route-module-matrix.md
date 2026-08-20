@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 279
-- Module-guarded routes: 192
+- Total routes: 280
+- Module-guarded routes: 193
 - Ungated routes: 87
 
 ## How to read the Guard column
@@ -414,6 +414,7 @@ LEGACY `/restaurant/menus…` reads keep their MENU_MANAGEMENT gate unchanged.
 | POST | `/restaurant/branches/:branchId/table-sessions` | TABLE_MANAGEMENT | ENFORCED | table:open |
 | GET | `/restaurant/branches/:branchId/open-sessions` | TABLE_MANAGEMENT | ENFORCED | table:view |
 | GET | `/restaurant/table-sessions/:sessionId` | TABLE_MANAGEMENT | ENFORCED | table:view |
+| GET | `/restaurant/table-sessions/:sessionId/bill-preview` | TABLE_MANAGEMENT | ENFORCED | bill:view |
 | GET | `/restaurant/table-sessions/:sessionId/detail` | TABLE_MANAGEMENT | ENFORCED | table:view |
 | POST | `/restaurant/table-sessions/:sessionId/orders` | TABLE_MANAGEMENT | ENFORCED | order:create |
 | POST | `/restaurant/orders/:orderId/rounds` | TABLE_MANAGEMENT | ENFORCED | order:send-to-kitchen |

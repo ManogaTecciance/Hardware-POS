@@ -354,6 +354,8 @@ export interface SessionDetailItem {
   id: string;
   menuItemId: string;
   menuItemName: string;
+  /** D71 — "Medium" vs "Large" is what a guest is being charged for. */
+  variantName: string | null;
   unitPrice: string;
   modifierTotal: string;
   quantity: string;
@@ -371,6 +373,25 @@ export interface SessionDetail {
       items: SessionDetailItem[];
     }[];
   }[];
+}
+
+/** D71 — the running bill for a session that has not closed yet. */
+export interface SessionBillPreview {
+  sessionId: string;
+  items: {
+    orderItemId: string;
+    name: string;
+    variantName: string | null;
+    unitPrice: string;
+    quantity: string;
+    lineTotal: string;
+    roundNumber: number | null;
+  }[];
+  subtotal: string;
+  serviceChargeAmount: string;
+  packagingCharge: string;
+  taxAmount: string;
+  total: string;
 }
 
 // ── Kitchen tickets ─────────────────────────────────────────────────────────

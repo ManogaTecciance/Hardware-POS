@@ -311,6 +311,9 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /restaurant/branches/:branchId/table-sessions': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: B },
   'GET /restaurant/branches/:branchId/open-sessions': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/table-sessions/:sessionId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  // D71 — the running bill for an open session; the waiter reads it at the
+  // table. BILL_VIEW, and scoped to the caller's own sessions by D70.
+  'GET /restaurant/table-sessions/:sessionId/bill-preview': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/table-sessions/:sessionId/detail': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/table-sessions/:sessionId/orders': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/orders/:orderId/rounds': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },

@@ -2408,6 +2408,46 @@ when it seats a table, so a dine-in session always has one.
 
 Frontend copy follows the rule rather than restating it: "Your open tables".
 
+### D71 — the waiter holds the bill
+
+PO decision, 2026-08-21. The waiter is the one talking to the guests, so the
+waiter is the one who has to answer "what have we had", "what do we owe" and
+"can we pay separately". All three lived at the till, on a screen a waiter
+never opens — which meant the cashier reconstructing who ate what from a
+conversation they were not part of.
+
+**The full order, on the POS screen.** The cart shows what has not been sent
+yet; the bill sheet shows everything that HAS, grouped by round, because that
+is the order the guests ate in and the order they will remember when they
+query a line.
+
+**The server prices it.** `GET /table-sessions/:id/bill-preview` reads the
+same rows the close will read and runs `computeRestaurantTotals` — the same
+calculator (D52/D59) — so what a guest is shown at the table and what they
+are charged a minute later cannot differ. The client never re-adds the lines.
+A service charge the client does not know about is exactly the kind of
+difference that turns into an argument at the table.
+
+**Splitting moved to the waiter.** `BILL_SPLIT` joins the WAITER template.
+`PAYMENT_COLLECT` deliberately does not: a waiter can divide a bill four ways
+and still cannot settle any of the four. Verified live — the waiter's own
+split-by-items succeeds and their attempt to collect a payment is refused.
+
+**The split surface is shared, not copied.** `ItemSplitAssigner` was lifted
+out of the bill screen (D51) so both the table and the till use the identical
+control. A second copy would have been two split UIs with one set of money
+rules between them, and they would have drifted the first time either was
+touched.
+
+**Why the split brackets the close.** Splits attach to a Sale and an open
+session has none, so confirming does two things in order: close the session
+(raising the Sale), then split it. These cannot be made atomic from a
+browser, so the failure is designed rather than hoped away: if the split call
+fails the close still stands, the waiter is told the table IS closed and that
+the cashier can finish the division at the till. Reporting a plain failure
+there would invite them to press it again against a session that no longer
+exists — which is why the half-failure has its own test.
+
 ---
 
 ## Open decisions

@@ -52,6 +52,7 @@ import type {
   OpenTableReleaseSummary,
   OpenTableView,
   ReservationView,
+  SessionBillPreview,
 } from './types';
 
 function auth(session: Session) {
@@ -608,6 +609,13 @@ export const tableSessions = {
   getDetail(session: Session, sessionId: string) {
     return api.get<SessionDetail>(
       `/restaurant/table-sessions/${sessionId}/detail`,
+      auth(session),
+    );
+  },
+  /** D71 — the running bill for an OPEN session, priced by the server. */
+  billPreview(session: Session, sessionId: string) {
+    return api.get<SessionBillPreview>(
+      `/restaurant/table-sessions/${sessionId}/bill-preview`,
       auth(session),
     );
   },

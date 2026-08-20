@@ -28,9 +28,8 @@ interface Props {
   branchId: string;
   active: ActiveTableSession | null;
   onPick: (picked: ActiveTableSession) => void;
-  onCloseSession: () => void;
-  /** Set while a close is in flight, so the strip cannot be double-fired. */
-  closing: boolean;
+  /** D71 — opens the bill sheet: full order, totals, split, close. */
+  onOpenBill: () => void;
   /** Rounds already sent to the kitchen on this session, for the strip. */
   roundsSent: number;
 }
@@ -54,8 +53,7 @@ export function TableSessionPanel({
   branchId,
   active,
   onPick,
-  onCloseSession,
-  closing,
+  onOpenBill,
   roundsSent,
 }: Props) {
   const [expanded, setExpanded] = React.useState(false);
@@ -74,10 +72,9 @@ export function TableSessionPanel({
         <ActiveStrip
           active={active}
           roundsSent={roundsSent}
-          closing={closing}
           expanded={expanded}
           onToggle={() => setExpanded((v) => !v)}
-          onCloseSession={onCloseSession}
+          onOpenBill={onOpenBill}
         />
       ) : null}
       {showPicker ? (
@@ -98,17 +95,15 @@ export function TableSessionPanel({
 function ActiveStrip({
   active,
   roundsSent,
-  closing,
   expanded,
   onToggle,
-  onCloseSession,
+  onOpenBill,
 }: {
   active: ActiveTableSession;
   roundsSent: number;
-  closing: boolean;
   expanded: boolean;
   onToggle: () => void;
-  onCloseSession: () => void;
+  onOpenBill: () => void;
 }) {
   return (
     <Card>
@@ -146,8 +141,9 @@ function ActiveStrip({
           >
             Change table
           </Button>
-          <Button size="sm" variant="outline" isLoading={closing} onClick={onCloseSession}>
-            Close session &amp; bill
+          {/* D71 — one door to the money: review the bill, split it, close it. */}
+          <Button size="sm" variant="outline" onClick={onOpenBill}>
+            Bill
           </Button>
         </div>
       </CardContent>

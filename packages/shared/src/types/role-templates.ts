@@ -112,6 +112,17 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.ORDER_EDIT_DRAFT,
       Permission.ORDER_SEND_TO_KITCHEN,
       Permission.BILL_VIEW,
+      /*
+       * D71 — the waiter splits the bill, because the waiter is the one the
+       * guests are talking to when they say "we're paying separately". Doing
+       * it at the till means the cashier reconstructing who ate what from a
+       * conversation they were not part of.
+       *
+       * BILL_SPLIT allocates shares; it does not take money. PAYMENT_COLLECT
+       * stays absent, so the waiter can divide a bill four ways and still
+       * cannot settle any of the four.
+       */
+      Permission.BILL_SPLIT,
       // D47: waiters take and manage bookings at the host stand.
       Permission.RESERVATION_VIEW,
       Permission.RESERVATION_CREATE,
