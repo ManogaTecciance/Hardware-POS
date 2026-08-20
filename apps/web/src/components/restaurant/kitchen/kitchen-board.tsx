@@ -157,7 +157,10 @@ export function KitchenBoard({ session, branchId }: Props) {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        // Three across from `lg` (1024) rather than `xl` (1280): the kitchen
+        // board is usually a wall-mounted landscape tablet, where two columns
+        // of narrow cards wastes half the screen the pass is reading from.
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {tickets.map((t) => (
             <TicketCard
               key={t.id}

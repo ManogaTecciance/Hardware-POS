@@ -192,6 +192,8 @@ export const RESTAURANT_SEED = {
   cashier: { email: 'restaurant.cashier@axlopos.test', password: 'Restaurant123!' },
   /** Approval PIN only (D48). */
   cashierPin: '3333',
+  /** D69/D70/D71 — the dine-in flow belongs to the waiter. */
+  waiter: { email: 'waiter@axlopos.test', password: 'Restaurant123!' },
   tenantId: 'tnt_resto',
   workspace: 'restaurant-demo',
   branchId: 'brn_resto',

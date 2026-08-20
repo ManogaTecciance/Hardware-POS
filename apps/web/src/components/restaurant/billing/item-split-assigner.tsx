@@ -199,7 +199,12 @@ export function ItemSplitAssigner({
       ) : null}
 
       {/* The lines */}
-      <div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
+      {/* Viewport-relative rather than a fixed 20rem, because this control has
+          two homes: a centred Dialog at the till, and a full-height Sheet on a
+          waiter's tablet. A fixed cap sized for the dialog leaves half a
+          portrait iPad empty; `min()` keeps the dialog honest AND lets the
+          sheet use the height it actually has. */}
+      <div className="max-h-[min(20rem,40vh)] space-y-1 overflow-y-auto rounded-xl border border-border p-2">
         {items.map((it) => {
           const mine = active?.assigned.get(it.orderItemId) ?? 0;
           const left = remainingOf(it);

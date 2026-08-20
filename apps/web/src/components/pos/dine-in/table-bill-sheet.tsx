@@ -149,7 +149,9 @@ export function TableBillSheet({
       }
       footer={
         stage === 'review' && !loading && !empty ? (
-          <div className="flex w-full flex-wrap gap-2">
+          // Stacked below sm: two labelled actions side by side truncate to
+          // nonsense on a narrow sheet; from sm up there is room for both.
+          <div className="flex w-full flex-col gap-2 sm:flex-row">
             {canSplit ? (
               <Button
                 variant="outline"

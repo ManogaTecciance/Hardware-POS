@@ -179,7 +179,10 @@ function ReportShell({
         ) : error ? (
           <p className="py-6 text-center text-sm text-danger">{error}</p>
         ) : (
-          children
+          /* Every report body is a wide table. Without this the page itself
+             scrolls sideways on a tablet — and a horizontally scrolling PAGE
+             hides the navigation, where a scrolling table hides nothing. */
+          <div className="overflow-x-auto">{children}</div>
         )}
       </CardContent>
     </Card>

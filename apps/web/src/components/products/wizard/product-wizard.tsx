@@ -502,7 +502,9 @@ export function ProductWizard(props: Props) {
           the same component; mounting one at a time keeps state graph
           rerenders unambiguous and avoids duplicate DOM. */}
       {isDesktop ? (
-        <div className="min-w-0 lg:min-w-[280px]">
+        // Testid so the tablet e2e can assert the rail is NOT mounted here
+        // without matching the identical preview inside the Sheet.
+        <div data-testid="product-preview-rail" className="min-w-0 lg:min-w-[280px]">
           <ProductPreview state={state} categories={categories} currentStepIndex={stepIndex} />
         </div>
       ) : null}
