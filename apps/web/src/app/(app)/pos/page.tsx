@@ -5,7 +5,6 @@ import * as React from 'react';
 
 import { PageHeader } from '@/components/page-header';
 import { PosCounterWorkspace } from '@/components/pos/pos-counter-workspace';
-import { PosDineInWorkspace } from '@/components/pos/pos-dine-in-workspace';
 import { type PosMode } from '@/components/pos/pos-mode-selector';
 import { PosRetailCheckout } from '@/components/pos/pos-retail-checkout';
 import { PosThirdPartyWorkspace } from '@/components/pos/pos-third-party-workspace';
@@ -25,15 +24,18 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
  *     modal on mount (per Pilot Change 3 Section 1).
  *   * `?mode=takeaway` or `?mode=third-party` → the workspace opens
  *     straight into that mode.
- *   * `?mode=dine-in` → the waiter's table-service flow
- *     (`PosDineInWorkspace`): pick a table or an open session, then order
- *     entry. With `&sessionId=…` it opens that session directly.
+ *   * `?mode=dine-in` → the SAME counter workspace, with a table-session
+ *     block above the menu (D69). Composition is identical to takeaway;
+ *     only the tail differs — Confirm & send posts a round to the table
+ *     instead of opening customer → payment → completion.
  *
- *     2026-08-18 (PO): dine-in is a WAITER flow, not a counter one. It used
- *     to fall through to the counter workspace when no session was named —
- *     which assumed the guest was standing at the till paying immediately,
- *     the opposite of table service. Items now go to the kitchen as the
- *     waiter adds them and the bill is settled when they close the table.
+ *     2026-08-18 (PO): dine-in is a WAITER flow, not a counter one — items
+ *     go to the kitchen as the waiter adds them, and the bill is raised when
+ *     they close the table. 2026-08-21 (PO): that flow belongs on the
+ *     ordinary POS screen rather than a separate one, so the fork this
+ *     comment used to describe (`PosDineInWorkspace` → `OrderEntry`) is
+ *     gone. `/tables/session/[id]` still mounts `OrderEntry` — the floor
+ *     plan's own route is unchanged.
  *   * `?mode=third-party&externalOrderId=…` → still routes to the
  *     `PosThirdPartyWorkspace` platform inspector for accepting inbound
  *     external orders. New Delivery-counter orders (composed here) use
@@ -73,7 +75,6 @@ export default function PosPage() {
   }
 
   const raw = params.get('mode');
-  const sessionId = params.get('sessionId');
   const externalOrderId = params.get('externalOrderId');
   const mode: PosMode | null =
     raw === 'dine-in'
@@ -84,16 +85,7 @@ export default function PosPage() {
           ? 'TAKEAWAY'
           : null;
 
-  // Deep-link exceptions that still route to the pre-existing screens.
-  if (mode === 'DINE_IN') {
-    return (
-      <PosDineInWorkspace
-        session={session}
-        branchId={session.branchId}
-        sessionId={sessionId}
-      />
-    );
-  }
+  // Deep-link exception that still routes to a pre-existing screen.
   if (mode === 'THIRD_PARTY' && externalOrderId) {
     return (
       <PosThirdPartyWorkspace

@@ -2325,6 +2325,52 @@ seeded workspaces; one drop migration costs a file and no data. The retired
 `KitchenTicketStatus` print values stay in the enum — persisted data with
 rows on it, and removing an enum value is destructive for nothing.
 
+### D69 — dine-in is the ordinary POS screen, plus a table
+
+PO decision, 2026-08-21. Dine-in had its own screen (`PosDineInWorkspace` →
+`OrderEntry`), built before the counter POS existed and diverging from it
+ever since: a different menu browser, a different cart, a different set of
+affordances for the same act of composing an order. Waiters and cashiers
+work the same shift; they should not be learning two POS screens.
+
+**One screen.** `?mode=dine-in` now renders `PosCounterWorkspace`, exactly as
+takeaway and delivery do. The menu grid, the cart, per-line edit/discount,
+the portrait cart sheet and the modifier dialog are the same code, so they
+cannot drift apart again. The POS fork is deleted;
+`/tables/session/[id]` still mounts `OrderEntry`, because the floor plan's
+own route is a different job.
+
+**Plus a table.** The one structural difference table service has is that an
+order belongs to a table, over a period, across rounds — so a session block
+sits above the menu. Picking a table swaps it for a one-line strip rather
+than navigating, so the menu never unmounts and a waiter mid-order does not
+lose their place.
+
+**One screen, two tails.** Composition is identical; the button diverges.
+Counter modes go customer → payment → completion. Dine-in confirms a ROUND
+onto the table and empties the cart, ready for whatever the guests ask for
+next, which is the actual shape of table service. Then: close the session →
+the bill is raised → the cashier settles and prints it.
+
+Two things this exposed, both fixed here rather than filed:
+
+- **The permission gate was wrong for the role the flow exists for.** The
+  counter's Place Order is gated on `TAKEAWAY_CREATE`; the WAITER template
+  deliberately holds `ORDER_SEND_TO_KITCHEN` and not that. Reusing the gate
+  would have left the waiter looking at a permanently disabled button.
+- **D68's Print bill could never have worked.** It called
+  `/receipts/:saleId/customer`, which sits behind
+  `@RequireModule(RETAIL_POS)` and answers 403 "Feature not available" to
+  every food-service workspace, the owner included. The bill is now rendered
+  client-side like the split bill beside it, which has always worked for the
+  same reason. Verified against a live restaurant tenant: the endpoint 403s
+  for owner and cashier alike.
+
+Also fixed: the POS never recorded who seated the table. `waiterUserId` is
+optional and the server does not default it to the caller, so the kitchen
+board showed tickets with no name on them and the close path fell back to
+whoever pressed the button.
+
 ---
 
 ## Open decisions

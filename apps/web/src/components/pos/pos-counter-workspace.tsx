@@ -10,11 +10,12 @@ import { ApiError } from '@/lib/api';
 import { useAuth, type Session } from '@/lib/auth';
 import { discountLimitFor, withinDiscountLimit, Permission } from '@/lib/permissions';
 import { useEffectiveProfile } from '@/lib/platform-profile';
-import { restaurantConfig, takeaway } from '@/lib/restaurant/api';
+import { restaurantConfig, tableSessions, takeaway } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
 
 import { CustomerCapturePopup, type ChosenCustomer } from './counter/customer-capture-popup';
+import { TableSessionPanel, type ActiveTableSession } from './dine-in/table-session-panel';
 import { ItemDiscountDialog, type LineDiscount } from './counter/item-discount-dialog';
 import { OrderCompletionScreen, type CompletionSummary } from './counter/order-completion-screen';
 import { PaymentPopup } from './counter/payment-popup';
@@ -67,10 +68,27 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const router = useRouter();
   const { hasPermission } = useAuth();
   const canPlaceTakeaway = hasPermission(Permission.TAKEAWAY_CREATE);
+  /*
+   * D69 — dine-in is gated on a DIFFERENT permission, and it matters: the
+   * WAITER template deliberately holds ORDER_SEND_TO_KITCHEN and not
+   * TAKEAWAY_CREATE. Reusing the counter's gate here would have left the
+   * one role this flow exists for looking at a disabled button.
+   */
+  const canSendToKitchen = hasPermission(Permission.ORDER_SEND_TO_KITCHEN);
   const canDiscount = hasPermission(Permission.DISCOUNT_APPROVE);
   const discountLimit = discountLimitFor(session.user.role);
 
   const [mode, setMode] = React.useState<PosMode | null>(initialMode);
+
+  // ── D69: dine-in session state ─────────────────────────────────────────
+  const [tableSession, setTableSession] = React.useState<ActiveTableSession | null>(null);
+  const [roundsSent, setRoundsSent] = React.useState(0);
+  const [sending, setSending] = React.useState(false);
+  const [closingSession, setClosingSession] = React.useState(false);
+  const [dineInError, setDineInError] = React.useState<string | null>(null);
+  const [closedBill, setClosedBill] = React.useState<{ saleId: string; table: string } | null>(
+    null,
+  );
 
   // D45: Restaurant / Cafe / Bakery tenants read the new POS catalogue
   // endpoint (Products the wizard published as POS-sellable). Retail
@@ -212,6 +230,95 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const taxAmount = (netSubtotal + serviceCharge) * (taxPct / 100);
   const total = netSubtotal + serviceCharge + taxAmount;
 
+  // ── D69: dine-in actions ───────────────────────────────────────────────
+
+  /**
+   * Confirm the current cart onto the table's order as one round.
+   *
+   * This is where dine-in stops resembling a counter sale: no customer
+   * capture, no payment, no completion screen. The round is sent, the cart
+   * empties, and the waiter is immediately able to take the next thing the
+   * table asks for — which is the actual shape of table service.
+   */
+  const sendRound = async () => {
+    if (draft.length === 0 || !tableSession || !canSendToKitchen) return;
+    setCartSheetOpen(false);
+    setSending(true);
+    setDineInError(null);
+    try {
+      // Opening a session does not create an order (D1); the first send is
+      // what needs one, so it is created lazily here and remembered.
+      let orderId = tableSession.orderId;
+      if (!orderId) {
+        const order = await tableSessions.createOrder(session, tableSession.id);
+        orderId = order.id;
+        setTableSession((cur) => (cur ? { ...cur, orderId: order.id } : cur));
+      }
+      await tableSessions.submitRound(session, orderId, {
+        idempotencyKey,
+        channel: 'DINE_IN',
+        // D46 — PRODUCT-sourced lines carry their own wire shape (the server
+        // resolves the variant and snapshots price/name); legacy MENU_ITEM
+        // lines keep the historic shape byte-for-byte.
+        items: draft.map((r) =>
+          r.sourceKind === 'PRODUCT'
+            ? {
+                sourceKind: 'PRODUCT' as const,
+                productId: r.productId!,
+                productVariantId: r.productVariantId,
+                quantity: r.quantity,
+                specialInstructions: r.specialInstructions.trim() || undefined,
+                modifiers: r.modifiers.map((m) => ({ modifierOptionId: m.optionId })),
+              }
+            : {
+                menuItemId: r.menuItemId,
+                quantity: r.quantity,
+                specialInstructions: r.specialInstructions.trim() || undefined,
+                modifiers: r.modifiers.map((m) => ({ modifierOptionId: m.optionId })),
+              },
+        ),
+      });
+      setDraft([]);
+      setRoundsSent((n) => n + 1);
+      // A fresh key per round: the same one twice would make the second
+      // round a replay of the first and silently drop it.
+      setIdempotencyKey(cryptoRandomKey());
+    } catch (err) {
+      setDineInError(err instanceof Error ? err.message : 'Could not send to the kitchen');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  /** Guests are finished: close the table, which raises the bill. */
+  const closeSession = async () => {
+    if (!tableSession || closingSession) return;
+    if (
+      draft.length > 0 &&
+      !window.confirm(
+        'The cart still has items that were never sent to the kitchen. Close the session anyway?',
+      )
+    ) {
+      return;
+    }
+    setClosingSession(true);
+    setDineInError(null);
+    try {
+      const result = await tableSessions.close(session, tableSession.id, {
+        idempotencyKey: cryptoRandomKey(),
+      });
+      setClosedBill({ saleId: result.saleId, table: tableSession.tableLabel });
+      setTableSession(null);
+      setRoundsSent(0);
+      setDraft([]);
+      setIdempotencyKey(cryptoRandomKey());
+    } catch (err) {
+      setDineInError(err instanceof Error ? err.message : 'Could not close the session');
+    } finally {
+      setClosingSession(false);
+    }
+  };
+
   // ── Stage transitions ──────────────────────────────────────────────────
   const openCustomer = () => {
     if (draft.length === 0 || !canPlaceTakeaway) return;
@@ -249,11 +356,23 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
       }
       setDraft([]);
     }
+    setTableSession(null);
+    setRoundsSent(0);
+    setClosedBill(null);
     setMode(null);
     onModeChange(null);
   };
 
   // ── Render ─────────────────────────────────────────────────────────────
+
+  /*
+   * D69 — one screen, two tails. Dine-in composes exactly like a counter
+   * order and then diverges at the button: it sends a round to a table
+   * instead of opening the customer → payment → completion chain.
+   */
+  const isDineIn = mode === 'DINE_IN';
+  const placeOrder = isDineIn ? () => void sendRound() : openCustomer;
+  const canPlace = isDineIn ? canSendToKitchen && tableSession !== null : canPlaceTakeaway;
 
   // First tap: pick a mode. No mode = the Order Type modal shows.
   if (!mode) {
@@ -277,6 +396,50 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
         />
         <PosModeChip mode={mode} onChange={resetMode} />
       </div>
+
+      {/* D69 — dine-in's one structural difference from a counter order: the
+          order belongs to a table, over a period. Rendered above the grid so
+          it reads first and stays put; picking a table swaps it for a strip
+          rather than navigating, so the menu never unmounts mid-order. */}
+      {isDineIn ? (
+        <>
+          <TableSessionPanel
+            session={session}
+            branchId={branchId}
+            active={tableSession}
+            onPick={(picked) => {
+              setTableSession(picked);
+              setRoundsSent(0);
+              setClosedBill(null);
+              setDineInError(null);
+            }}
+            onCloseSession={() => void closeSession()}
+            closing={closingSession}
+            roundsSent={roundsSent}
+          />
+          {dineInError ? (
+            <p className="flex items-center gap-1.5 text-sm text-danger">
+              <AlertTriangle className="h-4 w-4" aria-hidden />
+              {dineInError}
+            </p>
+          ) : null}
+          {closedBill ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-success/40 bg-success-soft/50 p-3 text-sm">
+              <span>
+                {closedBill.table} closed. The bill is ready for the cashier to settle and
+                print.
+              </span>
+              <button
+                type="button"
+                className="font-medium text-primary underline-offset-2 hover:underline"
+                onClick={() => router.push(`/bills/${closedBill.saleId}`)}
+              >
+                View bill
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       {/* Grid splits at `tab:` (900px) — comfortably before iPad landscape
           (1024) so we get the two-column layout on the widest tablet form
@@ -312,8 +475,10 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
             servicePct={servicePct}
             taxPct={taxPct}
             total={total}
-            onPlaceOrder={openCustomer}
-            canPlace={canPlaceTakeaway}
+            onPlaceOrder={placeOrder}
+            canPlace={canPlace}
+            sending={sending}
+            awaitingTable={isDineIn && tableSession === null}
           />
         </aside>
       </div>
@@ -361,11 +526,13 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
         } · ${formatMoney(total)}`}
         footer={
           <CartPlaceOrderFooter
-            canPlace={canPlaceTakeaway}
+            canPlace={canPlace}
             disabled={draft.length === 0}
             total={total}
             mode={mode}
-            onPlaceOrder={openCustomer}
+            onPlaceOrder={placeOrder}
+            sending={sending}
+            awaitingTable={isDineIn && tableSession === null}
             fullWidth
           />
         }
@@ -485,11 +652,13 @@ interface CartCardProps extends CartRailBodyProps {
   mode: PosMode;
   onPlaceOrder: () => void;
   canPlace: boolean;
+  sending: boolean;
+  awaitingTable: boolean;
 }
 
 function CartCard(props: CartCardProps) {
   const {
-    mode, total, onPlaceOrder, canPlace, ...body
+    mode, total, onPlaceOrder, canPlace, sending, awaitingTable, ...body
   } = props;
 
   return (
@@ -498,6 +667,8 @@ function CartCard(props: CartCardProps) {
       <div className="border-t border-border p-3">
         <CartPlaceOrderFooter
           canPlace={canPlace}
+          sending={sending}
+          awaitingTable={awaitingTable}
           disabled={body.draft.length === 0}
           total={total}
           mode={mode}
@@ -585,6 +756,8 @@ function CartPlaceOrderFooter({
   total,
   mode,
   onPlaceOrder,
+  sending,
+  awaitingTable,
   fullWidth,
 }: {
   canPlace: boolean;
@@ -592,8 +765,11 @@ function CartPlaceOrderFooter({
   total: number;
   mode: PosMode;
   onPlaceOrder: () => void;
+  sending: boolean;
+  awaitingTable: boolean;
   fullWidth?: boolean;
 }) {
+  const isDineIn = mode === 'DINE_IN';
   return (
     // `w-full` inside a `flex-wrap` Sheet footer keeps the CTA edge-to-edge on
     // portrait; the card shell also passes `fullWidth`. The button stays 56px
@@ -602,16 +778,32 @@ function CartPlaceOrderFooter({
       <button
         type="button"
         onClick={onPlaceOrder}
-        disabled={disabled || !canPlace}
+        disabled={disabled || !canPlace || sending}
         className="flex h-14 w-full items-center justify-between rounded-xl bg-primary px-5 text-base font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover active:bg-primary-active touch-manipulation disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <span>Place Order</span>
+        {/* D69 — dine-in confirms a ROUND onto a table; it does not place and
+            settle an order, and the button must not claim otherwise. */}
+        <span>{isDineIn ? (sending ? 'Sending…' : 'Confirm & send') : 'Place Order'}</span>
         <span className="tabular-nums">{formatMoney(total)}</span>
       </button>
-      {!canPlace ? (
+      {awaitingTable ? (
+        <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Pick a table above before sending this order.
+        </p>
+      ) : !canPlace ? (
         <p className="mt-2 flex items-center gap-1 text-xs text-warning">
           <AlertTriangle className="h-3.5 w-3.5" />
-          Your role can build a draft but not place a counter order.
+          {isDineIn
+            ? 'Your role can build a draft but not send it to the kitchen.'
+            : 'Your role can build a draft but not place a counter order.'}
+        </p>
+      ) : null}
+      {isDineIn ? (
+        <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+          <ReceiptText className="h-3.5 w-3.5" />
+          Goes straight to the kitchen board. The bill is raised when you close the
+          session.
         </p>
       ) : null}
       {mode === 'THIRD_PARTY' ? (

@@ -22,7 +22,7 @@ import { Permission } from '@/lib/permissions';
 import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import { getCachedDocumentProfile } from '@/lib/document-template-service';
-import { printSplitBill, reprintCustomerReceipt } from '@/lib/receipt-print';
+import { printSplitBill, printTableBill } from '@/lib/receipt-print';
 import { getActiveCurrency } from '@/lib/tenant-money';
 import type { BillLineItem, BillView, PaymentMethod } from '@/lib/restaurant/types';
 
@@ -64,27 +64,37 @@ export function BillScreen({ session, saleId }: Props) {
     null,
   );
   const [reopening, setReopening] = React.useState(false);
-  const [printing, setPrinting] = React.useState(false);
 
   /*
    * D68 — printing the bill is the CASHIER's deliberate act, not something
-   * the system does on their behalf. A browser print is the right mechanism
-   * for it: a human pressed a button, so the print dialog they get is the
-   * one they expect, and it reaches whichever printer that till is set up
-   * with. (Automatic, unattended printing is what needed hardware plumbing,
-   * and that is exactly what D68 withdrew.)
+   * the system does on their behalf. A browser print is the right mechanism:
+   * a human pressed a button, so the dialog is expected and it reaches
+   * whichever printer that till is set up with.
+   *
+   * D69 — rendered client-side, like the split bill beside it. The server's
+   * `/receipts/:saleId/customer` sits behind `@RequireModule(RETAIL_POS)` and
+   * answers 403 "Feature not available" to every food-service workspace,
+   * owner included; the data below is already on screen, so the fix is to
+   * print what we have rather than widen a module guard.
    */
-  const printBill = async () => {
-    setPrinting(true);
-    setError(null);
-    try {
-      await reprintCustomerReceipt(session, saleId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not prepare the bill for printing');
-    } finally {
-      setPrinting(false);
-    }
-  };
+  const printBill = (view: BillView) =>
+    printTableBill({
+      storeName: getCachedDocumentProfile().companyName || session.branchName || '',
+      currency: getActiveCurrency(),
+      saleNumber: view.saleNumber,
+      items: view.items.map((it) => ({
+        name: it.name,
+        variantName: it.variantName,
+        quantity: it.quantity,
+        lineTotal: it.lineTotal,
+      })),
+      subtotal: view.subtotal,
+      serviceCharge: view.serviceChargeAmount,
+      packagingCharge: view.packagingCharge,
+      total: view.total,
+      paidAmount: view.paidAmount,
+      balanceAmount: view.balanceAmount,
+    });
 
   const load = React.useCallback(async () => {
     try {
@@ -133,8 +143,7 @@ export function BillScreen({ session, saleId }: Props) {
                 size="sm"
                 variant="outline"
                 leftIcon={<Printer className="h-4 w-4" />}
-                isLoading={printing}
-                onClick={() => void printBill()}
+                onClick={() => printBill(bill)}
               >
                 Print bill
               </Button>
