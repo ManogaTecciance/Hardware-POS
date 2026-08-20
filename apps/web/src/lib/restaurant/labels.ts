@@ -140,18 +140,25 @@ export const CHANNEL_LABELS: Record<RestaurantOrderChannel, string> = {
 };
 
 // ── Kitchen tickets ───────────────────────────────────────────────────────
+/*
+ * D68 — the three print statuses are retired but still render: pre-D68 rows
+ * carry them, and the board labels them "To make" because that is what they
+ * are. Anything that is not COMPLETED is outstanding work.
+ */
 export const KITCHEN_TICKET_STATUS_LABELS: Record<KitchenTicketStatus, string> = {
-  QUEUED: 'Queued',
-  PRINTED: 'Printed',
-  REPRINTED: 'Reprinted',
-  FAILED: 'Failed',
+  QUEUED: 'To make',
+  PRINTED: 'To make',
+  REPRINTED: 'To make',
+  FAILED: 'To make',
+  COMPLETED: 'Done',
 };
 
 export const KITCHEN_TICKET_STATUS_TONES: Record<KitchenTicketStatus, BadgeTone> = {
   QUEUED: 'info',
-  PRINTED: 'positive',
-  REPRINTED: 'warning',
-  FAILED: 'danger',
+  PRINTED: 'info',
+  REPRINTED: 'info',
+  FAILED: 'info',
+  COMPLETED: 'positive',
 };
 
 export const PRINT_ATTEMPT_STATUS_LABELS: Record<KitchenPrintAttemptStatus, string> = {

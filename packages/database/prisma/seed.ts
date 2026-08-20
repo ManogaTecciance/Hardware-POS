@@ -226,6 +226,18 @@ async function main(): Promise<void> {
     });
   }
 
+  // D68 — and the kitchen, for the same reason (no matching enum value).
+  const kitchenRole = await prisma.role.findFirst({
+    where: { tenantId: restaurant.id, key: 'KITCHEN_STAFF' },
+    select: { id: true },
+  });
+  if (kitchenRole) {
+    await prisma.user.update({
+      where: { id: 'usr_resto_kitchen' },
+      data: { roleId: kitchenRole.id },
+    });
+  }
+
   // 2026-08-17: clear the retired demo users from a database seeded before
   // the role trim. Delete where nothing references them; deactivate where
   // history does — a re-run must converge, not crash.
@@ -255,6 +267,7 @@ async function main(): Promise<void> {
   console.log('              password: see docs/restaurant-pos/09-phase-1-acceptance.md');
   console.log('  Cashier     restaurant.cashier@axlopos.test  (approval PIN 3333)');
   console.log('  Waiter      waiter@axlopos.test  (approval PIN 4444) — no Kitchen/Sales/Reports, read-only catalogue');
+  console.log('  Kitchen     kitchen@axlopos.test  (approval PIN 5555) — the kitchen board only');
   console.log('');
   console.log(`\nPlatform console: ${platform.id}`);
   console.log(`  Platform admin  ${PLATFORM_ADMIN_EMAIL} / ${PLATFORM_ADMIN_PASSWORD}`);
@@ -347,6 +360,7 @@ async function seedRestaurant(passwordHash: string) {
 
   const pin3333 = await bcrypt.hash('3333', SALT_ROUNDS);
   const pin4444 = await bcrypt.hash('4444', SALT_ROUNDS);
+  const pin5555 = await bcrypt.hash('5555', SALT_ROUNDS);
   const users = [
     {
       id: 'usr_resto_owner',
@@ -372,6 +386,22 @@ async function seedRestaurant(passwordHash: string) {
       role: UserRole.CASHIER,
       passwordHash,
       pinHash: pin4444,
+      branchId: branch.id,
+    },
+    /*
+     * D68 — the kitchen board's user. Same enum trick as the waiter: there is
+     * no `UserRole.KITCHEN_STAFF`, so they are created as CASHIER and linked
+     * to the KITCHEN_STAFF row below. Without the link they would resolve as
+     * a full cashier, which is the opposite of the point — the whole reason
+     * this template exists is that the pass holds no money permissions.
+     */
+    {
+      id: 'usr_resto_kitchen',
+      name: 'Kitchen Staff',
+      email: 'kitchen@axlopos.test',
+      role: UserRole.CASHIER,
+      passwordHash,
+      pinHash: pin5555,
       branchId: branch.id,
     },
     // D48: email+password is the only login path; the PIN stays for approvals.

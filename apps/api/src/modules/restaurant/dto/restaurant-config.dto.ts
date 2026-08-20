@@ -6,7 +6,6 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
-  IsString,
   Max,
   Min,
 } from 'class-validator';
@@ -71,16 +70,4 @@ export class UpdateRestaurantBranchConfigDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   packagingChargeAmount?: number;
-
-  /*
-   * D67 — auto-printing, set once per branch by the owner. The printer ids
-   * are workspace printers (KitchenPrinter rows); each user may then pick
-   * their own defaults, which win over these.
-   */
-  @IsOptional() @IsBoolean() autoPrintKot?: boolean;
-  @IsOptional() @IsBoolean() autoPrintBill?: boolean;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(3) billCopies?: number;
-  /** `null` clears the choice — no auto bill printing for the branch. */
-  @IsOptional() @IsString() defaultReceiptPrinterId?: string | null;
-  @IsOptional() @IsString() defaultKitchenPrinterId?: string | null;
 }

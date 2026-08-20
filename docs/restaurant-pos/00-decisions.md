@@ -2216,7 +2216,13 @@ Verified live on the hardware tenant: create scoped collection → section →
 priced entry → sellable serves it (`COLLECTION_OVERRIDE`, 111.50), wrong
 channel serves zero, channel list filter includes/excludes correctly.
 
-### D67 — auto-printing, and dine-in as a waiter flow
+### D67 — auto-printing, and dine-in as a waiter flow  *(superseded by D68)*
+
+> **Superseded 2026-08-20 by [D68](#d68--the-kitchen-board-replaces-the-kitchen-printer).**
+> The dine-in half stands and is live. Everything about PRINTING below —
+> the outbox, the two transports, the on-site agent, the printer routing —
+> was withdrawn and deleted a day after it shipped. It is kept here as the
+> reasoning D68 overturns, not as a description of the system.
 
 PO requirements, 2026-08-18/20. Two things that turned out to be one change:
 the dine-in POS mode assumed a guest paying at the counter, and nothing in
@@ -2269,6 +2275,55 @@ not.
 
 The ESC/POS encoder is in-repo (~15 commands) rather than a dependency, and
 every template is asserted as real bytes.
+
+### D68 — the kitchen board replaces the kitchen printer
+
+PO decision, 2026-08-20, superseding D67 one day after it shipped. The
+kitchen does not want paper. It wants a screen.
+
+**Kitchen tickets are not printed at all.** Every item a waiter confirms
+onto an order appears on the kitchen board, and kitchen staff mark it done
+when the food is up. This is a genuine simplification, not a downgrade: a
+row written inside the round's transaction cannot fail to arrive, so the
+retry ladder, the lease arbitration, the two transports, the ESC/POS
+encoder, the LAN discovery and the on-site agent all had exactly one
+justification and it is gone. All of it was deleted rather than parked —
+1,900 lines and a whole app. Dead infrastructure attracts callers.
+
+**Kitchen staff are a role.** Phase 6 gave `KOT_VIEW` to no template a
+workspace seeds, so the board only ever opened for an owner — tolerable
+while it was a monitor for a printer, indefensible now that it is the sole
+delivery. The template holds exactly three permissions: read the profile
+(without it the nav rail renders empty, not reduced), see the board, mark a
+ticket done. Nothing on the floor, nothing with money in it. The pass is
+the one place in a restaurant with no till accountability, and a role that
+could both cook and settle a bill is how that becomes a problem.
+
+**A ticket carries where the food is going.** Station, table, order, round,
+waiter — what the printed KOT carried, for the same reason: a dish the pass
+can see but cannot place does not leave the kitchen. `OUTSTANDING` is a
+filter meaning "not COMPLETED" rather than "QUEUED", so a ticket left on one
+of the retired print statuses by a pre-D68 round still reads as work to do
+instead of silently vanishing from the board.
+
+**The waiter completes the order; the cashier prints the bill.** Closing a
+table is unchanged mechanically — it still raises the Sale — but it is
+labelled for what the floor actually does, and nothing prints on the way
+past. The cashier presses **Print bill** on the bill screen, which uses the
+browser print path the retail POS has always used. That mechanism was never
+the problem: a browser prints fine when a human presses a button, because
+the print dialog is expected and the destination is that till's own
+printer. What a browser cannot do is print unattended to two different
+printers, which is the only thing the D67 machinery existed to solve.
+
+Takeaway follows the same rule: the ticket goes to the board, the cashier
+prints the bill.
+
+**Schema.** Forward-only. D67's five migrations are already applied to live
+development databases, and deleting them would force a reset that wipes
+seeded workspaces; one drop migration costs a file and no data. The retired
+`KitchenTicketStatus` print values stay in the enum — persisted data with
+rows on it, and removing an enum value is destructive for nothing.
 
 ---
 

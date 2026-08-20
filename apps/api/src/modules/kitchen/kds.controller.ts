@@ -25,8 +25,13 @@ export class KdsController {
     @Param('branchId') branchId: string,
     @Query('status') status?: string,
   ): Promise<KitchenTicketView[]> {
-    // Default to QUEUED so the display shows what still needs cooking.
-    const filter = (status as KitchenTicketStatus) ?? KitchenTicketStatus.QUEUED;
+    /*
+     * D68 — default to OUTSTANDING, not QUEUED. A ticket left on one of the
+     * retired print statuses by a pre-D68 round is still food nobody has
+     * cooked; filtering on QUEUED alone would hide it from the pass.
+     */
+    const filter =
+      status && status in KitchenTicketStatus ? (status as KitchenTicketStatus) : 'OUTSTANDING';
     return this.kitchen.listTicketsForBranch(tenantId, branchId, filter);
   }
 }

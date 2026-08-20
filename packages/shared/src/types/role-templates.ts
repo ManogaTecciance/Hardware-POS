@@ -79,10 +79,12 @@ export const BUILT_IN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
  * Food-service operational roles: the Waiter and the (restaurant) Cashier.
  *
  * The wider catalogue this section used to carry — Restaurant Manager,
- * Kitchen Manager, Kitchen Staff, Bar Staff — was removed with the other
- * unstaffed templates (2026-08-17). Their permissions remain in the
- * catalogue and any rows already seeded from them remain in their tenants;
- * only the blueprints are gone.
+ * Kitchen Manager, Bar Staff — was removed with the other unstaffed
+ * templates (2026-08-17). Their permissions remain in the catalogue and any
+ * rows already seeded from them remain in their tenants; only the blueprints
+ * are gone. Kitchen Staff came BACK on 2026-08-20 (D68) — not as a
+ * restoration of the old catalogue, but because withdrawing kitchen printing
+ * created a job that did not exist before: somebody has to work the board.
  */
 export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   {
@@ -128,6 +130,33 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       // REPORT_READ are absent, so Sales and Reports never appear for them,
       // and PRODUCT_MANAGE / CATEGORY_MANAGE are absent so the catalogue and
       // promotions are read-only.
+    ],
+  },
+  {
+    /*
+     * D68 — the kitchen board's own user. Kitchen tickets stopped printing:
+     * the board IS the delivery, so somebody has to be looking at it and
+     * saying when food is done. That job had no role — Phase 6 gave
+     * KOT_VIEW to nobody a workspace actually seeds, which is why the board
+     * only ever opened for an owner.
+     */
+    key: 'KITCHEN_STAFF',
+    name: 'Kitchen staff',
+    description: 'Works the kitchen board: sees incoming tickets and marks them done.',
+    isBuiltIn: false,
+    permissions: [
+      // Without this the navigation rail renders EMPTY rather than reduced —
+      // same reasoning as the waiter template.
+      Permission.PLATFORM_PROFILE_READ,
+      // The two that ARE the job.
+      Permission.KOT_VIEW,
+      Permission.KITCHEN_STATUS_UPDATE,
+      // Deliberately absent: everything on the floor and everything with
+      // money in it. No TABLE_*, no ORDER_*, no BILL_*, no SALE_*,
+      // no PAYMENT_COLLECT, no reporting, no configuration. Kitchen staff
+      // read what was ordered and report what is cooked; they neither take
+      // an order nor settle one, and a role that could do both would put
+      // the pass in a position to write off a table's bill.
     ],
   },
   {
@@ -233,11 +262,16 @@ export const HARDWARE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   template(UserRole.Cashier),
 ];
 
-/** Food service (restaurant / cafe / bakery): Owner, Waiter, Cashier. */
+/**
+ * Food service (restaurant / cafe / bakery): Owner, Waiter, Cashier, Kitchen
+ * staff. The fourth is D68: the kitchen board replaced the kitchen printer,
+ * and a board needs somebody rostered to it.
+ */
 export const FOOD_SERVICE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   template(UserRole.Owner),
   template('WAITER'),
   template('RESTAURANT_CASHIER'),
+  template('KITCHEN_STAFF'),
 ];
 
 /** Hotel: Owner, Waiter, Receptionist. */

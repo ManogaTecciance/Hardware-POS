@@ -1,12 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  KitchenPrintAttemptStatus,
-  KitchenTicketStatus,
-  Prisma,
-} from '@hardware-pos/database';
+import { KitchenTicketStatus, Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
-import { resolveKitchenPrinterIdForUser } from '../printing/printing.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 
 export interface KitchenTicketView {
@@ -15,13 +10,23 @@ export interface KitchenTicketView {
   branchId: string;
   roundId: string;
   stationId: string;
-  primaryPrinterId: string | null;
+  stationName: string;
   status: KitchenTicketStatus;
+  /*
+   * D68 — the board is the ONLY place this ticket is ever delivered, so it
+   * carries what a printed KOT used to: where the food is going, whose order
+   * it is, and which round. A station screen showing dish names alone cannot
+   * tell the pass which table to plate for.
+   */
+  orderNumber: string | null;
+  placeLabel: string | null;
+  roundNumber: number | null;
+  waiterName: string | null;
   items: {
     id: string;
     menuItemName: string;
     /**
-     * D46 — variant selection printed on the KOT ("MEDIUM", "LARGE").
+     * D46 — variant selection shown on the ticket ("MEDIUM", "LARGE").
      * NULL for legacy MENU_ITEM rows and for non-variant Products.
      */
     variantName: string | null;
@@ -29,24 +34,20 @@ export interface KitchenTicketView {
     modifierNames: string[];
     specialInstructions: string | null;
   }[];
-  attempts: {
-    id: string;
-    printerId: string;
-    status: KitchenPrintAttemptStatus;
-    error: string | null;
-    attemptedAt: string;
-    completedAt: string | null;
-  }[];
+  completedAt: string | null;
+  completedByName: string | null;
   createdAt: string;
 }
 
 /**
- * Phase 6. Kitchen ticket generation and print-queue tracking.
+ * Phase 6, rewritten by D68. Kitchen tickets — for the BOARD, not a printer.
  *
- * Called from `TableSessionsService.submitRound` (Phase 5) after the round
- * itself has been committed. Failure here does NOT rollback the round —
- * scenario 20 requires that the order stays recorded even if printing
- * fails.
+ * Called from `TableSessionsService.submitRound` INSIDE the round's
+ * transaction, so a ticket and its items become visible together and a
+ * committed round can never be missing from the kitchen's queue. There is
+ * no delivery step after this: writing the row IS the delivery, which is
+ * the whole reason D68 dropped printing — a ticket cannot fail to reach a
+ * screen that reads it from the database.
  */
 @Injectable()
 export class KitchenService {
@@ -55,23 +56,13 @@ export class KitchenService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Generate one KOT per unique station referenced by the round's items.
-   * The service is called INSIDE the round's transaction so a KOT and its
-   * items are visible together; the actual print attempts (which may hit a
-   * network printer) are queued as PENDING rows and are not driven here.
+   * Generate one ticket per unique station referenced by the round's items.
    */
   async generateTicketsForRound(
     tx: Prisma.TransactionClient,
     tenantId: string,
     branchId: string,
     roundId: string,
-    /**
-     * D67 — who submitted the round. When that user has picked their own
-     * kitchen printer, the tickets print there instead of on the station's
-     * printers (see `resolveKitchenPrinterIdForUser`). Optional so existing
-     * callers and tests are unaffected.
-     */
-    actorUserId?: string | null,
   ): Promise<string[]> {
     const items = await tx.restaurantOrderItem.findMany({
       where: { tenantId, roundId },
@@ -149,6 +140,10 @@ export class KitchenService {
      * choice is a real one the operator must configure — guessing would send
      * food to the wrong line — so those items stay unrouted and are logged
      * by name, which is how an operator finds the missing link.
+     *
+     * D68 keeps this: the consequence of an unrouted item is now a dish
+     * missing from the BOARD, which is no less severe than a missing
+     * printout.
      */
     const branchStations = await tx.kitchenStation.findMany({
       where: { tenantId, branchId, isActive: true },
@@ -179,62 +174,12 @@ export class KitchenService {
     if (unrouted.length > 0) {
       this.logger.warn(
         `Round ${roundId}: ${unrouted.length} item(s) reached no kitchen station and will not ` +
-          `print — link them to a station in Settings → Printing (${unrouted.join(', ')})`,
+          `appear on the kitchen board — link them to a station (${unrouted.join(', ')})`,
       );
     }
 
-    /*
-     * D67 — the printer this round's tickets go to, in precedence order:
-     *   1. the acting user's own default (their tablet, their printer);
-     *   2. the station's configured printers (a shop that routes grill vs
-     *      bar means it, and that routing is per-item, not per-person);
-     *   3. the branch's default kitchen printer (the owner's one-time
-     *      workspace setting, so a user who picked nothing still prints).
-     * The user's choice REPLACES the station list rather than adding to it —
-     * printing the same ticket twice is a duplicate, not redundancy.
-     */
-    const userPrinterId = await resolveKitchenPrinterIdForUser(tx, actorUserId ?? null);
-    const branchConfig = await tx.restaurantBranchConfig.findUnique({
-      where: { branchId },
-      select: { defaultKitchenPrinterId: true },
-    });
-    const fallbackPrinterId = userPrinterId ?? branchConfig?.defaultKitchenPrinterId ?? null;
-    const fallbackPrinter = fallbackPrinterId
-      ? await tx.kitchenPrinter.findFirst({
-          where: { id: fallbackPrinterId, tenantId, isActive: true },
-          select: { id: true },
-        })
-      : null;
-    const userPrinter = userPrinterId && fallbackPrinter?.id === userPrinterId ? fallbackPrinter : null;
-
     const ticketIds: string[] = [];
     for (const [stationId, stationItems] of perStation) {
-      /*
-       * Printer targets for this ticket: the user's own choice when they
-       * have one, else the station's configured printers (primary first).
-       * A user preference REPLACES the station list rather than adding to
-       * it — printing the same ticket on both is a duplicate, not
-       * redundancy.
-       */
-      const linked = userPrinter
-        ? [{ printerId: userPrinter.id, isPrimary: true }]
-        : await tx.kitchenStationPrinter.findMany({
-            where: { stationId },
-            orderBy: { isPrimary: 'desc' },
-            select: { printerId: true, isPrimary: true },
-          });
-      // Nothing linked and no personal choice → the branch default, if the
-      // owner set one. Empty means the ticket is queued with no attempt:
-      // it shows on the KDS and can be printed by hand, which is strictly
-      // better than inventing a target.
-      const stationPrinters =
-        linked.length > 0
-          ? linked
-          : fallbackPrinter
-            ? [{ printerId: fallbackPrinter.id, isPrimary: true }]
-            : [];
-      const primaryPrinterId = stationPrinters[0]?.printerId ?? null;
-
       const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
       const ticketNumber = `KOT-${padSequence(seq)}`;
       const ticket = await tx.kitchenTicket.create({
@@ -243,7 +188,6 @@ export class KitchenService {
           branchId,
           roundId,
           stationId,
-          primaryPrinterId,
           ticketNumber,
           status: KitchenTicketStatus.QUEUED,
         },
@@ -266,139 +210,169 @@ export class KitchenService {
           },
         });
       }
-      // Queue a PENDING attempt for every configured printer on the station.
-      // The redundancy pair (D6) means the same ticket lands on the primary
-      // and any secondary; whichever prints first flips the ticket status.
-      for (const sp of stationPrinters) {
-        await tx.kitchenPrintAttempt.create({
-          data: {
-            tenantId,
-            ticketId: ticket.id,
-            printerId: sp.printerId,
-          },
-        });
-      }
       ticketIds.push(ticket.id);
     }
     return ticketIds;
   }
 
+  /**
+   * D68 — the board's read. `OUTSTANDING` is a filter, not a status: it means
+   * "not COMPLETED", so a ticket left on one of the retired print statuses by
+   * a pre-D68 round still shows as work to do rather than silently
+   * disappearing from the pass.
+   */
   async listTicketsForBranch(
     tenantId: string,
     branchId: string,
-    status?: KitchenTicketStatus,
+    filter?: KitchenTicketStatus | 'OUTSTANDING',
   ): Promise<KitchenTicketView[]> {
+    const where: Prisma.KitchenTicketWhereInput =
+      filter === 'OUTSTANDING'
+        ? { tenantId, branchId, status: { not: KitchenTicketStatus.COMPLETED } }
+        : { tenantId, branchId, ...(filter ? { status: filter } : {}) };
+
     const rows = await this.prisma.kitchenTicket.findMany({
-      where: { tenantId, branchId, ...(status ? { status } : {}) },
-      orderBy: { createdAt: 'desc' },
-      include: { items: true, attempts: true },
+      where,
+      // Oldest first while outstanding: a kitchen works a queue, and the
+      // dish that has been waiting longest is the one that goes next.
+      orderBy: { createdAt: filter === KitchenTicketStatus.COMPLETED ? 'desc' : 'asc' },
+      include: TICKET_INCLUDE,
     });
-    return rows.map(this.toView);
+    const waiters = await this.waiterNames(rows);
+    return rows.map((row) => toView(row, waiters));
   }
 
   /**
-   * Mark a ticket as printed on the given printer. Idempotent — a second
-   * mark-printed for the same attempt is a no-op.
+   * `TableSession.waiterUserId` carries no relation (it is a plain column),
+   * so the names are one extra query for the whole page rather than an
+   * include — and never one query per ticket.
    */
-  async markPrinted(
+  private async waiterNames(
+    rows: { round: { order: { session: { waiterUserId: string | null } | null } | null } | null }[],
+  ): Promise<Map<string, string>> {
+    const ids = [
+      ...new Set(
+        rows
+          .map((r) => r.round?.order?.session?.waiterUserId)
+          .filter((id): id is string => id !== null && id !== undefined),
+      ),
+    ];
+    if (ids.length === 0) return new Map();
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    });
+    return new Map(users.map((u) => [u.id, u.name]));
+  }
+
+  /**
+   * D68 — kitchen staff marking the food done.
+   *
+   * Idempotent: completing an already-completed ticket returns it unchanged
+   * rather than rewriting who finished it. A busy pass double-taps, and the
+   * second tap must not overwrite the first person's name on the record.
+   */
+  async completeTicket(
     tenantId: string,
+    branchId: string,
     ticketId: string,
-    printerId: string,
+    actorUserId: string,
   ): Promise<KitchenTicketView> {
     return this.prisma.$transaction(async (tx) => {
-      const attempt = await tx.kitchenPrintAttempt.findFirst({
-        where: {
-          tenantId,
-          ticketId,
-          printerId,
-          status: { not: KitchenPrintAttemptStatus.SUCCEEDED },
+      const ticket = await tx.kitchenTicket.findFirst({
+        where: { id: ticketId, tenantId, branchId },
+        select: { id: true, status: true },
+      });
+      if (!ticket) throw new KitchenTicketNotFoundError();
+
+      if (ticket.status !== KitchenTicketStatus.COMPLETED) {
+        await tx.kitchenTicket.update({
+          where: { id: ticket.id },
+          data: {
+            status: KitchenTicketStatus.COMPLETED,
+            completedAt: new Date(),
+            completedByUserId: actorUserId,
+          },
+        });
+      }
+
+      const full = await tx.kitchenTicket.findFirstOrThrow({
+        where: { id: ticketId, tenantId },
+        include: TICKET_INCLUDE,
+      });
+      return toView(full, await this.waiterNames([full]));
+    });
+  }
+}
+
+/** Thrown for a ticket that is not this tenant's, or not in this branch. */
+export class KitchenTicketNotFoundError extends Error {
+  constructor() {
+    super('Kitchen ticket not found');
+  }
+}
+
+/*
+ * One include, used by every read, so the board and the completion response
+ * are the SAME shape — a ticket that gained a field in one and not the other
+ * is how a screen ends up rendering `undefined` after an action.
+ */
+const TICKET_INCLUDE = {
+  items: true,
+  station: { select: { name: true } },
+  completedBy: { select: { name: true } },
+  round: {
+    select: {
+      roundNumber: true,
+      order: {
+        select: {
+          orderNumber: true,
+          session: {
+            select: {
+              waiterUserId: true,
+              table: { select: { code: true, area: { select: { name: true } } } },
+            },
+          },
         },
-        orderBy: { attemptedAt: 'desc' },
-      });
-      if (attempt) {
-        await tx.kitchenPrintAttempt.update({
-          where: { id: attempt.id },
-          data: {
-            status: KitchenPrintAttemptStatus.SUCCEEDED,
-            completedAt: new Date(),
-          },
-        });
-      }
-      // Ticket transitions on any successful attempt.
-      await tx.kitchenTicket.update({
-        where: { id: ticketId },
-        data: { status: KitchenTicketStatus.PRINTED },
-      });
-      const full = await tx.kitchenTicket.findFirstOrThrow({
-        where: { id: ticketId, tenantId },
-        include: { items: true, attempts: true },
-      });
-      return this.toView(full);
-    });
-  }
+      },
+    },
+  },
+} satisfies Prisma.KitchenTicketInclude;
 
-  /**
-   * Record a printer failure. If retries remain, the caller re-queues; the
-   * ticket is only marked FAILED when every printer has exhausted its
-   * attempts (that policy lives with whichever process drives the queue,
-   * which is out of scope for the API).
-   */
-  async markFailed(
-    tenantId: string,
-    ticketId: string,
-    printerId: string,
-    error: string,
-  ): Promise<KitchenTicketView> {
-    return this.prisma.$transaction(async (tx) => {
-      const attempt = await tx.kitchenPrintAttempt.findFirst({
-        where: { tenantId, ticketId, printerId, status: KitchenPrintAttemptStatus.PENDING },
-      });
-      if (attempt) {
-        await tx.kitchenPrintAttempt.update({
-          where: { id: attempt.id },
-          data: {
-            status: KitchenPrintAttemptStatus.FAILED,
-            error,
-            completedAt: new Date(),
-          },
-        });
-      }
-      const full = await tx.kitchenTicket.findFirstOrThrow({
-        where: { id: ticketId, tenantId },
-        include: { items: true, attempts: true },
-      });
-      return this.toView(full);
-    });
-  }
-
-  private toView(
-    row: Prisma.KitchenTicketGetPayload<{ include: { items: true; attempts: true } }>,
-  ): KitchenTicketView {
-    return {
-      id: row.id,
-      ticketNumber: row.ticketNumber,
-      branchId: row.branchId,
-      roundId: row.roundId,
-      stationId: row.stationId,
-      primaryPrinterId: row.primaryPrinterId,
-      status: row.status,
-      items: row.items.map((i) => ({
-        id: i.id,
-        menuItemName: i.menuItemName,
-        variantName: i.variantName,
-        quantity: i.quantity.toFixed(3),
-        modifierNames: i.modifierNames,
-        specialInstructions: i.specialInstructions,
-      })),
-      attempts: row.attempts.map((a) => ({
-        id: a.id,
-        printerId: a.printerId,
-        status: a.status,
-        error: a.error,
-        attemptedAt: a.attemptedAt.toISOString(),
-        completedAt: a.completedAt?.toISOString() ?? null,
-      })),
-      createdAt: row.createdAt.toISOString(),
-    };
-  }
+function toView(
+  row: Prisma.KitchenTicketGetPayload<{ include: typeof TICKET_INCLUDE }>,
+  waiterNames: Map<string, string>,
+): KitchenTicketView {
+  const session = row.round?.order?.session;
+  const table = session?.table;
+  return {
+    id: row.id,
+    ticketNumber: row.ticketNumber,
+    branchId: row.branchId,
+    roundId: row.roundId,
+    stationId: row.stationId,
+    stationName: row.station.name,
+    status: row.status,
+    orderNumber: row.round?.order?.orderNumber ?? null,
+    // The synthetic walk-in table backs every counter and takeaway order;
+    // the pass wants to read "Takeaway", not a table code nobody can find.
+    placeLabel: table
+      ? table.code === 'WALK-IN'
+        ? 'Takeaway'
+        : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
+      : null,
+    roundNumber: row.round?.roundNumber ?? null,
+    waiterName: session?.waiterUserId ? waiterNames.get(session.waiterUserId) ?? null : null,
+    items: row.items.map((i) => ({
+      id: i.id,
+      menuItemName: i.menuItemName,
+      variantName: i.variantName,
+      quantity: i.quantity.toFixed(3),
+      modifierNames: i.modifierNames,
+      specialInstructions: i.specialInstructions,
+    })),
+    completedAt: row.completedAt?.toISOString() ?? null,
+    completedByName: row.completedBy?.name ?? null,
+    createdAt: row.createdAt.toISOString(),
+  };
 }

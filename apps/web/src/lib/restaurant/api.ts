@@ -25,7 +25,6 @@ import type {
   ExternalOrderView,
   KitchenPrinterKind,
   KitchenPrinterView,
-  PrinterRole,
   KitchenTicketStatus,
   KitchenTicketView,
   MenuItemView,
@@ -656,7 +655,7 @@ export const kitchen = {
   listTickets(
     session: Session,
     branchId: string,
-    status?: KitchenTicketStatus | 'ALL',
+    status?: KitchenTicketStatus | 'OUTSTANDING' | 'ALL',
   ) {
     const query = status && status !== 'ALL' ? `?status=${status}` : '';
     return api.get<KitchenTicketView[]>(
@@ -664,33 +663,10 @@ export const kitchen = {
       auth(session),
     );
   },
-  markPrinted(
-    session: Session,
-    branchId: string,
-    ticketId: string,
-    body: { printerId: string },
-  ) {
+  /** D68 — kitchen staff saying the food is done. */
+  complete(session: Session, branchId: string, ticketId: string) {
     return api.post<KitchenTicketView>(
-      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/mark-printed`,
-      body,
-      auth(session),
-    );
-  },
-  markFailed(
-    session: Session,
-    branchId: string,
-    ticketId: string,
-    body: { printerId: string; error: string },
-  ) {
-    return api.post<KitchenTicketView>(
-      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/mark-failed`,
-      body,
-      auth(session),
-    );
-  },
-  reprint(session: Session, branchId: string, ticketId: string) {
-    return api.post<KitchenTicketView>(
-      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/reprint`,
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`,
       undefined,
       auth(session),
     );
@@ -726,140 +702,13 @@ export const kitchenPrinters = {
     session: Session,
     branchId: string,
     printerId: string,
-    body: Partial<{
-      name: string;
-      kind: KitchenPrinterKind;
-      address: string;
-      isActive: boolean;
-      role: PrinterRole;
-      columns: number;
-    }>,
+    body: Partial<{ name: string; kind: KitchenPrinterKind; address: string; isActive: boolean }>,
   ) {
     return api.patch<KitchenPrinterView>(
       `/restaurant/branches/${branchId}/kitchen-printers/${printerId}`,
       body,
       auth(session),
     );
-  },
-  /** D67 — which stations this printer serves (replace-all). */
-  setStations(session: Session, branchId: string, printerId: string, stationIds: string[]) {
-    return api.put<KitchenPrinterView>(
-      `/restaurant/branches/${branchId}/kitchen-printers/${printerId}/stations`,
-      { stationIds },
-      auth(session),
-    );
-  },
-  /** D67 — print a self-test page now; the outcome is the driver's own. */
-  testPrint(session: Session, branchId: string, printerId: string) {
-    return api.post<{ ok: boolean; error?: string }>(
-      `/restaurant/branches/${branchId}/kitchen-printers/${printerId}/test-print`,
-      {},
-      auth(session),
-    );
-  },
-};
-
-// ── D67 — auto-printing: discovery, per-user defaults, agents, queue ────────
-
-export interface DiscoveredPrinter {
-  host: string;
-  port: number;
-  latencyMs: number;
-}
-
-export interface DiscoveryResult {
-  /** AGENT = reported from inside the shop; SERVER = the API scanned its own LAN. */
-  source: 'AGENT' | 'SERVER';
-  agentName?: string;
-  at?: string;
-  port: number;
-  printers: DiscoveredPrinter[];
-  subnets: string[];
-  hostsScanned: number;
-  note?: string;
-}
-
-export interface MyPrinters {
-  kitchenPrinterId: string | null;
-  cashierPrinterId: string | null;
-  branchDefaultCashierPrinterId: string | null;
-  branchDefaultKitchenPrinterId: string | null;
-  autoPrintKot: boolean;
-  autoPrintBill: boolean;
-}
-
-export interface PrintAgentView {
-  id: string;
-  name: string;
-  isActive: boolean;
-  lastSeenAt: string | null;
-  version: string | null;
-  createdAt: string;
-  online: boolean;
-}
-
-export interface PrintQueueStatus {
-  pendingKitchenAttempts: number;
-  failedKitchenTickets: number;
-  pendingBillJobs: number;
-  failedBillJobs: { id: string; saleId: string; error: string | null; attempts: number; at: string }[];
-}
-
-export const printing = {
-  discover(session: Session, branchId: string) {
-    return api.get<DiscoveryResult>(
-      `/printing/discover?branchId=${encodeURIComponent(branchId)}`,
-      auth(session),
-    );
-  },
-  probe(session: Session, host: string, port?: number) {
-    return api.post<{ reachable: boolean; host: string; port: number; latencyMs: number | null }>(
-      `/printing/probe`,
-      { host, ...(port ? { port } : {}) },
-      auth(session),
-    );
-  },
-  myPrinters(session: Session, branchId: string) {
-    return api.get<MyPrinters>(
-      `/printing/my-printers?branchId=${encodeURIComponent(branchId)}`,
-      auth(session),
-    );
-  },
-  setMyPrinters(
-    session: Session,
-    body: { kitchenPrinterId?: string | null; cashierPrinterId?: string | null },
-  ) {
-    return api.put<{ ok: true }>(`/printing/my-printers`, body, auth(session));
-  },
-  queue(session: Session, branchId: string) {
-    return api.get<PrintQueueStatus>(
-      `/printing/queue?branchId=${encodeURIComponent(branchId)}`,
-      auth(session),
-    );
-  },
-  drain(session: Session) {
-    return api.post<{ kot: number; bill: number }>(`/printing/drain`, {}, auth(session));
-  },
-  retryJob(session: Session, jobId: string) {
-    return api.post<{ ok: true }>(`/printing/jobs/${jobId}/retry`, {}, auth(session));
-  },
-  agents: {
-    list(session: Session, branchId: string) {
-      return api.get<PrintAgentView[]>(
-        `/printing/agents?branchId=${encodeURIComponent(branchId)}`,
-        auth(session),
-      );
-    },
-    pair(session: Session, branchId: string, name: string) {
-      return api.post<{ id: string; name: string; token: string }>(
-        `/printing/agents`,
-        { branchId, name },
-        auth(session),
-      );
-    },
-    revoke(session: Session, agentId: string) {
-      return api.post<{ ok: true }>(`/printing/agents/${agentId}/revoke`, {}, auth(session));
-    },
   },
 };
 

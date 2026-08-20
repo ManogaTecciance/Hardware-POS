@@ -48,7 +48,14 @@ export type RestaurantOrderItemStatus =
 
 export type RestaurantOrderChannel = 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
 
-export type KitchenTicketStatus = 'QUEUED' | 'PRINTED' | 'REPRINTED' | 'FAILED';
+// D68 — PRINTED/REPRINTED/FAILED are retired: no code path produces them,
+// but pre-D68 rows still carry them and the board must render those.
+export type KitchenTicketStatus =
+  | 'QUEUED'
+  | 'PRINTED'
+  | 'REPRINTED'
+  | 'FAILED'
+  | 'COMPLETED';
 
 export type KitchenPrintAttemptStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED';
 
@@ -373,28 +380,25 @@ export interface KitchenTicketView {
   branchId: string;
   roundId: string;
   stationId: string;
-  primaryPrinterId: string | null;
+  stationName: string;
   status: KitchenTicketStatus;
+  /** D68 — where the food is going. The board is the only delivery. */
+  orderNumber: string | null;
+  placeLabel: string | null;
+  roundNumber: number | null;
+  waiterName: string | null;
   items: {
     id: string;
     menuItemName: string;
+    variantName: string | null;
     quantity: string;
     modifierNames: string[];
     specialInstructions: string | null;
   }[];
-  attempts: {
-    id: string;
-    printerId: string;
-    status: KitchenPrintAttemptStatus;
-    error: string | null;
-    attemptedAt: string;
-    completedAt: string | null;
-  }[];
+  completedAt: string | null;
+  completedByName: string | null;
   createdAt: string;
 }
-
-/** D67 — KITCHEN devices are station-routed; CASHIER devices print bills. */
-export type PrinterRole = 'KITCHEN' | 'CASHIER';
 
 export interface KitchenPrinterView {
   id: string;
@@ -404,10 +408,6 @@ export interface KitchenPrinterView {
   kind: KitchenPrinterKind;
   address: string;
   isActive: boolean;
-  role: PrinterRole;
-  /** Characters per line: 48 = 80 mm paper, 32 = 58 mm. */
-  columns: number;
-  stationIds: string[];
 }
 
 // ── Takeaway ────────────────────────────────────────────────────────────────

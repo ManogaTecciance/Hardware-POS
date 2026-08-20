@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { KitchenTicketStatus, ModuleKey } from '@hardware-pos/database';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -8,9 +8,15 @@ import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
-import { MarkFailedDto, MarkPrintedDto } from './dto/kitchen.dto';
-import { KitchenService, KitchenTicketView } from './kitchen.service';
+import { KitchenService, KitchenTicketNotFoundError, KitchenTicketView } from './kitchen.service';
 
+/**
+ * D68 — the kitchen board's write surface.
+ *
+ * Two verbs where Phase 6 had four: read the queue, say the food is done.
+ * `mark-printed`, `mark-failed` and `reprint` went with the printers — they
+ * described what a device did, and there is no device.
+ */
 @Controller('restaurant/branches/:branchId/kitchen-tickets')
 @RequireModule(ModuleKey.KITCHEN)
 export class KitchenTicketsController {
@@ -26,76 +32,41 @@ export class KitchenTicketsController {
     @Param('branchId') branchId: string,
     @Query('status') status?: string,
   ): Promise<KitchenTicketView[]> {
-    const s = status && (status as KitchenTicketStatus);
-    return this.service.listTicketsForBranch(tenantId, branchId, s || undefined);
+    return this.service.listTicketsForBranch(tenantId, branchId, parseFilter(status));
   }
 
-  @Post(':ticketId/mark-printed')
+  @Post(':ticketId/complete')
   @RequirePermissions(Permission.KITCHEN_STATUS_UPDATE)
-  async markPrinted(
+  async complete(
     @TenantId() tenantId: string,
     @CurrentUser() actor: AuthenticatedUser,
-    @Param('branchId') _branchId: string,
+    @Param('branchId') branchId: string,
     @Param('ticketId') ticketId: string,
-    @Body() dto: MarkPrintedDto,
   ): Promise<KitchenTicketView> {
-    const updated = await this.service.markPrinted(tenantId, ticketId, dto.printerId);
-    await this.audit.record(tenantId, {
-      userId: actor.id,
-      action: 'KITCHEN_TICKET_PRINTED',
-      entityType: 'KitchenTicket',
-      entityId: ticketId,
-      metadata: { printerId: dto.printerId },
-    });
-    return updated;
+    try {
+      const updated = await this.service.completeTicket(tenantId, branchId, ticketId, actor.id);
+      await this.audit.record(tenantId, {
+        userId: actor.id,
+        action: 'KITCHEN_TICKET_COMPLETED',
+        entityType: 'KitchenTicket',
+        entityId: ticketId,
+        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
+      });
+      return updated;
+    } catch (err) {
+      if (err instanceof KitchenTicketNotFoundError) throw new NotFoundException(err.message);
+      throw err;
+    }
   }
+}
 
-  @Post(':ticketId/mark-failed')
-  @RequirePermissions(Permission.KITCHEN_STATUS_UPDATE)
-  async markFailed(
-    @TenantId() tenantId: string,
-    @CurrentUser() actor: AuthenticatedUser,
-    @Param('branchId') _branchId: string,
-    @Param('ticketId') ticketId: string,
-    @Body() dto: MarkFailedDto,
-  ): Promise<KitchenTicketView> {
-    const updated = await this.service.markFailed(tenantId, ticketId, dto.printerId, dto.error);
-    await this.audit.record(tenantId, {
-      userId: actor.id,
-      action: 'KITCHEN_TICKET_ATTEMPT_FAILED',
-      entityType: 'KitchenTicket',
-      entityId: ticketId,
-      metadata: { printerId: dto.printerId, error: dto.error },
-    });
-    return updated;
-  }
-
-  @Post(':ticketId/reprint')
-  @RequirePermissions(Permission.KOT_PRINT)
-  async reprint(
-    @TenantId() tenantId: string,
-    @CurrentUser() actor: AuthenticatedUser,
-    @Param('branchId') _branchId: string,
-    @Param('ticketId') ticketId: string,
-  ): Promise<KitchenTicketView> {
-    // Reprint is a policy operation: mark the ticket as REPRINTED and let
-    // the queue driver observe the flag to re-enqueue. The full re-queue
-    // logic lives with the driver (not shipped here); this endpoint gives
-    // the operator a clean audit trail.
-    const { prisma } = this.service as unknown as { prisma: import('../../prisma/prisma.service').PrismaService };
-    await prisma.kitchenTicket.updateMany({
-      where: { id: ticketId, tenantId },
-      data: { status: 'REPRINTED' },
-    });
-    const listed = await this.service.listTicketsForBranch(tenantId, _branchId);
-    const found = listed.find((t) => t.id === ticketId);
-    await this.audit.record(tenantId, {
-      userId: actor.id,
-      action: 'KITCHEN_TICKET_REPRINT_REQUESTED',
-      entityType: 'KitchenTicket',
-      entityId: ticketId,
-      metadata: {},
-    });
-    return found!;
-  }
+/**
+ * `?status=` accepts a real ticket status or the board's `OUTSTANDING`
+ * pseudo-filter. Anything unrecognised means "no filter" rather than an
+ * error: a stale bookmark should show the whole board, not a 400.
+ */
+function parseFilter(status?: string): KitchenTicketStatus | 'OUTSTANDING' | undefined {
+  if (!status) return undefined;
+  if (status === 'OUTSTANDING') return 'OUTSTANDING';
+  return status in KitchenTicketStatus ? (status as KitchenTicketStatus) : undefined;
 }

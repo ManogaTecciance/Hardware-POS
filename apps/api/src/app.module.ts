@@ -44,7 +44,6 @@ import { DiningModule } from './modules/dining/dining.module';
 import { TableSessionsModule } from './modules/table-sessions/table-sessions.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { KitchenModule } from './modules/kitchen/kitchen.module';
-import { PrintingModule } from './modules/printing/printing.module';
 import { TakeawayModule } from './modules/takeaway/takeaway.module';
 import { CatalogueModule } from './modules/catalogue/catalogue.module';
 import { BillingModule } from './modules/billing/billing.module';
@@ -95,7 +94,6 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     TableSessionsModule,
     ReservationsModule,
     KitchenModule,
-    PrintingModule,
     TakeawayModule,
     CatalogueModule,
     BillingModule,

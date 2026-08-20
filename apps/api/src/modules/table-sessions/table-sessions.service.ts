@@ -20,7 +20,6 @@ import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-se
 import { RoundDepletionService } from '../providers/inventory/round-depletion.service';
 import { SettingsService } from '../settings/settings.service';
 import { KitchenService } from '../kitchen/kitchen.service';
-import { PrintingService } from '../printing/printing.service';
 import { resolveRoundItemInputs, writeRoundItems } from './round-item-resolution';
 import {
   CloseSessionDto,
@@ -124,9 +123,6 @@ export class TableSessionsService {
     // D65 — submit-time stock depletion (Q4): the round transaction is where
     // "the kitchen got the ticket" and "the shelf count moved" must coincide.
     private readonly roundDepletion: RoundDepletionService,
-    // D67 — auto-printing: queue the bill on close, nudge the dispatcher
-    // after each commit. Never in the transaction's critical path.
-    private readonly printing: PrintingService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────
@@ -409,16 +405,10 @@ export class TableSessionsService {
       );
 
       // Phase 6: generate KOTs inside the same transaction so a round and
-      // its tickets are visible together. Scenario 20 requires the round
-      // to be persisted even if printer wiring later fails; the tickets
-      // themselves are QUEUED and the print attempt driver handles retry.
-      await this.kitchen.generateTicketsForRound(
-        tx,
-        tenantId,
-        session.branchId,
-        round.id,
-        actorUserId,
-      );
+      // its tickets are visible together. D68 — the tickets ARE the
+      // delivery: they land QUEUED on the kitchen board the moment this
+      // transaction commits, with nothing downstream to go wrong.
+      await this.kitchen.generateTicketsForRound(tx, tenantId, session.branchId, round.id);
 
       const roundFull = await tx.orderRound.findUniqueOrThrow({
         where: { id: round.id },
@@ -426,15 +416,6 @@ export class TableSessionsService {
       });
       return this.roundToView(roundFull);
     });
-    /*
-     * D67 — items confirmed onto the order are already in the kitchen's
-     * queue (Phase 6 wrote the tickets + attempts above, in the same
-     * transaction). This nudges the dispatcher so they hit the station
-     * printer within a second of the waiter tapping Send, instead of on the
-     * worker's next tick. Never awaited: the round is already committed and
-     * a printer must not delay the response.
-     */
-    this.printing.kick();
     return view;
   }
 
@@ -643,19 +624,6 @@ export class TableSessionsService {
         sessionId: session.id,
       });
 
-      /*
-       * D67 — the waiter completing the order is what prints the finalised
-       * bill on the branch's cashier printer. Queued INSIDE this transaction
-       * so a rolled-back close cannot leave a bill job for a sale that does
-       * not exist; the bytes go out after commit, so no printer can delay or
-       * fail the close (D53).
-       */
-      await this.printing.enqueueBillForSale(tx, {
-        tenantId,
-        branchId: session.branchId,
-        saleId: sale.id,
-        createdByUserId: actorUserId,
-      });
       if (release.openTableRelease !== undefined) {
         return {
           session: this.sessionToView(updated),
@@ -666,8 +634,6 @@ export class TableSessionsService {
 
       return { session: this.sessionToView(updated), saleId: sale.id };
     });
-    // After commit: print now rather than on the worker's next tick.
-    this.printing.kick();
     return result;
   }
 

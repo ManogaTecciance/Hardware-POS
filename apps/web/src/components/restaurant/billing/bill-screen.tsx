@@ -1,6 +1,15 @@
 'use client';
 
-import { CreditCard, Minus, Plus, Printer, Receipt, Trash2, Undo2, UtensilsCrossed } from 'lucide-react';
+import {
+  CreditCard,
+  Minus,
+  Plus,
+  Printer,
+  Receipt,
+  Trash2,
+  Undo2,
+  UtensilsCrossed,
+} from 'lucide-react';
 import * as React from 'react';
 
 import { StatusBadge } from '@/components/restaurant/status-badge';
@@ -13,7 +22,7 @@ import { Permission } from '@/lib/permissions';
 import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import { getCachedDocumentProfile } from '@/lib/document-template-service';
-import { printSplitBill } from '@/lib/receipt-print';
+import { printSplitBill, reprintCustomerReceipt } from '@/lib/receipt-print';
 import { getActiveCurrency } from '@/lib/tenant-money';
 import type { BillLineItem, BillView, PaymentMethod } from '@/lib/restaurant/types';
 
@@ -51,10 +60,31 @@ export function BillScreen({ session, saleId }: Props) {
   const [error, setError] = React.useState<string | null>(null);
   const [showSplitEditor, setShowSplitEditor] = React.useState(false);
   const [showItemSplit, setShowItemSplit] = React.useState(false);
-  const [payFor, setPayFor] = React.useState<
-    { splitId: string | null; suggested: string } | null
-  >(null);
+  const [payFor, setPayFor] = React.useState<{ splitId: string | null; suggested: string } | null>(
+    null,
+  );
   const [reopening, setReopening] = React.useState(false);
+  const [printing, setPrinting] = React.useState(false);
+
+  /*
+   * D68 — printing the bill is the CASHIER's deliberate act, not something
+   * the system does on their behalf. A browser print is the right mechanism
+   * for it: a human pressed a button, so the print dialog they get is the
+   * one they expect, and it reaches whichever printer that till is set up
+   * with. (Automatic, unattended printing is what needed hardware plumbing,
+   * and that is exactly what D68 withdrew.)
+   */
+  const printBill = async () => {
+    setPrinting(true);
+    setError(null);
+    try {
+      await reprintCustomerReceipt(session, saleId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not prepare the bill for printing');
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const load = React.useCallback(async () => {
     try {
@@ -98,18 +128,29 @@ export function BillScreen({ session, saleId }: Props) {
             <div>
               <CardTitle>{bill.saleNumber}</CardTitle>
             </div>
-            <StatusBadge
-              label={bill.paymentStatus}
-              tone={
-                bill.paymentStatus === 'PAID'
-                  ? 'positive'
-                  : bill.paymentStatus === 'PARTIAL'
-                    ? 'warning'
-                    : bill.paymentStatus === 'REFUNDED'
-                      ? 'muted'
-                      : 'danger'
-              }
-            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<Printer className="h-4 w-4" />}
+                isLoading={printing}
+                onClick={() => void printBill()}
+              >
+                Print bill
+              </Button>
+              <StatusBadge
+                label={bill.paymentStatus}
+                tone={
+                  bill.paymentStatus === 'PAID'
+                    ? 'positive'
+                    : bill.paymentStatus === 'PARTIAL'
+                      ? 'warning'
+                      : bill.paymentStatus === 'REFUNDED'
+                        ? 'muted'
+                        : 'danger'
+                }
+              />
+            </div>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
             <Row label="Subtotal" value={formatMoney(bill.subtotal)} />
@@ -131,7 +172,10 @@ export function BillScreen({ session, saleId }: Props) {
             </CardHeader>
             <CardContent className="space-y-1">
               {bill.items.map((it) => (
-                <div key={it.orderItemId} className="flex items-start justify-between gap-3 text-sm">
+                <div
+                  key={it.orderItemId}
+                  className="flex items-start justify-between gap-3 text-sm"
+                >
                   <div className="min-w-0">
                     <p className="truncate">
                       {it.name}
@@ -199,9 +243,7 @@ export function BillScreen({ session, saleId }: Props) {
                   return (
                     <li key={sp.id} className="rounded-lg border border-border p-3 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="font-medium">
-                          {sp.label ?? `Split ${i + 1}`}
-                        </span>
+                        <span className="font-medium">{sp.label ?? `Split ${i + 1}`}</span>
                         <span>{formatMoney(sp.share)}</span>
                       </div>
                       <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
@@ -242,7 +284,8 @@ export function BillScreen({ session, saleId }: Props) {
                           leftIcon={<Printer className="h-4 w-4" />}
                           onClick={() =>
                             printSplitBill({
-                              storeName: getCachedDocumentProfile().companyName || session.branchName || '',
+                              storeName:
+                                getCachedDocumentProfile().companyName || session.branchName || '',
                               currency: getActiveCurrency(),
                               saleNumber: bill.saleNumber,
                               splitLabel: sp.label ?? `Split ${i + 1}`,
@@ -305,8 +348,8 @@ export function BillScreen({ session, saleId }: Props) {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <p className="text-muted-foreground">
-                Reopening a closed bill undoes the finalisation so a payment or a split can
-                be corrected. The reason is recorded on the audit trail.
+                Reopening a closed bill undoes the finalisation so a payment or a split can be
+                corrected. The reason is recorded on the audit trail.
               </p>
               <Button
                 variant="destructive"
@@ -485,7 +528,9 @@ function SplitsEditorDialog({
                 aria-label={`Label for split ${i + 1}`}
                 value={r.label}
                 onChange={(e) =>
-                  setRows((rs) => rs.map((row) => (row.key === r.key ? { ...row, label: e.target.value } : row)))
+                  setRows((rs) =>
+                    rs.map((row) => (row.key === r.key ? { ...row, label: e.target.value } : row)),
+                  )
                 }
                 className="flex-1"
               />
@@ -493,7 +538,9 @@ function SplitsEditorDialog({
                 aria-label={`Amount for split ${i + 1}`}
                 value={r.share}
                 onChange={(e) =>
-                  setRows((rs) => rs.map((row) => (row.key === r.key ? { ...row, share: e.target.value } : row)))
+                  setRows((rs) =>
+                    rs.map((row) => (row.key === r.key ? { ...row, share: e.target.value } : row)),
+                  )
                 }
                 inputMode="decimal"
                 className="w-24 text-right"
@@ -696,7 +743,12 @@ function ReopenDialog({
           <Button variant="ghost" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={submit} isLoading={saving} disabled={!reason.trim()}>
+          <Button
+            variant="destructive"
+            onClick={submit}
+            isLoading={saving}
+            disabled={!reason.trim()}
+          >
             Reopen bill
           </Button>
         </>
@@ -724,7 +776,6 @@ function cryptoRandomKey(): string {
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
   return `key-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
-
 
 /** "2.000" reads badly on a bill; "2" and "0.5" do. */
 function trimQuantity(q: string): string {
@@ -773,7 +824,8 @@ function ItemSplitDialog({
 
   const assignedTotal = (itemId: string) =>
     splits.reduce((n, s) => n + (s.assigned.get(itemId) ?? 0), 0);
-  const remainingOf = (item: BillLineItem) => Number(item.quantity) - assignedTotal(item.orderItemId);
+  const remainingOf = (item: BillLineItem) =>
+    Number(item.quantity) - assignedTotal(item.orderItemId);
   const unassignedUnits = bill.items.reduce((n, it) => n + remainingOf(it), 0);
 
   const splitSubtotal = (split: DraftSplit) =>
@@ -891,7 +943,12 @@ function ItemSplitDialog({
               </button>
             );
           })}
-          <Button size="sm" variant="outline" onClick={addSplit} leftIcon={<Plus className="h-4 w-4" />}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={addSplit}
+            leftIcon={<Plus className="h-4 w-4" />}
+          >
             Add guest
           </Button>
         </div>
@@ -943,7 +1000,10 @@ function ItemSplitDialog({
                     {formatMoney(it.unitPrice)} each · {trimQuantity(it.quantity)} total
                     {others > 0 ? ` · ${trimQuantity(String(others))} with others` : ''}
                     {left > 0 ? (
-                      <span className="text-warning"> · {trimQuantity(String(left))} unassigned</span>
+                      <span className="text-warning">
+                        {' '}
+                        · {trimQuantity(String(left))} unassigned
+                      </span>
                     ) : null}
                   </p>
                 </div>
@@ -990,8 +1050,8 @@ function ItemSplitDialog({
           ) : null}
         </div>
         <p className="text-xs text-muted-foreground">
-          Service charge and other bill-level amounts are shared across the new
-          bills in proportion to what each covers.
+          Service charge and other bill-level amounts are shared across the new bills in proportion
+          to what each covers.
         </p>
       </div>
     </Dialog>

@@ -317,38 +317,12 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /restaurant/order-items/:itemId/void': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/table-sessions/:sessionId/close': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  // D67 — auto-printing: station links, the self-test page, the queue, the
-  // network scan and each user's own printer defaults.
-  'PUT /restaurant/branches/:branchId/kitchen-printers/:printerId/stations': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /restaurant/branches/:branchId/kitchen-printers/:printerId/test-print': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'GET /printing/queue': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /printing/jobs/:jobId/retry': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /printing/drain': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'GET /printing/discover': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /printing/probe': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'GET /printing/my-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /printing/agents': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'GET /printing/agents': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /printing/agents/:agentId/revoke': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  /*
-   * D67 — the on-site print agent's own API. `public-no-tenant` in this
-   * table's vocabulary means "not a workspace-user route": these carry
-   * @Public() to switch OFF the user stack and are guarded by
-   * PrintAgentGuard instead, which resolves a branch-scoped device token.
-   * They cannot carry a module guard for the same reason the QuickBooks
-   * OAuth callback cannot — there is no authenticated tenant on the request
-   * until the guard puts one there.
-   */
-  'POST /print-agent/heartbeat': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
-  'POST /print-agent/lease': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
-  'POST /print-agent/ack': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
-  'PUT /printing/my-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/branches/:branchId/kitchen-printers/:printerId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/kitchen-tickets': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/mark-printed': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/mark-failed': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/reprint': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  // D68 — one write verb where Phase 6 had three. mark-printed/mark-failed/
+  // reprint described what a printer did, and there is no printer.
+  'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/complete': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'POST /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/takeaway/:profileId/status': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },

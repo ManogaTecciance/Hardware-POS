@@ -317,7 +317,7 @@ export function OrderEntry({ session, sessionId }: Props) {
                 leftIcon={<Receipt className="h-4 w-4" />}
                 onClick={() => setShowCloseConfirm(true)}
               >
-                Close & bill
+                Complete order
               </Button>
             ) : null}
             {s.status !== 'OPEN' && s.finalSaleId ? (
@@ -549,8 +549,8 @@ export function OrderEntry({ session, sessionId }: Props) {
         <Dialog
           open
           onClose={() => setShowCloseConfirm(false)}
-          title="Close and generate bill?"
-          description="No more rounds can be sent after closing. You will be taken to the bill to collect payment."
+          title="Complete this order?"
+          description="No more items can be sent to the kitchen after this. The bill is raised, and the cashier settles and prints it."
           footer={
             <>
               <Button
@@ -561,7 +561,7 @@ export function OrderEntry({ session, sessionId }: Props) {
                 Not yet
               </Button>
               <Button onClick={closeAndBill} isLoading={closingBill}>
-                Close & bill
+                Complete order
               </Button>
             </>
           }

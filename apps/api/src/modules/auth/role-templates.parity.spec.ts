@@ -38,17 +38,25 @@ import { collectRoutes } from '../../common/testkit/route-inventory';
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('the template catalogue is exactly what the workspace templates staff', () => {
-  it('exactly five templates exist — the removed ones stay removed', () => {
+  it('exactly six templates exist — the removed ones stay removed', () => {
     /*
      * PO decision, 2026-08-17: the unstaffed blueprints (Admin, Manager,
-     * Accountant, Restaurant Manager, Kitchen Manager, Kitchen Staff, Bar
-     * Staff) were DELETED, not parked. Exact set both ways: a template
-     * added back — or dropped — fails here by name. The UserRole ENUM keeps
-     * all five values (persisted data, legacy-fallback authority); this is
-     * about what NEW workspaces are seeded with.
+     * Accountant, Restaurant Manager, Kitchen Manager, Bar Staff) were
+     * DELETED, not parked. Exact set both ways: a template added back — or
+     * dropped — fails here by name. The UserRole ENUM keeps all five values
+     * (persisted data, legacy-fallback authority); this is about what NEW
+     * workspaces are seeded with.
+     *
+     * KITCHEN_STAFF is the one addition since, and it is not a walk-back of
+     * that decision: D68 withdrew kitchen printing, which turned the kitchen
+     * board into the only place a ticket is ever delivered and created a job
+     * — watch the board, mark food done — that nothing else in the catalogue
+     * covers. The bar remains "a template must name a job someone is
+     * rostered to".
      */
     expect(ALL_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual([
       'CASHIER',
+      'KITCHEN_STAFF',
       'OWNER',
       'RECEPTIONIST',
       'RESTAURANT_CASHIER',
@@ -150,12 +158,46 @@ describe('templates are selected by business type', () => {
     expect(keys.sort()).toEqual(['CASHIER', 'OWNER']);
   });
 
-  it('a food-service tenant gets Owner, Waiter and (Restaurant) Cashier', () => {
+  it('a food-service tenant gets Owner, Waiter, Cashier and Kitchen staff', () => {
     for (const type of ['RESTAURANT', 'CAFE', 'BAKERY']) {
       const keys = roleTemplatesForBusinessType(type).map((t) => t.key);
       expect({ type, keys: keys.sort() }).toEqual({
         type,
-        keys: ['OWNER', 'RESTAURANT_CASHIER', 'WAITER'],
+        keys: ['KITCHEN_STAFF', 'OWNER', 'RESTAURANT_CASHIER', 'WAITER'],
+      });
+    }
+  });
+
+  /**
+   * D68 — kitchen staff work the board and nothing else. Asserted as an
+   * EXACT set: a permission quietly added here is the difference between
+   * "marks food done" and "can settle a table's bill", and the pass is the
+   * one place in a restaurant with no till accountability.
+   */
+  it('Kitchen staff hold exactly the board permissions, and nothing with money in it', () => {
+    const kitchen = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === 'KITCHEN_STAFF');
+    expect(kitchen).toBeDefined();
+    expect([...kitchen!.permissions].sort()).toEqual(
+      [
+        Permission.PLATFORM_PROFILE_READ,
+        Permission.KOT_VIEW,
+        Permission.KITCHEN_STATUS_UPDATE,
+      ].sort(),
+    );
+    // NEGATIVE, by name — the exact-set assertion above already implies these,
+    // but naming them is what makes a future widening obviously wrong rather
+    // than merely red.
+    for (const forbidden of [
+      Permission.SALE_CREATE,
+      Permission.PAYMENT_COLLECT,
+      Permission.BILL_VIEW,
+      Permission.TABLE_CLOSE,
+      Permission.ORDER_CREATE,
+      Permission.REPORT_READ,
+    ]) {
+      expect({ permission: forbidden, held: kitchen!.permissions.includes(forbidden) }).toEqual({
+        permission: forbidden,
+        held: false,
       });
     }
   });

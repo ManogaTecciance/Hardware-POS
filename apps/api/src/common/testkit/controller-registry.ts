@@ -58,8 +58,6 @@ import { RestaurantTablesController } from '../../modules/dining/restaurant-tabl
 import { TableSessionsController } from '../../modules/table-sessions/table-sessions.controller';
 import { ReservationsController } from '../../modules/reservations/reservations.controller';
 import { KitchenPrintersController } from '../../modules/kitchen/kitchen-printers.controller';
-import { PrintingController } from '../../modules/printing/printing.controller';
-import { PrintAgentController } from '../../modules/printing/print-agent.controller';
 import { KitchenTicketsController } from '../../modules/kitchen/kitchen-tickets.controller';
 import { TakeawayController } from '../../modules/takeaway/takeaway.controller';
 import { BillingController } from '../../modules/billing/billing.controller';
@@ -131,9 +129,6 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   // D47 — table reservations.
   ReservationsController,
   KitchenPrintersController,
-  // D67 — the print queue's operator surface.
-  PrintingController,
-  PrintAgentController,
   KitchenTicketsController,
   TakeawayController,
   BillingController,
@@ -223,9 +218,6 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   // D47 — table reservations.
   'reservations',
   'kitchen-printers',
-  // D67.
-  'printing',
-  'print-agent',
   'kitchen-tickets',
   'takeaway',
   'billing',

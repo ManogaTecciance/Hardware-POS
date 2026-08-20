@@ -6,11 +6,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 
 /**
- * Kitchen board (Phase F).
+ * Kitchen board (Phase F, reshaped by D68).
  *
- * Shows every KOT for the active branch with its print status and last
- * attempt. Chefs and expeditors can reprint, mark a paper receipt as
- * printed manually, or record a failed print for the audit trail.
+ * The live queue for the active branch: every item a waiter confirms onto an
+ * order shows up here, and kitchen staff mark each ticket done when the food
+ * is up. Nothing prints — this screen IS the delivery.
  */
 export default function KitchenPage() {
   const { session } = useAuth();
@@ -34,7 +34,7 @@ export default function KitchenPage() {
     <div className="space-y-6">
       <PageHeader
         title="Kitchen"
-        description={`${session.branchName} — live kitchen tickets and reprints.`}
+        description={`${session.branchName} — live tickets. Mark each one done when the food is up.`}
       />
       <KitchenBoard session={session} branchId={session.branchId} />
     </div>

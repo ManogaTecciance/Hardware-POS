@@ -118,7 +118,11 @@ describe('the trimmed role catalogue, per template', () => {
   it('each template seeds exactly its staffed roles — nothing removed comes back', async () => {
     const cases: [string, string[]][] = [
       ['HARDWARE', ['CASHIER', 'OWNER']],
-      ['RESTAURANT', ['OWNER', 'RESTAURANT_CASHIER', 'WAITER']],
+      // D68 added KITCHEN_STAFF to food service — the kitchen board replaced
+      // the kitchen printer, so the board needs somebody rostered to it.
+      // Hotel deliberately does NOT get it: a hotel workspace is the front
+      // desk today, and nothing there works a pass.
+      ['RESTAURANT', ['KITCHEN_STAFF', 'OWNER', 'RESTAURANT_CASHIER', 'WAITER']],
       ['HOTEL', ['OWNER', 'RECEPTIONIST', 'WAITER']],
     ];
     for (const [templateKey, expected] of cases) {
