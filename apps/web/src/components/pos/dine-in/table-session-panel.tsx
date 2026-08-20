@@ -118,12 +118,11 @@ function ActiveStrip({
             <UtensilsCrossed className="h-4 w-4" aria-hidden />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">
-              {active.tableLabel}
-              <span className="ml-2 font-normal text-muted-foreground">
-                Session {active.sessionNumber}
-              </span>
-            </p>
+            {/* The table name alone (PO, 2026-08-21). A waiter says "table
+                nine", never "session 12" — the session number is an internal
+                document id and prefixing the one thing they recognise with it
+                buries it. */}
+            <p className="truncate text-sm font-semibold">{active.tableLabel}</p>
             <p className="truncate text-xs text-muted-foreground">
               Open {formatElapsed(active.openedAt)}
               {active.guestCount ? ` · ${active.guestCount} guests` : ''}
@@ -186,11 +185,13 @@ function Picker({
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   /**
-   * Area filter, the same control the floor plan and the calendar use. 'ALL'
-   * is a real selection, not the absence of one — a filter you cannot get
-   * back out of is a trap.
+   * Area filter — the floor plan's control, minus its "All areas" chip (PO,
+   * 2026-08-21). Showing every area at once is what made this block tall in
+   * the first place, and a waiter works one section of the room, so exactly
+   * one area is selected at all times. `null` only ever means "areas have
+   * not loaded yet".
    */
-  const [selectedArea, setSelectedArea] = React.useState<string>('ALL');
+  const [selectedArea, setSelectedArea] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -210,8 +211,9 @@ function Picker({
        * silent wrong answer otherwise: an open session's table is occupied
        * (so it is absent from the available lists), and a session in a
        * filtered-out area would lose its name entirely — leaving the waiter
-       * a chip reading "Session 000012" with no way to tell which table it
-       * is. The filter narrows what is DISPLAYED, never what is known.
+       * a chip labelled with a bare session number and no way to tell which
+       * table it is. The filter narrows what is DISPLAYED, never what is
+       * known.
        */
       const labelMap = new Map<string, string>();
       const availableByArea = new Map<string, RestaurantTableView[]>();
@@ -228,6 +230,16 @@ function Picker({
       setAreas(sorted);
       setTablesByArea(availableByArea);
       setLabels(labelMap);
+      /*
+       * With no "All" option there must always be a valid selection, so the
+       * first area is chosen on load — and re-chosen if a refresh archived
+       * the area that was selected. Without the second half the block would
+       * silently show nothing at all, which looks exactly like a branch with
+       * no tables.
+       */
+      setSelectedArea((current) =>
+        current && sorted.some((a) => a.id === current) ? current : sorted[0]?.id ?? null,
+      );
     } finally {
       setLoading(false);
     }
@@ -270,8 +282,7 @@ function Picker({
     }
   };
 
-  const visibleAreas =
-    selectedArea === 'ALL' ? areas : areas.filter((a) => a.id === selectedArea);
+  const visibleAreas = areas.filter((a) => a.id === selectedArea);
 
   return (
     <Card>
@@ -322,7 +333,7 @@ function Picker({
                           onPick({
                             id: s.id,
                             sessionNumber: s.sessionNumber,
-                            tableLabel: name ?? `Session ${s.sessionNumber}`,
+                            tableLabel: name ?? s.sessionNumber,
                             openedAt: s.openedAt,
                             guestCount: s.guestCount,
                             orderId: s.activeOrderId,
@@ -334,7 +345,7 @@ function Picker({
                             : 'border-primary/40 bg-brand-50 hover:border-primary'
                         }`}
                       >
-                        {name ?? `Session ${s.sessionNumber}`}
+                        {name ?? s.sessionNumber}
                         <span
                           className={`text-xs font-normal ${
                             s.id === activeId ? 'opacity-80' : 'text-muted-foreground'
@@ -357,14 +368,9 @@ function Picker({
                 </span>
                 <ChipRow
                   ariaLabel="Filter tables by dining area"
-                  activeKey={selectedArea}
+                  activeKey={selectedArea ?? ''}
                   className="min-w-0 flex-1"
                 >
-                  <AreaChip
-                    label="All areas"
-                    active={selectedArea === 'ALL'}
-                    onClick={() => setSelectedArea('ALL')}
-                  />
                   {areas.map((a) => (
                     <AreaChip
                       key={a.id}

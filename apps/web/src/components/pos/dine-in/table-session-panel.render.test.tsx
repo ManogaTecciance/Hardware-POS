@@ -147,6 +147,8 @@ describe('picking a table', () => {
     panel(null, onPick);
 
     const chip = await screen.findByRole('button', { name: /M2/ });
+    // NEGATIVE — the chip is the table, not "Session 000009".
+    expect(chip.textContent).not.toMatch(/Session/);
     fireEvent.click(chip);
 
     expect(openSession).not.toHaveBeenCalled(); // resuming, not seating
@@ -155,25 +157,40 @@ describe('picking a table', () => {
     );
   });
 
-  it('narrows the table list to one area, and can be widened again', async () => {
+  it('shows exactly ONE area — the first — and offers no "all areas" escape', async () => {
     panel(null);
 
-    // Default: both areas' free tables are offered.
+    // POSITIVE — the first area (Terrace, position 0) is selected on load.
     expect(await screen.findByRole('button', { name: /T1/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /M1/ })).toBeTruthy();
+    // NEGATIVE — and the second area's tables are NOT on screen. Paired, so a
+    // component rendering nothing fails the first half and one rendering
+    // everything fails the second.
+    expect(screen.queryByRole('button', { name: /M1/ })).toBeNull();
+
+    // PO, 2026-08-21: no "All areas" chip on this screen. Asserted by name
+    // because its return would be invisible to every other test here.
+    expect(screen.queryByRole('button', { name: 'All areas' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /all areas/i })).toBeNull();
+    // …and the real chips ARE present, so the two absences above are not
+    // passing because the filter failed to render at all.
+    expect(screen.getByRole('button', { name: 'Terrace' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Main Hall' })).toBeTruthy();
+  });
+
+  it('swaps to the other area when its chip is tapped', async () => {
+    panel(null);
+    expect(await screen.findByRole('button', { name: /T1/ })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Main Hall' }));
 
-    // POSITIVE + NEGATIVE together: a component that rendered nothing would
-    // satisfy the absence check alone, and one that ignored the chips would
-    // satisfy the presence check alone.
-    await waitFor(() => expect(screen.queryByRole('button', { name: /T1/ })).toBeNull());
-    expect(screen.getByRole('button', { name: /M1/ })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: /M1/ })).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /T1/ })).toBeNull();
 
-    // A filter that cannot be undone is a trap.
-    fireEvent.click(screen.getByRole('button', { name: 'All areas' }));
+    // And back again — one area is always selected, so this is a swap rather
+    // than a toggle that can land on nothing.
+    fireEvent.click(screen.getByRole('button', { name: 'Terrace' }));
     await waitFor(() => expect(screen.getByRole('button', { name: /T1/ })).toBeTruthy());
-    expect(screen.getByRole('button', { name: /M1/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /M1/ })).toBeNull();
   });
 
   it('keeps open sessions visible when an area filter is applied', async () => {
@@ -193,7 +210,9 @@ describe('picking a table', () => {
 
     expect(await screen.findByRole('button', { name: /T2/ })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Main Hall' }));
+    // Terrace's free table is gone with the filter…
     await waitFor(() => expect(screen.queryByRole('button', { name: /T1/ })).toBeNull());
+    // …but Terrace's OPEN SESSION is still there, which is the claim.
     expect(screen.getByRole('button', { name: /T2/ })).toBeTruthy();
   });
 });
@@ -223,6 +242,12 @@ describe('an active session', () => {
     // POSITIVE — the strip names the table and what has happened on it.
     expect(screen.getByText(/T1/)).toBeTruthy();
     expect(screen.getByText(/2 rounds sent/)).toBeTruthy();
+    /*
+     * NEGATIVE (PO, 2026-08-21) — and never the word "Session". A waiter says
+     * "table nine"; the session number is an internal document id, and
+     * leading with it buries the one label they recognise.
+     */
+    expect(screen.queryByText(/Session/)).toBeNull();
     // NEGATIVE — the picker is gone, so this is a swap and not an addition.
     expect(screen.queryByText(/Which table\?/)).toBeNull();
 
@@ -256,10 +281,17 @@ describe('an active session', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Change table/ }));
     expect(await screen.findByText('Which table?')).toBeTruthy();
-    // The strip stays: the waiter must be able to see which session they are
-    // about to move away from.
-    expect(screen.getByText(/Session 000012/)).toBeTruthy();
+    /*
+     * The strip stays: the waiter must be able to see which table they are
+     * about to move away from. Scoped to the strip deliberately — "T1" is
+     * now on screen twice (the strip AND its own chip in the re-opened
+     * picker), so an unscoped query would be ambiguous rather than wrong.
+     */
+    const stripMeta = screen.getByText(/2 rounds sent/);
+    expect(stripMeta.parentElement?.textContent).toContain('T1');
 
+    // M1 is in the second area, and only one area shows at a time now.
+    fireEvent.click(await screen.findByRole('button', { name: 'Main Hall' }));
     fireEvent.click(await screen.findByRole('button', { name: /M1/ }));
     await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
     // Picking collapses it again without waiting for the parent to re-render
