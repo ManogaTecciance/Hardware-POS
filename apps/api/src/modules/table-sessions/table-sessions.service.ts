@@ -112,6 +112,8 @@ export interface SessionBillPreview {
     quantity: string;
     lineTotal: string;
     roundNumber: number | null;
+    /** D72 — "no onions". Shown at the table and printed on the bill. */
+    specialInstructions: string | null;
   }[];
   subtotal: string;
   serviceChargeAmount: string;
@@ -303,6 +305,7 @@ export class TableSessionsService {
         quantity: item.quantity.toFixed(3),
         lineTotal: item.unitPrice.plus(item.modifierTotal).mul(item.quantity).toFixed(2),
         roundNumber: item.round?.roundNumber ?? null,
+        specialInstructions: item.specialInstructions,
       })),
       subtotal: totals.subtotal.toFixed(2),
       serviceChargeAmount: totals.serviceChargeAmount.toFixed(2),

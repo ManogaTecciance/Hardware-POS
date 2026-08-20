@@ -2448,6 +2448,52 @@ the cashier can finish the division at the till. Reporting a plain failure
 there would invite them to press it again against a session that no longer
 exists — which is why the half-failure has its own test.
 
+### D72 — the printed bill looks like a restaurant bill
+
+PO decision, 2026-08-21, against a photographed reference bill. The layout is
+now: centred logo, address, phone numbers, then Served By / date / bill
+number / table, then a ruled DESCRIPTION / QTY / AMOUNT table, the tender,
+and the totals block — Total Qty, Bill Amount, Paid Amount, Bal. Amount —
+closing on the tenant's footer text.
+
+**One template, two callers.** `renderThermalBill` prints the whole bill and
+each split bill. They were two hand-written documents, which is how a tenant
+ends up with a logo on one and not the other. A split's share IS its total:
+the server has already apportioned the service charge into it, so the
+template does not list bill-level charges again on a split.
+
+**The header is the tenant's, and never the vendor's.** Everything above the
+rule comes from the document profile (Settings → Documents), including the
+logo, which was already uploadable and simply unused by the bill. The logo
+REPLACES the company name rather than sitting above it: on the reference
+bill the mark carries the wordmark, and printing both gives the guest the
+brand twice. With no logo the name prints instead, so the header is never
+anonymous. Nothing is substituted for an unset field (D54).
+
+**Notes and discounts are on the paper.** A line's special instruction prints
+indented beneath the line it belongs to — a guest querying a charge reads the
+line they remember ordering, and a note is often the only thing separating
+two identical lines. A discount prints as a DEDUCTION: shown as a positive
+in a column of charges it reads as one more thing to pay. Zero rows are
+omitted; a bill listing "Discount 0.00" is noise.
+
+Three fields the bill needed and `BillView` did not carry: `taxAmount` (so a
+taxed branch's bill can add up at all), `totalDiscount`, and the line's
+`specialInstructions` — plus `servedByName`, `placeLabel` and `closedAt` for
+the header. Served-by prefers `servedByUserId` over `cashierId`: the guest is
+thinking of whoever brought the food, not the till operator.
+
+**Two defects found while building it.** The escaper handled `&<>` only,
+which is fine where every value lands in a text node but not here — the logo
+URL goes inside `src="…"`, and a value containing a quote closes the
+attribute. Found by a test feeding it `" onerror="alert(1)`. And the print
+window fired `print()` on a 400 ms timer, which predates the bill having an
+image at all; it now waits for every image to load or fail, with a 4 s
+backstop so an unreachable logo cannot leave the dialog un-opened.
+
+The retail receipt is deliberately untouched — it is the Tile Shop's
+document, and D16 keeps its behaviour and wording as they are.
+
 ---
 
 ## Open decisions

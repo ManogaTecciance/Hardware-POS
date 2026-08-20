@@ -21,18 +21,37 @@ export interface BillLineItem {
   lineTotal: string;
   /** Quantity already assigned to splits; `quantity` minus this is unassigned. */
   assignedQuantity: string;
+  /**
+   * D72 — what the guest asked for on this line ("no onions", "extra
+   * crispy"). It belongs on the printed bill: a guest checking a charge
+   * reads the line they remember ordering, and a kitchen note is often the
+   * only thing distinguishing two otherwise identical lines.
+   */
+  specialInstructions: string | null;
 }
 
 export interface BillView {
   saleId: string;
   saleNumber: string;
   subtotal: string;
+  /** D72 — discount taken off the bill. Zero today for a restaurant close
+   *  (D52 defers promotion pricing), but a printed bill must show one the
+   *  moment one exists rather than silently absorbing it into the total. */
+  totalDiscount: string;
   serviceChargeAmount: string;
   packagingCharge: string;
+  /** D72 — the tax the branch charged. Was omitted from this view entirely,
+   *  so a bill printed for a taxed branch could not add up. */
+  taxAmount: string;
   total: string;
   paidAmount: string;
   balanceAmount: string;
   paymentStatus: PaymentStatus;
+  /** D72 — receipt header: who served it, where, and when it was settled. */
+  servedByName: string | null;
+  /** "T7 · Terrace", or "Takeaway" for the synthetic walk-in table. */
+  placeLabel: string | null;
+  closedAt: string;
   /** D51 — the lines behind the totals, so a bill can be split by what was eaten. */
   items: BillLineItem[];
   splits: {
@@ -67,7 +86,42 @@ export class BillingService {
       },
     });
     if (!sale) throw new NotFoundException('Sale not found');
-    return this.toView(sale, await this.loadOrderItems(tenantId, sale.id));
+    /*
+     * D72 — "Served By" on the printed bill. `servedByUserId` is the waiter
+     * who worked the table (D58); `cashierId` is whoever closed it. Prefer
+     * the former: the guest reading the bill is thinking of the person who
+     * brought their food, not the till operator.
+     */
+    const servedById = sale.servedByUserId ?? sale.cashierId;
+    const servedBy = servedById
+      ? await this.prisma.user.findUnique({
+          where: { id: servedById },
+          select: { name: true },
+        })
+      : null;
+    /*
+     * `TableSession.finalSaleId` is a plain unique column, not a relation, so
+     * the table is a second lookup. The synthetic WALK-IN table backs every
+     * counter and takeaway order; the guest wants to read "Takeaway", not a
+     * table code that exists only in the schema.
+     */
+    const session = await this.prisma.tableSession.findFirst({
+      where: { finalSaleId: saleId, tenantId },
+      select: { table: { select: { code: true, area: { select: { name: true } } } } },
+    });
+    const table = session?.table ?? null;
+    const placeLabel = table
+      ? table.code === 'WALK-IN'
+        ? 'Takeaway'
+        : `${table.code}${table.area?.name ? ` · ${table.area.name}` : ''}`
+      : null;
+
+    return this.toView(
+      sale,
+      await this.loadOrderItems(tenantId, sale.id),
+      servedBy?.name ?? null,
+      placeLabel,
+    );
   }
 
   /**
@@ -364,7 +418,11 @@ export class BillingService {
       unitPrice: Prisma.Decimal;
       modifierTotal: Prisma.Decimal;
       quantity: Prisma.Decimal;
+      specialInstructions: string | null;
     }> = [],
+    /** D72 — resolved by the caller; `toView` stays a pure projection. */
+    servedByName: string | null = null,
+    placeLabel: string | null = null,
   ): BillView {
     const assignedByItem = new Map<string, Prisma.Decimal>();
     for (const split of sale.billSplits) {
@@ -379,12 +437,17 @@ export class BillingService {
       saleId: sale.id,
       saleNumber: sale.saleNumber,
       subtotal: sale.subtotal.toFixed(2),
+      totalDiscount: sale.totalDiscount.toFixed(2),
       serviceChargeAmount: sale.serviceChargeAmount.toFixed(2),
       packagingCharge: sale.packagingCharge.toFixed(2),
+      taxAmount: sale.taxAmount.toFixed(2),
       total: sale.total.toFixed(2),
       paidAmount: sale.paidAmount.toFixed(2),
       balanceAmount: sale.balanceAmount.toFixed(2),
       paymentStatus: sale.paymentStatus,
+      servedByName,
+      placeLabel,
+      closedAt: sale.createdAt.toISOString(),
       items: orderItems.map((it) => ({
         orderItemId: it.id,
         name: it.menuItemName,
@@ -393,6 +456,7 @@ export class BillingService {
         quantity: it.quantity.toFixed(3),
         lineTotal: lineTotal(it.unitPrice, it.modifierTotal, it.quantity).toFixed(2),
         assignedQuantity: (assignedByItem.get(it.id) ?? new Prisma.Decimal(0)).toFixed(3),
+        specialInstructions: it.specialInstructions,
       })),
       splits: sale.billSplits.map((s) => ({
         id: s.id,

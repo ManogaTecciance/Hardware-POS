@@ -54,6 +54,7 @@ const PREVIEW: SessionBillPreview = {
       quantity: '2.000',
       lineTotal: '2000.00',
       roundNumber: 1,
+      specialInstructions: 'no onions',
     },
     {
       orderItemId: 'oi_2',
@@ -63,6 +64,7 @@ const PREVIEW: SessionBillPreview = {
       quantity: '1.000',
       lineTotal: '1000.00',
       roundNumber: 2,
+      specialInstructions: null,
     },
   ],
   subtotal: '3000.00',
@@ -111,6 +113,8 @@ describe('reviewing the bill', () => {
     expect(screen.getByText(/Garlic Bread/)).toBeTruthy();
     // Variant, because it is what the guest is being charged for.
     expect(screen.getByText('Medium')).toBeTruthy();
+    // D72 — and the note, on the line the guest will point at.
+    expect(screen.getByText('no onions')).toBeTruthy();
 
     // The lines add to 3000; the bill is 3300. Only the server knows about
     // the service charge, so this asserts the number came from it.

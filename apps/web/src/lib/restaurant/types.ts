@@ -386,6 +386,8 @@ export interface SessionBillPreview {
     quantity: string;
     lineTotal: string;
     roundNumber: number | null;
+    /** D72 — "no onions". Shown at the table and printed on the bill. */
+    specialInstructions: string | null;
   }[];
   subtotal: string;
   serviceChargeAmount: string;
@@ -462,18 +464,28 @@ export interface BillLineItem {
   quantity: string;
   lineTotal: string;
   assignedQuantity: string;
+  /** D72 — "no onions". Printed under the line it belongs to. */
+  specialInstructions: string | null;
 }
 
 export interface BillView {
   saleId: string;
   saleNumber: string;
   subtotal: string;
+  /** D72 — discount taken off the bill; printed whenever it is non-zero. */
+  totalDiscount: string;
   serviceChargeAmount: string;
   packagingCharge: string;
+  /** D72 — the branch's tax. */
+  taxAmount: string;
   total: string;
   paidAmount: string;
   balanceAmount: string;
   paymentStatus: PaymentStatus;
+  /** D72 — receipt header. */
+  servedByName: string | null;
+  placeLabel: string | null;
+  closedAt: string;
   /** D51 — the lines behind the totals. */
   items: BillLineItem[];
   splits: {

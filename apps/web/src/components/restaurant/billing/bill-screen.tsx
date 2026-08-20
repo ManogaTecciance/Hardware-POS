@@ -21,7 +21,7 @@ import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
-import { getCachedDocumentProfile } from '@/lib/document-template-service';
+import { getDocumentProfile } from '@/lib/document-template-service';
 import { printSplitBill, printTableBill } from '@/lib/receipt-print';
 
 import { ItemSplitAssigner } from './item-split-assigner';
@@ -78,25 +78,48 @@ export function BillScreen({ session, saleId }: Props) {
    * answers 403 "Feature not available" to every food-service workspace,
    * owner included; the data below is already on screen, so the fix is to
    * print what we have rather than widen a module guard.
+   *
+   * D72 — the document profile is fetched LIVE rather than read from the
+   * cache. The cache is empty until something else populates it, and the
+   * first bill of the day printing without the restaurant's logo is exactly
+   * the failure nobody reports and everybody notices.
    */
-  const printBill = (view: BillView) =>
-    printTableBill({
-      storeName: getCachedDocumentProfile().companyName || session.branchName || '',
-      currency: getActiveCurrency(),
-      saleNumber: view.saleNumber,
-      items: view.items.map((it) => ({
-        name: it.name,
-        variantName: it.variantName,
-        quantity: it.quantity,
-        lineTotal: it.lineTotal,
-      })),
-      subtotal: view.subtotal,
-      serviceCharge: view.serviceChargeAmount,
-      packagingCharge: view.packagingCharge,
-      total: view.total,
-      paidAmount: view.paidAmount,
-      balanceAmount: view.balanceAmount,
-    });
+  const [printing, setPrinting] = React.useState(false);
+
+  const printBill = async (view: BillView) => {
+    setPrinting(true);
+    try {
+      const profile = await getDocumentProfile(session);
+      printTableBill({
+        profile,
+        fallbackName: session.branchName ?? '',
+        currency: getActiveCurrency(),
+        documentNumber: view.saleNumber,
+        placeLabel: view.placeLabel,
+        servedBy: view.servedByName,
+        issuedAt: new Date(view.closedAt),
+        lines: view.items.map((it) => ({
+          name: it.name,
+          variantName: it.variantName,
+          quantity: it.quantity,
+          lineTotal: it.lineTotal,
+          specialInstructions: it.specialInstructions,
+        })),
+        subtotal: view.subtotal,
+        discount: view.totalDiscount,
+        serviceCharge: view.serviceChargeAmount,
+        packaging: view.packagingCharge,
+        tax: view.taxAmount,
+        total: view.total,
+        paid: view.paidAmount,
+        balance: view.balanceAmount,
+        payments: view.payments.map((pmt) => ({ method: pmt.method, amount: pmt.amount })),
+        note: profile.billNote || null,
+      });
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const load = React.useCallback(async () => {
     try {
@@ -145,7 +168,8 @@ export function BillScreen({ session, saleId }: Props) {
                 size="sm"
                 variant="outline"
                 leftIcon={<Printer className="h-4 w-4" />}
-                onClick={() => printBill(bill)}
+                isLoading={printing}
+                onClick={() => void printBill(bill)}
               >
                 Print bill
               </Button>
@@ -294,16 +318,21 @@ export function BillScreen({ session, saleId }: Props) {
                           variant="ghost"
                           leftIcon={<Printer className="h-4 w-4" />}
                           onClick={() =>
-                            printSplitBill({
-                              storeName:
-                                getCachedDocumentProfile().companyName || session.branchName || '',
-                              currency: getActiveCurrency(),
-                              saleNumber: bill.saleNumber,
-                              splitLabel: sp.label ?? `Split ${i + 1}`,
-                              items: sp.items,
-                              share: sp.share,
-                              paidAmount: sp.paidAmount,
-                            })
+                            void getDocumentProfile(session).then((profile) =>
+                              printSplitBill({
+                                profile,
+                                storeName: session.branchName ?? '',
+                                currency: getActiveCurrency(),
+                                saleNumber: bill.saleNumber,
+                                splitLabel: sp.label ?? `Split ${i + 1}`,
+                                items: sp.items,
+                                share: sp.share,
+                                paidAmount: sp.paidAmount,
+                                servedBy: bill.servedByName,
+                                placeLabel: bill.placeLabel,
+                                issuedAt: new Date(bill.closedAt),
+                              }),
+                            )
                           }
                         >
                           Print

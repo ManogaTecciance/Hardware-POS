@@ -226,6 +226,13 @@ export function TableBillSheet({
                       <span className="block text-xs text-muted-foreground">
                         {formatMoney(it.unitPrice)} each
                       </span>
+                      {/* D72 — the note the guest asked for, on the line they
+                          will point at when they query the charge. */}
+                      {it.specialInstructions ? (
+                        <span className="block text-xs italic text-warning">
+                          {it.specialInstructions}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="shrink-0 tabular-nums">{formatMoney(it.lineTotal)}</span>
                   </li>
