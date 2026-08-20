@@ -107,11 +107,26 @@ function sendOverTcp(address: string, payload: Buffer, timeoutMs: number): Promi
   });
 }
 
-/** Write raw bytes to a device path (USB/serial passthrough, e.g. /dev/usb/lp0). */
+/**
+ * Write raw bytes to a device path — the USB/serial passthrough.
+ *
+ * Two shapes, because the operating systems disagree about what a printer is:
+ *
+ * - **Unix**: a character device, `/dev/usb/lp0`. Opened for APPEND, because
+ *   truncating a device node is meaningless and some drivers reject O_TRUNC.
+ * - **Windows**: there is no writable device node for a USB printer. The
+ *   supported route is a SHARED printer — share it (`\\localhost\KITCHEN`)
+ *   and write to the UNC path, which the spooler turns into one raw job. That
+ *   open must NOT be O_APPEND: each open starts a new job, and appending to a
+ *   job that does not exist yet fails. Install the printer with the "Generic /
+ *   Text Only" driver so the spooler passes ESC/POS through unaltered rather
+ *   than re-rendering it as a bitmap.
+ */
 function writeDevice(path: string, payload: Buffer): Promise<PrintOutcome> {
+  const isWindowsShare = path.startsWith('\\\\');
   return new Promise((resolvePromise) => {
     try {
-      const stream = createWriteStream(path, { flags: 'a' });
+      const stream = createWriteStream(path, { flags: isWindowsShare ? 'w' : 'a' });
       stream.on('error', (err: Error) =>
         resolvePromise({ ok: false, error: `${path} — ${err.message}` }),
       );

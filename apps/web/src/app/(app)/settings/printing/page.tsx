@@ -474,6 +474,9 @@ function ManualAddRow({
   const [name, setName] = React.useState('');
   const [address, setAddress] = React.useState('');
   const [role, setRole] = React.useState<'KITCHEN' | 'CASHIER'>('KITCHEN');
+  // A USB printer has no address to scan for, so it can only ever be added
+  // here — the reason this row is not just a fallback for a shy network box.
+  const [kind, setKind] = React.useState<'ESC_POS_NETWORK' | 'ESC_POS_USB'>('ESC_POS_NETWORK');
   const [busy, setBusy] = React.useState(false);
 
   const add = async () => {
@@ -484,7 +487,7 @@ function ManualAddRow({
       await kitchenPrinters.create(session, branchId, {
         code: `P-${Date.now().toString(36).toUpperCase()}`,
         name: name.trim(),
-        kind: 'ESC_POS_NETWORK',
+        kind,
         address: address.trim(),
         role,
       } as never);
@@ -499,17 +502,40 @@ function ManualAddRow({
     }
   };
 
+  const usb = kind === 'ESC_POS_USB';
   return (
-    <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
-      <Input placeholder="Name (e.g. Kitchen printer)" value={name} onChange={(e) => setName(e.target.value)} />
-      <Input placeholder="192.168.1.50:9100" value={address} onChange={(e) => setAddress(e.target.value)} />
-      <Select aria-label="Role" value={role} onChange={(e) => setRole(e.target.value as 'KITCHEN' | 'CASHIER')}>
-        <option value="KITCHEN">Kitchen</option>
-        <option value="CASHIER">Cashier</option>
-      </Select>
-      <Button leftIcon={<Plus className="h-4 w-4" />} isLoading={busy} onClick={() => void add()}>
-        Add
-      </Button>
+    <div className="space-y-1.5">
+      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto_auto]">
+        <Input placeholder="Name (e.g. Kitchen printer)" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input
+          placeholder={usb ? '\\\\localhost\\KITCHEN or /dev/usb/lp0' : '192.168.1.50:9100'}
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+        />
+        <Select
+          aria-label="Connection"
+          value={kind}
+          onChange={(e) => setKind(e.target.value as 'ESC_POS_NETWORK' | 'ESC_POS_USB')}
+        >
+          <option value="ESC_POS_NETWORK">Network</option>
+          <option value="ESC_POS_USB">USB / shared</option>
+        </Select>
+        <Select aria-label="Role" value={role} onChange={(e) => setRole(e.target.value as 'KITCHEN' | 'CASHIER')}>
+          <option value="KITCHEN">Kitchen</option>
+          <option value="CASHIER">Cashier</option>
+        </Select>
+        <Button leftIcon={<Plus className="h-4 w-4" />} isLoading={busy} onClick={() => void add()}>
+          Add
+        </Button>
+      </div>
+      {usb ? (
+        <p className="text-xs text-muted-foreground">
+          A USB printer must be attached to the machine running the server. On Windows, share it
+          (Printer properties → Sharing) and use <code>{'\\\\localhost\\SHARENAME'}</code>; install it with
+          the “Generic / Text Only” driver so the raw bytes pass through. On Linux, use the device
+          path, e.g. <code>/dev/usb/lp0</code>.
+        </p>
+      ) : null}
     </div>
   );
 }

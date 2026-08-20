@@ -1,5 +1,11 @@
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { KitchenPrinterKind } from '@hardware-pos/database';
+
 import { EscPosBuilder, encode, wrap } from './escpos';
-import { parseAddress } from './printer-drivers';
+import { parseAddress, sendToPrinter } from './printer-drivers';
 import { hostsOf, isPrivateV4 } from './printer-discovery.service';
 import { renderKotTicket, trimQty } from './templates/kot.template';
 import { renderBill } from './templates/bill.template';
@@ -195,5 +201,36 @@ describe('address + network helpers', () => {
     expect(hosts[253]).toBe('192.168.8.254');
     expect(hosts).not.toContain('192.168.8.0');
     expect(hosts).not.toContain('192.168.8.255');
+  });
+});
+
+describe('sendToPrinter — ESC_POS_USB', () => {
+  const target = (address: string) => ({
+    id: 'p1',
+    name: 'USB printer',
+    kind: KitchenPrinterKind.ESC_POS_USB,
+    address,
+    columns: 48,
+  });
+
+  /**
+   * A USB printer is a device node, and a device node is opened for APPEND:
+   * two documents sent in a row must both arrive, in order. Asserted against
+   * a real file rather than a mocked `fs`, so a change of flags to 'w' —
+   * which would silently discard the first ticket of every pair — fails here.
+   */
+  it('appends each document, so a second print does not erase the first', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'axlo-usb-')), 'lp0');
+
+    expect(await sendToPrinter(target(path), Buffer.from('TICKET-ONE'))).toEqual({ ok: true });
+    expect(await sendToPrinter(target(path), Buffer.from('TICKET-TWO'))).toEqual({ ok: true });
+
+    expect(readFileSync(path, 'latin1')).toBe('TICKET-ONETICKET-TWO');
+  });
+
+  it('reports an unreachable device as a failure instead of throwing', async () => {
+    const outcome = await sendToPrinter(target('/definitely/not/a/device/lp0'), Buffer.from('x'));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain('/definitely/not/a/device/lp0');
   });
 });
