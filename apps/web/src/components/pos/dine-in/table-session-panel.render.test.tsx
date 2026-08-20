@@ -25,32 +25,31 @@ import { TableSessionPanel, type ActiveTableSession } from './table-session-pane
 
 const AREAS: DiningAreaView[] = [
   { id: 'area_1', branchId: 'br_1', name: 'Terrace', position: 0, isActive: true } as DiningAreaView,
+  { id: 'area_2', branchId: 'br_1', name: 'Main Hall', position: 1, isActive: true } as DiningAreaView,
 ];
-const TABLES: RestaurantTableView[] = [
-  {
-    id: 'tbl_1',
-    areaId: 'area_1',
-    code: 'T1',
-    label: 'T1',
-    capacity: 4,
-    status: 'AVAILABLE',
-  } as RestaurantTableView,
-  {
-    id: 'tbl_2',
-    areaId: 'area_1',
-    code: 'T2',
-    label: 'T2',
-    capacity: 2,
-    status: 'OCCUPIED',
-  } as RestaurantTableView,
-];
+
+const table = (
+  id: string,
+  areaId: string,
+  code: string,
+  status: string,
+): RestaurantTableView =>
+  ({ id, areaId, code, label: code, capacity: 4, status } as RestaurantTableView);
+
+const TABLES: Record<string, RestaurantTableView[]> = {
+  area_1: [table('tbl_1', 'area_1', 'T1', 'AVAILABLE'), table('tbl_2', 'area_1', 'T2', 'OCCUPIED')],
+  // The occupied table behind the cross-area open-session test.
+  area_2: [table('tbl_3', 'area_2', 'M1', 'AVAILABLE'), table('tbl_4', 'area_2', 'M2', 'OCCUPIED')],
+};
 
 const openSession = vi.fn();
 const listOpenSessions = vi.fn<() => Promise<unknown[]>>(() => Promise.resolve([]));
 
 vi.mock('@/lib/restaurant/api', () => ({
   diningAreas: { list: () => Promise.resolve(AREAS) },
-  restaurantTables: { list: () => Promise.resolve(TABLES) },
+  restaurantTables: {
+    list: (_s: unknown, areaId: string) => Promise.resolve(TABLES[areaId] ?? []),
+  },
   tableSessions: {
     listOpen: () => listOpenSessions(),
     open: (...args: unknown[]) => openSession(...args),
@@ -126,9 +125,60 @@ describe('picking a table', () => {
   });
 
   it('lists an already-open session by its TABLE, not by a raw id', async () => {
-    // The table behind an open session is OCCUPIED, so it is absent from the
-    // available list — the label has to come from the full table set. This is
-    // the regression that made every running session read "Session 000012".
+    /*
+     * Two ways this label goes missing, both covered by this one fixture:
+     * the table behind an open session is OCCUPIED (absent from the
+     * available lists), and it lives in a DIFFERENT area from the one the
+     * filter would show. Either shortcut — deriving labels from the
+     * available rows, or loading only the filtered area — leaves the waiter
+     * a chip reading "Session 000009" with no way to tell which table it is.
+     */
+    listOpenSessions.mockResolvedValue([
+      {
+        id: 'ts_9',
+        sessionNumber: '000009',
+        tableId: 'tbl_4',
+        openedAt: '2026-08-21T09:00:00.000Z',
+        guestCount: 2,
+        activeOrderId: 'ord_9',
+      },
+    ]);
+    const onPick = vi.fn();
+    panel(null, onPick);
+
+    const chip = await screen.findByRole('button', { name: /M2/ });
+    fireEvent.click(chip);
+
+    expect(openSession).not.toHaveBeenCalled(); // resuming, not seating
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'ts_9', tableLabel: 'M2', orderId: 'ord_9' }),
+    );
+  });
+
+  it('narrows the table list to one area, and can be widened again', async () => {
+    panel(null);
+
+    // Default: both areas' free tables are offered.
+    expect(await screen.findByRole('button', { name: /T1/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /M1/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Main Hall' }));
+
+    // POSITIVE + NEGATIVE together: a component that rendered nothing would
+    // satisfy the absence check alone, and one that ignored the chips would
+    // satisfy the presence check alone.
+    await waitFor(() => expect(screen.queryByRole('button', { name: /T1/ })).toBeNull());
+    expect(screen.getByRole('button', { name: /M1/ })).toBeTruthy();
+
+    // A filter that cannot be undone is a trap.
+    fireEvent.click(screen.getByRole('button', { name: 'All areas' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /T1/ })).toBeTruthy());
+    expect(screen.getByRole('button', { name: /M1/ })).toBeTruthy();
+  });
+
+  it('keeps open sessions visible when an area filter is applied', async () => {
+    // The session is in Terrace; the filter shows Main Hall. Filtering it out
+    // would hide a running party — which is how one gets forgotten.
     listOpenSessions.mockResolvedValue([
       {
         id: 'ts_9',
@@ -139,16 +189,12 @@ describe('picking a table', () => {
         activeOrderId: 'ord_9',
       },
     ]);
-    const onPick = vi.fn();
-    panel(null, onPick);
+    panel(null);
 
-    const chip = await screen.findByRole('button', { name: /T2/ });
-    fireEvent.click(chip);
-
-    expect(openSession).not.toHaveBeenCalled(); // resuming, not seating
-    expect(onPick).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'ts_9', tableLabel: 'T2', orderId: 'ord_9' }),
-    );
+    expect(await screen.findByRole('button', { name: /T2/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Main Hall' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /T1/ })).toBeNull());
+    expect(screen.getByRole('button', { name: /T2/ })).toBeTruthy();
   });
 });
 
@@ -182,5 +228,42 @@ describe('an active session', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Close session/ }));
     expect(onCloseSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-opens the picker on demand and collapses it again on a new pick', async () => {
+    const onPick = vi.fn();
+    render(
+      <TableSessionPanel
+        session={session}
+        branchId="br_1"
+        active={{
+          id: 'ts_1',
+          sessionNumber: '000012',
+          tableLabel: 'T1',
+          openedAt: '2026-08-21T10:00:00.000Z',
+          guestCount: 4,
+          orderId: 'ord_1',
+        }}
+        onPick={onPick}
+        onCloseSession={vi.fn()}
+        closing={false}
+        roundsSent={2}
+      />,
+    );
+
+    // Collapsed by default — the menu is what the waiter is looking at now.
+    expect(screen.queryByText('Which table?')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Change table/ }));
+    expect(await screen.findByText('Which table?')).toBeTruthy();
+    // The strip stays: the waiter must be able to see which session they are
+    // about to move away from.
+    expect(screen.getByText(/Session 000012/)).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole('button', { name: /M1/ }));
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
+    // Picking collapses it again without waiting for the parent to re-render
+    // with a new `active` — otherwise the wall of chips stays over the menu.
+    await waitFor(() => expect(screen.queryByText('Which table?')).toBeNull());
   });
 });

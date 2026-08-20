@@ -1,10 +1,12 @@
 'use client';
 
-import { Loader2, RefreshCw, Users, UtensilsCrossed } from 'lucide-react';
+import { ChevronDown, Loader2, RefreshCw, Users, UtensilsCrossed } from 'lucide-react';
 import * as React from 'react';
 
+import { AreaChip } from '@/components/restaurant/area-chip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ChipRow } from '@/components/ui/chip-row';
 import { type Session } from '@/lib/auth';
 import { diningAreas, restaurantTables, tableSessions } from '@/lib/restaurant/api';
 import { formatElapsed } from '@/lib/restaurant/labels';
@@ -36,15 +38,16 @@ interface Props {
 /**
  * D69 — the dine-in session block.
  *
- * The one thing table service needs that a counter order does not: the
- * order belongs to a TABLE, over a period, across several rounds. So before
- * a waiter can compose anything they answer "which table", and afterwards
- * they answer "are they finished" — and between those two the screen is the
+ * The one thing table service needs that a counter order does not: the order
+ * belongs to a TABLE, over a period, across several rounds. So before a
+ * waiter can compose anything they answer "which table", and afterwards they
+ * answer "are they finished" — and between those two the screen is the
  * ordinary POS.
  *
- * Two states, deliberately not two screens: picking a table replaces this
- * block with a one-line strip rather than navigating, so the menu below it
- * never unmounts and a waiter mid-order does not lose their place.
+ * Once a table is chosen the picker COLLAPSES to a one-line strip, because
+ * from that moment the menu is what the waiter is looking at and a wall of
+ * table chips is just pushing it off the screen. The strip re-opens it, so
+ * moving to another table never means leaving the screen.
  */
 export function TableSessionPanel({
   session,
@@ -55,28 +58,56 @@ export function TableSessionPanel({
   closing,
   roundsSent,
 }: Props) {
-  if (active) {
-    return (
-      <ActiveStrip
-        active={active}
-        roundsSent={roundsSent}
-        closing={closing}
-        onCloseSession={onCloseSession}
-      />
-    );
-  }
-  return <Picker session={session} branchId={branchId} onPick={onPick} />;
+  const [expanded, setExpanded] = React.useState(false);
+
+  // Choosing a table collapses the picker; losing the session (a close, or a
+  // mode change) must not leave it collapsed with nothing to show.
+  React.useEffect(() => {
+    if (active) setExpanded(false);
+  }, [active]);
+
+  const showPicker = active === null || expanded;
+
+  return (
+    <div className="space-y-2">
+      {active ? (
+        <ActiveStrip
+          active={active}
+          roundsSent={roundsSent}
+          closing={closing}
+          expanded={expanded}
+          onToggle={() => setExpanded((v) => !v)}
+          onCloseSession={onCloseSession}
+        />
+      ) : null}
+      {showPicker ? (
+        <Picker
+          session={session}
+          branchId={branchId}
+          activeId={active?.id ?? null}
+          onPick={(picked) => {
+            setExpanded(false);
+            onPick(picked);
+          }}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 function ActiveStrip({
   active,
   roundsSent,
   closing,
+  expanded,
+  onToggle,
   onCloseSession,
 }: {
   active: ActiveTableSession;
   roundsSent: number;
   closing: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   onCloseSession: () => void;
 }) {
   return (
@@ -102,26 +133,50 @@ function ActiveStrip({
             </p>
           </div>
         </div>
-        <Button size="sm" variant="outline" isLoading={closing} onClick={onCloseSession}>
-          Close session &amp; bill
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={expanded}
+            onClick={onToggle}
+            leftIcon={
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              />
+            }
+          >
+            Change table
+          </Button>
+          <Button size="sm" variant="outline" isLoading={closing} onClick={onCloseSession}>
+            Close session &amp; bill
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
 }
 
+interface OpenSessionRow {
+  id: string;
+  sessionNumber: string;
+  tableId: string;
+  openedAt: string;
+  guestCount: number | null;
+  activeOrderId: string | null;
+}
+
 function Picker({
   session,
   branchId,
+  activeId,
   onPick,
 }: {
   session: Session;
   branchId: string;
+  activeId: string | null;
   onPick: (picked: ActiveTableSession) => void;
 }) {
-  const [open, setOpen] = React.useState<
-    { id: string; sessionNumber: string; tableId: string; openedAt: string; guestCount: number | null; activeOrderId: string | null }[]
-  >([]);
+  const [open, setOpen] = React.useState<OpenSessionRow[]>([]);
   const [areas, setAreas] = React.useState<DiningAreaView[]>([]);
   const [tablesByArea, setTablesByArea] = React.useState<Map<string, RestaurantTableView[]>>(
     new Map(),
@@ -130,12 +185,18 @@ function Picker({
   const [loading, setLoading] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  /**
+   * Area filter, the same control the floor plan and the calendar use. 'ALL'
+   * is a real selection, not the absence of one — a filter you cannot get
+   * back out of is a trap.
+   */
+  const [selectedArea, setSelectedArea] = React.useState<string>('ALL');
 
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
       const [sessions, areaRows] = await Promise.all([
-        tableSessions.listOpen(session, branchId).catch(() => []),
+        tableSessions.listOpen(session, branchId).catch(() => [] as OpenSessionRow[]),
         diningAreas.list(session, branchId, false).catch(() => [] as DiningAreaView[]),
       ]);
       const sorted = areaRows.slice().sort((a, b) => a.position - b.position);
@@ -144,10 +205,13 @@ function Picker({
       );
 
       /*
-       * One label map over EVERY table, not just the available ones: an open
-       * session points at a table that is by definition occupied, so building
-       * the map from the available list would leave every running session
-       * labelled by a raw id.
+       * EVERY area is loaded regardless of the filter, and the label map is
+       * built from every table in them. Two reasons, both of which produce a
+       * silent wrong answer otherwise: an open session's table is occupied
+       * (so it is absent from the available lists), and a session in a
+       * filtered-out area would lose its name entirely — leaving the waiter
+       * a chip reading "Session 000012" with no way to tell which table it
+       * is. The filter narrows what is DISPLAYED, never what is known.
        */
       const labelMap = new Map<string, string>();
       const availableByArea = new Map<string, RestaurantTableView[]>();
@@ -160,7 +224,7 @@ function Picker({
         );
       });
 
-      setOpen(sessions);
+      setOpen(sessions as OpenSessionRow[]);
       setAreas(sorted);
       setTablesByArea(availableByArea);
       setLabels(labelMap);
@@ -206,9 +270,12 @@ function Picker({
     }
   };
 
+  const visibleAreas =
+    selectedArea === 'ALL' ? areas : areas.filter((a) => a.id === selectedArea);
+
   return (
     <Card>
-      <CardContent className="space-y-4 p-4">
+      <CardContent className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm font-semibold">Which table?</p>
@@ -234,83 +301,136 @@ function Picker({
           </p>
         ) : (
           <>
+            {/* Open sessions sit ABOVE the filter and are never filtered: this
+                is the "carry on where I was" list, it is short, and hiding a
+                running table behind a filter the waiter set for a different
+                reason is how a party gets forgotten. */}
             {open.length > 0 ? (
               <div>
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Open sessions
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {open.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() =>
-                        onPick({
-                          id: s.id,
-                          sessionNumber: s.sessionNumber,
-                          tableLabel: labels.get(s.tableId) ?? `Session ${s.sessionNumber}`,
-                          openedAt: s.openedAt,
-                          guestCount: s.guestCount,
-                          orderId: s.activeOrderId,
-                        })
-                      }
-                      className="inline-flex h-11 items-center gap-2 rounded-lg border border-primary/40 bg-brand-50 px-3 text-sm font-medium hover:border-primary"
-                    >
-                      {labels.get(s.tableId) ?? `Session ${s.sessionNumber}`}
-                      <span className="text-xs font-normal text-muted-foreground">
-                        {formatElapsed(s.openedAt)}
-                        {s.guestCount ? ` · ${s.guestCount}` : ''}
-                      </span>
-                    </button>
-                  ))}
+                  {open.map((s) => {
+                    const name = labels.get(s.tableId);
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        data-active={s.id === activeId}
+                        onClick={() =>
+                          onPick({
+                            id: s.id,
+                            sessionNumber: s.sessionNumber,
+                            tableLabel: name ?? `Session ${s.sessionNumber}`,
+                            openedAt: s.openedAt,
+                            guestCount: s.guestCount,
+                            orderId: s.activeOrderId,
+                          })
+                        }
+                        className={`inline-flex h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium ${
+                          s.id === activeId
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-primary/40 bg-brand-50 hover:border-primary'
+                        }`}
+                      >
+                        {name ?? `Session ${s.sessionNumber}`}
+                        <span
+                          className={`text-xs font-normal ${
+                            s.id === activeId ? 'opacity-80' : 'text-muted-foreground'
+                          }`}
+                        >
+                          {formatElapsed(s.openedAt)}
+                          {s.guestCount ? ` · ${s.guestCount}` : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ) : null}
 
-            {areas.length === 0 ? (
-              <p className="py-4 text-sm text-muted-foreground">
-                No dining areas configured yet. Add an area and its tables in Tables.
-              </p>
-            ) : (
-              areas.map((area) => {
-                const free = tablesByArea.get(area.id) ?? [];
-                return (
-                  <div key={area.id}>
-                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {area.name}
-                    </p>
-                    {free.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        Every table here is seated.
+            {areas.length > 1 ? (
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Show
+                </span>
+                <ChipRow
+                  ariaLabel="Filter tables by dining area"
+                  activeKey={selectedArea}
+                  className="min-w-0 flex-1"
+                >
+                  <AreaChip
+                    label="All areas"
+                    active={selectedArea === 'ALL'}
+                    onClick={() => setSelectedArea('ALL')}
+                  />
+                  {areas.map((a) => (
+                    <AreaChip
+                      key={a.id}
+                      label={a.name}
+                      active={selectedArea === a.id}
+                      onClick={() => setSelectedArea(a.id)}
+                    />
+                  ))}
+                </ChipRow>
+              </div>
+            ) : null}
+
+            {/* Capped and scrollable: a branch with five areas of nine tables
+                would otherwise push the menu — the thing the waiter actually
+                came here to use — off the bottom of a tablet.
+                The cap is expressed against the block's own chrome (header +
+                open sessions + filter ≈ 11rem) so the WHOLE card stays under
+                half the viewport, which is the constraint that was asked
+                for; `min-h` wins over `max-h` in CSS, so a short viewport
+                degrades to a small scroller rather than to nothing. */}
+            <div className="max-h-[calc(50vh-11rem)] min-h-[7rem] space-y-3 overflow-y-auto">
+              {areas.length === 0 ? (
+                <p className="py-4 text-sm text-muted-foreground">
+                  No dining areas configured yet. Add an area and its tables in Tables.
+                </p>
+              ) : (
+                visibleAreas.map((area) => {
+                  const free = tablesByArea.get(area.id) ?? [];
+                  return (
+                    <div key={area.id}>
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {area.name}
                       </p>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {free.map((t) => (
-                          <button
-                            key={t.id}
-                            type="button"
-                            disabled={busyId !== null}
-                            onClick={() => void seat(t)}
-                            className="inline-flex h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm hover:border-primary disabled:opacity-50"
-                          >
-                            {busyId === t.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                            ) : null}
-                            {t.label ?? t.code}
-                            {t.capacity ? (
-                              <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
-                                <Users className="h-3 w-3" aria-hidden />
-                                {t.capacity}
-                              </span>
-                            ) : null}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
+                      {free.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Every table here is seated.
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {free.map((t) => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              disabled={busyId !== null}
+                              onClick={() => void seat(t)}
+                              className="inline-flex h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm hover:border-primary disabled:opacity-50"
+                            >
+                              {busyId === t.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                              ) : null}
+                              {t.label ?? t.code}
+                              {t.capacity ? (
+                                <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+                                  <Users className="h-3 w-3" aria-hidden />
+                                  {t.capacity}
+                                </span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </>
         )}
       </CardContent>
