@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
+    "//agent": "Deliberately NOT named `dev`: the agent is an on-site daemon, not part of the dev stack. `turbo run dev` would start it with the API and web, where it exits immediately for want of a token and takes the whole run down. Run it explicitly with `pnpm dev:agent` when testing the cloud transport.",
+    "agent": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo \"(the agent is linted by tsc; no ESLint config needed for 2 files)\"",
     "clean": "rm -rf dist *.tsbuildinfo"
