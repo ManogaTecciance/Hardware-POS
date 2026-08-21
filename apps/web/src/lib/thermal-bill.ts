@@ -85,11 +85,21 @@ const CSS = `
  */
 @page{margin:0}
 /*
- * Nothing splits across the page boundary that would look broken if it did:
- * a row cut in half mid-line, or a totals block with the balance stranded
- * on its own, are the two places a continuous receipt stops reading as one.
+ * NOTHING avoids a page break — deliberately, and this is the opposite of
+ * what a report wants.
+ *
+ * break-inside: avoid was here first, to stop a line being cut in half at
+ * the page boundary. On a continuous roll that protection costs more than it
+ * buys: a row that does not fit in what is left of the page is pushed WHOLE
+ * onto the next one, and the space it vacated prints as a band of blank
+ * paper mid-receipt. That is exactly the gap the PO photographed, between
+ * "Soup of the Day" and "Vegetable Fried Rice".
+ *
+ * With margin: 0 the pages abut, so the split this used to prevent is
+ * invisible: the top half of a line prints at the end of one page and the
+ * bottom half at the start of the next, and on continuous paper they meet.
+ * An avoided break is a gap you can see; an allowed one is not.
  */
-tr,.tot,.pay,.meta{break-inside:avoid;page-break-inside:avoid}
 /*
  * Stop the column headings repeating at the top of every page. A browser
  * repeats a thead by design, which is right for a report and wrong here: on

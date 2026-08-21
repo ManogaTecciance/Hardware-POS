@@ -2529,6 +2529,65 @@ prints the header once, continues flush from the top of page two with no
 heading and no gap, and closes with an unsplit totals block. A short bill is
 byte-for-byte what it was.
 
+### D74 — the print popup drives itself
+
+PO request, 2026-08-21. Pressing Print bill opens the print dialog with no
+click on the page, and the popup closes once the browser is finished with it.
+
+`afterprint` fires whether the operator printed or dismissed the dialog, and
+no web API distinguishes the two, so both close the window: a cashier who
+cancels wanted out of it either way, and the alternative is a dead receipt
+tab left open behind the POS. The listener is attached BEFORE `print()`,
+because `print()` is synchronous in some browsers and the event has already
+fired by the time it returns.
+
+**The dialog's own confirm button is not ours to remove.** Only Chrome's
+`--kiosk-printing` launch flag makes `window.print()` go straight to the
+default printer, and a page cannot set it. On a till launched with that flag
+this is already the whole interaction.
+
+The popup is also opened in the click's own turn now, before the document
+profile is fetched. Browsers grant a gesture a few seconds of transient
+activation, and `window.open` after an `await` gambles on that not having
+lapsed — on a slow connection the popup is simply blocked and nothing appears
+to happen. It opens with a placeholder and is filled in when the data lands;
+`abort()` closes it if the data never does.
+
+### D75 — the receipt ends where the text ends
+
+PO reports, 2026-08-21, with photographs: a band of blank paper mid-receipt
+between "Soup of the Day" and "Vegetable Fried Rice", and a large blank area
+after the footer that had to be fed before the bill could be torn off.
+
+Both are the same defect — the receipt was being paginated — and one
+mechanism fixes both: ONE page, sized to the content. No boundary to leak a
+gap, no remainder to feed.
+
+**This is the second attempt, and the difference matters.** The first sized
+the page and shrank long bills. `@page { size }` is a REQUEST: where it does
+not match the paper the driver reports, Chrome scales the page to fit, and
+432 mm of receipt on a 297 mm sheet is 69% — exactly the unreadable print
+that came back. That is a printer-side setting (a roll or custom paper
+length, and Scale at 100%), not something CSS can assert. So it is now
+switchable per call: a workspace whose driver has a fixed page length turns
+it off and pages normally at the correct size instead.
+
+The height is measured rather than declared, because `size: 80mm auto` is
+invalid CSS — the property takes one or two lengths — and because the real
+height depends on how the document lays out. Measured after images settle: a
+logo that has not decoded reports no height and would truncate the receipt to
+the height of its text. Two millimetres are added so the cutter does not
+shave the footer.
+
+**`break-inside: avoid` was removed, having caused the first gap.** It was
+there to stop a line being cut at a page boundary. On a continuous roll that
+protection costs more than it buys: a row that does not fit is pushed WHOLE
+onto the next page, and the space it vacated prints as blank paper mid-bill.
+With the pages abutting, an allowed break rejoins invisibly and an avoided
+one leaves a hole. `thead` is likewise demoted to a row group so the column
+headings do not reprint mid-receipt, where a guest reads them as a second
+bill starting.
+
 ---
 
 ## Open decisions

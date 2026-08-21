@@ -225,33 +225,46 @@ describe('the printed page itself', () => {
     expect(html).toContain('@page{margin:0}');
   });
 
-  it('never pins a page SIZE — that is what shrank the receipt', () => {
+  it('leaves the page SIZE to the printer layer, not the markup', () => {
     render();
     /*
-     * Sizing the page to the document made the whole bill one page, and
-     * browsers honour an oversized page by SCALING it onto the physical
-     * paper: a long order printed correct and unreadably small. The paper
-     * size belongs to the printer. Asserted by name so the fix cannot be
-     * reintroduced by someone solving "it splits across pages" again.
+     * The template never bakes a page size in. The height depends on how
+     * the document actually lays out — how the address wraps, whether the
+     * logo loaded — which only the print window knows, so `fitPageToContent`
+     * measures and injects it there (D75).
+     *
+     * Asserted here so nobody "fixes" a paged receipt by guessing a height
+     * in the CSS: a guess that is too short truncates the bill, and one that
+     * is too tall is the trailing blank paper this all exists to remove.
      */
     expect(html).not.toMatch(/@page\{[^}]*size:/);
-    expect(html).not.toContain('size:80mm');
     // POSITIVE CONTROL — an @page rule IS emitted, so the absence above is
     // about `size` specifically and not about the block failing to render.
     expect(html).toContain('@page{');
   });
 
-  it('keeps a row and the totals from splitting across the boundary', () => {
+  it('lets content break freely — an avoided break is a visible gap', () => {
     render();
     /*
-     * A line cut in half mid-row, or a balance stranded alone on the next
-     * page, are the two places a continuous receipt stops reading as one.
-     * `page-break-inside` rides along with `break-inside` because thermal
-     * drivers are not uniformly modern.
+     * The opposite of what a report wants, and deliberate. `break-inside:
+     * avoid` was here to stop a line being cut at a page boundary; on a
+     * continuous roll it pushes the row WHOLE onto the next page and the
+     * space it vacated prints as blank paper mid-receipt. That is the gap
+     * the PO photographed between "Soup of the Day" and "Vegetable Fried
+     * Rice".
+     *
+     * With the page sized to the content there is no boundary at all, and if
+     * one ever appears, an allowed break rejoins across abutting pages while
+     * an avoided one leaves a hole.
      */
-    expect(html).toContain('break-inside:avoid');
-    expect(html).toContain('page-break-inside:avoid');
-    const rule = html.slice(html.indexOf('tr,'), html.indexOf('}', html.indexOf('tr,')));
-    expect(rule).toContain('.tot');
+    expect(html).not.toContain('break-inside:avoid');
+    expect(html).not.toContain('page-break-inside:avoid');
+  });
+
+  it('prints the column headings once, not per page', () => {
+    render();
+    // A browser repeats a thead by design — right for a report, wrong on a
+    // roll, where the repeat reads as a second receipt starting.
+    expect(html).toContain('thead{display:table-row-group}');
   });
 });

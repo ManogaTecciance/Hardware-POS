@@ -1,5 +1,5 @@
 import { api } from './api';
-import { renderThermalBill, type ThermalBillInput } from './thermal-bill';
+import { RECEIPT_WIDTH_MM, renderThermalBill, type ThermalBillInput } from './thermal-bill';
 import type { Session } from './auth';
 import type { CartItem } from './cart';
 import { computeLine } from './cart';
@@ -19,7 +19,10 @@ export interface ReceiptContext {
 }
 
 function esc(v: unknown): string {
-  return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 /** Minimal printable receipt used as a fallback when the server render fails. */
@@ -54,12 +57,111 @@ ${ctx.orderDiscount > 0 ? `<div class="row"><span>Order discount</span><span>-${
 
 let printTimer: number | null = null;
 
-export function openPrintWindow(html: string): void {
+/**
+ * A print window opened NOW, filled in later.
+ *
+ * D74 — the popup must be opened in the click's own turn. Browsers grant a
+ * gesture a few seconds of "transient activation" and `window.open` after an
+ * `await` gambles on that not having lapsed: the bill screen fetches the
+ * document profile first, so on a slow connection the popup is simply
+ * blocked and the operator sees nothing happen at all.
+ *
+ * `abort()` exists because a window opened up front must not be left blank
+ * and orphaned when the data it was opened for fails to arrive.
+ */
+export interface PendingPrintWindow {
+  render: (html: string) => void;
+  abort: () => void;
+}
+
+export interface BeginPrintOptions {
+  /**
+   * Size the page to the receipt: one page, ending where the text ends.
+   *
+   * On by default for the callers that pass a roll width. Turn it OFF for a
+   * printer whose driver has a FIXED page length — Chrome scales a page it
+   * cannot match onto the paper it has, and a long bill then prints
+   * correct-but-tiny rather than long.
+   */
+  fitToContent?: boolean;
+  /** Roll width in millimetres. 80 is the common thermal default; 58 exists. */
+  paperWidthMm?: number;
+}
+
+export function beginPrintWindow(options: BeginPrintOptions = {}): PendingPrintWindow {
+  const win = window.open('', 'hpos-receipt-print', 'width=420,height=680');
+  if (!win) return { render: () => {}, abort: () => {} };
+  // Something honest on screen while the profile resolves — a blank popup
+  // reads as a crash.
+  win.document.open();
+  win.document.write('<!doctype html><title>Preparing bill…</title>');
+  win.document.close();
+  return {
+    render: (html) =>
+      fillAndPrint(
+        win,
+        html,
+        options.fitToContent === false
+          ? undefined
+          : { widthMm: options.paperWidthMm ?? RECEIPT_WIDTH_MM },
+      ),
+    abort: () => win.close(),
+  };
+}
+
+export function openPrintWindow(html: string, fit?: { widthMm: number }): void {
   // One *named* popup, reused across prints: repeated clicks replace the
   // receipt in place instead of stacking new windows and print dialogs
   // (which eventually hangs the tab).
   const win = window.open('', 'hpos-receipt-print', 'width=420,height=680');
   if (!win) return;
+  fillAndPrint(win, html, fit);
+}
+
+/**
+ * D75 — make the printed page exactly as tall as the receipt.
+ *
+ * Two things the PO asked for turn out to be one mechanism. A bill that
+ * spans pages prints a band of blank paper at each boundary, and a bill that
+ * ends a third of the way down its last page feeds the remaining two thirds
+ * before it can be torn off. With ONE page, sized to the content, there is
+ * no boundary to leak a gap and no remainder to feed: the receipt ends where
+ * the text ends.
+ *
+ * ## Why this was reverted once, and what is different
+ *
+ * An earlier attempt shrank long bills. `@page { size }` is a REQUEST: when
+ * the size does not match the paper the driver reports, Chrome scales the
+ * page to fit — 432 mm of receipt squeezed onto a 297 mm sheet is 69%, which
+ * is exactly the unreadable print that came back. That is a printer-side
+ * setting (a roll/variable paper length, and Scale at 100%), not something
+ * CSS can assert.
+ *
+ * So this is now a per-call opt-in with an escape hatch, rather than
+ * something every receipt does silently: a workspace whose driver has a
+ * fixed page length turns it off and gets correct-size print across
+ * multiple pages instead.
+ *
+ * `size: 80mm auto` would be the obvious thing to write and is invalid CSS —
+ * the property takes one or two lengths — so the height is measured. Done
+ * LAST, after images settle: a logo that has not decoded reports no height
+ * and would truncate the receipt to the height of its text.
+ */
+function fitPageToContent(win: Window, widthMm: number): void {
+  const doc = win.document;
+  const heightPx = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
+  if (heightPx <= 0) return; // nothing laid out — leave the default sheet alone
+  // 96 CSS px = 1 inch = 25.4 mm. Plus 2mm so the cutter does not shave the
+  // last line; a receipt cut flush against its footer looks torn.
+  const heightMm = Math.ceil((heightPx / 96) * 25.4) + 2;
+  const style = doc.createElement('style');
+  style.dataset.role = 'page-size';
+  style.textContent = `@page{size:${widthMm}mm ${heightMm}mm;margin:0}`;
+  doc.head.appendChild(style);
+}
+
+/** Write the document, wait for it to be printable, print it, close up. */
+function fillAndPrint(win: Window, html: string, fit?: { widthMm: number }): void {
   if (printTimer != null) window.clearTimeout(printTimer);
   win.document.open();
   win.document.write(html);
@@ -86,17 +188,40 @@ export function openPrintWindow(html: string): void {
         img.addEventListener('error', () => resolve(), { once: true });
       }),
   );
+  /*
+   * D74 — close the popup once the print has been dispatched.
+   *
+   * `afterprint` fires when the browser is finished with the document,
+   * whether the operator printed or dismissed the dialog. There is no web
+   * API that distinguishes the two, so both close the window: a cashier who
+   * cancels wanted out of it either way, and the alternative — leaving a
+   * dead receipt tab open behind the POS — is what this is fixing.
+   *
+   * Attached BEFORE `print()`, because in some browsers `print()` is
+   * synchronous and `afterprint` has already fired by the time it returns.
+   */
+  win.addEventListener('afterprint', () => win.close(), { once: true });
+
   void Promise.race([
     Promise.all(settled),
     new Promise((resolve) => window.setTimeout(resolve, 4000)),
   ]).then(() => {
+    if (fit) fitPageToContent(win, fit.widthMm);
     printTimer = window.setTimeout(() => {
       printTimer = null;
+      /*
+       * The print dialog opens by itself — no click on the page. Whether the
+       * OPERATING SYSTEM's dialog then needs a confirming click is not
+       * something a web page can decide: only Chrome's `--kiosk-printing`
+       * launch flag makes `print()` go straight to the default printer, and
+       * a page cannot set it. On a till launched with that flag this call is
+       * already the whole interaction; without it the dialog is the browser's
+       * to own. See docs/restaurant-pos/00-decisions.md, D74.
+       */
       win.print();
     }, 150);
   });
 }
-
 
 /** Print the customer receipt: server-rendered, with a client-side fallback. */
 export async function printCustomerReceipt(
@@ -138,7 +263,6 @@ export async function reprintCustomerReceipt(session: Session, saleId: string): 
   }
 }
 
-
 /**
  * D69/D72 — the whole table bill, printed by the cashier.
  *
@@ -151,11 +275,14 @@ export async function reprintCustomerReceipt(session: Session, saleId: string): 
  * totals block. Two hand-written receipt templates is how a tenant ends up
  * with a logo on one bill and not the other.
  */
-export function printTableBill(input: Omit<ThermalBillInput, 'profile'> & {
-  profile?: DocumentProfile;
-}): void {
+export function printTableBill(
+  input: Omit<ThermalBillInput, 'profile'> & {
+    profile?: DocumentProfile;
+  },
+): void {
   openPrintWindow(
     renderThermalBill({ ...input, profile: input.profile ?? getCachedDocumentProfile() }),
+    { widthMm: RECEIPT_WIDTH_MM },
   );
 }
 
@@ -164,7 +291,11 @@ export function printTableBill(input: Omit<ThermalBillInput, 'profile'> & {
  * they owe. D72 routes it through the shared thermal template so a split
  * bill and a whole bill are the same document with different lines.
  */
-export function printSplitBill(input: {
+export function printSplitBill(input: SplitBillInput): void {
+  openPrintWindow(renderSplitBill(input), { widthMm: RECEIPT_WIDTH_MM });
+}
+
+export interface SplitBillInput {
   storeName: string;
   currency?: string;
   saleNumber: string;
@@ -176,34 +307,39 @@ export function printSplitBill(input: {
   servedBy?: string | null;
   placeLabel?: string | null;
   issuedAt?: Date;
-}): void {
+}
+
+/**
+ * D74 — composing the split bill is separate from printing it, so a caller
+ * that must open its popup inside the click (before the profile has been
+ * fetched) can render into a window it already holds.
+ */
+export function renderSplitBill(input: SplitBillInput): string {
   const balance = (Number(input.share) - Number(input.paidAmount)).toFixed(2);
-  openPrintWindow(
-    renderThermalBill({
-      profile: input.profile ?? getCachedDocumentProfile(),
-      fallbackName: input.storeName,
-      currency: input.currency,
-      documentNumber: input.saleNumber,
-      placeLabel: input.placeLabel ?? null,
-      servedBy: input.servedBy ?? null,
-      // Whose bill this is — the one thing that distinguishes four bills
-      // printed off one table within a minute of each other.
-      copyLabel: input.splitLabel,
-      issuedAt: input.issuedAt ?? new Date(),
-      lines: input.items.map((it) => ({
-        name: it.name,
-        quantity: it.quantity,
-        lineTotal: it.lineTotal,
-      })),
-      // A split's share IS its total: the server has already apportioned the
-      // service charge and every other bill-level amount into it, so listing
-      // those again here would double-count them on the paper.
-      subtotal: input.share,
-      total: input.share,
-      paid: input.paidAmount,
-      balance,
-    }),
-  );
+  return renderThermalBill({
+    profile: input.profile ?? getCachedDocumentProfile(),
+    fallbackName: input.storeName,
+    currency: input.currency,
+    documentNumber: input.saleNumber,
+    placeLabel: input.placeLabel ?? null,
+    servedBy: input.servedBy ?? null,
+    // Whose bill this is — the one thing that distinguishes four bills
+    // printed off one table within a minute of each other.
+    copyLabel: input.splitLabel,
+    issuedAt: input.issuedAt ?? new Date(),
+    lines: input.items.map((it) => ({
+      name: it.name,
+      quantity: it.quantity,
+      lineTotal: it.lineTotal,
+    })),
+    // A split's share IS its total: the server has already apportioned the
+    // service charge and every other bill-level amount into it, so listing
+    // those again here would double-count them on the paper.
+    subtotal: input.share,
+    total: input.share,
+    paid: input.paidAmount,
+    balance,
+  });
 }
 
 /**

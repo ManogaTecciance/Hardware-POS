@@ -22,7 +22,8 @@ import { Permission } from '@/lib/permissions';
 import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import { getDocumentProfile } from '@/lib/document-template-service';
-import { printSplitBill, printTableBill } from '@/lib/receipt-print';
+import { beginPrintWindow, renderSplitBill } from '@/lib/receipt-print';
+import { renderThermalBill } from '@/lib/thermal-bill';
 
 import { ItemSplitAssigner } from './item-split-assigner';
 import { getActiveCurrency } from '@/lib/tenant-money';
@@ -88,34 +89,47 @@ export function BillScreen({ session, saleId }: Props) {
 
   const printBill = async (view: BillView) => {
     setPrinting(true);
+    /*
+     * D74 — the popup is opened HERE, in the click's own turn. Opening it
+     * after the profile fetch gambles on the browser's transient user
+     * activation not having lapsed, and on a slow connection it has: the
+     * popup is blocked and nothing at all appears to happen.
+     */
+    const printWindow = beginPrintWindow();
     try {
       const profile = await getDocumentProfile(session);
-      printTableBill({
-        profile,
-        fallbackName: session.branchName ?? '',
-        currency: getActiveCurrency(),
-        documentNumber: view.saleNumber,
-        placeLabel: view.placeLabel,
-        servedBy: view.servedByName,
-        issuedAt: new Date(view.closedAt),
-        lines: view.items.map((it) => ({
-          name: it.name,
-          variantName: it.variantName,
-          quantity: it.quantity,
-          lineTotal: it.lineTotal,
-          specialInstructions: it.specialInstructions,
-        })),
-        subtotal: view.subtotal,
-        discount: view.totalDiscount,
-        serviceCharge: view.serviceChargeAmount,
-        packaging: view.packagingCharge,
-        tax: view.taxAmount,
-        total: view.total,
-        paid: view.paidAmount,
-        balance: view.balanceAmount,
-        payments: view.payments.map((pmt) => ({ method: pmt.method, amount: pmt.amount })),
-        note: profile.billNote || null,
-      });
+      printWindow.render(
+        renderThermalBill({
+          profile,
+          fallbackName: session.branchName ?? '',
+          currency: getActiveCurrency(),
+          documentNumber: view.saleNumber,
+          placeLabel: view.placeLabel,
+          servedBy: view.servedByName,
+          issuedAt: new Date(view.closedAt),
+          lines: view.items.map((it) => ({
+            name: it.name,
+            variantName: it.variantName,
+            quantity: it.quantity,
+            lineTotal: it.lineTotal,
+            specialInstructions: it.specialInstructions,
+          })),
+          subtotal: view.subtotal,
+          discount: view.totalDiscount,
+          serviceCharge: view.serviceChargeAmount,
+          packaging: view.packagingCharge,
+          tax: view.taxAmount,
+          total: view.total,
+          paid: view.paidAmount,
+          balance: view.balanceAmount,
+          payments: view.payments.map((pmt) => ({ method: pmt.method, amount: pmt.amount })),
+          note: profile.billNote || null,
+        }),
+      );
+    } catch (err) {
+      // A window opened up front must not be left blank and orphaned.
+      printWindow.abort();
+      setError(err instanceof Error ? err.message : 'Could not prepare the bill');
     } finally {
       setPrinting(false);
     }
@@ -317,23 +331,30 @@ export function BillScreen({ session, saleId }: Props) {
                           size="sm"
                           variant="ghost"
                           leftIcon={<Printer className="h-4 w-4" />}
-                          onClick={() =>
-                            void getDocumentProfile(session).then((profile) =>
-                              printSplitBill({
-                                profile,
-                                storeName: session.branchName ?? '',
-                                currency: getActiveCurrency(),
-                                saleNumber: bill.saleNumber,
-                                splitLabel: sp.label ?? `Split ${i + 1}`,
-                                items: sp.items,
-                                share: sp.share,
-                                paidAmount: sp.paidAmount,
-                                servedBy: bill.servedByName,
-                                placeLabel: bill.placeLabel,
-                                issuedAt: new Date(bill.closedAt),
-                              }),
-                            )
-                          }
+                          onClick={() => {
+                            // D74 — same reasoning as the whole bill: the
+                            // popup opens in the click, not after the fetch.
+                            const w = beginPrintWindow();
+                            void getDocumentProfile(session)
+                              .then((profile) =>
+                                w.render(
+                                  renderSplitBill({
+                                    profile,
+                                    storeName: session.branchName ?? '',
+                                    currency: getActiveCurrency(),
+                                    saleNumber: bill.saleNumber,
+                                    splitLabel: sp.label ?? `Split ${i + 1}`,
+                                    items: sp.items,
+                                    share: sp.share,
+                                    paidAmount: sp.paidAmount,
+                                    servedBy: bill.servedByName,
+                                    placeLabel: bill.placeLabel,
+                                    issuedAt: new Date(bill.closedAt),
+                                  }),
+                                ),
+                              )
+                              .catch(() => w.abort());
+                          }}
                         >
                           Print
                         </Button>
