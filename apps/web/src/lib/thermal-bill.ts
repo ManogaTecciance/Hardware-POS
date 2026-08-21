@@ -82,6 +82,10 @@ export const RECEIPT_WIDTH_MM = 78;
  * character. Four millimetres is that overflow plus a little, leaving 74 mm
  * of text on a 78 mm page.
  *
+ * Raised from 4 mm to 6 mm on 2026-08-21: at 4 mm nothing was clipped, but
+ * the amounts sat hard against the edge with no breathing room. 6 mm leaves
+ * 72 mm of text on a 78 mm page.
+ *
  * Right only. The left edge has always printed cleanly from x=0, and taking
  * width off BOTH sides is what left the band of white the PO rejected.
  *
@@ -89,7 +93,7 @@ export const RECEIPT_WIDTH_MM = 78;
  * change — the page width stays matched to the driver's stock so nothing is
  * ever centred.
  */
-export const RECEIPT_RIGHT_INSET_MM = 4;
+export const RECEIPT_RIGHT_INSET_MM = 6;
 /** …in CSS pixels at 96 dpi, for the layout column. */
 export const RECEIPT_WIDTH_PX = Math.round((RECEIPT_WIDTH_MM / 25.4) * 96); // 302
 

@@ -267,10 +267,11 @@ describe('the printed page itself', () => {
      * "USER", Maximum Size 78.7mm). Matching it means nothing is centred, so
      * no width is lost to margins before the content starts.
      *
-     * The TEXT is inset 4mm from the right, because the print head stops
+     * The TEXT is inset 6mm from the right, because the print head stops
      * short of the paper's edge. At 78mm of text the last two characters
      * were lost — "LKR 1,450.00" printed as "LKR 1,450." and "AMOUNT" as
-     * "AMOU" — which is about 3.5mm at this font size.
+     * "AMOU" — which is about 3.5mm at this font size. 4mm cleared the clip
+     * but left the amounts hard against the edge; 6mm gives them room.
      *
      * RIGHT only. The left has always printed cleanly from x=0, and taking
      * width off both sides is what left the band of white down the margins.
@@ -281,7 +282,7 @@ describe('the printed page itself', () => {
       html.indexOf('}', html.indexOf('body{font-family')),
     );
     expect(bodyRule).toContain('width:100%');
-    expect(bodyRule).toContain('padding:0 4mm 0 0');
+    expect(bodyRule).toContain('padding:0 6mm 0 0');
     // NEGATIVE — not centred, not a fixed column, and not inset on the left:
     // the three shapes that put white where the operator does not want it.
     expect(bodyRule).not.toContain('auto');

@@ -2744,8 +2744,9 @@ These are two numbers, and every round that went wrong conflated them:
 - The PAGE matches the driver's stock, so nothing is centred and no width is
   lost before the content starts. Getting this wrong at 72 mm is what left a
   band of white down both margins.
-- The TEXT is inset 4 mm from the RIGHT, where the head stops. Getting this
-  wrong at 0 mm is the bleed, twice.
+- The TEXT is inset 6 mm from the RIGHT, where the head stops. Getting this
+  wrong at 0 mm is the bleed, twice; 4 mm cleared the clip but left the
+  amounts hard against the edge, so it was raised the same day.
 
 Left alone at 0: that edge has printed cleanly throughout, and insetting both
 sides is the white the PO rejected. The inset is a single named constant
