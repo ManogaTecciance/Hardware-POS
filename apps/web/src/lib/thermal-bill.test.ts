@@ -212,36 +212,46 @@ describe('safety', () => {
 });
 
 describe('the printed page itself', () => {
-  it('kills the browser page chrome and never fixes a page height', () => {
+  it('zeroes the page margin — killing the chrome AND the gap between pages', () => {
     render();
     /*
-     * `@page { margin: 0 }` is the only lever CSS has over the browser's own
-     * print header and footer — the page number and the "about:blank" URL
-     * Chrome draws in the page margin. With no margin there is nowhere to
-     * draw them.
+     * One declaration, two jobs. It removes the browser's print header and
+     * footer (the page number and the about:blank URL), because with no
+     * margin there is nowhere to draw them. And it is what makes a long bill
+     * read as ONE receipt: the gap between page one and page two IS the page
+     * margin, and on a roll that gap prints as a band of blank paper that
+     * looks like the receipt was cut and restarted.
      */
     expect(html).toContain('@page{margin:0}');
-
-    /*
-     * NEGATIVE — the template must NOT pin a page height. A receipt roll is
-     * continuous, and the real height is measured after layout and injected
-     * by `openPrintWindow`; a size baked in here would be a guess that cuts
-     * a long bill in half.
-     */
-    expect(html).not.toMatch(/@page\{size:/);
-    // …and the body is free to grow, so a long order lays out in one strip.
-    expect(html).toContain('html,body{height:auto}');
   });
 
-  it('takes the on-screen Print button out of flow', () => {
+  it('never pins a page SIZE — that is what shrank the receipt', () => {
     render();
     /*
-     * The page height is measured from the laid-out document. An in-flow
-     * button that only vanishes at print time would add its height to every
-     * receipt as blank paper after the footer.
+     * Sizing the page to the document made the whole bill one page, and
+     * browsers honour an oversized page by SCALING it onto the physical
+     * paper: a long order printed correct and unreadably small. The paper
+     * size belongs to the printer. Asserted by name so the fix cannot be
+     * reintroduced by someone solving "it splits across pages" again.
      */
-    const btn = html.slice(html.indexOf('.btn{'), html.indexOf('}', html.indexOf('.btn{')));
-    expect(btn).toContain('position:fixed');
-    expect(html).toContain('@media print{.btn{display:none}');
+    expect(html).not.toMatch(/@page\{[^}]*size:/);
+    expect(html).not.toContain('size:80mm');
+    // POSITIVE CONTROL — an @page rule IS emitted, so the absence above is
+    // about `size` specifically and not about the block failing to render.
+    expect(html).toContain('@page{');
+  });
+
+  it('keeps a row and the totals from splitting across the boundary', () => {
+    render();
+    /*
+     * A line cut in half mid-row, or a balance stranded alone on the next
+     * page, are the two places a continuous receipt stops reading as one.
+     * `page-break-inside` rides along with `break-inside` because thermal
+     * drivers are not uniformly modern.
+     */
+    expect(html).toContain('break-inside:avoid');
+    expect(html).toContain('page-break-inside:avoid');
+    const rule = html.slice(html.indexOf('tr,'), html.indexOf('}', html.indexOf('tr,')));
+    expect(rule).toContain('.tot');
   });
 });

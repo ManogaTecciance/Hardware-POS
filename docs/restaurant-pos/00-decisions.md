@@ -2494,39 +2494,40 @@ backstop so an unreachable logo cannot leave the dialog un-opened.
 The retail receipt is deliberately untouched — it is the Tile Shop's
 document, and D16 keeps its behaviour and wording as they are.
 
-### D73 — a receipt is one continuous page, with no browser chrome on it
+### D73 — a receipt wastes no paper between pages
 
 PO report, 2026-08-21: the printed bill carried a page number and the word
-"about:blank", and a long order came out on two sheets.
+"about:blank", and a long order came out looking like separate receipts.
 
-**The chrome.** Both were the browser's own print header and footer — the
-URL of the popup the bill is written into, and the page counter. `@page {
-margin: 0 }` is the only lever CSS has over them: with no page margin there
-is nowhere for the browser to draw them. The body's padding becomes the
-printed margin instead, so the text still clears the edge of the roll.
+**`@page { margin: 0 }` does both jobs.** It removes the browser's own print
+header and footer — the page counter and the URL of the popup the bill is
+written into — because with no page margin there is nowhere for that chrome
+to be drawn, and CSS has no other lever over it. And it is what makes a long
+bill read as ONE receipt: the gap between one page and the next IS the page
+margin, and on a continuous roll that gap prints as a band of blank paper
+mid-bill that looks like the receipt was cut and restarted. At zero, page two
+carries on exactly where page one stopped.
 
-**One page, whatever the length.** A receipt roll is continuous. Left on a
-sheet, a long order breaks across pages — and on a roll printer that means
-the cutter fires mid-bill and the totals arrive on a separate strip. So the
-document is measured after layout and the height written into `@page`.
+**The page is deliberately NOT given a size — corrected the same day.** The
+first attempt measured the document and wrote `size: 80mm <height>mm` so the
+whole bill was a single page. Browsers honour an oversized page by SCALING it
+onto the physical paper, so a long order printed correct and unreadably
+small. The paper size belongs to the printer; the only thing this document
+asserts is that it wastes none of it. The regression test names `size` so
+the same fix cannot be reintroduced by someone solving "it splits across
+pages" again.
 
-`size: 80mm auto` would have been the obvious thing to write, and it is
-invalid CSS — the property takes one or two lengths, and browsers drop the
-whole declaration without complaint. Both values are therefore lengths, with
-the height computed at 96 px per inch plus four millimetres of cutter margin:
-a receipt cut flush against its last line looks torn.
+Two smaller rules finish the job. Rows, the tender and the totals block carry
+`break-inside: avoid`, so a line is never cut in half mid-row and the balance
+is never stranded alone. And `thead { display: table-row-group }` stops the
+column headings repeating at the top of every page — a browser repeats them
+by design, which is right for a report and wrong on a roll, where a guest
+reads the repeat as a second receipt starting.
 
-Measured LAST, after images settle. A logo that has not decoded reports no
-height, and a page sized from that truncates the bill to the height of its
-text. The on-screen Print button is `position: fixed` for the same reason —
-in flow, a control that only disappears at print time still adds its height
-to every receipt as blank paper after the footer.
-
-Opt-in (`fitToContent`), so the retail receipt keeps printing to whichever
-sheet the operator selected (D16).
-
-Verified in a real browser rather than by inspection: the same 60-line bill
-prints as ONE 432 mm page with the fix and TWO A4 pages without it.
+Verified page by page in a real browser: a 60-line bill across three pages
+prints the header once, continues flush from the top of page two with no
+heading and no gap, and closes with an unsplit totals block. A short bill is
+byte-for-byte what it was.
 
 ---
 

@@ -63,18 +63,41 @@ export const RECEIPT_WIDTH_MM = 80;
 const CSS = `
 :root { color-scheme: light; }
 /*
- * margin: 0 is what removes the browser's own print header and footer —
- * the page number and the "about:blank" URL Chrome draws in the page margin.
- * There is no other lever for it from CSS: with no margin there is nowhere
- * for that chrome to be drawn. The body's own padding becomes the printed
- * margin instead, so the text still clears the edge of the roll.
+ * margin: 0 does two jobs, and both are the point of this block.
  *
- * The page SIZE is injected at print time by openPrintWindow, which
- * measures the laid-out document — a receipt roll is continuous, so the
- * page is made exactly as tall as the bill rather than letting a long order
- * spill onto a second sheet.
+ * 1. It removes the browser's own print header and footer — the page number
+ *    and the about:blank URL Chrome draws in the page margin. With no margin
+ *    there is nowhere for that chrome to be drawn, and CSS has no other
+ *    lever over it.
+ *
+ * 2. It is what makes a long bill READ as one continuous receipt. The gap
+ *    between one page and the next IS the page margin: on a roll, a default
+ *    margin prints as a band of blank paper mid-bill that looks like the
+ *    receipt has been cut and restarted. At zero, page two carries on
+ *    exactly where page one stopped.
+ *
+ * The page is deliberately NOT given an explicit size. An earlier attempt
+ * measured the document and wrote size: 80mm <height>mm so the whole bill
+ * was one page — which browsers honour by SCALING that page down onto the
+ * physical paper, so a long order printed correct-but-unreadably-small. The
+ * paper size belongs to the printer; the only thing this document asserts is
+ * that it wastes none of it.
  */
 @page{margin:0}
+/*
+ * Nothing splits across the page boundary that would look broken if it did:
+ * a row cut in half mid-line, or a totals block with the balance stranded
+ * on its own, are the two places a continuous receipt stops reading as one.
+ */
+tr,.tot,.pay,.meta{break-inside:avoid;page-break-inside:avoid}
+/*
+ * Stop the column headings repeating at the top of every page. A browser
+ * repeats a thead by design, which is right for a report and wrong here: on
+ * a continuous roll it prints DESCRIPTION / QTY / AMOUNT again in the middle
+ * of the bill, and a guest reading it sees a second receipt starting.
+ * table-row-group demotes the thead to an ordinary group, printed once.
+ */
+thead{display:table-row-group}
 html,body{height:auto}
 body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-width:302px;margin:0 auto;padding:12px;color:#000;background:#fff}
 .c{text-align:center}
@@ -98,13 +121,7 @@ td{padding:2px 0;vertical-align:top}
 .pay .row{display:flex;justify-content:space-between}
 .ft{margin-top:12px;font-size:11px;white-space:pre-line}
 .copy{margin-top:4px;font-size:11px;font-weight:bold}
-.btn{position:fixed;top:8px;right:8px;padding:6px 14px;cursor:pointer;font:inherit;z-index:2}
-/*
- * position: fixed takes the button out of flow deliberately: the page
- * height is measured from the laid-out document, and an in-flow button that
- * only disappears at print time would add its height to every receipt as
- * blank paper at the end of the roll.
- */
+.btn{display:block;margin:0 auto 10px;padding:8px 16px;cursor:pointer;font:inherit}
 @media print{.btn{display:none}body{padding:6px 10px;max-width:none}}
 `;
 

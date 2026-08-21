@@ -1,5 +1,5 @@
 import { api } from './api';
-import { RECEIPT_WIDTH_MM, renderThermalBill, type ThermalBillInput } from './thermal-bill';
+import { renderThermalBill, type ThermalBillInput } from './thermal-bill';
 import type { Session } from './auth';
 import type { CartItem } from './cart';
 import { computeLine } from './cart';
@@ -54,24 +54,7 @@ ${ctx.orderDiscount > 0 ? `<div class="row"><span>Order discount</span><span>-${
 
 let printTimer: number | null = null;
 
-export interface PrintWindowOptions {
-  /**
-   * Size the printed page to the document instead of to a paper sheet.
-   *
-   * A receipt roll is continuous: a long order should come out as one strip,
-   * not as "page 1 of 2" with the totals stranded on a second sheet the
-   * cutter has already separated. With this set, the page height is measured
-   * from the laid-out document and written into `@page` before printing.
-   *
-   * Off by default — the retail receipt and every other caller keep printing
-   * to whatever sheet the operator selected (D16).
-   */
-  fitToContent?: boolean;
-  /** Roll width in millimetres. 80 is the common thermal default; 58 exists. */
-  paperWidthMm?: number;
-}
-
-export function openPrintWindow(html: string, options: PrintWindowOptions = {}): void {
+export function openPrintWindow(html: string): void {
   // One *named* popup, reused across prints: repeated clicks replace the
   // receipt in place instead of stacking new windows and print dialogs
   // (which eventually hangs the tab).
@@ -107,7 +90,6 @@ export function openPrintWindow(html: string, options: PrintWindowOptions = {}):
     Promise.all(settled),
     new Promise((resolve) => window.setTimeout(resolve, 4000)),
   ]).then(() => {
-    if (options.fitToContent) fitPageToContent(win, options.paperWidthMm ?? 80);
     printTimer = window.setTimeout(() => {
       printTimer = null;
       win.print();
@@ -115,31 +97,6 @@ export function openPrintWindow(html: string, options: PrintWindowOptions = {}):
   });
 }
 
-/**
- * Make the printed page exactly as tall as the document.
- *
- * `@page { size: <width> <height> }` needs both values — `size: 80mm auto`
- * is not valid CSS and browsers ignore the whole declaration — so the height
- * is measured after layout and written in. Measured LAST, once images have
- * settled, because a logo that has not decoded yet reports zero height and
- * would truncate the receipt to the height of the text alone.
- *
- * 96 CSS px = 1 inch = 25.4 mm. The couple of extra millimetres are the
- * cutter's margin: a receipt cut flush against the last line looks torn.
- */
-function fitPageToContent(win: Window, widthMm: number): void {
-  const doc = win.document;
-  const heightPx = Math.max(
-    doc.body.scrollHeight,
-    doc.documentElement.scrollHeight,
-  );
-  if (heightPx <= 0) return; // nothing laid out; leave the default sheet alone
-  const heightMm = Math.ceil((heightPx / 96) * 25.4) + 4;
-  const style = doc.createElement('style');
-  style.dataset.role = 'page-size';
-  style.textContent = `@page{size:${widthMm}mm ${heightMm}mm;margin:0}`;
-  doc.head.appendChild(style);
-}
 
 /** Print the customer receipt: server-rendered, with a client-side fallback. */
 export async function printCustomerReceipt(
@@ -196,11 +153,9 @@ export async function reprintCustomerReceipt(session: Session, saleId: string): 
  */
 export function printTableBill(input: Omit<ThermalBillInput, 'profile'> & {
   profile?: DocumentProfile;
-  paperWidthMm?: number;
 }): void {
   openPrintWindow(
     renderThermalBill({ ...input, profile: input.profile ?? getCachedDocumentProfile() }),
-    { fitToContent: true, paperWidthMm: input.paperWidthMm ?? RECEIPT_WIDTH_MM },
   );
 }
 
@@ -248,7 +203,6 @@ export function printSplitBill(input: {
       paid: input.paidAmount,
       balance,
     }),
-    { fitToContent: true, paperWidthMm: RECEIPT_WIDTH_MM },
   );
 }
 
