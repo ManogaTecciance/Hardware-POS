@@ -258,17 +258,22 @@ describe('the printed page itself', () => {
     expect(html).not.toContain('class="btn"');
   });
 
-  it('fills the roll edge to edge, at the printer\u2019s own stock width', () => {
+  it('fills the roll, held off the RIGHT edge only', () => {
     render();
     /*
-     * 78mm comes from the driver, not from a guess: Xprinter XP-365B, stock
-     * "USER", Maximum Size width 78.7mm, exposed liner 0.0mm both sides.
-     * Guessed at 80mm it bled off the right edge; guessed at 72mm the shorter
-     * page was centred on the paper and left a band of white down both sides.
+     * Two different numbers, and conflating them cost several rounds.
      *
-     * The body FILLS that page — width 100%, no max-width, no centring, no
-     * padding — because the page IS the printable area. Any inset here is
-     * just white the operator asked to be rid of.
+     * The PAGE is 78mm — the driver's own stock width (Xprinter XP-365B,
+     * "USER", Maximum Size 78.7mm). Matching it means nothing is centred, so
+     * no width is lost to margins before the content starts.
+     *
+     * The TEXT is inset 4mm from the right, because the print head stops
+     * short of the paper's edge. At 78mm of text the last two characters
+     * were lost — "LKR 1,450.00" printed as "LKR 1,450." and "AMOUNT" as
+     * "AMOU" — which is about 3.5mm at this font size.
+     *
+     * RIGHT only. The left has always printed cleanly from x=0, and taking
+     * width off both sides is what left the band of white down the margins.
      */
     expect(html).toContain('box-sizing:border-box');
     const bodyRule = html.slice(
@@ -276,12 +281,12 @@ describe('the printed page itself', () => {
       html.indexOf('}', html.indexOf('body{font-family')),
     );
     expect(bodyRule).toContain('width:100%');
-    expect(bodyRule).toContain('margin:0;');
-    expect(bodyRule).toContain('padding:0;');
-    // NEGATIVE — no centring and no column, which are the two shapes that
-    // put white down the sides.
+    expect(bodyRule).toContain('padding:0 4mm 0 0');
+    // NEGATIVE — not centred, not a fixed column, and not inset on the left:
+    // the three shapes that put white where the operator does not want it.
     expect(bodyRule).not.toContain('auto');
     expect(bodyRule).not.toContain('max-width');
+    expect(bodyRule).not.toMatch(/padding:0 \d+mm 0 \d+mm/);
   });
 
   it('lets content break freely — an avoided break is a visible gap', () => {

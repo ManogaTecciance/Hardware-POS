@@ -2729,6 +2729,33 @@ the till is set up with (D16). Only the thermal bill asks to be sized to its
 content, and that only works because the driver's Maximum Length now allows
 it.
 
+### D80 — the page is the stock; the text is inset from the right
+
+PO photograph, 2026-08-21: the bleed returned and worse — "LKR 1,450.00"
+printed as "LKR 1,450.", "AMOUNT" as "AMOU".
+
+D79 read the driver's stock width (78.7 mm) as the printable width and set
+the text edge to edge on a 78 mm page. It is not: it is the width of the
+PAPER, and the head stops short of it. Two characters at this font size is
+about 3.5 mm.
+
+These are two numbers, and every round that went wrong conflated them:
+
+- The PAGE matches the driver's stock, so nothing is centred and no width is
+  lost before the content starts. Getting this wrong at 72 mm is what left a
+  band of white down both margins.
+- The TEXT is inset 4 mm from the RIGHT, where the head stops. Getting this
+  wrong at 0 mm is the bleed, twice.
+
+Left alone at 0: that edge has printed cleanly throughout, and insetting both
+sides is the white the PO rejected. The inset is a single named constant
+which the stylesheet interpolates, so the two cannot drift — and it is the
+only number to change for a printer that clips a different amount.
+
+Verified by rendering at the page width and measuring: the furthest ink lands
+at 280 px of a 295 px page, exactly on the content edge, with nothing
+overflowing.
+
 ---
 
 ## Open decisions

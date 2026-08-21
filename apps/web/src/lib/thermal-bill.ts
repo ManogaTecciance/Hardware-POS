@@ -71,6 +71,25 @@ export interface ThermalBillInput {
  * this file's — see the D79 record for the settings.
  */
 export const RECEIPT_WIDTH_MM = 78;
+
+/**
+ * D80 — how far the text is held off the RIGHT edge.
+ *
+ * The stock's 78.7 mm is the width of the PAPER; the print head covers less
+ * of it. Measured from what actually came out: at 78 mm of text the last two
+ * characters were lost ("LKR 1,450.00" printed as "LKR 1,450.", "AMOUNT" as
+ * "AMOU"), which at 11 px monospace is about 3.5 mm. At 80 mm it was one
+ * character. Four millimetres is that overflow plus a little, leaving 74 mm
+ * of text on a 78 mm page.
+ *
+ * Right only. The left edge has always printed cleanly from x=0, and taking
+ * width off BOTH sides is what left the band of white the PO rejected.
+ *
+ * If a future printer clips a different amount, this is the one number to
+ * change — the page width stays matched to the driver's stock so nothing is
+ * ever centred.
+ */
+export const RECEIPT_RIGHT_INSET_MM = 4;
 /** …in CSS pixels at 96 dpi, for the layout column. */
 export const RECEIPT_WIDTH_PX = Math.round((RECEIPT_WIDTH_MM / 25.4) * 96); // 302
 
@@ -143,7 +162,7 @@ html,body{height:auto}
  * with white down both sides. The page is already the printable area; an
  * inset here would just be white the operator asked to be rid of.
  */
-body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:100%;margin:0;padding:0;color:#000;background:#fff}
+body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:100%;margin:0;padding:0 ${RECEIPT_RIGHT_INSET_MM}mm 0 0;color:#000;background:#fff}
 .c{text-align:center}
 .logo{display:block;margin:0 auto 6px;max-width:180px;max-height:110px;object-fit:contain}
 h1{font-size:15px;margin:0 0 2px;letter-spacing:.02em}
