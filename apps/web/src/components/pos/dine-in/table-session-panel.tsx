@@ -9,8 +9,30 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
 import { type Session } from '@/lib/auth';
 import { diningAreas, restaurantTables, tableSessions } from '@/lib/restaurant/api';
-import { formatElapsed } from '@/lib/restaurant/labels';
-import type { DiningAreaView, RestaurantTableView } from '@/lib/restaurant/types';
+import { TABLE_STATUS_LABELS, formatElapsed } from '@/lib/restaurant/labels';
+import type {
+  DiningAreaView,
+  RestaurantTableStatus,
+  RestaurantTableView,
+} from '@/lib/restaurant/types';
+
+/**
+ * D91 — which tables the picker is showing.
+ *
+ * `OPEN` means a session is running on the table, which is what "open table"
+ * means everywhere else in this product (the floor plan, `/open-tables`, the
+ * bill). It is deliberately not a status the waiter has to know the name of:
+ * SEATED, OCCUPIED and BILLING are all one party at one table from the floor's
+ * point of view, and asking a waiter to distinguish them to find their table
+ * would be a filter that hides things for reasons they cannot see.
+ */
+type TableFilter = 'ALL' | 'FREE' | 'OPEN';
+
+const OPEN_STATUSES: readonly RestaurantTableStatus[] = ['SEATED', 'OCCUPIED', 'BILLING'];
+
+function isOpenTable(status: RestaurantTableStatus): boolean {
+  return OPEN_STATUSES.includes(status);
+}
 
 /** The session the POS is currently taking orders onto. */
 export interface ActiveTableSession {
@@ -188,6 +210,16 @@ function Picker({
    * not loaded yet".
    */
   const [selectedArea, setSelectedArea] = React.useState<string | null>(null);
+  /*
+   * D91 — table-state filter (PO, 2026-08-21). The picker used to show only
+   * AVAILABLE tables, so a seated one simply was not there: a waiter looking
+   * for the party on M4 saw a gap and no way to tell whether the table was
+   * taken, being cleaned, or had been deleted. Every table in the area is
+   * listed now, and this narrows the list rather than defining it — the
+   * default is ALL, because the ask was to SEE open tables, not to have to
+   * go looking for a filter first.
+   */
+  const [tableFilter, setTableFilter] = React.useState<TableFilter>('ALL');
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -204,27 +236,26 @@ function Picker({
       /*
        * EVERY area is loaded regardless of the filter, and the label map is
        * built from every table in them. Two reasons, both of which produce a
-       * silent wrong answer otherwise: an open session's table is occupied
-       * (so it is absent from the available lists), and a session in a
-       * filtered-out area would lose its name entirely — leaving the waiter
-       * a chip labelled with a bare session number and no way to tell which
-       * table it is. The filter narrows what is DISPLAYED, never what is
-       * known.
+       * silent wrong answer otherwise: a session in a filtered-out area would
+       * lose its name entirely — leaving the waiter a chip labelled with a
+       * bare session number and no way to tell which table it is. The filter
+       * narrows what is DISPLAYED, never what is known.
+       *
+       * D91 — and every table is kept, not just the AVAILABLE ones. The
+       * state filter below decides what is shown; discarding the rest here
+       * would make "Open" a chip that can only ever be empty.
        */
       const labelMap = new Map<string, string>();
-      const availableByArea = new Map<string, RestaurantTableView[]>();
+      const byArea = new Map<string, RestaurantTableView[]>();
       sorted.forEach((a, i) => {
         const rows = lists[i] ?? [];
         for (const t of rows) labelMap.set(t.id, t.label ?? t.code);
-        availableByArea.set(
-          a.id,
-          rows.filter((t) => t.status === 'AVAILABLE'),
-        );
+        byArea.set(a.id, rows);
       });
 
       setOpen(sessions as OpenSessionRow[]);
       setAreas(sorted);
-      setTablesByArea(availableByArea);
+      setTablesByArea(byArea);
       setLabels(labelMap);
       /*
        * With no "All" option there must always be a valid selection, so the
@@ -280,16 +311,63 @@ function Picker({
 
   const visibleAreas = areas.filter((a) => a.id === selectedArea);
 
+  /*
+   * D91 — the open sessions this user is allowed to work, keyed by table.
+   *
+   * `open` is already scoped by the server (D70: a waiter sees only sessions
+   * they opened; a supervisor sees the floor). So a table can be OCCUPIED and
+   * absent from this map, and that is not a gap to paper over — it is
+   * somebody else's table. It is shown, so the waiter can see the room, and
+   * it is not clickable, because opening it is exactly what the server
+   * refuses.
+   */
+  const mySessionByTable = React.useMemo(
+    () => new Map(open.map((s) => [s.tableId, s])),
+    [open],
+  );
+
+  /** Resume a session the user already has — the strip and the grid share it. */
+  const resume = React.useCallback(
+    (s: OpenSessionRow) =>
+      onPick({
+        id: s.id,
+        sessionNumber: s.sessionNumber,
+        tableLabel: labels.get(s.tableId) ?? s.sessionNumber,
+        openedAt: s.openedAt,
+        guestCount: s.guestCount,
+        orderId: s.activeOrderId,
+      }),
+    [labels, onPick],
+  );
+
+  const matchesFilter = (status: RestaurantTableStatus): boolean =>
+    tableFilter === 'ALL'
+      ? true
+      : tableFilter === 'FREE'
+        ? status === 'AVAILABLE'
+        : isOpenTable(status);
+
   return (
+    /*
+     * D69 asked for a block that never takes more than half the screen, and
+     * D91 broke the way that was expressed: the cap reserved a FIXED 11rem
+     * for the block's own chrome, measured on a tablet, and the state chips
+     * wrap to a second row on a narrow one — where the real chrome is 15.5rem.
+     * The number was a guess that only held at one width.
+     *
+     * Capping the CARD and letting the grid take what is left states the
+     * constraint exactly, at every width, with nothing to keep in step.
+     */
     <Card>
-      <CardContent className="space-y-3 p-4">
+      <CardContent className="flex max-h-[50dvh] flex-col gap-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm font-semibold">Which table?</p>
             <p className="text-xs text-muted-foreground">
               {/* D70 — "yours" is the honest word: the server only returns
                   sessions this user opened, unless they supervise the floor. */}
-              Seat a table to start a session, or carry on with one of yours.
+              Seat a free table or carry on with one of yours. Tables another
+              waiter is serving are shown, greyed.
             </p>
           </div>
           <Button
@@ -315,7 +393,11 @@ function Picker({
                 running table behind a filter the waiter set for a different
                 reason is how a party gets forgotten. */}
             {open.length > 0 ? (
-              <div>
+              /* D91 — labelled as a group: the same table can appear here AND
+                 in the room below (this strip crosses areas and ignores every
+                 filter), so "the T2 chip" is ambiguous without a name for the
+                 section it is in. */
+              <div role="group" aria-label="Your open tables">
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Your open tables
                 </p>
@@ -327,16 +409,7 @@ function Picker({
                         key={s.id}
                         type="button"
                         data-active={s.id === activeId}
-                        onClick={() =>
-                          onPick({
-                            id: s.id,
-                            sessionNumber: s.sessionNumber,
-                            tableLabel: name ?? s.sessionNumber,
-                            openedAt: s.openedAt,
-                            guestCount: s.guestCount,
-                            orderId: s.activeOrderId,
-                          })
-                        }
+                        onClick={() => resume(s)}
                         className={`inline-flex h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium ${
                           s.id === activeId
                             ? 'border-primary bg-primary text-primary-foreground'
@@ -359,75 +432,159 @@ function Picker({
               </div>
             ) : null}
 
-            {areas.length > 1 ? (
-              <div className="flex items-center gap-3">
-                <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Show
-                </span>
-                <ChipRow
-                  ariaLabel="Filter tables by dining area"
-                  activeKey={selectedArea ?? ''}
-                  className="min-w-0 flex-1"
-                >
-                  {areas.map((a) => (
-                    <AreaChip
-                      key={a.id}
-                      label={a.name}
-                      active={selectedArea === a.id}
-                      onClick={() => setSelectedArea(a.id)}
-                    />
-                  ))}
-                </ChipRow>
+            {/* D91 — table state and dining area on ONE row. A second row of
+                chips would cost 44px of a block that is capped at half the
+                viewport, and the two read naturally left to right: which
+                tables, then where. The state chips sit outside the ChipRow
+                because that control carries a single selection and its own
+                scroll-into-view; two selections in one strip would fight. */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Show
+              </span>
+              <div className="flex shrink-0 gap-2" role="group" aria-label="Filter tables by state">
+                {(
+                  [
+                    ['ALL', 'All'],
+                    ['FREE', 'Free'],
+                    ['OPEN', 'Open'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <AreaChip
+                    key={key}
+                    label={label}
+                    active={tableFilter === key}
+                    onClick={() => setTableFilter(key)}
+                  />
+                ))}
               </div>
-            ) : null}
+              {areas.length > 1 ? (
+                <>
+                  <span aria-hidden className="h-6 w-px shrink-0 bg-border" />
+                  <ChipRow
+                    ariaLabel="Filter tables by dining area"
+                    activeKey={selectedArea ?? ''}
+                    className="min-w-0 flex-1"
+                  >
+                    {areas.map((a) => (
+                      <AreaChip
+                        key={a.id}
+                        label={a.name}
+                        active={selectedArea === a.id}
+                        onClick={() => setSelectedArea(a.id)}
+                      />
+                    ))}
+                  </ChipRow>
+                </>
+              ) : null}
+            </div>
 
-            {/* Capped and scrollable: a branch with five areas of nine tables
-                would otherwise push the menu — the thing the waiter actually
-                came here to use — off the bottom of a tablet.
-                The cap is expressed against the block's own chrome (header +
-                open sessions + filter ≈ 11rem) so the WHOLE card stays under
-                half the viewport, which is the constraint that was asked
-                for; `min-h` wins over `max-h` in CSS, so a short viewport
-                degrades to a small scroller rather than to nothing. */}
-            <div className="max-h-[calc(50vh-11rem)] min-h-[7rem] space-y-3 overflow-y-auto">
+            {/* Takes whatever the capped card has left, and scrolls: a branch
+                with five areas of nine tables would otherwise push the menu —
+                the thing the waiter actually came here to use — off the
+                bottom. `min-h` still wins over the flex basis, so a very
+                short viewport degrades to a small scroller rather than to
+                nothing at all. */}
+            <div
+              role="group"
+              aria-label="Tables in this area"
+              className="min-h-[7rem] flex-1 space-y-3 overflow-y-auto"
+            >
               {areas.length === 0 ? (
                 <p className="py-4 text-sm text-muted-foreground">
                   No dining areas configured yet. Add an area and its tables in Tables.
                 </p>
               ) : (
                 visibleAreas.map((area) => {
-                  const free = tablesByArea.get(area.id) ?? [];
+                  const all = tablesByArea.get(area.id) ?? [];
+                  const shown = all.filter((t) => matchesFilter(t.status));
                   return (
                     <div key={area.id}>
                       <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {area.name}
                       </p>
-                      {free.length === 0 ? (
+                      {shown.length === 0 ? (
                         <p className="text-xs text-muted-foreground">
-                          Every table here is seated.
+                          {/* Says which of the three questions came back empty.
+                              One message for all of them would read as "this
+                              area has no tables" while the area is full. */}
+                          {all.length === 0
+                            ? 'No tables in this area yet. Add them in Tables.'
+                            : tableFilter === 'FREE'
+                              ? 'Every table here is seated.'
+                              : tableFilter === 'OPEN'
+                                ? 'No open tables here.'
+                                : 'Nothing to show here.'}
                         </p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          {free.map((t) => (
-                            <button
-                              key={t.id}
-                              type="button"
-                              disabled={busyId !== null}
-                              onClick={() => void seat(t)}
-                              className="inline-flex h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm hover:border-primary disabled:opacity-50"
-                            >
-                              {busyId === t.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                              ) : null}
-                              {t.label ?? t.code}
-                              {t.capacity ? (
-                                <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
-                                  <Users className="h-3 w-3" aria-hidden />
-                                  {t.capacity}
+                          {shown.map((t) => {
+                            const mine = mySessionByTable.get(t.id);
+                            const isActive = mine ? mine.id === activeId : false;
+                            const free = t.status === 'AVAILABLE';
+                            /*
+                             * Three kinds of table, and the difference is what
+                             * a tap does: seat a free one, carry on with one of
+                             * mine, and neither for anyone else's. The last is
+                             * still DRAWN — seeing that M4 is taken is the
+                             * whole point of the PO's request — but the server
+                             * refuses to hand it over (D70), so offering the
+                             * tap would be offering a refusal.
+                             */
+                            const clickable = free || !!mine;
+                            return (
+                              <button
+                                key={t.id}
+                                type="button"
+                                disabled={busyId !== null || !clickable}
+                                aria-current={isActive ? 'true' : undefined}
+                                title={
+                                  clickable
+                                    ? undefined
+                                    : `${TABLE_STATUS_LABELS[t.status]} — another waiter's table`
+                                }
+                                onClick={() => {
+                                  if (mine) resume(mine);
+                                  else if (free) void seat(t);
+                                }}
+                                className={`inline-flex h-11 items-center gap-2 rounded-lg border px-3 text-sm disabled:opacity-60 ${
+                                  isActive
+                                    ? 'border-primary bg-primary text-primary-foreground'
+                                    : mine
+                                      ? 'border-primary/40 bg-brand-50 hover:border-primary'
+                                      : free
+                                        ? 'border-border bg-card hover:border-primary'
+                                        : 'border-dashed border-border bg-muted text-muted-foreground'
+                                }`}
+                              >
+                                {busyId === t.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                                ) : null}
+                                {t.label ?? t.code}
+                                <span
+                                  className={`inline-flex items-center gap-0.5 text-xs font-normal ${
+                                    isActive ? 'opacity-80' : 'text-muted-foreground'
+                                  }`}
+                                >
+                                  {mine ? (
+                                    <>
+                                      {formatElapsed(mine.openedAt)}
+                                      {mine.guestCount ? ` · ${mine.guestCount}` : ''}
+                                    </>
+                                  ) : free ? (
+                                    t.capacity ? (
+                                      <>
+                                        <Users className="h-3 w-3" aria-hidden />
+                                        {t.capacity}
+                                      </>
+                                    ) : null
+                                  ) : (
+                                    TABLE_STATUS_LABELS[t.status]
+                                  )}
                                 </span>
-                              ) : null}
-                            </button>
-                          ))}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

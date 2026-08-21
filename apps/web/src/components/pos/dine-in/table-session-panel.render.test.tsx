@@ -14,8 +14,13 @@
  * Mutation-proven: dropping `tableSession !== null` from `canPlace` in
  * pos-counter-workspace.tsx flips test 2 to a pass-when-it-should-fail and
  * fails here.
+ *
+ * D91 additions, all three mutations run against the component itself:
+ * restoring the pre-D91 `.filter(status === 'AVAILABLE')` in `load()` fails
+ * five; rendering the state chips but ignoring them fails three; and making
+ * every table clickable regardless of whose session it is fails one.
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -45,10 +50,19 @@ const TABLES: Record<string, RestaurantTableView[]> = {
 const openSession = vi.fn();
 const listOpenSessions = vi.fn<() => Promise<unknown[]>>(() => Promise.resolve([]));
 
+/**
+ * Overridable per test (D91): the empty-state messages depend on what an area
+ * CONTAINS, and the shared fixture deliberately holds one free and one
+ * occupied table per area, so no filter over it is ever empty.
+ */
+const tablesFor = vi.fn<(areaId: string) => RestaurantTableView[]>(
+  (areaId: string) => TABLES[areaId] ?? [],
+);
+
 vi.mock('@/lib/restaurant/api', () => ({
   diningAreas: { list: () => Promise.resolve(AREAS) },
   restaurantTables: {
-    list: (_s: unknown, areaId: string) => Promise.resolve(TABLES[areaId] ?? []),
+    list: (_s: unknown, areaId: string) => Promise.resolve(tablesFor(areaId)),
   },
   tableSessions: {
     listOpen: () => listOpenSessions(),
@@ -59,6 +73,18 @@ vi.mock('@/lib/restaurant/api', () => ({
 vi.mock('@/lib/restaurant/labels', () => ({
   formatElapsed: () => '5m',
   formatMoney: (v: number) => String(v),
+  // D91 — the picker names a table's state on the chip. A stub missing this
+  // does not fail loudly: the component reads `undefined[status]` and the
+  // whole panel throws, which reads as a component bug rather than a mock gap.
+  TABLE_STATUS_LABELS: {
+    AVAILABLE: 'Available',
+    SEATED: 'Seated',
+    OCCUPIED: 'In service',
+    BILLING: 'Bill requested',
+    CLEANING: 'Cleaning',
+    BLOCKED: 'Blocked',
+    RESERVED: 'Reserved',
+  },
 }));
 
 const session = { token: 't', user: { id: 'usr_waiter', tenantId: 'tnt' } } as never;
@@ -67,6 +93,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   listOpenSessions.mockResolvedValue([]);
+  tablesFor.mockImplementation((areaId: string) => TABLES[areaId] ?? []);
 });
 
 const panel = (active: ActiveTableSession | null, onPick = vi.fn()) =>
@@ -82,7 +109,7 @@ const panel = (active: ActiveTableSession | null, onPick = vi.fn()) =>
   );
 
 describe('picking a table', () => {
-  it('offers only tables that are free, and seats the one tapped', async () => {
+  it('seats the free table tapped, and shows the occupied one without offering it', async () => {
     const onPick = vi.fn();
     openSession.mockResolvedValue({
       id: 'ts_1',
@@ -93,11 +120,28 @@ describe('picking a table', () => {
 
     panel(null, onPick);
 
-    // POSITIVE — the free table is offered…
+    /*
+     * D91 (PO, 2026-08-21) — the picker used to DROP every table that was not
+     * AVAILABLE, so a seated table simply was not there. It is drawn now, and
+     * the distinction moved from "listed / not listed" to "tappable / not":
+     * T2 belongs to another waiter, and the server refuses it (D70), so
+     * offering the tap would be offering a refusal.
+     */
     const t1 = await screen.findByRole('button', { name: /T1/ });
-    // …NEGATIVE — and the occupied one is not, so this is a real filter and
-    // not merely "some buttons rendered".
-    expect(screen.queryByRole('button', { name: /T2/ })).toBeNull();
+    const t2 = within(screen.getByRole('group', { name: 'Tables in this area' })).getByRole(
+      'button',
+      { name: /T2/ },
+    );
+    expect(t1.hasAttribute('disabled')).toBe(false);
+    expect(t2.hasAttribute('disabled')).toBe(true);
+    // …and it says WHY, rather than being mysteriously dead.
+    expect(t2.textContent).toMatch(/In service/);
+
+    // NEGATIVE, the half that still matters: tapping the other waiter's table
+    // starts nothing at all.
+    fireEvent.click(t2);
+    expect(openSession).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
 
     fireEvent.click(t1);
 
@@ -207,12 +251,120 @@ describe('picking a table', () => {
     ]);
     panel(null);
 
-    expect(await screen.findByRole('button', { name: /T2/ })).toBeTruthy();
+    // Scoped to the strip: under D91 the same table is ALSO drawn in the room
+    // below while its own area is selected, and an unscoped query matches two.
+    const strip = () => screen.getByRole('group', { name: 'Your open tables' });
+    await waitFor(() => expect(within(strip()).getByRole('button', { name: /T2/ })).toBeTruthy());
+
     fireEvent.click(screen.getByRole('button', { name: 'Main Hall' }));
     // Terrace's free table is gone with the filter…
     await waitFor(() => expect(screen.queryByRole('button', { name: /T1/ })).toBeNull());
     // …but Terrace's OPEN SESSION is still there, which is the claim.
-    expect(screen.getByRole('button', { name: /T2/ })).toBeTruthy();
+    expect(within(strip()).getByRole('button', { name: /T2/ })).toBeTruthy();
+    // …and it is no longer in the room grid, so the line above is proving the
+    // strip survived the filter rather than finding the grid's copy.
+    expect(
+      within(screen.getByRole('group', { name: 'Tables in this area' })).queryByRole('button', {
+        name: /T2/,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('D91 — the table-state filter', () => {
+  const room = () => screen.getByRole('group', { name: 'Tables in this area' });
+  const roomTables = () =>
+    within(room())
+      .queryAllByRole('button')
+      .map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim());
+
+  it('defaults to All, so both the free and the seated table are on screen', async () => {
+    panel(null);
+    await screen.findByRole('button', { name: /T1/ });
+
+    // The ask was to SEE open tables, not to have to find a filter first.
+    expect(screen.getByRole('button', { name: 'All' }).dataset.active).toBe('true');
+    const shown = roomTables();
+    expect(shown.some((t) => t.startsWith('T1'))).toBe(true);
+    expect(shown.some((t) => t.startsWith('T2'))).toBe(true);
+  });
+
+  it('Free hides the seated table and keeps the free one', async () => {
+    panel(null);
+    await screen.findByRole('button', { name: /T1/ });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free' }));
+
+    // BOTH halves. A component that dropped everything passes the negative
+    // alone; one that ignored the chip passes the positive alone.
+    await waitFor(() => expect(roomTables().some((t) => t.startsWith('T2'))).toBe(false));
+    expect(roomTables().some((t) => t.startsWith('T1'))).toBe(true);
+  });
+
+  it('Open hides the free table and keeps the seated one', async () => {
+    panel(null);
+    await screen.findByRole('button', { name: /T1/ });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    await waitFor(() => expect(roomTables().some((t) => t.startsWith('T1'))).toBe(false));
+    expect(roomTables().some((t) => t.startsWith('T2'))).toBe(true);
+  });
+
+  it('says which question came back empty rather than "no tables"', async () => {
+    // Terrace: every table seated. Under Free that is "all seated", NOT "this
+    // area has no tables" — the second reads as a setup error and sends a
+    // waiter to the Tables screen to fix something that is not broken.
+    tablesFor.mockImplementation((areaId: string) =>
+      areaId === 'area_1' ? [table('tbl_2', 'area_1', 'T2', 'OCCUPIED')] : TABLES[areaId] ?? [],
+    );
+    panel(null);
+    await screen.findByRole('button', { name: 'Free' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free' }));
+    await waitFor(() => expect(within(room()).getByText(/Every table here is seated/)).toBeTruthy());
+    // NEGATIVE — and not the message for an area with nothing in it.
+    expect(within(room()).queryByText(/No tables in this area/)).toBeNull();
+
+    // The mirror case: an area with nothing open says so in its own words.
+    cleanup();
+    tablesFor.mockImplementation((areaId: string) =>
+      areaId === 'area_1' ? [table('tbl_1', 'area_1', 'T1', 'AVAILABLE')] : TABLES[areaId] ?? [],
+    );
+    panel(null);
+    await screen.findByRole('button', { name: 'Open' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(within(room()).getByText(/No open tables here/)).toBeTruthy());
+    expect(within(room()).queryByText(/Every table here is seated/)).toBeNull();
+  });
+
+  it('an open table of MINE is tappable from the room, and resumes rather than seats', async () => {
+    listOpenSessions.mockResolvedValue([
+      {
+        id: 'ts_9',
+        sessionNumber: '000009',
+        tableId: 'tbl_2',
+        openedAt: '2026-08-21T09:00:00.000Z',
+        guestCount: 2,
+        activeOrderId: 'ord_9',
+      },
+    ]);
+    const onPick = vi.fn();
+    panel(null, onPick);
+    await screen.findByRole('button', { name: /T1/ });
+
+    const mine = within(room()).getByRole('button', { name: /T2/ });
+    // The same chip was DISABLED in the first test, where the session was not
+    // this user's — so the difference being asserted is ownership, not status.
+    expect(mine.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(mine);
+
+    expect(openSession).not.toHaveBeenCalled();
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'ts_9', tableLabel: 'T2', orderId: 'ord_9' }),
+    );
   });
 });
 

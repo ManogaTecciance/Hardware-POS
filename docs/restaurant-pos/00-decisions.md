@@ -3084,6 +3084,57 @@ that write their own record.
 is touched and no column is dropped, so a deploy that runs the migration
 without the new UI behaves exactly as before.
 
+
+### D91 — the picker shows the room, not just the empty seats
+
+PO, 2026-08-21: the dine-in POS should show open tables too, with a filter for
+them in the "which table" block.
+
+The block listed only `AVAILABLE` tables. A seated one was simply **absent** —
+so a waiter looking for the party on M4 saw a gap where M4 should be, with no
+way to tell whether the table was taken, being cleaned, or had been deleted.
+The only occupied tables anywhere on the screen were the waiter's own, in the
+strip above, and a floor has more tables on it than that.
+
+Every table in the area is drawn now, and a three-state filter — **All · Free ·
+Open** — narrows the list rather than defining it. The default is All, because
+the ask was to *see* open tables, not to go looking for a filter first.
+"Open" means a session is running (`SEATED`, `OCCUPIED`, `BILLING`): those are
+one party at one table from the floor's point of view, and asking a waiter to
+know which of the three their table is in would be a filter that hides things
+for reasons they cannot see.
+
+**Shown is not the same as offered.** A tap does three different things now: it
+seats a free table, resumes one of the waiter's own, and does nothing at all
+for anyone else's — that one is drawn greyed, with its state named and a title
+saying whose it is. This is D70 held to rather than worked around: the server
+returns only sessions this user opened, so a table that is occupied and absent
+from that list belongs to another waiter, and offering the tap would be
+offering a refusal. A supervisor holding `TABLE_SESSION_VIEW_ALL` sees them all
+as workable, which is the same rule, not an exception to it.
+
+The state chips share ONE row with the area chips. A second row costs 44px of a
+block that is capped at half the viewport, and the two read left to right:
+which tables, then where.
+
+**A stale cap, found while measuring.** That half-viewport rule was expressed
+as `max-h-[calc(50vh-11rem)]` on the table grid — the 11rem being a fixed
+reserve for the block's own chrome, measured once on a tablet. The new chips
+wrap to a second row on a narrow screen, where the real chrome is **15.5rem**,
+so the block would have quietly grown past half the screen on a phone. The
+guess is gone: the CARD carries `max-h-[50dvh]` and the grid takes what is
+left. The constraint is now exact at every width with nothing to keep in step.
+Measured at 834×1194, 1194×834, 390×844 and a deliberately cramped 390×500 —
+within half the viewport at each, with the grid scrolling and tables still
+reachable at the smallest.
+
+Mutation-proven three ways in the render spec (restoring the AVAILABLE-only
+filter fails five tests; rendering the chips but ignoring them fails three;
+making every table clickable regardless of ownership fails one), and once more
+against the browser — `TAB-DINE-003` fails when the chips are ignored. One test
+of mine was replaced during this work for promising an empty-state assertion
+it never made.
+
 ---
 
 ## Open decisions

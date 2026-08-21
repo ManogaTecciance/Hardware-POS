@@ -412,6 +412,63 @@ test.describe('TAB-DINE — dine-in POS tablet layout', () => {
     expect(await contentScrollsSideways(page)).toBe(false);
   });
 
+  test('TAB-DINE-003 the table-state filter narrows the room and keeps the block capped', async ({
+    page,
+  }) => {
+    await signInAsRestaurantWaiter(page);
+    await page.goto('/pos?mode=dine-in');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText('Which table?')).toBeVisible({ timeout: 20_000 });
+
+    const room = page.getByRole('group', { name: 'Tables in this area' });
+    await expect(room).toBeVisible();
+
+    // D91 — all three chips, all on the 44px touch line.
+    for (const label of ['All', 'Free', 'Open']) {
+      const chip = page.getByRole('button', { name: label, exact: true });
+      await expect(chip).toBeVisible();
+      const box = await chip.boundingBox();
+      expect(box!.height, `${label} chip is ${box!.height}px tall`).toBeGreaterThanOrEqual(40);
+    }
+
+    /*
+     * The chips must CHANGE something. Counting tables under All and under
+     * Free is the cheapest honest check: a filter that is wired to nothing
+     * leaves the two equal, and so does a room that renders nothing — hence
+     * the "All is not empty" assertion that pairs with it.
+     */
+    await page.getByRole('button', { name: 'All', exact: true }).click();
+    const all = await room.getByRole('button').count();
+    expect(all, 'the room draws no tables at all').toBeGreaterThan(0);
+
+    await page.getByRole('button', { name: 'Free', exact: true }).click();
+    const free = await room.getByRole('button').count();
+    expect(free).toBeLessThanOrEqual(all);
+
+    await page.getByRole('button', { name: 'Open', exact: true }).click();
+    const open = await room.getByRole('button').count();
+    // Free and Open partition the states the seed leaves a branch in, so
+    // together they cannot exceed the whole. If they SUM to the whole the
+    // filter is real; if either equals `all` it is ignoring the chip.
+    expect(free + open).toBeLessThanOrEqual(all);
+    expect(free === all && open === all).toBe(false);
+
+    /*
+     * And the cap survives the extra row of chips. This is measured, not
+     * asserted against a class, because the cap it replaced was a fixed rem
+     * reserve that was correct on a tablet and 4.5rem short on a phone —
+     * a class name would have looked right the whole time.
+     */
+    await page.getByRole('button', { name: 'All', exact: true }).click();
+    const card = page.locator('div', { hasText: 'Which table?' }).last();
+    const box = await card.boundingBox();
+    const vp = page.viewportSize()!;
+    expect(
+      box!.height,
+      `table block is ${box!.height}px of a ${vp.height}px viewport`,
+    ).toBeLessThanOrEqual(vp.height * 0.55);
+  });
+
   test('TAB-DINE-002 the bill sheet and its split control fit both orientations', async ({
     page,
   }) => {
