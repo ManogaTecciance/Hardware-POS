@@ -1,12 +1,14 @@
 'use client';
 
-import { X } from 'lucide-react';
+import { Receipt, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
+import { BillDialog } from '@/components/restaurant/billing/bill-dialog';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
+import { useAuth } from '@/lib/auth';
 import { formatElapsed, formatMoney, formatTime } from '@/lib/restaurant/labels';
 import type { UnifiedOrderView } from '@/lib/restaurant/types';
 import { useOrientation } from '@/lib/use-viewport';
@@ -227,6 +229,8 @@ function OrderDetailActions({
   onDone?: () => void;
 }) {
   const router = useRouter();
+  const { session } = useAuth();
+  const [billFor, setBillFor] = React.useState<string | null>(null);
   const go = (href: string) => {
     router.push(href);
     onDone?.();
@@ -259,15 +263,33 @@ function OrderDetailActions({
           Open inspector
         </Button>
       ) : null}
-      {order.paymentStatus ? (
+      {billFor && session ? (
+        <BillDialog
+          session={session}
+          saleId={billFor}
+          title={order.orderNumber}
+          onClose={() => setBillFor(null)}
+        />
+      ) : null}
+      {/*
+        * D83 — the follow-up slice this button was waiting for. It used to
+        * be disabled with "Bill navigation lands in a follow-up slice",
+        * because the queue row carried a payment status but not the id of
+        * the sale it belonged to. It does now, so the bill opens in place —
+        * read it, reprint it, without leaving the queue.
+        *
+        * Absent rather than disabled when there is no sale: a third-party
+        * order settles on the partner's side and never has one, and a
+        * greyed-out button invites people to keep trying it.
+        */}
+      {order.saleId ? (
         <Button
           size="sm"
-          variant="ghost"
-          onClick={() => go('/bills')}
-          title="Bill navigation lands in a follow-up slice"
-          disabled
+          variant="outline"
+          leftIcon={<Receipt className="h-4 w-4" />}
+          onClick={() => setBillFor(order.saleId!)}
         >
-          View Bill
+          View bill
         </Button>
       ) : null}
     </>

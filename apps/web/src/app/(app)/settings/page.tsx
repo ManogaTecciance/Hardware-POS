@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth';
+import { ChargesTab } from '@/components/settings/charges-tab';
 import { Permission } from '@/lib/permissions';
 import { resolveImageUrl } from '@/lib/products-api';
 import {
@@ -29,7 +30,12 @@ import {
   type PreviewDocumentType,
 } from '@/lib/settings-api';
 
-const TABS = ['Business', 'Branding', 'Layout', 'Preview'] as const;
+/*
+ * D84 — "Charges" is restaurant-only: it edits RestaurantBranchConfig, which
+ * a retail tenant has no row in. Appended rather than inserted so a bookmark
+ * on any existing tab still lands where it did.
+ */
+const TABS = ['Business', 'Branding', 'Layout', 'Preview', 'Charges'] as const;
 type Tab = (typeof TABS)[number];
 
 const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
@@ -235,6 +241,23 @@ export default function SettingsPage() {
         />
       ) : tab === 'Layout' ? (
         <LayoutTab docs={docs} set={set} disabled={!canManage} />
+      ) : tab === 'Charges' ? (
+        /*
+         * D84 — its own save button, and deliberately outside the sticky bar
+         * below: that bar saves the DOCUMENT profile, and the charges live on
+         * a different row with its own optimistic-concurrency version. One
+         * button writing two unrelated records is how a stale version
+         * silently clobbers somebody's edit.
+         */
+        session?.branchId ? (
+          <ChargesTab session={session} branchId={session.branchId} />
+        ) : (
+          <Card className="max-w-3xl">
+            <CardContent className="py-16 text-center text-sm text-muted-foreground">
+              Charges are set per branch. Ask an administrator for branch access.
+            </CardContent>
+          </Card>
+        )
       ) : (
         <PreviewTab docs={docs} />
       )}

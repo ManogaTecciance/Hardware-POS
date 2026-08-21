@@ -53,6 +53,7 @@ import type {
   OpenTableView,
   ReservationView,
   SessionBillPreview,
+  KitchenOrderView,
 } from './types';
 
 function auth(session: Session) {
@@ -72,6 +73,10 @@ export const restaurantConfig = {
     branchId: string,
     body: {
       serviceChargePercent?: number;
+      /** D84 — which channels levy the service charge. */
+      serviceChargeChannels?: string[];
+      serviceChargeTaxable?: boolean;
+      packagingChargeAmount?: number;
       takeawayEnabled?: boolean;
       dineInEnabled?: boolean;
       defaultTicketTargetMinutes?: number;
@@ -668,6 +673,13 @@ export const kitchen = {
     const query = status && status !== 'ALL' ? `?status=${status}` : '';
     return api.get<KitchenTicketView[]>(
       `/restaurant/branches/${branchId}/kitchen-tickets${query}`,
+      auth(session),
+    );
+  },
+  /** D83 — the whole order behind a ticket, across every station. */
+  order(session: Session, branchId: string, ticketId: string) {
+    return api.get<KitchenOrderView>(
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/order`,
       auth(session),
     );
   },

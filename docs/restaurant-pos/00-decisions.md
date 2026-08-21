@@ -2804,6 +2804,63 @@ losing the bucket and making it again — which is the papercut this removes —
 and running the script twice inside one container reports "already exists"
 and exits 0.
 
+### D83 — the bill where the work is, and the order behind a ticket
+
+PO requests, 2026-08-21.
+
+**The finalised bill is a dialog, not a link.** Closing a table used to offer
+"View bill" pointing at `/bills/:id`. A waiter is standing at the table with
+guests asking what they owe; sending them to another screen mid-service is
+the wrong answer. The bill now opens in place the moment the table closes —
+lines, totals, splits, and a Print button — and the strip re-opens it, so
+dismissing it is not a one-way door.
+
+**The Orders queue can open and reprint a bill.** That button existed,
+disabled, labelled "Bill navigation lands in a follow-up slice": the queue
+row carried a payment status but not the id of the sale it belonged to. The
+projection already resolves the sale to read its total, so the id was there
+all along — it is now exposed and the same dialog opens over the queue. A
+third-party row has no sale of ours and gets no button at all, rather than a
+greyed-out one that invites people to keep trying it.
+
+**A kitchen ticket can show its whole order.** A card lists only what THIS
+station is making, which is right for cooking and wrong for timing: the grill
+cannot tell whether it is plating alone or alongside a curry the main kitchen
+has not started. Details opens every item on the order, grouped by round and
+labelled with the station that received it — read back from the tickets
+rather than re-derived from the routing links, because a link can be edited
+after the fact and the ticket is what the kitchen actually got.
+
+KOT_VIEW, like the board, and deliberately NOT routed through the
+table-session read: that one is scoped to the waiter who owns the table
+(D70), and the kitchen owns no tables.
+
+### D84 — the service charge has somewhere to be set
+
+PO request, 2026-08-21: the service charge should appear on dine-in bills and
+be configurable by the owner.
+
+Half of it already worked. `computeRestaurantTotals` has applied the charge
+since D52 and the bill template has printed it since D72 — but nothing in the
+app could set the number, so it sat at the schema default of 0.00 and every
+bill quite correctly showed no service charge.
+
+Settings gains a Charges tab: the percentage, which channels levy it, whether
+tax applies on top of it, and the flat packaging charge for takeaway. Per
+BRANCH, because that is where the row lives and a group prices its rooms
+differently. The channel toggles are explicit rather than assumed — "10% on
+dine-in only" and "10% on everything" are both ordinary, and guessing puts
+money on a bill that should not carry it.
+
+Its own save button, outside the page's sticky bar: that bar writes the
+document profile, and the charges live on a different row with its own
+optimistic-concurrency version. One button writing two unrelated records is
+how a stale version silently clobbers an edit.
+
+Verified end to end against a live tenant: owner sets 10% → a dine-in preview
+reads 6400.00 + 640.00 = 7040.00 → the closed bill agrees, and the Orders
+queue row carries the sale id that opens it.
+
 ---
 
 ## Open decisions

@@ -15,6 +15,8 @@ import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
 
 import { CustomerCapturePopup, type ChosenCustomer } from './counter/customer-capture-popup';
+import { BillDialog } from '@/components/restaurant/billing/bill-dialog';
+
 import { TableBillSheet } from './dine-in/table-bill-sheet';
 import { TableSessionPanel, type ActiveTableSession } from './dine-in/table-session-panel';
 import { ItemDiscountDialog, type LineDiscount } from './counter/item-discount-dialog';
@@ -99,6 +101,8 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
     table: string;
     splitCount: number;
   } | null>(null);
+  /** D83 — the finalised bill, shown as soon as the table closes. */
+  const [showClosedBill, setShowClosedBill] = React.useState(false);
 
   // D45: Restaurant / Cafe / Bakery tenants read the new POS catalogue
   // endpoint (Products the wizard published as POS-sellable). Retail
@@ -340,6 +344,7 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
     setTableSession(null);
     setRoundsSent(0);
     setClosedBill(null);
+    setShowClosedBill(false);
     setMode(null);
     onModeChange(null);
   };
@@ -407,15 +412,16 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-success/40 bg-success-soft/50 p-3 text-sm">
               <span>
                 {closedBill.table} closed
-                {closedBill.splitCount > 1
-                  ? ` into ${closedBill.splitCount} bills`
-                  : ''}
-                . Ready for the cashier to settle and print.
+                {closedBill.splitCount > 1 ? ` into ${closedBill.splitCount} bills` : ''}
+                . Ready for the cashier to settle.
               </span>
+              {/* D83 — reopen the same dialog. A waiter who dismissed it and
+                  then had the guests ask for the total should not have to
+                  leave the POS to get it back. */}
               <button
                 type="button"
                 className="font-medium text-primary underline-offset-2 hover:underline"
-                onClick={() => router.push(`/bills/${closedBill.saleId}`)}
+                onClick={() => setShowClosedBill(true)}
               >
                 View bill
               </button>
@@ -551,12 +557,28 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
           onClosed={({ saleId, splitCount, warning }) => {
             setBillOpen(false);
             setClosedBill({ saleId, table: tableSession.tableLabel, splitCount });
+            /*
+             * D83 — show the finalised bill straight away rather than a link
+             * to another screen. The waiter is standing at the table and the
+             * guests are asking what they owe; sending them to /bills means
+             * leaving the POS mid-service.
+             */
+            setShowClosedBill(true);
             setDineInError(warning ?? null);
             setTableSession(null);
             setRoundsSent(0);
             setDraft([]);
             setIdempotencyKey(cryptoRandomKey());
           }}
+        />
+      ) : null}
+
+      {isDineIn && showClosedBill && closedBill ? (
+        <BillDialog
+          session={session}
+          saleId={closedBill.saleId}
+          title={`${closedBill.table} — bill`}
+          onClose={() => setShowClosedBill(false)}
         />
       ) : null}
 

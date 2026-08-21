@@ -1,8 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { KitchenTicketStatus, Prisma } from '@hardware-pos/database';
+import {
+  KitchenTicketStatus,
+  Prisma,
+  RestaurantOrderItemStatus,
+} from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+
+/** D83 — every item on the order a ticket belongs to, for the kitchen. */
+export interface KitchenOrderView {
+  ticketId: string;
+  ticketNumber: string;
+  orderNumber: string | null;
+  placeLabel: string | null;
+  waiterName: string | null;
+  placedAt: string;
+  items: {
+    id: string;
+    name: string;
+    variantName: string | null;
+    quantity: string;
+    modifierNames: string[];
+    specialInstructions: string | null;
+    roundNumber: number | null;
+    /** Which station received it — null if it reached none (unrouted). */
+    stationName: string | null;
+  }[];
+}
 
 export interface KitchenTicketView {
   id: string;
@@ -263,6 +288,110 @@ export class KitchenService {
       select: { id: true, name: true },
     });
     return new Map(users.map((u) => [u.id, u.name]));
+  }
+
+  /**
+   * D83 — the whole order behind one ticket.
+   *
+   * A ticket carries only the items routed to ITS station, which is right
+   * for making them and wrong for timing them: the grill cannot tell whether
+   * it is plating alone or alongside a curry the main kitchen has not
+   * started. This returns every non-voided item on the order, each labelled
+   * with the station it went to and the round it came in on, so the pass can
+   * see the table as the guests will.
+   *
+   * Read-only and KOT_VIEW gated, like the board itself. Deliberately NOT
+   * routed through the table-session read: that one is scoped to the waiter
+   * who owns the table (D70), and the kitchen owns no tables.
+   */
+  async orderForTicket(
+    tenantId: string,
+    branchId: string,
+    ticketId: string,
+  ): Promise<KitchenOrderView> {
+    const ticket = await this.prisma.kitchenTicket.findFirst({
+      where: { id: ticketId, tenantId, branchId },
+      select: { id: true, ticketNumber: true, roundId: true },
+    });
+    if (!ticket) throw new KitchenTicketNotFoundError();
+
+    const round = await this.prisma.orderRound.findFirst({
+      where: { id: ticket.roundId },
+      select: { orderId: true },
+    });
+    if (!round) throw new KitchenTicketNotFoundError();
+
+    const order = await this.prisma.restaurantOrder.findFirstOrThrow({
+      where: { id: round.orderId, tenantId },
+      select: {
+        orderNumber: true,
+        createdAt: true,
+        session: {
+          select: {
+            waiterUserId: true,
+            table: { select: { code: true, area: { select: { name: true } } } },
+          },
+        },
+        items: {
+          where: { status: { not: RestaurantOrderItemStatus.VOIDED } },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            menuItemName: true,
+            variantNameSnapshot: true,
+            quantity: true,
+            specialInstructions: true,
+            modifiers: { select: { optionName: true } },
+            round: { select: { roundNumber: true } },
+          },
+        },
+      },
+    });
+
+    /*
+     * Which station each item went to, read back from the tickets rather
+     * than re-derived from the routing links: the links can be edited after
+     * the fact, and the ticket is what the kitchen actually received.
+     */
+    const tickets = await this.prisma.kitchenTicket.findMany({
+      where: { tenantId, round: { orderId: round.orderId } },
+      select: { station: { select: { name: true } }, items: { select: { menuItemName: true } } },
+    });
+    const stationByName = new Map<string, string>();
+    for (const t of tickets) {
+      for (const item of t.items) stationByName.set(item.menuItemName, t.station.name);
+    }
+
+    const table = order.session?.table;
+    const waiter = order.session?.waiterUserId
+      ? await this.prisma.user.findUnique({
+          where: { id: order.session.waiterUserId },
+          select: { name: true },
+        })
+      : null;
+
+    return {
+      ticketId: ticket.id,
+      ticketNumber: ticket.ticketNumber,
+      orderNumber: order.orderNumber,
+      placeLabel: table
+        ? table.code === 'WALK-IN'
+          ? 'Takeaway'
+          : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
+        : null,
+      waiterName: waiter?.name ?? null,
+      placedAt: order.createdAt.toISOString(),
+      items: order.items.map((item) => ({
+        id: item.id,
+        name: item.menuItemName,
+        variantName: item.variantNameSnapshot,
+        quantity: item.quantity.toFixed(3),
+        modifierNames: item.modifiers.map((m) => m.optionName),
+        specialInstructions: item.specialInstructions,
+        roundNumber: item.round?.roundNumber ?? null,
+        stationName: stationByName.get(item.menuItemName) ?? null,
+      })),
+    };
   }
 
   /**

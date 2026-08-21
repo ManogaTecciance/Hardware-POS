@@ -1,11 +1,12 @@
 'use client';
 
-import { Check, Clock, UtensilsCrossed } from 'lucide-react';
+import { Check, Clock, Loader2, ListTree, UtensilsCrossed } from 'lucide-react';
 import * as React from 'react';
 
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/dialog';
 import { ChipRow } from '@/components/ui/chip-row';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
@@ -16,7 +17,7 @@ import {
   formatElapsed,
   formatTime,
 } from '@/lib/restaurant/labels';
-import type { KitchenTicketView } from '@/lib/restaurant/types';
+import type { KitchenOrderView, KitchenTicketView } from '@/lib/restaurant/types';
 
 interface Props {
   session: Session;
@@ -54,6 +55,8 @@ export function KitchenBoard({ session, branchId }: Props) {
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState<Set<string>>(new Set());
+  /** D83 — the ticket whose whole order is being read. */
+  const [detailFor, setDetailFor] = React.useState<KitchenTicketView | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -168,11 +171,137 @@ export function KitchenBoard({ session, branchId }: Props) {
               canComplete={canComplete && t.status !== 'COMPLETED'}
               pending={pending.has(t.id)}
               onComplete={() => void complete(t)}
+              onDetails={() => setDetailFor(t)}
             />
           ))}
         </div>
       )}
+
+      {detailFor ? (
+        <TicketOrderDialog
+          session={session}
+          branchId={branchId}
+          ticket={detailFor}
+          onClose={() => setDetailFor(null)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * D83 — the whole order behind one ticket.
+ *
+ * A card shows only what THIS station is making, which is right for cooking
+ * and wrong for timing: the grill cannot tell whether it is plating alone or
+ * alongside a curry the main kitchen has not started. Every item on the
+ * order is listed here with the station that received it, so the pass can
+ * see the table as the guests will.
+ */
+function TicketOrderDialog({
+  session,
+  branchId,
+  ticket,
+  onClose,
+}: {
+  session: Session;
+  branchId: string;
+  ticket: KitchenTicketView;
+  onClose: () => void;
+}) {
+  const [order, setOrder] = React.useState<KitchenOrderView | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    kitchen
+      .order(session, branchId, ticket.id)
+      .then((o) => {
+        if (!cancelled) setOrder(o);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Could not load the order');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, branchId, ticket.id]);
+
+  const byRound = React.useMemo(() => {
+    const groups = new Map<number | null, KitchenOrderView['items']>();
+    for (const item of order?.items ?? []) {
+      const list = groups.get(item.roundNumber) ?? [];
+      list.push(item);
+      groups.set(item.roundNumber, list);
+    }
+    return [...groups.entries()].sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0));
+  }, [order]);
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={ticket.placeLabel ?? ticket.ticketNumber}
+      description={
+        order
+          ? `${order.orderNumber ?? ''}${order.waiterName ? ` · ${order.waiterName}` : ''} · whole order`
+          : 'Loading the order…'
+      }
+      className="sm:max-w-lg"
+      footer={<Button onClick={onClose}>Close</Button>}
+    >
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
+      {!order && !error ? (
+        <p className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading…
+        </p>
+      ) : null}
+
+      {order ? (
+        <div className="space-y-4">
+          {byRound.map(([round, items]) => (
+            <div key={round ?? 'x'}>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {round ? `Round ${round}` : 'Items'}
+              </p>
+              <ul className="space-y-1.5">
+                {items.map((item) => (
+                  <li key={item.id} className="text-sm">
+                    <span className="font-medium">
+                      {trimQuantity(item.quantity)}× {item.name}
+                      {item.variantName ? ` (${item.variantName})` : ''}
+                    </span>
+                    {/* The station is what makes this view worth opening: it
+                        says who else is working on this table. */}
+                    {item.stationName ? (
+                      <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                        {item.stationName}
+                      </span>
+                    ) : (
+                      <span className="ml-2 rounded bg-warning-soft px-1.5 py-0.5 text-xs text-warning">
+                        no station
+                      </span>
+                    )}
+                    {item.modifierNames.length > 0 ? (
+                      <span className="block text-xs text-muted-foreground">
+                        {item.modifierNames.join(', ')}
+                      </span>
+                    ) : null}
+                    {item.specialInstructions ? (
+                      <span className="block text-xs font-medium text-warning">
+                        {item.specialInstructions}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Dialog>
   );
 }
 
@@ -181,11 +310,13 @@ function TicketCard({
   canComplete,
   pending,
   onComplete,
+  onDetails,
 }: {
   ticket: KitchenTicketView;
   canComplete: boolean;
   pending: boolean;
   onComplete: () => void;
+  onDetails: () => void;
 }) {
   const done = ticket.status === 'COMPLETED';
   return (
@@ -249,16 +380,26 @@ function TicketCard({
               </>
             )}
           </span>
-          {canComplete ? (
+          <div className="flex items-center gap-2">
             <Button
               size="sm"
-              leftIcon={<UtensilsCrossed className="h-4 w-4" />}
-              isLoading={pending}
-              onClick={onComplete}
+              variant="ghost"
+              leftIcon={<ListTree className="h-4 w-4" />}
+              onClick={onDetails}
             >
-              Mark done
+              Details
             </Button>
-          ) : null}
+            {canComplete ? (
+              <Button
+                size="sm"
+                leftIcon={<UtensilsCrossed className="h-4 w-4" />}
+                isLoading={pending}
+                onClick={onComplete}
+              >
+                Mark done
+              </Button>
+            ) : null}
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -103,6 +103,12 @@ export type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED';
 export interface RestaurantBranchConfigView {
   branchId: string;
   serviceChargePercent: string;
+  /** D84 — which channels levy it. DINE_IN by default. */
+  serviceChargeChannels: string[];
+  /** D84 — whether the charge sits inside the taxable base. */
+  serviceChargeTaxable: boolean;
+  /** D84 — flat per-order packaging charge for takeaway/online. */
+  packagingChargeAmount: string;
   takeawayEnabled: boolean;
   dineInEnabled: boolean;
   defaultTicketTargetMinutes: number | null;
@@ -396,6 +402,26 @@ export interface SessionBillPreview {
   total: string;
 }
 
+/** D83 — every item on the order behind a ticket, for the kitchen's Details view. */
+export interface KitchenOrderView {
+  ticketId: string;
+  ticketNumber: string;
+  orderNumber: string | null;
+  placeLabel: string | null;
+  waiterName: string | null;
+  placedAt: string;
+  items: {
+    id: string;
+    name: string;
+    variantName: string | null;
+    quantity: string;
+    modifierNames: string[];
+    specialInstructions: string | null;
+    roundNumber: number | null;
+    stationName: string | null;
+  }[];
+}
+
 // ── Kitchen tickets ─────────────────────────────────────────────────────────
 export interface KitchenTicketView {
   id: string;
@@ -540,6 +566,8 @@ export interface UnifiedOrderView {
   pickupAt: string | null;
   createdAt: string;
   total: string | null;
+  /** D83 — the settled Sale, for viewing and reprinting the bill in place. */
+  saleId: string | null;
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
 }

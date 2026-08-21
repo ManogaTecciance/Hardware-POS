@@ -325,6 +325,8 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/branches/:branchId/kitchen-tickets': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   // D68 — one write verb where Phase 6 had three. mark-printed/mark-failed/
   // reprint described what a printer did, and there is no printer.
+  // D83 — the whole order behind a ticket, for the board's Details view.
+  'GET /restaurant/branches/:branchId/kitchen-tickets/:ticketId/order': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/complete': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'POST /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },

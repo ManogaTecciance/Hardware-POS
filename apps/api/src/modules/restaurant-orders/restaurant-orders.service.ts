@@ -52,6 +52,15 @@ export interface OrderView {
   pickupAt: string | null;
   createdAt: string;
   total: string | null;
+  /**
+   * D83 — the settled Sale behind this row, when there is one.
+   *
+   * The queue already resolves the sale to read its total and payment
+   * status; withholding the id meant the Orders page could show what a table
+   * owed but not open or reprint the bill, which is the one thing anybody
+   * looking at a closed order wants to do.
+   */
+  saleId: string | null;
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
 }
@@ -181,6 +190,7 @@ export class RestaurantOrdersService {
           pickupAt: o.takeawayProfile?.pickupAt?.toISOString() ?? null,
           createdAt: o.createdAt.toISOString(),
           total: sale?.total?.toFixed(2) ?? null,
+          saleId: sale?.id ?? null,
           itemCount: o.items.reduce((s, i) => s + Number(i.quantity), 0),
           itemPreview: o.items.slice(0, 3).map((i) => ({
             name: i.menuItemName,
@@ -218,6 +228,9 @@ export class RestaurantOrdersService {
           pickupAt: null,
           createdAt: e.receivedAt.toISOString(),
           total: e.externalTotal?.toFixed(2) ?? null,
+          // A third-party order settles on the partner's side; there is no
+          // Sale of ours to open.
+          saleId: null,
           // ExternalOrder does not persist a per-item breakdown in this
           // schema; the UI shows the total as the only summary.
           itemCount: 0,

@@ -8,7 +8,12 @@ import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
-import { KitchenService, KitchenTicketNotFoundError, KitchenTicketView } from './kitchen.service';
+import {
+  KitchenOrderView,
+  KitchenService,
+  KitchenTicketNotFoundError,
+  KitchenTicketView,
+} from './kitchen.service';
 
 /**
  * D68 — the kitchen board's write surface.
@@ -33,6 +38,27 @@ export class KitchenTicketsController {
     @Query('status') status?: string,
   ): Promise<KitchenTicketView[]> {
     return this.service.listTicketsForBranch(tenantId, branchId, parseFilter(status));
+  }
+
+  /**
+   * D83 — the whole order behind a ticket, for the board's Details view.
+   *
+   * KOT_VIEW, like the board: this is the same information the kitchen
+   * already receives, assembled across stations instead of split by them.
+   */
+  @Get(':ticketId/order')
+  @RequirePermissions(Permission.KOT_VIEW)
+  async order(
+    @TenantId() tenantId: string,
+    @Param('branchId') branchId: string,
+    @Param('ticketId') ticketId: string,
+  ): Promise<KitchenOrderView> {
+    try {
+      return await this.service.orderForTicket(tenantId, branchId, ticketId);
+    } catch (err) {
+      if (err instanceof KitchenTicketNotFoundError) throw new NotFoundException(err.message);
+      throw err;
+    }
   }
 
   @Post(':ticketId/complete')
