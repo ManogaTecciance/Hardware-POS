@@ -114,6 +114,12 @@ describe('Sheet', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  /*
+   * D85 — every popup surface tops out at 80dvh, sheets included, so one
+   * rule holds across the app instead of each control having its own idea of
+   * "tall". `auto` was 85dvh and `full` claimed the viewport minus a 3rem
+   * strip; both are now bounded by the same ceiling.
+   */
   it('applies the correct height class per `height` prop', () => {
     const { rerender, container } = render(
       <Sheet open onClose={() => {}} title="A" height="auto">
@@ -121,7 +127,7 @@ describe('Sheet', () => {
       </Sheet>,
     );
     const dialog = container.querySelector('[role="dialog"]');
-    expect(dialog?.className).toMatch(/max-h-\[85dvh\]/);
+    expect(dialog?.className).toMatch(/max-h-\[80dvh\]/);
 
     rerender(
       <Sheet open onClose={() => {}} title="A" height="half">
@@ -135,9 +141,9 @@ describe('Sheet', () => {
         x
       </Sheet>,
     );
-    expect(container.querySelector('[role="dialog"]')?.className).toMatch(
-      /h-\[calc\(100dvh-3rem\)\]/,
-    );
+    expect(container.querySelector('[role="dialog"]')?.className).toMatch(/h-\[80dvh\]/);
+    // NEGATIVE — and nothing reaches for the viewport any more.
+    expect(container.querySelector('[role="dialog"]')?.className).not.toContain('100dvh');
   });
 
   it('footer receives safe-area padding so iOS home indicator does not eat the primary action', () => {

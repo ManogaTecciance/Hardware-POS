@@ -2861,6 +2861,38 @@ Verified end to end against a live tenant: owner sets 10% → a dine-in preview
 reads 6400.00 + 640.00 = 7040.00 → the closed bill agrees, and the Orders
 queue row carries the sale id that opens it.
 
+### D85 — a modal never grows past the screen
+
+PO request, 2026-08-21: no popup may bleed off the viewport; 80% of the
+height is the ceiling, and content beyond that scrolls.
+
+`Dialog` had no cap at all. It grew with its content and ran off BOTH ends of
+the screen — and the FOOTER went with it, so the confirm button on a long
+bill or a long split list sat below the fold with no way to reach it and no
+scrollbar to find it. The content was never the casualty; the actions were.
+
+Three rules, and any one of them alone leaves the bug intact: the card is
+capped and lays out as a column; the BODY is the scroller — `min-h-0`
+included, without which a flex child's min-height is its content and the card
+grows past the cap instead of overflowing inside it; and header and footer
+are `shrink-0`, so the body is the only thing that gives.
+
+`dvh`, not `vh`: on a phone or an iPad in Safari the toolbar collapses and
+expands, and `vh` measures the tallest state — exactly the state where the
+dialog does not fit.
+
+The ceiling is now the same everywhere rather than per-control. `Sheet`
+already capped itself but at 85dvh, with `height='full'` claiming the
+viewport minus a 3rem strip; the retail cart panel took 88dvh. All three are
+80dvh. `Drawer` is left alone — a side panel is full-height by design and
+already scrolls its body.
+
+Measured in a real browser at 1194×834, 834×1194 and 390×844: the card is
+exactly 80.0% of the viewport at each, sits fully on screen, the confirm
+button is reachable, and the body scrolls. Mutation-proven four ways —
+removing the cap, dropping `min-h-0`, moving the scroll to the card, and
+letting the footer shrink each fail.
+
 ---
 
 ## Open decisions

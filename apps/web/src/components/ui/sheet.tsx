@@ -37,9 +37,10 @@
  *   action lives at the bottom of the panel. Callers who want a centered card
  *   on desktop should keep using `<Dialog>`.
  *
- * - **`height='full'` claims the full viewport minus 3rem** — a common pattern
- *   for the modifier picker on portrait, where a menu item with 6+ modifier
- *   groups will not fit in a half sheet.
+ * - **`height='full'` claims 80dvh** (D85) — a common pattern for the
+ *   modifier picker on portrait, where a menu item with 6+ modifier groups
+ *   will not fit in a half sheet. It is the tallest a popup surface goes;
+ *   the body scrolls beyond that rather than the panel growing.
  *
  * - **Sticky footer is inside the panel.** A `<Dialog>` footer is a normal
  *   flow child; sheet footers pin to the bottom of the panel so the primary
@@ -64,11 +65,11 @@ export interface SheetProps {
   onClose: () => void;
   /**
    * Content height ceiling. Default `'auto'` — the panel is as tall as its
-   * body up to `max-h-[85dvh]`.
+   * body up to `max-h-[80dvh]`.
    *
-   *   'auto' — grows to content, capped at 85dvh.
+   *   'auto' — grows to content, capped at 80dvh.
    *   'half' — a fixed 60dvh, useful for a stable "peek" state.
-   *   'full' — 100dvh minus a 3rem top strip (leaves the scrim visible
+   *   'full' — 80dvh (leaves the scrim visible
    *            so a mis-tap on the top edge still dismisses).
    */
   height?: SheetHeight;
@@ -93,9 +94,16 @@ export interface SheetProps {
 }
 
 const HEIGHT_CLASSES: Record<SheetHeight, string> = {
-  auto: 'max-h-[85dvh]',
+  /*
+   * D85 — 80dvh is the ceiling for every popup surface, sheets included, so
+   * one rule holds across the app rather than each control having its own
+   * idea of "tall". `full` used to claim the viewport minus a 3rem strip;
+   * on a phone that left the sheet's own footer pressed against the home
+   * indicator, and it broke the rule for no benefit a bottom sheet needs.
+   */
+  auto: 'max-h-[80dvh]',
   half: 'h-[60dvh]',
-  full: 'h-[calc(100dvh-3rem)]',
+  full: 'h-[80dvh]',
 };
 
 export function Sheet({

@@ -835,7 +835,10 @@ export function PosRetailCheckout() {
             onClick={() => setCartOpen(false)}
             className="absolute inset-0 bg-slate-900/40"
           />
-          <div className="absolute inset-x-0 bottom-0 flex h-[88dvh] flex-col overflow-hidden rounded-t-2xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-2xl">
+          {/* D85 — 80dvh, the same ceiling every other popup surface takes.
+              The panel already scrolls internally, so the cap costs no
+              content; it just stops the cart covering the whole screen. */}
+          <div className="absolute inset-x-0 bottom-0 flex h-[80dvh] flex-col overflow-hidden rounded-t-2xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-2xl">
             {renderCartPanel(true)}
           </div>
         </div>
