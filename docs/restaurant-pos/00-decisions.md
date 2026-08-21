@@ -2893,6 +2893,32 @@ button is reachable, and the body scrolls. Mutation-proven four ways —
 removing the cap, dropping `min-h-0`, moving the scroll to the card, and
 letting the footer shrink each fail.
 
+### D86 — the logo has to be an absolute URL
+
+PO report, 2026-08-21: a logo uploaded in Settings → Branding did not appear
+on the printed receipt.
+
+An uploaded asset is stored as `/uploads/<key>`, and `/uploads` is served by
+the API — a different origin from the web app in every deployment (:4000 vs
+:3000 locally, api.axlopos.com vs the Amplify host in production). Printed
+raw, the browser resolves it against the app's own origin, finds nothing, and
+the receipt comes out with the logo silently missing: no error, no
+broken-image icon on paper, just no brand. `resolveImageUrl` is what the
+product screens have always used for exactly this, and the bill template now
+uses it too.
+
+Also removed: the "Total Qty" row above the subtotal (PO). The reference bill
+carried one; a guest counts plates, not units, and it is the only figure on
+the receipt that is neither money nor a line they ordered.
+
+**Not a defect — the service charge.** Reported in the same message as
+missing from the bill. It is captured at CLOSE time onto the Sale, which is
+correct: a bill is a settled document, and changing a rate afterwards must
+not rewrite what a guest already paid. The database says so plainly — the
+rate was set at 12:31; S-000007, closed at 12:32, carries 640.00, and every
+sale closed before it carries 0.00 and always will. A rate set today applies
+to tables closed after it, not to bills already raised.
+
 ---
 
 ## Open decisions

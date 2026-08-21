@@ -14,6 +14,17 @@
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 
+import { vi } from 'vitest';
+
+/*
+ * Mirrors the real helper: a stored `/uploads/...` path is absolutised
+ * against the API origin, and anything already absolute passes through.
+ */
+vi.mock('./products-api', () => ({
+  resolveImageUrl: (url: string | null | undefined) =>
+    !url ? null : /^(https?:\/\/|blob:|data:)/.test(url) ? url : `http://api.test${url}`,
+}));
+
 import { DEFAULT_DOCUMENT_PROFILE } from './document-template-service';
 import { renderThermalBill, type ThermalBillInput } from './thermal-bill';
 
@@ -77,6 +88,26 @@ describe('the header, as the reference bill lays it out', () => {
     expect(centred).toContain('<img');
     expect(centred).toContain('Muhandiram');
     expect(centred).toContain('0112 33');
+  });
+
+  it('absolutises a stored logo path against the API origin', () => {
+    /*
+     * D86 — an uploaded logo is stored as `/uploads/<key>`, and `/uploads` is
+     * served by the API: a different origin from the web app in every
+     * deployment (:4000 vs :3000 locally, api.axlopos.com vs the Amplify host
+     * in production). Printed raw, the browser resolves it against the app's
+     * own origin, finds nothing, and the receipt comes out with the logo
+     * silently missing — no error, no broken-image icon on paper.
+     */
+    render({ profile: { ...profile, logoUrl: '/uploads/images/abc.webp' } });
+    expect(html).toContain('src="http://api.test/uploads/images/abc.webp"');
+    // NEGATIVE — the bare path must not survive into the markup.
+    expect(html).not.toContain('src="/uploads/images/abc.webp"');
+  });
+
+  it('leaves an absolute logo URL alone', () => {
+    render({ profile: { ...profile, logoUrl: 'https://cdn.test/logo.png' } });
+    expect(html).toContain('src="https://cdn.test/logo.png"');
   });
 
   it('prints the NAME instead of the logo when there is no logo', () => {
@@ -147,7 +178,10 @@ describe('the totals block', () => {
   it('prints the tender, total qty and the three amounts', () => {
     render();
     expect(html).toContain('*** CASH');
-    expect(html).toContain('Total Qty :');
+    // D86 — no "Total Qty" row: a guest counts plates, not units, and it is
+    // the only figure on the receipt that is neither money nor a line they
+    // ordered. Asserted negatively so it cannot drift back in.
+    expect(html).not.toContain('Total Qty');
     expect(html).toContain('Bill Amount :');
     expect(html).toContain('Paid Amount :');
     expect(html).toContain('Bal. Amount :');

@@ -1,4 +1,5 @@
 import type { DocumentProfile } from './document-template-service';
+import { resolveImageUrl } from './products-api';
 import { formatMoney } from './restaurant/labels';
 
 /**
@@ -255,14 +256,30 @@ export function renderThermalBill(input: ThermalBillInput): string {
    * logo or in the address line — which is a choice they can see and fix,
    * unlike a name silently printed twice.
    */
-  const logo = p.logoUrl
-    ? `<img class="logo" src="${esc(p.logoUrl)}" alt="${esc(name)}">`
-    : '';
+  /*
+   * D86 — the logo URL must be ABSOLUTE.
+   *
+   * An uploaded asset is stored as `/uploads/<key>`, and `/uploads` is served
+   * by the API — a different origin from the web app in every deployment
+   * (:4000 vs :3000 locally, api.axlopos.com vs the Amplify host in
+   * production). Printed raw, the browser resolves it against the app's own
+   * origin, finds nothing, and the receipt prints with the logo silently
+   * missing: no error, no broken-image icon on paper, just no brand.
+   *
+   * `resolveImageUrl` is what the product screens already use for exactly
+   * this; data: and absolute URLs pass through untouched.
+   */
+  const logoSrc = resolveImageUrl(p.logoUrl);
+  const logo = logoSrc ? `<img class="logo" src="${esc(logoSrc)}" alt="${esc(name)}">` : '';
 
   const contact = [p.phone, p.email].filter(Boolean).map((v) => esc(v)).join('<br>');
 
-  const totalQty = input.lines.reduce((n, l) => n + Number(l.quantity), 0);
-
+  /*
+   * D86 — no "Total Qty" row. The reference bill carried one; the PO does
+   * not want it. A guest counts plates, not units, and the number is the
+   * only figure on the receipt that is neither money nor a line they
+   * ordered.
+   */
   const rows = input.lines
     .map((l) => {
       const label =
@@ -328,7 +345,6 @@ ${input.servedBy ? `<div>Served By: ${esc(input.servedBy)}</div>` : ''}
 ${tenders ? `<div class="pay">${tenders}</div><hr>` : ''}
 
 <div class="tot">
-<div class="row"><span>Total Qty :</span><span>${esc(totalQty.toFixed(2))}</span></div>
 <div class="row"><span>Subtotal</span><span>${esc(money(input.subtotal, input.currency))}</span></div>
 ${optional('Discount', input.discount, input.currency, true)}
 ${optional('Service charge', input.serviceCharge, input.currency)}
