@@ -2780,6 +2780,30 @@ Raised as a 500, not a 400. The upload was valid and the SERVER is
 misconfigured; a 400 sends the operator off to blame their image file. An
 unsupported image type stays a 400 — that one really is the caller's.
 
+### D82 — the LocalStack bucket creates itself
+
+Follow-up to D81, 2026-08-21: the PO's LocalStack WAS running from
+docker-compose, and the upload still failed with "The specified bucket does
+not exist".
+
+Both facts are true at once. A reachable LocalStack that returns
+`NoSuchBucket` is not a connection problem — the community image does not
+persist objects across container re-creation (that is a Pro feature), so it
+starts empty every time and a bucket made by hand disappears with the next
+rebuild. The compose file said so in a comment, which is the wrong place for
+a step that has to happen every time.
+
+The bucket is now created by an init hook in
+`docker/localstack/ready.d`, which LocalStack runs once the S3 service
+reports ready. Idempotent, so an existing bucket is a no-op rather than an
+error.
+
+Verified against a real container, not by reading the docs: first start logs
+`HeadBucket => 404` then `CreateBucket => 200`; a restart shows the image
+losing the bucket and making it again — which is the papercut this removes —
+and running the script twice inside one container reports "already exists"
+and exits 0.
+
 ---
 
 ## Open decisions

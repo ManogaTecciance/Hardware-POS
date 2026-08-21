@@ -28,13 +28,18 @@ services:
     restart: always
     environment:
       SERVICES: s3
-      # NOTE: object persistence across container re-creation is a LocalStack
-      # Pro feature; with the community image, re-create the bucket after a
-      # fresh container (awslocal s3 mb s3://hardware-pos-uploads).
+      # Object persistence across container re-creation is a LocalStack Pro
+      # feature, so the community image starts EMPTY every time. The init
+      # hook below re-creates the bucket on each start; without it the first
+      # symptom is "The specified bucket does not exist" on an image upload,
+      # from a part of the app that has nothing to do with Docker.
+      UPLOADS_BUCKET: hardware-pos-uploads
     ports:
       - "4566:4566"
     volumes:
       - localstack_data:/var/lib/localstack
+      # Runs once the S3 service reports ready — see the script's header.
+      - ./docker/localstack/ready.d:/etc/localstack/init/ready.d:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"s3\"'"]
       interval: 10s
