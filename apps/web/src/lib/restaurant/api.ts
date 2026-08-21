@@ -91,6 +91,41 @@ export const restaurantConfig = {
   },
 };
 
+// ── Opening hours (D90) ────────────────────────────────────────────────────
+export const openingHours = {
+  get(session: Session, branchId: string) {
+    return api.get<import('./types').OpeningHoursView>(
+      `/restaurant/branches/${branchId}/opening-hours`,
+      auth(session),
+    );
+  },
+  /**
+   * Replaces the WHOLE schedule — the owner edits the week as a unit, and a
+   * partial update would need a delete verb for the weekday they just put
+   * back to "same as usual".
+   */
+  update(
+    session: Session,
+    branchId: string,
+    body: {
+      weekly: { dayOfWeek: number; isClosed: boolean; opensAt: number; closesAt: number }[];
+      overrides: {
+        date: string;
+        isClosed: boolean;
+        opensAt: number;
+        closesAt: number;
+        note?: string;
+      }[];
+    },
+  ) {
+    return api.put<import('./types').OpeningHoursView>(
+      `/restaurant/branches/${branchId}/opening-hours`,
+      body,
+      auth(session),
+    );
+  },
+};
+
 // ── Kitchen stations ───────────────────────────────────────────────────────
 export const kitchenStations = {
   list(session: Session, branchId: string, includeArchived = false) {

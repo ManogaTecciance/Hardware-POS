@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 281
-- Module-guarded routes: 194
+- Total routes: 283
+- Module-guarded routes: 196
 - Ungated routes: 87
 
 ## How to read the Guard column
@@ -330,6 +330,8 @@ LEGACY `/restaurant/menus…` reads keep their MENU_MANAGEMENT gate unchanged.
 |---|---|---|---|---|
 | GET | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | platform:profile:read |
 | PUT | `/restaurant/branches/:branchId/config` | DINING | ENFORCED | restaurant:config:manage |
+| GET | `/restaurant/branches/:branchId/opening-hours` | DINING | ENFORCED | platform:profile:read |
+| PUT | `/restaurant/branches/:branchId/opening-hours` | DINING | ENFORCED | restaurant:config:manage |
 
 ### DeliveryWebhookController
 

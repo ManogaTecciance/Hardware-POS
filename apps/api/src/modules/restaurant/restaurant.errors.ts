@@ -6,6 +6,7 @@ export const RESTAURANT_ERROR_CODES = {
   STATION_NOT_FOUND: 'STATION_NOT_FOUND',
   STATION_CODE_TAKEN: 'STATION_CODE_TAKEN',
   STATION_HAS_ITEMS: 'STATION_HAS_ITEMS',
+  INVALID_OPENING_HOURS: 'INVALID_OPENING_HOURS',
 } as const;
 
 export class BranchNotFoundError extends NotFoundException {
@@ -44,5 +45,18 @@ export class StationHasItemsError extends BadRequestException {
       code: RESTAURANT_ERROR_CODES.STATION_HAS_ITEMS,
       message: 'Cannot archive a station while menu items still route to it',
     });
+  }
+}
+
+/**
+ * D90 — a schedule the calendar could not draw. Class-validator checks each
+ * field in isolation; these are the rules that need two fields at once (a
+ * closing time before its opening time) or the whole list (two rules for the
+ * same weekday), and they are refused before anything is written rather than
+ * left to surface as an unreadable chart.
+ */
+export class InvalidOpeningHoursError extends BadRequestException {
+  constructor(message: string) {
+    super({ code: RESTAURANT_ERROR_CODES.INVALID_OPENING_HOURS, message });
   }
 }

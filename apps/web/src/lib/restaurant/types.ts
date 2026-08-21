@@ -100,6 +100,36 @@ export type PaymentMethod =
 export type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED';
 
 // ── Restaurant config ──────────────────────────────────────────────────────
+/**
+ * D90 — the branch's opening hours. Times are minutes since LOCAL midnight;
+ * `closesAt` may exceed 1440 for a kitchen that shuts after midnight.
+ */
+export interface OpeningHoursDayView {
+  /** 0 = Sunday … 6 = Saturday, matching `Date.getDay()`. */
+  dayOfWeek: number;
+  isClosed: boolean;
+  opensAt: number;
+  closesAt: number;
+}
+
+export interface OpeningHoursOverrideView {
+  /** Local calendar date, `YYYY-MM-DD`. */
+  date: string;
+  isClosed: boolean;
+  opensAt: number;
+  closesAt: number;
+  note: string | null;
+}
+
+export interface OpeningHoursView {
+  branchId: string;
+  /** Only the weekdays the owner configured; the rest use `defaults`. */
+  weekly: OpeningHoursDayView[];
+  overrides: OpeningHoursOverrideView[];
+  /** What an unconfigured weekday resolves to, as stated by the server. */
+  defaults: { opensAt: number; closesAt: number };
+}
+
 export interface RestaurantBranchConfigView {
   branchId: string;
   serviceChargePercent: string;

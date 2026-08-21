@@ -333,6 +333,8 @@ model Tenant {
   businessProfile              TenantBusinessProfile?
   modules                      TenantModule[]
   restaurantConfigs            RestaurantBranchConfig[]
+  branchOpeningHours           BranchOpeningHours[]
+  branchOpeningHoursOverrides  BranchOpeningHoursOverride[]
   kitchenStations              KitchenStation[]
   menus                        Menu[]
   menuSections                 MenuSection[]
@@ -459,29 +461,31 @@ model Branch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  registers           Register[]
-  users               User[]
-  branchAccess        BranchAccess[]
-  sales               Sale[]
-  returns             Return[]
-  quotations          Quotation[]
-  restaurantConfig    RestaurantBranchConfig?
-  kitchenStations     KitchenStation[]
-  menus               Menu[]
-  diningAreas         DiningArea[]
-  restaurantTables    RestaurantTable[]
-  tableSessions       TableSession[]
-  tableReservations   TableReservation[]
-  restaurantOrders    RestaurantOrder[]
-  branchInventory     BranchInventory[]
-  stockMovements      StockMovement[]
-  inventoryReceipts   InventoryReceipt[]
-  kitchenPrinters     KitchenPrinter[]
-  kitchenTickets      KitchenTicket[]
-  deliveryPlatforms   DeliveryPlatform[]
-  externalOrders      ExternalOrder[]
-  webhookDeliveryLogs WebhookDeliveryLog[]
+  tenant                Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  registers             Register[]
+  users                 User[]
+  branchAccess          BranchAccess[]
+  sales                 Sale[]
+  returns               Return[]
+  quotations            Quotation[]
+  restaurantConfig      RestaurantBranchConfig?
+  openingHours          BranchOpeningHours[]
+  openingHoursOverrides BranchOpeningHoursOverride[]
+  kitchenStations       KitchenStation[]
+  menus                 Menu[]
+  diningAreas           DiningArea[]
+  restaurantTables      RestaurantTable[]
+  tableSessions         TableSession[]
+  tableReservations     TableReservation[]
+  restaurantOrders      RestaurantOrder[]
+  branchInventory       BranchInventory[]
+  stockMovements        StockMovement[]
+  inventoryReceipts     InventoryReceipt[]
+  kitchenPrinters       KitchenPrinter[]
+  kitchenTickets        KitchenTicket[]
+  deliveryPlatforms     DeliveryPlatform[]
+  externalOrders        ExternalOrder[]
+  webhookDeliveryLogs   WebhookDeliveryLog[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1668,6 +1672,63 @@ model Supplier {
 /// restaurant defaults live in `TenantSettings.data.restaurant` (Phase 8+);
 /// this row is the branch-level override, primarily service-charge and open
 /// hours. Zero rows for a hardware tenant is the expected state.
+/// D90 — the branch's ordinary week. One row per configured weekday; a weekday
+/// with no row falls back to the documented default (08:00–23:00), which is
+/// what the calendar has always drawn for an unconfigured branch.
+model BranchOpeningHours {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  /// 0 = Sunday … 6 = Saturday, matching `Date.getDay()` so the client never
+  /// has to re-map. An enum would read better and convert worse.
+  dayOfWeek Int
+  /// Shut all day. Kept separate from the times so a branch can keep its
+  /// usual hours recorded while closing on Mondays.
+  isClosed  Boolean @default(false)
+  /// Minutes since LOCAL midnight. 07:00 = 420.
+  opensAt   Int     @default(480)
+  /// Minutes since the SAME local midnight, so the small hours of the next
+  /// day are expressible: a kitchen closing at 01:00 is 1500, not 60.
+  closesAt  Int     @default(1380)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, dayOfWeek])
+  @@index([tenantId])
+}
+
+/// D90 — one named date that does not follow the weekly rule: a poya day, a
+/// private function, a public holiday. Beats the weekday rule for that date.
+model BranchOpeningHoursOverride {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  /// The local calendar date this applies to. `@db.Date` because a time here
+  /// would be a second timezone to reason about for no gain.
+  date     DateTime @db.Date
+  isClosed Boolean  @default(false)
+  opensAt  Int      @default(480)
+  closesAt Int      @default(1380)
+  /// Why, in the owner's words — "Poya day", "Private function". Printed
+  /// nowhere; it exists so the list is readable a month later.
+  note     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, date])
+  @@index([tenantId])
+}
+
 model RestaurantBranchConfig {
   id       String @id @default(cuid())
   tenantId String

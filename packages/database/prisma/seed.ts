@@ -512,6 +512,33 @@ async function seedRestaurant(passwordHash: string) {
     });
   }
 
+  /*
+   * D90 — opening hours. Seeded so a fresh workspace shows the feature
+   * working rather than an empty form: 07:00–23:00 every day, and the
+   * shorter Monday from the PO's own example. A branch with no rows is a
+   * valid state (it falls back to 08:00–23:00) — this one is configured on
+   * purpose.
+   */
+  for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek += 1) {
+    const monday = dayOfWeek === 1;
+    await prisma.branchOpeningHours.upsert({
+      where: { branchId_dayOfWeek: { branchId: branch.id, dayOfWeek } },
+      update: {
+        isClosed: false,
+        opensAt: monday ? 9 * 60 : 7 * 60,
+        closesAt: monday ? 22 * 60 : 23 * 60,
+      },
+      create: {
+        tenantId: tenant.id,
+        branchId: branch.id,
+        dayOfWeek,
+        isClosed: false,
+        opensAt: monday ? 9 * 60 : 7 * 60,
+        closesAt: monday ? 22 * 60 : 23 * 60,
+      },
+    });
+  }
+
   // ── Kitchen stations ─────────────────────────────────────────
   const stations = [
     { id: 'kst_resto_kitchen', code: 'KIT', name: 'Main Kitchen', category: 'KITCHEN' },

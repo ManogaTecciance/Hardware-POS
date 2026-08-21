@@ -3031,6 +3031,59 @@ absent, and no empty divider left behind. Split in two, deleting the entire
 footer would leave the negative green and read as a pass. Mutation-proven both
 ways: restoring the sentence fails it, and deleting the whole footer fails it.
 
+
+### D90 — opening hours the owner sets, per weekday and per date
+
+PO, 2026-08-21: the restaurant's opening and closing hours should be
+configurable from Settings, per weekday *and* for individual dates — every
+Monday 09:00–22:00 against an ordinary 07:00–23:00, and 13 August (a poya day)
+on its own terms. The calendar's hours must follow.
+
+**Two tables, because they answer two different questions.** A weekly rule is
+what the restaurant normally does; an override is what it is doing on one
+named date. Folding both into one table means either seven rows carrying a
+nullable date or a date column that is sometimes a weekday, and the query that
+resolves "what are today's hours" stops being obvious. Resolution is
+override → weekday rule → fallback, first match wins, and the fallback is the
+08:00–23:00 the calendar has always drawn, so a branch nobody has configured
+renders exactly as it does today.
+
+**Minutes since local midnight, stored as `Int`.** Not a `DateTime`: a
+restaurant that opens at seven opens at seven, on the wall clock, in March and
+in October. A timestamp would carry a date nobody means and a UTC offset that
+moves under it. Not `"HH:MM"` text either — every comparison would parse a
+string. `closesAt` may exceed 1440 to mean the small hours of the next day
+(a kitchen closing at 01:00 is `1500`), which is why closing is stored as a
+duration from the same midnight rather than a clock time: `01:00` and `25:00`
+are the same wall clock and very different closing times.
+
+**Per branch.** Hours are a property of a location — a group's city branch and
+its beach branch keep different ones — and this is where `RestaurantBranchConfig`
+already lives. Writes need `RESTAURANT_CONFIG_MANAGE` (the owner). Reads are
+gated on `PLATFORM_PROFILE_READ`, which every food-service role now holds
+(D88), because the calendar is a floor tool: the waiter reading the book needs
+today's hours as much as the owner setting them.
+
+**A closed day still draws its bookings.** If a date is marked closed but a
+reservation exists on it, the calendar shows the reservation and says the
+branch is closed. Hiding a booking because the hours say the door is shut
+loses a guest who is going to turn up anyway; the widening rule that has
+always kept a late booking on-chart is unchanged and now widens past the
+configured window as well.
+
+**One Save button per tab.** Adding a second self-saving tab exposed a bug in
+the first: the sticky bar at the bottom of Settings saves the DOCUMENT
+profile, and it is fixed to the viewport, so on Charges (D84) it sat on top of
+the Save button that actually applied to what the operator had just edited.
+Two Save buttons with the wrong one on top. The bar is now hidden on the tabs
+that write their own record.
+
+**Migration.** `20260904000000_add_branch_opening_hours` adds
+`BranchOpeningHours` (unique per branch+weekday) and `BranchOpeningHoursOverride`
+(unique per branch+date). Both cascade from branch and tenant. No existing row
+is touched and no column is dropped, so a deploy that runs the migration
+without the new UI behaves exactly as before.
+
 ---
 
 ## Open decisions

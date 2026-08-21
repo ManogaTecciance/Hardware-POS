@@ -15,6 +15,7 @@ import { Toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth';
 import { ChargesTab } from '@/components/settings/charges-tab';
+import { HoursTab } from '@/components/settings/hours-tab';
 import { Permission } from '@/lib/permissions';
 import { resolveImageUrl } from '@/lib/products-api';
 import {
@@ -34,9 +35,22 @@ import {
  * D84 — "Charges" is restaurant-only: it edits RestaurantBranchConfig, which
  * a retail tenant has no row in. Appended rather than inserted so a bookmark
  * on any existing tab still lands where it did.
+ *
+ * D90 — "Hours" likewise: it edits the branch's opening hours, which only a
+ * food-service tenant has. Appended for the same reason.
  */
-const TABS = ['Business', 'Branding', 'Layout', 'Preview', 'Charges'] as const;
+const TABS = ['Business', 'Branding', 'Layout', 'Preview', 'Charges', 'Hours'] as const;
 type Tab = (typeof TABS)[number];
+
+/*
+ * D90 — tabs that write their OWN record and carry their own Save button.
+ *
+ * The sticky bar below saves the document profile. On these tabs it saves
+ * something the operator is not looking at, and — worse — it is fixed to the
+ * bottom of the viewport, so it sat on top of the Save button that does apply
+ * to what they just edited. Two Save buttons, the visible one wrong.
+ */
+const SELF_SAVING_TABS: readonly Tab[] = ['Charges', 'Hours'];
 
 const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
   { value: 'quotation', label: 'Quotation' },
@@ -258,14 +272,29 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         )
+      ) : tab === 'Hours' ? (
+        /*
+         * D90 — its own save button, and per branch, for the same reason the
+         * charges tab has one: a different row with a different lifetime.
+         */
+        session?.branchId ? (
+          <HoursTab session={session} branchId={session.branchId} />
+        ) : (
+          <Card className="max-w-3xl">
+            <CardContent className="py-16 text-center text-sm text-muted-foreground">
+              Opening hours are set per branch. Ask an administrator for branch access.
+            </CardContent>
+          </Card>
+        )
       ) : (
         <PreviewTab docs={docs} />
       )}
 
-      {/* Sticky action bar. The left inset compensates for the sidebar
-          rail, which only appears from `tab:` (900) up — below that the
-          sidebar is a drawer and the bar spans the full width. */}
-      {canManage ? (
+      {/* Sticky action bar for the DOCUMENT profile. The left inset
+          compensates for the sidebar rail, which only appears from `tab:`
+          (900) up — below that the sidebar is a drawer and the bar spans the
+          full width. Hidden on tabs that save their own record (D90). */}
+      {canManage && !SELF_SAVING_TABS.includes(tab) ? (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 px-4 py-3 pb-safe backdrop-blur tab:pl-72">
           <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
             <Button

@@ -15,13 +15,15 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import type { Session } from '@/lib/auth';
 import { fetchCustomers, type ManagedCustomer } from '@/lib/customers-api';
-import { diningAreas, reservations, restaurantTables } from '@/lib/restaurant/api';
+import { diningAreas, openingHours, reservations, restaurantTables } from '@/lib/restaurant/api';
 import {
   RESERVATION_STATUS_LABELS,
   RESERVATION_STATUS_TONES,
 } from '@/lib/restaurant/labels';
+import { formatHours, resolveHoursForDate } from '@/lib/restaurant/opening-hours';
 import type {
   DiningAreaView,
+  OpeningHoursView,
   ReservationStatus,
   ReservationView,
   RestaurantTableView,
@@ -40,7 +42,13 @@ import type {
 const SLOT_MINUTES = 30;
 const SLOT_WIDTH_PX = 52;
 const ROW_HEIGHT_PX = 48;
-/** Default visible service window; auto-widened to fit any loaded booking. */
+/*
+ * D90 — the visible window now comes from the branch's configured opening
+ * hours (Settings → Hours), resolved per date. These two remain as the
+ * last-resort fallback for a schedule that has not loaded yet, and they are
+ * the same 08:00–23:00 the calendar drew before hours were configurable, so
+ * an unconfigured branch is unchanged.
+ */
 const DEFAULT_FIRST_HOUR = 8;
 const DEFAULT_LAST_HOUR = 23;
 
@@ -101,6 +109,16 @@ export function ReservationCalendar({
     error?: string;
   }>({ status: 'loading', snapshot: EMPTY });
 
+  /*
+   * D90 — the branch's opening hours. Loaded once per branch rather than per
+   * day: the whole schedule (the week plus its exceptions) arrives in one
+   * response, and paging through days must not re-fetch it.
+   *
+   * `null` means unresolved, and resolves to the default window rather than
+   * to "closed" — a slow request is not a shut restaurant (D31).
+   */
+  const [hours, setHours] = React.useState<OpeningHoursView | null>(null);
+
   // Pre-filled create-dialog target from a click on an empty slot.
   const [createAt, setCreateAt] = React.useState<{ tableId?: string; startAt?: Date } | null>(null);
   const [manage, setManage] = React.useState<ReservationView | null>(null);
@@ -109,6 +127,21 @@ export function ReservationCalendar({
   const dayEnd = React.useMemo(() => new Date(dayStart.getTime() + 24 * 3_600_000), [dayStart]);
   const isPastDay = dayEnd.getTime() <= Date.now();
   const isToday = toDateInputValue(new Date()) === dateInput;
+
+  React.useEffect(() => {
+    let cancelled = false;
+    openingHours
+      .get(session, branchId)
+      // A failed hours request must not take the calendar down with it: the
+      // bookings are the point, and the window falls back to the default.
+      .then((next) => !cancelled && setHours(next))
+      .catch(() => !cancelled && setHours(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [session, branchId]);
+
+  const today = React.useMemo(() => resolveHoursForDate(hours, dayStart), [hours, dayStart]);
 
   const load = React.useCallback(async () => {
     try {
@@ -173,8 +206,16 @@ export function ReservationCalendar({
   // Visible window: the default service hours, widened to fit every booking
   // loaded for the day so nothing can render off-chart.
   const { firstHour, lastHour } = React.useMemo(() => {
-    let first = DEFAULT_FIRST_HOUR;
-    let last = DEFAULT_LAST_HOUR;
+    /*
+     * D90 — start from the hours configured for THIS date (override beats
+     * weekday rule beats default), then widen as before. A closed day still
+     * gets a window: its bookings are drawn, because hiding a reservation
+     * because the door is shut loses a guest who is going to turn up anyway.
+     */
+    let first = today.isClosed ? DEFAULT_FIRST_HOUR : Math.floor(today.opensAt / 60);
+    let last = today.isClosed
+      ? DEFAULT_LAST_HOUR
+      : Math.ceil(today.closesAt / 60);
     // Only the bookings on screen widen it. Filtering to the terrace must not
     // leave the chart stretched to 02:00 by a late booking on another floor,
     // with nothing drawn out there to explain the empty space.
@@ -186,8 +227,11 @@ export function ReservationCalendar({
       if (s >= dayStart) first = Math.min(first, s.getHours());
       if (e <= dayEnd) last = Math.max(last, Math.min(24, e.getHours() + (e.getMinutes() > 0 ? 1 : 0)));
     }
-    return { firstHour: first, lastHour: last };
-  }, [state.snapshot.reservations, visibleTables, dayStart, dayEnd]);
+    // The chart can run past midnight for a late kitchen, but never past the
+    // 24-hour grid it draws: a booking after midnight belongs to the next
+    // day's chart, which is where the day window would have put it anyway.
+    return { firstHour: Math.max(0, first), lastHour: Math.min(24, Math.max(last, first + 1)) };
+  }, [state.snapshot.reservations, visibleTables, dayStart, dayEnd, today]);
 
   const windowStart = React.useMemo(
     () => new Date(dayStart.getTime() + firstHour * 3_600_000),
@@ -252,6 +296,29 @@ export function ReservationCalendar({
             Today
           </Button>
         </div>
+        {/*
+          * D90 — say which hours this day is drawn against, and where they
+          * came from. A chart that silently narrows is indistinguishable
+          * from one with no bookings in the missing hours.
+          */}
+        <span
+          className={
+            'ml-2 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium ' +
+            (today.isClosed
+              ? 'bg-danger-soft text-danger'
+              : 'bg-muted text-muted-foreground')
+          }
+          title={
+            today.source === 'override'
+              ? `Set for this date${today.note ? ` — ${today.note}` : ''}`
+              : today.source === 'weekly'
+                ? 'From the weekly opening hours'
+                : 'Branch default — set opening hours in Settings'
+          }
+        >
+          {today.isClosed ? 'Closed today' : formatHours(today)}
+          {today.note ? <span className="font-normal">· {today.note}</span> : null}
+        </span>
         <label className="ml-2 flex items-center gap-2 text-sm text-muted-foreground">
           <input
             type="checkbox"

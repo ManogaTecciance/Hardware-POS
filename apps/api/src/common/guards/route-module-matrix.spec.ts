@@ -277,6 +277,18 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/pos-catalogue': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/config': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'PUT /restaurant/branches/:branchId/config': { module: 'DINING', guard: 'ENFORCED', scope: T },
+  // D90 — opening hours. Read is PLATFORM_PROFILE_READ (the calendar is a
+  // floor tool); write is the owner's.
+  'GET /restaurant/branches/:branchId/opening-hours': {
+    module: 'DINING',
+    guard: 'ENFORCED',
+    scope: T,
+  },
+  'PUT /restaurant/branches/:branchId/opening-hours': {
+    module: 'DINING',
+    guard: 'ENFORCED',
+    scope: T,
+  },
   'GET /restaurant/branches/:branchId/kitchen-stations': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-stations': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/kitchen-stations/:stationId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },

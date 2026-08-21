@@ -8,6 +8,7 @@ import { KitchenStationsService } from './kitchen-stations.service';
 import { PosCatalogueController } from './pos-catalogue.controller';
 import { PosCatalogueService } from './pos-catalogue.service';
 import { RestaurantConfigController } from './restaurant-config.controller';
+import { OpeningHoursService } from './opening-hours.service';
 import { RestaurantConfigService } from './restaurant-config.service';
 
 @Module({
@@ -21,7 +22,7 @@ import { RestaurantConfigService } from './restaurant-config.service';
     KitchenStationsController,
     PosCatalogueController,
   ],
-  providers: [RestaurantConfigService, KitchenStationsService, PosCatalogueService],
-  exports: [RestaurantConfigService, KitchenStationsService],
+  providers: [RestaurantConfigService, OpeningHoursService, KitchenStationsService, PosCatalogueService],
+  exports: [RestaurantConfigService, OpeningHoursService, KitchenStationsService],
 })
 export class RestaurantModule {}

@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   DiningAreaView,
+  OpeningHoursView,
   ReservationView,
   RestaurantTableView,
 } from '@/lib/restaurant/types';
@@ -31,7 +32,13 @@ const listAreas = vi.fn<() => Promise<DiningAreaView[]>>();
 const listTables = vi.fn<(areaId: string) => Promise<RestaurantTableView[]>>();
 const listReservations = vi.fn<() => Promise<ReservationView[]>>();
 
+// D90 — the calendar reads the branch's opening hours. Declared as a mutable
+// stub rather than a fixed value so the hours tests below can vary it; these
+// filter tests keep the default window and assert nothing about it.
+let getOpeningHours = async () => openingHoursView();
+
 vi.mock('@/lib/restaurant/api', () => ({
+  openingHours: { get: () => getOpeningHours() },
   diningAreas: { list: () => listAreas() },
   restaurantTables: { list: (_s: unknown, areaId: string) => listTables(areaId) },
   reservations: {
@@ -42,6 +49,16 @@ vi.mock('@/lib/restaurant/api', () => ({
     cancel: vi.fn(),
   },
 }));
+
+function openingHoursView(over: Partial<OpeningHoursView> = {}): OpeningHoursView {
+  return {
+    branchId: 'brn_1',
+    weekly: [],
+    overrides: [],
+    defaults: { opensAt: 8 * 60, closesAt: 23 * 60 },
+    ...over,
+  };
+}
 
 vi.mock('@/lib/customers-api', () => ({ fetchCustomers: async () => [] }));
 
