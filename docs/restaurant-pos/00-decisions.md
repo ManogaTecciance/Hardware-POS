@@ -2756,6 +2756,29 @@ Verified by rendering at the page width and measuring: the furthest ink lands
 at 280 px of a 295 px page, exactly on the content edge, with nothing
 overflowing.
 
+### D81 — a storage failure names the bucket, the place, and the way out
+
+PO report, 2026-08-21: uploading a business logo on a local Windows machine
+failed with "The specified bucket does not exist".
+
+Nothing was wrong with the code. `apps/api/.env` had been copied from a
+machine configured for S3 (`STORAGE_PROVIDER=s3`, LocalStack at
+127.0.0.1:4566), and that endpoint does not exist on a laptop. The default
+has always been local disk; the environment overrode it.
+
+What IS wrong is the message. It names neither the bucket, nor where the
+bucket was looked for, nor the fact that this deployment is pointed at S3 at
+all — and the fix is one line in a file the operator already has open. So the
+S3 provider now explains its own failures: which bucket, which endpoint (or
+region, on real AWS), and `STORAGE_PROVIDER=local` as the way out. Rejected
+credentials and a refused connection get their own wording, because sending
+someone to hunt for a missing bucket when the key is wrong wastes the same
+hour again.
+
+Raised as a 500, not a 400. The upload was valid and the SERVER is
+misconfigured; a 400 sends the operator off to blame their image file. An
+unsupported image type stays a 400 — that one really is the caller's.
+
 ---
 
 ## Open decisions

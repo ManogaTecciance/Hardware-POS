@@ -7,7 +7,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, InternalServerErrorException } from '@nestjs/common';
 
 import { IMAGE_EXT, ResolvedImage, StorageProvider, UploadedImage } from './storage-provider';
 import { IMAGE_KEY_PREFIX, toObjectKey, toStoredPath } from './storage.util';
@@ -52,9 +52,14 @@ export class S3StorageProvider implements StorageProvider {
   private readonly redirectMaxAgeSeconds: number;
   /** `Cache-Control: max-age` stored on each uploaded object. */
   private readonly cacheMaxAgeSeconds: number;
+  /** Kept only so a failure can say WHERE it was trying to write (D81). */
+  private readonly endpoint?: string;
+  private readonly region: string;
 
   constructor(config: S3StorageConfig) {
     this.bucket = config.bucket;
+    this.endpoint = config.endpoint;
+    this.region = config.region;
     this.signedUrlTtlSeconds = config.signedUrlTtlSeconds;
     this.redirectMaxAgeSeconds = Math.floor(config.signedUrlTtlSeconds * REDIRECT_CACHE_FRACTION);
     this.cacheMaxAgeSeconds = config.cacheMaxAgeSeconds;
@@ -91,18 +96,65 @@ export class S3StorageProvider implements StorageProvider {
       throw new BadRequestException('Unsupported image type (use PNG, JPEG, WebP, or GIF)');
     }
     const key = `${IMAGE_KEY_PREFIX}/${randomUUID()}${ext}`;
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        Body: file.buffer,
-        ContentType: file.mimetype,
-        // Keys are content-unique (UUID per upload), so the object never changes:
-        // `immutable` lets the browser trust its cache for the full max-age.
-        CacheControl: `public, max-age=${this.cacheMaxAgeSeconds}, immutable`,
-      }),
-    );
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: file.buffer,
+          ContentType: file.mimetype,
+          // Keys are content-unique (UUID per upload), so the object never changes:
+          // `immutable` lets the browser trust its cache for the full max-age.
+          CacheControl: `public, max-age=${this.cacheMaxAgeSeconds}, immutable`,
+        }),
+      );
+    } catch (err) {
+      throw this.explain(err);
+    }
     return toStoredPath(key);
+  }
+
+  /**
+   * D81 — turn an SDK error into something the operator can act on.
+   *
+   * The raw message is "The specified bucket does not exist", which names
+   * neither the bucket, nor the endpoint, nor the fact that this workspace is
+   * pointed at S3 at all. It reached a PO trying to upload a logo on a laptop
+   * whose `.env` had been copied from the deployment: the bucket was real, it
+   * just lived somewhere that machine could not see. An hour went into a
+   * message that could have said so.
+   *
+   * Deliberately a 500, not a 400: the upload was fine and the SERVER is
+   * misconfigured. Reporting it as a bad request would send the operator off
+   * to blame their image.
+   */
+  private explain(err: unknown): Error {
+    const name = (err as { name?: string })?.name ?? '';
+    const where = this.endpointLabel();
+    if (name === 'NoSuchBucket') {
+      return new InternalServerErrorException(
+        `Upload storage is set to S3 but the bucket "${this.bucket}" does not exist ${where}. ` +
+          'Create it, point S3_BUCKET at one that exists, or set STORAGE_PROVIDER=local in ' +
+          "apps/api/.env to store uploads on the server's own disk.",
+      );
+    }
+    if (name === 'CredentialsProviderError' || name === 'InvalidAccessKeyId') {
+      return new InternalServerErrorException(
+        `Upload storage is set to S3 but the credentials for ${where} were rejected. ` +
+          'Check S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY, or set STORAGE_PROVIDER=local.',
+      );
+    }
+    // Anything else — a refused connection to a LocalStack that is not
+    // running, most often — still says where it was trying to go.
+    const detail = err instanceof Error ? err.message : String(err);
+    return new InternalServerErrorException(
+      `Could not store the upload ${where}: ${detail}. ` +
+        'Set STORAGE_PROVIDER=local in apps/api/.env to store uploads on disk instead.',
+    );
+  }
+
+  private endpointLabel(): string {
+    return this.endpoint ? `at ${this.endpoint}` : `in region ${this.region}`;
   }
 
   async remove(storedPath: string | null | undefined): Promise<void> {
