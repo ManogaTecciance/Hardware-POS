@@ -261,6 +261,27 @@ describe('the printed page itself', () => {
     expect(html).not.toContain('page-break-inside:avoid');
   });
 
+  it('keeps the column exactly one printable width wide', () => {
+    render();
+    /*
+     * Three things have to agree or Chrome scales the page down, which is
+     * the "content is smaller" defect (D76):
+     *
+     *   • the column is 272px — 72mm at 96dpi, the PRINTABLE width of an
+     *     80mm roll, not the 80mm of the paper;
+     *   • border-box, so the side padding is inside that width rather than
+     *     added to it (content-box makes the body 296px on a 272px page);
+     *   • the same width on screen and in print, because the page height is
+     *     measured from the on-screen layout.
+     */
+    expect(html).toContain('box-sizing:border-box');
+    expect(html).toContain('width:272px');
+    // NEGATIVE — the print media must not re-declare a different width.
+    const printBlock = html.slice(html.indexOf('@media print'));
+    expect(printBlock).not.toContain('width:');
+    expect(printBlock).not.toContain('max-width:');
+  });
+
   it('prints the column headings once, not per page', () => {
     render();
     // A browser repeats a thead by design — right for a report, wrong on a

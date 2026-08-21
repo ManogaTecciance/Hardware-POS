@@ -189,18 +189,24 @@ function fillAndPrint(win: Window, html: string, fit?: { widthMm: number }): voi
       }),
   );
   /*
-   * D74 — close the popup once the print has been dispatched.
+   * D76 — close the popup once the print has been dispatched.
    *
-   * `afterprint` fires when the browser is finished with the document,
-   * whether the operator printed or dismissed the dialog. There is no web
-   * API that distinguishes the two, so both close the window: a cashier who
-   * cancels wanted out of it either way, and the alternative — leaving a
-   * dead receipt tab open behind the POS — is what this is fixing.
+   * `afterprint` alone did not do it. It is the correct event, but on a
+   * scripted popup Chrome does not reliably deliver it to a listener the
+   * OPENER registered, and the receipt window was left sitting open behind
+   * the POS. So the close is driven from the call site instead:
+   * `window.print()` BLOCKS until the print dialog is dismissed, in Chrome
+   * and every other desktop browser, which makes the line after it the
+   * moment the browser is finished with the document.
    *
-   * Attached BEFORE `print()`, because in some browsers `print()` is
-   * synchronous and `afterprint` has already fired by the time it returns.
+   * The listener stays as a second path, guarded by `closed` so the two
+   * cannot fight: whichever fires first closes the window and the other
+   * finds it already gone.
    */
-  win.addEventListener('afterprint', () => win.close(), { once: true });
+  const dismiss = () => {
+    if (!win.closed) win.close();
+  };
+  win.addEventListener('afterprint', dismiss, { once: true });
 
   void Promise.race([
     Promise.all(settled),
@@ -219,6 +225,9 @@ function fillAndPrint(win: Window, html: string, fit?: { widthMm: number }): voi
        * to own. See docs/restaurant-pos/00-decisions.md, D74.
        */
       win.print();
+      // Reached once the dialog closes — printed or cancelled, the operator
+      // is done with this window either way.
+      dismiss();
     }, 150);
   });
 }

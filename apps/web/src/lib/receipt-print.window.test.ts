@@ -58,8 +58,12 @@ function makeWindow(images: unknown[] = []) {
       log.push(`on:${type}`);
       handlers[type] = fn;
     },
+    closed: false,
     print: () => log.push('print'),
-    close: () => log.push('close'),
+    close: () => {
+      log.push('close');
+      (win as { closed: boolean }).closed = true;
+    },
   };
 }
 
@@ -101,15 +105,30 @@ describe('the print popup', () => {
     expect(log.indexOf('on:afterprint')).toBeLessThan(log.indexOf('print'));
   });
 
-  it('closes the popup when the browser is finished with it', async () => {
+  it('closes the popup as soon as the dialog is dismissed', async () => {
     openPrintWindow('<p>bill</p>');
     await vi.runAllTimersAsync();
-    expect(log).not.toContain('close');
 
-    // The browser reports it is done — printed or dismissed, the web has no
-    // way to tell the two apart and the operator wants out of it either way.
+    /*
+     * D76 — the close is driven from the call site, immediately after
+     * `print()` returns. `window.print()` BLOCKS until the dialog is
+     * dismissed, so the next line is the moment the browser is done with the
+     * document. Relying on `afterprint` alone left the receipt window open:
+     * Chrome does not reliably deliver it to a listener the opener
+     * registered, which is what the PO saw.
+     */
+    expect(log).toEqual(['on:afterprint', 'print', 'close']);
+  });
+
+  it('does not double-close when afterprint also fires', async () => {
+    openPrintWindow('<p>bill</p>');
+    await vi.runAllTimersAsync();
+    const closes = log.filter((e) => e === 'close').length;
+
+    // The listener is a second path, not a competing one.
+    win.closed = true;
     handlers.afterprint!();
-    expect(log).toContain('close');
+    expect(log.filter((e) => e === 'close').length).toBe(closes);
   });
 
   it('does not close before the print has been dispatched', async () => {
@@ -158,9 +177,13 @@ describe('D75 — one page, as tall as the receipt', () => {
     beginPrintWindow().render('<p>bill</p>');
     await vi.runAllTimersAsync();
 
-    // 1000px ÷ 96dpi × 25.4 = 264.58 → 265mm, +2mm so the cutter does not
-    // shave the footer.
-    expect(injected).toEqual(['@page{size:80mm 267mm;margin:0}']);
+    /*
+     * 1000px ÷ 96dpi × 25.4 = 264.58 → 265mm, +2mm so the cutter does not
+     * shave the footer. 72mm, not 80: that is the PRINTABLE width of an 80mm
+     * roll, and declaring the paper width instead makes Chrome scale the
+     * page down to fit — the "content is smaller" defect (D76).
+     */
+    expect(injected).toEqual(['@page{size:72mm 267mm;margin:0}']);
     /*
      * `size: 80mm auto` would be the obvious thing to write and is invalid
      * CSS — the property takes one or two lengths — so browsers drop the

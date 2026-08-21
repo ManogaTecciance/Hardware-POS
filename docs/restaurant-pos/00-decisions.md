@@ -2588,6 +2588,37 @@ one leaves a hole. `thead` is likewise demoted to a row group so the column
 headings do not reprint mid-receipt, where a guest reads them as a second
 bill starting.
 
+### D76 — the column is the printable width, and the popup closes itself
+
+PO report, 2026-08-21, on the D74/D75 delivery: the bill fitted one page but
+printed SMALLER, and the popup stayed open.
+
+**Why it printed smaller.** An 80 mm thermal roll has a printable width of
+about 72 mm — 576 dots at 203 dpi, the rest under the mechanism. The page was
+declared at 80 mm, so Chrome had a page it could not fit on the paper and did
+what it always does with a mismatch: scaled it, by roughly the 90% the PO was
+looking at. The fix is to stop asking for something the printer cannot give
+— the column and the declared page are both 72 mm now, and a browser with
+nothing to reconcile has no reason to scale.
+
+Two supporting rules, each of which reintroduces the same defect on its own:
+`box-sizing: border-box`, because with content-box the side padding is added
+OUTSIDE the width and a 272 px column becomes a 296 px body on a 272 px page;
+and one width for both media, because the page height is measured from the
+on-screen layout and applied to the printed page, so a print column of a
+different width prints short or long.
+
+**Why the popup stayed open.** `afterprint` is the correct event and Chrome
+does not reliably deliver it to a listener the OPENER registered on a
+scripted popup. The close is now driven from the call site instead:
+`window.print()` blocks until the dialog is dismissed, in every desktop
+browser, so the line after it is the moment the browser is finished with the
+document. The listener stays as a second path, guarded on `closed` so the two
+cannot fight.
+
+Verified: one 72 × 223 mm page, content filling the full width, ending 2 mm
+after the footer.
+
 ---
 
 ## Open decisions

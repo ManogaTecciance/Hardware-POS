@@ -55,13 +55,33 @@ export interface ThermalBillInput {
   note?: string | null;
 }
 
-/** 80 mm roll ≈ 302 CSS px at 96 dpi. The printable column, in pixels. */
-export const RECEIPT_WIDTH_PX = 302;
-/** …and in millimetres, which is the unit `@page` wants. */
-export const RECEIPT_WIDTH_MM = 80;
+/**
+ * D76 — the column is 72 mm, not the 80 mm of the paper it prints on.
+ *
+ * An 80 mm thermal roll has a PRINTABLE width of about 72 mm: 576 dots at
+ * 203 dpi, with the rest under the mechanism. Declaring an 80 mm page on a
+ * 72 mm printable area is a mismatch, and Chrome resolves a mismatch by
+ * scaling the page to fit — roughly 90%, which is the "content is smaller"
+ * the PO reported. Matching the printable area is what removes the browser's
+ * reason to scale at all.
+ *
+ * A 58 mm roll prints 48 mm; that is the other common pair, and the width is
+ * a parameter for it rather than a constant to edit.
+ */
+export const RECEIPT_WIDTH_MM = 72;
+/** …in CSS pixels at 96 dpi, for the layout column. */
+export const RECEIPT_WIDTH_PX = Math.round((RECEIPT_WIDTH_MM / 25.4) * 96); // 272
 
 const CSS = `
 :root { color-scheme: light; }
+/*
+ * border-box everywhere, because the column width IS the paper width. With
+ * content-box the body's padding is added OUTSIDE max-width, so a 272px
+ * column plus 12px of padding each side is 296px — 78mm of content on a
+ * 72mm page, which Chrome resolves by scaling everything down. That is the
+ * same "content is smaller" defect one level further in.
+ */
+*,*::before,*::after{box-sizing:border-box}
 /*
  * margin: 0 does two jobs, and both are the point of this block.
  *
@@ -109,7 +129,14 @@ const CSS = `
  */
 thead{display:table-row-group}
 html,body{height:auto}
-body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-width:302px;margin:0 auto;padding:12px;color:#000;background:#fff}
+/*
+ * The screen column and the printed column are the SAME width, to the pixel.
+ * The page height is measured from this on-screen layout and applied to the
+ * printed page, so any difference between the two — a wider column wrapping
+ * fewer lines, say — shows up as a receipt cut short or a tail of blank
+ * paper. 272px is 72mm at 96dpi: the printable width of an 80mm roll.
+ */
+body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:272px;max-width:100%;margin:0 auto;padding:0 2mm;color:#000;background:#fff}
 .c{text-align:center}
 .logo{display:block;margin:0 auto 6px;max-width:180px;max-height:110px;object-fit:contain}
 h1{font-size:15px;margin:0 0 2px;letter-spacing:.02em}
@@ -131,8 +158,18 @@ td{padding:2px 0;vertical-align:top}
 .pay .row{display:flex;justify-content:space-between}
 .ft{margin-top:12px;font-size:11px;white-space:pre-line}
 .copy{margin-top:4px;font-size:11px;font-weight:bold}
-.btn{display:block;margin:0 auto 10px;padding:8px 16px;cursor:pointer;font:inherit}
-@media print{.btn{display:none}body{padding:6px 10px;max-width:none}}
+/*
+ * Out of flow deliberately: the page height is measured from this document,
+ * and an in-flow button that only disappears at print time adds its height
+ * to every receipt as blank paper after the footer.
+ */
+.btn{position:fixed;top:6px;right:6px;padding:6px 12px;cursor:pointer;font:inherit;z-index:2}
+/*
+ * In print the body fills the page exactly — no max-width, and the side
+ * padding in millimetres so it is the same physical margin whatever the
+ * roll. The printer's own unprintable edge does the rest.
+ */
+@media print{.btn{display:none}}
 `;
 
 /**
