@@ -23,6 +23,18 @@ import {
 import { SettingsService } from '../settings/settings.service';
 import { CreateTakeawayDto, UpdateTakeawayStatusDto } from './dto/takeaway.dto';
 
+/**
+ * D92 — the synthetic area a takeaway order's table hangs from.
+ *
+ * Exported so the tripwire that asserts the old `__walk_in__` string is gone
+ * can name the thing that replaced it, rather than asserting an absence on
+ * its own (a spec that only checks a string is missing passes just as well
+ * when the whole feature is deleted).
+ */
+export const WALK_IN_AREA_NAME = 'Walk In';
+/** The synthetic slot. The delivery hub uses 998; no authored floor is here. */
+export const WALK_IN_AREA_POSITION = 999;
+
 export interface TakeawayView {
   id: string;
   orderId: string;
@@ -328,14 +340,44 @@ export class TakeawayService {
     tenantId: string,
     branchId: string,
   ): Promise<{ id: string }> {
-    // Look up or create a synthetic "walk-in" area + table for this branch.
-    let area = await tx.diningArea.findFirst({
-      where: { tenantId, branchId, name: '__walk_in__' },
-      select: { id: true },
-    });
+    /*
+     * The synthetic area + table a takeaway order hangs from.
+     *
+     * D92 (PO, 2026-08-21): the name was `__walk_in__`, and it was never only
+     * internal — a DiningArea row's name IS its display name, so the string
+     * appeared verbatim as a chip in the waiter's table picker and on the
+     * floor plan. It reads as WALK_IN_AREA_NAME now.
+     *
+     * The lookup is by POSITION, not by name. The name alone identified the
+     * row safely while it was unpronounceable; "Walk In" is a name an owner
+     * could plausibly give a real floor, and `@@unique([branchId, name])`
+     * turns that coincidence into a failed takeaway order. 999 is the
+     * synthetic slot (998 is the delivery hub's) and no floor authored in the
+     * Tables screen reaches it — the Tables screen numbers from 0.
+     *
+     * The name is still tried second, so a row this migration could not
+     * rename (a branch that already had a "Walk In") is reused rather than
+     * fought with. Reusing the operator's own floor is a strange place for a
+     * synthetic table; failing every takeaway order on that branch is worse.
+     */
+    let area =
+      (await tx.diningArea.findFirst({
+        where: { tenantId, branchId, position: WALK_IN_AREA_POSITION },
+        select: { id: true },
+      })) ??
+      (await tx.diningArea.findFirst({
+        where: { tenantId, branchId, name: WALK_IN_AREA_NAME },
+        select: { id: true },
+      }));
     if (!area) {
       area = await tx.diningArea.create({
-        data: { tenantId, branchId, name: '__walk_in__', isActive: true, position: 999 },
+        data: {
+          tenantId,
+          branchId,
+          name: WALK_IN_AREA_NAME,
+          isActive: true,
+          position: WALK_IN_AREA_POSITION,
+        },
       });
     }
     let table = await tx.restaurantTable.findFirst({

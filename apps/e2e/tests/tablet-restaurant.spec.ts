@@ -412,7 +412,7 @@ test.describe('TAB-DINE — dine-in POS tablet layout', () => {
     expect(await contentScrollsSideways(page)).toBe(false);
   });
 
-  test('TAB-DINE-003 the table-state filter narrows the room and keeps the block capped', async ({
+  test('TAB-DINE-003 Open is a destination in the area strip and keeps the block capped', async ({
     page,
   }) => {
     await signInAsRestaurantWaiter(page);
@@ -423,43 +423,40 @@ test.describe('TAB-DINE — dine-in POS tablet layout', () => {
     const room = page.getByRole('group', { name: 'Tables in this area' });
     await expect(room).toBeVisible();
 
-    // D91 — all three chips, all on the 44px touch line.
-    for (const label of ['All', 'Free', 'Open']) {
-      const chip = page.getByRole('button', { name: label, exact: true });
-      await expect(chip).toBeVisible();
-      const box = await chip.boundingBox();
-      expect(box!.height, `${label} chip is ${box!.height}px tall`).toBeGreaterThanOrEqual(40);
-    }
+    // D92 — Open is a chip in the same strip as the floors, on the 44px line.
+    const open = page.getByRole('button', { name: 'Open', exact: true });
+    await expect(open).toBeVisible();
+    const openBox = await open.boundingBox();
+    expect(openBox!.height, `Open chip is ${openBox!.height}px tall`).toBeGreaterThanOrEqual(40);
+
+    // NEGATIVE — the D91 state chips are gone. Asserted in the browser as
+    // well as in jsdom because their return is exactly the kind of thing a
+    // half-applied revert reintroduces.
+    await expect(page.getByRole('button', { name: 'All', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Free', exact: true })).toHaveCount(0);
 
     /*
-     * The chips must CHANGE something. Counting tables under All and under
-     * Free is the cheapest honest check: a filter that is wired to nothing
-     * leaves the two equal, and so does a room that renders nothing — hence
-     * the "All is not empty" assertion that pairs with it.
+     * The chip must CHANGE something. Counting the room under a floor and
+     * under Open is the cheapest honest check: a chip wired to nothing leaves
+     * the two identical, and a room that renders nothing does too — hence the
+     * "the floor is not empty" assertion that pairs with it.
      */
-    await page.getByRole('button', { name: 'All', exact: true }).click();
-    const all = await room.getByRole('button').count();
-    expect(all, 'the room draws no tables at all').toBeGreaterThan(0);
+    const floor = await room.getByRole('button').allInnerTexts();
+    expect(floor.length, 'the floor draws no tables at all').toBeGreaterThan(0);
 
-    await page.getByRole('button', { name: 'Free', exact: true }).click();
-    const free = await room.getByRole('button').count();
-    expect(free).toBeLessThanOrEqual(all);
-
-    await page.getByRole('button', { name: 'Open', exact: true }).click();
-    const open = await room.getByRole('button').count();
-    // Free and Open partition the states the seed leaves a branch in, so
-    // together they cannot exceed the whole. If they SUM to the whole the
-    // filter is real; if either equals `all` it is ignoring the chip.
-    expect(free + open).toBeLessThanOrEqual(all);
-    expect(free === all && open === all).toBe(false);
+    await open.click();
+    await expect(open).toHaveAttribute('data-active', 'true');
+    const opened = await room.getByRole('button').allInnerTexts();
+    // Open and a floor partition the branch, so no table can be in both.
+    const overlap = opened.filter((t) => floor.includes(t));
+    expect(overlap, `these appear under both a floor and Open: ${overlap.join(', ')}`).toEqual([]);
 
     /*
-     * And the cap survives the extra row of chips. This is measured, not
-     * asserted against a class, because the cap it replaced was a fixed rem
-     * reserve that was correct on a tablet and 4.5rem short on a phone —
-     * a class name would have looked right the whole time.
+     * And the cap survives. Measured, not asserted against a class, because
+     * the cap this replaced was a fixed rem reserve that was right on a
+     * tablet and 4.5rem short on a phone — a class name would have looked
+     * correct the whole time.
      */
-    await page.getByRole('button', { name: 'All', exact: true }).click();
     const card = page.locator('div', { hasText: 'Which table?' }).last();
     const box = await card.boundingBox();
     const vp = page.viewportSize()!;

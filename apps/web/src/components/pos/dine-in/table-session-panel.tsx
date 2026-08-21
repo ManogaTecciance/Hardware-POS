@@ -17,17 +17,29 @@ import type {
 } from '@/lib/restaurant/types';
 
 /**
- * D91 — which tables the picker is showing.
+ * D92 — the running sessions, addressed like a dining area.
  *
- * `OPEN` means a session is running on the table, which is what "open table"
+ * The chip strip carries ONE selection: a floor, or this. An open table lives
+ * here and nowhere else, and a free one lives in its area and nowhere else, so
+ * every table on the branch is in exactly one place and no chip combination
+ * can hide it (D91 shipped All/Free/Open chips beside the areas — two
+ * selections, six combinations, and the PO wanted one row of destinations).
+ *
+ * The sentinel is client-only state that is never stored or sent, and area ids
+ * are cuids, so it cannot collide with one. This is deliberately NOT the
+ * `__walk_in__` pattern (D92, below): that string is a database row's name
+ * doing duty as an identifier.
+ */
+const OPEN_VIEW = '__open__';
+
+/*
+ * "Open" means a session is running on the table, which is what "open table"
  * means everywhere else in this product (the floor plan, `/open-tables`, the
  * bill). It is deliberately not a status the waiter has to know the name of:
  * SEATED, OCCUPIED and BILLING are all one party at one table from the floor's
  * point of view, and asking a waiter to distinguish them to find their table
- * would be a filter that hides things for reasons they cannot see.
+ * would hide things for reasons they cannot see.
  */
-type TableFilter = 'ALL' | 'FREE' | 'OPEN';
-
 const OPEN_STATUSES: readonly RestaurantTableStatus[] = ['SEATED', 'OCCUPIED', 'BILLING'];
 
 function isOpenTable(status: RestaurantTableStatus): boolean {
@@ -209,17 +221,7 @@ function Picker({
    * one area is selected at all times. `null` only ever means "areas have
    * not loaded yet".
    */
-  const [selectedArea, setSelectedArea] = React.useState<string | null>(null);
-  /*
-   * D91 — table-state filter (PO, 2026-08-21). The picker used to show only
-   * AVAILABLE tables, so a seated one simply was not there: a waiter looking
-   * for the party on M4 saw a gap and no way to tell whether the table was
-   * taken, being cleaned, or had been deleted. Every table in the area is
-   * listed now, and this narrows the list rather than defining it — the
-   * default is ALL, because the ask was to SEE open tables, not to have to
-   * go looking for a filter first.
-   */
-  const [tableFilter, setTableFilter] = React.useState<TableFilter>('ALL');
+  const [selected, setSelected] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -264,8 +266,10 @@ function Picker({
        * silently show nothing at all, which looks exactly like a branch with
        * no tables.
        */
-      setSelectedArea((current) =>
-        current && sorted.some((a) => a.id === current) ? current : sorted[0]?.id ?? null,
+      setSelected((current) =>
+        current === OPEN_VIEW || (current && sorted.some((a) => a.id === current))
+          ? current
+          : sorted[0]?.id ?? null,
       );
     } finally {
       setLoading(false);
@@ -309,7 +313,13 @@ function Picker({
     }
   };
 
-  const visibleAreas = areas.filter((a) => a.id === selectedArea);
+  /*
+   * D92 — Open is a destination in the same strip, so it spans every floor:
+   * a waiter carrying two tables in two rooms should not have to remember
+   * which room to look in.
+   */
+  const showingOpen = selected === OPEN_VIEW;
+  const visibleAreas = showingOpen ? areas : areas.filter((a) => a.id === selected);
 
   /*
    * D91 — the open sessions this user is allowed to work, keyed by table.
@@ -340,12 +350,11 @@ function Picker({
     [labels, onPick],
   );
 
-  const matchesFilter = (status: RestaurantTableStatus): boolean =>
-    tableFilter === 'ALL'
-      ? true
-      : tableFilter === 'FREE'
-        ? status === 'AVAILABLE'
-        : isOpenTable(status);
+  /** Open tables under Open; everything else under its own floor. */
+  const tablesIn = (areaId: string): RestaurantTableView[] =>
+    (tablesByArea.get(areaId) ?? []).filter((t) =>
+      showingOpen ? isOpenTable(t.status) : !isOpenTable(t.status),
+    );
 
   return (
     /*
@@ -366,8 +375,8 @@ function Picker({
             <p className="text-xs text-muted-foreground">
               {/* D70 — "yours" is the honest word: the server only returns
                   sessions this user opened, unless they supervise the floor. */}
-              Seat a free table or carry on with one of yours. Tables another
-              waiter is serving are shown, greyed.
+              Seat a free table from a floor, or pick Open to carry on with a
+              running one. Tables another waiter is serving are shown, greyed.
             </p>
           </div>
           <Button
@@ -432,52 +441,37 @@ function Picker({
               </div>
             ) : null}
 
-            {/* D91 — table state and dining area on ONE row. A second row of
-                chips would cost 44px of a block that is capped at half the
-                viewport, and the two read naturally left to right: which
-                tables, then where. The state chips sit outside the ChipRow
-                because that control carries a single selection and its own
-                scroll-into-view; two selections in one strip would fight. */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Show
-              </span>
-              <div className="flex shrink-0 gap-2" role="group" aria-label="Filter tables by state">
-                {(
-                  [
-                    ['ALL', 'All'],
-                    ['FREE', 'Free'],
-                    ['OPEN', 'Open'],
-                  ] as const
-                ).map(([key, label]) => (
+            {/* D92 — one strip, one selection: Open, then each floor. It sits
+                first because "carry on with a table" is the commoner errand
+                during service than "seat a new party", and because a strip
+                that scrolls should not hide the destination most often
+                wanted behind a swipe. */}
+            {areas.length > 0 ? (
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Show
+                </span>
+                <ChipRow
+                  ariaLabel="Filter tables by dining area"
+                  activeKey={selected ?? ''}
+                  className="min-w-0 flex-1"
+                >
                   <AreaChip
-                    key={key}
-                    label={label}
-                    active={tableFilter === key}
-                    onClick={() => setTableFilter(key)}
+                    label="Open"
+                    active={showingOpen}
+                    onClick={() => setSelected(OPEN_VIEW)}
                   />
-                ))}
+                  {areas.map((a) => (
+                    <AreaChip
+                      key={a.id}
+                      label={a.name}
+                      active={selected === a.id}
+                      onClick={() => setSelected(a.id)}
+                    />
+                  ))}
+                </ChipRow>
               </div>
-              {areas.length > 1 ? (
-                <>
-                  <span aria-hidden className="h-6 w-px shrink-0 bg-border" />
-                  <ChipRow
-                    ariaLabel="Filter tables by dining area"
-                    activeKey={selectedArea ?? ''}
-                    className="min-w-0 flex-1"
-                  >
-                    {areas.map((a) => (
-                      <AreaChip
-                        key={a.id}
-                        label={a.name}
-                        active={selectedArea === a.id}
-                        onClick={() => setSelectedArea(a.id)}
-                      />
-                    ))}
-                  </ChipRow>
-                </>
-              ) : null}
-            </div>
+            ) : null}
 
             {/* Takes whatever the capped card has left, and scrolls: a branch
                 with five areas of nine tables would otherwise push the menu —
@@ -494,10 +488,20 @@ function Picker({
                 <p className="py-4 text-sm text-muted-foreground">
                   No dining areas configured yet. Add an area and its tables in Tables.
                 </p>
+              ) : showingOpen && visibleAreas.every((a) => tablesIn(a.id).length === 0) ? (
+                /* One message for the whole view rather than an empty heading
+                   per floor: under Open, a branch with five quiet rooms would
+                   otherwise print five identical "nothing here" lines. */
+                <p className="py-4 text-sm text-muted-foreground">
+                  No open tables right now. Pick a floor to seat one.
+                </p>
               ) : (
                 visibleAreas.map((area) => {
                   const all = tablesByArea.get(area.id) ?? [];
-                  const shown = all.filter((t) => matchesFilter(t.status));
+                  const shown = tablesIn(area.id);
+                  // Under Open, a floor with nothing running is skipped
+                  // entirely — its heading would be the only thing in it.
+                  if (showingOpen && shown.length === 0) return null;
                   return (
                     <div key={area.id}>
                       <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -505,16 +509,12 @@ function Picker({
                       </p>
                       {shown.length === 0 ? (
                         <p className="text-xs text-muted-foreground">
-                          {/* Says which of the three questions came back empty.
-                              One message for all of them would read as "this
-                              area has no tables" while the area is full. */}
+                          {/* Which of the two questions came back empty. One
+                              message for both would read as "this area has no
+                              tables" while the area is full of seated ones. */}
                           {all.length === 0
                             ? 'No tables in this area yet. Add them in Tables.'
-                            : tableFilter === 'FREE'
-                              ? 'Every table here is seated.'
-                              : tableFilter === 'OPEN'
-                                ? 'No open tables here.'
-                                : 'Nothing to show here.'}
+                            : 'Every table here is seated — they are under Open.'}
                         </p>
                       ) : (
                         <div className="flex flex-wrap gap-2">

@@ -3135,6 +3135,65 @@ against the browser — `TAB-DINE-003` fails when the chips are ignored. One tes
 of mine was replaced during this work for promising an empty-state assertion
 it never made.
 
+
+### D92 — Open is a destination, not a second filter
+
+PO, 2026-08-21, on the D91 picker: drop the All and Free chips and put Open in
+the area strip, as if it were another area.
+
+D91 had shipped two independent selections side by side — table state and
+dining area — which is six combinations for a question with one answer:
+*which tables am I looking at?* The strip now carries one selection: **Open**,
+then each floor. Open first, because during service "carry on with a table" is
+the commoner errand than "seat a new party", and a strip that scrolls should
+not hide the commonest destination behind a swipe.
+
+The partition falls out of it, and is better than what D91 had: an open table
+lives under Open and nowhere else, a free one lives on its floor and nowhere
+else. Every table on the branch is in exactly one place, so no selection can
+hide one — which was D91's whole point, kept, with a third of the controls.
+Open spans every floor, because a waiter carrying two tables in two rooms
+should not have to remember which room to look in. A floor whose tables are
+all seated says so and points at Open, rather than reading as a floor with no
+tables in it.
+
+What did not change: another waiter's table is still drawn and still dead
+(D70 — the server returns only sessions this user opened), and "Your open
+tables" still sits above everything, cross-floor and unfiltered.
+
+### D92b — `__walk_in__` was never internal
+
+Same message: change `__walk_in__` to "Walk In" everywhere.
+
+A `DiningArea` row's `name` **is** its display name. The synthetic area that
+takeaway orders hang their table from was called `__walk_in__`, so that string
+appeared verbatim as a chip in the waiter's picker and on the floor plan. It
+was only ever invisible on a branch that had never taken a takeaway order.
+
+The rename moves the identity, though, and that needed care.
+`@@unique([branchId, name])` means an owner who calls a floor "Walk In" would
+collide with the synthetic row — a name nobody would type was doing real work
+as an identifier, and a readable one cannot. `ensureWalkInTable` now looks the
+row up by its reserved **position** (999; the delivery hub holds 998, and the
+Tables screen numbers floors from 0), falling back to the name for a row the
+migration could not rename. Reusing an operator's own floor is a strange home
+for a synthetic table; failing every takeaway order on that branch is worse.
+
+`20260905000000_rename_walk_in_area` is data-only and guarded with `NOT
+EXISTS` for the same constraint: one branch with an existing "Walk In" would
+otherwise abort the migration, and with it the deploy.
+
+`__delivery__` is untouched — it was not what was asked, and it identifies the
+same way. `hardcoded-audit.md` H6 moves from OPEN to PARTIAL rather than
+closed, because half of it is still a magic string.
+
+**Still open, and worth a decision:** the Walk In floor is now a
+normal-looking chip in the waiter's dine-in picker, holding a WALK-IN table a
+waiter can seat — which would open a dine-in session on takeaway plumbing. It
+was equally seatable before, just uglier and easier to ignore. Hiding the
+reserved floors (999/998) from the dine-in picker is a small change; it is not
+this one.
+
 ---
 
 ## Open decisions

@@ -127,7 +127,7 @@ anywhere in the app, even though the API accepts both.
 | H3 | Orders list applies `take` per channel *before* merge/filter/re-slice — orders vanish with no indication | `restaurant-orders.service.ts:90`, `112`, `200`, `254` | OPEN |
 | H4 | Order provenance invented from which optional contact fields are filled | `restaurant-orders.service.ts:157-163` | OPEN |
 | H5 | Missing tenant scoping on several queries | `restaurant-reports.service.ts:73`, `:174`; `restaurant-orders.service.ts:142`; `kitchen.service.ts:109`, `:115`, `:158` | OPEN |
-| H6 | Synthetic dining areas identified by magic strings `__walk_in__` / `__delivery__`, positions 999/998 | `takeaway.service.ts:266-289`, `delivery-hub.service.ts:135-164` | OPEN |
+| H6 | Synthetic dining areas identified by name + reserved positions 999/998. D92 renamed `__walk_in__` to `Walk In` (a row's name is its DISPLAY name) and moved the walk-in lookup onto the position, which is the part that actually identifies it; `__delivery__` still identifies by string | `takeaway.service.ts` (`ensureWalkInTable`), `delivery-hub.service.ts:135-164` | PARTIAL |
 | H7 | `CODE_DEFAULTS` duplicates Prisma column defaults in three places | `restaurant-config.service.ts:21-27`, `:90-93` | OPEN |
 | H8 | Open-table code uses a tenant-global unpadded sequence; `@@unique([areaId, code])` enforces nothing when `areaId` is NULL | `dining.service.ts:371-379` | OPEN |
 

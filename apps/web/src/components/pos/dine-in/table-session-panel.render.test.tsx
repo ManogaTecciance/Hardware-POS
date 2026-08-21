@@ -121,27 +121,16 @@ describe('picking a table', () => {
     panel(null, onPick);
 
     /*
-     * D91 (PO, 2026-08-21) — the picker used to DROP every table that was not
-     * AVAILABLE, so a seated table simply was not there. It is drawn now, and
-     * the distinction moved from "listed / not listed" to "tappable / not":
-     * T2 belongs to another waiter, and the server refuses it (D70), so
-     * offering the tap would be offering a refusal.
+     * A floor lists the tables you can seat. The occupied T2 is NOT here —
+     * under D92 it lives under the Open chip, which the tests below prove.
+     * The pairing matters: "absent from the floor" on its own is also what a
+     * component that dropped every occupied table would produce, which is
+     * exactly the pre-D91 defect.
      */
     const t1 = await screen.findByRole('button', { name: /T1/ });
-    const t2 = within(screen.getByRole('group', { name: 'Tables in this area' })).getByRole(
-      'button',
-      { name: /T2/ },
-    );
+    const room = screen.getByRole('group', { name: 'Tables in this area' });
     expect(t1.hasAttribute('disabled')).toBe(false);
-    expect(t2.hasAttribute('disabled')).toBe(true);
-    // …and it says WHY, rather than being mysteriously dead.
-    expect(t2.textContent).toMatch(/In service/);
-
-    // NEGATIVE, the half that still matters: tapping the other waiter's table
-    // starts nothing at all.
-    fireEvent.click(t2);
-    expect(openSession).not.toHaveBeenCalled();
-    expect(onPick).not.toHaveBeenCalled();
+    expect(within(room).queryByRole('button', { name: /T2/ })).toBeNull();
 
     fireEvent.click(t1);
 
@@ -271,100 +260,131 @@ describe('picking a table', () => {
   });
 });
 
-describe('D91 — the table-state filter', () => {
+describe('D92 — Open is a destination in the strip, not a second filter', () => {
   const room = () => screen.getByRole('group', { name: 'Tables in this area' });
   const roomTables = () =>
     within(room())
       .queryAllByRole('button')
       .map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim());
-
-  it('defaults to All, so both the free and the seated table are on screen', async () => {
-    panel(null);
-    await screen.findByRole('button', { name: /T1/ });
-
-    // The ask was to SEE open tables, not to have to find a filter first.
-    expect(screen.getByRole('button', { name: 'All' }).dataset.active).toBe('true');
-    const shown = roomTables();
-    expect(shown.some((t) => t.startsWith('T1'))).toBe(true);
-    expect(shown.some((t) => t.startsWith('T2'))).toBe(true);
+  const openSessionRow = (id: string, tableId: string) => ({
+    id,
+    sessionNumber: '0000' + id.slice(-1),
+    tableId,
+    openedAt: '2026-08-21T09:00:00.000Z',
+    guestCount: 2,
+    activeOrderId: 'ord_' + id.slice(-1),
   });
 
-  it('Free hides the seated table and keeps the free one', async () => {
+  it('offers Open beside the floors, and nothing else — the All and Free chips are gone', async () => {
     panel(null);
     await screen.findByRole('button', { name: /T1/ });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free' }));
+    // POSITIVE: one strip, three destinations.
+    expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Terrace' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Main Hall' })).toBeTruthy();
+    // NEGATIVE: the D91 state chips are gone (PO, 2026-08-21). Asserted by
+    // name because their return would be invisible to every other test here.
+    expect(screen.queryByRole('button', { name: 'All' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Free' })).toBeNull();
+  });
 
-    // BOTH halves. A component that dropped everything passes the negative
-    // alone; one that ignored the chip passes the positive alone.
-    await waitFor(() => expect(roomTables().some((t) => t.startsWith('T2'))).toBe(false));
+  it('a floor lists its free tables and says where the seated ones went', async () => {
+    // Terrace: one free, one seated. The seated one is under Open.
+    panel(null);
+    await screen.findByRole('button', { name: /T1/ });
+
     expect(roomTables().some((t) => t.startsWith('T1'))).toBe(true);
-  });
+    expect(roomTables().some((t) => t.startsWith('T2'))).toBe(false);
 
-  it('Open hides the free table and keeps the seated one', async () => {
-    panel(null);
-    await screen.findByRole('button', { name: /T1/ });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-
-    await waitFor(() => expect(roomTables().some((t) => t.startsWith('T1'))).toBe(false));
-    expect(roomTables().some((t) => t.startsWith('T2'))).toBe(true);
-  });
-
-  it('says which question came back empty rather than "no tables"', async () => {
-    // Terrace: every table seated. Under Free that is "all seated", NOT "this
-    // area has no tables" — the second reads as a setup error and sends a
-    // waiter to the Tables screen to fix something that is not broken.
+    // And when a floor is ENTIRELY seated it points at Open rather than
+    // reading as an area with no tables in it.
+    cleanup();
     tablesFor.mockImplementation((areaId: string) =>
       areaId === 'area_1' ? [table('tbl_2', 'area_1', 'T2', 'OCCUPIED')] : TABLES[areaId] ?? [],
     );
     panel(null);
-    await screen.findByRole('button', { name: 'Free' });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Free' }));
-    await waitFor(() => expect(within(room()).getByText(/Every table here is seated/)).toBeTruthy());
-    // NEGATIVE — and not the message for an area with nothing in it.
-    expect(within(room()).queryByText(/No tables in this area/)).toBeNull();
-
-    // The mirror case: an area with nothing open says so in its own words.
-    cleanup();
-    tablesFor.mockImplementation((areaId: string) =>
-      areaId === 'area_1' ? [table('tbl_1', 'area_1', 'T1', 'AVAILABLE')] : TABLES[areaId] ?? [],
+    await waitFor(() =>
+      expect(within(room()).getByText(/Every table here is seated — they are under Open/)).toBeTruthy(),
     );
-    panel(null);
-    await screen.findByRole('button', { name: 'Open' });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    await waitFor(() => expect(within(room()).getByText(/No open tables here/)).toBeTruthy());
-    expect(within(room()).queryByText(/Every table here is seated/)).toBeNull();
+    expect(within(room()).queryByText(/No tables in this area/)).toBeNull();
   });
 
-  it('an open table of MINE is tappable from the room, and resumes rather than seats', async () => {
-    listOpenSessions.mockResolvedValue([
-      {
-        id: 'ts_9',
-        sessionNumber: '000009',
-        tableId: 'tbl_2',
-        openedAt: '2026-08-21T09:00:00.000Z',
-        guestCount: 2,
-        activeOrderId: 'ord_9',
-      },
-    ]);
+  it('Open lists the seated tables of EVERY floor, and none of the free ones', async () => {
+    panel(null);
+    await screen.findByRole('button', { name: /T1/ });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    // Both floors' occupied tables, which is the point of it being its own
+    // destination: a waiter carrying two rooms looks in one place.
+    await waitFor(() => expect(roomTables().some((t) => t.startsWith('T2'))).toBe(true));
+    expect(roomTables().some((t) => t.startsWith('M2'))).toBe(true);
+    // NEGATIVE, both floors: the free tables are not here.
+    expect(roomTables().some((t) => t.startsWith('T1'))).toBe(false);
+    expect(roomTables().some((t) => t.startsWith('M1'))).toBe(false);
+  });
+
+  it('under Open, mine resumes and another waiter’s is shown but dead', async () => {
+    // tbl_2 (T2) is this waiter's; tbl_4 (M2) is occupied by someone whose
+    // session the server does not return (D70).
+    listOpenSessions.mockResolvedValue([openSessionRow('ts_9', 'tbl_2')]);
     const onPick = vi.fn();
     panel(null, onPick);
     await screen.findByRole('button', { name: /T1/ });
 
-    const mine = within(room()).getByRole('button', { name: /T2/ });
-    // The same chip was DISABLED in the first test, where the session was not
-    // this user's — so the difference being asserted is ownership, not status.
-    expect(mine.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(within(room()).getByRole('button', { name: /T2/ })).toBeTruthy());
 
-    fireEvent.click(mine);
-
+    const theirs = within(room()).getByRole('button', { name: /M2/ });
+    expect(theirs.hasAttribute('disabled')).toBe(true);
+    // …and it says WHY, rather than being mysteriously dead.
+    expect(theirs.textContent).toMatch(/In service/);
+    fireEvent.click(theirs);
+    expect(onPick).not.toHaveBeenCalled();
     expect(openSession).not.toHaveBeenCalled();
+
+    // The same chip shape, the other way: ownership is the difference.
+    const mine = within(room()).getByRole('button', { name: /T2/ });
+    expect(mine.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(mine);
+    expect(openSession).not.toHaveBeenCalled(); // resuming, not seating
     expect(onPick).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'ts_9', tableLabel: 'T2', orderId: 'ord_9' }),
     );
+  });
+
+  it('says so once when nothing is open, instead of once per empty floor', async () => {
+    tablesFor.mockImplementation((areaId: string) =>
+      areaId === 'area_1'
+        ? [table('tbl_1', 'area_1', 'T1', 'AVAILABLE')]
+        : [table('tbl_3', 'area_2', 'M1', 'AVAILABLE')],
+    );
+    panel(null);
+    await screen.findByRole('button', { name: /T1/ });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    await waitFor(() => expect(within(room()).getByText(/No open tables right now/)).toBeTruthy());
+    // NEGATIVE: two floors, ONE message — no per-floor heading with nothing
+    // under it, which is what makes a quiet branch unreadable.
+    expect(within(room()).queryByText('Terrace')).toBeNull();
+    expect(within(room()).queryByText('Main Hall')).toBeNull();
+  });
+
+  it('picking a floor again leaves Open, so the strip holds one selection', async () => {
+    panel(null);
+    await screen.findByRole('button', { name: /T1/ });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(roomTables().some((t) => t.startsWith('T2'))).toBe(true));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Main Hall' }));
+
+    // Back to a floor: its free table, and neither floor's open ones.
+    await waitFor(() => expect(roomTables().some((t) => t.startsWith('M1'))).toBe(true));
+    expect(roomTables().some((t) => t.startsWith('T2'))).toBe(false);
+    expect(roomTables().some((t) => t.startsWith('M2'))).toBe(false);
   });
 });
 
