@@ -139,6 +139,33 @@ export function printReceipt(
 }
 
 /**
+ * D75/D79 — make the printed page exactly as tall as the receipt.
+ *
+ * Only for thermal bills, and only useful once the driver can honour it: the
+ * PO's Xprinter had a Maximum Length of 101.6 mm, so every page-sized request
+ * beyond that was refused and the receipt split. Raising that length in the
+ * driver is what made this work.
+ *
+ * `size: 78mm auto` would be the obvious thing to write and is invalid CSS —
+ * the property takes one or two lengths — so the height is measured. After
+ * images settle: a logo that has not decoded reports no height and would
+ * truncate the receipt to the height of its text. Plus 2 mm so the cutter
+ * does not shave the footer.
+ */
+function fitPageToContent(win: Window, widthMm: number): void {
+  const doc = win.document;
+  const heightPx = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
+  if (heightPx <= 0) return; // nothing laid out — leave the default sheet alone
+  // 96 CSS px = 1 inch = 25.4 mm. Plus 2mm so the cutter does not shave the
+  // last line; a receipt cut flush against its footer looks torn.
+  const heightMm = Math.ceil((heightPx / 96) * 25.4) + 2;
+  const style = doc.createElement('style');
+  style.dataset.role = 'page-size';
+  style.textContent = `@page{size:${widthMm}mm ${heightMm}mm;margin:0}`;
+  doc.head.appendChild(style);
+}
+
+/**
  * Resolve once every image has loaded or failed, with a ceiling.
  *
  * `print()` captures the document as it stands: fire it while the tenant's
@@ -163,121 +190,18 @@ function whenImagesSettle(doc: Document): Promise<unknown> {
   ]);
 }
 
-export interface PendingPrintWindow {
-  render: (html: string) => void;
-  abort: () => void;
-}
-
-export interface BeginPrintOptions {
-  /**
-   * Size the page to the receipt: one page, ending where the text ends.
-   *
-   * OFF by default, and that is the third position on it (D77). It is what a
-   * roll wants — no page boundary to leak a gap, no remainder to feed — but
-   * `@page { size }` is a REQUEST, and where the height exceeds the paper the
-   * driver reports, Chrome scales the page down and the bill prints
-   * correct-but-small. That happened on the PO's printer twice.
-   *
-   * Turn it on for a driver configured with a continuous roll, where the
-   * declared height can actually be honoured.
-   */
-  fitToContent?: boolean;
-  /** Roll width in millimetres. 80 is the common thermal default; 58 exists. */
-  paperWidthMm?: number;
-}
-
-export function beginPrintWindow(options: BeginPrintOptions = {}): PendingPrintWindow {
-  const win = window.open('', 'hpos-receipt-print', 'width=420,height=680');
-  if (!win) return { render: () => {}, abort: () => {} };
-  // Something honest on screen while the profile resolves — a blank popup
-  // reads as a crash.
-  win.document.open();
-  win.document.write('<!doctype html><title>Preparing bill…</title>');
-  win.document.close();
-  return {
-    render: (html) =>
-      fillAndPrint(
-        win,
-        html,
-        options.fitToContent ? { widthMm: options.paperWidthMm ?? RECEIPT_WIDTH_MM } : undefined,
-      ),
-    abort: () => win.close(),
-  };
-}
-
-export function openPrintWindow(html: string, fit?: { widthMm: number }): void {
-  // One *named* popup, reused across prints: repeated clicks replace the
-  // receipt in place instead of stacking new windows and print dialogs
-  // (which eventually hangs the tab).
-  const win = window.open('', 'hpos-receipt-print', 'width=420,height=680');
-  if (!win) return;
-  fillAndPrint(win, html, fit);
-}
-
 /**
- * D75 — make the printed page exactly as tall as the receipt.
+ * D79 — kept for the callers that still say "open a print window", but there
+ * is no window: it delegates to the iframe.
  *
- * Two things the PO asked for turn out to be one mechanism. A bill that
- * spans pages prints a band of blank paper at each boundary, and a bill that
- * ends a third of the way down its last page feeds the remaining two thirds
- * before it can be torn off. With ONE page, sized to the content, there is
- * no boundary to leak a gap and no remainder to feed: the receipt ends where
- * the text ends.
- *
- * ## Why this was reverted once, and what is different
- *
- * An earlier attempt shrank long bills. `@page { size }` is a REQUEST: when
- * the size does not match the paper the driver reports, Chrome scales the
- * page to fit — 432 mm of receipt squeezed onto a 297 mm sheet is 69%, which
- * is exactly the unreadable print that came back. That is a printer-side
- * setting (a roll/variable paper length, and Scale at 100%), not something
- * CSS can assert.
- *
- * So this is now a per-call opt-in with an escape hatch, rather than
- * something every receipt does silently: a workspace whose driver has a
- * fixed page length turns it off and gets correct-size print across
- * multiple pages instead.
- *
- * `size: 80mm auto` would be the obvious thing to write and is invalid CSS —
- * the property takes one or two lengths — so the height is measured. Done
- * LAST, after images settle: a logo that has not decoded reports no height
- * and would truncate the receipt to the height of its text.
+ * Every popup-based path had the same defect — a receipt window the operator
+ * had to close by hand — and fixing it per call site would have left the next
+ * one to rediscover it. The page SIZE is not touched here: a retail receipt
+ * prints to whatever sheet the till is set up with (D16), and only the
+ * thermal bill asks to be sized to its content.
  */
-function fitPageToContent(win: Window, widthMm: number): void {
-  const doc = win.document;
-  const heightPx = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
-  if (heightPx <= 0) return; // nothing laid out — leave the default sheet alone
-  // 96 CSS px = 1 inch = 25.4 mm. Plus 2mm so the cutter does not shave the
-  // last line; a receipt cut flush against its footer looks torn.
-  const heightMm = Math.ceil((heightPx / 96) * 25.4) + 2;
-  const style = doc.createElement('style');
-  style.dataset.role = 'page-size';
-  style.textContent = `@page{size:${widthMm}mm ${heightMm}mm;margin:0}`;
-  doc.head.appendChild(style);
-}
-
-/** Write the document, wait for it to be printable, print it, close up. */
-function fillAndPrint(win: Window, html: string, fit?: { widthMm: number }): void {
-  if (printTimer != null) window.clearTimeout(printTimer);
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-
-  /*
-   * D77 — the document prints and closes itself.
-   *
-   * The waiting, the `print()` and the `close()` all live in a script inside
-   * the receipt (see `thermal-bill.ts`), because none of them work reliably
-   * from out here: `otherWindow.print()` does not block the caller, and
-   * Chrome ignores a `close()` issued by the opener while the popup's print
-   * preview is up — the receipt window stayed open, twice.
-   *
-   * What remains here is opening the window and putting the document in it.
-   *
-   * `fit` is retained but OFF by default — see `fitPageToContent`.
-   */
-  if (fit) fitPageToContent(win, fit.widthMm);
+export function openPrintWindow(html: string): void {
+  printReceipt(html, { fitToContent: false });
 }
 
 /** Print the customer receipt: server-rendered, with a client-side fallback. */
@@ -337,7 +261,7 @@ export function printTableBill(
     profile?: DocumentProfile;
   },
 ): void {
-  openPrintWindow(
+  printReceipt(
     renderThermalBill({ ...input, profile: input.profile ?? getCachedDocumentProfile() }),
   );
 }

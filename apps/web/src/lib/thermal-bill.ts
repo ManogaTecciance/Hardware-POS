@@ -56,15 +56,21 @@ export interface ThermalBillInput {
 }
 
 /**
- * D78 — 72 mm: the PRINTABLE width of an 80 mm roll.
+ * D79 — 78 mm, from the printer's own stock definition.
  *
- * Settled by observation, having been guessed both ways. At 80 mm — the
- * width of the paper — the text bled off the edge, because roughly 8 mm of
- * an 80 mm roll sits under the mechanism (576 printable dots at 203 dpi).
- * At 72 mm it fits. This is not the same question as the scaling, which
- * turned out to be the page HEIGHT; the width only ever governed the bleed.
+ * This number was guessed at 80 and then at 72 before the PO sent the driver
+ * dialog, which states it: Xprinter XP-365B, stock "USER", Maximum Size
+ * width **78.7 mm**, exposed liner 0.0 mm on both sides. So the printable
+ * width is 78.7 mm — 80 mm bled off the right edge, and 72 mm left a band of
+ * white down both sides because the shorter page was centred on the paper.
+ *
+ * 78 mm sits just inside the stock with no side padding at all: the page IS
+ * the printable area, so there is nothing to centre and nothing to inset.
+ *
+ * The remaining two numbers in that dialog are the printer's to fix, not
+ * this file's — see the D79 record for the settings.
  */
-export const RECEIPT_WIDTH_MM = 72;
+export const RECEIPT_WIDTH_MM = 78;
 /** …in CSS pixels at 96 dpi, for the layout column. */
 export const RECEIPT_WIDTH_PX = Math.round((RECEIPT_WIDTH_MM / 25.4) * 96); // 302
 
@@ -130,15 +136,14 @@ html,body{height:auto}
  * The page height is measured from this on-screen layout and applied to the
  * printed page, so any difference between the two — a wider column wrapping
  * fewer lines, say — shows up as a receipt cut short or a tail of blank
- * paper. 272px is 72mm at 96dpi — an 80mm roll's printable width.
+ * paper.
  *
- * LEFT-aligned, not centred. Centring a 72mm column inside whatever page the
- * driver reports puts 4mm of slack on each side, which pushes the right-hand
- * AMOUNT column past the last printable dot — the bleed in the PO's photo,
- * where "LKR 1,450.00" printed as "LKR 1,450.0". Starting at the printable
- * origin keeps the full width available to the content.
+ * The body FILLS the page — width 100%, no max-width, no centring, no
+ * padding — so the text uses the whole roll rather than sitting in a column
+ * with white down both sides. The page is already the printable area; an
+ * inset here would just be white the operator asked to be rid of.
  */
-body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:272px;max-width:100%;margin:0;padding:0 2mm;color:#000;background:#fff}
+body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:100%;margin:0;padding:0;color:#000;background:#fff}
 .c{text-align:center}
 .logo{display:block;margin:0 auto 6px;max-width:180px;max-height:110px;object-fit:contain}
 h1{font-size:15px;margin:0 0 2px;letter-spacing:.02em}

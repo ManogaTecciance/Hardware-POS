@@ -258,32 +258,30 @@ describe('the printed page itself', () => {
     expect(html).not.toContain('class="btn"');
   });
 
-  it('keeps the column inside the printable width, left-aligned', () => {
+  it('fills the roll edge to edge, at the printer\u2019s own stock width', () => {
     render();
     /*
-     * 272px is 72mm at 96dpi — the PRINTABLE width of an 80mm roll, about
-     * 8mm of which sits under the mechanism. At 80mm the AMOUNT column bled
-     * off the edge and "LKR 1,450.00" printed as "LKR 1,450.0".
+     * 78mm comes from the driver, not from a guess: Xprinter XP-365B, stock
+     * "USER", Maximum Size width 78.7mm, exposed liner 0.0mm both sides.
+     * Guessed at 80mm it bled off the right edge; guessed at 72mm the shorter
+     * page was centred on the paper and left a band of white down both sides.
      *
-     * LEFT-aligned, not centred: centring a 72mm column inside whatever page
-     * the driver reports puts 4mm of slack on each side and pushes the right
-     * column past the last printable dot — the same bleed by another route.
-     *
-     * border-box matters too: with content-box the side padding is added
-     * OUTSIDE the width.
+     * The body FILLS that page — width 100%, no max-width, no centring, no
+     * padding — because the page IS the printable area. Any inset here is
+     * just white the operator asked to be rid of.
      */
     expect(html).toContain('box-sizing:border-box');
-    expect(html).toContain('width:272px');
-    /*
-     * Scoped to the BODY rule. The logo is centred with `margin: 0 auto` and
-     * should be — an unscoped assertion matches that instead and passes
-     * whatever the body does.
-     */
-    const bodyRule = html.slice(html.indexOf('body{font-family'), html.indexOf('}', html.indexOf('body{font-family')));
+    const bodyRule = html.slice(
+      html.indexOf('body{font-family'),
+      html.indexOf('}', html.indexOf('body{font-family')),
+    );
+    expect(bodyRule).toContain('width:100%');
     expect(bodyRule).toContain('margin:0;');
+    expect(bodyRule).toContain('padding:0;');
+    // NEGATIVE — no centring and no column, which are the two shapes that
+    // put white down the sides.
     expect(bodyRule).not.toContain('auto');
-    const printBlock = html.slice(html.indexOf('@media print'));
-    expect(printBlock).not.toContain('width:');
+    expect(bodyRule).not.toContain('max-width');
   });
 
   it('lets content break freely — an avoided break is a visible gap', () => {

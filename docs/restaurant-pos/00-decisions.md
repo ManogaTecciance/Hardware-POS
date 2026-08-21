@@ -2691,6 +2691,44 @@ the measured `@page { size }` is no longer a request the printer has to
 refuse, so the fitting is back on for receipts: one page, no boundary to leak
 a gap, no remainder to feed.
 
+### D79 — no window at all, and the width comes from the driver
+
+PO report, 2026-08-21, with the driver dialog attached — which answered in
+one screenshot what three rounds of guessing had not.
+
+**Xprinter XP-365B, stock "USER": Maximum Size 78.7 × 101.6 mm, exposed liner
+0.0 mm, margins 4 mm top and bottom.** Every symptom follows from those
+numbers:
+
+- 80 mm bled off the right, because the stock is 78.7 mm wide.
+- 72 mm left a band of white down both sides, because the shorter page was
+  centred on 78.7 mm of paper.
+- The receipt split, because a 101.6 mm maximum length cannot hold a bill of
+  any size — and the 4 mm top and bottom margins were the gap between the
+  pieces.
+
+The PO fixed the last one at the printer, which is where it belonged: a
+longer Maximum Length. The width is this file's to get right, and it is now
+78 mm, edge to edge — the page IS the printable area, so there is no column,
+no centring and no padding.
+
+**The print window is gone, not fixed.** Four reports of a receipt window
+that would not close, chased from the opener and then from a script inside
+the popup. Receipts now print from a hidden IFRAME: there is no window to
+close, the dialog opens over the app, and dismissing it leaves the operator
+where they were. `openPrintWindow` survives as a name and delegates — every
+popup-based path had the same defect, and fixing them one at a time would
+have left the next one to rediscover it.
+
+The regression to guard is therefore not "does the window close" but "was one
+opened at all", and the spec asserts exactly that: `window.open` is stubbed to
+fail if anything in the module calls it.
+
+The page size stays off for retail receipts, which print to whatever sheet
+the till is set up with (D16). Only the thermal bill asks to be sized to its
+content, and that only works because the driver's Maximum Length now allows
+it.
+
 ---
 
 ## Open decisions
