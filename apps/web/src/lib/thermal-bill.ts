@@ -55,8 +55,27 @@ export interface ThermalBillInput {
   note?: string | null;
 }
 
+/** 80 mm roll ≈ 302 CSS px at 96 dpi. The printable column, in pixels. */
+export const RECEIPT_WIDTH_PX = 302;
+/** …and in millimetres, which is the unit `@page` wants. */
+export const RECEIPT_WIDTH_MM = 80;
+
 const CSS = `
 :root { color-scheme: light; }
+/*
+ * margin: 0 is what removes the browser's own print header and footer —
+ * the page number and the "about:blank" URL Chrome draws in the page margin.
+ * There is no other lever for it from CSS: with no margin there is nowhere
+ * for that chrome to be drawn. The body's own padding becomes the printed
+ * margin instead, so the text still clears the edge of the roll.
+ *
+ * The page SIZE is injected at print time by openPrintWindow, which
+ * measures the laid-out document — a receipt roll is continuous, so the
+ * page is made exactly as tall as the bill rather than letting a long order
+ * spill onto a second sheet.
+ */
+@page{margin:0}
+html,body{height:auto}
 body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-width:302px;margin:0 auto;padding:12px;color:#000;background:#fff}
 .c{text-align:center}
 .logo{display:block;margin:0 auto 6px;max-width:180px;max-height:110px;object-fit:contain}
@@ -79,8 +98,14 @@ td{padding:2px 0;vertical-align:top}
 .pay .row{display:flex;justify-content:space-between}
 .ft{margin-top:12px;font-size:11px;white-space:pre-line}
 .copy{margin-top:4px;font-size:11px;font-weight:bold}
-.btn{display:block;margin:0 auto 10px;padding:8px 16px;cursor:pointer;font:inherit}
-@media print{.btn{display:none}body{padding:0;max-width:none}}
+.btn{position:fixed;top:8px;right:8px;padding:6px 14px;cursor:pointer;font:inherit;z-index:2}
+/*
+ * position: fixed takes the button out of flow deliberately: the page
+ * height is measured from the laid-out document, and an in-flow button that
+ * only disappears at print time would add its height to every receipt as
+ * blank paper at the end of the roll.
+ */
+@media print{.btn{display:none}body{padding:6px 10px;max-width:none}}
 `;
 
 /**

@@ -210,3 +210,38 @@ describe('safety', () => {
     expect(html).not.toContain('onerror="alert(1)"');
   });
 });
+
+describe('the printed page itself', () => {
+  it('kills the browser page chrome and never fixes a page height', () => {
+    render();
+    /*
+     * `@page { margin: 0 }` is the only lever CSS has over the browser's own
+     * print header and footer — the page number and the "about:blank" URL
+     * Chrome draws in the page margin. With no margin there is nowhere to
+     * draw them.
+     */
+    expect(html).toContain('@page{margin:0}');
+
+    /*
+     * NEGATIVE — the template must NOT pin a page height. A receipt roll is
+     * continuous, and the real height is measured after layout and injected
+     * by `openPrintWindow`; a size baked in here would be a guess that cuts
+     * a long bill in half.
+     */
+    expect(html).not.toMatch(/@page\{size:/);
+    // …and the body is free to grow, so a long order lays out in one strip.
+    expect(html).toContain('html,body{height:auto}');
+  });
+
+  it('takes the on-screen Print button out of flow', () => {
+    render();
+    /*
+     * The page height is measured from the laid-out document. An in-flow
+     * button that only vanishes at print time would add its height to every
+     * receipt as blank paper after the footer.
+     */
+    const btn = html.slice(html.indexOf('.btn{'), html.indexOf('}', html.indexOf('.btn{')));
+    expect(btn).toContain('position:fixed');
+    expect(html).toContain('@media print{.btn{display:none}');
+  });
+});

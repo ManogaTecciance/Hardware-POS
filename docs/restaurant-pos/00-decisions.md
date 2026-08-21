@@ -2494,6 +2494,40 @@ backstop so an unreachable logo cannot leave the dialog un-opened.
 The retail receipt is deliberately untouched — it is the Tile Shop's
 document, and D16 keeps its behaviour and wording as they are.
 
+### D73 — a receipt is one continuous page, with no browser chrome on it
+
+PO report, 2026-08-21: the printed bill carried a page number and the word
+"about:blank", and a long order came out on two sheets.
+
+**The chrome.** Both were the browser's own print header and footer — the
+URL of the popup the bill is written into, and the page counter. `@page {
+margin: 0 }` is the only lever CSS has over them: with no page margin there
+is nowhere for the browser to draw them. The body's padding becomes the
+printed margin instead, so the text still clears the edge of the roll.
+
+**One page, whatever the length.** A receipt roll is continuous. Left on a
+sheet, a long order breaks across pages — and on a roll printer that means
+the cutter fires mid-bill and the totals arrive on a separate strip. So the
+document is measured after layout and the height written into `@page`.
+
+`size: 80mm auto` would have been the obvious thing to write, and it is
+invalid CSS — the property takes one or two lengths, and browsers drop the
+whole declaration without complaint. Both values are therefore lengths, with
+the height computed at 96 px per inch plus four millimetres of cutter margin:
+a receipt cut flush against its last line looks torn.
+
+Measured LAST, after images settle. A logo that has not decoded reports no
+height, and a page sized from that truncates the bill to the height of its
+text. The on-screen Print button is `position: fixed` for the same reason —
+in flow, a control that only disappears at print time still adds its height
+to every receipt as blank paper after the footer.
+
+Opt-in (`fitToContent`), so the retail receipt keeps printing to whichever
+sheet the operator selected (D16).
+
+Verified in a real browser rather than by inspection: the same 60-line bill
+prints as ONE 432 mm page with the fix and TWO A4 pages without it.
+
 ---
 
 ## Open decisions
