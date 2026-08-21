@@ -78,10 +78,14 @@ export interface BeginPrintOptions {
   /**
    * Size the page to the receipt: one page, ending where the text ends.
    *
-   * On by default for the callers that pass a roll width. Turn it OFF for a
-   * printer whose driver has a FIXED page length — Chrome scales a page it
-   * cannot match onto the paper it has, and a long bill then prints
-   * correct-but-tiny rather than long.
+   * OFF by default, and that is the third position on it (D77). It is what a
+   * roll wants — no page boundary to leak a gap, no remainder to feed — but
+   * `@page { size }` is a REQUEST, and where the height exceeds the paper the
+   * driver reports, Chrome scales the page down and the bill prints
+   * correct-but-small. That happened on the PO's printer twice.
+   *
+   * Turn it on for a driver configured with a continuous roll, where the
+   * declared height can actually be honoured.
    */
   fitToContent?: boolean;
   /** Roll width in millimetres. 80 is the common thermal default; 58 exists. */
@@ -101,9 +105,7 @@ export function beginPrintWindow(options: BeginPrintOptions = {}): PendingPrintW
       fillAndPrint(
         win,
         html,
-        options.fitToContent === false
-          ? undefined
-          : { widthMm: options.paperWidthMm ?? RECEIPT_WIDTH_MM },
+        options.fitToContent ? { widthMm: options.paperWidthMm ?? RECEIPT_WIDTH_MM } : undefined,
       ),
     abort: () => win.close(),
   };
@@ -169,67 +171,19 @@ function fillAndPrint(win: Window, html: string, fit?: { widthMm: number }): voi
   win.focus();
 
   /*
-   * D72 — wait for images before printing. A bill now carries the tenant's
-   * logo, and `print()` captures the document as it stands: fire it while
-   * the image is still decoding and the logo prints as a blank box. Every
-   * image is awaited (load OR error — a broken logo must not hold the
-   * dialog hostage), then a short beat for layout to settle.
+   * D77 — the document prints and closes itself.
    *
-   * The 4s ceiling is the backstop: a data: URI resolves instantly and a
-   * remote one usually does, but an unreachable host would otherwise mean
-   * a print dialog that never opens, which reads as "the button is broken".
+   * The waiting, the `print()` and the `close()` all live in a script inside
+   * the receipt (see `thermal-bill.ts`), because none of them work reliably
+   * from out here: `otherWindow.print()` does not block the caller, and
+   * Chrome ignores a `close()` issued by the opener while the popup's print
+   * preview is up — the receipt window stayed open, twice.
+   *
+   * What remains here is opening the window and putting the document in it.
+   *
+   * `fit` is retained but OFF by default — see `fitPageToContent`.
    */
-  const images = Array.from(win.document.images);
-  const settled = images.map(
-    (img) =>
-      img.complete ||
-      new Promise<void>((resolve) => {
-        img.addEventListener('load', () => resolve(), { once: true });
-        img.addEventListener('error', () => resolve(), { once: true });
-      }),
-  );
-  /*
-   * D76 — close the popup once the print has been dispatched.
-   *
-   * `afterprint` alone did not do it. It is the correct event, but on a
-   * scripted popup Chrome does not reliably deliver it to a listener the
-   * OPENER registered, and the receipt window was left sitting open behind
-   * the POS. So the close is driven from the call site instead:
-   * `window.print()` BLOCKS until the print dialog is dismissed, in Chrome
-   * and every other desktop browser, which makes the line after it the
-   * moment the browser is finished with the document.
-   *
-   * The listener stays as a second path, guarded by `closed` so the two
-   * cannot fight: whichever fires first closes the window and the other
-   * finds it already gone.
-   */
-  const dismiss = () => {
-    if (!win.closed) win.close();
-  };
-  win.addEventListener('afterprint', dismiss, { once: true });
-
-  void Promise.race([
-    Promise.all(settled),
-    new Promise((resolve) => window.setTimeout(resolve, 4000)),
-  ]).then(() => {
-    if (fit) fitPageToContent(win, fit.widthMm);
-    printTimer = window.setTimeout(() => {
-      printTimer = null;
-      /*
-       * The print dialog opens by itself — no click on the page. Whether the
-       * OPERATING SYSTEM's dialog then needs a confirming click is not
-       * something a web page can decide: only Chrome's `--kiosk-printing`
-       * launch flag makes `print()` go straight to the default printer, and
-       * a page cannot set it. On a till launched with that flag this call is
-       * already the whole interaction; without it the dialog is the browser's
-       * to own. See docs/restaurant-pos/00-decisions.md, D74.
-       */
-      win.print();
-      // Reached once the dialog closes — printed or cancelled, the operator
-      // is done with this window either way.
-      dismiss();
-    }, 150);
-  });
+  if (fit) fitPageToContent(win, fit.widthMm);
 }
 
 /** Print the customer receipt: server-rendered, with a client-side fallback. */
@@ -291,7 +245,6 @@ export function printTableBill(
 ): void {
   openPrintWindow(
     renderThermalBill({ ...input, profile: input.profile ?? getCachedDocumentProfile() }),
-    { widthMm: RECEIPT_WIDTH_MM },
   );
 }
 
@@ -301,7 +254,7 @@ export function printTableBill(
  * bill and a whole bill are the same document with different lines.
  */
 export function printSplitBill(input: SplitBillInput): void {
-  openPrintWindow(renderSplitBill(input), { widthMm: RECEIPT_WIDTH_MM });
+  openPrintWindow(renderSplitBill(input));
 }
 
 export interface SplitBillInput {

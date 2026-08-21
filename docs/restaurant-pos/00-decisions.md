@@ -2619,6 +2619,43 @@ cannot fight.
 Verified: one 72 × 223 mm page, content filling the full width, ending 2 mm
 after the footer.
 
+### D77 — the receipt prints itself; the page size is the printer's
+
+PO report, 2026-08-21, on the D76 delivery: both issues unchanged. Third
+attempt at each, and this record supersedes the reasoning in D74–D76.
+
+**The popup now closes itself, from inside.** Two assumptions were wrong.
+`otherWindow.print()` does NOT block the caller — the dialog is modal to the
+popup, not to the opener — so a `close()` on the next line ran while the
+preview was still up, and Chrome ignores that. And `afterprint` is not
+reliably delivered to a listener the OPENER registered on a scripted popup.
+Both calls now live in a script inside the receipt document, where
+`window.print()` blocks its own window and a script-opened window may always
+close itself. Verified in a real browser: the popup closes on its own.
+
+**The page size goes back to the printer.** Sizing the page to the content is
+what a roll wants — no boundary to leak a gap, no remainder to feed — and it
+cost correct print twice, at 432 mm and again at 223 mm. `@page { size }` is
+a REQUEST: where the declared height exceeds the paper the driver reports,
+Chrome scales the page down to fit, and the height of a receipt is by nature
+whatever the order came to. There is no height that is safe on a fixed-length
+page. So the fitting is opt-in, for a driver configured with a continuous
+roll, and correct size wins by default.
+
+**The column is 80 mm again.** D76 narrowed it to 72 mm — an 80 mm roll's
+printable area — on the theory that the mismatch was causing the scaling. It
+was not, and the receipt simply printed as a narrower column, which reads as
+"smaller" too. The printer this ships against prints the full width.
+
+What survives from D73–D76 and is confirmed working: `@page { margin: 0 }`
+(no browser header or footer, and no gap between pages), no
+`break-inside: avoid` (which was itself the photographed gap), and headings
+printed once rather than per page.
+
+Still outstanding, and it is a printer setting rather than a defect: paper is
+fed to the end of the last page. Set the driver to a continuous/roll length
+and the opt-in fitting removes it.
+
 ---
 
 ## Open decisions

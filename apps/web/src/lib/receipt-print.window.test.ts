@@ -1,18 +1,15 @@
 /**
- * D74 — what the print popup does on its own.
+ * D77 — what the OPENER still owns.
  *
- * Two claims, both with silent failure modes:
+ * Printing and closing moved into a script inside the receipt itself, because
+ * neither worked from out here: `otherWindow.print()` does not block the
+ * caller, and Chrome ignores a `close()` issued by the opener while the
+ * popup's print preview is up. The receipt window stayed open for the PO
+ * twice on the strength of those two assumptions.
  *
- *   • The dialog opens WITHOUT anyone clicking the page. If `print()` were
- *     only wired to the in-page button, the operator would face a receipt
- *     window that just sits there — which looks like the Print bill button
- *     did nothing.
- *   • The popup closes once the browser is done with it. `afterprint` has
- *     to be subscribed BEFORE `print()`, because `print()` is synchronous in
- *     some browsers and the event has already fired by the time it returns.
- *     Subscribing after would leave a dead receipt window open behind the
- *     POS on exactly those browsers — and pass any test that only checked
- *     the listener exists.
+ * What is left on this side is the window's LIFECYCLE, and it is worth
+ * guarding: opening it in the click's own turn, and not leaving a blank
+ * popup behind when the data it was opened for never arrives.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,41 +21,42 @@ vi.mock('./cart', () => ({ computeLine: () => ({ lineTotal: 0 }) }));
 vi.mock('./utils', () => ({ formatMoney: (v: number) => String(v) }));
 vi.mock('./restaurant/labels', () => ({ formatMoney: (v: number | string) => String(v) }));
 
-/** Everything the fake window did, in order. */
 let log: string[] = [];
-let handlers: Record<string, () => void> = {};
-let win: Record<string, unknown>;
-
+let written = '';
 let injected: string[] = [];
 let bodyHeight = 1000;
+let win: Record<string, unknown>;
 
-function makeWindow(images: unknown[] = []) {
+function makeWindow() {
   log = [];
-  handlers = {};
+  written = '';
   injected = [];
   return {
     document: {
-      open: () => {},
-      write: () => {},
-      close: () => {},
-      images,
-      body: { get scrollHeight() { return bodyHeight; } },
+      open: () => log.push('open'),
+      write: (h: string) => {
+        written = h;
+        log.push('write');
+      },
+      close: () => log.push('doc-close'),
+      images: [] as unknown[],
+      body: {
+        get scrollHeight() {
+          return bodyHeight;
+        },
+      },
       documentElement: { scrollHeight: 0 },
       createElement: () => ({ dataset: {} as Record<string, string>, textContent: '' }),
       head: {
         appendChild: (el: unknown) => {
-          const style = el as { textContent: string };
-          injected.push(style.textContent);
+          injected.push((el as { textContent: string }).textContent);
           log.push('page-size');
         },
       },
     },
-    focus: () => {},
-    addEventListener: (type: string, fn: () => void) => {
-      log.push(`on:${type}`);
-      handlers[type] = fn;
-    },
     closed: false,
+    focus: () => log.push('focus'),
+    addEventListener: () => {},
     print: () => log.push('print'),
     close: () => {
       log.push('close');
@@ -85,173 +83,68 @@ afterEach(() => {
 
 const { openPrintWindow, beginPrintWindow } = await import('./receipt-print');
 
-describe('the print popup', () => {
-  it('opens the dialog by itself, with no click on the page', async () => {
-    openPrintWindow('<p>bill</p>');
-    // Nothing yet — layout and images get a beat first.
-    expect(log).not.toContain('print');
-
-    await vi.runAllTimersAsync();
-    expect(log).toContain('print');
-  });
-
-  it('subscribes to afterprint BEFORE printing', async () => {
-    openPrintWindow('<p>bill</p>');
-    await vi.runAllTimersAsync();
-
-    // Order, not mere presence: a synchronous `print()` fires afterprint
-    // before it returns, so a listener attached afterwards never runs.
-    expect(log.indexOf('on:afterprint')).toBeGreaterThanOrEqual(0);
-    expect(log.indexOf('on:afterprint')).toBeLessThan(log.indexOf('print'));
-  });
-
-  it('closes the popup as soon as the dialog is dismissed', async () => {
-    openPrintWindow('<p>bill</p>');
-    await vi.runAllTimersAsync();
-
-    /*
-     * D76 — the close is driven from the call site, immediately after
-     * `print()` returns. `window.print()` BLOCKS until the dialog is
-     * dismissed, so the next line is the moment the browser is done with the
-     * document. Relying on `afterprint` alone left the receipt window open:
-     * Chrome does not reliably deliver it to a listener the opener
-     * registered, which is what the PO saw.
-     */
-    expect(log).toEqual(['on:afterprint', 'print', 'close']);
-  });
-
-  it('does not double-close when afterprint also fires', async () => {
-    openPrintWindow('<p>bill</p>');
-    await vi.runAllTimersAsync();
-    const closes = log.filter((e) => e === 'close').length;
-
-    // The listener is a second path, not a competing one.
-    win.closed = true;
-    handlers.afterprint!();
-    expect(log.filter((e) => e === 'close').length).toBe(closes);
-  });
-
-  it('does not close before the print has been dispatched', async () => {
-    openPrintWindow('<p>bill</p>');
-    // Nothing has printed yet, so nothing may have closed either — a popup
-    // that closed early would take the dialog down with it.
-    expect(log).not.toContain('close');
-    expect(log).not.toContain('print');
-  });
-});
-
 describe('beginPrintWindow — opened in the click, filled in later', () => {
-  it('opens the popup immediately, before any data has been fetched', () => {
-    const pending = beginPrintWindow();
+  it('opens the popup before any data has been fetched', () => {
+    beginPrintWindow();
     /*
      * The whole point: `window.open` has already happened by the time this
-     * returns. A popup opened after an await gambles on the browser's
-     * transient user activation not having lapsed, and when it has, nothing
-     * appears to happen at all.
+     * returns. Opened after an `await`, it gambles on the browser's transient
+     * user activation not having lapsed — and when it has, the popup is
+     * blocked and nothing appears to happen at all.
      */
-    expect(win).toBeTruthy();
-    // Nothing printed yet — there is no bill to print.
-    expect(log).not.toContain('print');
-    expect(pending).toHaveProperty('render');
+    expect(log).toContain('write'); // the placeholder is already on screen
+    expect(written).toContain('Preparing');
   });
 
-  it('prints once the document arrives', async () => {
-    const pending = beginPrintWindow();
-    pending.render('<p>bill</p>');
-    await vi.runAllTimersAsync();
-    expect(log).toContain('print');
-    expect(log.indexOf('on:afterprint')).toBeLessThan(log.indexOf('print'));
+  it('writes the receipt when it arrives', () => {
+    beginPrintWindow().render('<p>the bill</p>');
+    expect(written).toBe('<p>the bill</p>');
   });
 
   it('closes the placeholder when the data never arrives', () => {
-    const pending = beginPrintWindow();
-    pending.abort();
-    // A window opened up front must not be left blank and orphaned when the
-    // fetch it was opened for fails.
+    beginPrintWindow().abort();
+    // A window opened up front must not be left blank and orphaned.
     expect(log).toContain('close');
   });
 });
 
-describe('D75 — one page, as tall as the receipt', () => {
-  it('sizes the page to the content and prints it as a single page', async () => {
+describe('page sizing is opt-in', () => {
+  it('declares no page size by default', () => {
     beginPrintWindow().render('<p>bill</p>');
-    await vi.runAllTimersAsync();
+    /*
+     * D77 — correct size beats one page. `@page { size }` is a request, and
+     * where the height exceeds the paper the driver reports, Chrome scales
+     * the page down: the bill printed small on the PO's printer at 432mm and
+     * again at 223mm. The size is the printer's to choose.
+     */
+    expect(injected).toHaveLength(0);
+  });
 
-    /*
-     * 1000px ÷ 96dpi × 25.4 = 264.58 → 265mm, +2mm so the cutter does not
-     * shave the footer. 72mm, not 80: that is the PRINTABLE width of an 80mm
-     * roll, and declaring the paper width instead makes Chrome scale the
-     * page down to fit — the "content is smaller" defect (D76).
-     */
-    expect(injected).toEqual(['@page{size:72mm 267mm;margin:0}']);
-    /*
-     * `size: 80mm auto` would be the obvious thing to write and is invalid
-     * CSS — the property takes one or two lengths — so browsers drop the
-     * whole declaration and the receipt goes back to paging.
-     */
+  it('declares one when a caller asks for it, in lengths not `auto`', () => {
+    beginPrintWindow({ fitToContent: true }).render('<p>bill</p>');
+    // 1000px ÷ 96dpi × 25.4 = 264.58 → 265mm, +2mm of cutter margin.
+    expect(injected).toEqual(['@page{size:80mm 267mm;margin:0}']);
+    // `size: 80mm auto` is invalid CSS — the property takes one or two
+    // lengths — and browsers drop the whole declaration.
     expect(injected[0]).not.toContain('auto');
   });
 
-  it('measures AFTER images settle, never before', async () => {
-    /*
-     * The logo is the tallest thing on the bill. Measured while it is still
-     * decoding, the document reports the height of its text alone and the
-     * receipt is cut short.
-     */
-    let landed = () => {};
-    const image = {
-      complete: false,
-      addEventListener: (type: string, fn: () => void) => {
-        if (type === 'load') landed = fn;
-      },
-    };
-    bodyHeight = 200;
-    win = makeWindow([image]);
-
-    beginPrintWindow().render('<img>');
-    await vi.advanceTimersByTimeAsync(50);
-    expect(injected).toHaveLength(0);
-    expect(log).not.toContain('print');
-
-    bodyHeight = 800; // the logo lands and the document grows
-    landed();
-    await vi.runAllTimersAsync();
-
-    // 800px → 212mm (+2). NOT the 55mm the pre-image document would give.
-    expect(injected[0]).toContain('214mm');
-    expect(injected[0]).not.toContain('55mm');
-  });
-
-  it('sizes the page BEFORE printing, not after', async () => {
-    beginPrintWindow().render('<p>bill</p>');
-    await vi.runAllTimersAsync();
-    // A size applied after `print()` has already captured the document
-    // changes nothing at all.
-    expect(log.indexOf('page-size')).toBeLessThan(log.indexOf('print'));
-  });
-
-  it('honours a narrower roll, and can be switched off entirely', async () => {
-    beginPrintWindow({ paperWidthMm: 58 }).render('<p>bill</p>');
-    await vi.runAllTimersAsync();
+  it('honours a narrower roll', () => {
+    beginPrintWindow({ fitToContent: true, paperWidthMm: 58 }).render('<p>bill</p>');
     expect(injected[0]).toContain('58mm');
-
-    // A printer whose driver has a FIXED page length cannot honour a custom
-    // size — Chrome scales the page to fit and the bill prints tiny. That
-    // workspace turns the fitting off and pages normally instead.
-    win = makeWindow();
-    beginPrintWindow({ fitToContent: false }).render('<p>bill</p>');
-    await vi.runAllTimersAsync();
-    expect(injected).toHaveLength(0);
-    expect(log).toContain('print'); // still prints — just to a sheet
   });
 
-  it('leaves the sheet alone when nothing laid out', async () => {
+  it('leaves the sheet alone when nothing laid out', () => {
     bodyHeight = 0;
     win = makeWindow();
-    beginPrintWindow().render('<p>bill</p>');
-    await vi.runAllTimersAsync();
-    // A 0mm page would print nothing at all; a sheet at least prints.
+    beginPrintWindow({ fitToContent: true }).render('<p>bill</p>');
+    // A 0mm page would print nothing at all.
     expect(injected).toHaveLength(0);
-    expect(log).toContain('print');
+  });
+
+  it('one-shot printing takes the same default', () => {
+    openPrintWindow('<p>bill</p>');
+    expect(injected).toHaveLength(0);
+    expect(written).toBe('<p>bill</p>');
   });
 });

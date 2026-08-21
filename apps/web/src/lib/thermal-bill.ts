@@ -56,21 +56,18 @@ export interface ThermalBillInput {
 }
 
 /**
- * D76 — the column is 72 mm, not the 80 mm of the paper it prints on.
+ * D77 — 80 mm, the width of the roll.
  *
- * An 80 mm thermal roll has a PRINTABLE width of about 72 mm: 576 dots at
- * 203 dpi, with the rest under the mechanism. Declaring an 80 mm page on a
- * 72 mm printable area is a mismatch, and Chrome resolves a mismatch by
- * scaling the page to fit — roughly 90%, which is the "content is smaller"
- * the PO reported. Matching the printable area is what removes the browser's
- * reason to scale at all.
- *
- * A 58 mm roll prints 48 mm; that is the other common pair, and the width is
- * a parameter for it rather than a constant to edit.
+ * Briefly narrowed to 72 mm (an 80 mm roll's printable area) on the theory
+ * that the mismatch was making Chrome scale. It was not: the receipt simply
+ * printed as a narrower column, which is what the PO saw as "smaller". The
+ * printer this ships against clearly prints the full width — the bill it
+ * produced at 80 mm was the one the PO approved — so the column goes back to
+ * where it was and stays there.
  */
-export const RECEIPT_WIDTH_MM = 72;
+export const RECEIPT_WIDTH_MM = 80;
 /** …in CSS pixels at 96 dpi, for the layout column. */
-export const RECEIPT_WIDTH_PX = Math.round((RECEIPT_WIDTH_MM / 25.4) * 96); // 272
+export const RECEIPT_WIDTH_PX = Math.round((RECEIPT_WIDTH_MM / 25.4) * 96); // 302
 
 const CSS = `
 :root { color-scheme: light; }
@@ -134,9 +131,9 @@ html,body{height:auto}
  * The page height is measured from this on-screen layout and applied to the
  * printed page, so any difference between the two — a wider column wrapping
  * fewer lines, say — shows up as a receipt cut short or a tail of blank
- * paper. 272px is 72mm at 96dpi: the printable width of an 80mm roll.
+ * paper. 302px is 80mm at 96dpi — the width of the roll.
  */
-body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:272px;max-width:100%;margin:0 auto;padding:0 2mm;color:#000;background:#fff}
+body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:302px;max-width:100%;margin:0 auto;padding:0 2mm;color:#000;background:#fff}
 .c{text-align:center}
 .logo{display:block;margin:0 auto 6px;max-width:180px;max-height:110px;object-fit:contain}
 h1{font-size:15px;margin:0 0 2px;letter-spacing:.02em}
@@ -279,6 +276,50 @@ export function renderThermalBill(input: ThermalBillInput): string {
   )}</title><style>${CSS}</style></head>
 <body>
 <button class="btn" onclick="window.print()">Print</button>
+<script>
+/*
+ * D77 — the receipt prints and closes ITSELF.
+ *
+ * Driving this from the opener did not work. otherWindow.print() does not
+ * block the CALLER, and Chrome ignores a close() issued from the opener
+ * while the popup's print preview is up, so the receipt window was left
+ * standing open — which is exactly what the PO reported twice.
+ *
+ * Run from inside the popup, both calls behave: window.print() blocks this
+ * window's own script until the dialog is dismissed, and a window may always
+ * close itself when it was opened by script.
+ *
+ * Images first. print() captures the document as it stands, so firing
+ * while the logo is still decoding prints a blank box where the brand should
+ * be. Waiting on load OR error — a broken logo must not hold the dialog
+ * hostage — with a 4s ceiling so an unreachable image cannot mean a dialog
+ * that never opens.
+ */
+(function () {
+  var done = false;
+  function go() {
+    if (done) return;
+    done = true;
+    window.focus();
+    window.print();
+    window.close();
+  }
+  // Belt and braces: whichever the browser gives us, we only act once.
+  window.addEventListener('afterprint', function () { window.close(); });
+  var pending = 0;
+  var imgs = document.images;
+  for (var i = 0; i < imgs.length; i++) {
+    if (!imgs[i].complete) {
+      pending++;
+      imgs[i].addEventListener('load', settle);
+      imgs[i].addEventListener('error', settle);
+    }
+  }
+  function settle() { if (--pending <= 0) setTimeout(go, 80); }
+  if (pending === 0) setTimeout(go, 80);
+  setTimeout(go, 4000);
+})();
+</script>
 <div class="c">
 ${logo}
 ${!logo && name ? `<h1>${esc(name)}</h1>` : ''}

@@ -217,75 +217,87 @@ describe('the printed page itself', () => {
     /*
      * One declaration, two jobs. It removes the browser's print header and
      * footer (the page number and the about:blank URL), because with no
-     * margin there is nowhere to draw them. And it is what makes a long bill
-     * read as ONE receipt: the gap between page one and page two IS the page
-     * margin, and on a roll that gap prints as a band of blank paper that
-     * looks like the receipt was cut and restarted.
+     * margin there is nowhere to draw them. And it closes the gap between
+     * pages: that gap IS the page margin, and on a roll it prints as a band
+     * of blank paper that reads as the receipt having been cut and restarted.
      */
     expect(html).toContain('@page{margin:0}');
   });
 
-  it('leaves the page SIZE to the printer layer, not the markup', () => {
+  it('leaves the page SIZE to the printer', () => {
     render();
     /*
-     * The template never bakes a page size in. The height depends on how
-     * the document actually lays out — how the address wraps, whether the
-     * logo loaded — which only the print window knows, so `fitPageToContent`
-     * measures and injects it there (D75).
+     * D77 — no page size is declared, and this is the third position on it.
      *
-     * Asserted here so nobody "fixes" a paged receipt by guessing a height
-     * in the CSS: a guess that is too short truncates the bill, and one that
-     * is too tall is the trailing blank paper this all exists to remove.
+     * Declaring one gets a single page that ends at the content, which is
+     * what a roll wants. But `@page { size }` is a REQUEST: where the height
+     * exceeds the paper the driver reports, Chrome scales the page down to
+     * fit, and the bill prints correct-but-small. That happened twice on the
+     * PO's printer, at 432mm and again at 223mm.
+     *
+     * Correct size beats one page, so the size is left to the printer and
+     * the fitting is opt-in for a driver configured with a continuous roll.
      */
     expect(html).not.toMatch(/@page\{[^}]*size:/);
-    // POSITIVE CONTROL — an @page rule IS emitted, so the absence above is
-    // about `size` specifically and not about the block failing to render.
     expect(html).toContain('@page{');
+  });
+
+  it('prints and closes itself from inside the popup', () => {
+    render();
+    /*
+     * D77 — both calls live in the document, not in the opener.
+     * `otherWindow.print()` does not block the caller, and Chrome ignores a
+     * `close()` from the opener while the popup's preview is up: the receipt
+     * window stayed open for the PO twice. From inside, `print()` blocks its
+     * own window and a script-opened window may always close itself.
+     */
+    const script = html.slice(html.indexOf('<script>'), html.indexOf('</script>'));
+    /*
+     * The close must come IMMEDIATELY after the print, in the same function.
+     * Asserted as a sequence rather than as two `toContain` checks, which
+     * both pass while the close lives only in the afterprint fallback — the
+     * exact hole a mutation found in the first version of this test.
+     */
+    expect(script).toMatch(/window\.print\(\);\s*window\.close\(\);/);
+    // Images first: print() captures the document as it stands, so firing
+    // mid-decode prints a blank box where the logo should be.
+    expect(script).toContain('document.images');
+    expect(script).toContain('addEventListener');
+  });
+
+  it('keeps the column exactly one roll wide', () => {
+    render();
+    /*
+     * 302px is 80mm at 96dpi. Briefly narrowed to 72mm — an 80mm roll's
+     * printable area — on the theory that the mismatch was causing the
+     * scaling; it was not, and the receipt simply printed as a narrower
+     * column, which read as "smaller" too.
+     *
+     * border-box matters: with content-box the side padding is added OUTSIDE
+     * the width. And the width is the same in both media, because the layout
+     * a guest reads and the layout the printer lays out must not differ.
+     */
+    expect(html).toContain('box-sizing:border-box');
+    expect(html).toContain('width:302px');
+    const printBlock = html.slice(html.indexOf('@media print'));
+    expect(printBlock).not.toContain('width:');
   });
 
   it('lets content break freely — an avoided break is a visible gap', () => {
     render();
     /*
-     * The opposite of what a report wants, and deliberate. `break-inside:
-     * avoid` was here to stop a line being cut at a page boundary; on a
-     * continuous roll it pushes the row WHOLE onto the next page and the
-     * space it vacated prints as blank paper mid-receipt. That is the gap
-     * the PO photographed between "Soup of the Day" and "Vegetable Fried
-     * Rice".
-     *
-     * With the page sized to the content there is no boundary at all, and if
-     * one ever appears, an allowed break rejoins across abutting pages while
-     * an avoided one leaves a hole.
+     * `break-inside: avoid` pushes a row that does not fit WHOLE onto the
+     * next page, and the space it vacated prints as blank paper mid-receipt.
+     * That is the gap the PO photographed between "Soup of the Day" and
+     * "Vegetable Fried Rice". With margin 0 the pages abut, so an allowed
+     * break rejoins invisibly where an avoided one leaves a hole.
      */
     expect(html).not.toContain('break-inside:avoid');
     expect(html).not.toContain('page-break-inside:avoid');
   });
 
-  it('keeps the column exactly one printable width wide', () => {
-    render();
-    /*
-     * Three things have to agree or Chrome scales the page down, which is
-     * the "content is smaller" defect (D76):
-     *
-     *   • the column is 272px — 72mm at 96dpi, the PRINTABLE width of an
-     *     80mm roll, not the 80mm of the paper;
-     *   • border-box, so the side padding is inside that width rather than
-     *     added to it (content-box makes the body 296px on a 272px page);
-     *   • the same width on screen and in print, because the page height is
-     *     measured from the on-screen layout.
-     */
-    expect(html).toContain('box-sizing:border-box');
-    expect(html).toContain('width:272px');
-    // NEGATIVE — the print media must not re-declare a different width.
-    const printBlock = html.slice(html.indexOf('@media print'));
-    expect(printBlock).not.toContain('width:');
-    expect(printBlock).not.toContain('max-width:');
-  });
-
   it('prints the column headings once, not per page', () => {
     render();
-    // A browser repeats a thead by design — right for a report, wrong on a
-    // roll, where the repeat reads as a second receipt starting.
     expect(html).toContain('thead{display:table-row-group}');
   });
 });
