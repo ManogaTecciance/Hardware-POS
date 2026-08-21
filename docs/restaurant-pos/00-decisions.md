@@ -2656,6 +2656,41 @@ Still outstanding, and it is a printer setting rather than a defect: paper is
 fed to the end of the last page. Set the driver to a continuous/roll length
 and the opt-in fitting removes it.
 
+### D78 — printed from an iframe, at the printable width
+
+PO report, 2026-08-21, with a photograph: at 80 mm the AMOUNT column bled off
+the edge ("LKR 1,450.00" printed as "LKR 1,450.0"), the popup still would not
+close, and with the driver now set to continuous paper the receipt still
+broke across two pages.
+
+**No popup.** Three rounds were spent trying to make one close itself — from
+the opener (Chrome ignores `close()` while the preview is up, and does not
+deliver `afterprint` to a listener the opener registered) and then from a
+script inside the document. The receipt now prints from a hidden IFRAME, so
+there is no window to close. The dialog opens over the app and dismissing it
+leaves the operator where they were. Cleanup is a detached DOM node: were it
+ever delayed, nobody would see anything, which is the opposite failure mode
+to a receipt window left standing open. It also takes the popup blocker out
+of the picture, so the document profile can be fetched first without racing
+a user gesture.
+
+The frame is positioned off-screen at the receipt's true width rather than
+sized 0×0 — a zero-width frame lays out at zero width, wraps every line, and
+would report a height with no relation to the printed bill.
+
+**72 mm, left-aligned.** About 8 mm of an 80 mm roll sits under the mechanism
+(576 printable dots at 203 dpi), so a column set to the paper width bleeds.
+This is not the question the scaling turned on — that was the page HEIGHT
+(D77) — and guessing it both ways cost a round each. Left-aligned because
+centring a 72 mm column inside whatever page the driver reports puts 4 mm of
+slack on each side and pushes the right-hand column past the last printable
+dot: the same bleed by another route.
+
+**One page, now that the driver can honour it.** With continuous paper set,
+the measured `@page { size }` is no longer a request the printer has to
+refuse, so the fitting is back on for receipts: one page, no boundary to leak
+a gap, no remainder to feed.
+
 ---
 
 ## Open decisions

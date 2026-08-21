@@ -56,16 +56,15 @@ export interface ThermalBillInput {
 }
 
 /**
- * D77 — 80 mm, the width of the roll.
+ * D78 — 72 mm: the PRINTABLE width of an 80 mm roll.
  *
- * Briefly narrowed to 72 mm (an 80 mm roll's printable area) on the theory
- * that the mismatch was making Chrome scale. It was not: the receipt simply
- * printed as a narrower column, which is what the PO saw as "smaller". The
- * printer this ships against clearly prints the full width — the bill it
- * produced at 80 mm was the one the PO approved — so the column goes back to
- * where it was and stays there.
+ * Settled by observation, having been guessed both ways. At 80 mm — the
+ * width of the paper — the text bled off the edge, because roughly 8 mm of
+ * an 80 mm roll sits under the mechanism (576 printable dots at 203 dpi).
+ * At 72 mm it fits. This is not the same question as the scaling, which
+ * turned out to be the page HEIGHT; the width only ever governed the bleed.
  */
-export const RECEIPT_WIDTH_MM = 80;
+export const RECEIPT_WIDTH_MM = 72;
 /** …in CSS pixels at 96 dpi, for the layout column. */
 export const RECEIPT_WIDTH_PX = Math.round((RECEIPT_WIDTH_MM / 25.4) * 96); // 302
 
@@ -131,9 +130,15 @@ html,body{height:auto}
  * The page height is measured from this on-screen layout and applied to the
  * printed page, so any difference between the two — a wider column wrapping
  * fewer lines, say — shows up as a receipt cut short or a tail of blank
- * paper. 302px is 80mm at 96dpi — the width of the roll.
+ * paper. 272px is 72mm at 96dpi — an 80mm roll's printable width.
+ *
+ * LEFT-aligned, not centred. Centring a 72mm column inside whatever page the
+ * driver reports puts 4mm of slack on each side, which pushes the right-hand
+ * AMOUNT column past the last printable dot — the bleed in the PO's photo,
+ * where "LKR 1,450.00" printed as "LKR 1,450.0". Starting at the printable
+ * origin keeps the full width available to the content.
  */
-body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:302px;max-width:100%;margin:0 auto;padding:0 2mm;color:#000;background:#fff}
+body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:272px;max-width:100%;margin:0;padding:0 2mm;color:#000;background:#fff}
 .c{text-align:center}
 .logo{display:block;margin:0 auto 6px;max-width:180px;max-height:110px;object-fit:contain}
 h1{font-size:15px;margin:0 0 2px;letter-spacing:.02em}
@@ -156,17 +161,10 @@ td{padding:2px 0;vertical-align:top}
 .ft{margin-top:12px;font-size:11px;white-space:pre-line}
 .copy{margin-top:4px;font-size:11px;font-weight:bold}
 /*
- * Out of flow deliberately: the page height is measured from this document,
- * and an in-flow button that only disappears at print time adds its height
- * to every receipt as blank paper after the footer.
- */
-.btn{position:fixed;top:6px;right:6px;padding:6px 12px;cursor:pointer;font:inherit;z-index:2}
-/*
  * In print the body fills the page exactly — no max-width, and the side
  * padding in millimetres so it is the same physical margin whatever the
  * roll. The printer's own unprintable edge does the rest.
  */
-@media print{.btn{display:none}}
 `;
 
 /**
@@ -275,51 +273,6 @@ export function renderThermalBill(input: ThermalBillInput): string {
     input.documentNumber,
   )}</title><style>${CSS}</style></head>
 <body>
-<button class="btn" onclick="window.print()">Print</button>
-<script>
-/*
- * D77 — the receipt prints and closes ITSELF.
- *
- * Driving this from the opener did not work. otherWindow.print() does not
- * block the CALLER, and Chrome ignores a close() issued from the opener
- * while the popup's print preview is up, so the receipt window was left
- * standing open — which is exactly what the PO reported twice.
- *
- * Run from inside the popup, both calls behave: window.print() blocks this
- * window's own script until the dialog is dismissed, and a window may always
- * close itself when it was opened by script.
- *
- * Images first. print() captures the document as it stands, so firing
- * while the logo is still decoding prints a blank box where the brand should
- * be. Waiting on load OR error — a broken logo must not hold the dialog
- * hostage — with a 4s ceiling so an unreachable image cannot mean a dialog
- * that never opens.
- */
-(function () {
-  var done = false;
-  function go() {
-    if (done) return;
-    done = true;
-    window.focus();
-    window.print();
-    window.close();
-  }
-  // Belt and braces: whichever the browser gives us, we only act once.
-  window.addEventListener('afterprint', function () { window.close(); });
-  var pending = 0;
-  var imgs = document.images;
-  for (var i = 0; i < imgs.length; i++) {
-    if (!imgs[i].complete) {
-      pending++;
-      imgs[i].addEventListener('load', settle);
-      imgs[i].addEventListener('error', settle);
-    }
-  }
-  function settle() { if (--pending <= 0) setTimeout(go, 80); }
-  if (pending === 0) setTimeout(go, 80);
-  setTimeout(go, 4000);
-})();
-</script>
 <div class="c">
 ${logo}
 ${!logo && name ? `<h1>${esc(name)}</h1>` : ''}

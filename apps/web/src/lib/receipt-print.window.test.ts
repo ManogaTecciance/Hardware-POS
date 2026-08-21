@@ -123,7 +123,7 @@ describe('page sizing is opt-in', () => {
   it('declares one when a caller asks for it, in lengths not `auto`', () => {
     beginPrintWindow({ fitToContent: true }).render('<p>bill</p>');
     // 1000px ÷ 96dpi × 25.4 = 264.58 → 265mm, +2mm of cutter margin.
-    expect(injected).toEqual(['@page{size:80mm 267mm;margin:0}']);
+    expect(injected).toEqual(['@page{size:72mm 267mm;margin:0}']);
     // `size: 80mm auto` is invalid CSS — the property takes one or two
     // lengths — and browsers drop the whole declaration.
     expect(injected[0]).not.toContain('auto');

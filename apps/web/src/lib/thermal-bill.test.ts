@@ -242,43 +242,46 @@ describe('the printed page itself', () => {
     expect(html).toContain('@page{');
   });
 
-  it('prints and closes itself from inside the popup', () => {
+  it('carries no script and no on-page button', () => {
     render();
     /*
-     * D77 — both calls live in the document, not in the opener.
-     * `otherWindow.print()` does not block the caller, and Chrome ignores a
-     * `close()` from the opener while the popup's preview is up: the receipt
-     * window stayed open for the PO twice. From inside, `print()` blocks its
-     * own window and a script-opened window may always close itself.
+     * D78 — the receipt is printed from a hidden IFRAME, so there is no
+     * window for a button to live in and nothing for an embedded script to
+     * drive. Three rounds went into making a popup close itself; removing
+     * the popup removed the problem instead.
+     *
+     * Asserted negatively because a stray script in a document that is
+     * written into an invisible frame would run unseen.
      */
-    const script = html.slice(html.indexOf('<script>'), html.indexOf('</script>'));
-    /*
-     * The close must come IMMEDIATELY after the print, in the same function.
-     * Asserted as a sequence rather than as two `toContain` checks, which
-     * both pass while the close lives only in the afterprint fallback — the
-     * exact hole a mutation found in the first version of this test.
-     */
-    expect(script).toMatch(/window\.print\(\);\s*window\.close\(\);/);
-    // Images first: print() captures the document as it stands, so firing
-    // mid-decode prints a blank box where the logo should be.
-    expect(script).toContain('document.images');
-    expect(script).toContain('addEventListener');
+    expect(html).not.toContain('<script');
+    expect(html).not.toContain('window.print()');
+    expect(html).not.toContain('class="btn"');
   });
 
-  it('keeps the column exactly one roll wide', () => {
+  it('keeps the column inside the printable width, left-aligned', () => {
     render();
     /*
-     * 302px is 80mm at 96dpi. Briefly narrowed to 72mm — an 80mm roll's
-     * printable area — on the theory that the mismatch was causing the
-     * scaling; it was not, and the receipt simply printed as a narrower
-     * column, which read as "smaller" too.
+     * 272px is 72mm at 96dpi — the PRINTABLE width of an 80mm roll, about
+     * 8mm of which sits under the mechanism. At 80mm the AMOUNT column bled
+     * off the edge and "LKR 1,450.00" printed as "LKR 1,450.0".
      *
-     * border-box matters: with content-box the side padding is added OUTSIDE
-     * the width. And the width is the same in both media, because the layout
-     * a guest reads and the layout the printer lays out must not differ.
+     * LEFT-aligned, not centred: centring a 72mm column inside whatever page
+     * the driver reports puts 4mm of slack on each side and pushes the right
+     * column past the last printable dot — the same bleed by another route.
+     *
+     * border-box matters too: with content-box the side padding is added
+     * OUTSIDE the width.
      */
     expect(html).toContain('box-sizing:border-box');
-    expect(html).toContain('width:302px');
+    expect(html).toContain('width:272px');
+    /*
+     * Scoped to the BODY rule. The logo is centred with `margin: 0 auto` and
+     * should be — an unscoped assertion matches that instead and passes
+     * whatever the body does.
+     */
+    const bodyRule = html.slice(html.indexOf('body{font-family'), html.indexOf('}', html.indexOf('body{font-family')));
+    expect(bodyRule).toContain('margin:0;');
+    expect(bodyRule).not.toContain('auto');
     const printBlock = html.slice(html.indexOf('@media print'));
     expect(printBlock).not.toContain('width:');
   });

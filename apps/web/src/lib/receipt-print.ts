@@ -1,5 +1,10 @@
 import { api } from './api';
-import { RECEIPT_WIDTH_MM, renderThermalBill, type ThermalBillInput } from './thermal-bill';
+import {
+  RECEIPT_WIDTH_MM,
+  RECEIPT_WIDTH_PX,
+  renderThermalBill,
+  type ThermalBillInput,
+} from './thermal-bill';
 import type { Session } from './auth';
 import type { CartItem } from './cart';
 import { computeLine } from './cart';
@@ -69,6 +74,95 @@ let printTimer: number | null = null;
  * `abort()` exists because a window opened up front must not be left blank
  * and orphaned when the data it was opened for fails to arrive.
  */
+/**
+ * D78 — print a receipt from a hidden IFRAME, not a popup window.
+ *
+ * Three rounds were spent trying to make a popup close itself: the opener
+ * cannot reliably close it (Chrome ignores `close()` while the preview is
+ * up, and does not deliver `afterprint` to a listener the opener
+ * registered), and a script inside the document did not do it either.
+ *
+ * An iframe removes the problem rather than patching it. There is no window
+ * to close: the print dialog opens over the app, and when it is dismissed
+ * the operator is already back where they were. Cleanup is a detached DOM
+ * node — if it were ever delayed, nobody would see anything, which is the
+ * opposite of a receipt window left standing open.
+ *
+ * It also drops the popup blocker from the picture entirely, so the document
+ * profile can be fetched before printing without racing a user gesture.
+ */
+export function printReceipt(
+  html: string,
+  options: { fitToContent?: boolean; paperWidthMm?: number } = {},
+): void {
+  const widthMm = options.paperWidthMm ?? RECEIPT_WIDTH_MM;
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.title = 'Receipt';
+  /*
+   * Off-screen rather than zero-sized: the document has to LAY OUT at the
+   * receipt's true width, because the page height is measured from it. A
+   * 0×0 frame lays out at zero width, wraps every line, and would report a
+   * height that has nothing to do with the printed bill.
+   */
+  frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${RECEIPT_WIDTH_PX}px;height:0;border:0;visibility:hidden`;
+  document.body.appendChild(frame);
+
+  const win = frame.contentWindow;
+  const doc = frame.contentDocument ?? win?.document;
+  if (!win || !doc) {
+    frame.remove();
+    return;
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const cleanup = () => frame.remove();
+
+  void whenImagesSettle(doc).then(() => {
+    if (options.fitToContent !== false) fitPageToContent(win, widthMm);
+    // A beat for the injected @page rule and final layout to take effect.
+    window.setTimeout(() => {
+      win.focus();
+      win.print();
+      /*
+       * Removed on `afterprint` where the browser sends it, and on a timer
+       * regardless. The frame is invisible, so a late removal costs nothing
+       * — and removing it too early would tear the document out from under
+       * a dialog that is still open.
+       */
+      win.addEventListener('afterprint', cleanup, { once: true });
+      window.setTimeout(cleanup, 60_000);
+    }, 120);
+  });
+}
+
+/**
+ * Resolve once every image has loaded or failed, with a ceiling.
+ *
+ * `print()` captures the document as it stands: fire it while the tenant's
+ * logo is still decoding and the logo prints as a blank box. `error` counts
+ * as settled — a broken image must not hold the dialog hostage — and the
+ * 4 s ceiling means an unreachable host cannot mean a dialog that never
+ * opens, which reads as "the button is broken".
+ */
+function whenImagesSettle(doc: Document): Promise<unknown> {
+  const pending = Array.from(doc.images)
+    .filter((img) => !img.complete)
+    .map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          img.addEventListener('load', () => resolve(), { once: true });
+          img.addEventListener('error', () => resolve(), { once: true });
+        }),
+    );
+  return Promise.race([
+    Promise.all(pending),
+    new Promise((resolve) => window.setTimeout(resolve, 4000)),
+  ]);
+}
+
 export interface PendingPrintWindow {
   render: (html: string) => void;
   abort: () => void;
@@ -254,7 +348,7 @@ export function printTableBill(
  * bill and a whole bill are the same document with different lines.
  */
 export function printSplitBill(input: SplitBillInput): void {
-  openPrintWindow(renderSplitBill(input));
+  printReceipt(renderSplitBill(input));
 }
 
 export interface SplitBillInput {

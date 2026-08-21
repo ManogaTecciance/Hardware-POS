@@ -22,7 +22,7 @@ import { Permission } from '@/lib/permissions';
 import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import { getDocumentProfile } from '@/lib/document-template-service';
-import { beginPrintWindow, renderSplitBill } from '@/lib/receipt-print';
+import { printReceipt, renderSplitBill } from '@/lib/receipt-print';
 import { renderThermalBill } from '@/lib/thermal-bill';
 
 import { ItemSplitAssigner } from './item-split-assigner';
@@ -90,15 +90,13 @@ export function BillScreen({ session, saleId }: Props) {
   const printBill = async (view: BillView) => {
     setPrinting(true);
     /*
-     * D74 — the popup is opened HERE, in the click's own turn. Opening it
-     * after the profile fetch gambles on the browser's transient user
-     * activation not having lapsed, and on a slow connection it has: the
-     * popup is blocked and nothing at all appears to happen.
+     * D78 — no popup to open. The receipt prints from a hidden iframe, so
+     * there is no window to be blocked by a lapsed user gesture and none to
+     * be left open afterwards.
      */
-    const printWindow = beginPrintWindow();
     try {
       const profile = await getDocumentProfile(session);
-      printWindow.render(
+      printReceipt(
         renderThermalBill({
           profile,
           fallbackName: session.branchName ?? '',
@@ -127,8 +125,6 @@ export function BillScreen({ session, saleId }: Props) {
         }),
       );
     } catch (err) {
-      // A window opened up front must not be left blank and orphaned.
-      printWindow.abort();
       setError(err instanceof Error ? err.message : 'Could not prepare the bill');
     } finally {
       setPrinting(false);
@@ -332,12 +328,9 @@ export function BillScreen({ session, saleId }: Props) {
                           variant="ghost"
                           leftIcon={<Printer className="h-4 w-4" />}
                           onClick={() => {
-                            // D74 — same reasoning as the whole bill: the
-                            // popup opens in the click, not after the fetch.
-                            const w = beginPrintWindow();
                             void getDocumentProfile(session)
                               .then((profile) =>
-                                w.render(
+                                printReceipt(
                                   renderSplitBill({
                                     profile,
                                     storeName: session.branchName ?? '',
@@ -353,7 +346,7 @@ export function BillScreen({ session, saleId }: Props) {
                                   }),
                                 ),
                               )
-                              .catch(() => w.abort());
+                              .catch(() => undefined);
                           }}
                         >
                           Print
