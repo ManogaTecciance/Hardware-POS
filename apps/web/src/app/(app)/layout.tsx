@@ -34,11 +34,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <Sidebar />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <Header />
-                  {/* `pb-safe` sits on top of the padding so the last row of
-                      any scrollable page clears the home-indicator on
-                      notched iPads. The scroll container itself keeps
-                      p-4 / p-6 for actual content padding. */}
-                  <main className="min-h-0 flex-1 overflow-y-auto p-4 pb-safe md:p-6">
+                  {/*
+                    * D87 — the bottom padding is set ONCE, additively.
+                    *
+                    * This was `p-4 pb-safe md:p-6`, and `pb-safe` REPLACES
+                    * padding-bottom with `env(safe-area-inset-bottom)` — zero
+                    * on a desktop, a laptop, and any tablet without an inset.
+                    * So every page in the app ended flush against the bottom
+                    * of the scroll area with nothing under the last row.
+                    *
+                    * The sides and top keep their responsive padding; the
+                    * bottom comes from `.pb-page`, the only rule here that
+                    * touches padding-bottom, so nothing can silently
+                    * override it again.
+                    */}
+                  <main className="min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-page md:px-6 md:pt-6">
                     {/* Slice 8.6: one gate for every route, inside `main` so a
                         blocked page keeps the shell it was reached from — the
                         sidebar and header stay usable instead of the operator

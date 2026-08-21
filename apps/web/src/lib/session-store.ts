@@ -48,10 +48,26 @@ export function loadSession(): Session | null {
       window.localStorage.removeItem(STORAGE_KEY);
       return null;
     }
-    // Permissions are derived from the role, never trusted from storage: a
-    // session saved before a permission was added to ROLE_PERMISSIONS would
-    // otherwise hide new features (e.g. nav items) until re-login.
-    parsed.user.permissions = permissionsForRole(parsed.user.role);
+    /*
+     * D88 — trust what the server resolved, and re-derive only when there is
+     * nothing to trust.
+     *
+     * This used to overwrite the stored set with `permissionsForRole(role)` on
+     * every load. That is correct only for a user whose authority still comes
+     * from their enum role. A user linked to a custom role has the enum role
+     * CASHIER and an entirely different authority, so a waiter who pressed F5
+     * silently became a retail cashier: dine-in and bill splitting vanished,
+     * and Sales — which the API refuses them — appeared. `toSession` was fixed
+     * to keep the server's set at login; this threw it away again on the next
+     * page load, which is why the defect only ever showed after a reload.
+     *
+     * The original concern still holds for a session stored before the field
+     * existed: it has no permissions at all, and the enum is the only thing
+     * left to derive them from.
+     */
+    if (!Array.isArray(parsed.user.permissions) || parsed.user.permissions.length === 0) {
+      parsed.user.permissions = permissionsForRole(parsed.user.role);
+    }
     return parsed;
   } catch {
     return null;

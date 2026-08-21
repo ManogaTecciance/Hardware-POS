@@ -138,6 +138,42 @@ describe('the header, as the reference bill lays it out', () => {
     expect(html).toContain('Bill # S-000057');
     expect(html).toContain('M1/10');
   });
+
+  /*
+   * D87 — two people, two lines. The guest talked to the waiter and paid the
+   * cashier, and a bill that names only one of them cannot answer either
+   * question later.
+   */
+  it('names the cashier on a line of its own, directly under served-by', () => {
+    render({ servedBy: 'Nimal (waiter)', cashierName: 'Kamala' });
+
+    expect(html).toContain('Served By: Nimal (waiter)');
+    expect(html).toContain('Cashier: Kamala');
+    // Order matters: the two read as a pair, waiter first.
+    expect(html.indexOf('Served By:')).toBeLessThan(html.indexOf('Cashier:'));
+    // And they are separate lines, not one run-on.
+    expect(html).toMatch(/<div>Served By: [^<]*<\/div>\s*<div>Cashier: [^<]*<\/div>/);
+  });
+
+  it('omits the cashier line entirely when nobody is named', () => {
+    // Negative: the label must not survive as an empty row. A bill that says
+    // "Cashier:" and nothing else looks like data that went missing.
+    render({ cashierName: null });
+    expect(html).toContain('Served By: cashier');
+    expect(html).not.toContain('Cashier:');
+
+    render({ cashierName: undefined });
+    expect(html).not.toContain('Cashier:');
+
+    render({ cashierName: '' });
+    expect(html).not.toContain('Cashier:');
+  });
+
+  it('escapes the cashier name', () => {
+    render({ cashierName: 'A & <b>B</b>' });
+    expect(html).toContain('Cashier: A &amp; &lt;b&gt;B&lt;/b&gt;');
+    expect(html).not.toContain('<b>B</b>');
+  });
 });
 
 describe('the lines', () => {

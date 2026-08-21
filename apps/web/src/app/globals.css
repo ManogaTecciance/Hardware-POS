@@ -397,6 +397,7 @@ body {
  *   pb-safe-16, pb-safe-20  — additive: keep an existing bottom padding AND
  *                              add the safe-area inset on top. Used by
  *                              sticky POS bottom bars.
+ *   pb-page                  — the app shell's own bottom padding; see below.
  *
  * There is no `p-safe` shorthand; a fully safe-padded surface should list
  * the sides explicitly so a caller can't accidentally push a top-bar down
@@ -408,6 +409,26 @@ body {
 .pl-safe { padding-left: env(safe-area-inset-left); }
 .pb-safe-16 { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
 .pb-safe-20 { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+
+/*
+ * The app shell's bottom padding (D87).
+ *
+ * The shell used to say `p-4 pb-safe md:p-6`, and plain `pb-safe` REPLACES
+ * padding-bottom with `env(safe-area-inset-bottom)` — zero on a desktop, a
+ * laptop, and any tablet without an inset. Every page in the app therefore
+ * ended flush against the bottom of its scroll area with nothing under the
+ * last row.
+ *
+ * Its own class rather than `md:pb-safe-12`, because Tailwind only builds
+ * variants for utilities it knows about: a `md:` prefix on a custom class
+ * silently generates NOTHING, which is how the first attempt at this fix
+ * produced 32px at every width while looking correct in the markup. The
+ * breakpoint lives in the rule instead, where it cannot be dropped.
+ */
+.pb-page { padding-bottom: calc(2rem + env(safe-area-inset-bottom)); }
+@media (min-width: 48rem) {
+  .pb-page { padding-bottom: calc(3rem + env(safe-area-inset-bottom)); }
+}
 
 /*
  * Coarse-pointer hover neutralisation. `hover:` bg / border / shadow

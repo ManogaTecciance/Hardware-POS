@@ -111,6 +111,14 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.ORDER_CREATE,
       Permission.ORDER_EDIT_DRAFT,
       Permission.ORDER_SEND_TO_KITCHEN,
+      /*
+       * D87 — a seated guest asking for something to take home is still the
+       * waiter's order to take. Server-enforced: `takeaway.create` requires
+       * TAKEAWAY_CREATE, so without this the option would be visible and
+       * refused.
+       */
+      Permission.TAKEAWAY_VIEW,
+      Permission.TAKEAWAY_CREATE,
       Permission.BILL_VIEW,
       /*
        * D71 — the waiter splits the bill, because the waiter is the one the
@@ -186,12 +194,27 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Settles bills and collects payment.',
     isBuiltIn: false,
     permissions: [
+      /*
+       * D88 — every role inside a food-service workspace needs to READ the
+       * profile, because the profile is how the client learns it is a
+       * restaurant at all. Without it the navigation renders "Navigation
+       * unavailable" and /pos falls back to the retail checkout (D31).
+       *
+       * This was missing and nobody noticed: the session store used to
+       * re-derive permissions from the enum role on every page load, and the
+       * retail CASHIER enum carries PLATFORM_PROFILE_READ, so the till was
+       * borrowing it from a bug. Fixing the store exposed the gap.
+       */
+      Permission.PLATFORM_PROFILE_READ,
       Permission.SALE_READ,
       Permission.PRODUCT_READ,
       Permission.CUSTOMER_READ,
       Permission.CUSTOMER_MANAGE,
       Permission.TABLE_VIEW,
       Permission.TAKEAWAY_VIEW,
+      // D87 — the counter is where a takeaway order is taken; the till could
+      // see the queue but not add to it.
+      Permission.TAKEAWAY_CREATE,
       Permission.BILL_VIEW,
       Permission.BILL_SPLIT,
       Permission.PAYMENT_COLLECT,

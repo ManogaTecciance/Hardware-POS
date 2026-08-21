@@ -8,6 +8,14 @@ import type { PosMode } from './pos-mode-selector';
 interface Props {
   onSelect: (mode: PosMode) => void;
   onCancel: () => void;
+  /**
+   * D87 — the modes this user can actually use. Omitted means all three.
+   *
+   * An option a role cannot complete is worse than a missing one: it is a
+   * door that opens onto a refusal, and the operator has no way to know
+   * which of the three will work until they pick.
+   */
+  modes?: readonly PosMode[];
 }
 
 interface Option {
@@ -56,7 +64,8 @@ const OPTIONS: readonly Option[] = [
  * on the container so a screen reader announces "3 of 3, radio" for the
  * final option.
  */
-export function PosOrderTypeModal({ onSelect, onCancel }: Props) {
+export function PosOrderTypeModal({ onSelect, onCancel, modes }: Props) {
+  const options = modes ? OPTIONS.filter((o) => modes.includes(o.mode)) : OPTIONS;
   const [focusIdx, setFocusIdx] = React.useState(0);
   const buttonRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -107,7 +116,7 @@ export function PosOrderTypeModal({ onSelect, onCancel }: Props) {
         onKeyDown={onKey}
         className="grid grid-cols-1 gap-2 sm:grid-cols-3"
       >
-        {OPTIONS.map((o, i) => (
+        {options.map((o, i) => (
           <button
             key={o.mode}
             ref={(el) => {

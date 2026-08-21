@@ -141,16 +141,18 @@ function NavList({ collapsed, label }: { collapsed?: boolean; label: string }) {
  * entirely on AxloPOS was being told its books lived somewhere they do not.
  *
  * `QUICKBOOKS` keeps the sentence verbatim, so the Tile Shop sidebar is unchanged.
- * `null` renders nothing at all rather than inventing a replacement claim — while
- * the profile is unresolved the app does not yet know what to say, and saying
- * nothing is the only honest option.
+ * `null` renders nothing at all — no note, and no divider above it.
+ *
+ * D89 (PO, 2026-08-21): `NONE` returns null too. "Sales and catalogue are
+ * managed in AxloPOS" told an AxloPOS user they were using AxloPOS; it earned
+ * a rule and a block of rail that the QuickBooks note earns because it names
+ * a system somewhere else. The unresolved case keeps returning null for the
+ * original reason — the app does not yet know what to say.
  */
 function footerNote(accountingProvider: string | null | undefined): string | null {
   switch (accountingProvider) {
     case 'QUICKBOOKS':
       return 'QuickBooks is the inventory & accounting master.';
-    case 'NONE':
-      return 'Sales and catalogue are managed in AxloPOS.';
     default:
       return null;
   }

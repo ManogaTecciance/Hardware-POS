@@ -36,7 +36,16 @@ export interface ThermalBillInput {
   documentNumber: string;
   /** "M1/10" in the reference bill: the table, or Takeaway. */
   placeLabel?: string | null;
+  /** The WAITER who worked the table — captured on the Sale at close. */
   servedBy?: string | null;
+  /**
+   * D87 — whoever is printing this copy, resolved at print time from the
+   * signed-in user rather than stored on the Sale. "Served by" answers who
+   * looked after the table; this answers who handed over the paper, and a
+   * bill reprinted by a different person on a different shift should say so
+   * rather than repeat the first cashier's name.
+   */
+  cashierName?: string | null;
   issuedAt: Date;
   /** Marks a re-print so a duplicate cannot be passed off as the original. */
   copyLabel?: string | null;
@@ -329,6 +338,7 @@ ${input.copyLabel ? `<p class="copy">${esc(input.copyLabel)}</p>` : ''}
 
 <div class="meta">
 ${input.servedBy ? `<div>Served By: ${esc(input.servedBy)}</div>` : ''}
+${input.cashierName ? `<div>Cashier: ${esc(input.cashierName)}</div>` : ''}
 <div class="row"><span>${esc(date)}</span><span>${esc(time)}</span></div>
 <div class="row"><span>Bill # ${esc(input.documentNumber)}</span><span>${esc(
     input.placeLabel ?? '',

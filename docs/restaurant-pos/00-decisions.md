@@ -2919,6 +2919,118 @@ rate was set at 12:31; S-000007, closed at 12:32, carries 640.00, and every
 sale closed before it carries 0.00 and always will. A rate set today applies
 to tables closed after it, not to bills already raised.
 
+### D87 — the till prints, the waiter serves, and every page has a floor
+
+PO, 2026-08-21, four things in two messages.
+
+**Two names on the bill.** "Served By" is the waiter — the person the guest
+actually spoke to — and a new **Cashier** line under it names whoever pressed
+Print. They are different people and the receipt now says so, which is what
+makes a printed bill answerable: a guest querying the food knows who served
+them, and a manager querying the money knows who took it. The waiter comes
+from the session; the cashier is read from the printing user's own session at
+print time, not stored on the Sale — reprint it tomorrow from a different till
+and the line correctly names whoever reprinted it.
+
+**Only the till prints.** Print is gated on `PAYMENT_COLLECT`, which the
+waiter template does not carry and the cashier and owner do. The waiter still
+sees the whole bill, still splits it, still closes the table — they just have
+no Print button and no "Open billing" link, because handing a printed bill to
+a guest is a payment act and the waiter does not take payment.
+
+This is the frontend half of a rule the server already enforced (D31: hiding
+is usability, the server is the authority). `POST /v1/restaurant/billing/…`
+still refuses a waiter's token, and that refusal, not the missing button, is
+what protects the till.
+
+**Bottom padding — and a Tailwind trap worth recording.** Almost every
+restaurant screen ran its last row flush against the bottom of the scroll
+container. The app shell had `p-4 pb-safe md:p-6`; `pb-safe` sets
+`padding-bottom: env(safe-area-inset-bottom)` — which is **0 on every device
+without a notch**, and because it comes after `p-4` it *replaces* the 16px
+rather than adding to it. The screens with no bottom padding had it deleted by
+the class meant to protect it.
+
+My first fix was `pb-safe-8 md:pb-safe-12`, and it was wrong in a way that
+looked right in the markup: **Tailwind generates no variants for a custom
+class**, so `md:pb-safe-12` compiled to nothing at all. The shell now uses a
+single `.pb-page` that carries its own media query — `calc(2rem + env(...))`
+below 48rem, `calc(3rem + ...)` above. Measured in a real browser: 32px at
+390×844 and 48px at 1194×834, where it used to be 0.
+
+`TAB-PAD-001` reads the computed padding off the real scroll container rather
+than asserting a class name, so it fails on the `md:` trap, on a reverted
+`pb-safe`, and on a future shell that pads the wrong element.
+
+**The waiter's POS shows Dine In and Takeaway.** A waiter has no reason to
+raise a Delivery order — that is a counter and third-party channel — but a
+seated guest asking for something to take home is ordinary, so takeaway stays.
+The waiter and restaurant-cashier templates gained `TAKEAWAY_CREATE`
+(`TAKEAWAY_VIEW` too, for the waiter), and the order-type modal takes an
+explicit `modes` list instead of hard-coding all three. When only one mode is
+available the modal does not appear at all and the mode chip is hidden — a
+choice of one is not a choice.
+
+**Honest limit.** Mode filtering here is presentation. `PosOrderTypeModal`
+offers what the permissions allow; the server is what refuses a delivery
+order from a waiter's token, and it still does. Anyone reading the modes list
+as a security boundary would be reading it wrong.
+
+**Requires a reseed.** The two template grants only reach existing users
+through `pnpm db:seed`; roles already in the database keep the permissions
+they were created with.
+
+
+### D88 — a reload must not change who you are
+
+Found while verifying D87 in a browser, not by a test: the waiter's order-type
+chooser rendered with **no options at all**.
+
+`loadSession()` overwrote the stored permission set with
+`permissionsForRole(user.role)` on every read — the enum role, not the role
+row. For a user whose authority is a custom role that is simply the wrong set:
+the waiter's enum is CASHIER, so a page reload silently turned them into a
+retail cashier. `toSession` had already been fixed to keep what the server
+resolved at login; the store threw it away again on the next load, which is
+why the bug only ever appeared **after a refresh** and never during a session.
+
+What a waiter lost on F5: dine-in (`ORDER_SEND_TO_KITCHEN`), takeaway,
+bill splitting, opening a table. What they gained: `SALE_READ` — a Sales entry
+in the rail that the API refuses. The fix trusts the stored set and falls back
+to the enum only when there is nothing stored, which is the one case the
+original comment was actually about.
+
+**The gap it was hiding.** With the fallback gone, the restaurant cashier's
+navigation went blank and `/pos` fell back to the retail checkout: the
+`RESTAURANT_CASHIER` template never held `PLATFORM_PROFILE_READ`. It worked
+because the retail CASHIER enum carries that permission and every reload was
+handing it over. The template now holds it in its own right.
+
+This is the failure mode D30 exists for: two wrongs that cancelled, and no
+test could see either. The tripwire is a real jsdom round-trip through
+`saveSession`/`loadSession` asserting the stored set survives (positive) and
+that `SALE_READ` does not appear (negative), with three inline mutation
+proofs — unconditional re-derivation, merging both sets, and an inverted
+guard. Restoring the original line fails two of them.
+
+
+### D89 — the rail's footer note earns its space or leaves
+
+PO, 2026-08-21: remove "Sales and catalogue are managed in AxloPOS." from the
+sidebar.
+
+The QuickBooks note exists to answer a real question — *where do my books
+live?* — and its answer is somewhere else. The AxloPOS variant answered the
+same question with the name of the app the reader is already looking at, and
+charged a divider and a block of rail for it. `NONE` now returns null, which
+removes the note **and** the rule above it; the QuickBooks sentence is
+untouched, verbatim, per D16.
+
+The tripwire asserts both halves in one test — QuickBooks present, AxloPOS
+absent, and no empty divider left behind. Split in two, deleting the entire
+footer would leave the negative green and read as a pass. Mutation-proven both
+ways: restoring the sentence fails it, and deleting the whole footer fails it.
+
 ---
 
 ## Open decisions

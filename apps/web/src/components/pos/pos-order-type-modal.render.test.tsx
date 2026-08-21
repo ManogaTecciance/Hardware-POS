@@ -67,3 +67,40 @@ describe('PosOrderTypeModal', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * D87 — the modal offers only what the signed-in role can complete.
+ *
+ * An option a role cannot finish is worse than a missing one: it is a door
+ * that opens onto a refusal, and nothing on the screen says which of the
+ * three will work until the operator picks one. The waiter case is the live
+ * one — they take dine-in AND takeaway (a seated guest ordering something to
+ * take home is still their order) but not delivery.
+ */
+describe('D87 — mode filtering', () => {
+  it('shows only the modes it is given', () => {
+    render(
+      <PosOrderTypeModal
+        modes={['DINE_IN', 'TAKEAWAY']}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    // POSITIVE — both of the waiter's modes are offered…
+    expect(screen.getByText('Dine In')).toBeTruthy();
+    expect(screen.getByText('Takeaway')).toBeTruthy();
+    // …NEGATIVE — and the one they cannot complete is absent, not disabled.
+    expect(screen.queryByText('Delivery')).toBeNull();
+  });
+
+  it('shows all three when no restriction is given', () => {
+    render(<PosOrderTypeModal onSelect={vi.fn()} onCancel={vi.fn()} />);
+    /*
+     * The default has to stay open, or every existing caller silently loses
+     * options — which is the same defect in the other direction.
+     */
+    expect(screen.getByText('Dine In')).toBeTruthy();
+    expect(screen.getByText('Takeaway')).toBeTruthy();
+    expect(screen.getByText('Delivery')).toBeTruthy();
+  });
+});

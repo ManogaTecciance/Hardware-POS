@@ -41,6 +41,19 @@ interface Props {
 export function BillDialog({ session, saleId, title, onClose }: Props) {
   const router = useRouter();
   const { hasPermission } = useAuth();
+  /*
+   * D87 — printing the bill belongs to the till, not the floor.
+   *
+   * Gated on PAYMENT_COLLECT, which the restaurant Cashier and the Owner
+   * hold and the Waiter deliberately does not (D71). A waiter still READS
+   * the bill here — they closed the table and the guests are asking what
+   * they owe — they just do not hand over the paper.
+   *
+   * A dedicated BILL_PRINT permission would name the intent more exactly,
+   * but it would mean a catalogue change and a reseed on every machine for
+   * no behavioural difference: the set of roles is identical either way.
+   */
+  const canPrint = hasPermission(Permission.PAYMENT_COLLECT);
   const [bill, setBill] = React.useState<BillView | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [printing, setPrinting] = React.useState(false);
@@ -74,6 +87,9 @@ export function BillDialog({ session, saleId, title, onClose }: Props) {
           documentNumber: view.saleNumber,
           placeLabel: view.placeLabel,
           servedBy: view.servedByName,
+          // D87 — who is handing the paper over, now, not who closed the
+          // table. A reprint on a later shift names the person doing it.
+          cashierName: session.user.name,
           issuedAt: new Date(view.closedAt),
           lines: view.items.map((it) => ({
             name: it.name,
@@ -116,7 +132,7 @@ export function BillDialog({ session, saleId, title, onClose }: Props) {
         <>
           {/* The billing screen is where money is collected; this dialog is
               read-and-reprint. Offered only to a role that can settle. */}
-          {hasPermission(Permission.PAYMENT_COLLECT) ? (
+          {canPrint ? (
             <Button
               variant="ghost"
               leftIcon={<ExternalLink className="h-4 w-4" />}
@@ -128,14 +144,16 @@ export function BillDialog({ session, saleId, title, onClose }: Props) {
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
-          <Button
-            leftIcon={<Printer className="h-4 w-4" />}
-            isLoading={printing}
-            disabled={!bill}
-            onClick={() => bill && void print(bill)}
-          >
-            Print bill
-          </Button>
+          {canPrint ? (
+            <Button
+              leftIcon={<Printer className="h-4 w-4" />}
+              isLoading={printing}
+              disabled={!bill}
+              onClick={() => bill && void print(bill)}
+            >
+              Print bill
+            </Button>
+          ) : null}
         </>
       }
     >

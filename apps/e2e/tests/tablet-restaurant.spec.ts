@@ -438,3 +438,43 @@ test.describe('TAB-DINE — dine-in POS tablet layout', () => {
     expect(await contentScrollsSideways(page)).toBe(false);
   });
 });
+
+// ── The app shell leaves room under the last row ────────────────────────
+
+test.describe('TAB-PAD — page bottom padding', () => {
+  /**
+   * D87 — the shell said `p-4 pb-safe md:p-6`, and plain `pb-safe` REPLACES
+   * padding-bottom with `env(safe-area-inset-bottom)`: zero on a desktop, a
+   * laptop, and any tablet without an inset. Every page in the app ended
+   * flush against the bottom of its scroll area.
+   *
+   * Measured, not read off the markup: the first attempt at the fix used
+   * `md:pb-safe-12`, and Tailwind builds no variants for custom classes, so
+   * the class was in the DOM and generated no CSS at all. The markup looked
+   * right and the padding was still wrong.
+   */
+  test('TAB-PAD-001 the scroll container has real padding under its content', async ({ page }) => {
+    await signInAsRestaurantOwner(page);
+    await page.goto('/orders');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('heading', { name: /^orders$/i }).first()).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const padding = await page.evaluate(() => {
+      const main = document.querySelector('main');
+      if (!main) throw new Error('no <main>: the app shell did not render');
+      return {
+        bottom: parseFloat(getComputedStyle(main).paddingBottom),
+        top: parseFloat(getComputedStyle(main).paddingTop),
+      };
+    });
+
+    // POSITIVE — a real gap under the last row, not the zero an absent
+    // safe-area inset collapses to.
+    expect(padding.bottom, 'padding-bottom on <main>').toBeGreaterThanOrEqual(24);
+    // …and the top is untouched, so this is a bottom fix and not a blanket
+    // padding change that happens to satisfy the assertion above.
+    expect(padding.top).toBeGreaterThanOrEqual(16);
+  });
+});

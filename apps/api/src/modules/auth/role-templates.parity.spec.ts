@@ -169,6 +169,59 @@ describe('templates are selected by business type', () => {
   });
 
   /**
+   * D88 — the profile is how the client learns it is a restaurant at all:
+   * the navigation, the POS fork and every mode flag hang off it. A
+   * food-service role without this permission gets "Navigation unavailable"
+   * and the RETAIL checkout, which is exactly what happened to the till.
+   *
+   * The gap survived because the session store used to re-derive permissions
+   * from the enum role on every page load, and the retail CASHIER enum
+   * carries PLATFORM_PROFILE_READ — so the missing grant was borrowed from a
+   * bug. Asserted across ALL food-service templates, not just the one that
+   * broke, because the next one added will have the same requirement.
+   */
+  it('every food-service template can read the platform profile', () => {
+    const missing = RESTAURANT_ROLE_TEMPLATES.filter(
+      (t) => !t.permissions.includes(Permission.PLATFORM_PROFILE_READ),
+    ).map((t) => t.key);
+    expect(missing).toEqual([]);
+
+    // The filter must have inspected something (D30.7): an empty template
+    // list would satisfy the assertion above while proving nothing. OWNER is
+    // absent by design — it is a built-in, added alongside these three by
+    // `roleTemplatesForBusinessType`.
+    expect(RESTAURANT_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual(
+      ['KITCHEN_STAFF', 'RESTAURANT_CASHIER', 'WAITER'].sort(),
+    );
+    // …and the built-in the tenant actually gets alongside them holds it too.
+    expect(
+      roleTemplatesForBusinessType('RESTAURANT').every((t) =>
+        t.permissions.includes(Permission.PLATFORM_PROFILE_READ),
+      ),
+    ).toBe(true);
+  });
+
+  /**
+   * D87 — the floor takes takeaway orders too. A seated guest asking for
+   * something to take home is still the waiter's order, and the till is where
+   * a walk-in takeaway is rung up.
+   */
+  it('the waiter and the till can both raise a takeaway order', () => {
+    const waiter = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === 'WAITER')!;
+    const till = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === 'RESTAURANT_CASHIER')!;
+
+    expect(waiter.permissions).toContain(Permission.TAKEAWAY_CREATE);
+    expect(waiter.permissions).toContain(Permission.TAKEAWAY_VIEW);
+    expect(till.permissions).toContain(Permission.TAKEAWAY_CREATE);
+
+    // NEGATIVE — the two roles are still different. The waiter does not take
+    // money, and the till does not send food to the kitchen; the POS mode
+    // list is built from exactly these two facts (D87).
+    expect(waiter.permissions).not.toContain(Permission.PAYMENT_COLLECT);
+    expect(till.permissions).not.toContain(Permission.ORDER_SEND_TO_KITCHEN);
+  });
+
+  /**
    * D68 — kitchen staff work the board and nothing else. Asserted as an
    * EXACT set: a permission quietly added here is the difference between
    * "marks food done" and "can settle a table's bill", and the pass is the

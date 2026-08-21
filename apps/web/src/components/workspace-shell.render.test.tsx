@@ -259,6 +259,32 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     expect(within(mainNav()).getByRole('status').textContent).toMatch(/unavailable/i);
   });
 
+  /*
+   * D89 — the footer note names an external system or renders nothing.
+   *
+   * Asserted as a PAIR in one test: the QuickBooks sentence must survive
+   * verbatim (D16 — Tile Shop wording is not edited to accommodate a
+   * restaurant change) and the AxloPOS sentence must be gone. Split into two
+   * tests, a mistake that deleted the whole footer would leave the negative
+   * green and read as a pass.
+   */
+  it('D89 — the footer names QuickBooks and says nothing at all for AxloPOS', async () => {
+    profileState = { status: 'ready', profile: profile('HARDWARE', LEGACY) };
+    const tileShop = render(<Sidebar />);
+    await settle();
+    expect(tileShop.container.textContent).toContain(
+      'QuickBooks is the inventory & accounting master.',
+    );
+
+    profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
+    const restaurant = render(<Sidebar />);
+    await settle();
+    expect(restaurant.container.textContent).not.toMatch(/managed in AxloPOS/i);
+    // …and no empty divider left behind where the sentence used to sit: the
+    // note's container is gone, not merely blank.
+    expect(restaurant.container.querySelectorAll('.border-t.border-border.p-4')).toHaveLength(0);
+  });
+
   it('permission gating still applies inside a workspace', async () => {
     role = 'CASHIER';
     render(<Sidebar />);

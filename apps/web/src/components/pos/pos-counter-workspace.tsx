@@ -84,6 +84,29 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
    * money, so a role can split four ways and still not settle any of them.
    */
   const canSplitBill = hasPermission(Permission.BILL_SPLIT);
+  /*
+   * D87 — the modes this user can actually use.
+   *
+   * Dine In and Takeaway are both real, server-enforced capabilities
+   * (ORDER_SEND_TO_KITCHEN and TAKEAWAY_CREATE), and a waiter holds both — a
+   * seated guest asking for something to take home is still their order.
+   *
+   * Delivery is the odd one. Server-side it IS a takeaway order: the same
+   * endpoint, the same permission, with the address in the notes. So hiding
+   * it from the floor is USABILITY, not authorization, and there is no
+   * permission that would make it otherwise without inventing one the server
+   * cannot enforce. PAYMENT_COLLECT is the honest proxy: taking an order you
+   * will not be there to settle belongs to whoever settles it.
+   */
+  const availableModes = React.useMemo(() => {
+    const modes: PosMode[] = [];
+    if (canSendToKitchen) modes.push('DINE_IN');
+    if (canPlaceTakeaway) modes.push('TAKEAWAY');
+    if (canPlaceTakeaway && hasPermission(Permission.PAYMENT_COLLECT)) modes.push('THIRD_PARTY');
+    return modes;
+  }, [canSendToKitchen, canPlaceTakeaway, hasPermission]);
+  /** Asking is a question with one answer — skip it and open that mode. */
+  const soleMode = availableModes.length === 1 ? availableModes[0]! : null;
   const canDiscount = hasPermission(Permission.DISCOUNT_APPROVE);
   const discountLimit = discountLimitFor(session.user.role);
 
@@ -165,6 +188,17 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
     // does not touch tenant settings API today. Kept at 0 unless the
     // future settings hook lands. Server always reconciles.
   }, [session, branchId]);
+
+  /*
+   * D87 — land a dine-in-only role straight in Dine In. In an effect rather
+   * than during render: `onModeChange` rewrites the URL, and a render-phase
+   * router call is a React warning at best and a loop at worst.
+   */
+  React.useEffect(() => {
+    if (mode || !soleMode) return;
+    setMode(soleMode);
+    onModeChange(soleMode);
+  }, [mode, soleMode, onModeChange]);
 
   // ── Draft edits ─────────────────────────────────────────────────────────
   const addOrEdit = (line: DraftLine, editingKey?: string) => {
@@ -360,10 +394,14 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const placeOrder = isDineIn ? () => void sendRound() : openCustomer;
   const canPlace = isDineIn ? canSendToKitchen && tableSession !== null : canPlaceTakeaway;
 
-  // First tap: pick a mode. No mode = the Order Type modal shows.
+  // First tap: pick a mode. No mode = the Order Type modal shows — unless
+  // there is only one mode this role can use, in which case asking is a
+  // question with one answer.
   if (!mode) {
+    if (soleMode) return null; // the effect above selects it
     return (
       <PosOrderTypeModal
+        modes={availableModes}
         onSelect={(m) => {
           setMode(m);
           onModeChange(m);
@@ -380,7 +418,8 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
           title="POS"
           description={`${session.branchName} · Counter 1`}
         />
-        <PosModeChip mode={mode} onChange={resetMode} />
+        {/* D87 — no Change chip when there is nothing to change to. */}
+        {soleMode ? null : <PosModeChip mode={mode} onChange={resetMode} />}
       </div>
 
       {/* D69 — dine-in's one structural difference from a counter order: the

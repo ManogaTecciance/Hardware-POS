@@ -57,6 +57,12 @@ export function BillScreen({ session, saleId }: Props) {
   const { hasPermission } = useAuth();
   const canSplit = hasPermission(Permission.BILL_SPLIT);
   const canCollect = hasPermission(Permission.PAYMENT_COLLECT);
+  /*
+   * D87 — printing the bill belongs to the till. A waiter reaches this screen
+   * (they hold BILL_VIEW and just closed the table) but hands over no paper;
+   * the same gate gives the Cashier and the Owner both buttons.
+   */
+  const canPrint = canCollect;
 
   const [bill, setBill] = React.useState<BillView | null>(null);
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
@@ -104,6 +110,8 @@ export function BillScreen({ session, saleId }: Props) {
           documentNumber: view.saleNumber,
           placeLabel: view.placeLabel,
           servedBy: view.servedByName,
+        // D87 — who is handing the paper over, resolved now.
+        cashierName: session.user.name,
           issuedAt: new Date(view.closedAt),
           lines: view.items.map((it) => ({
             name: it.name,
@@ -174,15 +182,17 @@ export function BillScreen({ session, saleId }: Props) {
               <CardTitle>{bill.saleNumber}</CardTitle>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                leftIcon={<Printer className="h-4 w-4" />}
-                isLoading={printing}
-                onClick={() => void printBill(bill)}
-              >
-                Print bill
-              </Button>
+              {canPrint ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  leftIcon={<Printer className="h-4 w-4" />}
+                  isLoading={printing}
+                  onClick={() => void printBill(bill)}
+                >
+                  Print bill
+                </Button>
+              ) : null}
               <StatusBadge
                 label={bill.paymentStatus}
                 tone={
@@ -322,7 +332,8 @@ export function BillScreen({ session, saleId }: Props) {
                             Collect for split
                           </Button>
                         ) : null}
-                        {/* D51 — each party gets their own printed bill. */}
+                        {/* D51 — each party gets their own printed bill.
+                            D87 — and the same till-only gate applies. */}
                         <Button
                           size="sm"
                           variant="ghost"
