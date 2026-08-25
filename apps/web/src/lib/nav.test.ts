@@ -626,9 +626,16 @@ describe('D93 — any-of permission gates', () => {
   it('and the till still does NOT get the entries it has no business in', () => {
     const rail = labels(restaurantNav('RESTAURANT_CASHIER'));
 
-    // NEGATIVE, paired with the positive above so neither can pass on a rail
+    /*
+     * D94 (PO, 2026-08-25) — Kitchen LEFT this list: the till watches the board
+     * now. Read-only: `KITCHEN_STATUS_UPDATE` stays with the kitchen, and the
+     * board's Complete control is gated on it (kitchen-board.tsx:51), so a
+     * cashier sees the queue and cannot mark it done.
+     */
+    expect(rail).toContain('Kitchen');
+
+    // NEGATIVE, paired with the positives so neither can pass on a rail
     // that renders everything or nothing.
-    expect(rail).not.toContain('Kitchen'); // kot:view — the board is not theirs
     expect(rail).not.toContain('Reports');
     expect(rail).not.toContain('Settings');
     // Tables still hangs on SALE_CREATE and is deliberately NOT part of this
@@ -640,6 +647,17 @@ describe('D93 — any-of permission gates', () => {
   it('waiter and owner keep POS, so the change is strictly additive', () => {
     expect(labels(restaurantNav('WAITER'))).toContain('POS');
     expect(labels(nav('RESTAURANT', RESTAURANT_MODULES, 'OWNER'))).toContain('POS');
+  });
+
+  it('D94 — the till sees the board but cannot work it', () => {
+    const till = permissionsOfTemplate('RESTAURANT_CASHIER');
+
+    // The rail entry is KOT_VIEW…
+    expect(till(Permission.KOT_VIEW)).toBe(true);
+    // …and the capability that changes a ticket is NOT the till's. This pair is
+    // the whole point: a read-only board. If the second ever flips, the cashier
+    // gains the power to mark food done from behind the counter.
+    expect(till(Permission.KITCHEN_STATUS_UPDATE)).toBe(false);
   });
 
   it('kitchen staff still get no POS, and are not simply getting nothing', () => {

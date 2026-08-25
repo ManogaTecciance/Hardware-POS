@@ -194,6 +194,8 @@ export const RESTAURANT_SEED = {
   cashierPin: '3333',
   /** D69/D70/D71 — the dine-in flow belongs to the waiter. */
   waiter: { email: 'waiter@axlopos.test', password: 'Restaurant123!' },
+  /** D68 — the board is theirs to work; D94 gave the till a read-only view. */
+  kitchen: { email: 'kitchen@axlopos.test', password: 'Restaurant123!' },
   tenantId: 'tnt_resto',
   workspace: 'restaurant-demo',
   branchId: 'brn_resto',

@@ -206,6 +206,16 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
        * borrowing it from a bug. Fixing the store exposed the gap.
        */
       Permission.PLATFORM_PROFILE_READ,
+      /*
+       * D94 (PO, 2026-08-25) — the till watches the board too.
+       *
+       * KOT_VIEW and nothing more: the board's Complete control is gated on
+       * KITCHEN_STATUS_UPDATE, which the till does NOT hold, so this is a
+       * read-only view of what the kitchen is doing — which is what a cashier
+       * fielding "is table six's food ready?" needs. Marking a ticket done
+       * stays with the people who cooked it (D68).
+       */
+      Permission.KOT_VIEW,
       Permission.SALE_READ,
       Permission.PRODUCT_READ,
       Permission.CUSTOMER_READ,

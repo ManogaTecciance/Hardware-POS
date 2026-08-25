@@ -3299,6 +3299,37 @@ comment says it exists only for the rail gate this decision removes, and closing
 a table needs `TABLE_CLOSE`, not `SALE_CREATE`. Removing it is a separate
 security decision and needs a reseed.
 
+
+### D94 — the till watches the board
+
+PO, 2026-08-25: "Show the kitchen tab to the cashier as well."
+
+`KOT_VIEW`, granted to `RESTAURANT_CASHIER`, and nothing else. The board's
+"Mark done" control is gated on `KITCHEN_STATUS_UPDATE`
+(`kitchen-board.tsx:51`), which the till does not hold, so this is a read-only
+view of what the kitchen is doing — a cashier fielding "is table six's food
+ready?" can answer it. Marking a ticket done stays with the people who cooked
+it (D68), and the server refuses the update regardless of what the screen
+shows.
+
+Note this is a **grant**, not a gate change, and deliberately so. D93 moved the
+POS rail entry off a borrowed permission because the till already held the
+capability the screen offers; here the till held *no* kitchen capability at
+all, so widening the `/kitchen` gate to some permission it happens to have
+would have been exactly the `SALE_CREATE` proxy mistake D93 was written
+against. The honest change is the one that says what it means: the cashier may
+read the board.
+
+It reaches existing users through `pnpm db:seed`.
+
+**Proving a read-only board is harder than it looks.** "The till has no Mark
+done button" is also what an empty board, a failed request and a broken
+selector each produce — the first probe returned zero for kitchen staff too,
+which would have shipped as evidence of nothing. `WS-408` asserts the contrast
+on the same board: the till sees N Details buttons and zero Mark done, kitchen
+staff see N Details and N Mark done. Mutation-proven — granting the till
+`KITCHEN_STATUS_UPDATE` fails both the unit test and the e2e.
+
 ---
 
 ## Open decisions

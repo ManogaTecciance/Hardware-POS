@@ -217,10 +217,13 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
 
     // POSITIVE — the destination the complaint was about.
     expect(flat, 'the till needs a POS entry to place takeaway/delivery orders').toContain('POS');
+    // D94 — the till watches the board too, read-only (Complete is gated on
+    // KITCHEN_STATUS_UPDATE, which they do not hold).
+    expect(flat, 'the till watches the kitchen board').toContain('Kitchen');
     // NEGATIVE, in the same test — a rail that rendered everything would pass
-    // the line above just as happily. The kitchen board is not the till's.
-    expect(flat, 'the till should not get the kitchen board').not.toContain('Kitchen');
+    // the lines above just as happily.
     expect(flat, 'the till should not get Settings').not.toContain('Settings');
+    expect(flat, 'the till should not get Reports').not.toContain('Reports');
 
     // …and the screen behind the entry offers both order types.
     await page.getByRole('link', { name: 'POS', exact: true }).first().click();
@@ -239,6 +242,55 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     // NEGATIVE — Dine In is the waiter's; the till cannot send to the kitchen,
     // and offering it would be offering a 403 three taps later.
     await expect(page.getByRole('radio', { name: /Dine In/ })).toHaveCount(0);
+  });
+
+  test('WS-408 the till watches the kitchen board but cannot work it', async ({ page }) => {
+    /*
+     * D94 (PO): the cashier gets the board. KOT_VIEW and nothing more — the
+     * Mark done control is gated on KITCHEN_STATUS_UPDATE, which stays with
+     * the people who cooked the food (D68).
+     *
+     * Asserted as a CONTRAST against kitchen staff on the same board, because
+     * "the till has no Mark done button" is also what an empty board, a failed
+     * request and a broken selector all look like. The Details count is the
+     * positive control: same tickets, same page, one control missing.
+     */
+    await signIn(page, RESTAURANT_SEED.cashier);
+    await page.goto('/kitchen');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('heading', { name: 'Kitchen' })).toBeVisible({ timeout: 20_000 });
+
+    const tillDetails = await page.getByRole('button', { name: /details/i }).count();
+    const tillMarkDone = await page.getByRole('button', { name: /mark done/i }).count();
+    expect(tillDetails, 'the till should see tickets on the board').toBeGreaterThan(0);
+    expect(tillMarkDone, 'the till must not be able to mark food done').toBe(0);
+
+    /*
+     * Kitchen staff in a SECOND context rather than a second sign-in on the same
+     * page: re-visiting /login while already authenticated leaves the email
+     * field prefilled and unfillable, and the contrast is only worth anything
+     * if both halves are in one test.
+     */
+    const kitchenContext = await page.context().browser()!.newContext();
+    try {
+      const kitchenPage = await kitchenContext.newPage();
+      await signIn(kitchenPage, RESTAURANT_SEED.kitchen);
+      await kitchenPage.goto('/kitchen');
+      await kitchenPage.waitForLoadState('networkidle');
+      await expect(kitchenPage.getByRole('heading', { name: 'Kitchen' })).toBeVisible({
+        timeout: 20_000,
+      });
+
+      // The control EXISTS on the same board — so the zero above is about the
+      // permission, not about an empty board or a selector matching nothing.
+      expect(
+        await kitchenPage.getByRole('button', { name: /mark done/i }).count(),
+        'kitchen staff must still be able to mark food done',
+      ).toBeGreaterThan(0);
+      expect(await kitchenPage.getByRole('button', { name: /details/i }).count()).toBe(tillDetails);
+    } finally {
+      await kitchenContext.close();
+    }
   });
 
   test('WS-407 a deep link to a mode the till cannot work asks instead of opening it', async ({
