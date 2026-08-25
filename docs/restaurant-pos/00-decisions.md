@@ -3492,6 +3492,58 @@ than dangerous — the default is the working state — but a branch that genuin
 wants takeaway off has no screen for it. Worth adding beside the charges when
 somebody needs it.
 
+
+### D98 — the counter receipt prints itself
+
+PO, 2026-08-25: once a takeaway order is placed by the cashier, the ticket goes
+to the kitchen and "receipt must be immediately printed without showing the
+print window to the user".
+
+**The kitchen half already worked.** `TakeawayService.create` calls
+`generateTicketsForRound` inside the same transaction that writes the order, so
+a ticket exists before the response returns. Confirmed rather than assumed:
+the order placed while verifying this has a `QUEUED` ticket at the Grill
+station.
+
+**The receipt half did not exist at all.** The completion screen showed a
+"Receipt ready" indicator, which was an indicator and nothing more — no receipt
+was ever produced. It prints now, automatically, the moment payment succeeds.
+
+It prints from the SALE, not from the cart. The server decides the totals — the
+service charge, the tax and any rounding are applied when the sale is created —
+and paper that disagrees with the money actually taken is worse than no paper.
+So the flow fetches the bill it just created and renders that.
+
+**Printing must not be able to fail the order.** By the time the receipt is
+attempted, the food is on its way to the kitchen and the money is collected. A
+printer out of paper is a reprint, not a rollback, so the failure is caught and
+reported on the completion screen — "Receipt not printed — reprint from
+Orders" — rather than thrown. The screen tells the truth either way instead of
+claiming a receipt that never came out.
+
+**No window, and one print.** Verified by counting: placing a real order from
+the cashier's console produced exactly **one** `print()` call and **zero**
+popup windows, with no click of any kind. The hidden-iframe path (D78) is what
+makes that true.
+
+**The print dialog itself is not ours to remove**, and D74 already recorded
+why: only Chrome's `--kiosk-printing` launch flag sends `window.print()`
+straight to the default printer, and a page cannot set it. On a till started
+with that flag this is now the entire interaction — order placed, ticket in the
+kitchen, receipt out of the printer, nothing clicked. Without it Chrome shows
+its preview, which is a property of the browser rather than of this code.
+
+**One map, not three.** The `BillView` → printable-HTML mapping existed twice,
+byte-for-byte identical, in `bill-screen.tsx` and `bill-dialog.tsx`, and this
+needed a third caller. It lives in `lib/restaurant/bill-print.ts` now and all
+three use it. Both former copies did the fetch, the map and the print in one
+function, so the part most worth testing — that every money row reaches the
+paper — had no test in either. It has one now, asserting the whole object at
+once: a field DROPPED from the map is the failure that matters, and a
+field-by-field test only catches the fields somebody thought to list.
+Mutation-proven by deleting the service charge and the packaging charge from
+the map.
+
 ---
 
 ## Open decisions

@@ -21,6 +21,8 @@ import { NumericKeypad } from '../payment/numeric-keypad';
 import type { DraftLine } from '../pos-types';
 import type { PosMode } from '../pos-mode-selector';
 import type { ChosenCustomer } from './customer-capture-popup';
+import { printSaleReceipt } from '@/lib/restaurant/bill-print';
+
 import type { CompletionSummary } from './order-completion-screen';
 
 interface Props {
@@ -183,6 +185,7 @@ export function PaymentPopup(props: Props) {
 
       let saleId: string | null = null;
       let paidNow = false;
+      let receiptPrinted = false;
 
       if (!isDelivery) {
         // Step 2: hand over → creates a Sale (UNPAID). The updated
@@ -207,6 +210,28 @@ export function PaymentPopup(props: Props) {
               reference: reference.trim() || undefined,
             });
             paidNow = true;
+
+            /*
+             * D98 — the receipt prints itself.
+             *
+             * A counter order is handed over at the counter: the operator has
+             * the customer in front of them and nothing to click. It prints
+             * from the SALE rather than from the cart, because the server is
+             * what decided the totals — service charge, tax and rounding are
+             * applied when the sale is created, and paper that disagrees with
+             * the money taken is worse than no paper.
+             *
+             * Failure here must not fail the order. The food is already on its
+             * way to the kitchen and the money is already collected; a printer
+             * that is out of paper is a reprint, not a rollback. The
+             * completion screen reports it, and Orders can reprint.
+             */
+            try {
+              await printSaleReceipt(session, saleId, { cashierName: session.user.name });
+              receiptPrinted = true;
+            } catch {
+              receiptPrinted = false;
+            }
           } catch (err) {
             // Silent failure would be worse than reporting: surface but
             // still complete the order so the KOT is not orphaned.
@@ -227,6 +252,7 @@ export function PaymentPopup(props: Props) {
         method: paidNow ? method : null,
         saleId,
         takeawayId: takeawayRow.id,
+        receiptPrinted,
       });
     } catch (err) {
       if (err instanceof ApiError) {

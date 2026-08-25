@@ -7,13 +7,10 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { useAuth, type Session } from '@/lib/auth';
-import { getDocumentProfile } from '@/lib/document-template-service';
 import { Permission } from '@/lib/permissions';
-import { printReceipt } from '@/lib/receipt-print';
+import { printBillView } from '@/lib/restaurant/bill-print';
 import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
-import { getActiveCurrency } from '@/lib/tenant-money';
-import { renderThermalBill } from '@/lib/thermal-bill';
 import type { BillView } from '@/lib/restaurant/types';
 
 interface Props {
@@ -77,39 +74,17 @@ export function BillDialog({ session, saleId, title, onClose }: Props) {
 
   const print = async (view: BillView) => {
     setPrinting(true);
+    /*
+     * D78 — no popup to open. The receipt prints from a hidden iframe, so
+     * there is no window to be blocked by a lapsed user gesture and none to
+     * be left open afterwards.
+     *
+     * D98 — the map from a bill to printable HTML lives in one place now. It
+     * was written out twice, identically, here and in the other bill screen,
+     * and the counter's automatic receipt would have made three.
+     */
     try {
-      const profile = await getDocumentProfile(session);
-      printReceipt(
-        renderThermalBill({
-          profile,
-          fallbackName: session.branchName ?? '',
-          currency: getActiveCurrency(),
-          documentNumber: view.saleNumber,
-          placeLabel: view.placeLabel,
-          servedBy: view.servedByName,
-          // D87 — who is handing the paper over, now, not who closed the
-          // table. A reprint on a later shift names the person doing it.
-          cashierName: session.user.name,
-          issuedAt: new Date(view.closedAt),
-          lines: view.items.map((it) => ({
-            name: it.name,
-            variantName: it.variantName,
-            quantity: it.quantity,
-            lineTotal: it.lineTotal,
-            specialInstructions: it.specialInstructions,
-          })),
-          subtotal: view.subtotal,
-          discount: view.totalDiscount,
-          serviceCharge: view.serviceChargeAmount,
-          packaging: view.packagingCharge,
-          tax: view.taxAmount,
-          total: view.total,
-          paid: view.paidAmount,
-          balance: view.balanceAmount,
-          payments: view.payments.map((p) => ({ method: p.method, amount: p.amount })),
-          note: profile.billNote || null,
-        }),
-      );
+      await printBillView(session, view, { cashierName: session.user.name });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not prepare the bill');
     } finally {

@@ -18,6 +18,14 @@ export interface CompletionSummary {
   method: PaymentMethod | null;
   saleId: string | null;
   takeawayId: string;
+  /**
+   * D98 — whether the receipt actually reached the printer.
+   *
+   * Reported rather than assumed. The order completes either way (the food is
+   * cooking and the money is taken), so a printer that is out of paper must
+   * say so here instead of leaving the operator to notice nothing came out.
+   */
+  receiptPrinted: boolean;
 }
 
 interface Props {
@@ -77,8 +85,16 @@ export function OrderCompletionScreen({ summary, onNewOrder, onViewOrder }: Prop
         />
         <StatusRow
           icon={<Receipt className="h-4 w-4" />}
-          label="Receipt ready"
-          on={summary.paidNow}
+          label={
+            isDelivery
+              ? 'Receipt ready'
+              : summary.receiptPrinted
+                ? 'Receipt printed'
+                : summary.paidNow
+                  ? 'Receipt not printed — reprint from Orders'
+                  : 'Receipt ready'
+          }
+          on={isDelivery ? summary.paidNow : summary.receiptPrinted}
           muted={isDelivery}
         />
 
