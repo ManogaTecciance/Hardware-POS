@@ -162,8 +162,20 @@ describe('what the page reports', () => {
   });
 });
 
-describe('included and excluded features', () => {
-  it('lists a restaurant’s features and marks the retail ones as absent', () => {
+/*
+ * D95 — the "Not included" column is gone, for every business template
+ * including the Tile Shop's. What a workspace includes is not changeable, so an
+ * inventory of the absent was a list of things nobody can act on.
+ *
+ * These tests keep their shape: each still asserts BOTH what the column shows
+ * and what it must not, because "Included lists the right modules" is also what
+ * a column rendering every label would produce. The exact-set assertion that
+ * used to span the two columns now runs against the one that remains — dropping
+ * it entirely was the tempting move and would have left the positives with
+ * nothing pinning them.
+ */
+describe('included features', () => {
+  it('lists a restaurant’s features and not the retail ones', () => {
     show({
       businessType: 'RESTAURANT',
       inventoryMode: 'LOCAL',
@@ -172,35 +184,44 @@ describe('included and excluded features', () => {
     });
 
     const included = within('Included');
-    const excluded = within('Not included');
 
     expect(included).toContain(MODULE_LABELS.TABLE_MANAGEMENT);
     expect(included).toContain(MODULE_LABELS.KITCHEN);
+    // NEGATIVE — the half that makes the positives mean something.
     expect(included).not.toContain(MODULE_LABELS.QUICKBOOKS);
-
-    expect(excluded).toContain(MODULE_LABELS.QUICKBOOKS);
-    expect(excluded).toContain(MODULE_LABELS.QUOTATIONS);
-    expect(excluded).not.toContain(MODULE_LABELS.KITCHEN);
+    expect(included).not.toContain(MODULE_LABELS.QUOTATIONS);
   });
 
   it('lists a Tile Shop’s features the other way round', () => {
     show();
 
     expect(within('Included')).toContain(MODULE_LABELS.QUICKBOOKS);
-    expect(within('Not included')).toContain(MODULE_LABELS.TABLE_MANAGEMENT);
+    expect(within('Included')).not.toContain(MODULE_LABELS.TABLE_MANAGEMENT);
   });
 
-  it('accounts for every module key exactly once', () => {
-    // The set assertion the two above depend on: a key missing from both columns
-    // would be invisible, and one appearing in both would be a contradiction.
-    show();
+  it('shows exactly the enabled modules — no more, no fewer', () => {
+    // The set assertion the two above depend on. It used to span both columns;
+    // with one column left it pins that column against the profile's own list,
+    // which is a stronger claim than "contains these two".
+    show({
+      businessType: 'RESTAURANT',
+      inventoryMode: 'LOCAL',
+      accountingProvider: 'NONE',
+      enabledModules: RESTAURANT,
+    });
 
     const included = within('Included');
-    const excluded = within('Not included');
-    const all = Object.values(MODULE_LABELS);
+    expect([...included].sort()).toEqual(RESTAURANT.map((key) => MODULE_LABELS[key]).sort());
+  });
 
-    expect([...included, ...excluded].sort()).toEqual([...all].sort());
-    expect(included.filter((label) => excluded.includes(label))).toEqual([]);
+  it('D95 — there is no "Not included" column any more', () => {
+    show();
+
+    // NEGATIVE, paired with a positive in the same test so it cannot pass on a
+    // page that rendered nothing at all.
+    expect(screen.queryByText('Not included')).toBeNull();
+    expect(screen.queryByText(/Every available feature is included/)).toBeNull();
+    expect(screen.getByText('Included')).toBeTruthy();
   });
 });
 
@@ -238,9 +259,16 @@ describe('the page is read-only', () => {
     expect(screen.getByText('Hardware store')).toBeTruthy();
   });
 
-  it('says where a change comes from instead', () => {
+  it('D95 — no longer tells the reader to contact support about it', () => {
+    // The paragraph said a change was possible through support. It is not: the
+    // inventory-mode transitions it referred to have no migration, and the PO
+    // removed the instruction rather than leave one nobody can carry out.
     show();
-    expect(screen.getByText(/Contact support/)).toBeTruthy();
+
+    expect(screen.queryByText(/Contact support/)).toBeNull();
+    expect(screen.queryByText(/not self-service/)).toBeNull();
+    // Positive control: the page did render.
+    expect(screen.getByText('Hardware store')).toBeTruthy();
   });
 });
 
@@ -317,7 +345,9 @@ function within(heading: string): string[] {
 
   const labels = Array.from(section.querySelectorAll('span'), (el) => el.textContent ?? '');
   // A selector that matched nothing would make every `not.toContain` pass.
-  if (labels.length === 0 && !section.textContent?.includes('Every available feature')) {
+  // D95 removed the empty-state fallback this used to allow for, so the guard
+  // is now unconditional — which is stronger.
+  if (labels.length === 0) {
     throw new Error(`No badges found under "${heading}"`);
   }
   return labels;

@@ -14,10 +14,18 @@ import { Switch } from '@/components/ui/switch';
 import { Toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth';
+import { BillPreviewTab } from '@/components/settings/bill-preview-tab';
+import { BillStructureCard } from '@/components/settings/bill-structure-card';
 import { ChargesTab } from '@/components/settings/charges-tab';
 import { HoursTab } from '@/components/settings/hours-tab';
+import { WorkspaceTab } from '@/components/settings/workspace-tab';
 import { Permission } from '@/lib/permissions';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 import { resolveImageUrl } from '@/lib/products-api';
+import {
+  resolveDocumentSettingsPresentation,
+  type DocumentSettingsPresentation,
+} from '@/lib/settings/document-presentation';
 import {
   fetchSettings,
   previewDocument,
@@ -39,18 +47,27 @@ import {
  * D90 — "Hours" likewise: it edits the branch's opening hours, which only a
  * food-service tenant has. Appended for the same reason.
  */
-const TABS = ['Business', 'Branding', 'Layout', 'Preview', 'Charges', 'Hours'] as const;
+const TABS = ['Business', 'Branding', 'Layout', 'Preview', 'Charges', 'Hours', 'Workspace'] as const;
 type Tab = (typeof TABS)[number];
 
+/**
+ * D96 — Charges and Hours edit `RestaurantBranchConfig`, a row a retail tenant
+ * has none of. They were appended unconditionally by D84/D90, so a Tile Shop
+ * owner has been shown two tabs that answer "Feature not available" — verified
+ * live. The resolver decides now.
+ */
+const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours'];
+
 /*
- * D90 — tabs that write their OWN record and carry their own Save button.
+ * D90 — tabs that write their OWN record and carry their own Save button, plus
+ * (D95) the read-only Workspace tab, which owns no record at all.
  *
  * The sticky bar below saves the document profile. On these tabs it saves
  * something the operator is not looking at, and — worse — it is fixed to the
  * bottom of the viewport, so it sat on top of the Save button that does apply
  * to what they just edited. Two Save buttons, the visible one wrong.
  */
-const SELF_SAVING_TABS: readonly Tab[] = ['Charges', 'Hours'];
+const SELF_SAVING_TABS: readonly Tab[] = ['Charges', 'Hours', 'Workspace'];
 
 const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
   { value: 'quotation', label: 'Quotation' },
@@ -62,10 +79,37 @@ const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
 export default function SettingsPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.SETTINGS_MANAGE);
+  /*
+   * D96 — one resolver call, one prop. Every tab below reads flags; none of
+   * them compares a capability, a business type or an inventory mode, which is
+   * what the contract test enforces.
+   */
+  const { profile } = useEffectiveProfile();
+  const view = resolveDocumentSettingsPresentation({
+    capabilities: profile?.capabilities ?? null,
+  });
 
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [docs, setDocs] = React.useState<DocumentSettings | null>(null);
   const [tab, setTab] = React.useState<Tab>('Business');
+  /*
+   * D96 — the restaurant-only tabs appear only where their record exists.
+   * While the profile is unresolved they are hidden, which is the safe way
+   * round: a tab that vanishes a moment after appearing is worse than one that
+   * appears a moment late.
+   */
+  const visibleTabs = React.useMemo(
+    () =>
+      TABS.filter((t) => !FOOD_SERVICE_ONLY_TABS.includes(t) || view.showRestaurantOperationsTabs),
+    [view.showRestaurantOperationsTabs],
+  );
+  /*
+   * …and a tab that disappears under the operator must not leave the screen
+   * blank. This runs when the profile resolves, not on every render.
+   */
+  React.useEffect(() => {
+    if (!visibleTabs.includes(tab)) setTab('Business');
+  }, [visibleTabs, tab]);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -203,25 +247,14 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6 pb-24">
-      <PageHeader
-        title="Documents & Printing"
-        description="Business letterhead, branding and A4 template settings applied to every quotation, invoice, bill and return."
-        actions={
-          // Slice 8.7: the only route to the workspace configuration. It stays out
-          // of the sidebar — an operator looks for it under Settings, and a second
-          // Settings entry in the rail would compete with this one.
-          <Link
-            href="/settings/business"
-            className="text-sm font-medium text-primary hover:underline"
-          >
-            Workspace configuration
-          </Link>
-        }
-      />
+      {/* D95 — the "Workspace configuration" link that used to sit here is now
+          the Workspace tab below, at the PO's request. The /settings/business
+          route survives as a bookmarkable shell. */}
+      <PageHeader title="Documents & Printing" description={view.headerDescription} />
 
       {/* Tabs */}
       <div className="flex gap-1 overflow-x-auto border-b border-border">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -244,7 +277,7 @@ export default function SettingsPage() {
       ) : null}
 
       {tab === 'Business' ? (
-        <BusinessTab docs={docs} set={set} disabled={!canManage} />
+        <BusinessTab docs={docs} set={set} disabled={!canManage} view={view} />
       ) : tab === 'Branding' ? (
         <BrandingTab
           docs={docs}
@@ -252,9 +285,10 @@ export default function SettingsPage() {
           disabled={!canManage}
           onUpload={onUpload}
           onRemove={onRemoveAsset}
+          view={view}
         />
       ) : tab === 'Layout' ? (
-        <LayoutTab docs={docs} set={set} disabled={!canManage} />
+        <LayoutTab docs={docs} set={set} disabled={!canManage} view={view} />
       ) : tab === 'Charges' ? (
         /*
          * D84 — its own save button, and deliberately outside the sticky bar
@@ -286,8 +320,24 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         )
-      ) : (
+      ) : tab === 'Workspace' ? (
+        // D95 — read-only, and therefore outside the document save bar.
+        <WorkspaceTab />
+      ) : view.previewKind === 'THERMAL_BILL' ? (
+        // D96 — the bill itself, rendered from the template the till prints.
+        <BillPreviewTab docs={docs} />
+      ) : view.previewKind === 'SERVER_A4' ? (
         <PreviewTab docs={docs} />
+      ) : (
+        /*
+         * Unresolved. Neither preview is right yet, and guessing means flashing
+         * quotation chrome at a restaurant or a thermal slip at a Tile Shop.
+         */
+        <Card className="max-w-3xl">
+          <CardContent className="py-16 text-center text-sm text-muted-foreground" role="status">
+            Checking this workspace’s configuration…
+          </CardContent>
+        </Card>
       )}
 
       {/* Sticky action bar for the DOCUMENT profile. The left inset
@@ -350,7 +400,17 @@ function Field({
   );
 }
 
-function BusinessTab({ docs, set, disabled }: { docs: DocumentSettings; set: SetFn; disabled: boolean }) {
+function BusinessTab({
+  docs,
+  set,
+  disabled,
+  view,
+}: {
+  docs: DocumentSettings;
+  set: SetFn;
+  disabled: boolean;
+  view: DocumentSettingsPresentation;
+}) {
   return (
     <Card className="max-w-3xl">
       <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
@@ -372,11 +432,10 @@ function BusinessTab({ docs, set, disabled }: { docs: DocumentSettings; set: Set
         <Field label="Footer / thank-you line" hint="Printed at the bottom of every document." full>
           <Input value={docs.footerText} disabled={disabled} onChange={(e) => set('footerText', e.target.value)} />
         </Field>
-        <Field
-          label="Invoice note"
-          hint="Printed below the footer on invoices only — e.g. a return policy. Leave blank to hide."
-          full
-        >
+        {/* D96 — a restaurant has no invoice, and the note prints ABOVE the
+            footer on a bill, not below it. The retail wording is untouched
+            (D16); the resolver supplies the right one for each. */}
+        <Field label={view.billNoteLabel} hint={view.billNoteHint} full>
           <Textarea
             value={docs.billNote ?? ''}
             disabled={disabled}
@@ -453,24 +512,40 @@ function BrandingTab({
   disabled,
   onUpload,
   onRemove,
+  view,
 }: {
   docs: DocumentSettings;
   set: SetFn;
   disabled: boolean;
   onUpload: (asset: BrandingAsset, file: File) => void;
   onRemove: (asset: BrandingAsset) => void;
+  view: DocumentSettingsPresentation;
 }) {
   return (
     <div className="max-w-3xl space-y-4">
       <Card>
         <CardContent className="space-y-3 p-6">
           <AssetRow label="Business logo" url={docs.logoUrl} asset="logo" disabled={disabled} onUpload={onUpload} onRemove={onRemove} />
-          <AssetRow label="Authorized signature" url={docs.signatureUrl} asset="signature" disabled={disabled} onUpload={onUpload} onRemove={onRemove} />
-          <AssetRow label="Company stamp / seal" url={docs.stampUrl} asset="stamp" disabled={disabled} onUpload={onUpload} onRemove={onRemove} />
+          {/* D96 — a signature block and a rubber stamp are properties of an A4
+              document. A bill has neither, so a workspace that prints bills is
+              not offered them. */}
+          {view.showSignatureAsset ? (
+            <AssetRow label="Authorized signature" url={docs.signatureUrl} asset="signature" disabled={disabled} onUpload={onUpload} onRemove={onRemove} />
+          ) : null}
+          {view.showStampAsset ? (
+            <AssetRow label="Company stamp / seal" url={docs.stampUrl} asset="stamp" disabled={disabled} onUpload={onUpload} onRemove={onRemove} />
+          ) : null}
+          {view.brandingNote ? (
+            <p className="pt-1 text-xs text-muted-foreground">{view.brandingNote}</p>
+          ) : null}
         </CardContent>
       </Card>
+      {/* D96 — accent colour and logo placement style an A4 document. A bill is
+          black on white with the logo hard-centred, so neither reaches it. */}
+      {view.showAccentColor || view.showLogoPlacement ? (
       <Card>
         <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
+          {view.showAccentColor ? (
           <Field label="Accent colour" hint="Headings, rules and the grand-total line.">
             <div className="flex items-center gap-2">
               <input
@@ -484,7 +559,10 @@ function BrandingTab({
               <Input value={docs.accentColor} disabled={disabled} onChange={(e) => set('accentColor', e.target.value)} className="font-mono" />
             </div>
           </Field>
+          ) : null}
           <div />
+          {view.showLogoPlacement ? (
+          <>
           <Field label="Logo alignment">
             <Select value={docs.logoAlignment} disabled={disabled} onChange={(e) => set('logoAlignment', e.target.value as DocumentSettings['logoAlignment'])}>
               <option value="LEFT">Left</option>
@@ -499,8 +577,11 @@ function BrandingTab({
               <option value="LARGE">Large</option>
             </Select>
           </Field>
+          </>
+          ) : null}
         </CardContent>
       </Card>
+      ) : null}
     </div>
   );
 }
@@ -529,7 +610,26 @@ function ToggleRow({
   );
 }
 
-function LayoutTab({ docs, set, disabled }: { docs: DocumentSettings; set: SetFn; disabled: boolean }) {
+function LayoutTab({
+  docs,
+  set,
+  disabled,
+  view,
+}: {
+  docs: DocumentSettings;
+  set: SetFn;
+  disabled: boolean;
+  view: DocumentSettingsPresentation;
+}) {
+  /*
+   * D96 — a workspace that prints bills gets a read-only summary instead of
+   * these controls. Not because the controls are unwanted, but because not one
+   * of them can reach a thermal bill: its columns are fixed, its totals rows
+   * appear when they are non-zero, and a continuous roll has no page to lay
+   * out. Offering them would be offering settings that change nothing.
+   */
+  if (view.showBillLayoutSummary) return <BillStructureCard note={view.layoutNote} />;
+
   return (
     <div className="max-w-3xl space-y-4">
       <Card>

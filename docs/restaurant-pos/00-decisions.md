@@ -3330,6 +3330,119 @@ on the same board: the till sees N Details buttons and zero Mark done, kitchen
 staff see N Details and N Mark done. Mutation-proven — granting the till
 `KITCHEN_STATUS_UPDATE` fails both the unit test and the e2e.
 
+
+### D95 — the workspace page stops listing what a workspace does not have
+
+PO, 2026-08-25: drop the "Not included" block from the workspace configuration
+page, "across all of the templates", and remove the paragraph telling the reader
+to contact support to change what a workspace includes — "since it's not
+possible to change what a workspace includes."
+
+Both are gone, for every business template **including the Tile Shop's**. That
+half needs saying out loud because D16 protects retail wording: this is not a
+restaurant change that leaked, it is the PO's instruction applied where they
+said to apply it. The original block was defended on the grounds that "what am
+I not getting" is the question an operator arrives with — but the answer was a
+list of things nobody can act on, printed under an instruction that could not be
+carried out. An inventory of the absent is only useful next to a way to acquire
+it.
+
+The support paragraph made a weaker claim than the PO's reason, which is worth
+recording: it said the change was not *self-service*, implying support could do
+it. The code comment above it is more honest — `QUICKBOOKS → LOCAL` has no
+migration in either direction, so it is not that the change is gated, it is that
+it does not exist. Nothing replaces the paragraph: a screen that says nothing
+about an impossible action is better than one that hints at it.
+
+**And the hyperlink became a tab.** "Workspace configuration" was a small link
+in the Settings header, which is where things go to be missed. It is a tab now,
+beside the others. The body moved to `components/settings/workspace-tab.tsx` and
+`/settings/business` survives as a thin shell around the same component — it is
+bookmarkable, it was the only inbound link until this change, and it still
+renders when `GET /v1/settings` fails, which the tab cannot: the settings page
+returns its error card before the tab strip exists.
+
+The tests for the removed block were rewritten rather than deleted. The
+exact-set assertion that used to span "Included" and "Not included" now pins
+"Included" against the profile's own module list, which is a stronger claim than
+the two `toContain`s it protects — deleting it was the tempting move and would
+have left the positives with nothing behind them.
+
+### D96 — Settings shows the document this workspace actually prints
+
+PO, 2026-08-25: the Layout and Preview tabs should show "the details related to
+the bill that will be printed, not quotations like in hardware pos", and the
+signature, stamp "and the other branding details that are relevant to quotations
+and invoices are not needed under the branding tab of restaurant POS either."
+
+A restaurant owner opening Preview was shown a **quotation for Portland Cement
+50kg, billed to Perera Constructions (Pvt) Ltd** — the server's sample catalogue
+is a hardware one. Layout offered them margins, A4 paper size, an SKU column and
+a signature area, not one of which can reach a thermal bill: `thermal-bill.ts`
+reads exactly seven profile fields, its three columns are hard-coded, and a
+continuous roll has no page to lay out. Those controls were not merely
+irrelevant, they were settings that changed nothing.
+
+**One resolver, not nine conditionals.** `resolveDocumentSettingsPresentation`
+takes the tenant's capabilities and returns view flags; the tabs read flags and
+decide nothing. This is the `product-presentation.ts` shape applied to a second
+screen, for the same reason — the question reaches nine places, and the one
+that is forgotten offers a restaurant a signature upload it can never use. A
+contract test asserts the capability is named in exactly one file across the
+whole web app, as an exact set rather than a count.
+
+It routes on `capabilities.documents.proformaBill`, not on the business type.
+That names the DOCUMENT rather than the service model, so a takeaway-only bakery
+keeps its bill without seating anyone, and HOTEL — the value the seven
+hand-written predicates D56 replaced had all independently forgotten — inherits
+the right answer through the food-service capability set. The resolver takes
+`TenantCapabilities | null` rather than a business type for a second reason too:
+`domain-single-authority.test.ts` pins the exact set of files allowed to contain
+`businessType === null`, and a resolver copying that idiom would have failed a
+spec in a file nobody would think to open.
+
+**The preview is the real bill.** Rendered client-side from `renderThermalBill`
+— the same function the till prints from, fed the tab's UNSAVED settings, so an
+operator sees the effect of a change before keeping it. A fifth server-side
+preview type would have meant a second copy of a template whose printer
+measurements were got wrong twice (D79, D80), and the API's preview spec
+iterates a hard-coded list of four document types, so the new one would have
+been silently uncovered — a textbook D30 vacuity.
+
+**Layout gets a read-only summary.** After auditing every field the bill reads,
+there is nothing on that tab a restaurant can configure. So it answers the
+question an operator actually has — what comes out of the printer, and which tab
+edits each line — instead of offering controls that do nothing.
+
+**The consequence the PO may not have intended, and what was done about it.**
+Hiding the branding controls does not stop a restaurant printing the document
+that uses them: `/sales/[id]` offered "Print A4 bill" unconditionally, and
+driven as the restaurant owner it produced a full A4 **INVOICE** with the SKU
+column and an "Authorized signature / Checked by / Approved by / Customer
+signature" block. Removing the controls while leaving the document would hand a
+restaurant a signature block they can no longer populate or switch off, so the
+A4 button is hidden for a food-service workspace by the same flag. The thermal
+receipt button stays — that is their document. Usability only:
+`/print/sales/[saleId]` is ungated and a typed URL still renders it, and the
+server is unchanged.
+
+**A defect this uncovered.** `Charges` (D84) and `Hours` (D90) were appended to
+the tab list unconditionally, so a Tile Shop owner has been shown two tabs that
+answer "Feature not available" — verified live before the fix. They edit
+`RestaurantBranchConfig`, a row a retail tenant has none of. The same resolver
+now decides, which is how they should have shipped.
+
+Unresolved is its own state throughout: while the profile is loading every flag
+is false and the Preview tab says it is checking, rather than flashing quotation
+chrome at a restaurant and correcting itself.
+
+**Known limit.** Hiding the signature and stamp rows also hides their Remove
+buttons, and a save re-sends the whole document profile — so a food-service
+tenant that had already uploaded a stamp keeps it stored, invisible and unused.
+For the pilot tenant both are null. Clearing one would need Reset to defaults,
+which discards the whole document profile; a targeted clear is not worth a
+migration for an asset nothing prints.
+
 ---
 
 ## Open decisions

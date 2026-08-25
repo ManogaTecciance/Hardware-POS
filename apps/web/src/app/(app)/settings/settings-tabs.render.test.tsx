@@ -18,6 +18,8 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { domainFor } from '@hardware-pos/shared';
+
 import type { AppSettings } from '@/lib/settings-api';
 
 const session = {
@@ -90,6 +92,23 @@ vi.mock('@/lib/settings-api', () => ({
 }));
 
 vi.mock('@/lib/products-api', () => ({ resolveImageUrl: (u: string | null) => u }));
+
+/*
+ * D96 — the settings screen now asks what this workspace prints. A food-service
+ * profile, because the two tabs under test (Charges, Hours) edit
+ * `RestaurantBranchConfig` and only exist for a workspace that has one; a
+ * retail tenant was being shown them by mistake until D96, and opening either
+ * answered "Feature not available".
+ */
+vi.mock('@/lib/platform-profile', () => ({
+  PlatformProfileProvider: ({ children }: { children: React.ReactNode }) => children,
+  useEffectiveProfile: () => ({
+    status: 'ready',
+    profile: { capabilities: domainFor('RESTAURANT').capabilities },
+    inventoryMode: 'LOCAL',
+    refresh: vi.fn(),
+  }),
+}));
 
 vi.mock('@/lib/restaurant/api', () => ({
   restaurantConfig: {

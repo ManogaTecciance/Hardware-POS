@@ -12,9 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 import { reprintCustomerReceipt } from '@/lib/receipt-print';
 import { fetchSaleReturns, type ReturnDetail } from '@/lib/returns';
 import { fetchSale, retrySaleSync, type PaymentStatusCode, type SaleDetail } from '@/lib/sales';
+import { resolveDocumentSettingsPresentation } from '@/lib/settings/document-presentation';
 import { formatMoney } from '@/lib/utils';
 
 const PAYMENT_STATUS: Record<
@@ -51,6 +53,11 @@ export default function SaleDetailPage() {
   const { session, hasPermission } = useAuth();
   const params = useParams<{ id: string }>();
   const id = params.id;
+  // D96 — which printed document this workspace's settings are about.
+  const { profile } = useEffectiveProfile();
+  const view = resolveDocumentSettingsPresentation({
+    capabilities: profile?.capabilities ?? null,
+  });
 
   const [sale, setSale] = React.useState<SaleDetail | null>(null);
   const [returns, setReturns] = React.useState<ReturnDetail[]>([]);
@@ -164,9 +171,22 @@ export default function SaleDetailPage() {
               </Button>
             </Link>
           ) : null}
-          <Button variant="outline" onClick={handleA4Bill} disabled={busy} leftIcon={<FileDown className="h-4 w-4" />}>
-            Print A4 bill
-          </Button>
+          {/*
+            * D96 — the A4 bill is the document whose letterhead, signature
+            * block and stamp live on the Branding and Layout tabs. A
+            * food-service workspace no longer has those controls, so offering
+            * the document here would leave an operator with a signature block
+            * they cannot populate or switch off. The thermal receipt stays:
+            * that IS their document.
+            *
+            * Usability only. `/print/sales/[saleId]` is ungated and a typed URL
+            * still renders it; the server is unchanged.
+            */}
+          {view.showA4SaleDocument ? (
+            <Button variant="outline" onClick={handleA4Bill} disabled={busy} leftIcon={<FileDown className="h-4 w-4" />}>
+              Print A4 bill
+            </Button>
+          ) : null}
           <Button variant="ghost" onClick={handleReprint} disabled={busy} leftIcon={<Printer className="h-4 w-4" />}>
             Thermal receipt
           </Button>
