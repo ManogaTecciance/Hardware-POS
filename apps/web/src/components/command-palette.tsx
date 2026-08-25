@@ -29,11 +29,32 @@ interface Command {
   href: string;
   icon: LucideIcon;
   keywords: string;
-  permission?: Permission;
+  /** D93 — an array means any-of, matching the nav gate. */
+  permission?: Permission | readonly Permission[];
+}
+
+/** D93 — see `holdsAnyOf` in lib/nav.ts; the same rule, and the same reason. */
+function holdsAnyOf(
+  permission: Permission | readonly Permission[] | undefined,
+  hasPermission: (permission: Permission) => boolean,
+): boolean {
+  if (permission === undefined) return true;
+  if (!Array.isArray(permission)) return hasPermission(permission as Permission);
+  for (const candidate of permission as readonly Permission[]) {
+    if (hasPermission(candidate)) return true;
+  }
+  return false;
 }
 
 const COMMANDS: Command[] = [
-  { id: 'new-sale', label: 'Start new sale', hint: 'POS', href: '/pos', icon: ShoppingCart, keywords: 'sell checkout cart pos register', permission: Permission.SALE_CREATE },
+  /*
+   * D93 — the same any-of gate as the POS rail entry, for the same reason: a
+   * restaurant till holds TAKEAWAY_CREATE and not SALE_CREATE, and Ctrl+K was
+   * hiding the only other way in. The retail wording is untouched (D16); it
+   * reads oddly in a food-service workspace, which is noted in D93 rather
+   * than fixed by editing a string the Tile Shop depends on.
+   */
+  { id: 'new-sale', label: 'Start new sale', hint: 'POS', href: '/pos', icon: ShoppingCart, keywords: 'sell checkout cart pos register order takeaway delivery', permission: [Permission.SALE_CREATE, Permission.ORDER_SEND_TO_KITCHEN, Permission.TAKEAWAY_CREATE] },
   { id: 'find-sale', label: 'Find a sale', hint: 'Sales', href: '/sales', icon: ReceiptText, keywords: 'invoice receipt transaction history', permission: Permission.SALE_READ },
   { id: 'new-quote', label: 'Create quotation', hint: 'Quotations', href: '/quotations/new', icon: FileText, keywords: 'quote estimate proposal', permission: Permission.QUOTATION_CREATE },
   { id: 'find-quote', label: 'Find a quotation', hint: 'Quotations', href: '/quotations', icon: FileText, keywords: 'quote estimate pipeline', permission: Permission.QUOTATION_READ },
@@ -59,7 +80,7 @@ export function CommandPalette() {
   const restoreRef = React.useRef<HTMLElement | null>(null);
 
   const available = React.useMemo(
-    () => COMMANDS.filter((c) => !c.permission || hasPermission(c.permission)),
+    () => COMMANDS.filter((c) => holdsAnyOf(c.permission, hasPermission)),
     [hasPermission],
   );
 

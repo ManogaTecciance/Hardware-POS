@@ -201,6 +201,64 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     expect(flat.join(' | ')).toContain('Customers');
   });
 
+  test('WS-406 the restaurant CASHIER can reach the POS and place a takeaway or delivery order', async ({
+    page,
+  }) => {
+    /*
+     * D93. Every other test in this describe signs in as the OWNER, which is
+     * exactly why this defect survived: the food-service `/pos` entry hung on
+     * SALE_CREATE, a retail permission the till deliberately does not hold
+     * (D87), so the one role whose job is ringing up takeaway and delivery
+     * orders had no POS in its rail — while the server had permitted the whole
+     * flow all along.
+     */
+    await signIn(page, RESTAURANT_SEED.cashier);
+    const flat = await railLinkNames(page);
+
+    // POSITIVE — the destination the complaint was about.
+    expect(flat, 'the till needs a POS entry to place takeaway/delivery orders').toContain('POS');
+    // NEGATIVE, in the same test — a rail that rendered everything would pass
+    // the line above just as happily. The kitchen board is not the till's.
+    expect(flat, 'the till should not get the kitchen board').not.toContain('Kitchen');
+    expect(flat, 'the till should not get Settings').not.toContain('Settings');
+
+    // …and the screen behind the entry offers both order types.
+    await page.getByRole('link', { name: 'POS', exact: true }).first().click();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText('Start new order')).toBeVisible({ timeout: 20_000 });
+
+    /*
+     * Matched as radios, not as text. The theme switcher in the header is also
+     * a radiogroup, and each option card carries its label in a heading AND in
+     * its hint — a `getByText` here resolved to two elements and failed on
+     * strict mode, which would have been easy to "fix" by loosening the query
+     * into something that asserts less.
+     */
+    await expect(page.getByRole('radio', { name: /Takeaway/ })).toBeVisible();
+    await expect(page.getByRole('radio', { name: /Delivery/ })).toBeVisible();
+    // NEGATIVE — Dine In is the waiter's; the till cannot send to the kitchen,
+    // and offering it would be offering a 403 three taps later.
+    await expect(page.getByRole('radio', { name: /Dine In/ })).toHaveCount(0);
+  });
+
+  test('WS-407 a deep link to a mode the till cannot work asks instead of opening it', async ({
+    page,
+  }) => {
+    // D93 — `?mode=` survives a bookmark and a shared link. Now that the till
+    // has a POS entry, `/pos?mode=dine-in` is an ordinary thing to be sent.
+    await signIn(page, RESTAURANT_SEED.cashier);
+    await page.goto('/pos?mode=dine-in');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByText('Start new order')).toBeVisible({ timeout: 20_000 });
+    // POSITIVE CONTROL in the same test: a mode they CAN work still opens
+    // directly, so the assertion above is not passing on a screen that always
+    // shows the chooser.
+    await page.goto('/pos?mode=takeaway');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText('Start new order')).toHaveCount(0);
+  });
+
   test('WS-404 built destinations render their real feature, not the shell text', async ({
     page,
   }) => {

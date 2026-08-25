@@ -42,8 +42,24 @@ export interface NavItemSpec {
   readonly href: string;
   readonly label: string;
   readonly icon: NavIconName;
-  /** Shown only when the user holds this permission. */
-  readonly permission?: Permission;
+  /**
+   * Shown only when the user holds this permission.
+   *
+   * D93 — an ARRAY means any-of: holding one of them is enough. A destination
+   * that more than one job can reach lists every capability that reaches it,
+   * rather than borrowing an unrelated permission as a proxy for "works here".
+   * `/pos` in a food-service workspace is the case that forced this: the
+   * waiter arrives there to send a round to the kitchen and the till arrives
+   * to ring up a takeaway, and gating on one of those hid the screen from the
+   * other.
+   *
+   * Widening this field rather than adding a sibling `anyPermission` is
+   * deliberate. `bindGroups` in the web app copies spec fields by an explicit
+   * whitelist, so a NEW field that someone forgets to copy produces an item
+   * with no gate at all — fail-open. Widening the existing one makes every
+   * consumer a compile error instead.
+   */
+  readonly permission?: Permission | readonly Permission[];
   /**
    * Shown only when the tenant has this module enabled.
    *
@@ -178,7 +194,23 @@ export const FOOD_SERVICE_NAVIGATION: readonly NavGroupSpec[] = [
         href: '/pos',
         label: 'POS',
         icon: 'ShoppingCart',
-        permission: Permission.SALE_CREATE,
+        /*
+         * D93 — the capabilities this screen actually offers, which is what
+         * decides whether there is anything behind the door:
+         *   ORDER_SEND_TO_KITCHEN → Dine In
+         *   TAKEAWAY_CREATE       → Takeaway, and Delivery with PAYMENT_COLLECT
+         * exactly the set `pos-counter-workspace.tsx` turns into the mode
+         * chooser. SALE_CREATE stays in the list so nobody who reaches POS
+         * today loses it, but it is no longer what the entry hangs on: it is a
+         * RETAIL permission that the restaurant till deliberately does not
+         * hold (D87), so gating on it hid the POS from the one role whose job
+         * is ringing up takeaway and delivery orders.
+         */
+        permission: [
+          Permission.SALE_CREATE,
+          Permission.ORDER_SEND_TO_KITCHEN,
+          Permission.TAKEAWAY_CREATE,
+        ],
         module: 'TABLE_MANAGEMENT',
       },
       {

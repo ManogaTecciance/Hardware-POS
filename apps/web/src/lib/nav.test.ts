@@ -10,7 +10,13 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { ALL_NAV_ITEMS, moduleForPath, resolveNavigation, type NavGroup } from './nav';
+import {
+  FOOD_SERVICE_NAVIGATION,
+  RESTAURANT_ROLE_TEMPLATES,
+  RETAIL_NAVIGATION,
+} from '@hardware-pos/shared';
+
+import { ALL_NAV_ITEMS, holdsAnyOf, moduleForPath, resolveNavigation, type NavGroup } from './nav';
 import { Permission, ROLE_PERMISSIONS, type UserRole } from './permissions';
 import type { ModuleKey } from './platform-api';
 
@@ -47,6 +53,33 @@ const RESTAURANT_MODULES: ModuleKey[] = [...SHARED_CORE, ...RESTAURANT_ONLY];
 
 function permissionsOf(role: UserRole) {
   const granted = new Set<string>(ROLE_PERMISSIONS[role]);
+  return (permission: Permission) => granted.has(permission);
+}
+
+/**
+ * D93 — the permission predicate for a TEMPLATE role (waiter, kitchen staff,
+ * restaurant cashier), which is where the food-service rail defect lived.
+ *
+ * `permissionsOf` above takes a `UserRole` ENUM, and every restaurant role
+ * except the owner is a template with no enum value — which is exactly why a
+ * rail that was wrong for the till stayed invisible to this file for so long.
+ *
+ * Throws on an unknown key rather than returning an empty set: a renamed
+ * template would otherwise hand every test a predicate that answers `false` to
+ * everything, and a rail asserted to be MISSING an entry passes beautifully
+ * when the role holds nothing at all.
+ */
+function permissionsOfTemplate(key: string) {
+  const template = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === key);
+  if (!template) {
+    throw new Error(
+      `No restaurant role template '${key}' — it was renamed or removed, and this test is now asserting nothing.`,
+    );
+  }
+  if (template.permissions.length === 0) {
+    throw new Error(`Template '${key}' grants nothing; every assertion against it would be vacuous.`);
+  }
+  const granted = new Set<string>(template.permissions);
   return (permission: Permission) => granted.has(permission);
 }
 
@@ -549,5 +582,257 @@ describe('the navigation assertions can actually fail', () => {
     const bare = (path: string) => (path.startsWith('/pos') ? 'RETAIL_POS' : null);
     expect(bare('/possible-duplicates')).toBe('RETAIL_POS');
     expect(() => expect(bare('/possible-duplicates')).toBeNull()).toThrow();
+  });
+});
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────────
+ * D93 — the POS rail entry is gated on what the POS screen can do
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * The defect: `/pos` in a food-service workspace hung on SALE_CREATE, a RETAIL
+ * permission the restaurant till deliberately does not hold (D87). The one role
+ * whose job is ringing up takeaway and delivery orders had no POS in its rail,
+ * while the server had permitted the whole flow all along.
+ *
+ * Why the existing file missed it: every test above resolves permissions from
+ * `ROLE_PERMISSIONS[UserRole]`, and every restaurant role except the owner is a
+ * TEMPLATE with no enum value. The rail was only ever asserted for roles that
+ * could not exhibit the bug.
+ *
+ * The dangerous direction of this change is fail-open — an any-of gate written
+ * as all-of-nothing puts Settings and QuickBooks in front of every role — so
+ * the negatives below are load-bearing and are mutation-proven at the bottom.
+ */
+describe('D93 — any-of permission gates', () => {
+  const restaurantNav = (key: string) =>
+    resolveNavigation({
+      businessType: 'RESTAURANT',
+      enabledModules: RESTAURANT_MODULES,
+      hasPermission: permissionsOfTemplate(key),
+    });
+
+  it('the restaurant CASHIER can see POS — the entry the complaint was about', () => {
+    const rail = labels(restaurantNav('RESTAURANT_CASHIER'));
+
+    // POSITIVE: the destination that composes takeaway and delivery orders.
+    expect(rail).toContain('POS');
+    // …reached WITHOUT holding the retail permission it used to hang on, which
+    // is the whole point: no grant was made to achieve this.
+    expect(permissionsOfTemplate('RESTAURANT_CASHIER')(Permission.SALE_CREATE)).toBe(false);
+    expect(permissionsOfTemplate('RESTAURANT_CASHIER')(Permission.TAKEAWAY_CREATE)).toBe(true);
+  });
+
+  it('and the till still does NOT get the entries it has no business in', () => {
+    const rail = labels(restaurantNav('RESTAURANT_CASHIER'));
+
+    // NEGATIVE, paired with the positive above so neither can pass on a rail
+    // that renders everything or nothing.
+    expect(rail).not.toContain('Kitchen'); // kot:view — the board is not theirs
+    expect(rail).not.toContain('Reports');
+    expect(rail).not.toContain('Settings');
+    // Tables still hangs on SALE_CREATE and is deliberately NOT part of this
+    // change (D93). Asserted so that widening it later is a decision somebody
+    // makes on purpose rather than a side effect.
+    expect(rail).not.toContain('Tables');
+  });
+
+  it('waiter and owner keep POS, so the change is strictly additive', () => {
+    expect(labels(restaurantNav('WAITER'))).toContain('POS');
+    expect(labels(nav('RESTAURANT', RESTAURANT_MODULES, 'OWNER'))).toContain('POS');
+  });
+
+  it('kitchen staff still get no POS, and are not simply getting nothing', () => {
+    const rail = labels(restaurantNav('KITCHEN_STAFF'));
+
+    // NEGATIVE…
+    expect(rail).not.toContain('POS');
+    expect(rail).not.toContain('Orders');
+    // …and the POSITIVE that stops it passing on an empty rail.
+    expect(rail).toContain('Kitchen');
+  });
+
+  it('the /pos gate is exactly the three capabilities, in the shared spec', () => {
+    /*
+     * Read from FOOD_SERVICE_NAVIGATION, not from ALL_NAV_ITEMS: there are TWO
+     * `/pos` entries in the product — retail's, still a single SALE_CREATE,
+     * and this one — and `ALL_NAV_ITEMS.find` returns whichever domain was
+     * bound first. An earlier draft of this test did exactly that and spread
+     * the retail string into a list of characters.
+     */
+    const pos = FOOD_SERVICE_NAVIGATION.flatMap((g) => g.items).find((i) => i.href === '/pos');
+    expect(pos).toBeDefined();
+    expect(Array.isArray(pos!.permission)).toBe(true);
+    // An EXACT set, not a `toContain`: a permission quietly added here widens
+    // who sees the till's screen, and counts would not notice a swap.
+    expect([...(pos!.permission as readonly Permission[])].sort()).toEqual(
+      [
+        Permission.SALE_CREATE,
+        Permission.ORDER_SEND_TO_KITCHEN,
+        Permission.TAKEAWAY_CREATE,
+      ].sort(),
+    );
+  });
+
+  it('the RETAIL /pos entry is untouched — still a single retail permission', () => {
+    // D16: Tile Shop behaviour is not edited to accommodate a restaurant fix.
+    const retailPos = RETAIL_NAVIGATION.flatMap((g) => g.items).find((i) => i.href === '/pos');
+    expect(retailPos).toBeDefined();
+    expect(retailPos!.permission).toBe(Permission.SALE_CREATE);
+    expect(Array.isArray(retailPos!.permission)).toBe(false);
+  });
+
+  it('FAIL-OPEN TRIPWIRE — a user holding nothing sees only ungated destinations', () => {
+    const rail = resolveNavigation({
+      businessType: 'RESTAURANT',
+      enabledModules: RESTAURANT_MODULES,
+      hasPermission: () => false,
+    });
+
+    // This is the assertion that catches an any-of written as all-of-nothing.
+    // Dashboard is genuinely ungated (shared core); everything else must go.
+    expect(labels(rail)).toEqual(['Dashboard']);
+    for (const forbidden of ['POS', 'Settings', 'Reports', 'Kitchen', 'Sales', 'Tables']) {
+      expect(labels(rail)).not.toContain(forbidden);
+    }
+    // And the same for retail, where the blast radius includes QuickBooks.
+    expect(
+      labels(
+        resolveNavigation({
+          businessType: 'HARDWARE',
+          enabledModules: LEGACY_MODULES,
+          hasPermission: () => false,
+        }),
+      ),
+    ).toEqual(['Dashboard']);
+  });
+
+  it('an ARRAY gate is any-of, not all-of', () => {
+    // Holding exactly ONE of the three is enough. Built as a bare predicate
+    // rather than from a template so the claim is about the gate, not about
+    // whichever role happens to hold what today.
+    const onlyTakeaway = (p: Permission) => p === Permission.TAKEAWAY_CREATE;
+    const onlyKitchenSend = (p: Permission) => p === Permission.ORDER_SEND_TO_KITCHEN;
+    const onlySaleCreate = (p: Permission) => p === Permission.SALE_CREATE;
+
+    for (const holds of [onlyTakeaway, onlyKitchenSend, onlySaleCreate]) {
+      expect(
+        labels(
+          resolveNavigation({
+            businessType: 'RESTAURANT',
+            enabledModules: RESTAURANT_MODULES,
+            hasPermission: holds,
+          }),
+        ),
+      ).toContain('POS');
+    }
+
+    // NEGATIVE: holding a permission that is NOT in the set does not open it.
+    expect(
+      labels(
+        resolveNavigation({
+          businessType: 'RESTAURANT',
+          enabledModules: RESTAURANT_MODULES,
+          hasPermission: (p) => p === Permission.PAYMENT_COLLECT,
+        }),
+      ),
+    ).not.toContain('POS');
+  });
+
+  it('a single-permission gate still behaves exactly as before', () => {
+    // The regression risk of widening the field: entries that were NOT changed
+    // must be unaffected. Kitchen is still a plain single-permission gate.
+    const onlyKot = (p: Permission) => p === Permission.KOT_VIEW;
+    const rail = labels(
+      resolveNavigation({
+        businessType: 'RESTAURANT',
+        enabledModules: RESTAURANT_MODULES,
+        hasPermission: onlyKot,
+      }),
+    );
+    expect(rail).toContain('Kitchen');
+    expect(rail).not.toContain('POS');
+    expect(rail).not.toContain('Orders');
+  });
+
+  /*
+   * MUTATION PROOFS (D30), inline and in the style used above: each is the
+   * implementation somebody could plausibly write instead, shown to produce a
+   * DIFFERENT answer to an assertion in this block — so none of the above can
+   * be passing for the wrong reason.
+   */
+  describe('the any-of gate can actually fail', () => {
+    const gate = [
+      Permission.SALE_CREATE,
+      Permission.ORDER_SEND_TO_KITCHEN,
+      Permission.TAKEAWAY_CREATE,
+    ] as const;
+    const till = permissionsOfTemplate('RESTAURANT_CASHIER');
+    const kitchen = permissionsOfTemplate('KITCHEN_STAFF');
+
+    it('M1: all-of instead of any-of hides POS from the till again', () => {
+      const allOf = gate.every((p) => till(p));
+      const anyOf = gate.some((p) => till(p));
+      expect(anyOf).toBe(true);
+      expect(allOf).toBe(false);
+      expect(() => expect(allOf).toBe(true)).toThrow();
+    });
+
+    it('M2: ignoring the array and truthy-testing it shows POS to kitchen staff', () => {
+      // `!item.permission || hasPermission(item.permission)` — the ORIGINAL
+      // line — against an array: a non-empty array is truthy, so the first
+      // clause is false, and hasPermission(array) is false for everyone…
+      const original = !gate || kitchen(gate as unknown as Permission);
+      expect(original).toBe(false); // …which would hide POS from EVERYBODY.
+      // …and the other plausible slip, treating a present gate as satisfied:
+      const truthy = Boolean(gate);
+      expect(truthy).toBe(true); // POS for kitchen staff, who hold none of it.
+      expect(gate.some((p) => kitchen(p))).toBe(false);
+      expect(() => expect(truthy).toBe(false)).toThrow();
+    });
+
+    /*
+     * M3 asserts against the REAL `holdsAnyOf`, not a stand-in. No nav spec
+     * carries an empty gate today, so this branch cannot be reached through
+     * `resolveNavigation` — and the first draft of this proof compared two
+     * local expressions, which passed happily while the actual function fell
+     * open. That is precisely the vacuous shape D30 exists to catch.
+     */
+    it('M3: an empty gate array REFUSES in the real gate, not just in a stand-in', () => {
+      const holdsNothing = { hasPermission: () => false };
+      const holdsEverything = { hasPermission: () => true };
+
+      // The load-bearing case: an entry whose last permission was deleted
+      // disappears, rather than appearing for every role in the product.
+      expect(holdsAnyOf([], holdsEverything)).toBe(false);
+      expect(holdsAnyOf([], holdsNothing)).toBe(false);
+
+      // Paired controls, so the line above is not passing on a function that
+      // refuses everything.
+      expect(holdsAnyOf(undefined, holdsNothing)).toBe(true); // ungated
+      expect(holdsAnyOf(Permission.TAKEAWAY_CREATE, holdsEverything)).toBe(true);
+      expect(holdsAnyOf(Permission.TAKEAWAY_CREATE, holdsNothing)).toBe(false);
+      expect(holdsAnyOf([Permission.SALE_CREATE, Permission.TAKEAWAY_CREATE], { hasPermission: till }))
+        .toBe(true);
+      expect(holdsAnyOf([Permission.SALE_CREATE], { hasPermission: till })).toBe(false);
+    });
+
+    it('M4: the gate is not handed an index — a bare `.some(hasPermission)` would be', () => {
+      /*
+       * `[].some(fn)` calls fn(value, index, array). `hasPermission` ignores
+       * the extras today, so this is latent rather than live — but a predicate
+       * that ever looks at its second argument would start answering a
+       * different question, silently, for array gates only.
+       */
+      const seen: number[] = [];
+      holdsAnyOf([Permission.SALE_CREATE, Permission.TAKEAWAY_CREATE], {
+        hasPermission: (...args: unknown[]) => {
+          seen.push(args.length);
+          return false;
+        },
+      });
+      expect(seen).toEqual([1, 1]);
+      expect(seen).not.toContain(3);
+    });
   });
 });

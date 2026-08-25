@@ -25,6 +25,12 @@ import { PaymentPopup } from './counter/payment-popup';
 import { RunningBillSummary } from './counter/running-bill-summary';
 import { ModifierPickerDialog } from './modifier-picker-dialog';
 import { PosMenuBrowser } from './pos-menu-browser';
+import {
+  availablePosModes,
+  resolveInitialPosMode,
+  solePosMode,
+} from '@/lib/pos/pos-modes';
+
 import { PosModeChip } from './pos-mode-chip';
 import type { PosMode } from './pos-mode-selector';
 import { PosOrderTypeModal } from './pos-order-type-modal';
@@ -98,19 +104,29 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
    * cannot enforce. PAYMENT_COLLECT is the honest proxy: taking an order you
    * will not be there to settle belongs to whoever settles it.
    */
-  const availableModes = React.useMemo(() => {
-    const modes: PosMode[] = [];
-    if (canSendToKitchen) modes.push('DINE_IN');
-    if (canPlaceTakeaway) modes.push('TAKEAWAY');
-    if (canPlaceTakeaway && hasPermission(Permission.PAYMENT_COLLECT)) modes.push('THIRD_PARTY');
-    return modes;
-  }, [canSendToKitchen, canPlaceTakeaway, hasPermission]);
+  const availableModes = React.useMemo(() => availablePosModes(hasPermission), [hasPermission]);
   /** Asking is a question with one answer — skip it and open that mode. */
-  const soleMode = availableModes.length === 1 ? availableModes[0]! : null;
+  const soleMode = solePosMode(availableModes);
   const canDiscount = hasPermission(Permission.DISCOUNT_APPROVE);
   const discountLimit = discountLimitFor(session.user.role);
 
-  const [mode, setMode] = React.useState<PosMode | null>(initialMode);
+  /*
+   * D93 — a deep link may only open a mode this user can actually work.
+   *
+   * `?mode=` comes off the URL, so it survives a bookmark, a shared link and
+   * the dashboard's /takeaway hop. Now that POS is a visible destination for
+   * the till (whose rail entry used to be hidden), `?mode=dine-in` would open
+   * a cashier into a dine-in workspace whose Confirm & send the server
+   * refuses — a 403 three taps in, after they have composed an order. Falling
+   * back to the chooser costs one tap and refuses at the door instead.
+   *
+   * Computed with `useState`'s initialiser so the wrong workspace never
+   * renders even once; `availableModes` is derived from permissions that do
+   * not change within a session.
+   */
+  const [mode, setMode] = React.useState<PosMode | null>(() =>
+    resolveInitialPosMode(initialMode, availableModes),
+  );
 
   // ── D69: dine-in session state ─────────────────────────────────────────
   const [tableSession, setTableSession] = React.useState<ActiveTableSession | null>(null);

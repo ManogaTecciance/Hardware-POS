@@ -64,8 +64,8 @@ export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
-  /** Shown only when the user holds this permission. */
-  permission?: Permission;
+  /** Shown only when the user holds this permission; an array means any-of (D93). */
+  permission?: Permission | readonly Permission[];
   /** Shown only when the tenant has this module enabled. Omitted = shared core. */
   module?: ModuleKey;
   /** The route exists but the feature behind it is not built yet. */
@@ -78,6 +78,36 @@ export interface NavGroup {
   items: NavItem[];
 }
 
+/**
+ * D93 — the permission half of the nav gate, as ANY-of.
+ *
+ * Written as an explicit `for` rather than `[].some(input.hasPermission)`:
+ * `some` hands its callback (value, index, array), and `hasPermission` taking a
+ * second argument it ignores today is not a thing to rely on.
+ *
+ * The `length === 0` case is a REFUSAL, not a pass. An entry whose gate is an
+ * empty array is a mistake — someone deleted the last permission from a list —
+ * and the fail-open reading would put that destination in front of every role
+ * in the product. `undefined` still means ungated, which is how shared-core
+ * destinations are declared.
+ *
+ * Exported ONLY so that empty-array branch can be tested. No nav spec carries
+ * an empty gate today, so it is unreachable through `resolveNavigation`, and a
+ * tripwire that can only assert against a hand-written stand-in is not a
+ * tripwire (D30) — the first draft of this one fell open undetected.
+ */
+export function holdsAnyOf(
+  permission: Permission | readonly Permission[] | undefined,
+  input: { hasPermission: (permission: Permission) => boolean },
+): boolean {
+  if (permission === undefined) return true;
+  if (!Array.isArray(permission)) return input.hasPermission(permission as Permission);
+  for (const candidate of permission as readonly Permission[]) {
+    if (input.hasPermission(candidate)) return true;
+  }
+  return false;
+}
+
 /** Bind one shared spec group to renderable items. */
 function bindGroups(groups: readonly NavGroupSpec[]): NavGroup[] {
   return groups.map((group) => ({
@@ -86,7 +116,7 @@ function bindGroups(groups: readonly NavGroupSpec[]): NavGroup[] {
       href: item.href,
       label: item.label,
       icon: NAV_ICONS[item.icon],
-      permission: item.permission as Permission | undefined,
+      permission: item.permission as Permission | readonly Permission[] | undefined,
       module: item.module as ModuleKey | undefined,
       upcoming: item.upcoming,
     })),
@@ -141,8 +171,7 @@ export function resolveNavigation(input: NavigationInput): NavGroup[] {
       ...group,
       items: group.items.filter(
         (item) =>
-          (!item.module || enabled.has(item.module)) &&
-          (!item.permission || input.hasPermission(item.permission)),
+          (!item.module || enabled.has(item.module)) && holdsAnyOf(item.permission, input),
       ),
     }))
     .filter((group) => group.items.length > 0);

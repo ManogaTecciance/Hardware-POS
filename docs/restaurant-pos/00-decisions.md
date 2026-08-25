@@ -3194,6 +3194,79 @@ was equally seatable before, just uglier and easier to ignore. Hiding the
 reserved floors (999/998) from the dine-in picker is a small change; it is not
 this one.
 
+
+### D93 — a rail entry is gated on what the screen can do
+
+PO, 2026-08-25: "In restaurant POS, cashier should also be able to place takeaway
+and delivery orders. That part is missing it seems."
+
+It was not missing. It was unsigned.
+
+The server has permitted the whole thing since D87: `POST /v1/restaurant/takeaway`
+asks for `TAKEAWAY_CREATE`, the status change asks for the same, payment asks for
+`PAYMENT_COLLECT`, and the till holds all three. The counter workspace computes
+`[TAKEAWAY, THIRD_PARTY]` for exactly that permission set and renders the chooser.
+The audit log shows the cashier had already placed and settled orders. What the
+cashier did not have was any way to *find* the screen: the food-service `/pos`
+rail entry hung on `SALE_CREATE` — a **retail** permission the restaurant till
+deliberately does not hold (D87) — and so did the Ctrl+K command. The two doors
+left were a dashboard tile labelled "Takeaway ready" and a "New sale" button on
+the Sales page. Neither says "place an order here."
+
+**`SALE_CREATE` was the wrong lever, and granting it would have been the wrong
+fix.** The WAITER template says so out loud: it carries `SALE_CREATE` with a
+comment explaining the grant exists *because the POS and Tables rail entries are
+gated on it*. A retail-sale permission had become a proxy for "may use the
+restaurant floor screens", and the proxy had started lying. Granting it to the
+till would have made the sidebar right by making the permission model wronger,
+needed a reseed to reach the existing row, and handed the till a standing
+retail-sale, discount-approval and receipt-issuing grant that goes live the day
+someone enables `RETAIL_POS` or gates a food-service route on it.
+
+So the gate moved instead. `NavItemSpec.permission` now accepts an **array,
+meaning any-of**, and `/pos` lists the capabilities the screen actually offers —
+`ORDER_SEND_TO_KITCHEN` (Dine In), `TAKEAWAY_CREATE` (Takeaway, and Delivery with
+`PAYMENT_COLLECT`), and `SALE_CREATE` kept so nobody who reaches POS today loses
+it. The entry now appears exactly when there is something behind the door. No
+permission was granted, no seed is required, no migration, no API change.
+
+Widening the existing field rather than adding a sibling `anyPermission` is
+deliberate: `bindGroups` copies spec fields by an explicit whitelist, so a new
+field somebody forgets to copy yields an item with **no gate at all**. Widening
+the existing one makes every consumer a compile error instead.
+
+**The dangerous direction is fail-open.** An any-of gate written as all-of-nothing
+puts Settings and QuickBooks in front of every role in the product, so an empty
+gate array REFUSES rather than passes, and the tripwire that proves it calls the
+real exported `holdsAnyOf` — the first draft of that proof compared two local
+expressions and passed happily while the function under test fell open. No nav
+spec carries an empty gate today, which is exactly why the branch had to be
+reachable from a test at all.
+
+**A deep link may now open a mode you cannot work.** Making POS visible to the
+till turns `/pos?mode=dine-in` into an ordinary link to receive from a colleague,
+and unclamped it opens a cashier into a dine-in workspace whose Confirm & send
+the server refuses — a 403 three taps in, after they have composed an order. The
+mode logic moved out of the component into `apps/web/src/lib/pos/pos-modes.ts`
+as a pure resolver (D28/D31), where the clamp is one line and testable without
+rendering a workspace. It was untestable in place, which is why the hole was
+invisible.
+
+**Deliberately not done.** `/tables` carries the identical `SALE_CREATE` gate and
+the identical problem — the till settles tables it cannot see in its rail — but
+the complaint was about takeaway and delivery, and widening a second destination
+is a decision somebody should make on purpose. There is a negative assertion
+holding that line so it cannot drift in unnoticed. The hotel RECEPTIONIST holds
+none of the three and still gets no POS; the retail `/pos` entry is untouched and
+still requires exactly `SALE_CREATE` (D16). The palette keeps its retail wording
+"Start new sale", which reads oddly in a restaurant — noted here rather than
+fixed by editing a string the Tile Shop depends on.
+
+**Still open:** whether the WAITER's `SALE_CREATE` grant is now vestigial. Its own
+comment says it exists only for the rail gate this decision removes, and closing
+a table needs `TABLE_CLOSE`, not `SALE_CREATE`. Removing it is a separate
+security decision and needs a reseed.
+
 ---
 
 ## Open decisions
