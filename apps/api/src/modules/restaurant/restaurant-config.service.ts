@@ -26,7 +26,13 @@ export interface RestaurantBranchConfigView {
 
 const CODE_DEFAULTS = {
   serviceChargePercent: '0.00',
-  takeawayEnabled: false,
+  /*
+   * D97 — TRUE, and it has to be: `TakeawayService.create` refuses only when a
+   * row exists and says false, so an unconfigured branch takes takeaway orders.
+   * Reporting `false` here described a restriction the server does not apply,
+   * and the Charges tab believed it.
+   */
+  takeawayEnabled: true,
   dineInEnabled: true,
   defaultTicketTargetMinutes: null,
   serviceChargeChannels: ['DINE_IN'],
@@ -108,7 +114,16 @@ export class RestaurantConfigService {
           tenantId,
           branchId,
           serviceChargePercent: new Prisma.Decimal(dto.serviceChargePercent ?? 0),
-          takeawayEnabled: dto.takeawayEnabled ?? false,
+          /*
+           * D97 — `?? true`, not `?? false`. This create path runs the first
+           * time anybody saves ANY branch setting, and the Charges tab does not
+           * send these two: setting a service charge was therefore switching
+           * takeaway off, and every takeaway order after it failed with
+           * "Takeaway is disabled on this branch". A create must not decide
+           * something the caller never mentioned — `dineInEnabled` already had
+           * this right, which is why dine-in never broke the same way.
+           */
+          takeawayEnabled: dto.takeawayEnabled ?? true,
           dineInEnabled: dto.dineInEnabled ?? true,
           defaultTicketTargetMinutes: dto.defaultTicketTargetMinutes ?? null,
           ...(dto.serviceChargeChannels !== undefined

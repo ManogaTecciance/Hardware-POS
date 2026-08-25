@@ -3443,6 +3443,55 @@ For the pilot tenant both are null. Clearing one would need Reset to defaults,
 which discards the whole document profile; a targeted clear is not worth a
 migration for an asset nothing prints.
 
+
+### D97 — saving one setting must not decide another
+
+PO, 2026-08-25: "I get error when trying to order takeaway from cashier console
+saying 'takeaway is disabled on this branch'."
+
+Nobody had disabled takeaway. **Setting the service charge did.**
+
+`RestaurantBranchConfig` is created the first time anyone saves any branch
+setting, and the Charges tab (D84) sends only charge fields. The create path
+filled `takeawayEnabled` with `false`, and `TakeawayService.create` refuses when
+a row exists and says false — so the row that D84 created to hold a 10% service
+charge switched takeaway off, and every takeaway order after it failed. The
+column defaulted to `false` in the schema too, so omitting it would not have
+helped.
+
+Reproduced exactly, from an empty table: `PUT …/config` with charge fields only
+→ `takeawayEnabled: false` in the response nobody reads → `POST …/takeaway` →
+`400 Takeaway is disabled on this branch`.
+
+`dineInEnabled` was already `?? true` in the same object, two lines away. That
+asymmetry is why dine-in never broke the same way and why nothing caught this.
+
+**The deeper fault, which is the one worth fixing.** The enforcement refuses
+only when a row EXISTS and says false, so a branch with no row has always taken
+takeaway orders — while `get()` reported `takeawayEnabled: false` for that same
+branch. The API described a restriction the server does not apply. Any screen
+built on that answer would have disabled a working button. Both now say the same
+thing: takeaway is on unless somebody turns it off.
+
+So three changes, not one: the create path defaults to `true`, `CODE_DEFAULTS`
+reports `true`, and the column defaults to `true` so no future writer can spring
+the same trap. `20260906000000_takeaway_enabled_by_default` also flips existing
+`false` rows — every one of them was written by this defect, because no UI
+anywhere turns takeaway off and the only caller that ever sent the field
+explicitly is a test. The flag still works: an explicit
+`takeawayEnabled: false` is honoured, and there is a test holding that line so
+the fix cannot quietly become a hard-coded `true`.
+
+Mutation-proven three ways: restoring `?? false` fails the regression test,
+hard-coding `true` fails the explicit-refusal test, and reverting `CODE_DEFAULTS`
+fails the agreement test.
+
+**Not done:** the Charges tab still has no toggle for either channel, so
+`takeawayEnabled` is settable only through the API. That is now harmless rather
+than dangerous — the default is the working state — but a branch that genuinely
+wants takeaway off has no screen for it. Worth adding beside the charges when
+somebody needs it.
+
 ---
 
 ## Open decisions

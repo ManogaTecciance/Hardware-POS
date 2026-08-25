@@ -1737,7 +1737,14 @@ model RestaurantBranchConfig {
   /// Service charge percent — 0 disables. Default disabled per D8.
   serviceChargePercent       Decimal @default(0) @db.Decimal(5, 2)
   /// Enable takeaway operations on this branch. Independent of service charge.
-  takeawayEnabled            Boolean @default(false)
+  ///
+  /// D97 — defaults TRUE. It was false, and since the enforcement in
+  /// `TakeawayService.create` only refuses when a row EXISTS and says false,
+  /// the mere act of creating this row (saving a service charge) turned
+  /// takeaway off for a branch that had been taking orders. A column whose
+  /// default contradicts the behaviour of a branch without the column is a
+  /// trap for every future writer, not just the one that sprang it.
+  takeawayEnabled            Boolean @default(true)
   /// Enable dine-in operations on this branch.
   dineInEnabled              Boolean @default(true)
   /// Default target time for a KOT ticket, in minutes. Informational only in
