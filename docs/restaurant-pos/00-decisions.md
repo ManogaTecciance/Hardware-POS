@@ -3262,6 +3262,38 @@ still requires exactly `SALE_CREATE` (D16). The palette keeps its retail wording
 "Start new sale", which reads oddly in a restaurant — noted here rather than
 fixed by editing a string the Tile Shop depends on.
 
+**What the review changed.** An adversarial pass over this change confirmed no
+findings, but three of its refutations conceded something worth acting on, and
+all three were the same species of defect this decision is about — an assertion
+that looks like a guarantee and is not one.
+
+* `resolveInitialPosMode` opened with "the mode a `?mode=` deep link may open",
+  which reads as route-wide. It is not: `/pos?mode=third-party` carrying an
+  `externalOrderId` returns the third-party **inspector** earlier in
+  `pos/page.tsx`, before the counter workspace exists. That screen is a
+  different feature gated server-side on `PLATFORM_PROFILE_READ` /
+  `PLATFORM_PROFILE_MANAGE`, so routing it through this resolver would apply
+  the wrong gate and would hide from a waiter an inspector they are authorised
+  to read. The docstring now says what it guards.
+* The palette had a **second, hand-copied** `holdsAnyOf` and a hand-typed copy
+  of the three permissions. That is the shape D56 already caught once (seven
+  inline copies of a businessType predicate, each drifted). It now imports the
+  real helper and derives the gate from the nav specs as the union of both
+  domains' `/pos` entries — fail-closed if the specs ever fail to load.
+* Two of the mutation proofs in `nav.test.ts` compared **local expressions**.
+  `Boolean(gate)` against a literal array is a compile-time constant: it could
+  never fail whatever the shipped gate did. They assert against the exported
+  `holdsAnyOf` now.
+
+The palette gate had no test at all — the whole web suite was green with it
+fully fail-open. It has one, and the first draft of THAT re-derived the gate
+instead of importing it, so mutating the component left every assertion green;
+the second draft asserted the constant but not that the command uses it, so
+hardcoding the old permission back onto the entry also passed. Both were found
+by running the mutation rather than by reading the test, which is the whole
+argument for D30's rule that tripwires are mutation-proven and not merely
+written.
+
 **Still open:** whether the WAITER's `SALE_CREATE` grant is now vestigial. Its own
 comment says it exists only for the rail gate this decision removes, and closing
 a table needs `TABLE_CLOSE`, not `SALE_CREATE`. Removing it is a separate

@@ -770,25 +770,40 @@ describe('D93 — any-of permission gates', () => {
     const till = permissionsOfTemplate('RESTAURANT_CASHIER');
     const kitchen = permissionsOfTemplate('KITCHEN_STAFF');
 
+    /*
+     * These two assert against the REAL exported `holdsAnyOf`, contrasted with
+     * the implementation somebody would plausibly write instead. An earlier
+     * draft compared two LOCAL expressions — `Boolean(gate)` against a literal
+     * array is a compile-time constant, so it could never fail whatever the
+     * shipped gate did. Decorative assertions of that shape are the exact
+     * failure D30 names: indistinguishable from a passing test, and they stop
+     * anyone looking again.
+     */
     it('M1: all-of instead of any-of hides POS from the till again', () => {
+      const shipped = holdsAnyOf(gate, { hasPermission: till });
       const allOf = gate.every((p) => till(p));
-      const anyOf = gate.some((p) => till(p));
-      expect(anyOf).toBe(true);
-      expect(allOf).toBe(false);
-      expect(() => expect(allOf).toBe(true)).toThrow();
+
+      expect(shipped).toBe(true); // what the till gets today
+      expect(allOf).toBe(false); // what the mutation would give them
+      expect(shipped).not.toBe(allOf);
     });
 
-    it('M2: ignoring the array and truthy-testing it shows POS to kitchen staff', () => {
-      // `!item.permission || hasPermission(item.permission)` — the ORIGINAL
-      // line — against an array: a non-empty array is truthy, so the first
-      // clause is false, and hasPermission(array) is false for everyone…
-      const original = !gate || kitchen(gate as unknown as Permission);
-      expect(original).toBe(false); // …which would hide POS from EVERYBODY.
-      // …and the other plausible slip, treating a present gate as satisfied:
-      const truthy = Boolean(gate);
-      expect(truthy).toBe(true); // POS for kitchen staff, who hold none of it.
-      expect(gate.some((p) => kitchen(p))).toBe(false);
-      expect(() => expect(truthy).toBe(false)).toThrow();
+    it('M2: treating a present gate as satisfied shows POS to kitchen staff', () => {
+      const shipped = holdsAnyOf(gate, { hasPermission: kitchen });
+      // `!item.permission || …` — the pre-D93 line — reads a non-empty array
+      // as "gated", then asks hasPermission(theWholeArray), which is false for
+      // everyone: POS would vanish for ALL roles.
+      const preD93 = !gate || kitchen(gate as unknown as Permission);
+      // …and the opposite slip, treating any present gate as already met.
+      const truthyGate = (g: readonly Permission[] | undefined) => Boolean(g);
+
+      expect(shipped).toBe(false); // kitchen staff hold none of the three
+      expect(preD93).toBe(false); // …and would lose it even if they did
+      expect(truthyGate(gate)).toBe(true); // POS for everyone — the fail-open
+      expect(shipped).not.toBe(truthyGate(gate));
+      // Positive control: the same shipped gate DOES open for the till, so the
+      // false above is about kitchen staff, not about a gate that refuses all.
+      expect(holdsAnyOf(gate, { hasPermission: till })).toBe(true);
     });
 
     /*

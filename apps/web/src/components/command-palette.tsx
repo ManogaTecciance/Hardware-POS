@@ -19,10 +19,11 @@ import {
 import * as React from 'react';
 
 import { useAuth } from '@/lib/auth';
+import { ALL_NAV_ITEMS, holdsAnyOf } from '@/lib/nav';
 import { Permission } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 
-interface Command {
+export interface Command {
   id: string;
   label: string;
   hint: string;
@@ -33,18 +34,37 @@ interface Command {
   permission?: Permission | readonly Permission[];
 }
 
-/** D93 — see `holdsAnyOf` in lib/nav.ts; the same rule, and the same reason. */
-function holdsAnyOf(
-  permission: Permission | readonly Permission[] | undefined,
-  hasPermission: (permission: Permission) => boolean,
-): boolean {
-  if (permission === undefined) return true;
-  if (!Array.isArray(permission)) return hasPermission(permission as Permission);
-  for (const candidate of permission as readonly Permission[]) {
-    if (hasPermission(candidate)) return true;
-  }
-  return false;
-}
+/**
+ * D93 — the POS command's gate, taken FROM the navigation specs rather than
+ * retyped beside them.
+ *
+ * The palette hand-copies every destination's href and permission from the nav
+ * lists; that duplication predates this change, but a second hand-copy of a
+ * PERMISSION SET is the shape D56 already caught once — seven inline copies of
+ * a businessType predicate that each drifted. `/pos` appears in both domains
+ * (retail gated on SALE_CREATE, food service on the three capabilities the
+ * screen offers), and the command should show when EITHER is reachable, so the
+ * gate is their union.
+ *
+ * Fails CLOSED if the specs ever fail to load: an empty union refuses, which
+ * hides one command rather than offering every role a door to nothing. A test
+ * asserts it is non-empty so that never happens silently.
+ *
+ * Exported so that test asserts against THIS value rather than re-deriving it.
+ * The first draft of the test copied the derivation, and a mutation to the copy
+ * below went undetected — a mirror is not a tripwire (D30).
+ */
+export const POS_COMMAND_GATE: readonly Permission[] = [
+  ...new Set(
+    ALL_NAV_ITEMS.filter((item) => item.href === '/pos').flatMap((item) =>
+      item.permission === undefined
+        ? []
+        : Array.isArray(item.permission)
+          ? [...(item.permission as readonly Permission[])]
+          : [item.permission as Permission],
+    ),
+  ),
+];
 
 const COMMANDS: Command[] = [
   /*
@@ -54,7 +74,7 @@ const COMMANDS: Command[] = [
    * reads oddly in a food-service workspace, which is noted in D93 rather
    * than fixed by editing a string the Tile Shop depends on.
    */
-  { id: 'new-sale', label: 'Start new sale', hint: 'POS', href: '/pos', icon: ShoppingCart, keywords: 'sell checkout cart pos register order takeaway delivery', permission: [Permission.SALE_CREATE, Permission.ORDER_SEND_TO_KITCHEN, Permission.TAKEAWAY_CREATE] },
+  { id: 'new-sale', label: 'Start new sale', hint: 'POS', href: '/pos', icon: ShoppingCart, keywords: 'sell checkout cart pos register order takeaway delivery', permission: POS_COMMAND_GATE },
   { id: 'find-sale', label: 'Find a sale', hint: 'Sales', href: '/sales', icon: ReceiptText, keywords: 'invoice receipt transaction history', permission: Permission.SALE_READ },
   { id: 'new-quote', label: 'Create quotation', hint: 'Quotations', href: '/quotations/new', icon: FileText, keywords: 'quote estimate proposal', permission: Permission.QUOTATION_CREATE },
   { id: 'find-quote', label: 'Find a quotation', hint: 'Quotations', href: '/quotations', icon: FileText, keywords: 'quote estimate pipeline', permission: Permission.QUOTATION_READ },
@@ -68,6 +88,20 @@ const COMMANDS: Command[] = [
   { id: 'settings', label: 'Open settings', hint: 'System', href: '/settings', icon: Settings, keywords: 'preferences configuration', permission: Permission.SETTINGS_MANAGE },
 ];
 
+/**
+ * The commands this permission set may see.
+ *
+ * Exported and pure so a test covers the WIRING, not just the gate: asserting
+ * `POS_COMMAND_GATE` alone left "the command stopped using it" undetected, and
+ * a mutation that hardcoded the old single permission back onto the entry
+ * passed every assertion. The unit worth testing is command-plus-gate.
+ */
+export function availableCommands(
+  hasPermission: (permission: Permission) => boolean,
+): readonly Command[] {
+  return COMMANDS.filter((c) => holdsAnyOf(c.permission, { hasPermission }));
+}
+
 /** Global command search. Opens on Cmd/Ctrl+K or via its trigger; permission-
  *  aware; keyboard-driven listbox with focus restore. */
 export function CommandPalette() {
@@ -80,7 +114,7 @@ export function CommandPalette() {
   const restoreRef = React.useRef<HTMLElement | null>(null);
 
   const available = React.useMemo(
-    () => COMMANDS.filter((c) => holdsAnyOf(c.permission, hasPermission)),
+    () => availableCommands(hasPermission),
     [hasPermission],
   );
 

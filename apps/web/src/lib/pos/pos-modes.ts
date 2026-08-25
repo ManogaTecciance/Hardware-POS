@@ -42,7 +42,17 @@ export function availablePosModes(
 }
 
 /**
- * The mode a `?mode=` deep link may open, or `null` for "ask".
+ * The mode the COUNTER WORKSPACE may open from a `?mode=` deep link, or `null`
+ * for "ask".
+ *
+ * Scoped deliberately, and the scope matters: `/pos?mode=third-party` carrying
+ * an `externalOrderId` returns the third-party INSPECTOR earlier in
+ * `app/(app)/pos/page.tsx`, before this workspace is constructed, so this
+ * resolver never sees it. That screen is a read-only inspector for an inbound
+ * partner order gated server-side on different permissions
+ * (`PLATFORM_PROFILE_READ` to view, `PLATFORM_PROFILE_MANAGE` to accept) — a
+ * different feature that happens to share the `?mode=` prefix. Routing it
+ * through here would apply the wrong gate.
  *
  * `?mode=` survives a bookmark, a shared link and the dashboard's `/takeaway`
  * hop, so it can name a mode this operator cannot work. Since D93 the till has
