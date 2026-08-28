@@ -1761,6 +1761,11 @@ enums **at runtime**, both directions, no regex.
 
 ### D57 — One business type per template: the pilot is HARDWARE; TILE_SHOP and RETAIL are removed
 
+> **Partly superseded by D99 (2026-08-28).** `RETAIL` returns as its own business
+> type and domain descriptor, for a clothing customer that did not exist in
+> August. The Tile Shop finding below and the `TILE_SHOP` removal **stand
+> unchanged**.
+
 PO decision (2026-08-14): the Hardware template and the Tile Shop are the same
 entity, and there is no Retail template. (Plan §4.8.1; plan-appendix id D71.)
 
@@ -3543,6 +3548,164 @@ once: a field DROPPED from the map is the failure that matters, and a
 field-by-field test only catches the fields somebody thought to list.
 Mutation-proven by deleting the service charge and the packaging charge from
 the map.
+
+---
+
+## 2026-08-28 — Retail template
+
+### D99 — the Retail template returns: clothing first, local inventory, one workspace per shop
+
+**Supersedes D57** on its retail half. PO decision, 2026-08-28.
+
+D57 removed `TILE_SHOP` and `RETAIL` from `BusinessType` on 14 August, on the
+finding that the Hardware template and the Tile Shop were the same entity and
+that **there was no Retail template**. That was true of the world it was written
+in: the enum was ten days old, the three retail values carried zero rows, and no
+retail customer existed. *"A transition for ghosts protects nothing."*
+
+What changed is the customer, not the reasoning. A clothing retailer is now in
+scope, with grocery behind it, and a template that does not exist cannot serve
+them. D57 is superseded on its facts rather than corrected on its logic — the
+removal was right, and re-adding is cheap in the direction that matters:
+`ALTER TYPE … ADD VALUE` is additive, so this record needs none of the
+destructive-migration exception D57 had to carve out in
+`provider-contract.spec.ts`.
+
+**`RETAIL` returns; `TILE_SHOP` stays removed.** The Tile Shop finding is
+untouched — it really is a Hardware workspace, and the pilot tenant remains
+classified `HARDWARE`.
+
+#### What a Retail workspace is
+
+A `RETAIL` business type with its own `DomainDescriptor` in
+`packages/shared/src/domains/`, registered in `DOMAIN_REGISTRY` — which is total
+and has no fallback (D56), so the value cannot exist without the descriptor.
+
+- **Providers:** `InventoryMode.LOCAL` + `AccountingProviderKind.NONE`. Retail
+  does not integrate with QuickBooks. This needs no code: both values already
+  exist, and D63's quarantine already assumes tenants that never speak to it.
+- **Modules:** `SHARED_CORE_MODULES` + `RETAIL_MODULES` **minus `QUICKBOOKS`**.
+  `RETAIL_CAPABILITIES` is adopted as-is — it already declares
+  `catalogue.variants` and `collections` true, `fulfilment.kind: IMMEDIATE`,
+  `channels: ['COUNTER']`.
+- **Navigation and permissions** follow D93: a rail entry is gated on what the
+  screen can do. A retail till legitimately holds `SALE_CREATE`; nothing may use
+  it as a proxy for anything else.
+- **Catalogue fields** arrive through `catalogue.attributeSchema` (D64) —
+  description in `attributes`, behaviour in columns. Clothing and grocery each
+  declare their own; neither adds a migration.
+
+#### One workspace per shop
+
+**A Retail workspace serves exactly one shop, with one branch.** A chain of three
+shops is three workspaces.
+
+This is a deliberate acceptance of an existing limit rather than a design
+preference. `LocalInventoryProvider` counts a tenant's active branches and
+**refuses every stock operation when there is more than one** — the guard D10
+describes as protecting against a shared `Product.quantityOnHand` being
+decremented by two shops at once. D10 calls that *"a known architectural defect …
+not an acceptable permanent limitation"* and schedules the fix as Phase 2.5.
+**That fix is not a retail dependency and is not being brought forward.** With one
+branch per workspace the guard is never reached.
+
+What the model gives up, recorded so nobody discovers it in front of a customer:
+stock, catalogue, customers and reporting are per shop; there is no cross-shop
+lookup, no transfer, and no consolidated head-office view. The product-import
+path makes seeding a second shop practical. The first customer who needs one
+number across two shops reopens D10 Phase 2.5.
+
+#### The sellable unit is the variant
+
+Retail sells a size, a pack, a weight — not a style. `ProductVariant` and its
+dimensions already exist, `SaleItem.productVariantId` is already nullable with SKU
+and name snapshots (D44), and goods receipts already write per-variant stock into
+`BranchInventory`.
+
+**The sell path does not.** It aggregates cart lines by `productId` and decrements
+the global `Product.quantityOnHand`, so selling a Medium reduces a shared "shirts"
+number and leaves the Medium count untouched. Per-variant stock accuracy is a
+requirement of this template, and closing that gap is the first implementation
+phase.
+
+Two properties carry forward unchanged: the conditional stock write that prevents
+two tills selling the same last unit — moved, never reimplemented — and the
+`trackInventory` check that keeps non-stocked lines moving no stock.
+
+#### Tax
+
+Per **category** and **global**, resolved most-specific-first, with
+`Product.taxable` honoured as an exemption and the resolved rate **snapshotted
+onto the sale line** so a rate change cannot rewrite an old receipt — the same
+reasoning D44 applies to variant names.
+
+**No price bands.** Considered and rejected: the band-boundary behaviour is
+visible to a shopper whenever a discounted item crosses one, and no confirmed
+format needs them.
+
+Prices are **displayed tax-inclusive**. Storage is unchanged — net, tax and gross
+stay separate; only presentation changes. The inclusive figure is never stored as
+the price, because converting it back to net drifts by a cent at some quantities
+and the receipt would then disagree with the ledger. This finally gives
+`AppSettings.taxInclusive` a meaning; it has been persisted and read by nothing.
+
+Per-line tax replaces the single order-level figure. D8's requirement that tax
+treatment stay tenant-configurable is unaffected.
+
+#### Formats
+
+**Clothing and grocery are the confirmed formats. The clothing pilot ships
+first.** Scales and weighed goods are grocery-only and are not on the clothing
+path.
+
+Further retail formats — pharmacy, electronics — are added as a descriptor and a
+seed pack, never as code. If a third format requires a new table, a DTO change or
+a branch in a service, the mechanism has failed and the mechanism is what gets
+fixed. The one legitimate exception is a format needing genuinely new *behaviour*,
+which is a feature with its own record, gated by a capability.
+
+#### Billing audit: A4 and A8 only
+
+Of the five open items in `hardcoded-audit.md`, the retail work claims **two**:
+
+- **A4** — promotions are surfaced by the POS catalogue and never applied at
+  close. Retail needs working promotions, and the fix lives in a new applier plus
+  the retail sale path.
+- **A8** — reports coerce `Decimal` to float and back, so totals cannot tie to the
+  payment ledger. This is fixed **before** retail reporting is built on the same
+  code, not after.
+
+**A2, A3 and A7 are deliberately not claimed here.** They are restaurant-side
+defects, they contribute nothing to the clothing pilot, and they live in files
+another developer is modifying daily. Ownership of those three is unresolved at
+the time of writing; if they return to this work, that is a separate record
+appended later rather than an edit to this one.
+
+**A4 is larger than "wire up the existing service".** `PromotionsService` is CRUD
+only and the evaluator exports one function answering whether a promotion is
+inside its schedule window. There is no discount calculation anywhere; it must be
+built.
+
+#### Discounts do not stack
+
+**A manual line discount overrides any promotion on that line.** Manual discounts
+carry role-based approval limits; a promotion stacking on top would take the total
+past a figure nobody approved, and the approval would be for one number while the
+customer paid another.
+
+`stackable` continues to govern promotion-against-promotion. The override is per
+line, not per basket.
+
+#### Not in scope
+
+QuickBooks for retail tenants · multi-branch inventory, transfers and branch
+management · price-band tax · schema-per-tenant · migrating Simply POS data,
+which is a reference implementation only.
+
+`ModuleKey.EXCHANGES` remains as D2 left it — a reserved key with an A4 document
+renderer and no transaction. The retail template builds that transaction; until it
+lands, D2's instruction stands and exchange behaviour must not be represented as
+implemented.
 
 ---
 
