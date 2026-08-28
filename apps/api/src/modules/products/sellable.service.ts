@@ -4,6 +4,7 @@ import { coerceAttributeQueryValue, domainFor } from '@hardware-pos/shared';
 import type { TenantCapabilities } from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { variantDisplayName } from '../../common/variant-display';
 import { isPromotionActive } from '../promotions/promotions.evaluator';
 import { PromotionsRepository } from '../promotions/promotions.repository';
 import { BusinessProfileService } from '../platform/business-profile.service';
@@ -316,10 +317,7 @@ export class SellableService {
         item.variants = p.variants.map((v) => ({
           id: v.id,
           sku: v.sku,
-          name:
-            v.optionValues.length > 0
-              ? v.optionValues.map((ov) => ov.option?.name ?? '').join(' / ')
-              : v.sku,
+          name: variantDisplayName(v.optionValues, v.sku),
           unitPrice: v.unitPrice.toFixed(2),
           isDefault: v.isDefault,
           isActive: v.isActive,

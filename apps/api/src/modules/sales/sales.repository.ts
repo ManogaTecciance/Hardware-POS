@@ -115,6 +115,15 @@ const saleListInclude = {
   _count: { select: { items: true } },
 } satisfies Prisma.SaleInclude;
 
+/**
+ * D99 — a variant as the sale path needs it: the row plus the option values the
+ * display name is derived from. Declared with `validator` so the include shape
+ * and the type cannot drift apart.
+ */
+export type SaleVariant = Prisma.ProductVariantGetPayload<{
+  include: { optionValues: { include: { option: { select: { name: true } } } } };
+}>;
+
 @Injectable()
 export class SalesRepository {
   constructor(
@@ -176,6 +185,24 @@ export class SalesRepository {
 
   findProductsByIds(tenantId: string, ids: string[]): Promise<Product[]> {
     return this.prisma.product.findMany({ where: { tenantId, id: { in: ids } } });
+  }
+
+  /**
+   * D99 — resolve the variants a cart names.
+   *
+   * `tenantId` in the predicate is what makes another tenant's variant id return
+   * nothing rather than a row, exactly as `findProductsByIds` does. The caller
+   * then reports it as unknown, so the response never distinguishes "does not
+   * exist" from "belongs to someone else".
+   */
+  findVariantsByIds(tenantId: string, ids: string[]): Promise<SaleVariant[]> {
+    return this.prisma.productVariant.findMany({
+      where: { tenantId, id: { in: ids } },
+      // The option values are what `variantDisplayName` turns into "Black / Medium"
+      // for the snapshot frozen onto the sale line. Same include shape as
+      // `sellable.service` uses, so both derive the name from the same data.
+      include: { optionValues: { include: { option: { select: { name: true } } } } },
+    });
   }
 
   branchExists(tenantId: string, branchId: string): Promise<{ id: string } | null> {
@@ -515,6 +542,14 @@ function orderDiscountData(computed: PersistSaleInput['computed']) {
 function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleInput {
   return {
     product: { connect: { id: line.productId } },
+    // D99 — `connect` only when a variant was actually sold; a product-level line
+    // must leave the relation unset rather than connect to nothing.
+    ...(line.productVariantId
+      ? { productVariant: { connect: { id: line.productVariantId } } }
+      : {}),
+    // D44 — frozen at sale time, so a later rename cannot rewrite this receipt.
+    variantSkuSnapshot: line.variantSkuSnapshot,
+    variantNameSnapshot: line.variantNameSnapshot,
     productName: line.productName,
     sku: line.sku,
     unitPrice: line.unitPrice,
@@ -543,6 +578,9 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
 function toStockLines(lines: ComputedLine[]): StockLine[] {
   return lines.map((line) => ({
     productId: line.productId,
+    // D99 — the real variant now, resolved by `computeCart`. Still null for a
+    // product-level line, which the providers handle as they always have.
+    productVariantId: line.productVariantId,
     productName: line.productName,
     quantity: line.quantity,
     trackInventory: line.trackInventory,

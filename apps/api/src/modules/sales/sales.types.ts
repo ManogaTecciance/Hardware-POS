@@ -53,6 +53,8 @@ export interface SalesListFilter {
 /** Normalized cart line coming into the compute pipeline. */
 export interface CartItemInput {
   productId: string;
+  /** D99 — the variant sold, when the client names one. */
+  productVariantId?: string | null;
   quantity: number;
   unitPrice?: number;
   discountType?: DiscountType | null;
@@ -67,6 +69,21 @@ export interface CartItemInput {
 /** A fully computed sale line, ready to persist. */
 export interface ComputedLine {
   productId: string;
+  /**
+   * D99 — the exact variant sold, or null for a product that has none.
+   *
+   * Null is also the answer when a variant product is sold without one being
+   * named: the line then behaves exactly as it did before variants existed, at
+   * product level. Requiring a variant is deferred until the till can supply one.
+   */
+  productVariantId: string | null;
+  /**
+   * D44 — the variant's SKU and display name frozen at sale time, so renaming or
+   * deactivating a variant later cannot rewrite a historical receipt. Null
+   * whenever `productVariantId` is.
+   */
+  variantSkuSnapshot: string | null;
+  variantNameSnapshot: string | null;
   productName: string;
   sku: string | null;
   /** Whether the sale should decrement the product's on-hand stock. */

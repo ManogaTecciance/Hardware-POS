@@ -78,8 +78,8 @@ describe('NoInventoryProvider', () => {
 
   it('is a no-op even when given real lines — it must not behave like Local', async () => {
     const lines = [
-      { productId: 'p1', productName: 'Tile', quantity: 5, trackInventory: true },
-      { productId: 'p2', productName: 'Grout', quantity: 2, trackInventory: true },
+      { productId: 'p1', productVariantId: null, productName: 'Tile', quantity: 5, trackInventory: true },
+      { productId: 'p2', productVariantId: null, productName: 'Grout', quantity: 2, trackInventory: true },
     ];
     // trackInventory: true would move stock under Local; here it must not, and the
     // forbidden proxy proves nothing was read or written.

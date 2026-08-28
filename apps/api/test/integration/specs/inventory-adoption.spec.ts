@@ -330,6 +330,7 @@ describe('6, 20 — overselling under concurrency', () => {
         inventory.reduceStock(tx, { tenantId: tile.tenantId, branchId: tile.branchId }, [
           {
             productId: tile.productAId,
+            productVariantId: null,
             productName: 'Fixture Product A',
             quantity: 100_000,
             trackInventory: true,
@@ -343,6 +344,7 @@ describe('6, 20 — overselling under concurrency', () => {
         inventory.reduceStock(tx, { tenantId: tile.tenantId, branchId: tile.branchId }, [
           {
             productId: tile.productAId,
+            productVariantId: null,
             productName: 'Fixture Product A',
             quantity: 100_000,
             trackInventory: true,
@@ -495,7 +497,7 @@ describe('13-17, 21 — LOCAL inventory, single active branch', () => {
     await expect(
       prisma.$transaction(async (tx) => {
         await inventory.reduceStock(tx, { tenantId: tile.tenantId, branchId: tile.branchId }, [
-          { productId: tile.productAId, productName: 'Tile', quantity: 2, trackInventory: true },
+          { productId: tile.productAId, productVariantId: null, productName: 'Tile', quantity: 2, trackInventory: true },
         ]);
         // Visible inside the transaction …
         const mid = await tx.product.findUniqueOrThrow({ where: { id: tile.productAId } });
@@ -1058,6 +1060,10 @@ describe('6C-A.5 — the provider is genuinely invoked, not merely imported', ()
     expect(lines).toEqual([
       {
         productId: tile.productAId,
+        // D99 — the sell/restock paths carry a variant slot now. Both pass null
+        // until `computeCart` resolves one, so this pins today's behaviour and
+        // will fire again the moment a real variant starts flowing through.
+        productVariantId: null,
         productName: expect.any(String),
         quantity: 2,
         trackInventory: true,
@@ -1080,6 +1086,10 @@ describe('6C-A.5 — the provider is genuinely invoked, not merely imported', ()
     expect(lines).toEqual([
       {
         productId: tile.productAId,
+        // D99 — the sell/restock paths carry a variant slot now. Both pass null
+        // until `computeCart` resolves one, so this pins today's behaviour and
+        // will fire again the moment a real variant starts flowing through.
+        productVariantId: null,
         productName: expect.any(String),
         quantity: 1,
         trackInventory: true,

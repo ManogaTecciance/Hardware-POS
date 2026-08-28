@@ -123,7 +123,7 @@ async function onHand(productId: string): Promise<number> {
 }
 
 function line(productId: string, quantity: number, trackInventory = true): StockLine {
-  return { productId, productName: 'Fixture Product', quantity, trackInventory };
+  return { productId, productVariantId: null, productName: 'Fixture Product', quantity, trackInventory };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ describe('QuickBooksInventoryProvider', () => {
     await expect(
       prismaService.$transaction((tx) =>
         provider.reduceStock(tx, ctx, [
-          { productId: tile.productAId, productName: 'Fixture Product A', quantity: 101, trackInventory: true },
+          { productId: tile.productAId, productVariantId: null, productName: 'Fixture Product A', quantity: 101, trackInventory: true },
         ]),
       ),
     ).rejects.toThrow('Insufficient stock for Fixture Product A');
@@ -397,7 +397,7 @@ describe('LocalInventoryProvider', () => {
     await expect(
       prismaService.$transaction((tx) =>
         provider.reduceStock(tx, ctx, [
-          { productId: other.productAId, productName: 'Foreign', quantity: 1, trackInventory: true },
+          { productId: other.productAId, productVariantId: null, productName: 'Foreign', quantity: 1, trackInventory: true },
         ]),
       ),
     ).rejects.toThrow('Insufficient stock for Foreign');
@@ -668,7 +668,7 @@ describe('provider mutations participate in the caller transaction', () => {
         });
         // ...then the provider refuses.
         await provider.reduceStock(tx, ctx, [
-          { productId: tile.productAId, productName: 'Fixture Product A', quantity: 999, trackInventory: true },
+          { productId: tile.productAId, productVariantId: null, productName: 'Fixture Product A', quantity: 999, trackInventory: true },
         ]);
       }),
     ).rejects.toThrow('Insufficient stock');

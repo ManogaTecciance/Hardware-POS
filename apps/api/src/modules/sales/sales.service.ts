@@ -10,6 +10,7 @@ import { CURRENCY_SYMBOL, type Paginated } from '@hardware-pos/shared';
 import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
 import { computeDocumentLine } from '../../common/money/document-totals';
+import { variantDisplayName } from '../../common/variant-display';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { DiscountsService, ORDER_DISCOUNT_KEY } from '../discounts/discounts.service';
 import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
@@ -134,6 +135,9 @@ export class SalesService {
         // lines were written by this module with a product, so a null here is
         // corruption, not a state — fail the completion rather than sell air.
         productId: requireProductId(it.productId, it.id),
+        // D99 — a draft line already carries the variant chosen when the draft was
+        // built; completing it must sell the same one, not fall back to product level.
+        productVariantId: it.productVariantId,
         quantity: Number(it.quantity),
         discountType: it.discountType,
         discountValue: it.discountValue != null ? Number(it.discountValue) : null,
@@ -325,6 +329,18 @@ export class SalesService {
     const ids = [...new Set(items.map((i) => i.productId))];
     const products = await this.salesRepository.findProductsByIds(tenantId, ids);
     const byId = new Map(products.map((p) => [p.id, p]));
+
+    // D99 — resolve every named variant in one read, mirroring the product fetch
+    // above. A cart that names no variant does no query at all, so the ordinary
+    // single-SKU sale costs exactly what it did before.
+    const variantIds = [
+      ...new Set(items.map((i) => i.productVariantId).filter((v): v is string => Boolean(v))),
+    ];
+    const variants = variantIds.length
+      ? await this.salesRepository.findVariantsByIds(tenantId, variantIds)
+      : [];
+    const variantById = new Map(variants.map((v) => [v.id, v]));
+
     const settings = this.settingsService.getSettings(tenantId);
 
     // Availability comes from the provider, not from the product row. For
@@ -344,7 +360,29 @@ export class SalesService {
         if (!product.isActive) {
           throw new BadRequestException(`Product ${product.name} is inactive`);
         }
-        const cachedPrice = Number(product.unitPrice);
+        // D99 — resolve and vet the variant before any money is computed from it.
+        const variant = item.productVariantId ? (variantById.get(item.productVariantId) ?? null) : null;
+        if (item.productVariantId && !variant) {
+          // Unknown id and another tenant's id give the same message on purpose:
+          // the response must not reveal that a variant exists elsewhere.
+          throw new BadRequestException(`Unknown variant ${item.productVariantId}`);
+        }
+        if (variant && variant.productId !== product.id) {
+          // Without this a client could pair a cheap variant with a dear product
+          // and pay the variant's price for the wrong thing.
+          throw new BadRequestException(
+            `Variant ${variant.sku} does not belong to ${product.name}`,
+          );
+        }
+        if (variant && !variant.isActive) {
+          throw new BadRequestException(`Variant ${variant.sku} is inactive`);
+        }
+
+        // A variant owns its price outright; the product price is NOT a fallback.
+        // `ProductVariant.unitPrice` is non-nullable, and `sellable.service`
+        // reports a variant product's own price as null for exactly this reason —
+        // `??` here would let a variant priced at 0 silently charge the product's.
+        const cachedPrice = variant ? Number(variant.unitPrice) : Number(product.unitPrice);
         if (item.unitPrice != null && round2(item.unitPrice) !== round2(cachedPrice)) {
           throw new BadRequestException(
             `Price for ${product.name} has changed; refresh the product cache`,
@@ -398,6 +436,11 @@ export class SalesService {
 
         return {
           productId: product.id,
+          productVariantId: variant?.id ?? null,
+          // D44 — frozen here, at sale time. A later rename or deactivation must
+          // not be able to rewrite what this receipt said.
+          variantSkuSnapshot: variant?.sku ?? null,
+          variantNameSnapshot: variant ? variantDisplayName(variant.optionValues, variant.sku) : null,
           productName: product.name,
           sku: product.sku,
           trackInventory: product.type === 'Inventory',
@@ -575,6 +618,10 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
 function toCartItem(dto: SaleItemInputDto): CartItemInput {
   return {
     productId: dto.productId,
+    // D99 — forward the variant. Omitting it here would type-check cleanly and
+    // silently drop every variant the till sent, since the field is optional on
+    // both sides.
+    productVariantId: dto.productVariantId ?? null,
     quantity: dto.quantity,
     unitPrice: dto.unitPrice,
     discountType: dto.discountType,

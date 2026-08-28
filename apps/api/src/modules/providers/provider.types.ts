@@ -46,9 +46,26 @@ export interface ProviderContext {
  * Mirrors the fields `sales.repository.decrementStock` already uses:
  * `productId`, `productName` (for the user-facing insufficient-stock message),
  * `quantity`, and `trackInventory` (only `Inventory`-type products move stock).
+ *
+ * D99 — `productVariantId` closes the asymmetry with {@link ReceiveStockLine},
+ * which has carried a variant since goods receipts learned to write
+ * `BranchInventory` per (branch, product, variant). Selling could not say which
+ * variant moved, so a sale reduced a single product-level number and left the
+ * per-variant figures a receipt had written untouched.
+ *
+ * Nullable, not required: a product without variants — loose rice, a service —
+ * is the common case and keeps the existing product-level behaviour. Providers
+ * that do not yet read it are unaffected, which is what lets this land ahead of
+ * the depletion change it exists for.
  */
 export interface StockLine {
   productId: string;
+  /**
+   * The exact variant sold, or null for a product that has none.
+   * A provider that honours it must still fall back to product-level stock when
+   * it is null.
+   */
+  productVariantId: string | null;
   /** Used verbatim in user-facing errors, exactly as the current code does. */
   productName: string;
   quantity: number;

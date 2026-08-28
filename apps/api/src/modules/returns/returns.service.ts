@@ -838,6 +838,10 @@ function eligibleRestockLines(items: PersistReturnItem[]): StockLine[] {
     .filter((it) => it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK')
     .map((it) => ({
       productId: it.productId,
+      // D99 — `ReturnItem.productVariantId` exists and will be threaded here when
+      // the sell path resolves variants; until a sale can record one, every
+      // return line restocks at product level exactly as it does today.
+      productVariantId: null,
       productName: it.productNameSnapshot,
       quantity: Number(it.returnQuantity),
       trackInventory: true,
