@@ -24,11 +24,16 @@ import { InventoryProvider } from './inventory-provider';
  *
  * ## The multi-branch guard — the important part of this class
  *
- * `Product.quantityOnHand` is **one global number per product**. It has no branch
- * dimension, and there is no `BranchInventory` table yet (decision D10, scheduled
- * for Phase 2.5). For a single-branch tenant that column is a complete and correct
+ * `Product.quantityOnHand` is **one global number per product**, with no branch
+ * dimension. For a single-branch tenant that column is a complete and correct
  * description of stock. For a multi-branch tenant it is not: reducing it for a sale
  * at branch A silently reduces the number branch B is also reading.
+ *
+ * `BranchInventory` **does** exist (D44) and is branch- and variant-scoped — this
+ * comment claimed otherwise until D99 corrected it. But only receipts and variant
+ * sales write it; a product-level sale still moves the global column, so the guard
+ * below remains necessary. D10's Phase 2.5, which would move *every* path onto
+ * branch-scoped rows, is still outstanding.
  *
  * So this provider **counts the tenant's active branches and refuses** when there
  * is more than one. That is a deliberate choice to fail loudly rather than to
@@ -78,19 +83,68 @@ export class LocalInventoryProvider implements InventoryProvider {
   ): Promise<void> {
     await this.assertSingleBranch(tx, ctx);
 
-    for (const [productId, { name, qty }] of aggregate(lines)) {
-      const res = await tx.product.updateMany({
-        // `tenantId` in the predicate is what makes a foreign product id match
-        // zero rows instead of being mutated.
-        where: { id: productId, tenantId: ctx.tenantId, quantityOnHand: { gte: qty } },
-        data: { quantityOnHand: { decrement: qty } },
+    for (const { productId, productVariantId, name, qty } of aggregateByVariant(lines)) {
+      // ── product-level line: unchanged since before variants existed ────────
+      if (productVariantId === null) {
+        const res = await tx.product.updateMany({
+          // `tenantId` in the predicate is what makes a foreign product id match
+          // zero rows instead of being mutated.
+          where: { id: productId, tenantId: ctx.tenantId, quantityOnHand: { gte: qty } },
+          data: { quantityOnHand: { decrement: qty } },
+        });
+        if (res.count === 0) {
+          // Either genuinely insufficient stock or a product outside this tenant.
+          // One message for both: distinguishing them would leak whether a product
+          // id exists elsewhere.
+          throw insufficientStockError(name);
+        }
+        continue;
+      }
+
+      // ── variant line: the row lives in BranchInventory ─────────────────────
+      // D99 decision 9 — a variant's stock is branch-scoped, so there is no row to
+      // target without a branch. Fail loudly, matching `receiveStock`, rather than
+      // quietly reducing product-level stock and hiding the caller's omission.
+      if (ctx.branchId === null) {
+        throw new InvalidBranchContextError(
+          'reduceStock requires an explicit branchId for a variant line',
+        );
+      }
+
+      // The oversell guard, MOVED not rewritten: the same conditional write, the
+      // same row-count check, the same message. `quantityOnHand: { gte: qty }` in
+      // the predicate is what makes two concurrent sales of the last unit
+      // serialise — one updates the row, the other matches nothing.
+      //
+      // D99 decision 8 — no row means the variant was never received into this
+      // branch, so it matches nothing and reports insufficient stock. Variant
+      // stock is created by goods receipts, never by a sale.
+      const res = await tx.branchInventory.updateMany({
+        where: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          productVariantId,
+          quantityOnHand: { gte: qty },
+        },
+        data: { quantityOnHand: { decrement: qty }, version: { increment: 1 } },
       });
       if (res.count === 0) {
-        // Either genuinely insufficient stock or a product outside this tenant.
-        // One message for both: distinguishing them would leak whether a product
-        // id exists elsewhere.
         throw insufficientStockError(name);
       }
+
+      // D10 rollup mirror, the exact counterpart of the increment in
+      // `receiveStock`. Without it the product-level number only ever climbs —
+      // receipts add to it and sales never subtract — and that number is what the
+      // product list and the low-stock badge read.
+      //
+      // No `gte` guard here on purpose: the authoritative check already happened
+      // against the BranchInventory row above, and a second conditional on the
+      // same logical decrement would fail partially in ways nobody can reason
+      // about. `type: 'Inventory'` matches the receive/return idiom.
+      await tx.product.updateMany({
+        where: { id: productId, tenantId: ctx.tenantId, type: 'Inventory' },
+        data: { quantityOnHand: { decrement: qty } },
+      });
     }
   }
 
@@ -320,6 +374,43 @@ export class LocalInventoryProvider implements InventoryProvider {
  * existing behaviour: a cart may repeat a product id, and only `trackInventory`
  * lines move stock.
  */
+/**
+ * D99 — aggregate by (product, variant) rather than by product.
+ *
+ * A cart holding a Medium and a Large of one shirt must produce two decrements
+ * against two rows; keying by product alone would collapse them into one against
+ * the wrong grain. Repeated lines of the *same* variant still merge, which is why
+ * {@link aggregate} existed in the first place — a cart may list one thing twice.
+ *
+ * Deliberately a second function rather than a change to {@link aggregate}: the
+ * QuickBooks provider also aggregates, and QuickBooks Items have no variant
+ * dimension. Widening the shared helper would quietly alter a provider that
+ * cannot use the extra key.
+ */
+export interface VariantStockTotal {
+  productId: string;
+  productVariantId: string | null;
+  name: string;
+  qty: number;
+}
+
+export function aggregateByVariant(lines: StockLine[]): VariantStockTotal[] {
+  const totals = new Map<string, VariantStockTotal>();
+  for (const line of lines) {
+    if (!line.trackInventory) continue;
+    // `::` cannot occur inside a cuid, so the composite key is unambiguous.
+    const key = `${line.productId}::${line.productVariantId ?? ''}`;
+    const prev = totals.get(key);
+    totals.set(key, {
+      productId: line.productId,
+      productVariantId: line.productVariantId,
+      name: line.productName,
+      qty: (prev?.qty ?? 0) + line.quantity,
+    });
+  }
+  return [...totals.values()];
+}
+
 export function aggregate(lines: StockLine[]): Map<string, { name: string; qty: number }> {
   const totals = new Map<string, { name: string; qty: number }>();
   for (const line of lines) {
