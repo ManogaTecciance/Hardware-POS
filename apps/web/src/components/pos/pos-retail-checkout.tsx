@@ -32,8 +32,8 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
 import { useAuth } from '@/lib/auth';
-import { computeLine, computeTotals, type LineDiscount, type OrderDiscount } from '@/lib/cart';
-import { useCheckoutData, type ClientProduct } from '@/lib/catalog';
+import { computeLine, computeTotals, linePrice, type LineDiscount, type OrderDiscount } from '@/lib/cart';
+import { displayPrice, useCheckoutData, type ClientProduct } from '@/lib/catalog';
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
@@ -372,7 +372,7 @@ export function PosRetailCheckout() {
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
                       <span className="truncate">
-                        {item.product.sku ?? '—'} · {formatMoney(item.product.unitPrice, currency)}
+                        {item.product.sku ?? '—'} · {formatMoney(linePrice(item), currency)}
                       </span>
                     </div>
                   </div>
@@ -706,7 +706,7 @@ export function PosRetailCheckout() {
                       </div>
                       <div className="mt-1.5 flex items-end justify-between gap-1">
                         <span className="text-sm font-semibold text-primary">
-                          {formatMoney(p.unitPrice, currency)}
+                          {formatMoney(displayPrice(p), currency)}
                         </span>
                         <span
                           className={cn(
@@ -862,7 +862,7 @@ export function PosRetailCheckout() {
         <ItemDiscountDialog
           open={!!discountFor}
           productName={discountItem.product.name}
-          unitPrice={discountItem.product.unitPrice}
+          unitPrice={linePrice(discountItem)}
           quantity={discountItem.quantity}
           currency={currency}
           roleLimit={discountLimitFor(session!.user.role)}

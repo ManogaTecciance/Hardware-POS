@@ -35,8 +35,22 @@ export function computeDiscount(lineSubtotal: number, discount?: LineDiscount): 
   return Math.min(lineSubtotal, round2(discount.value));
 }
 
+/**
+ * The price actually charged for a cart line.
+ *
+ * D99 — `ClientProduct.unitPrice` is **null when variants own the price**, which
+ * the read model states explicitly rather than repeating a number that means
+ * nothing for a variant product. Until the cart carries a chosen variant (1c.2),
+ * a variant product has no line price and falls to 0 rather than to a wrong
+ * number: a visibly free line is a bug someone reports, a plausible-but-wrong
+ * price is one that ships.
+ */
+export function linePrice(item: CartItem): number {
+  return item.product.unitPrice ?? 0;
+}
+
 export function computeLine(item: CartItem): LineTotals {
-  const lineSubtotal = round2(item.product.unitPrice * item.quantity);
+  const lineSubtotal = round2(linePrice(item) * item.quantity);
   const discountAmount = computeDiscount(lineSubtotal, item.discount);
   return {
     lineSubtotal,

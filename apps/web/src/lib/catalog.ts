@@ -6,6 +6,22 @@ import * as React from 'react';
 import { api } from './api';
 import type { Session } from './auth';
 
+/** D99 — one sellable size/pack of a product, as the till needs it. */
+export interface ClientVariant {
+  id: string;
+  sku: string;
+  /** "Black / Medium", or the SKU when the variant carries no options. */
+  name: string;
+  unitPrice: number;
+  /** The variant the POS quick-adds when the operator taps the card (D45). */
+  isDefault: boolean;
+  /** Branch stock for this variant. `null` when the tenant tracks no stock. */
+  quantityOnHand: number | null;
+  stockState: StockState;
+}
+
+export type StockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED';
+
 export interface ClientProduct {
   id: string;
   name: string;
@@ -15,11 +31,18 @@ export interface ClientProduct {
   categoryName: string;
   subcategoryId: string | null;
   subcategoryName: string | null;
-  unitPrice: number;
+  /**
+   * Product-level price. **Null when variants own the price** — the read model
+   * says so explicitly rather than repeating a number that means nothing for a
+   * variant product, so a caller that ignores variants cannot quietly charge it.
+   */
+  unitPrice: number | null;
   quantityOnHand: number;
   /** Reorder point (null when not set) — drives the POS low-stock badge. */
   reorderLevel: number | null;
   imageUrl: string | null;
+  /** D99 — empty for a single-SKU product; the sizes to choose from otherwise. */
+  variants: ClientVariant[];
 }
 
 export interface ClientCustomer {
@@ -44,30 +67,42 @@ export interface PosSettings {
   taxRatePercent: number;
 }
 
-interface ApiProduct {
+/**
+ * `GET /products/sellable` — the POS read model (D62).
+ *
+ * Money and quantities arrive as decimal STRINGS, not numbers: the server keeps
+ * them in `Prisma.Decimal` (D59) and serialising through a float is exactly the
+ * boundary that rule exists to prevent. They are parsed once, here.
+ */
+interface ApiSellableItem {
   id: string;
   name: string;
-  sku: string | null;
-  type: string;
-  categoryId: string | null;
-  subcategoryId: string | null;
-  unitPrice: string | number;
-  quantityOnHand: string | number;
-  reorderLevel: string | number | null;
+  sellableKind: string;
+  /** Null when variants own the price. */
+  unitPrice: string | null;
+  effectivePrice: string | null;
+  category: { id: string; name: string } | null;
+  subcategory: { id: string; name: string } | null;
   imageUrl: string | null;
+  hasVariants: boolean;
+  variants?: {
+    id: string;
+    sku: string;
+    name: string;
+    unitPrice: string;
+    isDefault: boolean;
+    isActive: boolean;
+    availableQuantity: string | null;
+    stockState: StockState;
+  }[];
+  availableQuantity?: string | null;
+  stockState?: StockState;
 }
 
-interface ApiSubcategory {
-  id: string;
-  name: string;
-  isActive?: boolean;
-}
-
-interface ApiCategory {
-  id: string;
-  name: string;
-  isActive?: boolean;
-  subcategories?: ApiSubcategory[];
+interface ApiSellableResponse {
+  items: ApiSellableItem[];
+  total: number;
+  nextCursor: string | null;
 }
 
 const DEFAULT_SETTINGS: PosSettings = { currency: DEFAULT_CURRENCY, taxRatePercent: 0 };
@@ -85,55 +120,133 @@ export interface CheckoutData {
   reload: () => void;
 }
 
+/**
+ * What price to show for a product card.
+ *
+ * A variant product has no price of its own (D99): the read model reports null
+ * because its variants own the number. Until the card renders a range or a
+ * "from" price (1c.4), show the cheapest active variant — the honest answer to
+ * "what does this start at" — and fall back to 0 only when there is nothing to
+ * price at all.
+ */
+export function displayPrice(p: ClientProduct): number {
+  if (p.unitPrice != null) return p.unitPrice;
+  if (p.variants.length === 0) return 0;
+  return Math.min(...p.variants.map((v) => v.unitPrice));
+}
+
 function deriveCategories(products: ClientProduct[]): string[] {
   return Array.from(new Set(products.map((p) => p.categoryName))).sort();
 }
 
-function normalizeApi(
-  p: ApiProduct,
-  catNames: Map<string, string>,
-  subNames: Map<string, string>,
-): ClientProduct {
+function normalizeApi(item: ApiSellableItem): ClientProduct {
+  const tracks = item.stockState !== undefined && item.stockState !== 'UNTRACKED';
   return {
-    id: p.id,
-    name: p.name,
-    sku: p.sku,
-    type: p.type,
-    categoryName: (p.categoryId && catNames.get(p.categoryId)) || 'Uncategorized',
-    subcategoryId: p.subcategoryId ?? null,
-    subcategoryName: (p.subcategoryId && subNames.get(p.subcategoryId)) || null,
-    unitPrice: Number(p.unitPrice),
-    quantityOnHand: Number(p.quantityOnHand),
-    reorderLevel: p.reorderLevel != null ? Number(p.reorderLevel) : null,
-    imageUrl: p.imageUrl,
+    id: item.id,
+    name: item.name,
+    // The sellable model has no SKU at item level — a variant product's SKUs
+    // live on its variants, and a single-SKU product's is not needed to sell it.
+    sku: null,
+    // `trackInventory` was derived from the QuickBooks item type; the read model
+    // answers the same question directly with UNTRACKED, which also covers a
+    // SERVICE and a COMPOSED_ITEM without the till knowing either concept.
+    type: tracks ? 'Inventory' : 'Service',
+    categoryName: item.category?.name ?? 'Uncategorized',
+    subcategoryId: item.subcategory?.id ?? null,
+    subcategoryName: item.subcategory?.name ?? null,
+    unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
+    quantityOnHand: item.availableQuantity != null ? Number(item.availableQuantity) : 0,
+    // Not exposed by the read model: the server has already classified the
+    // quantity into stockState, so the till no longer needs the raw threshold.
+    reorderLevel: null,
+    imageUrl: item.imageUrl,
+    variants: (item.variants ?? [])
+      .filter((v) => v.isActive)
+      .map((v) => ({
+        id: v.id,
+        sku: v.sku,
+        name: v.name,
+        unitPrice: Number(v.unitPrice),
+        isDefault: v.isDefault,
+        quantityOnHand: v.availableQuantity != null ? Number(v.availableQuantity) : null,
+        stockState: v.stockState,
+      })),
   };
 }
 
-/** The API caps `pageSize` at this value, so larger catalogs need paging. */
+/** The API caps `limit` at this value, so larger catalogs need paging. */
 const MAX_PAGE_SIZE = 200;
 
 /**
- * Fetch the whole product catalog for the POS by paging through all results.
- * The POS filters/searches client-side over this list, so it must load every
- * product — a single capped request would silently drop everything past the
- * first page (products sorted alphabetically beyond the cap wouldn't appear).
+ * Fetch the whole sellable catalogue by following the cursor.
+ *
+ * The POS filters and searches client-side over this list, so it must load every
+ * page — stopping at the first would silently drop everything alphabetically
+ * beyond the cap. `/products/sellable` pages by opaque cursor rather than by page
+ * number, so the pages cannot be requested in parallel the way the old numbered
+ * endpoint allowed; each response names the next.
+ *
+ * `MAX_PAGES` is a stop, not a limit: a server that returned a non-advancing
+ * cursor would otherwise spin here forever.
  */
-async function fetchAllProducts(auth: { token: string; tenantId: string }): Promise<ApiProduct[]> {
-  const first = await api.get<{ items: ApiProduct[]; total: number }>(
-    `/products?page=1&pageSize=${MAX_PAGE_SIZE}`,
-    auth,
-  );
-  const items = [...first.items];
-  const totalPages = Math.ceil(first.total / MAX_PAGE_SIZE);
-  if (totalPages > 1) {
-    const rest = await Promise.all(
-      Array.from({ length: totalPages - 1 }, (_, i) =>
-        api.get<{ items: ApiProduct[] }>(`/products?page=${i + 2}&pageSize=${MAX_PAGE_SIZE}`, auth),
-      ),
+const MAX_PAGES = 100;
+
+async function fetchAllSellable(
+  auth: { token: string; tenantId: string },
+  branchId: string,
+): Promise<ApiSellableItem[]> {
+  const items: ApiSellableItem[] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const qs = new URLSearchParams({
+      branchId,
+      // COUNTER is the retail channel; it decides channel-scoped pricing and
+      // which promotions are considered live for this till.
+      channel: 'COUNTER',
+      limit: String(MAX_PAGE_SIZE),
+    });
+    if (cursor) qs.set('cursor', cursor);
+
+    const res: ApiSellableResponse = await api.get<ApiSellableResponse>(
+      `/products/sellable?${qs.toString()}`,
+      auth,
     );
-    for (const page of rest) items.push(...page.items);
+    items.push(...res.items);
+    if (!res.nextCursor) return items;
+    cursor = res.nextCursor;
   }
   return items;
+}
+
+/**
+ * The category tree, derived from what is actually sellable.
+ *
+ * Previously a second call to `/categories`, joined to products client-side. That
+ * listed every category and subcategory the tenant had defined, including ones
+ * with nothing sellable in them — so the till could show a chip that filtered to
+ * an empty grid. Deriving it from the catalogue means a chip always has something
+ * behind it.
+ */
+function deriveCategoryTree(products: ClientProduct[]): CatalogCategory[] {
+  const byName = new Map<string, Map<string, string>>();
+  for (const p of products) {
+    if (!byName.has(p.categoryName)) byName.set(p.categoryName, new Map());
+    if (p.subcategoryId && p.subcategoryName) {
+      byName.get(p.categoryName)!.set(p.subcategoryId, p.subcategoryName);
+    }
+  }
+  return [...byName.entries()]
+    .map(([name, subs]) => ({
+      // The read model gives no category id at tree level, and the till filters
+      // by name — the id is carried on the product itself where it is needed.
+      id: name,
+      name,
+      subcategories: [...subs.entries()]
+        .map(([id, subName]) => ({ id, name: subName }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Loads catalog data for the checkout screen from the backend product API. */
@@ -152,6 +265,7 @@ export function useCheckoutData(session: Session): CheckoutData {
 
   const token = session.token;
   const tenantId = session.user.tenantId;
+  const branchId = session.branchId;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -160,27 +274,21 @@ export function useCheckoutData(session: Session): CheckoutData {
 
     (async () => {
       try {
-        const [productItems, cats, settings] = await Promise.all([
-          fetchAllProducts(auth),
-          api.get<ApiCategory[]>('/categories', auth),
+        // `/products/sellable` is branch-scoped: stock and channel pricing are
+        // per branch, so there is no sensible tenant-wide answer. A session with
+        // no branch cannot complete a sale either — `saleLocation()` already
+        // throws — so failing here states the same requirement earlier and more
+        // clearly than an empty grid would.
+        if (!branchId) {
+          throw new Error('No branch assigned to this session — the POS needs one to load stock');
+        }
+        const [items, settings] = await Promise.all([
+          fetchAllSellable(auth, branchId),
           api.get<PosSettings>('/settings', auth),
         ]);
         if (cancelled) return;
-        const catNames = new Map(cats.map((c) => [c.id, c.name]));
-        const subNames = new Map<string, string>();
-        for (const c of cats) {
-          for (const s of c.subcategories ?? []) subNames.set(s.id, s.name);
-        }
-        const categoryTree: CatalogCategory[] = cats
-          .filter((c) => c.isActive !== false)
-          .map((c) => ({
-            id: c.id,
-            name: c.name,
-            subcategories: (c.subcategories ?? [])
-              .filter((s) => s.isActive !== false)
-              .map((s) => ({ id: s.id, name: s.name })),
-          }));
-        const products = productItems.map((p) => normalizeApi(p, catNames, subNames));
+        const products = items.map(normalizeApi);
+        const categoryTree = deriveCategoryTree(products);
         setData({
           loading: false,
           error: null,
@@ -205,7 +313,9 @@ export function useCheckoutData(session: Session): CheckoutData {
     return () => {
       cancelled = true;
     };
-  }, [token, tenantId, refreshKey]);
+    // `branchId` belongs here: the catalogue is branch-scoped now, so switching
+    // branch must refetch rather than keep showing the old branch's stock.
+  }, [token, tenantId, branchId, refreshKey]);
 
   return React.useMemo(() => ({ ...data, reload }), [data, reload]);
 }

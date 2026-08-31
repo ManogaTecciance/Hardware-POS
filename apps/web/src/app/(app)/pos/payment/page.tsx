@@ -26,7 +26,7 @@ import { Select } from '@/components/ui/select';
 import { Sheet } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/lib/auth';
-import { computeLine, computeTotals, type CartItem } from '@/lib/cart';
+import { computeLine, linePrice, computeTotals, type CartItem } from '@/lib/cart';
 import { useCheckoutData } from '@/lib/catalog';
 import { usePosCart } from '@/lib/pos-cart';
 import { printCustomerReceipt, type ReceiptContext } from '@/lib/receipt-print';
@@ -710,7 +710,7 @@ function OrderSummary({
                     </div>
                   </td>
                   <td className="whitespace-nowrap px-3 py-3 text-right">
-                    {formatMoney(it.product.unitPrice, currency)}
+                    {formatMoney(linePrice(it), currency)}
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex items-center justify-center gap-1">

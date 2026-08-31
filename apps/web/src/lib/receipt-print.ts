@@ -7,7 +7,7 @@ import {
 } from './thermal-bill';
 import type { Session } from './auth';
 import type { CartItem } from './cart';
-import { computeLine } from './cart';
+import { computeLine, linePrice } from './cart';
 import type { CompletedSale } from './sales';
 import { getCachedDocumentProfile, type DocumentProfile } from './document-template-service';
 import { formatMoney } from './utils';
@@ -35,7 +35,7 @@ function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
   const rows = ctx.items
     .map((it) => {
       const line = computeLine(it);
-      return `<tr><td>${esc(it.product.name)}<br><span class="m">${it.quantity} × ${formatMoney(it.product.unitPrice, ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
+      return `<tr><td>${esc(it.product.name)}<br><span class="m">${it.quantity} × ${formatMoney(linePrice(it), ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
     })
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(sale.saleNumber)}</title>
