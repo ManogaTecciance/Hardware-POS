@@ -16,6 +16,8 @@ import {
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
+  VariantAvailability,
+  VariantAvailabilityMap,
 } from '../provider.types';
 import { InventoryProvider } from './inventory-provider';
 
@@ -66,6 +68,52 @@ export class LocalInventoryProvider implements InventoryProvider {
   async getAvailability(ctx: ProviderContext, productIds: string[]): Promise<AvailabilityMap> {
     await this.assertSingleBranch(this.prisma, ctx);
     return readAvailability(this.prisma, ctx.tenantId, productIds);
+  }
+
+  /**
+   * D99 — read-time availability at variant grain, so the courtesy check in
+   * `computeCart` speaks about the same rows `reduceStock` will guard.
+   *
+   * Without this the two disagree: the read sees a product total of 10 across four
+   * sizes and passes, then the write finds 0 on the Medium and refuses with the
+   * terser transactional message. The cashier gets a bare refusal where a
+   * quantities-and-size message was the whole point of checking early.
+   *
+   * A variant with no `BranchInventory` row is **absent from the map**, matching
+   * how an unknown product is absent from {@link getAvailability}. The caller reads
+   * absent as zero — D99 decision 8 at read time.
+   *
+   * Returns an empty map when there is no branch context rather than throwing:
+   * this is a read, and `reduceStock` already fails loudly for a variant line with
+   * no branch. Refusing here too would turn a courtesy into a second gate.
+   */
+  async getVariantAvailability(
+    ctx: ProviderContext,
+    variantIds: string[],
+  ): Promise<VariantAvailabilityMap> {
+    await this.assertSingleBranch(this.prisma, ctx);
+    if (variantIds.length === 0 || ctx.branchId === null) return new Map();
+
+    const rows = await this.prisma.branchInventory.findMany({
+      where: {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        productVariantId: { in: [...new Set(variantIds)] },
+      },
+      select: { productVariantId: true, quantityOnHand: true },
+    });
+
+    const map = new Map<string, VariantAvailability>();
+    for (const row of rows) {
+      // The `in` predicate cannot match a null column, so this is narrowing for
+      // the type checker rather than a real branch.
+      if (row.productVariantId === null) continue;
+      map.set(row.productVariantId, {
+        productVariantId: row.productVariantId,
+        quantityOnHand: Number(row.quantityOnHand),
+      });
+    }
+    return map;
   }
 
   /**

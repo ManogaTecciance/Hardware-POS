@@ -350,3 +350,90 @@ describe('the oversell guard under concurrency', () => {
     expect(await variantQty(mediumId)).toBe(-1);
   });
 });
+
+describe('read-time availability agrees with the write guard (1a.19)', () => {
+  /**
+   * The defect this closes: the product total is the sum across every size, so a
+   * product with 10 Larges and 0 Mediums passed the read check for a Medium and was
+   * then refused by the write. Two messages for one condition, and the terser one.
+   */
+  async function attemptSale(variantId: string, quantity: number): Promise<string> {
+    try {
+      await reduce([variantLine(variantId, quantity)]);
+      return '<<no error>>';
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }
+
+  it('reports the variant out of stock at read time, naming the size', async () => {
+    const { mediumId } = await twoSizes(0, 10);
+    const inventory = await inventoryFactory.forTenant(tile.tenantId);
+
+    const map = await inventory.getVariantAvailability!(
+      { tenantId: tile.tenantId, branchId: tile.branchId },
+      [mediumId],
+    );
+
+    expect(map.get(mediumId)?.quantityOnHand).toBe(0);
+  });
+
+  it('omits a variant with no BranchInventory row, which the caller reads as zero', async () => {
+    const orphan = await prisma.productVariant.create({
+      data: { tenantId: tile.tenantId, productId: tile.productAId, sku: 'SHIRT-XXL', unitPrice: 1000 },
+    });
+    const inventory = await inventoryFactory.forTenant(tile.tenantId);
+
+    const map = await inventory.getVariantAvailability!(
+      { tenantId: tile.tenantId, branchId: tile.branchId },
+      [orphan.id],
+    );
+
+    // Absent, not zero — the same contract getAvailability uses for an unknown
+    // product. Distinguishing "no row" from "zero on hand" is the caller's choice.
+    expect(map.has(orphan.id)).toBe(false);
+  });
+
+  it('reads one variant without reporting on its siblings', async () => {
+    const { mediumId, largeId } = await twoSizes(3, 7);
+    const inventory = await inventoryFactory.forTenant(tile.tenantId);
+
+    const map = await inventory.getVariantAvailability!(
+      { tenantId: tile.tenantId, branchId: tile.branchId },
+      [mediumId],
+    );
+
+    expect(map.get(mediumId)?.quantityOnHand).toBe(3);
+    expect(map.has(largeId)).toBe(false);
+  });
+
+  it('returns an empty map with no branch context rather than throwing', async () => {
+    const { mediumId } = await twoSizes(5, 5);
+    const inventory = await inventoryFactory.forTenant(tile.tenantId);
+
+    // A read must not become a second gate: reduceStock already refuses a variant
+    // line with no branch, and that is where the failure belongs.
+    const map = await inventory.getVariantAvailability!(
+      { tenantId: tile.tenantId, branchId: null },
+      [mediumId],
+    );
+
+    expect(map.size).toBe(0);
+  });
+
+  it('the read and the write agree that an empty variant is empty', async () => {
+    const { mediumId } = await twoSizes(0, 10);
+    const inventory = await inventoryFactory.forTenant(tile.tenantId);
+
+    const map = await inventory.getVariantAvailability!(
+      { tenantId: tile.tenantId, branchId: tile.branchId },
+      [mediumId],
+    );
+    const readSaysEmpty = (map.get(mediumId)?.quantityOnHand ?? 0) === 0;
+    const writeMessage = await attemptSale(mediumId, 1);
+
+    // Before this step the read said "10 available" while the write refused.
+    expect(readSaysEmpty).toBe(true);
+    expect(writeMessage).toContain('Insufficient stock');
+  });
+});

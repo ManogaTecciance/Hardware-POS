@@ -109,6 +109,29 @@ export interface ProductAvailability {
 export type AvailabilityMap = ReadonlyMap<string, ProductAvailability>;
 
 /**
+ * D99 — what a provider knows about one variant's availability.
+ *
+ * Deliberately smaller than {@link ProductAvailability}: there is no
+ * `trackInventory` or `isUnlimited` here because those are properties of the
+ * *product* — a Service product has no variants to ask about, and a provider that
+ * imposes no ceiling does not implement variant availability at all.
+ */
+export interface VariantAvailability {
+  productVariantId: string;
+  quantityOnHand: number;
+}
+
+/**
+ * Availability keyed by variant id.
+ *
+ * A variant with no row is **absent**, exactly as an unknown product is absent
+ * from {@link AvailabilityMap}. The caller reads absent as zero, which is D99
+ * decision 8 stated at read time: variant stock is created by goods receipts, so
+ * a variant never received into the branch has none.
+ */
+export type VariantAvailabilityMap = ReadonlyMap<string, VariantAvailability>;
+
+/**
  * Result of asking a provider to synchronise.
  *
  * `requested: false` is the honest answer from a provider with nothing to

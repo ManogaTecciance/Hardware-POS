@@ -351,6 +351,16 @@ export class SalesService {
     // write remains the authority under concurrency.
     const availability = await inventory.getAvailability({ tenantId, branchId }, ids);
 
+    // D99 — the same courtesy, at variant grain. Without it the two checks
+    // disagree: the product total is 10 across four sizes, so the read passes, and
+    // then `reduceStock` finds 0 on the Medium's row and refuses with the terser
+    // transactional message. Optional on the provider — QuickBooks and DISABLED
+    // cannot answer it, and for them the product-level check above is the right one.
+    const variantAvailability =
+      variantIds.length > 0 && inventory.getVariantAvailability
+        ? await inventory.getVariantAvailability({ tenantId, branchId }, variantIds)
+        : null;
+
     const lines = await Promise.all(
       items.map(async (item) => {
         const product = byId.get(item.productId);
@@ -395,14 +405,32 @@ export class SalesService {
         // product, which the `!product` guard above has already excluded.
         const stock = availability.get(product.id);
         if (stock && !stock.isUnlimited && stock.quantityOnHand !== null) {
-          const onHand = stock.quantityOnHand;
-          if (quantity > onHand) {
-            // Wording preserved verbatim — this is the message the POS surfaces and
-            // the Slice 3 characterisation spec asserts. Note it is deliberately
-            // NOT the same string `reduceStock` throws; both are unchanged.
-            throw new BadRequestException(
-              `Insufficient stock for ${product.name} (on hand ${onHand}, requested ${quantity})`,
-            );
+          if (variant && variantAvailability) {
+            // D99 — a variant line is checked against its own row. Absent means no
+            // row, which is no stock (decision 8), so it reads as zero rather than
+            // falling back to the product total: the product may hold plenty across
+            // its other sizes while this one has none.
+            const onHand = variantAvailability.get(variant.id)?.quantityOnHand ?? 0;
+            if (quantity > onHand) {
+              // Names the variant, unlike the product-level message below. The
+              // cashier is looking at a four-size product and needs to know which
+              // size is short; the wording below is asserted verbatim by existing
+              // specs and must not move.
+              const label = variantDisplayName(variant.optionValues, variant.sku);
+              throw new BadRequestException(
+                `Insufficient stock for ${product.name} (${label}) (on hand ${onHand}, requested ${quantity})`,
+              );
+            }
+          } else {
+            const onHand = stock.quantityOnHand;
+            if (quantity > onHand) {
+              // Wording preserved verbatim — this is the message the POS surfaces and
+              // the Slice 3 characterisation spec asserts. Note it is deliberately
+              // NOT the same string `reduceStock` throws; both are unchanged.
+              throw new BadRequestException(
+                `Insufficient stock for ${product.name} (on hand ${onHand}, requested ${quantity})`,
+              );
+            }
           }
         }
 

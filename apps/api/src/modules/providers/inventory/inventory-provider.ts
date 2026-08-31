@@ -9,6 +9,7 @@ import {
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
+  VariantAvailabilityMap,
 } from '../provider.types';
 
 /**
@@ -69,6 +70,25 @@ export interface InventoryProvider {
    * reported as zero, so a caller can tell "unknown product" from "out of stock".
    */
   getAvailability(ctx: ProviderContext, productIds: string[]): Promise<AvailabilityMap>;
+
+  /**
+   * D99 — on-hand availability for specific variants. **Optional.**
+   *
+   * Optional rather than required because only a provider whose stock is
+   * branch-and-variant scoped can answer it. QuickBooks holds a cache of an
+   * upstream quantity with no variant dimension, and `NoInventoryProvider` has no
+   * quantities at all; forcing either to implement this would mean inventing an
+   * answer. A caller that finds the method absent keeps the product-level check,
+   * which is the correct behaviour for both.
+   *
+   * Read-only, so no transaction client — the same contract as
+   * {@link getAvailability}. It remains a courtesy check: `reduceStock`'s
+   * conditional write is still the authority under concurrency.
+   */
+  getVariantAvailability?(
+    ctx: ProviderContext,
+    variantIds: string[],
+  ): Promise<VariantAvailabilityMap>;
 
   /**
    * Reduce stock for a completed sale, inside the caller's transaction.

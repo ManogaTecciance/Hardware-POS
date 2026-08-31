@@ -4,6 +4,7 @@ import { coerceAttributeQueryValue, domainFor } from '@hardware-pos/shared';
 import type { TenantCapabilities } from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { stockStateFor, type StockState } from '../../common/stock-state';
 import { variantDisplayName } from '../../common/variant-display';
 import { isPromotionActive } from '../promotions/promotions.evaluator';
 import { PromotionsRepository } from '../promotions/promotions.repository';
@@ -47,7 +48,7 @@ export interface SellableQuery {
 }
 
 export type PriceSource = 'BASE' | 'COLLECTION_OVERRIDE' | 'CHANNEL_OVERRIDE';
-export type StockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED';
+export type { StockState };
 
 export interface SellableItem {
   id: string;
@@ -69,6 +70,14 @@ export interface SellableItem {
     unitPrice: string;
     isDefault: boolean;
     isActive: boolean;
+    /**
+     * D99 — this variant's own branch stock, so the till can grey out a size and
+     * cap its stepper. `null` when the tenant does not track stock; `"0.000"`
+     * when the variant has no `BranchInventory` row, which is no stock rather
+     * than unknown (decision 8).
+     */
+    availableQuantity: string | null;
+    stockState: StockState;
   }[];
   // Present only when capabilities.catalogue.preparation.
   prepMinutes?: number | null;
@@ -257,6 +266,29 @@ export class SellableService {
       this.promotions.listForCatalogue(tenantId),
     ]);
 
+    // D99 — one read for every variant on the page, so the till can badge each
+    // size. Keyed by variant; a variant with no row is simply absent, and reads
+    // below as zero (decision 8: variant stock comes from goods receipts).
+    const variantIds = rows.flatMap((p) => p.variants.map((v) => v.id));
+    const variantStock = new Map<string, { qty: Prisma.Decimal; reorderLevel: Prisma.Decimal | null }>();
+    if (variantIds.length > 0) {
+      const cells = await this.prisma.branchInventory.findMany({
+        where: {
+          tenantId,
+          branchId: query.branchId,
+          productVariantId: { in: variantIds },
+        },
+        select: { productVariantId: true, quantityOnHand: true, reorderLevel: true },
+      });
+      for (const cell of cells) {
+        if (cell.productVariantId === null) continue;
+        variantStock.set(cell.productVariantId, {
+          qty: cell.quantityOnHand,
+          reorderLevel: cell.reorderLevel,
+        });
+      }
+    }
+
     const now = new Date();
     const validPromotionsById = new Map<
       string,
@@ -314,14 +346,22 @@ export class SellableService {
       };
 
       if (caps.catalogue.variants) {
-        item.variants = p.variants.map((v) => ({
-          id: v.id,
-          sku: v.sku,
-          name: variantDisplayName(v.optionValues, v.sku),
-          unitPrice: v.unitPrice.toFixed(2),
-          isDefault: v.isDefault,
-          isActive: v.isActive,
-        }));
+        item.variants = p.variants.map((v) => {
+          // Same UNTRACKED reasoning as the item level: a tenant that tracks no
+          // stock gets null rather than a fabricated zero.
+          const cell = variantStock.get(v.id);
+          const qty = cell?.qty ?? new Prisma.Decimal(0);
+          return {
+            id: v.id,
+            sku: v.sku,
+            name: variantDisplayName(v.optionValues, v.sku),
+            unitPrice: v.unitPrice.toFixed(2),
+            isDefault: v.isDefault,
+            isActive: v.isActive,
+            availableQuantity: tracksStock ? qty.toFixed(3) : null,
+            stockState: tracksStock ? stockStateFor(qty, cell?.reorderLevel ?? null) : 'UNTRACKED',
+          };
+        });
       }
       if (caps.catalogue.preparation) {
         item.prepMinutes = p.prepMinutes;
@@ -365,11 +405,7 @@ export class SellableService {
         } else {
           const qty = p.quantityOnHand;
           item.availableQuantity = qty.toFixed(3);
-          item.stockState = qty.lessThanOrEqualTo(0)
-            ? 'OUT'
-            : p.reorderLevel && qty.lessThanOrEqualTo(p.reorderLevel)
-              ? 'LOW'
-              : 'IN_STOCK';
+          item.stockState = stockStateFor(qty, p.reorderLevel);
         }
       }
       return item;
