@@ -4,7 +4,12 @@ import { coerceAttributeQueryValue, domainFor } from '@hardware-pos/shared';
 import type { TenantCapabilities } from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
-import { stockStateFor, type StockState } from '../../common/stock-state';
+import {
+  aggregateVariantStock,
+  stockStateFor,
+  type StockState,
+  type VariantStockCell,
+} from '../../common/stock-state';
 import { variantDisplayName } from '../../common/variant-display';
 import { isPromotionActive } from '../promotions/promotions.evaluator';
 import { PromotionsRepository } from '../promotions/promotions.repository';
@@ -423,6 +428,26 @@ export class SellableService {
         if (p.sellableKind === 'SERVICE' || p.sellableKind === 'COMPOSED_ITEM') {
           item.availableQuantity = null;
           item.stockState = 'UNTRACKED';
+        } else if (p.hasVariants && p.variants.length > 0) {
+          // D99 (1c.6) — stock is tracked by variant, not by product. The
+          // parent's `quantityOnHand` is the D10 rollup mirror; it is maintained
+          // on sale and receipt but it is not the authority, and it had drifted
+          // to 350 against 22 real units on the shelf. Derive from the rows that
+          // are authoritative and leave the mirror alone.
+          //
+          // Not gated on `caps.catalogue.variants`: that capability decides
+          // whether the client is SHOWN the sizes, and how much stock exists is
+          // not a display question.
+          const cells: VariantStockCell[] = p.variants.map((v) => {
+            const cell = variantStock.get(v.id);
+            return {
+              qty: cell?.qty ?? new Prisma.Decimal(0),
+              reorderLevel: cell?.reorderLevel ?? null,
+            };
+          });
+          const rolled = aggregateVariantStock(cells);
+          item.availableQuantity = rolled.quantity.toFixed(3);
+          item.stockState = rolled.state;
         } else {
           const qty = p.quantityOnHand;
           item.availableQuantity = qty.toFixed(3);

@@ -432,7 +432,11 @@ export function PosRetailCheckout() {
           cart.items.map((item) => {
             const line = computeLine(item);
             return (
-              <div key={item.product.id} className="rounded-xl border border-border bg-card p-2.5">
+              // D99 (1c.6) — keyed by the LINE, not the product. 1c.2 re-keyed the
+              // cart's own map but left this list on `product.id`, so two sizes of
+              // one product were duplicate siblings: React reconciles those by
+              // position, and a note or discount could be applied to the wrong row.
+              <div key={item.lineKey} className="rounded-xl border border-border bg-card p-2.5">
                 <div className="flex items-start gap-2.5">
                   <div className="min-w-0 flex-1">
                     <div className="line-clamp-2 text-sm font-medium leading-tight">
@@ -440,7 +444,12 @@ export function PosRetailCheckout() {
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
                       <span className="truncate">
-                        {item.product.sku ?? '—'} · {formatMoney(linePrice(item), currency)}
+                        {/* A variant parent's SKU is null by design (D44), so this
+                            slot showed a bare dash on exactly the lines that most
+                            needed identifying. The size is what distinguishes two
+                            otherwise identical rows. */}
+                        {item.variant ? item.variant.name : (item.product.sku ?? '—')} ·{' '}
+                        {formatMoney(linePrice(item), currency)}
                       </span>
                     </div>
                   </div>
@@ -462,7 +471,8 @@ export function PosRetailCheckout() {
                 {line.outOfStock ? (
                   <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-danger">
                     <AlertTriangle className="h-3.5 w-3.5" />
-                    Only {item.product.quantityOnHand} in stock
+                    Only {item.variant?.quantityOnHand ?? item.product.quantityOnHand} in
+                    stock
                   </div>
                 ) : null}
 
@@ -475,7 +485,7 @@ export function PosRetailCheckout() {
                 <div className="mt-2 flex items-center justify-between">
                   <QuantityStepper
                     quantity={item.quantity}
-                    max={stockCap(item.product) ?? undefined}
+                    max={stockCap(item.product, item.variant) ?? undefined}
                     onDecrement={() => cart.changeQty(item.lineKey, -1)}
                     onIncrement={() => cart.changeQty(item.lineKey, 1)}
                     onSet={(q) => cart.setQty(item.lineKey, q)}
@@ -728,14 +738,16 @@ export function PosRetailCheckout() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2.5">
               {pageProducts.map((p) => {
-                const outOfStock = p.type === 'Inventory' && p.quantityOnHand <= 0;
-                // Low stock only when a reorder point is set and stock is at/below
-                // it — the same rule the products table and dashboard alert use.
-                const lowStock =
-                  p.type === 'Inventory' &&
-                  !outOfStock &&
-                  p.reorderLevel != null &&
-                  p.quantityOnHand <= p.reorderLevel;
+                // D99 (1c.6) — the server's classification, not a threshold
+                // comparison here. For a variant product it is rolled up from the
+                // sizes, so a shirt with no Mediums but plenty of Larges stays
+                // sellable instead of being greyed out by a stale parent number.
+                //
+                // The `reorderLevel` this replaced was mapped to null for every
+                // product by the sellable read model, so the low-stock badge had
+                // been unreachable on this screen since 1c.1.
+                const outOfStock = p.stockState === 'OUT';
+                const lowStock = p.stockState === 'LOW';
                 // More than one sellable option — the card offers the picker
                 // rather than a bare Add, even when a default would quick-add.
                 const hasChoice = p.variants.filter((v) => v.stockState !== 'OUT').length > 1;

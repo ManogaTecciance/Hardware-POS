@@ -3709,6 +3709,50 @@ implemented.
 
 ---
 
+## 2026-08-31 — Stock authority for a product with variants
+
+### D100 — stock is tracked by variant id, not product id
+
+**Direction (supervisor, 2026-08-31):** *"Stock should be tracked by product variant
+id, not product id."*
+
+`BranchInventory` already keys on `(branch, product, variant?)` per D44, and both the
+write path (1a) and the per-variant read (1b.1) obeyed this. The **item-level read**
+did not: `sellable.service` set `availableQuantity` and `stockState` from
+`Product.quantityOnHand`.
+
+That column is the D10 rollup mirror. It is maintained on sale and receipt, so it is
+not abandoned — but it is a mirror, and it can drift. It was observed reading
+`350.000` for a product whose four variants held 22 units between them, and the till
+showed the 350.
+
+**Decided.** For a product with `hasVariants` and at least one active variant, the
+item level is **derived from the variant rows**:
+
+- `availableQuantity` — the **sum** across sizes. Deliberately not `null` as `sku` and
+  `unitPrice` are for a variant parent: those are null because using them would be
+  *wrong* (a sale at the parent price is a financial error, a parent-SKU scan is
+  ambiguous), whereas a total misleads nobody once nothing caps by it. The sell cap is
+  `stockCap(product, variant)`, which asks the chosen size.
+- `stockState` — `OUT` only when every size is out; `LOW` when no size is `IN_STOCK`,
+  each size measured against **its own** reorder point.
+
+`Product.quantityOnHand` keeps its D10 role for variant-less products and QuickBooks
+caching, and is still mirrored on write. It is simply **not read** for a product that
+has variants.
+
+The derivation lives on the **server** (`aggregateVariantStock`, beside `stockStateFor`
+in `common/stock-state.ts`), not in the till. D31 makes the server the authority, and
+the alternative put the same rule in `pos-retail-checkout` and `quotation-builder` —
+two copies of one threshold rule, which is how two screens come to disagree.
+
+Not gated on `capabilities.catalogue.variants`: that capability governs whether a
+client is *shown* the sizes. How much stock exists is not a display question.
+
+No migration. Read-model behaviour only.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

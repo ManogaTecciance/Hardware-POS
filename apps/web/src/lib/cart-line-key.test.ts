@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { cartLineKey, computeLine, linePrice, newCartItem, type CartItem } from './cart';
 import type { ClientProduct, ClientVariant } from './catalog';
+import { stockCap } from './pos-cart';
 
 /**
  * D99 (1c.2) — the cart is keyed by (product, variant), not by product.
@@ -26,7 +27,7 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     subcategoryName: null,
     unitPrice: null, // a variant product owns no price of its own
     quantityOnHand: 20,
-    reorderLevel: null,
+    stockState: 'IN_STOCK',
     imageUrl: null,
     variants: [],
     ...over,
@@ -198,5 +199,50 @@ describe('outOfStock is judged against the variant', () => {
   it('uses the product quantity when there is no variant', () => {
     const item: CartItem = { ...newCartItem(product({ quantityOnHand: 2 })), quantity: 3 };
     expect(computeLine(item).outOfStock).toBe(true);
+  });
+});
+
+/**
+ * D99 (1c.6) — the two defects that survived 1c.2 because nothing called the
+ * variant-aware code with a variant.
+ */
+describe('a line is identified by its size, not just its product', () => {
+  it('gives two sizes of one product distinct keys', () => {
+    // The React list rendered `key={item.product.id}`, so these two were
+    // duplicate siblings and React reconciled them by position — a note or a
+    // discount could land on the wrong row. The key was always distinct; the
+    // JSX simply was not using it.
+    const m = newCartItem(product(), variant({ id: 'var_m' }));
+    const l = newCartItem(product(), variant({ id: 'var_l' }));
+
+    expect(m.lineKey).not.toBe(l.lineKey);
+    // Positive half: each key is the one the factory is supposed to produce.
+    expect(m.lineKey).toBe(cartLineKey('prod_shirt', 'var_m'));
+    expect(l.lineKey).toBe(cartLineKey('prod_shirt', 'var_l'));
+    // And neither collapses to the bare product id, which is what the list used.
+    expect(m.lineKey).not.toBe('prod_shirt');
+  });
+});
+
+describe('the quantity cap follows the chosen size', () => {
+  it('caps at the variant, not the product total', () => {
+    // `stockCap(product, variant = null)` has a default, so the call site
+    // `stockCap(item.product)` compiled cleanly for four commits while capping
+    // at the product's 20 — a cashier could add 20 Mediums when 3 existed.
+    const p = product({ quantityOnHand: 20 });
+    const small = variant({ id: 'var_s', quantityOnHand: 3 });
+
+    expect(stockCap(p, small)).toBe(3);
+    expect(stockCap(p, small)).not.toBe(20);
+    // The omitted-argument form is what the bug looked like; it still answers
+    // the product, which is correct for a variant-less product and wrong here.
+    expect(stockCap(p)).toBe(20);
+  });
+
+  it('leaves an untracked variant uncapped rather than capping at zero', () => {
+    const p = product({ quantityOnHand: 0 });
+    const untracked = variant({ stockState: 'UNTRACKED', quantityOnHand: null });
+
+    expect(stockCap(p, untracked)).toBeNull();
   });
 });

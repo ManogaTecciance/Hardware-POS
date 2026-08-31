@@ -38,7 +38,7 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     subcategoryName: null,
     unitPrice: null,
     quantityOnHand: 20,
-    reorderLevel: null,
+    stockState: 'IN_STOCK',
     imageUrl: null,
     variants: [],
     ...over,

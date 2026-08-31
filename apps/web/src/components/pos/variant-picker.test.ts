@@ -36,7 +36,7 @@ function product(variants: ClientVariant[] = []): ClientProduct {
     subcategoryName: null,
     unitPrice: variants.length > 0 ? null : 1500,
     quantityOnHand: 20,
-    reorderLevel: null,
+    stockState: 'IN_STOCK',
     imageUrl: null,
     variants,
   };

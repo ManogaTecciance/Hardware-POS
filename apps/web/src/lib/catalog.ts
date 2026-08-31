@@ -39,9 +39,26 @@ export interface ClientProduct {
    * variant product, so a caller that ignores variants cannot quietly charge it.
    */
   unitPrice: number | null;
+  /**
+   * Branch stock. For a product with variants this is the **sum across sizes**,
+   * rolled up by the server (1c.6) from the variant rows rather than read from
+   * `Product.quantityOnHand`, which is a mirror and had drifted.
+   *
+   * Informative, never a limit: the sell cap comes from `stockCap(product,
+   * variant)`, which asks the chosen size.
+   */
   quantityOnHand: number;
-  /** Reorder point (null when not set) — drives the POS low-stock badge. */
-  reorderLevel: number | null;
+  /**
+   * The server's stock classification — the same field, computed the same way,
+   * that each variant carries.
+   *
+   * This replaces a client-side `reorderLevel` comparison. The read model does
+   * not expose a reorder point, so that field was mapped to null unconditionally
+   * and every low-stock badge in the app had been silently dead since 1c.1. The
+   * server already classifies; the till reads its answer rather than re-deriving
+   * one from a threshold it cannot see.
+   */
+  stockState: StockState;
   imageUrl: string | null;
   /** D99 — empty for a single-SKU product; the sizes to choose from otherwise. */
   variants: ClientVariant[];
@@ -163,9 +180,7 @@ function normalizeApi(item: ApiSellableItem): ClientProduct {
     subcategoryName: item.subcategory?.name ?? null,
     unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
     quantityOnHand: item.availableQuantity != null ? Number(item.availableQuantity) : 0,
-    // Not exposed by the read model: the server has already classified the
-    // quantity into stockState, so the till no longer needs the raw threshold.
-    reorderLevel: null,
+    stockState: item.stockState ?? 'UNTRACKED',
     imageUrl: item.imageUrl,
     variants: (item.variants ?? [])
       .filter((v) => v.isActive)
