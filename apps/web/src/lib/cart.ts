@@ -1,4 +1,4 @@
-import type { ClientProduct } from './catalog';
+import type { ClientProduct, ClientVariant } from './catalog';
 import { round2 } from './utils';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
@@ -9,8 +9,41 @@ export interface LineDiscount {
   reason?: string;
 }
 
+/**
+ * D99 — the identity of one cart line.
+ *
+ * Branded rather than a bare `string` so the compiler refuses a raw `product.id`
+ * where a line key is expected. Every cart operation used to take a product id,
+ * and the two are indistinguishable to TypeScript without this — which would make
+ * "did I update all twelve call sites" a review question instead of a compile
+ * error.
+ */
+export type CartLineKey = string & { readonly __brand: 'CartLineKey' };
+
+/**
+ * A line is identified by its product AND the variant chosen, so a Medium and a
+ * Large of one shirt are two lines rather than one with quantity 2.
+ *
+ * A variant-less line keys on the product id alone, unchanged from before
+ * variants existed. That is what lets a single-SKU product — grocery loose goods,
+ * a service — behave exactly as it always has, and what lets a cart persisted
+ * before this change still hydrate (see `pos-cart.tsx`).
+ *
+ * The variant half is always present, empty when there is none, so the two halves
+ * are unambiguous whatever an id contains. Keying a variant-less line on the bare
+ * product id instead would collide with a product whose own id happened to hold
+ * the delimiter — unlikely with cuids, but the format should not depend on that.
+ */
+export function cartLineKey(productId: string, variantId: string | null): CartLineKey {
+  return `${productId}::${variantId ?? ''}` as CartLineKey;
+}
+
 export interface CartItem {
+  /** Stable identity of this line. Stored, not derived — see {@link cartLineKey}. */
+  lineKey: CartLineKey;
   product: ClientProduct;
+  /** D99 — the size/pack chosen, or null for a product sold without variants. */
+  variant: ClientVariant | null;
   quantity: number;
   note?: string;
   discount?: LineDiscount;
@@ -46,7 +79,10 @@ export function computeDiscount(lineSubtotal: number, discount?: LineDiscount): 
  * price is one that ships.
  */
 export function linePrice(item: CartItem): number {
-  return item.product.unitPrice ?? 0;
+  // A variant owns its price outright — the same rule the server applies
+  // (D99): `ClientProduct.unitPrice` is null for a variant product precisely
+  // because the number lives on the variant.
+  return item.variant ? item.variant.unitPrice : (item.product.unitPrice ?? 0);
 }
 
 export function computeLine(item: CartItem): LineTotals {
@@ -56,7 +92,13 @@ export function computeLine(item: CartItem): LineTotals {
     lineSubtotal,
     discountAmount,
     lineTotal: round2(lineSubtotal - discountAmount),
-    outOfStock: item.quantity > item.product.quantityOnHand,
+    // D99 — a variant line is short against ITS OWN row, not the product total.
+    // Comparing against the product would let 10 Mediums look fine because the
+    // Larges make up the number, and the server would then refuse the sale.
+    outOfStock: item.variant
+      ? item.variant.stockState !== 'UNTRACKED' &&
+        item.quantity > (item.variant.quantityOnHand ?? 0)
+      : item.quantity > item.product.quantityOnHand,
   };
 }
 
@@ -115,6 +157,6 @@ export function computeTotals(
 }
 
 /** A product to add to the cart maps 1:1 to a starting cart line. */
-export function newCartItem(product: ClientProduct): CartItem {
-  return { product, quantity: 1 };
+export function newCartItem(product: ClientProduct, variant: ClientVariant | null = null): CartItem {
+  return { lineKey: cartLineKey(product.id, variant?.id ?? null), product, variant, quantity: 1 };
 }

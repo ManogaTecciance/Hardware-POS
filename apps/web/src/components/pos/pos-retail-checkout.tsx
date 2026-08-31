@@ -32,7 +32,14 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
 import { useAuth } from '@/lib/auth';
-import { computeLine, computeTotals, linePrice, type LineDiscount, type OrderDiscount } from '@/lib/cart';
+import {
+  computeLine,
+  computeTotals,
+  linePrice,
+  type CartLineKey,
+  type LineDiscount,
+  type OrderDiscount,
+} from '@/lib/cart';
 import { displayPrice, useCheckoutData, type ClientProduct } from '@/lib/catalog';
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
@@ -43,6 +50,9 @@ import { cn, formatMoney, round2 } from '@/lib/utils';
 
 const PAGE_SIZES = [20, 30, 40, 50];
 interface PendingLineApproval {
+  /** D99 — which cart line to update. */
+  lineKey: CartLineKey;
+  /** The product the approval is *for* — `/discounts/approve` is product-scoped. */
   productId: string;
   discount: LineDiscount;
   percent: number;
@@ -70,8 +80,8 @@ export function PosRetailCheckout() {
   const [subcategory, setSubcategory] = React.useState('All');
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
-  const [noteFor, setNoteFor] = React.useState<string | null>(null);
-  const [discountFor, setDiscountFor] = React.useState<string | null>(null);
+  const [noteFor, setNoteFor] = React.useState<CartLineKey | null>(null);
+  const [discountFor, setDiscountFor] = React.useState<CartLineKey | null>(null);
   const [pendingApproval, setPendingApproval] = React.useState<PendingLineApproval | null>(null);
   const [orderDiscountOpen, setOrderDiscountOpen] = React.useState(false);
   const [pendingOrderApproval, setPendingOrderApproval] = React.useState<{
@@ -195,23 +205,23 @@ export function PosRetailCheckout() {
   };
 
   // ── discounts ──────────────────────────────────────────────────────────────
-  const handleLineDiscountApply = (productId: string, discount: LineDiscount) => {
-    const item = cart.items.find((it) => it.product.id === productId);
+  const handleLineDiscountApply = (lineKey: CartLineKey, discount: LineDiscount) => {
+    const item = cart.items.find((it) => it.lineKey === lineKey);
     if (!item) return;
     const line = computeLine({ ...item, discount });
     const percent = line.lineSubtotal > 0 ? (line.discountAmount / line.lineSubtotal) * 100 : 0;
     if (withinDiscountLimit(discountLimitFor(session!.user.role), percent)) {
-      cart.setLineDiscount(productId, discount);
+      cart.setLineDiscount(lineKey, discount);
       setDiscountFor(null);
     } else {
-      setPendingApproval({ productId, discount, percent });
+      setPendingApproval({ lineKey, productId: item.product.id, discount, percent });
       setDiscountFor(null);
     }
   };
 
   const handleApproveLine = async (managerPin: string, note: string): Promise<string | null> => {
     if (!pendingApproval) return 'No pending discount';
-    const { productId, discount } = pendingApproval;
+    const { lineKey, productId, discount } = pendingApproval;
     const res = await requestDiscountApproval(session!, {
       managerPin,
       productId,
@@ -221,7 +231,7 @@ export function PosRetailCheckout() {
     });
     if (res.approved && res.approvalToken) {
       cart.setLineDiscount(
-        productId,
+        lineKey,
         { ...discount, reason: note || discount.reason },
         res.approvalToken,
         res.approvedByUserId ?? undefined,
@@ -276,8 +286,8 @@ export function PosRetailCheckout() {
     cart.addedCustomers.find((c) => c.id === cart.customerId)?.name ?? null;
 
   const noteItem = cart.items.find((it) => it.product.id === noteFor);
-  const discountItem = cart.items.find((it) => it.product.id === discountFor);
-  const approvalItem = cart.items.find((it) => it.product.id === pendingApproval?.productId);
+  const discountItem = cart.items.find((it) => it.lineKey === discountFor);
+  const approvalItem = cart.items.find((it) => it.lineKey === pendingApproval?.lineKey);
 
   const currency = data.settings.currency;
   const cartEmpty = cart.items.length === 0;
@@ -408,9 +418,9 @@ export function PosRetailCheckout() {
                   <QuantityStepper
                     quantity={item.quantity}
                     max={stockCap(item.product) ?? undefined}
-                    onDecrement={() => cart.changeQty(item.product.id, -1)}
-                    onIncrement={() => cart.changeQty(item.product.id, 1)}
-                    onSet={(q) => cart.setQty(item.product.id, q)}
+                    onDecrement={() => cart.changeQty(item.lineKey, -1)}
+                    onIncrement={() => cart.changeQty(item.lineKey, 1)}
+                    onSet={(q) => cart.setQty(item.lineKey, q)}
                   />
 
                   <div className="flex items-center gap-0.5">
@@ -418,7 +428,7 @@ export function PosRetailCheckout() {
                       variant="ghost"
                       size="icon"
                       className={cn('h-9 w-9', item.note && 'text-primary')}
-                      onClick={() => setNoteFor(item.product.id)}
+                      onClick={() => setNoteFor(item.lineKey)}
                       aria-label="Add note"
                     >
                       <NotebookPen className="h-4 w-4" />
@@ -427,7 +437,7 @@ export function PosRetailCheckout() {
                       variant="ghost"
                       size="icon"
                       className={cn('h-9 w-9', item.discount && 'text-primary')}
-                      onClick={() => setDiscountFor(item.product.id)}
+                      onClick={() => setDiscountFor(item.lineKey)}
                       aria-label="Add product discount"
                     >
                       <Tag className="h-4 w-4" />
@@ -437,7 +447,7 @@ export function PosRetailCheckout() {
                       size="icon"
                       className="h-9 w-9 text-danger"
                       aria-label="Remove item"
-                      onClick={() => cart.removeItem(item.product.id)}
+                      onClick={() => cart.removeItem(item.lineKey)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -851,7 +861,7 @@ export function PosRetailCheckout() {
           productName={noteItem.product.name}
           initialNote={noteItem.note}
           onSave={(note) => {
-            cart.setNote(noteItem.product.id, note);
+            cart.setNote(noteItem.lineKey, note);
             setNoteFor(null);
           }}
           onClose={() => setNoteFor(null)}
@@ -867,9 +877,9 @@ export function PosRetailCheckout() {
           currency={currency}
           roleLimit={discountLimitFor(session!.user.role)}
           initial={discountItem.discount}
-          onApply={(d) => handleLineDiscountApply(discountItem.product.id, d)}
+          onApply={(d) => handleLineDiscountApply(discountItem.lineKey, d)}
           onClear={() => {
-            cart.setLineDiscount(discountItem.product.id, undefined);
+            cart.setLineDiscount(discountItem.lineKey, undefined);
             setDiscountFor(null);
           }}
           onClose={() => setDiscountFor(null)}

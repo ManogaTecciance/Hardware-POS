@@ -26,7 +26,13 @@ import { Select } from '@/components/ui/select';
 import { Sheet } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/lib/auth';
-import { computeLine, linePrice, computeTotals, type CartItem } from '@/lib/cart';
+import {
+  computeLine,
+  linePrice,
+  computeTotals,
+  type CartItem,
+  type CartLineKey,
+} from '@/lib/cart';
 import { useCheckoutData } from '@/lib/catalog';
 import { usePosCart } from '@/lib/pos-cart';
 import { printCustomerReceipt, type ReceiptContext } from '@/lib/receipt-print';
@@ -665,7 +671,7 @@ function OrderSummary({
   currency: string;
   taxRatePercent: number;
   total: number;
-  onChangeQty: (productId: string, delta: number) => void;
+  onChangeQty: (lineKey: CartLineKey, delta: number) => void;
   hideHeader?: boolean;
 }) {
   return (
@@ -719,7 +725,7 @@ function OrderSummary({
                         size="icon"
                         className="h-8 w-8 shrink-0"
                         aria-label={`Decrease ${it.product.name} quantity`}
-                        onClick={() => onChangeQty(it.product.id, -1)}
+                        onClick={() => onChangeQty(it.lineKey, -1)}
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </Button>
@@ -731,7 +737,7 @@ function OrderSummary({
                         size="icon"
                         className="h-8 w-8 shrink-0"
                         aria-label={`Increase ${it.product.name} quantity`}
-                        onClick={() => onChangeQty(it.product.id, 1)}
+                        onClick={() => onChangeQty(it.lineKey, 1)}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </Button>
