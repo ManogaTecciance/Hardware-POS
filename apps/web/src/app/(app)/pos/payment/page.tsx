@@ -39,6 +39,7 @@ import { printCustomerReceipt, type ReceiptContext } from '@/lib/receipt-print';
 import {
   completeSale,
   saleLocation,
+  toSaleItemPayload,
   type CompletedSale,
   type CompleteSaleDto,
   type PaymentMethodCode,
@@ -217,14 +218,14 @@ export default function PaymentPage() {
       const dto: CompleteSaleDto = {
         ...saleLocation(session!),
         customerId: cart.customerId || undefined,
-        items: cart.items.map((it) => ({
-          productId: it.product.id,
-          quantity: it.quantity,
-          discountType: it.discount?.type,
-          discountValue: it.discount?.value,
-          discountReason: it.discount?.reason,
-          approvalToken: it.approvalToken,
-        })),
+        // D99 (1c.7) — closes the loop. Everything behind this (variant pricing,
+        // the ownership checks, per-variant depletion and its oversell guard,
+        // the D44 snapshots) was built in 1a and never once reached from the
+        // till, because the payload did not carry the variant id.
+        //
+        // A function rather than a literal so the mapping is testable: the field
+        // is optional on the wire, so forgetting it compiles silently.
+        items: cart.items.map(toSaleItemPayload),
         payments,
         orderDiscountType: cart.orderDiscount?.type,
         orderDiscountValue: cart.orderDiscount?.value,

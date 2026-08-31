@@ -35,6 +35,8 @@ import { PrismaModule } from '../../../src/prisma/prisma.module';
 import { PlatformModule } from '../../../src/modules/platform/platform.module';
 import { ProvidersModule } from '../../../src/modules/providers/providers.module';
 import { SalesModule } from '../../../src/modules/sales/sales.module';
+import { SalesService } from '../../../src/modules/sales/sales.service';
+import type { AuthenticatedUser } from '../../../src/modules/auth/auth.types';
 import { InventoryProviderFactory } from '../../../src/modules/providers/inventory/inventory-provider.factory';
 import { InvalidBranchContextError } from '../../../src/modules/providers/provider.errors';
 import type { StockLine } from '../../../src/modules/providers/provider.types';
@@ -46,6 +48,8 @@ import { seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let inventoryFactory: InventoryProviderFactory;
+let sales: SalesService;
+let owner: AuthenticatedUser;
 let tile: SeededTenant;
 
 /** A shirt in two sizes, each with its own branch stock row. */
@@ -72,6 +76,7 @@ beforeAll(async () => {
   testModule.useLogger(false);
   await testModule.init();
   inventoryFactory = testModule.get(InventoryProviderFactory);
+  sales = testModule.get(SalesService);
 });
 
 afterAll(async () => {
@@ -91,6 +96,7 @@ beforeEach(async () => {
       accountingProvider: AccountingProviderKind.NONE,
     },
   });
+  owner = { id: tile.ownerId, tenantId: tile.tenantId, role: 'OWNER', activeBranchId: null };
 });
 
 /**
@@ -435,5 +441,126 @@ describe('read-time availability agrees with the write guard (1a.19)', () => {
     // Before this step the read said "10 available" while the write refused.
     expect(readSaysEmpty).toBe(true);
     expect(writeMessage).toContain('Insufficient stock');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * D99 (1c.7) — the loop closed: a completed SALE, not a provider call.
+ *
+ * Everything above proves `reduceStock` handles variants. None of it proves the
+ * sale pipeline ever *hands* it one. Between the two sat `SaleItemInputDto`'s
+ * `productVariantId?`, which is optional — omitting it compiles, validates,
+ * returns 201 and quietly sells at product level. That is precisely the shape of
+ * defect that has bitten this phase four times, and no type can catch it.
+ *
+ * So these go through `SalesService.complete` with a real cart, and assert the
+ * STORED row — the only evidence that the id survived the whole pipeline.
+ */
+function sale(variantId: string | undefined, quantity: number) {
+  return sales.complete(tile.tenantId, owner, {
+    branchId: tile.branchId,
+    registerId: tile.registerId,
+    items: [{ productId: tile.productAId, productVariantId: variantId, quantity }],
+    payments: [{ method: 'CASH', amount: 1000 * quantity }],
+  });
+}
+
+async function storedLine(saleId: string) {
+  return prisma.saleItem.findFirstOrThrow({ where: { saleId } });
+}
+
+describe('a completed sale carries the variant end to end (1c.7)', () => {
+  it('stores the variant id on the sale line', async () => {
+    const { mediumId } = await twoSizes(10, 10);
+
+    const result = await sale(mediumId, 2);
+    const line = await storedLine(result.id);
+
+    // The assertion the compiler cannot make. If the payload field is ever
+    // dropped again this is the only thing that fails.
+    expect(line.productVariantId).toBe(mediumId);
+    expect(line.productVariantId).not.toBeNull();
+  });
+
+  it('freezes the D44 snapshots at sale time', async () => {
+    const { mediumId } = await twoSizes(10, 10);
+
+    const result = await sale(mediumId, 1);
+    const line = await storedLine(result.id);
+
+    expect(line.variantSkuSnapshot).toBe('SHIRT-M');
+    // No option values on this fixture, so the display name falls back to the
+    // SKU — the documented behaviour of `variantDisplayName`, asserted rather
+    // than assumed.
+    expect(line.variantNameSnapshot).toBe('SHIRT-M');
+  });
+
+  it('renaming the variant afterwards does not rewrite the sale', async () => {
+    const { mediumId } = await twoSizes(10, 10);
+    const result = await sale(mediumId, 1);
+
+    await prisma.productVariant.update({ where: { id: mediumId }, data: { sku: 'SHIRT-MEDIUM' } });
+
+    // The whole reason D44 snapshots rather than joins.
+    expect((await storedLine(result.id)).variantSkuSnapshot).toBe('SHIRT-M');
+  });
+
+  it('depletes the sold size and leaves its sibling untouched', async () => {
+    const { mediumId, largeId } = await twoSizes(10, 10);
+
+    await sale(mediumId, 3);
+
+    expect(await variantQty(mediumId)).toBe(7);
+    // The negative half, and the actual bug being fixed: before 1c.7 the sale
+    // reached the provider with no variant, so this row moved and that one did
+    // not — or a product-level number moved and neither did.
+    expect(await variantQty(largeId)).toBe(10);
+  });
+
+  it('moves the D10 rollup mirror with it', async () => {
+    const { mediumId } = await twoSizes(10, 10);
+    const before = await productQty();
+
+    await sale(mediumId, 2);
+
+    expect(await productQty()).toBe(before - 2);
+  });
+
+  it('refuses to oversell the chosen size, and moves nothing when it does', async () => {
+    const { mediumId, largeId } = await twoSizes(2, 10);
+
+    await expect(sale(mediumId, 3)).rejects.toThrow();
+
+    // The guard is only worth having if the failure is atomic. A partial write
+    // here would leave stock short with no sale to account for it.
+    expect(await variantQty(mediumId)).toBe(2);
+    expect(await variantQty(largeId)).toBe(10);
+  });
+
+  it('a sibling with plenty of stock does not rescue an oversold size', async () => {
+    // Product-level depletion would have seen 12 units across the two rows and
+    // happily sold 3 Mediums out of 2.
+    const { mediumId } = await twoSizes(2, 10);
+
+    await expect(sale(mediumId, 3)).rejects.toThrow();
+  });
+});
+
+describe('omitting the variant is still a valid product-level sale', () => {
+  it('stores a null variant id and touches no variant row', async () => {
+    // Loose goods, a service, a single-SKU product — and every sale in history.
+    // This is the control that proves the assertions above are about the id
+    // being SENT, not about variants existing in the database.
+    const { mediumId, largeId } = await twoSizes(10, 10);
+
+    const result = await sale(undefined, 1);
+    const line = await storedLine(result.id);
+
+    expect(line.productVariantId).toBeNull();
+    expect(line.variantSkuSnapshot).toBeNull();
+    expect(await variantQty(mediumId)).toBe(10);
+    expect(await variantQty(largeId)).toBe(10);
   });
 });

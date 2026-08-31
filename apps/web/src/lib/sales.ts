@@ -2,7 +2,7 @@ import type { SaleReturnStatusCode } from '@hardware-pos/shared';
 
 import { api, authorizedFetch } from './api';
 import type { Session } from './auth';
-import type { DiscountType } from './cart';
+import type { CartItem, DiscountType } from './cart';
 
 import type { Session as LocationSession } from './session-store';
 
@@ -33,12 +33,50 @@ export type PaymentMethodCode =
 
 export interface SaleItemPayload {
   productId: string;
+  /**
+   * D99 (1c.7) — the exact variant sold. Mirrors `SaleItemInputDto` on the
+   * server: optional, because most sellable things have no variant (loose goods,
+   * a service, a single-SKU product).
+   *
+   * Optional is the risk here, not the convenience: omitting it compiles, and
+   * the sale then depletes at product level and freezes no size onto the
+   * receipt. No type can catch that — the integration test asserting a non-null
+   * stored `productVariantId` is what does.
+   */
+  productVariantId?: string;
   quantity: number;
   unitPrice?: number;
   discountType?: DiscountType;
   discountValue?: number;
   discountReason?: string;
   approvalToken?: string;
+}
+
+/**
+ * One cart line as the sale endpoint wants it.
+ *
+ * Extracted from the payment page (1c.7) for the reason this phase keeps
+ * relearning: `productVariantId` is optional on both the payload and the server
+ * DTO, so an object literal that forgets it compiles, validates and returns 201
+ * while selling at product level. The integration test proves the SERVER handles
+ * the id; only this, tested as a function, proves the till ever sends it.
+ *
+ * The same move as `quickAddVariant` and `resolveScan`: when the rule is the
+ * behaviour, make it a pure function rather than an inline literal inside a
+ * component the tests cannot reach.
+ */
+export function toSaleItemPayload(item: CartItem): SaleItemPayload {
+  return {
+    productId: item.product.id,
+    // Undefined, not null: the field is optional on the wire, and a product
+    // without variants must send no variant rather than an explicit empty one.
+    productVariantId: item.variant?.id,
+    quantity: item.quantity,
+    discountType: item.discount?.type,
+    discountValue: item.discount?.value,
+    discountReason: item.discount?.reason,
+    approvalToken: item.approvalToken,
+  };
 }
 
 export interface SalePaymentPayload {
@@ -161,6 +199,12 @@ export interface SalesQuery {
 export interface SaleDetailItem {
   id: string;
   productName: string;
+  /**
+   * D44 — the variant's display name frozen at sale time; null for a line with
+   * no variant. Required-nullable rather than optional so every construction
+   * site has to say which it is.
+   */
+  variantName: string | null;
   sku: string | null;
   unitPrice: number;
   quantity: number;
@@ -251,6 +295,8 @@ interface ApiSaleDetail {
   items: Array<{
     id: string;
     productName: string;
+    /** D44 snapshot; absent on responses predating variants. */
+    variantNameSnapshot?: string | null;
     sku: string | null;
     unitPrice: string | number;
     quantity: string | number;
@@ -360,6 +406,11 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
     items: s.items.map((it) => ({
       id: it.id,
       productName: it.productName,
+      // D44/D99 (1c.7) — the SNAPSHOT, never the live variant. Renaming
+      // "Medium" to "M" next month must not rewrite last month's sale. The
+      // server has always returned this; the client was dropping it, so a
+      // returns clerk could not see which size a past sale was for.
+      variantName: it.variantNameSnapshot ?? null,
       sku: it.sku,
       unitPrice: Number(it.unitPrice),
       quantity: Number(it.quantity),

@@ -35,7 +35,11 @@ function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
   const rows = ctx.items
     .map((it) => {
       const line = computeLine(it);
-      return `<tr><td>${esc(it.product.name)}<br><span class="m">${it.quantity} × ${formatMoney(linePrice(it), ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
+      // D99 (1c.7) — the size goes on the paper. Unlike the server document this
+      // reads the live cart rather than a snapshot, because it prints at the
+      // moment of sale: there is nothing yet to have drifted from.
+      const label = it.variant ? `${it.product.name} — ${it.variant.name}` : it.product.name;
+      return `<tr><td>${esc(label)}<br><span class="m">${it.quantity} × ${formatMoney(linePrice(it), ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
     })
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(sale.saleNumber)}</title>

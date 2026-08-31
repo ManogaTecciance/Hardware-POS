@@ -204,8 +204,17 @@ export class DocumentsService {
     const lines: DocLine[] = sale.items.map((it, i) => ({
       index: i + 1,
       name: it.productName,
-      sku: it.sku,
-      description: null,
+      // D44/D99 (1c.7) — identify the SIZE that was sold, from the snapshots
+      // frozen at sale time rather than the live variant.
+      //
+      // A return is argued from this paper. Printing only "Cotton Shirt" and the
+      // parent SKU left a clerk no way to tell a returned Medium from a Large,
+      // and 1a.20 (returns restock the right variant) has nothing to key on.
+      //
+      // Both fall back for a line with no variant, so a single-SKU product and
+      // every historical sale print exactly as before.
+      sku: it.variantSkuSnapshot ?? it.sku,
+      description: it.variantNameSnapshot,
       quantity: num(it.quantity),
       unitType: null,
       unitPrice: num(it.unitPrice),
