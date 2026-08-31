@@ -25,6 +25,11 @@ import { ItemNoteDialog } from '@/components/pos/item-note-dialog';
 import { ManagerApprovalDialog } from '@/components/pos/manager-approval-dialog';
 import { OrderDiscountDialog } from '@/components/pos/order-discount-dialog';
 import { ProductImage } from '@/components/product-image';
+import {
+  VariantPickerDialog,
+  needsVariantChoice,
+  quickAddVariant,
+} from '@/components/pos/variant-picker-dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
@@ -40,7 +45,12 @@ import {
   type LineDiscount,
   type OrderDiscount,
 } from '@/lib/cart';
-import { displayPrice, useCheckoutData, type ClientProduct } from '@/lib/catalog';
+import {
+  displayPrice,
+  useCheckoutData,
+  type ClientProduct,
+  type ClientVariant,
+} from '@/lib/catalog';
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
@@ -82,6 +92,8 @@ export function PosRetailCheckout() {
   const [pageSize, setPageSize] = React.useState(20);
   const [noteFor, setNoteFor] = React.useState<CartLineKey | null>(null);
   const [discountFor, setDiscountFor] = React.useState<CartLineKey | null>(null);
+  // D99 (1c.4) — the product whose sizes are being chosen, or null when closed.
+  const [pickVariantFor, setPickVariantFor] = React.useState<ClientProduct | null>(null);
   const [pendingApproval, setPendingApproval] = React.useState<PendingLineApproval | null>(null);
   const [orderDiscountOpen, setOrderDiscountOpen] = React.useState(false);
   const [pendingOrderApproval, setPendingOrderApproval] = React.useState<{
@@ -138,9 +150,29 @@ export function PosRetailCheckout() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageProducts = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  const addToCart = (product: ClientProduct) => {
-    cart.addToCart(product);
-    showToast(`${product.name} added`);
+  /**
+   * D99 (1c.4) — the single add-to-cart path.
+   *
+   * Every route into the cart goes through here — card tap, Enter on search, the
+   * sole-visible-result shortcut — so the quick-add ladder cannot differ between
+   * them. `quickAddVariant` decides whether there is a real choice to make; the
+   * picker opens only when there is.
+   */
+  const addProduct = (product: ClientProduct) => {
+    if (needsVariantChoice(product)) {
+      setPickVariantFor(product);
+      return;
+    }
+    const variant = quickAddVariant(product);
+    cart.addToCart(product, variant);
+    showToast(variant ? `${product.name} (${variant.name}) added` : `${product.name} added`);
+  };
+
+  /** Chosen from the picker — always explicit, never a guess. */
+  const addChosenVariant = (product: ClientProduct, variant: ClientVariant) => {
+    cart.addToCart(product, variant);
+    setPickVariantFor(null);
+    showToast(`${product.name} (${variant.name}) added`);
   };
 
   /**
@@ -188,6 +220,7 @@ export function PosRetailCheckout() {
   const modalOpen =
     !!noteFor ||
     !!discountFor ||
+    !!pickVariantFor ||
     !!pendingApproval ||
     orderDiscountOpen ||
     !!pendingOrderApproval;
@@ -199,7 +232,7 @@ export function PosRetailCheckout() {
     const exact = findBySku(q);
     const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
     if (target) {
-      addToCart(target);
+      addProduct(target);
       setQuery('');
     }
   };
@@ -678,6 +711,9 @@ export function PosRetailCheckout() {
                   !outOfStock &&
                   p.reorderLevel != null &&
                   p.quantityOnHand <= p.reorderLevel;
+                // More than one sellable option — the card offers the picker
+                // rather than a bare Add, even when a default would quick-add.
+                const hasChoice = p.variants.filter((v) => v.stockState !== 'OUT').length > 1;
                 return (
                   <div
                     key={p.id}
@@ -686,7 +722,7 @@ export function PosRetailCheckout() {
                   >
                     <button
                       type="button"
-                      onClick={() => addToCart(p)}
+                      onClick={() => addProduct(p)}
                       disabled={outOfStock}
                       aria-label={`Add ${p.name} to cart`}
                       className="relative block text-left disabled:cursor-not-allowed"
@@ -733,16 +769,22 @@ export function PosRetailCheckout() {
                               : p.quantityOnHand.toLocaleString()}
                         </span>
                       </div>
+                      {/*
+                        D99 (1c.4) — option B. Tapping the card quick-adds the
+                        default size; this button opens the picker instead, so a
+                        cashier selling a Large is never stuck with the default.
+                        A product with one option or none keeps the plain Add.
+                      */}
                       <Button
                         variant={outOfStock ? 'outline' : 'primary'}
                         size="sm"
                         fullWidth
                         disabled={outOfStock}
                         className="mt-2"
-                        onClick={() => addToCart(p)}
-                        leftIcon={outOfStock ? undefined : <Plus className="h-4 w-4" />}
+                        onClick={() => (hasChoice ? setPickVariantFor(p) : addProduct(p))}
+                        leftIcon={outOfStock || hasChoice ? undefined : <Plus className="h-4 w-4" />}
                       >
-                        {outOfStock ? 'Out of Stock' : 'Add'}
+                        {outOfStock ? 'Out of Stock' : hasChoice ? 'Choose option' : 'Add'}
                       </Button>
                     </div>
                   </div>
@@ -867,6 +909,14 @@ export function PosRetailCheckout() {
           onClose={() => setNoteFor(null)}
         />
       ) : null}
+
+      <VariantPickerDialog
+        open={!!pickVariantFor}
+        product={pickVariantFor}
+        currency={currency}
+        onPick={addChosenVariant}
+        onClose={() => setPickVariantFor(null)}
+      />
 
       {discountItem ? (
         <ItemDiscountDialog
