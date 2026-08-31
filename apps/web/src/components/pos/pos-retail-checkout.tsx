@@ -55,7 +55,8 @@ import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
 import { stockCap, usePosCart } from '@/lib/pos-cart';
-import { scanCandidates, useBarcodeScanner } from '@/lib/use-barcode-scanner';
+import { resolveScan, type ScanHit } from '@/lib/scan-resolver';
+import { useBarcodeScanner } from '@/lib/use-barcode-scanner';
 import { cn, formatMoney, round2 } from '@/lib/utils';
 
 const PAGE_SIZES = [20, 30, 40, 50];
@@ -182,37 +183,47 @@ export function PosRetailCheckout() {
    * URL or JSON are unwrapped by `scanCandidates`, so both 1D barcodes and QR
    * codes resolve through the same path.
    */
-  const findBySku = React.useCallback(
-    (code: string): ClientProduct | undefined => {
-      for (const candidate of scanCandidates(code)) {
-        const key = candidate.toLowerCase();
-        const hit = data.products.find((p) => (p.sku ?? '').trim().toLowerCase() === key);
-        if (hit) return hit;
-      }
-      return undefined;
-    },
+  const findByCode = React.useCallback(
+    (code: string): ScanHit | null => resolveScan(data.products, code),
     [data.products],
   );
 
   /** Add a scanned product, or explain why it couldn't be added. */
   const addByCode = React.useCallback(
     (code: string) => {
-      const product = findBySku(code);
-      if (!product) {
+      const hit = findByCode(code);
+      if (!hit) {
         showToast(`No product found for "${code}"`, 'danger');
         return;
       }
+      const { product, variant } = hit;
+
+      // D99 (1c.5) — a barcode names ONE size, so a variant match adds it
+      // directly. Opening the picker after a scan would ask a question the code
+      // already answered.
+      if (variant) {
+        if (variant.stockState === 'OUT') {
+          showToast(`${product.name} (${variant.name}) is out of stock`, 'warning');
+          return;
+        }
+        cart.addToCart(product, variant);
+        showToast(`${product.name} (${variant.name}) added`);
+        setQuery('');
+        return;
+      }
+
+      // A legacy variant-less product: the product-level stock is the right
+      // number, and the quick-add ladder resolves to a direct add.
       if (product.type === 'Inventory' && product.quantityOnHand <= 0) {
         showToast(`${product.name} is out of stock`, 'warning');
         return;
       }
-      cart.addToCart(product);
-      showToast(`${product.name} added`);
+      addProduct(product);
       setQuery('');
     },
     // showToast/cart are stable enough for this handler's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [findBySku],
+    [findByCode],
   );
 
   // Hardware scanner works anywhere on the page — no need to focus the search
@@ -226,13 +237,27 @@ export function PosRetailCheckout() {
     !!pendingOrderApproval;
   useBarcodeScanner({ onScan: addByCode, enabled: !modalOpen });
 
-  // Enter adds an exact SKU match (whole catalog), else the sole visible result.
+  // Enter adds an exact code match (whole catalog), else the sole visible result.
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
-    const exact = findBySku(q);
-    const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
-    if (target) {
-      addProduct(target);
+    // D99 (1c.5) — a typed variant SKU is as specific as a scanned barcode, so
+    // it adds that size rather than falling back to the product and prompting.
+    // The same path as a scan, deliberately: a cashier typing a code a damaged
+    // barcode would have carried must get the same result.
+    const exact = findByCode(q);
+    if (exact) {
+      if (exact.variant) {
+        cart.addToCart(exact.product, exact.variant);
+        showToast(`${exact.product.name} (${exact.variant.name}) added`);
+      } else {
+        addProduct(exact.product);
+      }
+      setQuery('');
+      return;
+    }
+    // No code match: the sole visible result, which may still need a size.
+    if (filtered.length === 1) {
+      addProduct(filtered[0]!);
       setQuery('');
     }
   };

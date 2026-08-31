@@ -53,6 +53,16 @@ export type { StockState };
 export interface SellableItem {
   id: string;
   name: string;
+  /**
+   * D99 — the legacy single-SKU identifier, for scanning and typed search.
+   *
+   * **Null for a variant product.** D44 is explicit that once `hasVariants` is
+   * set "the variant rows own price, cost, SKU, barcode… the parent-level
+   * unitPrice / sku / quantityOnHand remain as legacy fallbacks and are not
+   * read." Returning it anyway would hand the till a value the domain says is
+   * meaningless — the same rule `unitPrice` already follows below.
+   */
+  sku: string | null;
   description: string | null;
   imageUrl: string | null;
   sellableKind: SellableKind;
@@ -66,6 +76,12 @@ export interface SellableItem {
   variants?: {
     id: string;
     sku: string;
+    /**
+     * D99 — the scannable code. Only `ProductVariant` has one; `Product` has no
+     * barcode column at all, which is why scanning is inherently a variant-level
+     * operation in this data model.
+     */
+    barcode: string | null;
     name: string;
     unitPrice: string;
     isDefault: boolean;
@@ -331,6 +347,10 @@ export class SellableService {
       const item: SellableItem = {
         id: p.id,
         name: p.name,
+        // Mirrors the `base` price rule two lines below: a variant product's
+        // parent-level SKU is a legacy fallback D44 says is not read, so the
+        // till is not handed one to match a scan against.
+        sku: p.hasVariants ? null : p.sku,
         description: p.description,
         imageUrl: p.imageUrl,
         sellableKind: p.sellableKind,
@@ -354,6 +374,7 @@ export class SellableService {
           return {
             id: v.id,
             sku: v.sku,
+            barcode: v.barcode,
             name: variantDisplayName(v.optionValues, v.sku),
             unitPrice: v.unitPrice.toFixed(2),
             isDefault: v.isDefault,

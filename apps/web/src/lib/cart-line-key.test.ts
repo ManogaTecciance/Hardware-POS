@@ -37,6 +37,7 @@ function variant(over: Partial<ClientVariant> = {}): ClientVariant {
   return {
     id: 'var_m',
     sku: 'SHIRT-M',
+    barcode: null,
     name: 'Black / Medium',
     unitPrice: 2500,
     isDefault: false,

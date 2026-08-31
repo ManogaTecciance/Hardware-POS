@@ -10,6 +10,8 @@ import type { Session } from './auth';
 export interface ClientVariant {
   id: string;
   sku: string;
+  /** D99 — the scannable code. Only variants have one; `Product` has no column. */
+  barcode: string | null;
   /** "Black / Medium", or the SKU when the variant carries no options. */
   name: string;
   unitPrice: number;
@@ -77,6 +79,8 @@ export interface PosSettings {
 interface ApiSellableItem {
   id: string;
   name: string;
+  /** Null for a variant product — its SKUs live on the variants (D44). */
+  sku: string | null;
   sellableKind: string;
   /** Null when variants own the price. */
   unitPrice: string | null;
@@ -88,6 +92,7 @@ interface ApiSellableItem {
   variants?: {
     id: string;
     sku: string;
+    barcode: string | null;
     name: string;
     unitPrice: string;
     isDefault: boolean;
@@ -144,9 +149,11 @@ function normalizeApi(item: ApiSellableItem): ClientProduct {
   return {
     id: item.id,
     name: item.name,
-    // The sellable model has no SKU at item level — a variant product's SKUs
-    // live on its variants, and a single-SKU product's is not needed to sell it.
-    sku: null,
+    // 1c.1 set this to null because the read model did not expose a SKU, which
+    // silently broke barcode scanning: `findBySku` matched against it and could
+    // never hit. The compiler said nothing — the field was already
+    // `string | null`. 1c.5 restored the field server-side; this reads it.
+    sku: item.sku,
     // `trackInventory` was derived from the QuickBooks item type; the read model
     // answers the same question directly with UNTRACKED, which also covers a
     // SERVICE and a COMPOSED_ITEM without the till knowing either concept.
@@ -165,6 +172,7 @@ function normalizeApi(item: ApiSellableItem): ClientProduct {
       .map((v) => ({
         id: v.id,
         sku: v.sku,
+        barcode: v.barcode,
         name: v.name,
         unitPrice: Number(v.unitPrice),
         isDefault: v.isDefault,
