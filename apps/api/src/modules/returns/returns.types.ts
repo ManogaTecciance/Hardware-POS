@@ -146,8 +146,29 @@ export interface ReturnsListFilter {
 export interface PersistReturnItem {
   originalSaleItemId: string;
   productId: string;
+  /**
+   * D99 (1a.20) — the exact variant that was sold, copied from the original
+   * SaleItem rather than named by the client.
+   *
+   * `ReturnItemInputDto` identifies a line by `saleItemId`, so the server
+   * already holds the historical record and never has to trust a caller about
+   * which size is coming back. A client cannot restock a Large against a sale
+   * of a Medium, because it is never asked.
+   *
+   * Required-nullable, not optional: the bug being fixed here was a hardcoded
+   * `productVariantId: null`, and an optional field would let the same thing
+   * happen again silently.
+   */
+  productVariantId: string | null;
   productNameSnapshot: string;
   skuSnapshot: string | null;
+  /**
+   * D44 — copied from the sale line's snapshots, never re-derived from the live
+   * variant. The sale froze "4 inch" at sale time; a rename since must not
+   * change what this return says was handed back.
+   */
+  variantSkuSnapshot: string | null;
+  variantNameSnapshot: string | null;
   imageUrlSnapshot: string | null;
   originalUnitPrice: number;
   purchasedQuantity: number;

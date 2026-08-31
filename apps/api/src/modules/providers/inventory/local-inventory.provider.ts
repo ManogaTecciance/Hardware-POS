@@ -199,9 +199,28 @@ export class LocalInventoryProvider implements InventoryProvider {
   /**
    * Restore on-hand stock for a return.
    *
-   * Mirrors `returns.repository`: `type: 'Inventory'` is part of the predicate, so
-   * a Service product silently restocks nothing, and there is no row-count check
-   * because restoring stock cannot fail a business rule.
+   * `type: 'Inventory'` is part of the product predicate, so a Service product
+   * silently restocks nothing, and there is no row-count check because restoring
+   * stock cannot fail a business rule.
+   *
+   * ## D99 (1a.20) — the return goes back to the size that was sold
+   *
+   * This used to aggregate by product alone and touch `Product.quantityOnHand`
+   * only, which left the sell and return paths asymmetric:
+   *
+   * | Line | Sale decrements | Return incremented |
+   * |---|---|---|
+   * | product-level | `Product` | `Product` — symmetric |
+   * | **variant** | `BranchInventory` **+** `Product` mirror | **`Product` only** |
+   *
+   * So a returned Medium credited the customer, bumped the product total, and
+   * never went back on the shelf. The variant row stayed down and the mirror
+   * drifted up a little further with every return.
+   *
+   * Structure now mirrors `reduceStock` exactly, minus the parts that have no
+   * counterpart on this side: **no `gte` guard** (restoring adds — there is
+   * nothing to run short of, and the guard exists to prevent overselling), and
+   * no row-count check.
    */
   async restoreStock(
     tx: Prisma.TransactionClient,
@@ -210,7 +229,64 @@ export class LocalInventoryProvider implements InventoryProvider {
   ): Promise<void> {
     await this.assertSingleBranch(tx, ctx);
 
-    for (const [productId, { qty }] of aggregate(lines)) {
+    for (const { productId, productVariantId, qty } of aggregateByVariant(lines)) {
+      // ── product-level line: unchanged since before variants existed ────────
+      if (productVariantId === null) {
+        await tx.product.updateMany({
+          where: { id: productId, tenantId: ctx.tenantId, type: 'Inventory' },
+          data: { quantityOnHand: { increment: qty } },
+        });
+        continue;
+      }
+
+      // ── variant line: the row lives in BranchInventory ─────────────────────
+      // Same reasoning as `reduceStock` — a variant's stock is branch-scoped, so
+      // there is no row to target without a branch.
+      if (ctx.branchId === null) {
+        throw new InvalidBranchContextError(
+          'restoreStock requires an explicit branchId for a variant line',
+        );
+      }
+
+      // Upsert, not updateMany (decision: 1a.20, option A).
+      //
+      // The row should always exist: `reduceStock` refuses a variant with no row,
+      // so a completed sale is proof one was there. A missing row means it was
+      // deleted between the sale and the return — and in that case a cashier is
+      // standing at the counter holding the goods. Recording stock that
+      // physically exists is truer than silently discarding it, which is what a
+      // no-op `updateMany` would do.
+      //
+      // `averageCost` is left null on a row created this way. That is already its
+      // documented pre-receipt state (D44), and a return is not a receipt: it has
+      // no purchase cost to weight into an average.
+      // `upsert` is not available: uniqueness of (branch, variant) is enforced by
+      // paired PARTIAL unique indexes, which Prisma cannot express, so there is no
+      // compound `where` unique to upsert against.
+      //
+      // Update-first rather than `receiveStock`'s find-then-branch, because the
+      // conditional write is atomic: a concurrent return cannot slip between a
+      // read and a write and cause a lost increment.
+      const restored = await tx.branchInventory.updateMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, productVariantId },
+        data: { quantityOnHand: { increment: qty }, version: { increment: 1 } },
+      });
+
+      if (restored.count === 0) {
+        await tx.branchInventory.create({
+          data: {
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            productId,
+            productVariantId,
+            quantityOnHand: qty,
+          },
+        });
+      }
+
+      // D10 rollup mirror — the exact counterpart of the decrement in
+      // `reduceStock`. Without it a return would put the size back on the shelf
+      // while the product total stayed down.
       await tx.product.updateMany({
         where: { id: productId, tenantId: ctx.tenantId, type: 'Inventory' },
         data: { quantityOnHand: { increment: qty } },

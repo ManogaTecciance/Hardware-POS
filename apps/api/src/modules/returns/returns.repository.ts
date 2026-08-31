@@ -254,6 +254,18 @@ export class ReturnsRepository {
             create: input.items.map((it) => ({
               originalSaleItemId: it.originalSaleItemId,
               productId: it.productId,
+              // D99 (1a.20) — these three columns have existed since D44 built
+              // them and had never been written.
+              //
+              // The scalar FK, not `productVariant: { connect }`: `productId` is
+              // set as a scalar here, which puts this nested create into Prisma's
+              // *unchecked* shape, and that shape accepts foreign keys rather than
+              // relations. The connect form typechecked only because it was
+              // spread from a conditional — a spread suppresses excess-property
+              // checking — and failed at runtime.
+              productVariantId: it.productVariantId,
+              variantSkuSnapshot: it.variantSkuSnapshot,
+              variantNameSnapshot: it.variantNameSnapshot,
               productNameSnapshot: it.productNameSnapshot,
               skuSnapshot: it.skuSnapshot,
               imageUrlSnapshot: it.imageUrlSnapshot,

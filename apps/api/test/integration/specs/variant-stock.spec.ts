@@ -36,19 +36,25 @@ import { PlatformModule } from '../../../src/modules/platform/platform.module';
 import { ProvidersModule } from '../../../src/modules/providers/providers.module';
 import { SalesModule } from '../../../src/modules/sales/sales.module';
 import { SalesService } from '../../../src/modules/sales/sales.service';
+import { ReturnsModule } from '../../../src/modules/returns/returns.module';
+import { ReturnsService } from '../../../src/modules/returns/returns.service';
+import { CreateReturnDto } from '../../../src/modules/returns/dto/create-return.dto';
+import { ApproveReturnDto } from '../../../src/modules/returns/dto/approve-return.dto';
 import type { AuthenticatedUser } from '../../../src/modules/auth/auth.types';
+import { dto } from '../dto';
 import { InventoryProviderFactory } from '../../../src/modules/providers/inventory/inventory-provider.factory';
 import { InvalidBranchContextError } from '../../../src/modules/providers/provider.errors';
 import type { StockLine } from '../../../src/modules/providers/provider.types';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
 import { resetDatabase } from '../db-reset';
-import { seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
+import { MANAGER_PIN, seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let inventoryFactory: InventoryProviderFactory;
 let sales: SalesService;
+let returns: ReturnsService;
 let owner: AuthenticatedUser;
 let tile: SeededTenant;
 
@@ -71,12 +77,14 @@ beforeAll(async () => {
       // SalesModule supplies it transitively — the same graph `providers.spec`
       // and `inventory-adoption.spec` compile.
       SalesModule,
+      ReturnsModule,
     ],
   }).compile();
   testModule.useLogger(false);
   await testModule.init();
   inventoryFactory = testModule.get(InventoryProviderFactory);
   sales = testModule.get(SalesService);
+  returns = testModule.get(ReturnsService);
 });
 
 afterAll(async () => {
@@ -560,6 +568,188 @@ describe('omitting the variant is still a valid product-level sale', () => {
 
     expect(line.productVariantId).toBeNull();
     expect(line.variantSkuSnapshot).toBeNull();
+    expect(await variantQty(mediumId)).toBe(10);
+    expect(await variantQty(largeId)).toBe(10);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * D99 (1a.20) — a return puts stock back on the SIZE that was sold.
+ *
+ * `restoreStock` aggregated by product alone and touched `Product.quantityOnHand`
+ * only, which made the two paths asymmetric for a variant line:
+ *
+ *   sale    → BranchInventory(variant) decremented, Product mirrored
+ *   return  → Product incremented, BranchInventory NEVER touched
+ *
+ * So a returned Medium credited the customer, bumped the product total, and never
+ * went back on the shelf. The variant row stayed down and the mirror drifted up a
+ * little further with every return.
+ *
+ * The variant is not taken from the caller. `ReturnItemInputDto` names a
+ * `saleItemId`, so the server reads the size off its own historical record — a
+ * client cannot restock a Large against a sale of a Medium, because it is never
+ * asked which size is coming back.
+ */
+function returnLine(saleItemId: string, quantity: number, over: Record<string, unknown> = {}) {
+  return {
+    saleItemId,
+    returnQuantity: quantity,
+    returnReason: 'CHANGED_MIND',
+    itemCondition: 'GOOD',
+    stockDisposition: 'RETURN_TO_STOCK',
+    ...over,
+  };
+}
+
+async function returnFrom(
+  saleId: string,
+  items: Record<string, unknown>[],
+  { approve = false, refundTotal = 1000 }: { approve?: boolean; refundTotal?: number } = {},
+) {
+  // A damaged or non-resellable return needs a manager, which is a real rule —
+  // obeyed here rather than bypassed, so the test exercises the same path a
+  // cashier walks.
+  let approvalToken: string | undefined;
+  if (approve) {
+    const approval = await returns.approve(
+      tile.tenantId,
+      dto(ApproveReturnDto, { managerPin: MANAGER_PIN, originalSaleId: saleId, refundTotal }),
+    );
+    if (!approval.approved || !approval.approvalToken) {
+      throw new Error(`Fixture approval refused: ${approval.reason ?? 'unknown'}`);
+    }
+    approvalToken = approval.approvalToken;
+  }
+
+  return returns.complete(
+    tile.tenantId,
+    owner,
+    dto(CreateReturnDto, {
+      originalSaleId: saleId,
+      refundMethod: 'CASH',
+      ...(approvalToken ? { approvalToken } : {}),
+      items,
+    }),
+    null,
+  );
+}
+
+async function soldMedium(qty: number) {
+  const { mediumId, largeId } = await twoSizes(10, 10);
+  const result = await sale(mediumId, qty);
+  const saleItem = await prisma.saleItem.findFirstOrThrow({ where: { saleId: result.id } });
+  return { mediumId, largeId, saleId: result.id, saleItemId: saleItem.id };
+}
+
+describe('a return restocks the variant that was sold (1a.20)', () => {
+  it('puts the quantity back on the sold size and leaves its sibling alone', async () => {
+    const { mediumId, largeId, saleId, saleItemId } = await soldMedium(3);
+    expect(await variantQty(mediumId)).toBe(7);
+
+    await returnFrom(saleId, [returnLine(saleItemId, 2)]);
+
+    expect(await variantQty(mediumId)).toBe(9);
+    // The negative half, and the whole bug: restocking by product alone put the
+    // units into a number that is not this row, so this stayed at 7 forever.
+    expect(await variantQty(largeId)).toBe(10);
+  });
+
+  it('moves the D10 rollup mirror back with it, exactly once', async () => {
+    const { saleId, saleItemId } = await soldMedium(3);
+    const afterSale = await productQty();
+
+    await returnFrom(saleId, [returnLine(saleItemId, 2)]);
+
+    // "Exactly once" matters: the variant branch increments BranchInventory and
+    // then mirrors onto Product. Incrementing the product twice — once in each
+    // branch — is the obvious way to write this wrong.
+    expect(await productQty()).toBe(afterSale + 2);
+  });
+
+  it('stores the variant id and both D44 snapshots on the return line', async () => {
+    const { mediumId, saleId, saleItemId } = await soldMedium(2);
+
+    const ret = await returnFrom(saleId, [returnLine(saleItemId, 1)]);
+    const line = await prisma.returnItem.findFirstOrThrow({ where: { returnId: ret.id } });
+
+    // These three columns have existed since D44 and were never written. The
+    // stored row is the only evidence they are now populated.
+    expect(line.productVariantId).toBe(mediumId);
+    expect(line.variantSkuSnapshot).toBe('SHIRT-M');
+    expect(line.variantNameSnapshot).toBe('SHIRT-M');
+  });
+
+  it('takes the size from the SALE, so a rename between sale and return changes nothing', async () => {
+    const { mediumId, saleId, saleItemId } = await soldMedium(2);
+
+    await prisma.productVariant.update({ where: { id: mediumId }, data: { sku: 'SHIRT-MEDIUM' } });
+    const ret = await returnFrom(saleId, [returnLine(saleItemId, 1)]);
+    const line = await prisma.returnItem.findFirstOrThrow({ where: { returnId: ret.id } });
+
+    // Copied from the sale's frozen snapshot, never re-derived from the live
+    // variant — the reason D44 snapshots rather than joins.
+    expect(line.variantSkuSnapshot).toBe('SHIRT-M');
+    // The stock still goes back to the right row: the id is what moves stock,
+    // and renaming does not change identity.
+    expect(await variantQty(mediumId)).toBe(9);
+  });
+});
+
+describe('return eligibility still decides whether stock moves at all', () => {
+  it('does not restock a DAMAGED item, even though it now names a variant', async () => {
+    const { mediumId, saleId, saleItemId } = await soldMedium(3);
+
+    await returnFrom(
+      saleId,
+      [returnLine(saleItemId, 2, { itemCondition: 'DAMAGED', stockDisposition: 'DAMAGED_STOCK' })],
+      { approve: true, refundTotal: 2000 },
+    );
+
+    // Threading the variant through must not sneak past the eligibility filter:
+    // damaged goods are refunded but never resold.
+    expect(await variantQty(mediumId)).toBe(7);
+  });
+
+  it('does not restock when the disposition is not RETURN_TO_STOCK', async () => {
+    const { mediumId, saleId, saleItemId } = await soldMedium(3);
+
+    await returnFrom(saleId, [returnLine(saleItemId, 2, { stockDisposition: 'DO_NOT_RESTOCK' })]);
+
+    expect(await variantQty(mediumId)).toBe(7);
+  });
+});
+
+describe('the missing-row case (1a.20 option A — upsert)', () => {
+  it('creates the row rather than losing stock a cashier is holding', async () => {
+    const { mediumId, saleId, saleItemId } = await soldMedium(3);
+
+    // The row should always exist — `reduceStock` refuses a variant without one,
+    // so a completed sale proves it was there. This simulates it being deleted
+    // between the sale and the return.
+    await prisma.branchInventory.deleteMany({ where: { productVariantId: mediumId } });
+
+    await returnFrom(saleId, [returnLine(saleItemId, 2)]);
+
+    // A no-op updateMany would have silently discarded two physical items.
+    expect(await variantQty(mediumId)).toBe(2);
+  });
+});
+
+describe('product-level returns are unchanged (regression guard)', () => {
+  it('restocks the product column and touches no variant row', async () => {
+    // Every existing tenant. If this moves, 1a.20 broke returns for everyone who
+    // does not use variants.
+    const { mediumId, largeId } = await twoSizes(10, 10);
+    const result = await sale(undefined, 2);
+    const saleItem = await prisma.saleItem.findFirstOrThrow({ where: { saleId: result.id } });
+    const afterSale = await productQty();
+
+    await returnFrom(result.id, [returnLine(saleItem.id, 1)]);
+
+    expect(await productQty()).toBe(afterSale + 1);
     expect(await variantQty(mediumId)).toBe(10);
     expect(await variantQty(largeId)).toBe(10);
   });

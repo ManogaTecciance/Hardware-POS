@@ -540,8 +540,17 @@ export class ReturnsService {
       persistItems.push({
         originalSaleItemId: si.id,
         productId,
+        // D99 (1a.20) — the variant comes from the SALE, never from the caller.
+        // `ReturnItemInputDto` names a `saleItemId`, so the server already holds
+        // the historical record; a client cannot restock a size other than the
+        // one that was sold, because it is never asked which.
+        productVariantId: si.productVariantId,
         productNameSnapshot: si.productName,
         skuSnapshot: si.sku,
+        // D44 — copied, not re-derived. The sale froze these at sale time; a
+        // rename since must not change what the return says came back.
+        variantSkuSnapshot: si.variantSkuSnapshot,
+        variantNameSnapshot: si.variantNameSnapshot,
         imageUrlSnapshot: null,
         originalUnitPrice: line.originalUnitPrice,
         purchasedQuantity: purchased,
@@ -838,10 +847,11 @@ function eligibleRestockLines(items: PersistReturnItem[]): StockLine[] {
     .filter((it) => it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK')
     .map((it) => ({
       productId: it.productId,
-      // D99 — `ReturnItem.productVariantId` exists and will be threaded here when
-      // the sell path resolves variants; until a sale can record one, every
-      // return line restocks at product level exactly as it does today.
-      productVariantId: null,
+      // D99 (1a.20) — threaded now that 1c.7 lets a sale record a variant.
+      // Hardcoding null here meant a returned Medium credited the customer,
+      // bumped the product total, and never went back on the shelf: the variant
+      // row stayed down and the D10 mirror drifted up with every return.
+      productVariantId: it.productVariantId,
       productName: it.productNameSnapshot,
       quantity: Number(it.returnQuantity),
       trackInventory: true,
