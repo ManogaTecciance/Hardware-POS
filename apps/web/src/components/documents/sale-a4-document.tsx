@@ -6,6 +6,7 @@ import type { DocumentProfile, SaleDocumentMeta } from '@/lib/document-template-
 import { resolveImageUrl } from '@/lib/products-api';
 import type { SaleDetail } from '@/lib/sales';
 import { formatMoney } from '@/lib/utils';
+import { saleLineLabel } from '@hardware-pos/shared';
 
 /**
  * Native React A4 sale invoice / final bill. Sized 210mm and print-safe:
@@ -147,7 +148,11 @@ export function SaleA4Document({
             {sale.items.map((it, i) => (
               <tr key={it.id}>
                 <td>{i + 1}</td>
-                <td>{it.productName}</td>
+                {/* D99 (2.12) — this renderer is a SECOND A4, separate from the
+                    server's, and 1c.7 fixed only the server's. The same sale
+                    printed with the size from one endpoint and without it from
+                    here. Both now call `saleLineLabel`. */}
+                <td>{saleLineLabel(it.productName, it.variantName)}</td>
                 {profile.showSku ? <td>{it.sku ?? '—'}</td> : null}
                 <td className="r">{it.quantity}</td>
                 <td className="r">{formatMoney(it.unitPrice)}</td>

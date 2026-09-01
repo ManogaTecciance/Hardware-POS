@@ -1,14 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
-import {
-  formatCurrency,
-  ITEM_CONDITION_LABELS,
-  QUOTATION_STATUS_LABELS,
-  QuotationStatusCode,
-  RETURN_REASON_LABELS,
-  type ItemConditionCode,
-  type ReturnReasonCode,
-} from '@hardware-pos/shared';
+import { ITEM_CONDITION_LABELS, QUOTATION_STATUS_LABELS, QuotationStatusCode, RETURN_REASON_LABELS, formatCurrency, saleLineLabel, type ItemConditionCode, type ReturnReasonCode } from '@hardware-pos/shared';
 
 import { customerAddressLine } from '../../common/customer-display';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -203,18 +195,16 @@ export class DocumentsService {
 
     const lines: DocLine[] = sale.items.map((it, i) => ({
       index: i + 1,
-      name: it.productName,
-      // D44/D99 (1c.7) — identify the SIZE that was sold, from the snapshots
-      // frozen at sale time rather than the live variant.
+      // D44/D99 — identify the SIZE that was sold, from the snapshots frozen at
+      // sale time rather than the live variant. A return is argued from this
+      // paper: printing only "Cotton Shirt" left a clerk no way to tell a
+      // returned Medium from a Large.
       //
-      // A return is argued from this paper. Printing only "Cotton Shirt" and the
-      // parent SKU left a clerk no way to tell a returned Medium from a Large,
-      // and 1a.20 (returns restock the right variant) has nothing to key on.
-      //
-      // Both fall back for a line with no variant, so a single-SKU product and
-      // every historical sale print exactly as before.
+      // 2.12 moved this from a muted sub-line to the inline form the PO asked
+      // for, and into `saleLineLabel` so all four renderers agree.
+      name: saleLineLabel(it.productName, it.variantNameSnapshot),
       sku: it.variantSkuSnapshot ?? it.sku,
-      description: it.variantNameSnapshot,
+      description: null,
       quantity: num(it.quantity),
       unitType: null,
       unitPrice: num(it.unitPrice),
@@ -307,8 +297,10 @@ export class DocumentsService {
       const desc = [`${reason} · ${condition}`, it.note].filter(Boolean).join(' — ');
       return {
         index: i + 1,
-        name: it.productNameSnapshot,
-        sku: it.skuSnapshot,
+        // 2.12 — returns carry the same snapshots since 1a.20, and a credit note
+        // has exactly the same need as the receipt it reverses.
+        name: saleLineLabel(it.productNameSnapshot, it.variantNameSnapshot),
+        sku: it.variantSkuSnapshot ?? it.skuSnapshot,
         description: desc,
         quantity: num(it.returnQuantity),
         unitType: null,

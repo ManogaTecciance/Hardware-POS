@@ -11,6 +11,7 @@ import { computeLine, linePrice } from './cart';
 import type { CompletedSale } from './sales';
 import { getCachedDocumentProfile, type DocumentProfile } from './document-template-service';
 import { formatMoney } from './utils';
+import { saleLineLabel } from '@hardware-pos/shared';
 
 export interface ReceiptContext {
   currency: string;
@@ -35,10 +36,11 @@ function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
   const rows = ctx.items
     .map((it) => {
       const line = computeLine(it);
-      // D99 (1c.7) — the size goes on the paper. Unlike the server document this
-      // reads the live cart rather than a snapshot, because it prints at the
-      // moment of sale: there is nothing yet to have drifted from.
-      const label = it.variant ? `${it.product.name} — ${it.variant.name}` : it.product.name;
+      // D99 (1c.7 / 2.12) — the size goes on the paper. Unlike the server
+      // document this reads the live cart rather than a snapshot, because it
+      // prints at the moment of sale: there is nothing yet to have drifted from.
+      // The FORMAT is shared, so this fallback and the server render identically.
+      const label = saleLineLabel(it.product.name, it.variant?.name ?? null);
       return `<tr><td>${esc(label)}<br><span class="m">${it.quantity} × ${formatMoney(linePrice(it), ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
     })
     .join('');

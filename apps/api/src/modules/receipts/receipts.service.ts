@@ -11,6 +11,7 @@ import {
 import { ReceiptsRepository, SaleForReceipt } from './receipts.repository';
 import { CustomerReceiptData, renderCustomerReceipt } from './receipt-templates';
 import { QueryPrintJobsDto } from './dto/query-print-jobs.dto';
+import { saleLineLabel } from '@hardware-pos/shared';
 
 export interface CustomerReceiptResult {
   receiptNumber: string;
@@ -125,8 +126,11 @@ export class ReceiptsService {
       customerName: sale.customer?.name ?? null,
       currency,
       items: sale.items.map((it) => ({
-        name: it.productName,
-        sku: it.sku,
+        // D99 (2.12) — the size, on the paper a customer walks out with. This
+        // renderer was missed by 1c.7, so the same sale printed with the variant
+        // from the A4 endpoint and without it from here.
+        name: saleLineLabel(it.productName, it.variantNameSnapshot),
+        sku: it.variantSkuSnapshot ?? it.sku,
         quantity: Number(it.quantity),
         unitPrice: Number(it.unitPrice),
         discountAmount: Number(it.discountAmount),
