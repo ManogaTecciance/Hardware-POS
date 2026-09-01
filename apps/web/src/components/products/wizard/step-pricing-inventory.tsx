@@ -134,7 +134,7 @@ function SimpleForm({
           id="simple-sku"
           value={state.simple.sku}
           onChange={(e) => set({ sku: e.target.value })}
-          placeholder="e.g. MILK-200"
+          placeholder="Enter SKU (or leave blank to generate)"
           maxLength={80}
           aria-invalid={!!errors['simple-sku']}
         />

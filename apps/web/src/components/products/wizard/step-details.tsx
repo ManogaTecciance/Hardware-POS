@@ -107,12 +107,21 @@ export function StepDetails({
         </p>
       </div>
 
+      {/*
+        D99 (2.13) — the placeholder is neutral, and carries no business-type
+        branch. It read `isRestaurant ? 'e.g. Mix Kottu' : 'e.g. Milk 200ml'`,
+        which made every NON-restaurant workspace a grocery: a clothing shop was
+        prompted for milk. Swapping in a clothing example would only move the
+        problem to the next vertical, and a per-type placeholder map is exactly
+        the scattered conditional D56 exists to end. A neutral prompt needs no
+        branch at all.
+      */}
       <Field label="Product name" htmlFor="product-name" required error={errors.name}>
         <Input
           id="product-name"
           value={state.name}
           onChange={(e) => onChange({ name: e.target.value })}
-          placeholder={isRestaurant ? 'e.g. Mix Kottu' : 'e.g. Milk 200ml'}
+          placeholder="Enter product name"
           maxLength={200}
           autoFocus
           aria-invalid={!!errors.name}
