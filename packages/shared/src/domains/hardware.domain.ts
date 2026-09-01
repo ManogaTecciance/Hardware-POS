@@ -22,7 +22,17 @@ export const HARDWARE_DOMAIN: DomainDescriptor = {
   label: 'Hardware store',
   template: {
     key: 'HARDWARE',
-    name: 'Hardware / Retail',
+    // 2.10 — was "Hardware / Retail". D99 puts a real Retail card beside this
+    // one, and two cards both claiming "retail" — one of them QuickBooks-backed,
+    // the other explicitly not — is a support call waiting to happen. This card
+    // now says what it is; the Retail card says what it is.
+    //
+    // D57's own history is the precedent: TILE_SHOP → HARDWARE was accepted as
+    // behaviour-preserving because "the one visible change is the Settings →
+    // Business label". A label is exactly what tells an operator which product
+    // they are getting. `key` and `businessTypes` are untouched, so nothing
+    // stored, seeded or provisioned changes.
+    name: 'Hardware store',
     description:
       'Counter sales, stock control, quotations, returns and supplier management. ' +
       'QuickBooks-backed inventory and accounting.',

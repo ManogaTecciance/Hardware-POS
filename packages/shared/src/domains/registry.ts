@@ -57,7 +57,7 @@ export function roleTemplatesForBusinessType(businessType: string): readonly Rol
  * rather than hand-written — a new domain appears in the picker by existing,
  * unless it is deliberately withheld here.
  */
-const OFFERED_TEMPLATE_KEYS: readonly string[] = ['HARDWARE', 'RESTAURANT', 'HOTEL'];
+const OFFERED_TEMPLATE_KEYS: readonly string[] = ['HARDWARE', 'RESTAURANT', 'HOTEL', 'RETAIL'];
 
 export interface WorkspaceTemplateView {
   readonly key: string;

@@ -55,9 +55,14 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
     description:
       'Clothing, grocery and general retail. Sell by size, colour or pack with ' +
       'per-variant stock and barcodes. Local inventory — no accounting integration.',
-    // Sorted after Hardware (1) and before Restaurant. The picker orders by this
-    // field, not by enum position; 2.9 is what actually puts the card on screen.
-    order: 2,
+    // Hardware 1, Restaurant 2, Hotel 3 — so Retail takes 4. Appending rather
+    // than slotting in beside Hardware, where it arguably belongs: any other
+    // value collides, and resolving the collision means editing three
+    // descriptors that have nothing to do with this change. D56's contract is
+    // "zero edits to existing domains", and picker order is not worth breaking
+    // it for. A tie would sort by registry insertion order, which is exactly the
+    // kind of incidental ordering that looks deliberate until it moves.
+    order: 4,
   },
   // D99 — the defining difference. `LOCAL` means the tenant owns its own stock
   // numbers, which is what makes per-variant `BranchInventory` rows authoritative
