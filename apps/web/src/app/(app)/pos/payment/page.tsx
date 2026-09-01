@@ -28,6 +28,7 @@ import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/lib/auth';
 import {
   computeLine,
+  lineLabel,
   linePrice,
   computeTotals,
   type CartItem,
@@ -703,7 +704,11 @@ function OrderSummary({
               const line = computeLine(it);
               return (
                 <tr
-                  key={it.product.id}
+                  // D99 (1c.8) — keyed by the LINE. Same collision 1c.6 fixed in the
+                  // cart: two sizes of one product were duplicate React siblings
+                  // here, reconciled by position, so a quantity change could land
+                  // on the wrong row.
+                  key={it.lineKey}
                   className="border-b border-border last:border-0 align-middle"
                 >
                   <td className="px-4 py-3">
@@ -711,7 +716,22 @@ function OrderSummary({
                       <div className="min-w-0">
                         <div className="truncate font-medium leading-tight">{it.product.name}</div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {it.product.sku ? `SKU: ${it.product.sku}` : ''}
+                          {/*
+                            D99 (1c.8) — the size, on the last screen before money
+                            changes hands.
+
+                            "Paint Brush 2 inch" hides how bad this was: hardware
+                            names often carry the size already. Clothing does not —
+                            two Cotton Shirt rows at the same price were literally
+                            indistinguishable, and a variant product's SKU is null
+                            by design (D44), so this line rendered empty on exactly
+                            the rows that needed identifying.
+                          */}
+                          {it.variant
+                            ? it.variant.name
+                            : it.product.sku
+                              ? `SKU: ${it.product.sku}`
+                              : ''}
                         </div>
                       </div>
                     </div>
@@ -725,7 +745,7 @@ function OrderSummary({
                         variant="outline"
                         size="icon"
                         className="h-8 w-8 shrink-0"
-                        aria-label={`Decrease ${it.product.name} quantity`}
+                        aria-label={`Decrease ${lineLabel(it)} quantity`}
                         onClick={() => onChangeQty(it.lineKey, -1)}
                       >
                         <Minus className="h-3.5 w-3.5" />
@@ -737,7 +757,7 @@ function OrderSummary({
                         variant="outline"
                         size="icon"
                         className="h-8 w-8 shrink-0"
-                        aria-label={`Increase ${it.product.name} quantity`}
+                        aria-label={`Increase ${lineLabel(it)} quantity`}
                         onClick={() => onChangeQty(it.lineKey, 1)}
                       >
                         <Plus className="h-3.5 w-3.5" />

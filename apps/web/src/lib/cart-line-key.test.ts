@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { cartLineKey, computeLine, linePrice, newCartItem, type CartItem } from './cart';
+import {
+  cartLineKey,
+  computeLine,
+  lineLabel,
+  linePrice,
+  newCartItem,
+  type CartItem,
+} from './cart';
 import type { ClientProduct, ClientVariant } from './catalog';
 import { stockCap } from './pos-cart';
 
@@ -244,5 +251,31 @@ describe('the quantity cap follows the chosen size', () => {
     const untracked = variant({ stockState: 'UNTRACKED', quantityOnHand: null });
 
     expect(stockCap(p, untracked)).toBeNull();
+  });
+});
+
+/**
+ * D99 (1c.8) — a line named in one piece, for assistive text.
+ */
+describe('lineLabel names the size', () => {
+  it('includes the variant name', () => {
+    const item = newCartItem(product(), variant({ name: 'Black / Medium' }));
+
+    expect(lineLabel(item)).toBe('Cotton Shirt, Black / Medium');
+  });
+
+  it('distinguishes two sizes of one product', () => {
+    // The defect: the payment screen announced "Increase Cotton Shirt quantity"
+    // for both buttons, so a screen-reader user could not tell which size they
+    // were changing.
+    const m = newCartItem(product(), variant({ id: 'var_m', name: 'Black / Medium' }));
+    const l = newCartItem(product(), variant({ id: 'var_l', name: 'Black / Large' }));
+
+    expect(lineLabel(m)).not.toBe(lineLabel(l));
+  });
+
+  it('is just the product name when there is no variant', () => {
+    // Loose goods, a service, a single-SKU product — unchanged from before.
+    expect(lineLabel(newCartItem(product({ unitPrice: 1500 }), null))).toBe('Cotton Shirt');
   });
 });

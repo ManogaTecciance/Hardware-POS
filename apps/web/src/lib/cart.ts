@@ -85,6 +85,21 @@ export function linePrice(item: CartItem): number {
   return item.variant ? item.variant.unitPrice : (item.product.unitPrice ?? 0);
 }
 
+/**
+ * One cart line as a single human string — "Cotton Shirt, Black / Medium".
+ *
+ * For assistive text and anywhere a line needs to be named in one piece. The
+ * visible UI shows the same two facts stacked (name above, size below); this is
+ * the flattened form, kept here so the two can never describe a line differently.
+ *
+ * D99 (1c.8) — the payment screen announced "Increase Cotton Shirt quantity" for
+ * two adjacent buttons, giving a screen-reader user no way to tell which size
+ * they were changing.
+ */
+export function lineLabel(item: CartItem): string {
+  return item.variant ? `${item.product.name}, ${item.variant.name}` : item.product.name;
+}
+
 export function computeLine(item: CartItem): LineTotals {
   const lineSubtotal = round2(linePrice(item) * item.quantity);
   const discountAmount = computeDiscount(lineSubtotal, item.discount);
