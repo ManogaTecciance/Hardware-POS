@@ -40,6 +40,7 @@ import type { CategoryNode, ManagedProduct } from '@/lib/products-api';
 import { fetchSuppliers } from '@/lib/suppliers/suppliers-api';
 import type { Supplier } from '@/lib/suppliers/types';
 import { cn, formatMoney } from '@/lib/utils';
+import { resolveImageUrl } from '@/lib/products-api';
 
 /**
  * Product Details tabbed page (D44).
@@ -199,7 +200,7 @@ export function ProductDetail({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <ProductImage
-            src={product.imageUrl}
+            src={resolveImageUrl(product.imageUrl) ?? undefined}
             alt={product.name}
             className="h-16 w-16 shrink-0"
           />
@@ -444,7 +445,7 @@ function OverviewTab({
         </CardHeader>
         <CardContent className="space-y-4">
           <ProductImage
-            src={product.imageUrl}
+            src={resolveImageUrl(product.imageUrl) ?? undefined}
             alt={product.name}
             className="aspect-square w-full"
           />

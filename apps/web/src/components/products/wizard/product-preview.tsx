@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import type { CategoryNode } from '@/lib/products-api';
 
 import { priceBand, type WizardState } from './wizard-state';
+import { resolveImageUrl } from '@/lib/products-api';
 
 /**
  * Add Product wizard — right-rail live preview.
@@ -46,9 +47,18 @@ export function ProductPreview({ state, categories, currentStepIndex }: Props) {
 
       <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-muted">
         {state.imageUrl ? (
+          /*
+           * D99 (2.14) — resolved, not raw. After upload `imageUrl` is a
+           * SERVER-RELATIVE path (`/uploads/products/….webp`), so the browser
+           * resolves it against the WEB origin while the file is served by the
+           * API. It 404s, and the `onError` below hides the element — so the
+           * failure showed as an empty box rather than a broken image, which is
+           * why it survived. `resolveImageUrl` passes blob:/data:/http through
+           * untouched, so the local pre-upload preview still works.
+           */
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={state.imageUrl}
+            src={resolveImageUrl(state.imageUrl) ?? undefined}
             alt=""
             className="h-full w-full object-cover"
             onError={(e) => {
