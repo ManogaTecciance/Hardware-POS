@@ -885,3 +885,114 @@ describe('D93 — any-of permission gates', () => {
     });
   });
 });
+
+/**
+ * D99 (2.8) — D93 verification for the Retail rail.
+ *
+ * D93's rule: **a rail entry is gated on what the screen can do.** Its failure
+ * was `SALE_CREATE` — a retail permission — gating the restaurant `/pos` entry,
+ * so a permission had become a proxy for "may use the floor screens" and the
+ * proxy had started lying.
+ *
+ * The dangerous direction is fail-open, so the empty-gate case is proven against
+ * the real exported `holdsAnyOf` rather than a local re-expression.
+ */
+describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
+  const RETAIL_MODULES_ALL: ModuleKey[] = [
+    ...SHARED_CORE,
+    ...RETAIL_ONLY.filter((m) => m !== 'QUICKBOOKS'),
+  ];
+
+  it('gates each entry on the permission that names what its screen does', () => {
+    // An exact map, so a future entry gated on a borrowed permission is a
+    // failing test rather than a plausible-looking sidebar. Every pair below is
+    // the screen's OWN capability: /returns on RETURN_READ, not on SALE_CREATE.
+    const gates = nav('RETAIL', RETAIL_MODULES_ALL)
+      .flatMap((g) => g.items)
+      .map((i) => [i.href, i.permission ?? null]);
+
+    expect(gates).toEqual([
+      ['/dashboard', null],
+      ['/pos', Permission.SALE_CREATE],
+      ['/sales', Permission.SALE_READ],
+      ['/quotations', Permission.QUOTATION_READ],
+      ['/returns', Permission.RETURN_READ],
+      ['/products', Permission.PRODUCT_READ],
+      ['/suppliers', Permission.SUPPLIER_READ],
+      ['/customers', Permission.CUSTOMER_READ],
+      ['/settings', Permission.SETTINGS_MANAGE],
+    ]);
+  });
+
+  it('hides QuickBooks by MODULE, not by withholding a permission', () => {
+    // The retail descriptor omits the QUICKBOOKS module, so the shared rail's
+    // entry never renders. Deleting the entry from RETAIL_NAVIGATION instead
+    // would fork a list Hardware also uses, to remove a line the module gate
+    // already removes.
+    const withoutModule = nav('RETAIL', RETAIL_MODULES_ALL).flatMap((g) => g.items);
+    expect(withoutModule.map((i) => i.href)).not.toContain('/quickbooks');
+
+    // POSITIVE CONTROL: the entry exists and the permission is held — only the
+    // module is missing. Without this the assertion above would pass even if the
+    // entry had been deleted or the permission revoked.
+    const withModule = nav('RETAIL', [...RETAIL_MODULES_ALL, 'QUICKBOOKS']).flatMap((g) => g.items);
+    expect(withModule.map((i) => i.href)).toContain('/quickbooks');
+  });
+
+  it('carries no restaurant destination', () => {
+    const hrefs = nav('RETAIL', RETAIL_MODULES_ALL)
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+
+    for (const restaurantOnly of ['/tables', '/kitchen', '/orders', '/calendar']) {
+      expect(hrefs).not.toContain(restaurantOnly);
+    }
+  });
+
+  it('deliberately omits /reports — that screen is restaurant analytics', () => {
+    // Checked during the 2.8 audit and nearly "fixed" into a bug. A Retail
+    // Owner holds REPORT_READ and the REPORTING module is in SHARED_CORE, so the
+    // gate would pass — but `/reports` renders `<RestaurantReports>` and is
+    // described as "waiter performance, voids and channels". A door that opens
+    // onto the wrong room is worse than no door.
+    //
+    // Retail reporting is Phase 8 (8.2 sales by variant, 8.4 margin, 8.6 tax by
+    // rate). The entry belongs there, with a screen behind it.
+    const hrefs = nav('RETAIL', RETAIL_MODULES_ALL)
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+
+    expect(hrefs).not.toContain('/reports');
+    // The gate really would have passed — this is what makes the omission a
+    // decision rather than an accident of permissions.
+    expect(ROLE_PERMISSIONS.OWNER).toContain(Permission.REPORT_READ);
+    expect(SHARED_CORE).toContain('REPORTING');
+  });
+
+  it('a Cashier sees the till and its history, and nothing administrative', () => {
+    const hrefs = nav('RETAIL', RETAIL_MODULES_ALL, 'CASHIER')
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+
+    expect(hrefs).toContain('/pos');
+    expect(hrefs).toContain('/returns');
+    // Settings is SETTINGS_MANAGE, which a cashier does not hold — the gate is
+    // doing the work, not a hardcoded role check.
+    expect(hrefs).not.toContain('/settings');
+    expect(hrefs).not.toContain('/suppliers');
+  });
+
+  it('an empty gate array REFUSES, using the real holdsAnyOf', () => {
+    // D93: the dangerous direction is fail-open. An any-of gate written as
+    // all-of-nothing would put Settings in front of every role. Proven against
+    // the exported function, because the first draft of this proof in D93
+    // compared two local expressions and passed while the real one fell open.
+    const grantsEverything = { hasPermission: () => true };
+
+    expect(holdsAnyOf([], grantsEverything)).toBe(false);
+    // POSITIVE CONTROLS either side, so the assertion cannot pass by the
+    // function refusing everything.
+    expect(holdsAnyOf(undefined, { hasPermission: () => false })).toBe(true);
+    expect(holdsAnyOf([Permission.SALE_CREATE], grantsEverything)).toBe(true);
+  });
+});
