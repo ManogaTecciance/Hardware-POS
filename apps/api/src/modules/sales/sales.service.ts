@@ -241,8 +241,17 @@ export class SalesService {
     // performs the reduction, inside the repository's transaction. The conditional
     // write it contains — not the read above — is what prevents two concurrent sales
     // from both taking the last unit.
-    const reduceStock: ReduceStock = (tx, lines) =>
-      inventory.reduceStock(tx, { tenantId, branchId }, lines);
+    const reduceStock: ReduceStock = (tx, lines, saleId) =>
+      inventory.reduceStock(tx, { tenantId, branchId }, lines, {
+        // 1a.21 — supplying metadata is what asks the provider to append the
+        // stock ledger row. Only the Local provider records anything; QuickBooks
+        // stock is a cache of an upstream ledger and NONE has no stock, so this
+        // service never asks which mode it is in (D28).
+        reason: 'SALE',
+        refType: 'SALE',
+        refId: saleId,
+        createdByUserId: actor.id,
+      });
 
     return dto.saleId
       ? this.salesRepository.completeDraft(tenantId, dto.saleId, persist, postAccounting, reduceStock)

@@ -11,6 +11,7 @@ import {
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
+  StockMovementMetadata,
 } from '../provider.types';
 import { InventoryProvider } from './inventory-provider';
 
@@ -73,6 +74,8 @@ export class NoInventoryProvider implements InventoryProvider {
     _tx: Prisma.TransactionClient,
     _ctx: ProviderContext,
     _lines: StockLine[],
+    // 1a.21 — accepted and ignored: this tenant tracks no stock at all.
+    _metadata?: StockMovementMetadata,
   ): Promise<void> {
     return Promise.resolve();
   }
@@ -82,6 +85,8 @@ export class NoInventoryProvider implements InventoryProvider {
     _tx: Prisma.TransactionClient,
     _ctx: ProviderContext,
     _lines: StockLine[],
+    // 1a.21 — accepted and ignored: this tenant tracks no stock at all.
+    _metadata?: StockMovementMetadata,
   ): Promise<void> {
     return Promise.resolve();
   }

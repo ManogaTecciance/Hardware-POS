@@ -333,3 +333,26 @@ export interface CatalogRefreshOutcome<T = unknown> {
   /** Whatever the local refresh reported, passed through untouched. */
   summary: T;
 }
+
+/**
+ * Why a stock movement happened, for the append-only ledger (D44, 1a.21).
+ *
+ * Passed to `reduceStock` / `restoreStock` by a caller that wants the provider to
+ * record the movement. **Omitting it is a meaningful state, not an oversight**:
+ * it says "I maintain my own ledger". `RoundDepletionService` does exactly that —
+ * it writes its own `ORDER_ROUND` rows in the caller, and must not receive a
+ * second row from the provider for the same physical movement.
+ *
+ * That is the whole reason the parameter is optional rather than required. A
+ * required parameter would force every existing caller to supply one, including
+ * the restaurant path, whose behaviour is deliberately unchanged.
+ */
+export interface StockMovementMetadata {
+  /** Constrained to the two reasons this path can produce. */
+  reason: 'SALE' | 'RETURN';
+  /** Typed reference, e.g. 'SALE' | 'RETURN'. */
+  refType: string;
+  /** The sale or return id. Available before the provider call in both cases. */
+  refId: string;
+  createdByUserId: string;
+}

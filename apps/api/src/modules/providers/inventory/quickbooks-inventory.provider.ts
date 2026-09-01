@@ -15,6 +15,7 @@ import {
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
+  StockMovementMetadata,
 } from '../provider.types';
 import { InventoryProvider } from './inventory-provider';
 import { aggregate, readAvailability } from './local-inventory.provider';
@@ -77,6 +78,9 @@ export class QuickBooksInventoryProvider implements InventoryProvider {
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    // 1a.21 — accepted and ignored. Stock here is a cache of an upstream system
+    // (QuickBooks) or absent entirely, so there is no local ledger to append to.
+    _metadata?: StockMovementMetadata,
   ): Promise<void> {
     for (const [productId, { name, qty }] of aggregate(lines)) {
       const res = await tx.product.updateMany({
@@ -100,6 +104,9 @@ export class QuickBooksInventoryProvider implements InventoryProvider {
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    // 1a.21 — accepted and ignored. Stock here is a cache of an upstream system
+    // (QuickBooks) or absent entirely, so there is no local ledger to append to.
+    _metadata?: StockMovementMetadata,
   ): Promise<void> {
     for (const [productId, { qty }] of aggregate(lines)) {
       await tx.product.updateMany({

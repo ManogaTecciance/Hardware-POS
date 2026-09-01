@@ -572,8 +572,17 @@ describe('the adoption tripwires can actually fail', () => {
     const real = sourceOf('modules/sales/sales.repository.ts');
     expect(referencesIdentifier(real, 'quantityOnHand')).toBe(false);
 
+    // The anchor is asserted before it is used. 1a.21 added a `saleId` argument
+    // to this call and the old literal silently stopped matching, which turned
+    // the mutation into a no-op — the tripwire then failed on `not.toEqual`,
+    // correctly but obscurely. Asserting the anchor first means the next
+    // signature change says WHY it broke instead of looking like a real
+    // regression. The assertion under test is unchanged.
+    const ANCHOR = 'await reduceStock(tx, toStockLines(input.computed.lines), sale.id);';
+    expect(real).toContain(ANCHOR);
+
     const mutated = real.replace(
-      'await reduceStock(tx, toStockLines(input.computed.lines));',
+      ANCHOR,
       'await tx.product.updateMany({ data: { quantityOnHand: { decrement: 1 } } });',
     );
     expect(mutated).not.toEqual(real);

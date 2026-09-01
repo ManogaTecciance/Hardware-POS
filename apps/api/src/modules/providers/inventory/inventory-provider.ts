@@ -9,6 +9,7 @@ import {
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
+  StockMovementMetadata,
   VariantAvailabilityMap,
 } from '../provider.types';
 
@@ -95,11 +96,27 @@ export interface InventoryProvider {
    *
    * Must be safe under concurrency: two simultaneous sales of the last unit must
    * not both succeed.
+   *
+   * ## `metadata` (1a.21)
+   *
+   * Supply it to have the provider append a `StockMovement` for each line it
+   * actually moved. **Omitting it means "I keep my own ledger"** — a real state,
+   * not a forgotten argument: `RoundDepletionService` writes its own
+   * `ORDER_ROUND` rows in the caller and must not get a duplicate from here.
+   *
+   * Optional for exactly that reason. Making it required would change the call
+   * shape of the restaurant path, whose behaviour is deliberately untouched.
+   *
+   * Only `LocalInventoryProvider` writes movements. QuickBooks stock is a cache
+   * of an upstream system whose ledger is not ours to write, and
+   * `NoInventoryProvider` has no stock at all — so neither records anything,
+   * and no service has to ask which mode it is in (D28).
    */
   reduceStock(
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    metadata?: StockMovementMetadata,
   ): Promise<void>;
 
   /**
@@ -112,6 +129,7 @@ export interface InventoryProvider {
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    metadata?: StockMovementMetadata,
   ): Promise<void>;
 
   /**

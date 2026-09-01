@@ -754,3 +754,159 @@ describe('product-level returns are unchanged (regression guard)', () => {
     expect(await variantQty(largeId)).toBe(10);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * D44 / D99 (1a.21) — the append-only stock ledger for retail.
+ *
+ * Stock levels were already correct in both directions after 1a.20. What was
+ * missing was the record of WHY a number moved: a shop could see a size go
+ * 3 → 1 → 2 with nothing saying which sale or return did it. Receipts have
+ * written `StockMovement` since D44; sales and returns wrote nothing.
+ *
+ * The movement is written INSIDE the provider, in the same loop iteration as the
+ * balance write. That placement is not incidental — `restoreStock` carries a
+ * `type: 'Inventory'` predicate, so a SERVICE product matches zero rows and no
+ * stock moves; a separate pass reading balances afterwards could not tell, and
+ * would log a movement that never happened.
+ */
+async function movements(where: Record<string, unknown> = {}) {
+  return prisma.stockMovement.findMany({
+    where: { tenantId: tile.tenantId, ...where },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+describe('a sale appends to the stock ledger (1a.21)', () => {
+  it('records the size sold, the delta and the resulting balance', async () => {
+    const { mediumId } = await twoSizes(10, 10);
+
+    const result = await sale(mediumId, 3);
+    const [row, ...rest] = await movements({ productVariantId: mediumId });
+
+    expect(rest).toEqual([]);
+    expect(Number(row!.delta)).toBe(-3);
+    expect(Number(row!.balanceAfter)).toBe(7);
+    expect(row!.reason).toBe('SALE');
+    expect(row!.refType).toBe('SALE');
+    expect(row!.refId).toBe(result.id);
+    expect(row!.createdByUserId).toBe(tile.ownerId);
+  });
+
+  it('writes nothing against a sibling size', async () => {
+    const { mediumId, largeId } = await twoSizes(10, 10);
+
+    await sale(mediumId, 3);
+
+    // The negative half. A product-keyed ledger would have attributed the
+    // movement to something that is not this row.
+    expect(await movements({ productVariantId: largeId })).toEqual([]);
+  });
+
+  it('records a product-level sale with an explicit null variant', async () => {
+    await twoSizes(10, 10);
+
+    await sale(undefined, 2);
+    const rows = await movements({ productVariantId: null });
+
+    expect(rows).toHaveLength(1);
+    expect(Number(rows[0]!.delta)).toBe(-2);
+    // Present and null, not omitted — a legacy line is still a ledger entry.
+    expect(rows[0]!.productVariantId).toBeNull();
+  });
+
+  it('writes no movement when the sale is refused', async () => {
+    const { mediumId } = await twoSizes(2, 10);
+
+    await expect(sale(mediumId, 3)).rejects.toThrow();
+
+    // The whole transaction rolls back. A ledger that recorded attempts rather
+    // than movements would not reconcile against the shelf.
+    expect(await movements()).toEqual([]);
+  });
+});
+
+describe('a return appends the counterpart entry', () => {
+  it('records the restock as a positive delta against the same size', async () => {
+    const { mediumId, saleId, saleItemId } = await soldMedium(3);
+
+    const ret = await returnFrom(saleId, [returnLine(saleItemId, 2)]);
+    const rows = await movements({ productVariantId: mediumId });
+
+    expect(rows).toHaveLength(2);
+    expect(Number(rows[1]!.delta)).toBe(2);
+    expect(Number(rows[1]!.balanceAfter)).toBe(9);
+    expect(rows[1]!.reason).toBe('RETURN');
+    expect(rows[1]!.refId).toBe(ret.id);
+  });
+
+  it('the ledger reconciles to the shelf', async () => {
+    // The property that makes this a ledger rather than decoration: replaying
+    // every delta from the opening balance must land on the current quantity.
+    const { mediumId, saleId, saleItemId } = await soldMedium(3);
+    await returnFrom(saleId, [returnLine(saleItemId, 2)]);
+
+    const rows = await movements({ productVariantId: mediumId });
+    const net = rows.reduce((sum, r) => sum + Number(r.delta), 0);
+
+    expect(10 + net).toBe(await variantQty(mediumId));
+  });
+
+  it('writes no movement for a DAMAGED return that does not restock', async () => {
+    const { mediumId, saleId, saleItemId } = await soldMedium(3);
+
+    await returnFrom(
+      saleId,
+      [returnLine(saleItemId, 2, { itemCondition: 'DAMAGED', stockDisposition: 'DAMAGED_STOCK' })],
+      { approve: true, refundTotal: 2000 },
+    );
+
+    // Refunded but not resold. No stock moved, so the ledger must not claim it
+    // did — only the SALE row from the original sale remains.
+    const rows = await movements({ productVariantId: mediumId });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.reason).toBe('SALE');
+  });
+});
+
+describe('the restaurant module keeps its own ledger (1a.21 constraint)', () => {
+  it('a reduceStock call with NO metadata writes no movement', async () => {
+    // This is `RoundDepletionService`'s exact call shape — three arguments, no
+    // metadata — asserted from the retail side so that its behaviour is pinned
+    // WITHOUT editing or importing any restaurant code.
+    //
+    // Omitting metadata means "I keep my own ledger": round-depletion writes its
+    // own ORDER_ROUND rows in the caller, and a second row from the provider
+    // would double-count every dish sent to a kitchen.
+    //
+    // If anyone later makes the parameter required, or writes unconditionally,
+    // this fails here — before it can reach the restaurant module.
+    const { mediumId } = await twoSizes(10, 10);
+
+    await reduce([variantLine(mediumId, 2)]);
+
+    expect(await variantQty(mediumId)).toBe(8);
+    expect(await movements()).toEqual([]);
+  });
+
+  it('the same call WITH metadata does write one', async () => {
+    // The positive half: the guard above must fail for the right reason — the
+    // absent metadata — and not because movements are broken everywhere.
+    const { mediumId } = await twoSizes(10, 10);
+    const inventory = await inventoryFactory.forTenant(tile.tenantId);
+
+    await prisma.$transaction((tx) =>
+      inventory.reduceStock(tx, { tenantId: tile.tenantId, branchId: tile.branchId }, [variantLine(mediumId, 2)], {
+        reason: 'SALE',
+        refType: 'SALE',
+        refId: 'sale_probe',
+        createdByUserId: tile.ownerId,
+      }),
+    );
+
+    const rows = await movements();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.refId).toBe('sale_probe');
+  });
+});

@@ -34,6 +34,12 @@ export type PostAccounting = (
 export type ReduceStock = (
   tx: Prisma.TransactionClient,
   lines: StockLine[],
+  /**
+   * 1a.21 — the sale this reduction belongs to, for the stock ledger's `refId`.
+   * The row is created before `reduceStock` is called, so the id is already in
+   * hand; only this callback type was hiding it. No transaction was reordered.
+   */
+  saleId: string,
 ) => Promise<void>;
 
 /**
@@ -346,7 +352,7 @@ export class SalesRepository {
         },
         include: saleInclude,
       });
-      await reduceStock(tx, toStockLines(input.computed.lines));
+      await reduceStock(tx, toStockLines(input.computed.lines), sale.id);
       await this.postAccountingChecked(postAccounting, tx, sale.id, input);
       return sale;
     });
@@ -391,7 +397,7 @@ export class SalesRepository {
         },
         include: saleInclude,
       });
-      await reduceStock(tx, toStockLines(input.computed.lines));
+      await reduceStock(tx, toStockLines(input.computed.lines), sale.id);
       await this.postAccountingChecked(postAccounting, tx, sale.id, input);
       return sale;
     });

@@ -16,6 +16,7 @@ import {
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
+  StockMovementMetadata,
   VariantAvailability,
   VariantAvailabilityMap,
 } from '../provider.types';
@@ -128,6 +129,7 @@ export class LocalInventoryProvider implements InventoryProvider {
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    metadata?: StockMovementMetadata,
   ): Promise<void> {
     await this.assertSingleBranch(tx, ctx);
 
@@ -146,6 +148,11 @@ export class LocalInventoryProvider implements InventoryProvider {
           // id exists elsewhere.
           throw insufficientStockError(name);
         }
+        await this.recordMovement(tx, ctx, metadata, {
+          productId,
+          productVariantId: null,
+          delta: -qty,
+        });
         continue;
       }
 
@@ -193,6 +200,8 @@ export class LocalInventoryProvider implements InventoryProvider {
         where: { id: productId, tenantId: ctx.tenantId, type: 'Inventory' },
         data: { quantityOnHand: { decrement: qty } },
       });
+
+      await this.recordMovement(tx, ctx, metadata, { productId, productVariantId, delta: -qty });
     }
   }
 
@@ -226,16 +235,28 @@ export class LocalInventoryProvider implements InventoryProvider {
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    metadata?: StockMovementMetadata,
   ): Promise<void> {
     await this.assertSingleBranch(tx, ctx);
 
     for (const { productId, productVariantId, qty } of aggregateByVariant(lines)) {
       // ── product-level line: unchanged since before variants existed ────────
       if (productVariantId === null) {
-        await tx.product.updateMany({
+        const res = await tx.product.updateMany({
           where: { id: productId, tenantId: ctx.tenantId, type: 'Inventory' },
           data: { quantityOnHand: { increment: qty } },
         });
+        // 1a.21 — the row count is why the movement is written HERE and not by a
+        // separate pass. `type: 'Inventory'` means a SERVICE product matches zero
+        // rows and no stock moves; a later reader of balances could not tell, and
+        // would log a movement that never happened.
+        if (res.count > 0) {
+          await this.recordMovement(tx, ctx, metadata, {
+            productId,
+            productVariantId: null,
+            delta: qty,
+          });
+        }
         continue;
       }
 
@@ -291,7 +312,66 @@ export class LocalInventoryProvider implements InventoryProvider {
         where: { id: productId, tenantId: ctx.tenantId, type: 'Inventory' },
         data: { quantityOnHand: { increment: qty } },
       });
+
+      await this.recordMovement(tx, ctx, metadata, { productId, productVariantId, delta: qty });
     }
+  }
+
+  /**
+   * Append one `StockMovement`, or nothing at all when the caller keeps its own
+   * ledger (1a.21).
+   *
+   * `balanceAfter` is read back rather than computed. The oversell guard is a
+   * conditional `updateMany`, which returns a row count and not the new value, and
+   * weakening it to something that returns the row would trade the concurrency
+   * guarantee for a convenience. The read is inside the caller's transaction, so
+   * nothing can interleave between the write and it.
+   *
+   * `unitCost` is deliberately absent: the schema reserves it for `RECEIPT`
+   * movements, where cost is authoritative. A sale or return has no purchase cost
+   * to record, and inventing one would corrupt a future FIFO walk.
+   */
+  private async recordMovement(
+    tx: Prisma.TransactionClient,
+    ctx: ProviderContext,
+    metadata: StockMovementMetadata | undefined,
+    move: { productId: string; productVariantId: string | null; delta: number },
+  ): Promise<void> {
+    // The caller writes its own — see `StockMovementMetadata`.
+    if (!metadata) return;
+    // Every movement is branch-scoped. A product-level reduction is allowed
+    // without a branch (D99 decision 9), and there is no meaningful branch to
+    // attribute such a movement to, so it is not recorded rather than guessed at.
+    if (ctx.branchId === null) return;
+
+    const balanceAfter = move.productVariantId
+      ? (
+          await tx.branchInventory.findFirst({
+            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, productVariantId: move.productVariantId },
+            select: { quantityOnHand: true },
+          })
+        )?.quantityOnHand
+      : (
+          await tx.product.findFirst({
+            where: { id: move.productId, tenantId: ctx.tenantId },
+            select: { quantityOnHand: true },
+          })
+        )?.quantityOnHand;
+
+    await tx.stockMovement.create({
+      data: {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        productId: move.productId,
+        productVariantId: move.productVariantId,
+        delta: new Prisma.Decimal(move.delta),
+        balanceAfter: balanceAfter ?? new Prisma.Decimal(0),
+        reason: metadata.reason as StockMovementReason,
+        refType: metadata.refType,
+        refId: metadata.refId,
+        createdByUserId: metadata.createdByUserId,
+      },
+    });
   }
 
   /**

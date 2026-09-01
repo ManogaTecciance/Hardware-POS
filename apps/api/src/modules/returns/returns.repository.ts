@@ -31,6 +31,8 @@ export type PostReturnAccounting = (
 export type RestoreStock = (
   tx: Prisma.TransactionClient,
   lines: StockLine[],
+  /** 1a.21 — the return this restock belongs to, for the ledger's `refId`. */
+  returnId: string,
 ) => Promise<void>;
 
 /** A return with everything the detail screen and receipt need. */
@@ -322,7 +324,7 @@ export class ReturnsRepository {
       // in; where the stock lives is decided by the tenant's `InventoryProvider`.
       // The `type: 'Inventory'` predicate that kept Service products out lives in
       // the provider, unchanged.
-      await restoreStock(tx, input.restockLines);
+      await restoreStock(tx, input.restockLines, created.id);
 
       // Per-sale return-status roll-up (recomputed from the fresh line states).
       const saleItems = await tx.saleItem.findMany({

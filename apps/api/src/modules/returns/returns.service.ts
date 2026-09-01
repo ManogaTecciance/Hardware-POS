@@ -304,8 +304,17 @@ export class ReturnsService {
     // change `inventoryMode` once stock has moved.
     const inventory = await this.inventoryProviders.forTenant(tenantId);
     const restockLines = eligibleRestockLines(computed.persistItems);
-    const restoreStock: RestoreStock = (tx, lines) =>
-      inventory.restoreStock(tx, { tenantId, branchId: sale.branchId }, lines);
+    const restoreStock: RestoreStock = (tx, lines, returnId) =>
+      inventory.restoreStock(tx, { tenantId, branchId: sale.branchId }, lines, {
+        // 1a.21 — the counterpart of the SALE row. `lines` has already been
+        // filtered to those that actually restock, so a DAMAGED item that is
+        // refunded but not resold produces no ledger entry, which is correct: no
+        // stock moved.
+        reason: 'RETURN',
+        refType: 'RETURN',
+        refId: returnId,
+        createdByUserId: actor.id,
+      });
 
     let created: ReturnWithRelations;
     try {
