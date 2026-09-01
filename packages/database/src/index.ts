@@ -29,3 +29,5 @@ export * from '@prisma/client';
 export * from './business-profile-presets';
 export * from './seed-roles';
 export * from './mock-catalog';
+// D99 (2.6) — per-business-type provisioning packs, beside `seed-roles`.
+export * from './seed-packs/clothing';
