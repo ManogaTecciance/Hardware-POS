@@ -75,11 +75,65 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
   navigation: RETAIL_NAVIGATION,
   roleTemplates: HARDWARE_ROLE_TEMPLATES,
   capabilities: RETAIL_CAPABILITIES,
-  // Empty, declared rather than defaulted (D64). Size and colour are NOT
-  // attributes — they are variation dimensions with their own price, barcode and
-  // stock row, which is behaviour and therefore lives in columns. The descriptive
-  // remainder (material, fit, care; brand, origin, allergens) is what will fill
-  // this in 2.4 and 2.5. Until then every `attributes` key is refused, which is
-  // the intended state: nothing is silently accepted.
-  catalogue: { attributeSchema: [] },
+  /**
+   * D64 (2.4) — the clothing catalogue fields.
+   *
+   * ## Why these are attributes and size/colour are not
+   *
+   * The test: **if changing the value changes what the cashier scans, it is a
+   * variation dimension; if it changes only what the label says, it is an
+   * attribute.** A Medium has its own price, barcode and stock row — you sell
+   * *a Medium*. "Slim fit" changes nothing the engine touches: not what is
+   * scanned, not what is priced, not what is depleted. It is printed and
+   * reported on, and nothing more.
+   *
+   * So size and colour live in `ProductVariationDimension` (Phase 1), and these
+   * five live in `Product.attributes` — validated, but never computed on.
+   *
+   * ## Why every field is optional
+   *
+   * `required: true` blocks product creation for a tenant that does not track
+   * the field. A shop that never records fabric composition should not be unable
+   * to add a product; a shop that does gets a validated place to put it.
+   *
+   * ## Why `brand` is absent
+   *
+   * It is a **column eventually** (Phase 8 step 8.8 — "brand as an entity"):
+   * filtered and reported on, and free text will not survive real data.
+   * Declaring it here now would mean migrating tenants' stored strings into an
+   * entity later. Leaving it out costs nothing today.
+   *
+   * ## Why grocery is absent
+   *
+   * `schemaForTenant` resolves ONE schema per business type, and clothing and
+   * grocery are both `RETAIL`. A merged list would show a clothing shop an
+   * "Allergens" field. 2.5 is blocked on a decision to split the enum, which is
+   * out of scope while clothing is the pilot.
+   *
+   * ## Adding is safe; removing is not
+   *
+   * `validateAttributes` refuses unknown keys, so deleting a field later strands
+   * whatever tenants have stored under it on their next full write. This list is
+   * a commitment, not a sketch.
+   */
+  catalogue: {
+    attributeSchema: [
+      // "60% cotton, 40% polyester" — free text because the combinations are
+      // endless and nothing groups on the exact string.
+      { key: 'material', label: 'Material', type: 'text', maxLength: 120 },
+      // A fixed list precisely because this IS grouped on in reports; free text
+      // would give "slim", "Slim", "slim-fit" as three different cuts.
+      { key: 'fit', label: 'Fit', type: 'enum', options: ['Regular', 'Slim', 'Relaxed', 'Oversized'] },
+      // Wash symbols in words, for the tag and the product page.
+      { key: 'careInstructions', label: 'Care instructions', type: 'text', maxLength: 240 },
+      // The most common reporting axis in clothing retail after size.
+      {
+        key: 'gender',
+        label: 'Gender',
+        type: 'enum',
+        options: ['Men', 'Women', 'Unisex', 'Boys', 'Girls'],
+      },
+      { key: 'season', label: 'Season', type: 'enum', options: ['All season', 'Summer', 'Winter'] },
+    ],
+  },
 };
