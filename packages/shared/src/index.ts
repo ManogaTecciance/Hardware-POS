@@ -10,6 +10,7 @@
 
 export * from './constants.js';
 export * from './money.js';
+export * from './phone.js';
 export * from './returns.js';
 export * from './quotations.js';
 export * from './types/index.js';

@@ -3544,6 +3544,165 @@ field-by-field test only catches the fields somebody thought to list.
 Mutation-proven by deleting the service charge and the packaging charge from
 the map.
 
+### D99 — the roll is measured, not assumed
+
+Report, 2026-09-01: the bill prints correctly from Google Chrome and prints
+with its **left edge cut off** from Microsoft Edge. Same till, same roll, same
+Xprinter XP-365B.
+
+**The mechanism.** `@page { size }` is a request about a page BOX. It says
+nothing about where that box is PLACED on the paper, and the two Chromium
+browsers do not place it the same way: Chrome laid the 78 mm box down at the
+printable origin at 100%, and Edge re-fits and centres it against the driver's
+78.7 mm stock, which splits the overflow between both edges. A layout whose
+only slack is on the right survives one placement policy and not the other.
+
+This is the mirror image of a failure already in this file. D79 recorded
+*"72 mm left a band of white down both sides, because the shorter page was
+centred on 78.7 mm of paper"*. The centring never went away; D80 simply stopped
+noticing it, because at 78 mm there was nothing left over to centre — in
+Chrome.
+
+**The defect was not the value of the inset.** It was that all the slack was on
+one side, and that the number lived in source, where nobody can measure it.
+D73 through D80 is seven rounds of setting these numbers from a laptop and
+posting the result to be photographed. An eighth constant is the same bet with
+a different number.
+
+#### What this supersedes in D80
+
+1. *"Right only. The left edge has always printed cleanly from x=0"* — false
+   in Edge. The text is inset on **both** sides now, by two independent
+   numbers.
+2. *"insetting both sides is the white the PO rejected"* — it is not. That
+   white came from a PAGE narrower than the stock, centred on it. A page equal
+   to the stock, with padding inside it, produces no white to centre. The two
+   were conflated.
+3. *"The inset is a single named constant which the stylesheet interpolates"* —
+   replaced. The correct values are a property of a printer, a driver and a
+   browser together, and are not knowable from source. They are per-workspace
+   settings, defaulting to the XP-365B's 78 / 3 / 5.
+4. The blanket ban on `max-width` — replaced by a narrower rule, below.
+
+#### What D79 and D80 keep, restated
+
+The two numbers are still different things and must not be conflated again.
+The **page** matches the driver's stock, so nothing is ever centred and no
+width is lost before the content starts — that is why the page width is still
+what goes into `@page { size }`, never the content width. The **text** is inset
+from where the head stops. Insets are in millimetres, never pixels: a pixel
+inset stops being a fixed physical margin the moment a browser applies a scale
+factor, which is the family this whole defect belongs to.
+
+Also unchanged: no popup, printed from a hidden iframe, and `window.open`
+asserted never to be called. `@page { margin: 0 }`, for the browser chrome and
+for the gap between pages. No `break-inside: avoid`. Headings printed once. No
+page size for retail receipts (D16). And the right inset stays the LARGER of
+the two, because its clip is a measured property of the print head where the
+left's is browser drift.
+
+#### `max-width` on the body, and the one value it may take
+
+The body is now capped at exactly the page width. When `@page { size }` is
+honoured the cap does nothing. When a browser refuses the size and lays the
+document out on A4 or Letter instead, it stops a monospace bill designed for
+78 mm from spreading across 210 mm and landing past the last printable dot —
+which is a total loss, not a clipped character.
+
+It is safe at that value and at no other. `max-width` narrower than the page,
+plus centring, IS the D79 band of white. So the margin stays `0` and never
+`0 auto`, and both halves are asserted negatively.
+
+#### The document carries its own geometry
+
+`printReceipt` is handed an HTML string. The stylesheet inside it decides how
+wide the text prints; the frame it is written into decides how wide it lays
+out, and the page height written into `@page` is measured from that layout.
+Two numbers, produced in two files, that must agree — and for seven rounds
+they were kept agreeing by hand.
+
+The numbers now travel in the document as `<meta>` and the frame reads them
+back. There is no parameter for a call site to get wrong and no second
+constant to fall behind. It is metadata ABOUT the document, not a page-size
+declaration: the template still declares no `@page { size }` of its own, and
+D77's third position on that is untouched. The two claims are asserted as a
+pair so the distinction cannot erode into one.
+
+**A correction worth writing down, because the obvious fix is wrong.** The
+frame lays out at the PAGE width, not the content width. The body is
+`border-box` at `width: 100%`, so a frame 295 px wide already gives a content
+column of 295 px − 6 mm = 272 px — exactly what a 78 mm page with the same
+padding prints. Narrowing the frame to the content width would subtract the
+insets a second time, wrap more lines, and over-measure the page height. It
+would look like a correction and be a regression, and it is invisible on a
+78 mm roll.
+
+#### Calibration is an operator action
+
+Settings → Documents → Preview now carries **Paper width**, **Left inset**,
+**Right inset**, a fit-to-content switch, and a **Print calibration strip**
+button. The strip prints, in one page:
+
+- a solid bar pulled out to the page's own edges by negative margins equal to
+  the insets — the only element that is not inset, and the one that separates
+  "the page is wider than the stock" from "the insets are too small". Without
+  it those two faults look identical on paper, which is how D79 spent a round
+  narrowing the page when the inset was the problem;
+- a millimetre ruler across the text column, so the first and last legible
+  numerals give both insets directly;
+- edge markers, and the widest line a bill can print (`LKR 1,450,000.00` in the
+  AMOUNT column) — the exact string D80 watched come out as `LKR 1,450.`;
+- the three numbers in force, and **the browser that printed it**. That last
+  one is not decoration: Chrome and Edge disagreeing is the entire defect, and
+  two strips on a counter are otherwise indistinguishable. An unrecognised
+  browser prints an em dash, never a guess (D54) — a strip labelled with the
+  wrong browser would have the operator calibrate the wrong one and stop.
+
+The strip's body rule is byte-identical to the bill's, from the same shared
+function, and that identity is asserted. An instrument laid out differently
+from the document it measures is worse than no instrument.
+
+#### No migration
+
+The four fields land in `TenantSettings.data`, which is `Json`. The service
+merges its defaults UNDER a stored blob, and the web client's cache read
+spreads `DEFAULT_DOCUMENT_PROFILE` under the cached value, so an existing
+tenant and a till holding a stale `localStorage` profile both pick the geometry
+up on the next read with no backfill. Asserted, rather than assumed.
+
+#### D16 and D30
+
+One existing behavioural assertion changed: `thermal-bill.test.ts`'s "fills the
+roll, held off the RIGHT edge only", which is the claim this record reverses.
+It changed because of this decision, not to accommodate a refactor.
+`receipt-print.iframe.test.ts` — including `width:295px` and
+`@page{size:78mm 267mm;margin:0}` — and `bill-print.test.ts` survive
+**unedited**, which is the evidence that the default path is unchanged.
+
+Mutation-proven tripwires added:
+
+- `receipt-print.geometry.test.ts` — that the frame width, the stylesheet and
+  the injected page all come from the document's own geometry. The fixture is
+  58 / 2 / 4, sharing no digit with the defaults, and the proof is written
+  inline: `mmToPx(78) === 295 && mmToPx(78) !== mmToPx(58)`, so a printer that
+  re-hard-coded the old constant could not produce the asserted numbers. The
+  companion case feeds a document with no geometry and asserts the unchanged
+  fallback, so the pair cannot pass by always trusting or always ignoring.
+- `thermal-bill-geometry.test.ts` — that `readBillGeometry` reads the document
+  rather than answering from the defaults, proven with the same fixture.
+- `document-presentation.test.ts` — `showBillCalibration` across all three
+  surfaces, in that file's existing style.
+
+Two other things the tests found while being written, both now fixed: a
+half-written meta set was accepted because `Number(null)` is `0` and `0` is
+finite, which would have silently reported insets of zero — the very layout
+this record removes; and a second fallback for the page width was dead code,
+unreachable given the bounds, so it was replaced by an assertion that the
+bounds keep it unnecessary.
+
+**Verified how:** the strip printed from both browsers on the till, and the
+numbers it produced recorded here.
+
 ---
 
 ## Open decisions

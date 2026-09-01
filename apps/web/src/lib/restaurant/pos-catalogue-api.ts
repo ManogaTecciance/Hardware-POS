@@ -92,14 +92,28 @@ export interface PosCatalogueItem {
 
 export interface PosCatalogueResponse {
   items: PosCatalogueItem[];
+  /** Rows matching the filter, across every page — not the page length. */
   total: number;
+  /**
+   * Keyset cursor for the next page, or `null` on the last one.
+   *
+   * Forwarded verbatim from the server. Before this existed the client
+   * dropped it, which made the response indistinguishable from a complete
+   * catalogue and silently capped the POS at the server's default page.
+   */
+  nextCursor: string | null;
 }
 
 export interface PosCatalogueQuery {
   branchId: string;
   channel?: PosCatalogueChannel;
   foodType?: PosCatalogueFoodType;
+  /** Server-side match over name, dietary tags and subcategory name. */
   search?: string;
+  /** Page size. The server clamps to 1..200 and defaults to 100. */
+  limit?: number;
+  /** `nextCursor` from the previous page. Omit for the first page. */
+  cursor?: string;
 }
 
 // ── Raw shapes (decimals arrive as strings) ──────────────────────────────────
@@ -231,9 +245,11 @@ export async function fetchPosCatalogue(
   if (query.channel) params.push(`channel=${encodeURIComponent(query.channel)}`);
   if (query.foodType) params.push(`foodType=${encodeURIComponent(query.foodType)}`);
   if (query.search) params.push(`search=${encodeURIComponent(query.search)}`);
+  if (query.limit != null) params.push(`limit=${query.limit}`);
+  if (query.cursor) params.push(`cursor=${encodeURIComponent(query.cursor)}`);
   // D62: the one POS read model. The legacy /restaurant/pos-catalogue alias
   // still answers (with Deprecation headers) until its sunset; this client
   // moved on the day the successor shipped.
   const res = await api.get<ApiResponse>(`/products/sellable?${params.join('&')}`, auth(session));
-  return { items: res.items.map(toItem), total: res.total };
+  return { items: res.items.map(toItem), total: res.total, nextCursor: res.nextCursor ?? null };
 }

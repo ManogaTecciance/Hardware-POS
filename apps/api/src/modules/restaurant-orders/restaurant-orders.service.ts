@@ -73,8 +73,54 @@ export interface OrdersQuery {
   to?: Date;
   /** Substring match on orderNumber, customerName, customerPhone, contextLabel. */
   search?: string;
-  limit?: number;
+  /** 1-based. Out-of-range pages return an empty page, not an error. */
+  page?: number;
+  pageSize?: number;
 }
+
+export interface OrdersPage {
+  items: OrderView[];
+  /** Rows matching the filter across every page. */
+  total: number;
+  page: number;
+  pageSize: number;
+  /**
+   * The scan hit {@link SCAN_CEILING}, so `total` is a floor rather than the
+   * true count and later pages may be incomplete.
+   *
+   * Surfaced rather than hidden: the alternative is a list that silently stops,
+   * which is the defect this endpoint had before it was paged at all.
+   */
+  truncated: boolean;
+  /**
+   * How many rows each status holds, for the tab row above the list.
+   *
+   * Counted BEFORE the status filter and across every page, so the tabs keep
+   * showing the whole picture while one of them is selected. Deriving them from
+   * the returned rows cannot work once the list is paged — the count would be
+   * "on this page", and would read as the total.
+   */
+  statusCounts: Record<UnifiedOrderStatus, number>;
+}
+
+const DEFAULT_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 100;
+
+/**
+ * How many rows per source the scan will pull before paging.
+ *
+ * `unifiedStatus` and `paymentStatus` are DERIVED — from the order status, its
+ * round statuses and any takeaway profile — and search spans joined columns, so
+ * those filters cannot be pushed into the `where`. Expressing them in SQL would
+ * fork the derivation that `unifiedStatusForRestaurantOrder` owns and is tested
+ * on, and the two copies would drift.
+ *
+ * So the scan applies every filter SQL can express (tenant, branch, channel,
+ * date), derives the rest in TypeScript, and pages the result. The ceiling is
+ * what keeps that bounded; crossing it sets `truncated` so the operator is told
+ * to narrow the window instead of being handed a quietly short list.
+ */
+const SCAN_CEILING = 1000;
 
 @Injectable()
 export class RestaurantOrdersService {
@@ -95,8 +141,12 @@ export class RestaurantOrdersService {
     tenantId: string,
     branchId: string,
     query: OrdersQuery = {},
-  ): Promise<OrderView[]> {
-    const limit = Math.min(Math.max(query.limit ?? 100, 1), 500);
+  ): Promise<OrdersPage> {
+    const pageSize = Math.min(Math.max(query.pageSize ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+    const page = Math.max(query.page ?? 1, 1);
+    // One row beyond the ceiling, purely so a full scan can be told from one
+    // that was cut off. The extra row is dropped before paging.
+    const scan = SCAN_CEILING + 1;
     const channel = query.channel ?? 'ALL';
     const status = query.status ?? 'ALL';
     const payment = query.paymentStatus ?? 'ALL';
@@ -118,7 +168,7 @@ export class RestaurantOrdersService {
           ...(channel === 'DINE_IN' ? { channel: 'DINE_IN' } : channel === 'TAKEAWAY' ? { channel: 'TAKEAWAY' } : {}),
           ...(dateWhere ? { createdAt: dateWhere } : {}),
         },
-        take: limit,
+        take: scan,
         orderBy: { createdAt: 'desc' },
         include: {
           session: {
@@ -207,7 +257,7 @@ export class RestaurantOrdersService {
           branchId,
           ...(dateWhere ? { receivedAt: dateWhere } : {}),
         },
-        take: limit,
+        take: scan,
         orderBy: { receivedAt: 'desc' },
         include: { platform: { select: { kind: true } } },
       });
@@ -243,16 +293,13 @@ export class RestaurantOrdersService {
     // would require six branching where-clauses per channel, which is
     // significantly harder to test and no faster in practice for pilot
     // volume.
-    let filtered = rows;
-    if (status !== 'ALL') {
-      filtered = filtered.filter((r) => r.unifiedStatus === status);
-    }
+    let base = rows;
     if (payment !== 'ALL') {
-      filtered = filtered.filter((r) => r.paymentStatus === payment);
+      base = base.filter((r) => r.paymentStatus === payment);
     }
     if (query.search) {
       const q = query.search.trim().toLowerCase();
-      filtered = filtered.filter(
+      base = base.filter(
         (r) =>
           r.orderNumber.toLowerCase().includes(q) ||
           (r.customerName ?? '').toLowerCase().includes(q) ||
@@ -261,11 +308,51 @@ export class RestaurantOrdersService {
       );
     }
 
-    // Sort newest first across channels, then cap at limit.
-    return filtered
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-      .slice(0, limit);
+    // Tallied on `base` — every filter EXCEPT status — so selecting one tab
+    // does not zero the others.
+    const statusCounts = emptyStatusCounts();
+    for (const r of base) statusCounts[r.unifiedStatus] += 1;
+
+    const filtered = status === 'ALL' ? base : base.filter((r) => r.unifiedStatus === status);
+
+    /*
+     * Sorted newest first across channels BEFORE paging, so page 2 continues
+     * page 1 rather than resuming whichever source happened to be appended
+     * second. Ties break on id, so two orders created in the same millisecond
+     * cannot swap places between two requests and be shown twice or not at all.
+     */
+    const sorted = filtered.sort((a, b) => {
+      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+      return a.id < b.id ? 1 : -1;
+    });
+
+    const truncated = rows.length > SCAN_CEILING;
+    const start = (page - 1) * pageSize;
+    return {
+      // A page past the end is an empty page, not an error: filters change
+      // under a reader who is on page 4, and a 404 there reads as a fault.
+      items: sorted.slice(start, start + pageSize),
+      total: sorted.length,
+      page,
+      pageSize,
+      truncated,
+      statusCounts,
+    };
   }
+}
+
+/** Every status at zero, so a status absent from the page still has a count. */
+function emptyStatusCounts(): Record<UnifiedOrderStatus, number> {
+  return {
+    DRAFT: 0,
+    PENDING: 0,
+    CONFIRMED: 0,
+    IN_PROGRESS: 0,
+    READY: 0,
+    HANDED_OVER: 0,
+    COMPLETED: 0,
+    CANCELLED: 0,
+  };
 }
 
 /**

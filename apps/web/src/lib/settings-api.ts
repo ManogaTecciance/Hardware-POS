@@ -44,6 +44,16 @@ export interface DocumentSettings {
   showPageNumbers: boolean;
   defaultBillFormat: BillFormat;
   signatureFields: boolean;
+
+  /*
+   * D99 — the thermal bill's paper geometry. Read by `resolveBillGeometry`,
+   * never by a component: the template and the print frame both take their
+   * width from that one resolver so the two cannot drift.
+   */
+  billPaperWidthMm: number;
+  billLeftInsetMm: number;
+  billRightInsetMm: number;
+  billFitToContent: boolean;
 }
 
 export interface AppSettings {

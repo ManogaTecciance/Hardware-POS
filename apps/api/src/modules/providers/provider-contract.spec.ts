@@ -648,9 +648,18 @@ describe('AccountingSubmissionResult contains no QuickBooks SDK types', () => {
   });
 
   it('carries only a disposition, a provider discriminator, and a document type', () => {
-    const union = /export type AccountingSubmissionResult[\s\S]*?\n\n/.exec(types)?.[0] ?? '';
+    /*
+     * `\r?\n` twice, not `\n\n`: on a CRLF checkout the blank line between
+     * declarations is `\r\n\r\n`, which contains no `\n\n`, so this regex
+     * matched nothing at all and the assertion below ran against an empty
+     * field list. D30 rule 7 — an analyser that inspects nothing must fail
+     * rather than pass — so the extraction is now asserted before it is used.
+     */
+    const union = /export type AccountingSubmissionResult[\s\S]*?\r?\n\r?\n/.exec(types)?.[0] ?? '';
+    expect(union).toContain('AccountingSubmissionResult');
     // Any other field would be a place for provider internals to leak.
     const fields = [...union.matchAll(/^\s{6}(\w+):/gm)].map((m) => m[1]);
+    expect(fields.length).toBeGreaterThan(0);
     expect([...new Set(fields)].sort()).toEqual([
       'disposition',
       'externalDocumentType',

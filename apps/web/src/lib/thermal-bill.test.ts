@@ -328,36 +328,92 @@ describe('the printed page itself', () => {
     expect(html).not.toContain('class="btn"');
   });
 
-  it('fills the roll, held off the RIGHT edge only', () => {
+  /**
+   * D99 supersedes D80's "held off the RIGHT edge only", which asserted
+   * `padding:0 6mm 0 0` and forbade a left inset outright. That shape printed
+   * correctly in Chrome and lost its first characters in Edge, which re-fits
+   * the page box against the driver's stock and takes the overflow off both
+   * edges. The rule is now: slack on BOTH sides, and the numbers are the
+   * workspace's.
+   *
+   * Run over TWO geometries, and this is the part that matters: every
+   * assertion below would also pass against a template that had simply
+   * hard-coded 5mm and 3mm. The 58/2/4 half is what distinguishes a
+   * geometry-driven stylesheet from a re-hard-coded one, and it shares no
+   * digit with the defaults so a fallback cannot masquerade as a read.
+   */
+  const bodyRuleOf = (h: string) =>
+    h.slice(h.indexOf('body{font-family'), h.indexOf('}', h.indexOf('body{font-family')));
+
+  it('holds the text off BOTH edges, by the workspace’s own measurements', () => {
+    render();
+    expect(html).toContain('box-sizing:border-box');
+
+    const bodyRule = bodyRuleOf(html);
+    expect(bodyRule).toContain('width:100%');
+    // The page matches the driver's stock, so nothing is centred (D79 stands).
+    expect(bodyRule).toContain('max-width:78mm');
+    // Right 5mm, where the head stops; left 3mm, where the browser drifts.
+    expect(bodyRule).toContain('padding:0 5mm 0 3mm');
+
+    /*
+     * NEGATIVES, and each one names a failure that has actually happened:
+     *
+     * - the old right-only shape, which is the Edge defect itself;
+     * - `auto` margins, which centre a capped column and reproduce the band of
+     *   white down both margins that the PO rejected at D79;
+     * - a px inset, which stops being a fixed physical margin the moment a
+     *   browser applies a scale factor — the family this whole bug lives in.
+     */
+    expect(bodyRule).not.toContain('padding:0 6mm 0 0');
+    expect(bodyRule).not.toMatch(/margin:\s*0\s+auto/);
+    expect(bodyRule).not.toMatch(/padding:[^;]*\d+px/);
+  });
+
+  it('takes those measurements from the profile, not from a second constant', () => {
+    render({
+      profile: {
+        ...profile,
+        billPaperWidthMm: 58,
+        billLeftInsetMm: 2,
+        billRightInsetMm: 4,
+      },
+    });
+    const bodyRule = bodyRuleOf(html);
+
+    expect(bodyRule).toContain('max-width:58mm');
+    expect(bodyRule).toContain('padding:0 4mm 0 2mm');
+    // The anti-hard-code half: none of the default numbers may survive here.
+    expect(bodyRule).not.toContain('78mm');
+    expect(bodyRule).not.toContain('5mm');
+    expect(bodyRule).not.toContain('3mm');
+  });
+
+  it('allows a zero inset — this is a generalisation, not a new fixed 3mm', () => {
+    render({ profile: { ...profile, billLeftInsetMm: 0 } });
+    /*
+     * A workspace whose printer really does start at x=0 must still be able to
+     * say so. Asserting this keeps the fix honest: 3mm is a DEFAULT, and a
+     * default that cannot be overridden is a constant wearing a setting's
+     * clothes — which is exactly what D80 was.
+     */
+    expect(bodyRuleOf(html)).toContain('padding:0 5mm 0 0mm');
+  });
+
+  it('carries the geometry as metadata, without declaring a page size', () => {
     render();
     /*
-     * Two different numbers, and conflating them cost several rounds.
-     *
-     * The PAGE is 78mm — the driver's own stock width (Xprinter XP-365B,
-     * "USER", Maximum Size 78.7mm). Matching it means nothing is centred, so
-     * no width is lost to margins before the content starts.
-     *
-     * The TEXT is inset 6mm from the right, because the print head stops
-     * short of the paper's edge. At 78mm of text the last two characters
-     * were lost — "LKR 1,450.00" printed as "LKR 1,450." and "AMOUNT" as
-     * "AMOU" — which is about 3.5mm at this font size. 4mm cleared the clip
-     * but left the amounts hard against the edge; 6mm gives them room.
-     *
-     * RIGHT only. The left has always printed cleanly from x=0, and taking
-     * width off both sides is what left the band of white down the margins.
+     * The pair is the assertion. The printer needs the numbers, so they travel
+     * in the document — but as `meta`, which is a statement ABOUT the
+     * document. Turning them into an `@page{size}` here would undo D77's third
+     * position (a declared size the driver refuses is printed scaled down),
+     * and the two claims are asserted together so that distinction cannot
+     * quietly erode into one.
      */
-    expect(html).toContain('box-sizing:border-box');
-    const bodyRule = html.slice(
-      html.indexOf('body{font-family'),
-      html.indexOf('}', html.indexOf('body{font-family')),
-    );
-    expect(bodyRule).toContain('width:100%');
-    expect(bodyRule).toContain('padding:0 6mm 0 0');
-    // NEGATIVE — not centred, not a fixed column, and not inset on the left:
-    // the three shapes that put white where the operator does not want it.
-    expect(bodyRule).not.toContain('auto');
-    expect(bodyRule).not.toContain('max-width');
-    expect(bodyRule).not.toMatch(/padding:0 \d+mm 0 \d+mm/);
+    expect(html).toContain('<meta name="hpos:page-width-mm" content="78">');
+    expect(html).toContain('<meta name="hpos:left-inset-mm" content="3">');
+    expect(html).toContain('<meta name="hpos:right-inset-mm" content="5">');
+    expect(html).not.toMatch(/@page\{[^}]*size:/);
   });
 
   it('lets content break freely — an avoided break is a visible gap', () => {

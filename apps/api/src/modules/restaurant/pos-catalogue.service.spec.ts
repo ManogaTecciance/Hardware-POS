@@ -34,10 +34,18 @@ function productRow(overrides: Partial<any> = {}) {
   };
 }
 
-function buildService(products: any[], promotions: any[] = []) {
+function buildService(products: any[], promotions: any[] = [], tagSpellings: string[] = []) {
   const findMany = jest.fn(async () => products);
   const count = jest.fn(async () => products.length);
-  const prisma = { product: { findMany, count } };
+  /*
+   * The tenant's real dietary-tag spellings, resolved by a raw `unnest` +
+   * `lower()` query so the tag half of search is case-insensitive (Prisma's
+   * `has` is exact and has no insensitive form). It runs ONLY when a term is
+   * present, which the pair of specs below pins in both directions — the
+   * `findMany` N+1 tripwire above is unaffected either way.
+   */
+  const queryRaw = jest.fn(async () => tagSpellings.map((tag) => ({ tag })));
+  const prisma = { product: { findMany, count }, $queryRaw: queryRaw };
   const repo: jest.Mocked<PromotionsRepository> = {
     listForCatalogue: jest.fn(async () => promotions),
     // Unused entry points — the endpoint uses only `listForCatalogue`.
@@ -62,6 +70,7 @@ function buildService(products: any[], promotions: any[] = []) {
   return {
     service: new PosCatalogueService(sellable),
     findMany,
+    queryRaw,
     promotions: repo.listForCatalogue as jest.Mock,
   };
 }
@@ -88,6 +97,37 @@ describe('PosCatalogueService — filters', () => {
     const where = (findMany.mock.calls[0] as any[])[0].where;
     expect(JSON.stringify(where)).toContain('"contains":"chicken"');
     expect(JSON.stringify(where)).toContain('"mode":"insensitive"');
+  });
+
+  it('POSITIVE: a term naming a tag emits `hasSome` with the stored spelling', async () => {
+    // The stored tag is "Veg"; the cashier typed "veg". Resolving the real
+    // spelling is what lets an exact-match `hasSome` stay case-insensitive.
+    const { service, findMany, queryRaw } = buildService([productRow()], [], ['Veg']);
+    await service.list(TENANT, { branchId: BRANCH, search: 'veg' });
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const where = (findMany.mock.calls[0] as any[])[0].where;
+    expect(JSON.stringify(where)).toContain('"hasSome":["Veg"]');
+  });
+
+  it('NEGATIVE: a term naming no tag emits no tag clause at all', async () => {
+    // Resolution returns nothing, so the OR keeps only its name and
+    // subcategory branches — an empty `hasSome` would read as a tag filter
+    // that matched nothing.
+    const { service, findMany, queryRaw } = buildService([productRow()], [], []);
+    await service.list(TENANT, { branchId: BRANCH, search: 'chicken' });
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const where = (findMany.mock.calls[0] as any[])[0].where;
+    expect(JSON.stringify(where)).not.toContain('hasSome');
+    expect(JSON.stringify(where)).not.toContain('dietaryTags');
+  });
+
+  it('NEGATIVE: no search term means no tag lookup at all', async () => {
+    const { service, queryRaw } = buildService([productRow()]);
+    await service.list(TENANT, { branchId: BRANCH });
+    // The extra round trip is paid only by a search, never by a plain browse.
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 
   it('NEGATIVE: without a search filter, no `contains` clause is emitted', async () => {

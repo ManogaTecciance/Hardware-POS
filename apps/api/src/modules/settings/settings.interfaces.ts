@@ -88,6 +88,34 @@ export interface DocumentSettings {
   defaultBillFormat: 'A4' | 'THERMAL' | 'BOTH';
   /** Render authorized/customer signature areas in the footer. */
   signatureFields: boolean;
+
+  /*
+   * D99 — the thermal bill's paper geometry, which is the PRINTER's to state
+   * and not this codebase's to guess. D73–D80 guessed it seven times against
+   * one driver and one browser; these four numbers are where an operator puts
+   * the answer instead, read off the test strip on Settings → Documents →
+   * Preview.
+   */
+
+  /** The driver's stock width, and therefore the printed page width, in mm. */
+  billPaperWidthMm: number;
+  /**
+   * How far the text is held off the LEFT edge, in mm.
+   *
+   * Non-zero, and that is the whole of D99: at 0 the layout bets on the
+   * browser landing the page box exactly on the paper's printable origin.
+   * Chrome did; Edge refits the page against the driver's stock and splits the
+   * overflow across both sides, so the left edge lost its ink.
+   */
+  billLeftInsetMm: number;
+  /** How far the text is held off the RIGHT edge, where the head stops, in mm. */
+  billRightInsetMm: number;
+  /**
+   * One page, sized to the content (D77). Only true for a driver configured
+   * with a continuous roll: on a fixed page length the request is refused and
+   * the receipt is scaled down instead, which is why it is switchable.
+   */
+  billFitToContent: boolean;
 }
 
 /**

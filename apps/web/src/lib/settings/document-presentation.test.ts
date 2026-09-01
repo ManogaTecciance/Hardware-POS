@@ -46,8 +46,10 @@ describe('resolveDocumentSettingsPresentation', () => {
     expect(view.billNoteHint).toBe(
       'Printed below the footer on invoices only — e.g. a return policy. Leave blank to hide.',
     );
-    // NEGATIVE: retail gets neither the bill summary nor the restaurant tabs.
+    // NEGATIVE: retail gets neither the bill summary nor the restaurant tabs,
+    // and no roll calibration — an A4 sheet's geometry is the driver's (D99).
     expect(view.showBillLayoutSummary).toBe(false);
+    expect(view.showBillCalibration).toBe(false);
     expect(view.showRestaurantOperationsTabs).toBe(false);
   });
 
@@ -72,6 +74,10 @@ describe('resolveDocumentSettingsPresentation', () => {
     // POSITIVE, so the wall of `false` above cannot be an object of all-false:
     expect(view.showBillLayoutSummary).toBe(true);
     expect(view.showRestaurantOperationsTabs).toBe(true);
+    // D99 — the roll is the one piece of page setup a thermal bill DOES have,
+    // and it lives on Preview beside the strip that measures it.
+    expect(view.showBillCalibration).toBe(true);
+    expect(view.layoutNote).toMatch(/Preview tab/i);
     expect(view.billNoteLabel).toBe('Bill note');
     expect(view.brandingNote).toMatch(/logo/i);
     expect(view.layoutNote).toMatch(/continuous roll/i);
@@ -105,6 +111,7 @@ describe('resolveDocumentSettingsPresentation', () => {
       view.showBillLayoutSummary,
       view.showRestaurantOperationsTabs,
       view.showA4SaleDocument,
+      view.showBillCalibration,
     ]) {
       expect(flag).toBe(false);
     }

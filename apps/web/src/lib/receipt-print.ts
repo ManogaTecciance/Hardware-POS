@@ -1,10 +1,11 @@
 import { api } from './api';
+import { renderThermalBill, type ThermalBillInput } from './thermal-bill';
 import {
-  RECEIPT_WIDTH_MM,
-  RECEIPT_WIDTH_PX,
-  renderThermalBill,
-  type ThermalBillInput,
-} from './thermal-bill';
+  pxToMm,
+  readBillGeometry,
+  resolveBillGeometry,
+  type BillGeometry,
+} from './thermal-bill-geometry';
 import type { Session } from './auth';
 import type { CartItem } from './cart';
 import { computeLine } from './cart';
@@ -91,21 +92,23 @@ let printTimer: number | null = null;
  * It also drops the popup blocker from the picture entirely, so the document
  * profile can be fetched before printing without racing a user gesture.
  */
-export function printReceipt(
-  html: string,
-  options: { fitToContent?: boolean; paperWidthMm?: number } = {},
-): void {
-  const widthMm = options.paperWidthMm ?? RECEIPT_WIDTH_MM;
+export function printReceipt(html: string, options: { fitToContent?: boolean } = {}): void {
   const frame = document.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   frame.title = 'Receipt';
   /*
-   * Off-screen rather than zero-sized: the document has to LAY OUT at the
-   * receipt's true width, because the page height is measured from it. A
-   * 0×0 frame lays out at zero width, wraps every line, and would report a
-   * height that has nothing to do with the printed bill.
+   * D99 — nothing is visible in this frame, so there is nothing to scroll. A
+   * scrollbar drawn on its initial containing block would narrow the layout
+   * column, move every wrap, and change the height that gets measured.
    */
-  frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${RECEIPT_WIDTH_PX}px;height:0;border:0;visibility:hidden`;
+  frame.setAttribute('scrolling', 'no');
+  /*
+   * The width is provisional until the document is written. A document that
+   * carries no geometry — a retail receipt, a quotation, anything the server
+   * rendered — lays out at the default page width, exactly as it always has.
+   */
+  const provisional = resolveBillGeometry(null);
+  frame.style.cssText = frameCss(provisional);
   document.body.appendChild(frame);
 
   const win = frame.contentWindow;
@@ -118,10 +121,22 @@ export function printReceipt(
   doc.write(html);
   doc.close();
 
+  /*
+   * D99 — the geometry travels INSIDE the document, so the width this frame
+   * lays out at and the width the stylesheet prints at are the same numbers by
+   * construction rather than by two people remembering. Set before the height
+   * is measured, or the measurement is taken against the provisional width and
+   * the error is silent on any roll that is not 78mm.
+   */
+  const g = readBillGeometry(doc) ?? provisional;
+  frame.style.cssText = frameCss(g);
+
   const cleanup = () => frame.remove();
 
   void whenImagesSettle(doc).then(() => {
-    if (options.fitToContent !== false) fitPageToContent(win, widthMm);
+    // An explicit `false` overrides the document: a retail receipt prints to
+    // whatever sheet the till is set up with (D16), whatever a bill would ask.
+    if (options.fitToContent !== false && g.fitToContent) fitPageToContent(win, g);
     // A beat for the injected @page rule and final layout to take effect.
     window.setTimeout(() => {
       win.focus();
@@ -152,17 +167,35 @@ export function printReceipt(
  * truncate the receipt to the height of its text. Plus 2 mm so the cutter
  * does not shave the footer.
  */
-function fitPageToContent(win: Window, widthMm: number): void {
+function fitPageToContent(win: Window, g: BillGeometry): void {
   const doc = win.document;
   const heightPx = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
   if (heightPx <= 0) return; // nothing laid out — leave the default sheet alone
-  // 96 CSS px = 1 inch = 25.4 mm. Plus 2mm so the cutter does not shave the
-  // last line; a receipt cut flush against its footer looks torn.
-  const heightMm = Math.ceil((heightPx / 96) * 25.4) + 2;
+  // Plus 2mm so the cutter does not shave the last line; a receipt cut flush
+  // against its footer looks torn.
+  const heightMm = Math.ceil(pxToMm(heightPx)) + 2;
   const style = doc.createElement('style');
   style.dataset.role = 'page-size';
-  style.textContent = `@page{size:${widthMm}mm ${heightMm}mm;margin:0}`;
+  /*
+   * The PAGE width, not the content width. The page box matches the driver's
+   * stock so nothing is ever centred — that is the D79 lesson D99 leaves
+   * intact — and the insets in the body are what hold the text off the head.
+   */
+  style.textContent = `@page{size:${g.pageWidthMm}mm ${heightMm}mm;margin:0}`;
   doc.head.appendChild(style);
+}
+
+/**
+ * The whole frame style, in one string, so the provisional layout and the
+ * geometry-driven one cannot be written two different ways.
+ *
+ * Off-screen rather than zero-sized: the document has to LAY OUT at the
+ * receipt's true width, because the page height is measured from it. A 0×0
+ * frame lays out at zero width, wraps every line, and would report a height
+ * with nothing to do with the printed bill.
+ */
+function frameCss(g: BillGeometry): string {
+  return `position:fixed;left:-10000px;top:0;width:${g.pageWidthPx}px;height:0;border:0;visibility:hidden`;
 }
 
 /**

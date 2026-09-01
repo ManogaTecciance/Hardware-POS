@@ -325,7 +325,7 @@ export default function SettingsPage() {
         <WorkspaceTab />
       ) : view.previewKind === 'THERMAL_BILL' ? (
         // D96 — the bill itself, rendered from the template the till prints.
-        <BillPreviewTab docs={docs} />
+        <BillPreviewTab docs={docs} set={set} showCalibration={view.showBillCalibration} />
       ) : view.previewKind === 'SERVER_A4' ? (
         <PreviewTab docs={docs} />
       ) : (

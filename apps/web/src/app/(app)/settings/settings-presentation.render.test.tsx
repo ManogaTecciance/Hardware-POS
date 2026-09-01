@@ -68,6 +68,15 @@ const documents = {
   showPageNumbers: true,
   defaultBillFormat: 'A4',
   signatureFields: false,
+  /*
+   * D99 — deliberately NOT the shipped 78/3/5. The preview iframe and the
+   * calibration fields both have to read this workspace's own numbers, and at
+   * the defaults a component that ignored them entirely would look correct.
+   */
+  billPaperWidthMm: 58,
+  billLeftInsetMm: 2,
+  billRightInsetMm: 4,
+  billFitToContent: true,
 } as unknown as AppSettings['documents'];
 
 vi.mock('@/lib/settings-api', () => ({
@@ -213,6 +222,34 @@ describe('D96 — the Preview tab', () => {
     expect(frame.srcdoc).toContain('DESCRIPTION');
     // NEGATIVE — the A4 chooser is gone with it.
     expect(screen.queryByText('Document type')).toBeNull();
+  });
+
+  it('D99 — a bill workspace can measure its roll here', async () => {
+    businessType = 'RESTAURANT';
+    await open('Preview');
+
+    expect(screen.getByLabelText('Paper width (mm)')).toBeTruthy();
+    expect(screen.getByLabelText('Left inset (mm)')).toBeTruthy();
+    expect(screen.getByLabelText('Right inset (mm)')).toBeTruthy();
+    expect(screen.getByText('Print calibration strip')).toBeTruthy();
+
+    // The fields and the preview both show THIS workspace's numbers, not the
+    // shipped defaults — 58mm is 219px, where 78mm would be 295px.
+    expect((screen.getByLabelText('Paper width (mm)') as HTMLInputElement).value).toBe('58');
+    const frame = screen.getByTitle('Bill preview') as HTMLIFrameElement;
+    expect(frame.style.width).toBe('219px');
+    expect(frame.srcdoc).toContain('padding:0 4mm 0 2mm');
+  });
+
+  it('D99 — a retail workspace is offered no roll to calibrate', async () => {
+    await open('Preview');
+
+    // NEGATIVE: an A4 sheet's geometry belongs to the driver, and the fields
+    // would be settings that change nothing — the defect D96 was written for.
+    expect(screen.queryByLabelText('Paper width (mm)')).toBeNull();
+    expect(screen.queryByText('Print calibration strip')).toBeNull();
+    // POSITIVE CONTROL: the Preview tab did render.
+    expect(screen.getByText('Document type')).toBeTruthy();
   });
 });
 

@@ -8,7 +8,7 @@
  * "is this a restaurant?" of the raw enum.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 
 const SRC = resolve(__dirname, '../..');
 
@@ -24,7 +24,13 @@ function collect(dir: string, matches: string[], predicate: (s: string) => boole
     }
     if (!/\.ts$/.test(entry.name) || /\.spec\.ts$/.test(entry.name)) continue;
     visited += 1;
-    if (predicate(readFileSync(full, 'utf8'))) matches.push(full.replace(`${SRC}/`, ''));
+    if (predicate(readFileSync(full, 'utf8'))) /*
+     * Repo-relative, posix separators. `resolve` returns backslashes on
+     * Windows, so stripping a `${SRC}/` prefix matched nothing there and this
+     * exact-set assertion compared relative paths against absolute ones — a
+     * D30 tripwire that could not be read at all on a Windows checkout.
+     */
+    matches.push(relative(SRC, full).split(sep).join('/'));
   }
   return visited;
 }

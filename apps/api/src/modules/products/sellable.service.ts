@@ -122,6 +122,24 @@ export class SellableService {
     private readonly profiles: BusinessProfileService,
   ) {}
 
+  /**
+   * The tenant's own spellings of a dietary tag that equal `term` ignoring case.
+   *
+   * One small tenant-scoped query (covered by `@@index([tenantId])`), run only
+   * when a search term is present. `unnest` flattens the `String[]` column so
+   * `lower()` can be applied per element — the comparison stays an equality,
+   * not a substring, so "veg" does not start matching "vegan".
+   */
+  private async resolveTagSpellings(tenantId: string, term: string): Promise<string[]> {
+    const rows = await this.prisma.$queryRaw<Array<{ tag: string }>>(Prisma.sql`
+      SELECT DISTINCT t AS tag
+      FROM "Product" p, unnest(p."dietaryTags") AS t
+      WHERE p."tenantId" = ${tenantId}
+        AND lower(t) = lower(${term})
+    `);
+    return rows.map((r) => r.tag);
+  }
+
   async list(tenantId: string, query: SellableQuery): Promise<SellableResponse> {
     const profile = await this.profiles.getEffectiveProfile(tenantId);
     const caps: TenantCapabilities = profile.capabilities;
@@ -140,10 +158,31 @@ export class SellableService {
       { OR: [{ hasVariants: false }, { hasVariants: true, variants: { some: { isActive: true } } }] },
     ];
     if (query.search) {
+      /*
+       * `has` is exact array-element equality, and Prisma has no
+       * case-insensitive form of it. That made the tag half of this search
+       * case-sensitive while the other two halves were not: a cashier typing
+       * "veg" got only the rows with "Veg" in the NAME, while "Veg" matched
+       * fourteen. Lower-case is what actually gets typed at a till.
+       *
+       * Tags are free text, so there is no vocabulary to fold against and
+       * generating case variants does not work — title-casing "gluten-free"
+       * gives "Gluten-free", not the stored "Gluten-Free". Instead the
+       * tenant's real spellings are resolved first and matched with
+       * `hasSome`, which keeps the exact-match semantics `has` had and only
+       * changes the casing rule. No column and no migration (D-rule: no
+       * Prisma migration without a decision record).
+       */
+      const tagSpellings = await this.resolveTagSpellings(tenantId, query.search);
       and.push({
         OR: [
           { name: { contains: query.search, mode: 'insensitive' } },
-          { dietaryTags: { has: query.search } },
+          // Omitted entirely when the term names no tag — an empty `hasSome`
+          // matches nothing in Prisma, which would be harmless here but reads
+          // as though a tag filter applied.
+          ...(tagSpellings.length > 0
+            ? [{ dietaryTags: { hasSome: tagSpellings } } as Prisma.ProductWhereInput]
+            : []),
           { subcategory: { name: { contains: query.search, mode: 'insensitive' } } },
         ],
       });

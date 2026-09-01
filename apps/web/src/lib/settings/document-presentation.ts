@@ -77,6 +77,16 @@ export interface DocumentSettingsPresentation {
 
   // ── Preview tab ────────────────────────────────────────────────────────
   previewKind: DocumentPreviewKind;
+  /**
+   * D99 — the roll-calibration fields and the test strip.
+   *
+   * On Preview rather than Layout, deliberately: calibration is a
+   * measure → adjust → reprint loop, and putting the numbers on a different
+   * tab from the button that prints the ruler adds a tab switch to every turn
+   * of it. It is also the one item on Layout's list that a thermal bill DOES
+   * have, so it would read as a contradiction of layoutNote sitting there.
+   */
+  showBillCalibration: boolean;
 
   // ── Tabs that only apply to a food-service workspace ───────────────────
   /** Charges and Hours edit `RestaurantBranchConfig`, which retail has no row in. */
@@ -106,6 +116,8 @@ const A4_DOCUMENTS: DocumentSettingsPresentation = {
   showBillLayoutSummary: false,
   layoutNote: null,
   previewKind: 'SERVER_A4',
+  // An A4 sheet's geometry is the driver's; there is no roll to calibrate.
+  showBillCalibration: false,
   showRestaurantOperationsTabs: false,
   showA4SaleDocument: true,
 };
@@ -135,8 +147,9 @@ const THERMAL_BILL: DocumentSettingsPresentation = {
   showPageNumbersToggle: false,
   showBillLayoutSummary: true,
   layoutNote:
-    'A bill prints on a continuous roll, so there is no page size, orientation or margin to set. What it contains is fixed; what it says comes from Business and Branding.',
+    'A bill prints on a continuous roll, so there is no page size, orientation or margin to set. The roll’s own width and edge insets are measured on the Preview tab. What the bill contains is fixed; what it says comes from Business and Branding.',
   previewKind: 'THERMAL_BILL',
+  showBillCalibration: true,
   showRestaurantOperationsTabs: true,
   showA4SaleDocument: false,
 };
@@ -165,6 +178,7 @@ const UNRESOLVED: DocumentSettingsPresentation = {
   showBillLayoutSummary: false,
   layoutNote: null,
   previewKind: 'NONE',
+  showBillCalibration: false,
   showRestaurantOperationsTabs: false,
   showA4SaleDocument: false,
 };

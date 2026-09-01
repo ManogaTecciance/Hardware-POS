@@ -912,7 +912,21 @@ export interface OrdersQuery {
   search?: string;
   from?: string;
   to?: string;
-  limit?: number;
+  /** 1-based. Omit for the first page. */
+  page?: number;
+  pageSize?: number;
+}
+
+export interface UnifiedOrdersPage {
+  items: UnifiedOrderView[];
+  /** Rows matching the filter across every page, not the page length. */
+  total: number;
+  page: number;
+  pageSize: number;
+  /** The server's scan was capped, so `total` is a floor. Narrow the filters. */
+  truncated: boolean;
+  /** Per-status totals across every page, counted before the status filter. */
+  statusCounts: Record<UnifiedOrderStatus, number>;
 }
 
 export const restaurantOrders = {
@@ -924,9 +938,10 @@ export const restaurantOrders = {
     if (q.search) params.set('search', q.search);
     if (q.from) params.set('from', q.from);
     if (q.to) params.set('to', q.to);
-    if (q.limit) params.set('limit', String(q.limit));
+    if (q.page && q.page > 1) params.set('page', String(q.page));
+    if (q.pageSize) params.set('pageSize', String(q.pageSize));
     const query = params.toString() ? `?${params.toString()}` : '';
-    return api.get<UnifiedOrderView[]>(
+    return api.get<UnifiedOrdersPage>(
       `/restaurant/branches/${branchId}/orders${query}`,
       auth(session),
     );

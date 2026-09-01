@@ -8,6 +8,7 @@ import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
 import {
   OrderView,
+  OrdersPage,
   OrdersQuery,
   RestaurantOrdersService,
   UnifiedChannel,
@@ -39,8 +40,9 @@ export class RestaurantOrdersController {
     @Query('search') search?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
-    @Query('limit') limit?: string,
-  ): Promise<OrderView[]> {
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ): Promise<OrdersPage> {
     const q: OrdersQuery = {
       channel: parseChannel(channel),
       status: parseStatus(status),
@@ -48,10 +50,21 @@ export class RestaurantOrdersController {
       search: search ?? undefined,
       from: parseDate(from),
       to: parseDate(to),
-      limit: limit ? Number(limit) : undefined,
+      // `Number('abc')` is NaN, which would sail past a plain `? :` and reach
+      // the service as a page number that breaks the slice. Anything that is
+      // not a finite number is treated as absent, so the default applies.
+      page: toPositiveInt(page),
+      pageSize: toPositiveInt(pageSize),
     };
     return this.service.listOrders(tenantId, branchId, q);
   }
+}
+
+/** A query-string integer, or `undefined` for anything that is not one. */
+function toPositiveInt(v: string | undefined): number | undefined {
+  if (v === undefined || v === '') return undefined;
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 function parseChannel(v: string | undefined): UnifiedChannel | 'ALL' {

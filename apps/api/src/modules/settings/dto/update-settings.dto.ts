@@ -187,6 +187,35 @@ export class UpdateDocumentSettingsDto {
   @IsBoolean()
   @IsOptional()
   signatureFields?: boolean;
+
+  /*
+   * D99 — thermal paper geometry. The bounds are not taste: a page narrower
+   * than 40mm is not a receipt roll, and insets that swallow the column would
+   * render a bill with nowhere to print the amounts. The client-side resolver
+   * clamps as well, because the web app renders from a cached profile that
+   * never passed through this DTO.
+   */
+  @IsNumber()
+  @Min(40)
+  @Max(120)
+  @IsOptional()
+  billPaperWidthMm?: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(20)
+  @IsOptional()
+  billLeftInsetMm?: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(20)
+  @IsOptional()
+  billRightInsetMm?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  billFitToContent?: boolean;
 }
 
 export class UpdateSharingSettingsDto {

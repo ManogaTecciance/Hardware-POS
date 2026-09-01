@@ -28,9 +28,18 @@ interface Props {
   onBack: () => void;
 }
 
+/**
+ * What the last completed lookup found.
+ *
+ * Deliberately has no `searching` member. It used to, and because the New
+ * Customer fields render only for `notFound`, every keystroke wiped the result
+ * to `searching` and tore the Name input out of the DOM — then put it back
+ * 250ms later. A cashier typing a number watched the form jump, and lost focus
+ * and caret position each time. Whether a request is in flight is a separate
+ * question from what the last one returned, so it is separate state.
+ */
 type State =
   | { kind: 'idle' }
-  | { kind: 'searching' }
   | { kind: 'found'; id: string; name: string; phone: string | null }
   | { kind: 'notFound'; phone: string };
 
@@ -39,6 +48,47 @@ interface CustomerRow {
   name: string;
   phone?: string | null;
   mobile?: string | null;
+}
+
+/*
+ * Mobile rules.
+ *
+ * Counted in DIGITS, not characters, so the separators the placeholder invites
+ * ("+94 77 123 4567") do not eat the allowance. Nine is the shortest real
+ * local number once a leading 0 is dropped; fifteen is the E.164 ceiling, so
+ * an international number entered in full still fits. The server caps `mobile`
+ * at 40 characters, which the 24-character input cap stays inside.
+ */
+const MOBILE_MIN_DIGITS = 9;
+const MOBILE_MAX_DIGITS = 15;
+const MOBILE_MAX_CHARS = 24;
+
+/** Matches `CreateCustomerDto.name` — @MaxLength(200) — so the form can never
+ *  build a payload the server will refuse at the end of the order flow. */
+const NAME_MAX = 200;
+/** A single character is a slip, not a name; it makes the record unsearchable. */
+const NAME_MIN = 2;
+
+/**
+ * Keep what a phone number is made of and drop the rest as it is typed.
+ *
+ * Filtering on entry rather than validating after the fact: `inputMode="tel"`
+ * is only a soft-keyboard hint, so on a desktop till every letter went
+ * straight through to the customer record. A cashier who pastes "077 123 4567
+ * (home)" gets the number, not an error they have to go back and fix.
+ *
+ * `+` survives only in first position, where it means a country code; anywhere
+ * else it is a typo.
+ */
+function sanitizeMobile(raw: string): string {
+  const kept = raw.replace(/[^\d+\s-]/g, '');
+  const plus = kept.startsWith('+') ? '+' : '';
+  return (plus + kept.replace(/\+/g, '')).slice(0, MOBILE_MAX_CHARS);
+}
+
+/** Just the digits, which is what the length rules are about. */
+function digitsOf(value: string): string {
+  return value.replace(/\D/g, '');
 }
 
 /**
@@ -61,6 +111,8 @@ export function CustomerCapturePopup({ session, mode, onChoose, onBack }: Props)
   const [name, setName] = React.useState('');
   const [address, setAddress] = React.useState('');
   const [state, setState] = React.useState<State>({ kind: 'idle' });
+  /** A lookup is in flight. Never clears {@link state} — see its docblock. */
+  const [searching, setSearching] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
@@ -68,10 +120,12 @@ export function CustomerCapturePopup({ session, mode, onChoose, onBack }: Props)
   React.useEffect(() => {
     const q = phone.trim();
     if (q.length < 3) {
+      // Too short to look anything up, so there is no result to keep.
       setState({ kind: 'idle' });
+      setSearching(false);
       return;
     }
-    setState({ kind: 'searching' });
+    setSearching(true);
     const t = setTimeout(async () => {
       try {
         const res = await api.get<{ items: CustomerRow[] }>(
@@ -93,13 +147,48 @@ export function CustomerCapturePopup({ session, mode, onChoose, onBack }: Props)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Search failed');
         setState({ kind: 'idle' });
+      } finally {
+        setSearching(false);
       }
     }, 250);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      // The debounce was cancelled by another keystroke, so nothing is in
+      // flight — but the previous result stays on screen until the next one
+      // lands, which is what keeps the Name field mounted.
+      setSearching(false);
+    };
     // Intentionally not including `name` — we only want to auto-fill on the
     // debounced tick, not every keystroke of the name field.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phone, session]);
+
+  /*
+   * Both messages are null while the field is untouched: a form that turns red
+   * before anything has been typed reads as broken, and Skip is still a valid
+   * way out of this dialog for Dine In and Takeaway.
+   */
+  const phoneDigits = digitsOf(phone);
+  const mobileError =
+    phone.trim() === ''
+      ? null
+      : phoneDigits.length < MOBILE_MIN_DIGITS
+        ? `Mobile number needs at least ${MOBILE_MIN_DIGITS} digits.`
+        : phoneDigits.length > MOBILE_MAX_DIGITS
+          ? `Mobile number cannot be more than ${MOBILE_MAX_DIGITS} digits.`
+          : null;
+
+  const trimmedName = name.trim();
+  const nameError =
+    trimmedName === ''
+      ? null
+      : trimmedName.length < NAME_MIN
+        ? `Name needs at least ${NAME_MIN} characters.`
+        : trimmedName.length > NAME_MAX
+          ? `Name cannot be longer than ${NAME_MAX} characters.`
+          : null;
+
+  const invalid = !!mobileError || !!nameError;
 
   const canContinue = isDelivery
     ? !!name.trim() && !!phone.trim() && !!address.trim()
@@ -116,7 +205,9 @@ export function CustomerCapturePopup({ session, mode, onChoose, onBack }: Props)
   };
 
   const saveAndContinue = async () => {
-    if (!name.trim() || !phone.trim()) return;
+    // Belt and braces with the disabled button: Enter-to-submit and a stale
+    // click both reach here without going through it.
+    if (!name.trim() || !phone.trim() || invalid) return;
     setSaving(true);
     setError(null);
     try {
@@ -176,7 +267,9 @@ export function CustomerCapturePopup({ session, mode, onChoose, onBack }: Props)
             <Button
               onClick={saveAndContinue}
               isLoading={saving}
-              disabled={!name.trim() || !phone.trim() || (isDelivery && !address.trim())}
+              disabled={
+                !name.trim() || !phone.trim() || invalid || (isDelivery && !address.trim())
+              }
             >
               Save & Continue
             </Button>
@@ -194,18 +287,29 @@ export function CustomerCapturePopup({ session, mode, onChoose, onBack }: Props)
             <Input
               id="cust-phone"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              // Filtered on entry — see `sanitizeMobile`. `inputMode` only
+              // suggests a keypad; it never stopped a desktop till from
+              // typing letters straight into the customer record.
+              onChange={(e) => setPhone(sanitizeMobile(e.target.value))}
               placeholder="+94 77 123 4567"
               autoFocus
               className="pl-9"
               inputMode="tel"
+              maxLength={MOBILE_MAX_CHARS}
+              aria-invalid={mobileError ? true : undefined}
+              aria-describedby={mobileError ? 'cust-phone-error' : undefined}
             />
-            {state.kind === 'searching' ? (
+            {searching ? (
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                 Searching…
               </span>
             ) : null}
           </div>
+          {mobileError ? (
+            <p id="cust-phone-error" className="text-xs text-danger" role="alert">
+              {mobileError}
+            </p>
+          ) : null}
         </div>
 
         {state.kind === 'found' ? (
@@ -233,7 +337,15 @@ export function CustomerCapturePopup({ session, mode, onChoose, onBack }: Props)
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Customer name"
+                maxLength={NAME_MAX}
+                aria-invalid={nameError ? true : undefined}
+                aria-describedby={nameError ? 'cust-name-error' : undefined}
               />
+              {nameError ? (
+                <p id="cust-name-error" className="text-xs text-danger" role="alert">
+                  {nameError}
+                </p>
+              ) : null}
             </div>
             {isDelivery ? (
               <div className="space-y-1.5">

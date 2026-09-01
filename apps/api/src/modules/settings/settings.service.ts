@@ -308,6 +308,14 @@ export class SettingsService implements OnModuleInit {
         showPageNumbers: true,
         defaultBillFormat: 'A4',
         signatureFields: true,
+        // D99 — the Xprinter XP-365B's stock is 78.7mm wide and its head stops
+        // short of the right edge (D80 measured the clip at ~3.5mm). The 3mm of
+        // LEFT slack is the new number: it is what a refitting browser takes
+        // its overflow from instead of taking it out of the first character.
+        billPaperWidthMm: 78,
+        billLeftInsetMm: 3,
+        billRightInsetMm: 5,
+        billFitToContent: true,
       },
       sharing: {
         emailSenderName: 'Hardware POS',

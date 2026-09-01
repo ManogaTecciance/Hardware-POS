@@ -21,6 +21,8 @@ import type {
   SectionView,
 } from '@/lib/restaurant/types';
 
+import { normalizeSearchTerm } from '@/lib/search-term';
+
 import { EMPTY_MENU, type MenuData } from './pos-types';
 
 /**
@@ -129,9 +131,52 @@ const FOOD_TYPE_SECTIONS: Array<{ id: string; name: string; foodType: 'FOOD' | '
   { id: '__section_other__', name: 'Other', foodType: null, position: 4 },
 ];
 
+/** Page size for the POS grid. Matches the server default, so first paint is unchanged. */
+const POS_PAGE_SIZE = 100;
+
+export interface PosCatalogueOptions {
+  /**
+   * Server-side search term, matched against name, dietary tags and
+   * subcategory name. Debounce before passing it — every distinct value
+   * resets paging and issues a request.
+   */
+  search?: string;
+  /** Page size. The server clamps to 1..200. */
+  pageSize?: number;
+}
+
+export interface PosCatalogueResult {
+  data: MenuData;
+  loading: boolean;
+  error: string | null;
+  reload: () => void;
+  /** The server has at least one more page for the current filter. */
+  hasMore: boolean;
+  /** A {@link PosCatalogueResult.loadMore} fetch is in flight. */
+  loadingMore: boolean;
+  loadMore: () => void;
+  /** Rows matching the filter across every page — not the loaded count. */
+  total: number;
+  /** Rows currently in `data`. */
+  loadedCount: number;
+}
+
 /**
  * Load the branch's POS-sellable catalogue (D45) and shape it into the
  * same `MenuData` structure the picker + modifier dialog consume.
+ *
+ * ## Paging and search are the server's job
+ *
+ * `GET /products/sellable` has always been paged — keyset over (name, id),
+ * default 100 rows, `nextCursor` for the next page — and has always accepted
+ * `search`. This hook did neither: it issued one unpaged request and dropped
+ * `nextCursor`, so a branch with more than 100 sellable products silently lost
+ * every row after the hundredth, with nothing in the UI to say so. Search then
+ * ran client-side over that truncated set, which is why an item could exist,
+ * be active, and still be unfindable at the till.
+ *
+ * So the term goes to the server, and pages accumulate through `loadMore()`.
+ * Searching resets to page one — a cursor is only meaningful within one filter.
  *
  * Why a shape adapter rather than a second picker component:
  *   - `pos-menu-browser.tsx` is 200 LOC of chip + grid + search + empty
@@ -158,37 +203,107 @@ export function usePosCatalogue(
   session: Session,
   branchId: string | null,
   channel?: PosCatalogueChannel,
-): { data: MenuData; loading: boolean; error: string | null; reload: () => void } {
-  const [data, setData] = React.useState<MenuData>(EMPTY_MENU);
+  options?: PosCatalogueOptions,
+): PosCatalogueResult {
+  const search = normalizeSearchTerm(options?.search);
+  const pageSize = options?.pageSize ?? POS_PAGE_SIZE;
+
+  const [items, setItems] = React.useState<PosCatalogueItem[]>([]);
+  const [cursor, setCursor] = React.useState<string | null>(null);
+  const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
+  const [loadingMore, setLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [tick, setTick] = React.useState(0);
 
+  /*
+   * Every reset (new branch, channel, search term or reload) bumps this. A
+   * `loadMore` that was already in flight compares the generation it captured
+   * against the current one and discards its rows — otherwise a slow page 2
+   * for "chicken" could append itself onto the results for "rice".
+   */
+  const generation = React.useRef(0);
+
   React.useEffect(() => {
     if (!branchId) return;
-    let cancelled = false;
+    generation.current += 1;
+    const mine = generation.current;
     setLoading(true);
     setError(null);
     (async () => {
       try {
-        const res = await fetchPosCatalogue(session, { branchId, channel });
-        if (cancelled) return;
-        setData(catalogueToMenuData(res.items));
+        const res = await fetchPosCatalogue(session, {
+          branchId,
+          channel,
+          limit: pageSize,
+          ...(search ? { search } : {}),
+        });
+        if (generation.current !== mine) return;
+        setItems(res.items);
+        setCursor(res.nextCursor);
+        setTotal(res.total);
       } catch (err) {
-        if (cancelled) return;
+        if (generation.current !== mine) return;
         setError(err instanceof Error ? err.message : 'Failed to load catalogue');
-        setData(EMPTY_MENU);
+        setItems([]);
+        setCursor(null);
+        setTotal(0);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (generation.current === mine) setLoading(false);
       }
     })();
     return () => {
-      cancelled = true;
+      // Abandon this generation so a late response cannot overwrite the next one.
+      generation.current += 1;
     };
-  }, [session, branchId, channel, tick]);
+  }, [session, branchId, channel, search, pageSize, tick]);
 
+  const loadMore = React.useCallback(() => {
+    if (!branchId || !cursor || loading || loadingMore) return;
+    const mine = generation.current;
+    setLoadingMore(true);
+    (async () => {
+      try {
+        const res = await fetchPosCatalogue(session, {
+          branchId,
+          channel,
+          limit: pageSize,
+          cursor,
+          ...(search ? { search } : {}),
+        });
+        if (generation.current !== mine) return;
+        // Append, and drop any id already present. The keyset is stable, but a
+        // product renamed between two page reads can land on both sides of the
+        // cursor, and a duplicate key would break the grid's React reconciliation.
+        setItems((prev) => {
+          const seen = new Set(prev.map((it) => it.id));
+          return [...prev, ...res.items.filter((it) => !seen.has(it.id))];
+        });
+        setCursor(res.nextCursor);
+        setTotal(res.total);
+      } catch (err) {
+        if (generation.current !== mine) return;
+        setError(err instanceof Error ? err.message : 'Failed to load more items');
+      } finally {
+        if (generation.current === mine) setLoadingMore(false);
+      }
+    })();
+  }, [session, branchId, channel, cursor, loading, loadingMore, pageSize, search]);
+
+  const data = React.useMemo(() => catalogueToMenuData(items), [items]);
   const reload = React.useCallback(() => setTick((t) => t + 1), []);
-  return { data, loading, error, reload };
+
+  return {
+    data,
+    loading,
+    error,
+    reload,
+    hasMore: cursor !== null,
+    loadingMore,
+    loadMore,
+    total,
+    loadedCount: items.length,
+  };
 }
 
 /**

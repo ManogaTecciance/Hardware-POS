@@ -57,6 +57,12 @@ export const DEFAULT_DOCUMENT_PROFILE: DocumentProfile = {
   showPageNumbers: true,
   defaultBillFormat: 'A4',
   signatureFields: true,
+  // D99 — see `thermal-bill-geometry.ts`. These defaults are the Xprinter
+  // XP-365B's, and every one of them is overridable per workspace.
+  billPaperWidthMm: 78,
+  billLeftInsetMm: 3,
+  billRightInsetMm: 5,
+  billFitToContent: true,
 };
 
 function readCache(): DocumentProfile | null {

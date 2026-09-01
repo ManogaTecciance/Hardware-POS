@@ -36,6 +36,8 @@ import type { PosMode } from './pos-mode-selector';
 import { PosOrderTypeModal } from './pos-order-type-modal';
 import type { DraftLine } from './pos-types';
 import { addDraftLine, cryptoRandomKey, draftSubtotal } from './pos-utils';
+import { normalizeSearchTerm } from '@/lib/search-term';
+
 import { useMenuData, usePosCatalogue } from './use-menu-data';
 
 interface Props {
@@ -161,10 +163,24 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   // We gate by nulling `branchId` on the inactive hook so it never fetches.
   const catalogueChannel =
     mode === 'DINE_IN' ? 'DINE_IN' : mode === 'THIRD_PARTY' ? 'ONLINE' : 'TAKEAWAY';
+  /*
+   * D45 search is resolved by the server (`GET /products/sellable?search=`),
+   * which also matches dietary tags and subcategory name — fields the grid
+   * never receives. The raw keystrokes drive the input; the debounced value
+   * is what becomes a request. 300ms matches the products screen.
+   */
+  const [menuSearch, setMenuSearch] = React.useState('');
+  const [appliedMenuSearch, setAppliedMenuSearch] = React.useState('');
+  React.useEffect(() => {
+    const t = window.setTimeout(() => setAppliedMenuSearch(normalizeSearchTerm(menuSearch)), 300);
+    return () => window.clearTimeout(t);
+  }, [menuSearch]);
+
   const catalogue = usePosCatalogue(
     session,
     isRestaurantProfile ? branchId : null,
     catalogueChannel,
+    { search: appliedMenuSearch },
   );
   const legacyMenu = useMenuData(session, isRestaurantProfile ? null : branchId);
   const { data: menuData, loading: menuLoading } = isRestaurantProfile ? catalogue : legacyMenu;
@@ -495,7 +511,30 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
             order bar (h≈4rem + safe-area inset) does not eat the last row of
             item cards. `tab:pb-0` restores flush spacing once the bar hides. */}
         <div className="min-w-0 pb-safe-20 tab:pb-0">
-          <PosMenuBrowser data={menuData} loading={menuLoading} onPick={openItem} />
+          <PosMenuBrowser
+            data={menuData}
+            loading={menuLoading}
+            onPick={openItem}
+            /*
+             * Only the catalogue path can page or search server-side. The
+             * legacy admin-menu fallback loads the whole tree at once, so it
+             * gets no `serverQuery` and keeps its original client-side filter.
+             */
+            serverQuery={
+              isRestaurantProfile
+                ? {
+                    search: menuSearch,
+                    onSearchChange: setMenuSearch,
+                    appliedSearch: appliedMenuSearch,
+                    hasMore: catalogue.hasMore,
+                    loadingMore: catalogue.loadingMore,
+                    onLoadMore: catalogue.loadMore,
+                    total: catalogue.total,
+                    loadedCount: catalogue.loadedCount,
+                  }
+                : undefined
+            }
+          />
         </div>
 
         {/* Aside is hidden below `tab:` — cart moves to a Sheet on portrait.

@@ -1,6 +1,12 @@
 import type { DocumentProfile } from './document-template-service';
 import { resolveImageUrl } from './products-api';
 import { formatMoney } from './restaurant/labels';
+import {
+  billBodyGeometryCss,
+  billGeometryMetaTags,
+  resolveBillGeometry,
+  type BillGeometry,
+} from './thermal-bill-geometry';
 
 /**
  * D72 — the printed restaurant bill.
@@ -66,55 +72,34 @@ export interface ThermalBillInput {
 }
 
 /**
- * D79 — 78 mm, from the printer's own stock definition.
+ * D99 — the paper geometry is the PRINTER’s, and it is a setting.
  *
- * This number was guessed at 80 and then at 72 before the PO sent the driver
- * dialog, which states it: Xprinter XP-365B, stock "USER", Maximum Size
- * width **78.7 mm**, exposed liner 0.0 mm on both sides. So the printable
- * width is 78.7 mm — 80 mm bled off the right edge, and 72 mm left a band of
- * white down both sides because the shorter page was centred on the paper.
+ * `RECEIPT_WIDTH_MM`, `RECEIPT_RIGHT_INSET_MM` and `RECEIPT_WIDTH_PX` used to
+ * live here as constants. They were arrived at over seven rounds (D73–D80),
+ * each measured against one driver and — as Edge later showed — one browser,
+ * and the last of them bet the left edge on printing cleanly from x=0.
  *
- * 78 mm sits just inside the stock with no side padding at all: the page IS
- * the printable area, so there is nothing to centre and nothing to inset.
- *
- * The remaining two numbers in that dialog are the printer's to fix, not
- * this file's — see the D79 record for the settings.
+ * They are now resolved per workspace by `resolveBillGeometry`, which is the
+ * ONE place they are decided, and the same resolver the print frame reads.
+ * See `thermal-bill-geometry.ts` for why that matters.
  */
-export const RECEIPT_WIDTH_MM = 78;
 
-/**
- * D80 — how far the text is held off the RIGHT edge.
- *
- * The stock's 78.7 mm is the width of the PAPER; the print head covers less
- * of it. Measured from what actually came out: at 78 mm of text the last two
- * characters were lost ("LKR 1,450.00" printed as "LKR 1,450.", "AMOUNT" as
- * "AMOU"), which at 11 px monospace is about 3.5 mm. At 80 mm it was one
- * character. Four millimetres is that overflow plus a little, leaving 74 mm
- * of text on a 78 mm page.
- *
- * Raised from 4 mm to 6 mm on 2026-08-21: at 4 mm nothing was clipped, but
- * the amounts sat hard against the edge with no breathing room. 6 mm leaves
- * 72 mm of text on a 78 mm page.
- *
- * Right only. The left edge has always printed cleanly from x=0, and taking
- * width off BOTH sides is what left the band of white the PO rejected.
- *
- * If a future printer clips a different amount, this is the one number to
- * change — the page width stays matched to the driver's stock so nothing is
- * ever centred.
- */
-export const RECEIPT_RIGHT_INSET_MM = 6;
-/** …in CSS pixels at 96 dpi, for the layout column. */
-export const RECEIPT_WIDTH_PX = Math.round((RECEIPT_WIDTH_MM / 25.4) * 96); // 302
-
-const CSS = `
+function css(g: BillGeometry): string {
+  return `
 :root { color-scheme: light; }
 /*
- * border-box everywhere, because the column width IS the paper width. With
- * content-box the body's padding is added OUTSIDE max-width, so a 272px
- * column plus 12px of padding each side is 296px — 78mm of content on a
- * 72mm page, which Chrome resolves by scaling everything down. That is the
- * same "content is smaller" defect one level further in.
+ * border-box everywhere, and it is load-bearing twice over.
+ *
+ * With content-box the body's padding is added OUTSIDE its width, so a body
+ * at 100% of the page plus the insets is WIDER than the page, which a browser
+ * resolves by scaling everything down — the "content is smaller" defect one
+ * level in.
+ *
+ * It is also what makes the print frame's width correct. The frame lays out at
+ * the PAGE width; border-box means the body's content column is that width
+ * minus the insets, which is exactly what the printed page gives it. Under
+ * content-box the two would differ by the insets and every measured page
+ * height would be wrong.
  */
 *,*::before,*::after{box-sizing:border-box}
 /*
@@ -165,18 +150,22 @@ const CSS = `
 thead{display:table-row-group}
 html,body{height:auto}
 /*
- * The screen column and the printed column are the SAME width, to the pixel.
- * The page height is measured from this on-screen layout and applied to the
- * printed page, so any difference between the two — a wider column wrapping
- * fewer lines, say — shows up as a receipt cut short or a tail of blank
- * paper.
+ * The screen column and the printed column are the SAME width, to the pixel,
+ * because the frame is laid out at the page width and the body is border-box
+ * at 100% of it. The page height is measured from that on-screen layout and
+ * applied to the printed page, so any difference between the two — a wider
+ * column wrapping fewer lines, say — shows up as a receipt cut short or a
+ * tail of blank paper.
  *
- * The body FILLS the page — width 100%, no max-width, no centring, no
- * padding — so the text uses the whole roll rather than sitting in a column
- * with white down both sides. The page is already the printable area; an
- * inset here would just be white the operator asked to be rid of.
+ * D99 — the text is held off BOTH edges now, and that is the Edge fix. The
+ * declarations themselves live in billBodyGeometryCss, which the calibration
+ * strip shares: an instrument laid out differently from the document it
+ * measures is worse than no instrument at all. (No backticks in this comment:
+ * it sits inside a template literal.)
  */
-body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:100%;margin:0;padding:0 ${RECEIPT_RIGHT_INSET_MM}mm 0 0;color:#000;background:#fff}
+body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;${billBodyGeometryCss(
+    g,
+  )};color:#000;background:#fff}
 .c{text-align:center}
 .logo{display:block;margin:0 auto 6px;max-width:180px;max-height:110px;object-fit:contain}
 h1{font-size:15px;margin:0 0 2px;letter-spacing:.02em}
@@ -199,11 +188,15 @@ td{padding:2px 0;vertical-align:top}
 .ft{margin-top:12px;font-size:11px;white-space:pre-line}
 .copy{margin-top:4px;font-size:11px;font-weight:bold}
 /*
- * In print the body fills the page exactly — no max-width, and the side
- * padding in millimetres so it is the same physical margin whatever the
- * roll. The printer's own unprintable edge does the rest.
+ * D99 — the hidden print frame is 0px tall and its content overflows it. A
+ * browser that draws a scrollbar on that frame's initial containing block
+ * narrows the layout column by the scrollbar's width, which changes where
+ * every line wraps and therefore the measured page height. Nothing is ever
+ * visible in the frame, so there is nothing to scroll and nothing lost.
  */
+@media screen{html{overflow:hidden}}
 `;
+}
 
 /**
  * Escapes for BOTH text and attribute contexts.
@@ -251,6 +244,13 @@ function optional(
 export function renderThermalBill(input: ThermalBillInput): string {
   const p = input.profile;
   const name = p.companyName || input.fallbackName || '';
+
+  /*
+   * D99 — resolved ONCE, and used twice: for the stylesheet, and for the meta
+   * tags the printer reads back. Two calls would be two chances to disagree,
+   * which is the whole failure mode this replaces.
+   */
+  const g = resolveBillGeometry(p);
 
   /*
    * The logo is an <img>, and print windows race image decoding: an
@@ -325,7 +325,7 @@ export function renderThermalBill(input: ThermalBillInput): string {
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Bill ${esc(
     input.documentNumber,
-  )}</title><style>${CSS}</style></head>
+  )}</title>${billGeometryMetaTags(g)}<style>${css(g)}</style></head>
 <body>
 <div class="c">
 ${logo}
