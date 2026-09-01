@@ -200,6 +200,12 @@ const NAV_CACHE: Record<BusinessType, NavGroup[]> = {
   BAKERY: boundGroups(domainFor('BAKERY').navigation),
   HOTEL: boundGroups(domainFor('HOTEL').navigation),
   GENERAL: boundGroups(domainFor('GENERAL').navigation),
+  // D99. Shares RETAIL_NAVIGATION with HARDWARE, so `boundGroups` returns the
+  // SAME object from its identity cache — the two rails stay one list, and
+  // `ALL_NAV_ITEMS` still counts each destination once. The /quickbooks entry in
+  // that list is gated on the QUICKBOOKS module, which the retail descriptor does
+  // not enable, so it never renders here.
+  RETAIL: boundGroups(domainFor('RETAIL').navigation),
 };
 
 /**

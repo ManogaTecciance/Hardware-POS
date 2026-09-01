@@ -131,17 +131,33 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
 
   it('an unregistered business type renders the empty rail, never the retail one (D56/D57)', () => {
     /*
-     * TILE_SHOP and RETAIL were removed from the enum (D57), and the registry
-     * has no fallback (D56) — the `?? RETAIL_NAV` this replaced is exactly
-     * the mechanism that handed HOTEL the wrong screens. A stale value from
-     * an old token or a mis-wired caller gets a visibly empty rail, not a
-     * plausibly wrong retail one.
+     * TILE_SHOP was removed from the enum (D57) and the registry has no
+     * fallback (D56) — the `?? RETAIL_NAV` this replaced is exactly the
+     * mechanism that handed HOTEL the wrong screens. A stale value from an old
+     * token or a mis-wired caller gets a visibly empty rail, not a plausibly
+     * wrong retail one.
+     *
+     * `RETAIL` was a second probe here until D99 brought the template back. It
+     * is registered now, so asserting it renders nothing would assert the
+     * opposite of the truth. `GHOST_TYPE` replaces it — a value that cannot
+     * ever be registered, which is what the probe always meant.
      */
     expect(nav('TILE_SHOP' as never, LEGACY_MODULES)).toEqual([]);
-    expect(nav('RETAIL' as never, LEGACY_MODULES)).toEqual([]);
+    expect(nav('GHOST_TYPE' as never, LEGACY_MODULES)).toEqual([]);
     // Positive counterpart, so the two negatives cannot pass by the resolver
     // returning [] for everything.
     expect(labels(nav('HARDWARE', LEGACY_MODULES)).length).toBeGreaterThan(0);
+  });
+
+  it('D99 — RETAIL is registered, and gets the retail rail', () => {
+    // The counterpart of the probe retired above: the value that used to prove
+    // "unregistered renders nothing" must now prove the opposite, or the change
+    // above would have quietly weakened the suite by one assertion.
+    const retail = labels(nav('RETAIL', LEGACY_MODULES));
+
+    expect(retail.length).toBeGreaterThan(0);
+    // Same rail as HARDWARE — RETAIL_NAVIGATION is shared, not forked (D99).
+    expect(retail).toEqual(labels(nav('HARDWARE', LEGACY_MODULES)));
   });
 
   it('marks nothing as upcoming — every retail destination is built', () => {

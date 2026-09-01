@@ -15,6 +15,7 @@ import { FOOD_SERVICE_DOMAIN } from './food-service.domain.js';
 import { GENERAL_DOMAIN } from './general.domain.js';
 import { HARDWARE_DOMAIN } from './hardware.domain.js';
 import { HOTEL_DOMAIN } from './hotel.domain.js';
+import { RETAIL_DOMAIN } from './retail.domain.js';
 
 export const DOMAIN_REGISTRY: Record<BusinessType, DomainDescriptor> = {
   HARDWARE: HARDWARE_DOMAIN,
@@ -23,6 +24,9 @@ export const DOMAIN_REGISTRY: Record<BusinessType, DomainDescriptor> = {
   BAKERY: FOOD_SERVICE_DOMAIN,
   HOTEL: HOTEL_DOMAIN,
   GENERAL: GENERAL_DOMAIN,
+  // D99. The registry is total, so adding `RETAIL` to `BusinessType` without
+  // this line is a COMPILE ERROR — which is why 2.1 and 2.2 land together.
+  RETAIL: RETAIL_DOMAIN,
 };
 
 export function domainFor(businessType: BusinessType): DomainDescriptor {

@@ -44,15 +44,29 @@ describe('shared vocabulary mirrors the persisted enums, both ways', () => {
     expect(MODULE_KEY_VALUES).not.toContain('PAYMENTS');
   });
 
-  it('D57: the removed business types are gone from BOTH sides', () => {
+  it('D57: TILE_SHOP is gone from BOTH sides', () => {
     // The consolidation is only done when neither side can express the old
-    // values — one side alone would reintroduce the drift this spec ends.
-    for (const removed of ['TILE_SHOP', 'RETAIL']) {
-      expect(Object.values(BusinessType)).not.toContain(removed);
-      expect(BUSINESS_TYPE_VALUES).not.toContain(removed);
-    }
+    // value — one side alone would reintroduce the drift this spec ends.
+    //
+    // `RETAIL` used to be asserted here too. **D99 supersedes D57 on that value
+    // only**: a clothing retailer is now in scope, so the template returned and
+    // the value with it. The TILE_SHOP finding is untouched — it was about an
+    // entity (the pilot tile shop really is a HARDWARE workspace), not about
+    // whether a retail template should exist.
+    expect(Object.values(BusinessType)).not.toContain('TILE_SHOP');
+    expect(BUSINESS_TYPE_VALUES).not.toContain('TILE_SHOP');
+
     // POSITIVE CONTROL: the check can fail — a value that IS present is found.
     expect(Object.values(BusinessType)).toContain('HARDWARE');
     expect(BUSINESS_TYPE_VALUES).toContain('HARDWARE');
+  });
+
+  it('D99: RETAIL is back, on BOTH sides and in step', () => {
+    // The mirror is hand-maintained, so the two can drift. Asserting both is
+    // what makes adding a value to one of them a test failure rather than a
+    // runtime surprise — which is how the shared union's omission was caught
+    // when this migration landed.
+    expect(Object.values(BusinessType)).toContain('RETAIL');
+    expect(BUSINESS_TYPE_VALUES).toContain('RETAIL');
   });
 });

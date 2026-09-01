@@ -3753,6 +3753,75 @@ No migration. Read-model behaviour only.
 
 ---
 
+## 2026-09-01 — Applying the RETAIL enum migration
+
+### D99a — `RETAIL` is added in its own migration, and used in a later one
+
+**D99 already authorises this migration.** It says in terms that
+`ALTER TYPE … ADD VALUE` is additive and that the record "needs none of the
+destructive-migration exception D57 had to carve out". Nothing here re-authorises
+it. This entry records **how** it must be applied, because getting that wrong
+fails at apply time rather than at review.
+
+#### The constraint
+
+PostgreSQL is 16.14. Since PG 12, `ALTER TYPE … ADD VALUE` may run inside a
+transaction block — but **the new value cannot be used in the same transaction
+that adds it**. Prisma wraps each migration in a transaction, so a single
+migration that adds `RETAIL` and then references it (a seed, a backfill, a
+`DEFAULT`, a check constraint, a partial index predicate) fails with
+*"unsafe use of new value of enum type"*.
+
+The failure is not a data risk — the transaction rolls back — but it strands a
+migration in a failed state that every developer then has to resolve by hand.
+
+#### Decided
+
+**Two migrations, in order:**
+
+1. **`add_retail_business_type`** — `ALTER TYPE "BusinessType" ADD VALUE 'RETAIL';`
+   and nothing else. No seed, no backfill, no constraint mentioning the value.
+2. **Anything that uses `RETAIL`** — a separate, later migration.
+
+**Written with `IF NOT EXISTS`**, following the closest precedent in this repo —
+the D44 variants migration (`20260812000000`), which uses
+`ALTER TYPE "StockMovementReason" ADD VALUE IF NOT EXISTS 'RECEIPT'`. The older
+auto-generated form (`20260709145818`, `PaymentMethod` → `'QR_PAYMENT'`) omits
+it. Both work; the explicit form is chosen because it is re-runnable against a
+database where the value already exists, which is the state a developer lands in
+after a partially-resolved migration.
+
+Verified on the project's own PostgreSQL 16.14 rather than assumed:
+
+```
+BEGIN; ALTER TYPE t ADD VALUE IF NOT EXISTS 'B'; INSERT INTO … VALUES ('B'); COMMIT;
+  ERROR:  unsafe use of new value "B" of enum type
+  HINT:   New enum values must be committed before they can be used.
+
+-- split across two transactions: succeeds
+-- re-running the ADD VALUE:  NOTICE: enum label "B" already exists, skipping
+```
+
+#### Ordering within the enum
+
+`RETAIL` is appended, not positioned with `BEFORE`/`AFTER`. Enum ordinal order is
+not a display order anywhere in this codebase — the console picker sorts by
+`DomainDescriptor.template.order` (D55), and `BUSINESS_TYPE_VALUES` is used for
+validation messages, not ranking. Appending keeps the migration a pure addition.
+
+#### What this does not do
+
+Adding the value **puts no card in the console picker** and creates no template.
+`WORKSPACE_TEMPLATES` filters `DOMAIN_REGISTRY` through the hand-maintained
+`OFFERED_TEMPLATE_KEYS` allowlist, and `DOMAIN_REGISTRY` is total over
+`BusinessType` — so the enum value without a descriptor is a **compile error**,
+by design (D56).
+
+Practical consequence: the migration and the descriptor land together or the
+build breaks. That is the intended pressure, not an obstacle to work around.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

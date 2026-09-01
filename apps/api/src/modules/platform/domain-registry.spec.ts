@@ -48,8 +48,11 @@ describe('the registry is total, and answers with complete descriptors', () => {
      */
     const loose = DOMAIN_REGISTRY as Record<string, DomainDescriptor | undefined>;
     expect(loose['TILE_SHOP']).toBeUndefined();
-    expect(loose['RETAIL']).toBeUndefined();
     expect(loose['SOMETHING_NEW']).toBeUndefined();
+    // `RETAIL` was a probe here until D99 brought the template back. It is now a
+    // registered value, so using it to prove "unknown answers undefined" would
+    // assert the opposite of the truth — the probe was retired, not the rule.
+    expect(loose['RETAIL']).toBeDefined();
     // POSITIVE CONTROL: a registered value is found.
     expect(loose['HARDWARE']).toBeDefined();
   });

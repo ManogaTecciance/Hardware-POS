@@ -1,0 +1,35 @@
+-- D99 / D99a — the Retail template returns.
+--
+-- D57 removed `TILE_SHOP` and `RETAIL` on 14 August, correctly: the enum was ten
+-- days old, the values carried zero rows, and there was no Retail customer.
+-- "A transition for ghosts protects nothing." What changed is the customer, not
+-- the reasoning — a clothing retailer is now in scope, with grocery behind it.
+-- `TILE_SHOP` stays removed; the pilot tenant really is a HARDWARE workspace.
+--
+-- ── Why this migration does nothing else ──────────────────────────────────────
+--
+-- PostgreSQL refuses to USE a new enum label in the transaction that adds it,
+-- and Prisma wraps every migration in one. A single migration that added
+-- 'RETAIL' and then referenced it — a seed, a backfill, a DEFAULT, a check
+-- constraint — would fail at apply time with:
+--
+--   ERROR:  unsafe use of new value "RETAIL" of enum type "BusinessType"
+--   HINT:   New enum values must be committed before they can be used.
+--
+-- Verified on this project's PostgreSQL 16.14, not assumed. The transaction
+-- rolls back so no data is at risk, but it strands a migration in a failed
+-- state that every developer then resolves by hand. Anything that uses the
+-- value belongs in a later migration (D99a).
+--
+-- `IF NOT EXISTS` follows the D44 variants migration (20260812000000), which
+-- writes `ADD VALUE IF NOT EXISTS 'RECEIPT'`. It makes the statement re-runnable
+-- against a database where the label already exists — the state a developer
+-- lands in after resolving a partially-applied migration by hand.
+--
+-- Appended, not placed with BEFORE/AFTER: enum ordinal order is not a display
+-- order anywhere in this codebase. The console picker sorts by
+-- `DomainDescriptor.template.order` (D55) and `BUSINESS_TYPE_VALUES` is used for
+-- validation messages, not ranking.
+
+-- AlterEnum
+ALTER TYPE "BusinessType" ADD VALUE IF NOT EXISTS 'RETAIL';

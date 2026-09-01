@@ -232,6 +232,11 @@ enum BusinessType {
   /// workspaces are distinguishable in data before they diverge in behaviour.
   HOTEL
   GENERAL
+  /// D99. Clothing first, grocery behind it. LOCAL inventory, no accounting
+  /// provider — the opposite posture to HARDWARE, which is QuickBooks-backed.
+  /// Appended rather than positioned: `ALTER TYPE … ADD VALUE` appends, and
+  /// keeping the schema in the database's own order avoids a phantom diff.
+  RETAIL
 }
 
 /// Where stock lives and who is authoritative for it.

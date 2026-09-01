@@ -27,6 +27,16 @@
  * D57: `TILE_SHOP` and `RETAIL` are gone. The pilot tile shop *is* a
  * hardware-template business (PO decision, 2026-08-14), and `RETAIL` was a
  * speculative value nothing ever used. One value per workspace template.
+ *
+ * **D99 supersedes D57 on `RETAIL` only.** A clothing retailer is now in scope,
+ * so the value returns — appended, matching the order
+ * `ALTER TYPE … ADD VALUE` produces in the database. `TILE_SHOP` stays gone;
+ * that finding was about an entity, not a template.
+ *
+ * This list is a hand-maintained mirror of the Prisma enum, not a derivation of
+ * it — so a value added to `schema.prisma` must be added here too. The compiler
+ * catches the omission the moment a descriptor references the new value, which
+ * is how this one was caught.
  */
 export const BUSINESS_TYPE_VALUES = [
   'HARDWARE',
@@ -35,6 +45,7 @@ export const BUSINESS_TYPE_VALUES = [
   'BAKERY',
   'HOTEL',
   'GENERAL',
+  'RETAIL',
 ] as const;
 export type BusinessType = (typeof BUSINESS_TYPE_VALUES)[number];
 
