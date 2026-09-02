@@ -11,7 +11,7 @@ import { computeLine, linePrice } from './cart';
 import type { CompletedSale } from './sales';
 import { getCachedDocumentProfile, type DocumentProfile } from './document-template-service';
 import { formatMoney } from './utils';
-import { saleLineLabel } from '@hardware-pos/shared';
+import { saleLineLabel, taxRateLabel } from '@hardware-pos/shared';
 
 export interface ReceiptContext {
   currency: string;
@@ -21,6 +21,8 @@ export interface ReceiptContext {
   totalDiscount: number;
   orderDiscount: number;
   taxAmount: number;
+  /** D101 (3.12) — per-rate rows, empty when a single rate covers the sale. */
+  taxBreakdown?: { ratePercent: number; taxAmount: number }[];
   storeName?: string;
 }
 
@@ -59,6 +61,12 @@ table{width:100%;border-collapse:collapse;font-size:12px}td{padding:3px 0;vertic
 <div class="row"><span>Subtotal</span><span>${formatMoney(ctx.subtotal, ctx.currency)}</span></div>
 <div class="row"><span>Product discount</span><span>-${formatMoney(ctx.totalDiscount, ctx.currency)}</span></div>
 ${ctx.orderDiscount > 0 ? `<div class="row"><span>Order discount</span><span>-${formatMoney(ctx.orderDiscount, ctx.currency)}</span></div>` : ''}
+${(ctx.taxBreakdown ?? [])
+  .map(
+    (t) =>
+      `<div class="row"><span>Tax @ ${esc(taxRateLabel(t.ratePercent))}</span><span>${formatMoney(t.taxAmount, ctx.currency)}</span></div>`,
+  )
+  .join('')}
 <div class="row"><span>Tax</span><span>${formatMoney(ctx.taxAmount, ctx.currency)}</span></div>
 <div class="row g"><span>Total</span><span>${formatMoney(sale.total, ctx.currency)}</span></div>
 <div class="row"><span>Paid</span><span>${formatMoney(sale.paidAmount, ctx.currency)}</span></div>

@@ -7,6 +7,7 @@ import { resolveImageUrl } from '@/lib/products-api';
 import type { SaleDetail } from '@/lib/sales';
 import { formatMoney } from '@/lib/utils';
 import { saleLineLabel } from '@hardware-pos/shared';
+import { taxBreakdownForDocument, taxRateLabel, type TaxableLine } from '@hardware-pos/shared';
 
 /**
  * Native React A4 sale invoice / final bill. Sized 210mm and print-safe:
@@ -41,6 +42,19 @@ function formatDateTime(iso: string | null): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+  });
+}
+
+/**
+ * Each line's taxable net for the shared allocation (D101, 3.12) — line net
+ * less its proportional share of the order discount, matching the server.
+ */
+function taxableLinesOfSale(sale: SaleDetail): TaxableLine[] {
+  const discountedSubtotal = sale.subtotal - sale.totalDiscount;
+  return sale.items.map((it) => {
+    const share =
+      discountedSubtotal > 0 ? (sale.orderDiscountAmount * it.lineTotal) / discountedSubtotal : 0;
+    return { taxable: it.lineTotal - share, taxRatePercent: it.taxRatePercent };
   });
 }
 
@@ -172,6 +186,17 @@ export function SaleA4Document({
               <SumRow k="Subtotal" v={formatMoney(sale.subtotal)} />
               {sale.totalDiscount > 0 ? <SumRow k="Product discount" v={`- ${formatMoney(sale.totalDiscount)}`} muted /> : null}
               {sale.orderDiscountAmount > 0 ? <SumRow k="Order discount" v={`- ${formatMoney(sale.orderDiscountAmount)}`} muted /> : null}
+              {/* D101 (3.12) — the SHARED allocation. Empty for a single-rate
+                  sale, so this renders exactly what it rendered before. */}
+              {sale.taxAmount > 0
+                ? taxBreakdownForDocument(taxableLinesOfSale(sale), sale.taxAmount).map((t) => (
+                    <SumRow
+                      key={t.ratePercent}
+                      k={`Tax @ ${taxRateLabel(t.ratePercent)}`}
+                      v={formatMoney(t.taxAmount)}
+                    />
+                  ))
+                : null}
               {sale.taxAmount > 0 ? <SumRow k="Tax / VAT" v={formatMoney(sale.taxAmount)} /> : null}
               <SumRow k="Grand total" v={formatMoney(sale.total)} grand />
               <SumRow k="Paid" v={formatMoney(sale.paidAmount)} />

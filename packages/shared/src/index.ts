@@ -12,6 +12,7 @@ export * from './constants.js';
 export * from './money.js';
 export * from './returns.js';
 export * from './sale-line-label.js';
+export * from './tax-breakdown.js';
 export * from './quotations.js';
 export * from './types/index.js';
 export * from './domains/index.js';

@@ -11,7 +11,7 @@ import {
 import { ReceiptsRepository, SaleForReceipt } from './receipts.repository';
 import { CustomerReceiptData, renderCustomerReceipt } from './receipt-templates';
 import { QueryPrintJobsDto } from './dto/query-print-jobs.dto';
-import { saleLineLabel } from '@hardware-pos/shared';
+import { saleLineLabel, taxBreakdownForDocument } from '@hardware-pos/shared';
 
 export interface CustomerReceiptResult {
   receiptNumber: string;
@@ -140,6 +140,26 @@ export class ReceiptsService {
       totalDiscount: Number(sale.totalDiscount),
       orderDiscount: Number(sale.orderDiscountAmount),
       taxAmount: Number(sale.taxAmount),
+      // D101 (3.12) — the SHARED allocation, so the printed rows and a later
+      // refund divide the recorded tax the same way. Empty for a single-rate
+      // sale, which is every tenant today.
+      taxBreakdown: taxBreakdownForDocument(
+        (() => {
+          const discountedSubtotal = Number(sale.subtotal) - Number(sale.totalDiscount);
+          return sale.items.map((it) => {
+            const lineTotal = Number(it.lineTotal);
+            const share =
+              discountedSubtotal > 0
+                ? (Number(sale.orderDiscountAmount) * lineTotal) / discountedSubtotal
+                : 0;
+            return {
+              taxable: lineTotal - share,
+              taxRatePercent: it.taxRatePercent === null ? null : Number(it.taxRatePercent),
+            };
+          });
+        })(),
+        Number(sale.taxAmount),
+      ),
       total: Number(sale.total),
       paidAmount: Number(sale.paidAmount),
       balanceAmount: Number(sale.balanceAmount),

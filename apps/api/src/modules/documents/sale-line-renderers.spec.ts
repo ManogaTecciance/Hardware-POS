@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { saleLineLabel } from '@hardware-pos/shared';
+import { saleLineLabel, taxBreakdownForDocument, taxRateLabel } from '@hardware-pos/shared';
 
 import { referencesIdentifier, stripComments } from '../providers/testkit/source-analysis';
 
@@ -90,6 +90,21 @@ describe('every sale-line renderer uses the shared formatter', () => {
     expect(referencesIdentifier(source, 'saleLineLabel')).toBe(true);
   });
 
+  it.each(SALE_LINE_RENDERERS)('$file also uses the shared tax breakdown (3.12)', ({ file }) => {
+    // Same enumeration, second shared rule. `SaleItem.taxAmount` is always 0, so
+    // a breakdown cannot be summed from lines — it ALLOCATES the recorded total,
+    // and two ways to divide one total is two chances to disagree.
+    //
+    // `receipts.service` computes the rows and its TEMPLATE prints them, so
+    // either identifier counts for that file.
+    const source = stripComments(sourceOf(file));
+
+    expect(
+      referencesIdentifier(source, 'taxBreakdownForDocument') ||
+        referencesIdentifier(source, 'taxRateLabel'),
+    ).toBe(true);
+  });
+
   it('names all four renderers — a fifth added blind is the failure mode', () => {
     // An exact set rather than a count (D30). If a renderer is added and listed,
     // this fails and someone has to think; if added and NOT listed, the reviewer
@@ -171,5 +186,98 @@ describe('the formatter itself', () => {
     saleLineLabel('Cotton T-Shirt', stored);
 
     expect(stored).toBe('M / Navy');
+  });
+});
+
+/**
+ * D101 (3.12) — a single-rate document renders exactly what it rendered before.
+ *
+ * The zero-change guarantee for hardware and restaurant, asserted on the shared
+ * allocation itself rather than on four renderers: every one of them takes the
+ * "no rows" path for the same reason, so proving the allocation returns nothing
+ * proves all four are byte-identical.
+ */
+describe('the breakdown is silent unless it adds information', () => {
+  const line = (taxable: number, rate: number | null) => ({ taxable, taxRatePercent: rate });
+
+  it('returns NOTHING when every line shares one rate', () => {
+    // Every tenant today. A row repeating the single total already printed adds
+    // a line and no information.
+    expect(taxBreakdownForDocument([line(1000, 18), line(500, 18)], 270)).toEqual([]);
+  });
+
+  it('returns nothing for a RESTAURANT sale, which has no lines at all', () => {
+    // `closeSession` writes totals only; the lines live on the session's orders
+    // (billing.service, D51). Structurally unreachable, not merely matching.
+    expect(taxBreakdownForDocument([], 360)).toEqual([]);
+  });
+
+  it('returns nothing for a sale predating 3.8', () => {
+    // One missing rate makes the whole weight unusable, which is correct: those
+    // documents print what they always printed.
+    expect(taxBreakdownForDocument([line(1000, null), line(500, null)], 270)).toEqual([]);
+    // Even a partially-snapshotted sale, which 3.9 makes impossible but a
+    // hand-edited row could produce.
+    expect(taxBreakdownForDocument([line(1000, 18), line(500, null)], 270)).toEqual([]);
+  });
+
+  it('returns nothing when a single rate is zero', () => {
+    // A tenant configured at 0%: one rate, nothing to break down.
+    expect(taxBreakdownForDocument([line(1000, 0), line(500, 0)], 0)).toEqual([]);
+  });
+});
+
+describe('the breakdown when rates differ', () => {
+  const line = (taxable: number, rate: number | null) => ({ taxable, taxRatePercent: rate });
+
+  it('splits by rate and sums EXACTLY to the recorded total', () => {
+    const rows = taxBreakdownForDocument([line(1000, 18), line(250.5, 0)], 180);
+
+    expect(rows).toEqual([
+      { ratePercent: 18, taxable: 1000, taxAmount: 180 },
+      { ratePercent: 0, taxable: 250.5, taxAmount: 0 },
+    ]);
+    expect(rows.reduce((a, r) => a + r.taxAmount, 0)).toBe(180);
+  });
+
+  it('SHOWS the zero-rated row rather than hiding it', () => {
+    // Proving an item was zero-rated is often a legal requirement, and it is the
+    // line a shopper looks for when a price seems wrong (PO, 2026-09-02).
+    const rows = taxBreakdownForDocument([line(1000, 18), line(250.5, 0)], 180);
+
+    expect(rows.map((r) => r.ratePercent)).toContain(0);
+  });
+
+  it('orders highest rate first, deterministically', () => {
+    const rows = taxBreakdownForDocument([line(100, 0), line(100, 18), line(100, 8)], 26);
+
+    expect(rows.map((r) => r.ratePercent)).toEqual([18, 8, 0]);
+  });
+
+  it('absorbs rounding drift so the rows equal the printed total', () => {
+    // Each row rounds independently, so the sum can miss by a cent. Absorbing is
+    // legitimate here and was NOT for returns: a document shows the whole
+    // partition at once, so there is always a row to carry the remainder. A
+    // refund sees one line at a time and may be split across weeks.
+    for (const tax of [100.01, 33.33, 0.01, 999.99]) {
+      const rows = taxBreakdownForDocument([line(333.33, 15), line(333.33, 7.5), line(1, 0)], tax);
+      const summed = Math.round(rows.reduce((a, r) => a + r.taxAmount, 0) * 100) / 100;
+
+      expect(summed).toBe(tax);
+    }
+  });
+
+  it('never divides by zero when every rate is zero but tax was recorded', () => {
+    // Unreachable via 3.10, which charges nothing when all lines are exempt —
+    // but a guard that only holds while another module behaves is not a guard.
+    const rows = taxBreakdownForDocument([line(1000, 0), line(500, 0)], 50);
+
+    expect(rows).toEqual([]);
+  });
+
+  it('labels a rate the way a customer reads it', () => {
+    expect(taxRateLabel(18)).toBe('18%');
+    expect(taxRateLabel(7.5)).toBe('7.5%');
+    expect(taxRateLabel(0)).toBe('0%');
   });
 });

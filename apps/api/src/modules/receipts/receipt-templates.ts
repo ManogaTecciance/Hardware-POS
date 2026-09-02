@@ -3,6 +3,7 @@
  * inline print CSS and a screen-only Print button (browser print for v1).
  */
 import { formatCurrency } from '@hardware-pos/shared';
+import { taxRateLabel } from '@hardware-pos/shared';
 
 export interface ReceiptLine {
   name: string;
@@ -25,6 +26,12 @@ export interface CustomerReceiptData {
   totalDiscount: number;
   orderDiscount: number;
   taxAmount: number;
+  /**
+   * D101 (3.12) — per-rate rows, or empty when the document should print
+   * exactly what it printed before: a single-rate sale, a restaurant Sale (no
+   * lines) or a sale predating 3.8.
+   */
+  taxBreakdown?: { ratePercent: number; taxAmount: number }[];
   total: number;
   paidAmount: number;
   balanceAmount: number;
@@ -102,6 +109,12 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
       <div class="row"><span>Subtotal</span><span>${money(d.subtotal, d.currency)}</span></div>
       <div class="row"><span>Product discount</span><span>-${money(d.totalDiscount, d.currency)}</span></div>
       ${d.orderDiscount > 0 ? `<div class="row"><span>Order discount</span><span>-${money(d.orderDiscount, d.currency)}</span></div>` : ''}
+      ${(d.taxBreakdown ?? [])
+        .map(
+          (t) =>
+            `<div class="row muted"><span>Tax @ ${esc(taxRateLabel(t.ratePercent))}</span><span>${money(t.taxAmount, d.currency)}</span></div>`,
+        )
+        .join('')}
       <div class="row"><span>Tax</span><span>${money(d.taxAmount, d.currency)}</span></div>
       <div class="row grand"><span>Total</span><span>${money(d.total, d.currency)}</span></div>
       <div class="row"><span>Paid</span><span>${money(d.paidAmount, d.currency)}</span></div>

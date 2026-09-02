@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
-import { ITEM_CONDITION_LABELS, QUOTATION_STATUS_LABELS, QuotationStatusCode, RETURN_REASON_LABELS, formatCurrency, saleLineLabel, type ItemConditionCode, type ReturnReasonCode } from '@hardware-pos/shared';
+import { ITEM_CONDITION_LABELS, QUOTATION_STATUS_LABELS, QuotationStatusCode, RETURN_REASON_LABELS, formatCurrency, saleLineLabel, taxBreakdownForDocument, taxRateLabel, type ItemConditionCode, type ReturnReasonCode, type TaxableLine } from '@hardware-pos/shared';
 
 import { customerAddressLine } from '../../common/customer-display';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -94,6 +94,48 @@ const SAMPLE_ITEMS: { name: string; sku: string; unit: string; unitPrice: number
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
+/**
+ * The taxable net of each line, for the shared allocation (D101, 3.12).
+ *
+ * Line net less its proportional share of the order discount — the same
+ * quantity `computeReturnLine` derives, so the printed rows and a later refund
+ * divide the recorded tax identically.
+ */
+function taxableLinesOf(
+  items: readonly { lineTotal: Prisma.Decimal | number; taxRatePercent: Prisma.Decimal | number | null }[],
+  subtotal: number,
+  totalDiscount: number,
+  orderDiscountAmount: number,
+): TaxableLine[] {
+  const discountedSubtotal = subtotal - totalDiscount;
+  return items.map((it) => {
+    const lineTotal = Number(it.lineTotal);
+    const share =
+      discountedSubtotal > 0 ? (orderDiscountAmount * lineTotal) / discountedSubtotal : 0;
+    return {
+      taxable: lineTotal - share,
+      taxRatePercent: it.taxRatePercent === null ? null : Number(it.taxRatePercent),
+    };
+  });
+}
+
+/** Push the per-rate rows a document should print, if any (3.12). */
+function pushTaxBreakdown(
+  summary: A4SummaryLine[],
+  lines: TaxableLine[],
+  recordedTax: number,
+): void {
+  // Empty for a single-rate sale, a restaurant Sale (no lines) and any sale
+  // predating 3.8 — each of which then renders exactly what it rendered before.
+  for (const row of taxBreakdownForDocument(lines, recordedTax)) {
+    summary.push({
+      label: `Tax @ ${taxRateLabel(row.ratePercent)}`,
+      value: formatCurrency(row.taxAmount),
+      muted: true,
+    });
+  }
+}
+
 @Injectable()
 export class DocumentsService {
   constructor(
@@ -106,6 +148,7 @@ export class DocumentsService {
   get pdfAvailable(): boolean {
     return this.pdf.available;
   }
+
 
   // ── Quotation A4 ─────────────────────────────────────────────
 
@@ -220,7 +263,19 @@ export class DocumentsService {
       summary.push({ label: 'Product discounts', value: `- ${formatCurrency(num(sale.totalDiscount))}`, muted: true });
     if (num(sale.orderDiscountAmount) > 0)
       summary.push({ label: 'Order discount', value: `- ${formatCurrency(num(sale.orderDiscountAmount))}`, muted: true });
-    if (num(sale.taxAmount) > 0) summary.push({ label: 'Tax / VAT', value: formatCurrency(num(sale.taxAmount)) });
+    if (num(sale.taxAmount) > 0) {
+      pushTaxBreakdown(
+        summary,
+        taxableLinesOf(
+          sale.items,
+          num(sale.subtotal),
+          num(sale.totalDiscount),
+          num(sale.orderDiscountAmount),
+        ),
+        num(sale.taxAmount),
+      );
+      summary.push({ label: 'Tax / VAT', value: formatCurrency(num(sale.taxAmount)) });
+    }
     summary.push({ label: 'Grand total', value: formatCurrency(num(sale.total)), strong: true });
     summary.push({ label: 'Paid', value: formatCurrency(paid) });
     if (balance > 0) summary.push({ label: 'Balance due', value: formatCurrency(balance) });
@@ -316,8 +371,25 @@ export class DocumentsService {
       summary.push({ label: 'Product discount reversed', value: `- ${formatCurrency(num(ret.productDiscountAdjustment))}`, muted: true });
     if (num(ret.orderDiscountAdjustment) > 0)
       summary.push({ label: 'Order discount reversed', value: `- ${formatCurrency(num(ret.orderDiscountAdjustment))}`, muted: true });
-    if (num(ret.taxAdjustment) > 0)
+    if (num(ret.taxAdjustment) > 0) {
+      // 3.12 — a credit note shows WHICH rates were reversed, for the same
+      // reason the receipt shows which were charged. `ReturnItem.taxRatePercent`
+      // exists from 3.11, so the return groups exactly as the sale did.
+      pushTaxBreakdown(
+        summary,
+        taxableLinesOf(
+          ret.items.map((it) => ({
+            lineTotal: num(it.originalLineSubtotal) - num(it.productDiscountAdjustment),
+            taxRatePercent: it.taxRatePercent,
+          })),
+          num(ret.subtotal),
+          num(ret.productDiscountAdjustment),
+          num(ret.orderDiscountAdjustment),
+        ),
+        num(ret.taxAdjustment),
+      );
       summary.push({ label: 'Tax reversed', value: formatCurrency(num(ret.taxAdjustment)) });
+    }
     summary.push({ label: 'Total refund', value: formatCurrency(num(ret.refundTotal)), strong: true });
     if (ret.refundMethod) summary.push({ label: 'Refund method', value: ret.refundMethod });
     summary.push({ label: 'Refund status', value: ret.refundStatus });

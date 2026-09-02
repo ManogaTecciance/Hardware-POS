@@ -205,6 +205,12 @@ export interface SaleDetailItem {
    * site has to say which it is.
    */
   variantName: string | null;
+  /**
+   * D101 (3.12) — the tax rate frozen onto this line. Null for a sale written
+   * before 3.8; `0` is a real rate (zero-rated or exempt) and means something
+   * different.
+   */
+  taxRatePercent: number | null;
   sku: string | null;
   unitPrice: number;
   quantity: number;
@@ -297,6 +303,8 @@ interface ApiSaleDetail {
     productName: string;
     /** D44 snapshot; absent on responses predating variants. */
     variantNameSnapshot?: string | null;
+    /** D101 snapshot; absent on responses predating per-line tax. */
+    taxRatePercent?: string | number | null;
     sku: string | null;
     unitPrice: string | number;
     quantity: string | number;
@@ -411,6 +419,7 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       // server has always returned this; the client was dropping it, so a
       // returns clerk could not see which size a past sale was for.
       variantName: it.variantNameSnapshot ?? null,
+      taxRatePercent: it.taxRatePercent != null ? Number(it.taxRatePercent) : null,
       sku: it.sku,
       unitPrice: Number(it.unitPrice),
       quantity: Number(it.quantity),

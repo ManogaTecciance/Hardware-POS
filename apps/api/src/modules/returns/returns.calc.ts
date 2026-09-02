@@ -14,6 +14,8 @@
  * share is re-derived here from the sale-level snapshot. Pure functions only —
  * unit-tested in returns.calc.spec.ts.
  */
+import { taxWeight } from '@hardware-pos/shared';
+
 import { round2, sum2 } from '../../common/money';
 
 /** Sale-level figures needed to allocate order discount and tax to a line. */
@@ -142,7 +144,10 @@ export function computeReturnLine(
   let taxAdjustment = 0;
   if (sale.taxAmount > 0) {
     if (hasSnapshot) {
-      const weight = returnLineTaxable * line.taxRatePercent!;
+      // 3.12 — the SHARED weight, so the refund and the printed breakdown divide
+      // the same total the same way. Two expressions for one division is two
+      // chances to disagree.
+      const weight = taxWeight(returnLineTaxable, line.taxRatePercent!);
       taxAdjustment =
         sale.taxWeightTotal! > 0 ? round2((sale.taxAmount * weight) / sale.taxWeightTotal!) : 0;
     } else if (saleTaxable > 0) {
