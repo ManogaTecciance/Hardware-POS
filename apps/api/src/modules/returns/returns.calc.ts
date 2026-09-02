@@ -26,6 +26,14 @@ export interface OriginalSaleSnapshot {
   orderDiscountAmount: number;
   /** Document-level tax amount on the sale. */
   taxAmount: number;
+  /**
+   * D101 (3.11) — Σ over EVERY sale line of `lineTaxable × taxRatePercent`.
+   *
+   * The denominator that allocates the sale's recorded tax across its lines by
+   * how much tax each one actually attracted. Null for a sale written before
+   * 3.8, where no line carries a rate and the proportional fallback applies.
+   */
+  taxWeightTotal: number | null;
 }
 
 /** The original sale line being (partially) returned. */
@@ -36,6 +44,12 @@ export interface OriginalLineSnapshot {
   discountAmount: number;
   /** Net of the product discount: unitPrice*qty - discountAmount. */
   lineTotal: number;
+  /**
+   * D101 (3.11) — the rate this line was charged at, frozen at sale time.
+   * Null for a line written before 3.8. `0` is a real rate (zero-rated or an
+   * exempt product) and is not the same fact.
+   */
+  taxRatePercent: number | null;
 }
 
 export interface ComputedReturnLine {
@@ -92,16 +106,52 @@ export function computeReturnLine(
   const orderDiscountAdjustment =
     sale.orderDiscountAmount > 0 ? round2(orderDiscountShareFull * frac) : 0;
 
-  // 4. Proportional tax. Tax was a flat rate on the sale's taxable base
-  //    (discountedSubtotal - orderDiscount); allocate the sale's recorded tax by
-  //    this line's taxable contribution for the returned portion.
+  /*
+   * 4. Tax, allocated from the sale's RECORDED total rather than recomputed.
+   *
+   * D101 (3.11) weights each line by the tax it actually attracted:
+   *
+   *     taxAdjustment = saleTax × (lineTaxable × rate) / Σ(lineTaxable × rate)
+   *
+   * Four properties fall out of that shape rather than being engineered:
+   *
+   *   • UNIFORM RATES — `rate` cancels top and bottom, leaving exactly the
+   *     formula this replaced. Every pre-existing assertion holds unchanged.
+   *   • AN EXEMPT LINE contributes 0 to the numerator, so it refunds 0 — where
+   *     the old denominator (`discountedSubtotal - orderDiscount`, which counts
+   *     exempt lines) refunded tax that was never charged.
+   *   • A TAXABLE LINE in a mixed basket gets the true base as its denominator,
+   *     so it refunds everything it paid instead of a diluted share.
+   *   • RECONCILIATION — the shares sum to 1 by construction, so Σ refunds
+   *     equals the sale's tax exactly. That holds for a full return AND for any
+   *     sequence of partial ones, which is why no line has to "absorb" a
+   *     rounding remainder and why split returns need no bookkeeping.
+   *
+   * Allocation, not recomputation: a return can never refund a different amount
+   * of tax than the sale charged.
+   */
   const saleTaxable = round2(discountedSubtotal - sale.orderDiscountAmount);
   const lineTaxableFull = line.lineTotal - orderDiscountShareFull;
   const returnLineTaxable = lineTaxableFull * frac;
-  const taxAdjustment =
-    sale.taxAmount > 0 && saleTaxable > 0
-      ? round2((sale.taxAmount * returnLineTaxable) / saleTaxable)
-      : 0;
+
+  // A sale is never mixed: 3.9 writes a rate on every line, so a sale is wholly
+  // pre-3.8 or wholly post. Both halves are checked because either being absent
+  // means the same thing — this sale predates the snapshot.
+  const hasSnapshot = line.taxRatePercent !== null && sale.taxWeightTotal !== null;
+
+  let taxAdjustment = 0;
+  if (sale.taxAmount > 0) {
+    if (hasSnapshot) {
+      const weight = returnLineTaxable * line.taxRatePercent!;
+      taxAdjustment =
+        sale.taxWeightTotal! > 0 ? round2((sale.taxAmount * weight) / sale.taxWeightTotal!) : 0;
+    } else if (saleTaxable > 0) {
+      // Pre-3.8 sale: no rate was recorded, so the only available weight is the
+      // taxable amount itself. This is the original expression, unchanged, and
+      // it is what keeps historical refunds byte-identical.
+      taxAdjustment = round2((sale.taxAmount * returnLineTaxable) / saleTaxable);
+    }
+  }
 
   // 5. Final refundable line amount.
   const refundableAmount = round2(lineNet - orderDiscountAdjustment + taxAdjustment);

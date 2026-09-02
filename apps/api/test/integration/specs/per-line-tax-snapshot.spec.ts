@@ -9,12 +9,17 @@ import { PlatformModule } from '../../../src/modules/platform/platform.module';
 import { ProvidersModule } from '../../../src/modules/providers/providers.module';
 import { SalesModule } from '../../../src/modules/sales/sales.module';
 import { SalesService } from '../../../src/modules/sales/sales.service';
+import { ReturnsModule } from '../../../src/modules/returns/returns.module';
+import { ReturnsService } from '../../../src/modules/returns/returns.service';
+import { CreateReturnDto } from '../../../src/modules/returns/dto/create-return.dto';
+import { ApproveReturnDto } from '../../../src/modules/returns/dto/approve-return.dto';
+import { dto } from '../dto';
 import { SettingsService } from '../../../src/modules/settings/settings.service';
 import type { AuthenticatedUser } from '../../../src/modules/auth/auth.types';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
 import { resetDatabase } from '../db-reset';
-import { seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
+import { MANAGER_PIN, seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 
 /**
  * D101 (3.9) — the rate a line was charged at, frozen at sale time.
@@ -38,6 +43,7 @@ import { seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let sales: SalesService;
+let returns: ReturnsService;
 let settings: SettingsService;
 let tenant: SeededTenant;
 let owner: AuthenticatedUser;
@@ -55,11 +61,13 @@ beforeAll(async () => {
       PlatformModule,
       ProvidersModule,
       SalesModule,
+      ReturnsModule,
     ],
   }).compile();
   testModule.useLogger(false);
   await testModule.init();
   sales = testModule.get(SalesService);
+  returns = testModule.get(ReturnsService);
   settings = testModule.get(SettingsService);
 });
 
@@ -341,5 +349,157 @@ describe('restaurant tenants are structurally unaffected', () => {
     // the assertion above cannot pass by SaleItem being broken everywhere.
     const retailSale = await sell(1, UNIT_PRICE);
     expect(await prisma.saleItem.count({ where: { saleId: retailSale.id } })).toBe(1);
+  });
+});
+
+/**
+ * D101 (3.11) — a refund allocates the tax the sale actually recorded.
+ */
+async function refund(
+  saleId: string,
+  items: { saleItemId: string; qty: number }[],
+  refundTotal?: number,
+) {
+  // A full-sale return needs a manager (returns.service, `isFullReturn`). That
+  // is a real rule, obeyed here rather than bypassed, so these tests walk the
+  // same path a clerk does. `refundTotal` is supplied only when approval is
+  // needed, because the token is bound to the amount.
+  let approvalToken: string | undefined;
+  if (refundTotal !== undefined) {
+    const approval = await returns.approve(
+      tenant.tenantId,
+      dto(ApproveReturnDto, { managerPin: MANAGER_PIN, originalSaleId: saleId, refundTotal }),
+    );
+    if (!approval.approved || !approval.approvalToken) {
+      throw new Error(`Fixture approval refused: ${approval.reason ?? 'unknown'}`);
+    }
+    approvalToken = approval.approvalToken;
+  }
+
+  return returns.complete(
+    tenant.tenantId,
+    owner,
+    dto(CreateReturnDto, {
+      originalSaleId: saleId,
+      refundMethod: 'CASH',
+      ...(approvalToken ? { approvalToken } : {}),
+      items: items.map((i) => ({
+        saleItemId: i.saleItemId,
+        returnQuantity: i.qty,
+        returnReason: 'CHANGED_MIND',
+        itemCondition: 'GOOD',
+        stockDisposition: 'RETURN_TO_STOCK',
+      })),
+    }),
+    null,
+  );
+}
+
+describe('3.11 — returns refund the tax the line actually paid', () => {
+  it('a mixed basket refunds the taxable line in full and the exempt line nothing', async () => {
+    // The end-to-end shape of the whole phase. Before 3.11 the taxable line
+    // refunded 143.94 (180 x 1000/1250.50) and the exempt line refunded 36.06 —
+    // the shop keeping tax it charged, and paying back tax it never did.
+    await setTaxRate(18);
+    await prisma.product.update({ where: { id: tenant.productBId }, data: { taxable: false } });
+
+    const sale = await sales.complete(tenant.tenantId, owner, {
+      branchId: tenant.branchId,
+      registerId: tenant.registerId,
+      items: [
+        { productId: tenant.productAId, quantity: 1 },
+        { productId: tenant.productBId, quantity: 1 },
+      ],
+      payments: [{ method: 'CASH', amount: 1430.5 }],
+    });
+    expect(Number(sale.taxAmount)).toBe(180);
+
+    const lines = await prisma.saleItem.findMany({ where: { saleId: sale.id } });
+    const lineFor = (productId: string) => lines.find((l) => l.productId === productId)!;
+
+    const taxableReturn = await refund(
+      sale.id,
+      [{ saleItemId: lineFor(tenant.productAId).id, qty: 1 }],
+      1180,
+    );
+    expect(Number(taxableReturn.taxAdjustment)).toBe(180);
+
+    const exemptReturn = await refund(
+      sale.id,
+      [{ saleItemId: lineFor(tenant.productBId).id, qty: 1 }],
+      250.5,
+    );
+    expect(Number(exemptReturn.taxAdjustment)).toBe(0);
+
+    // And together they reconcile to what the sale charged.
+    expect(
+      Number(taxableReturn.taxAdjustment) + Number(exemptReturn.taxAdjustment),
+    ).toBe(Number(sale.taxAmount));
+  });
+
+  it('split returns reconcile across separate transactions', async () => {
+    // Two returns, days apart in practice. Neither is "full", so neither could
+    // know to absorb a remainder — allocation makes the question moot.
+    await setTaxRate(18);
+
+    const sale = await sell(4, 4720);
+    expect(Number(sale.taxAmount)).toBe(720);
+
+    const line = await lineOf(sale.id);
+    const first = await refund(sale.id, [{ saleItemId: line.id, qty: 1 }], 1180);
+    const second = await refund(sale.id, [{ saleItemId: line.id, qty: 3 }], 3540);
+
+    expect(Number(first.taxAdjustment)).toBe(180);
+    expect(Number(second.taxAdjustment)).toBe(540);
+    expect(Number(first.taxAdjustment) + Number(second.taxAdjustment)).toBe(720);
+  });
+
+  it('stores the reversed rate on the return line', async () => {
+    await setTaxRate(18);
+    const sale = await sell(1, 1180);
+    const line = await lineOf(sale.id);
+
+    const ret = await refund(sale.id, [{ saleItemId: line.id, qty: 1 }], 1180);
+    const returnLine = await prisma.returnItem.findFirstOrThrow({ where: { returnId: ret.id } });
+
+    expect(Number(returnLine.taxRatePercent)).toBe(18);
+  });
+
+  it('a rate change between sale and return does not alter the refund', async () => {
+    await setTaxRate(18);
+    const sale = await sell(1, 1180);
+    const line = await lineOf(sale.id);
+
+    await setTaxRate(25);
+
+    const ret = await refund(sale.id, [{ saleItemId: line.id, qty: 1 }], 1180);
+
+    // Allocated from the sale's RECORDED tax and the frozen rate, so today's
+    // configuration is irrelevant.
+    expect(Number(ret.taxAdjustment)).toBe(180);
+    expect(Number((await prisma.returnItem.findFirstOrThrow({ where: { returnId: ret.id } })).taxRatePercent)).toBe(18);
+  });
+
+  it('a PRE-3.8 sale falls back to proportional refunding, unchanged', async () => {
+    // The guarantee that protects live data. The rate columns are nulled to
+    // reproduce a sale written before 3.8 existed; the refund must be what that
+    // sale would always have received.
+    await setTaxRate(18);
+    const sale = await sell(4, 4720);
+    const line = await lineOf(sale.id);
+
+    await prisma.saleItem.updateMany({
+      where: { saleId: sale.id },
+      data: { taxRatePercent: null },
+    });
+
+    const ret = await refund(sale.id, [{ saleItemId: line.id, qty: 2 }]);
+
+    // 720 x (2000/4000) — the proportional formula, untouched.
+    expect(Number(ret.taxAdjustment)).toBe(360);
+    // And the return records that no rate was known, rather than inventing one.
+    expect(
+      (await prisma.returnItem.findFirstOrThrow({ where: { returnId: ret.id } })).taxRatePercent,
+    ).toBeNull();
   });
 });

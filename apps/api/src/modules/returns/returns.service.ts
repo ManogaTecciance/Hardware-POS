@@ -464,11 +464,41 @@ export class ReturnsService {
 
     // The recorded sale.taxAmount is the authoritative tax the customer paid; the
     // calc allocates that amount proportionally (it is 0 when tax was disabled).
+    /*
+     * D101 (3.11) — the weight that allocates the sale's recorded tax.
+     *
+     * Σ over EVERY sale line of `lineTaxable × rate`, where `lineTaxable` is the
+     * line net less its proportional share of the order discount — the same
+     * quantity `computeReturnLine` derives, so numerator and denominator are
+     * built the same way and the shares provably sum to 1.
+     *
+     * Computed over ALL lines, not just the ones being returned: a share must
+     * mean the same thing whether the customer brings back one item or every
+     * item, which is what makes a sequence of partial returns reconcile.
+     *
+     * Null when the sale predates 3.8 — one line without a rate makes the whole
+     * weight unusable, which is correct: those sales fall back wholesale to the
+     * proportional method they were refunded by before.
+     */
+    const discountedSubtotalAll = Number(sale.subtotal) - Number(sale.totalDiscount);
+    const anyLineMissingRate = sale.items.some((it) => it.taxRatePercent === null);
+    const taxWeightTotal = anyLineMissingRate
+      ? null
+      : sale.items.reduce((acc, it) => {
+          const lineTotal = Number(it.lineTotal);
+          const orderDiscountShare =
+            discountedSubtotalAll > 0
+              ? (Number(sale.orderDiscountAmount) * lineTotal) / discountedSubtotalAll
+              : 0;
+          return acc + (lineTotal - orderDiscountShare) * Number(it.taxRatePercent);
+        }, 0);
+
     const saleSnapshot = {
       subtotal: Number(sale.subtotal),
       totalDiscount: Number(sale.totalDiscount),
       orderDiscountAmount: Number(sale.orderDiscountAmount),
       taxAmount: Number(sale.taxAmount),
+      taxWeightTotal,
     };
 
     const previewItems: ReturnPreviewItem[] = [];
@@ -524,6 +554,8 @@ export class ReturnsService {
           purchasedQuantity: purchased,
           discountAmount: Number(si.discountAmount),
           lineTotal: Number(si.lineTotal),
+          // Null means this line predates 3.8 — the fallback signal.
+          taxRatePercent: si.taxRatePercent === null ? null : Number(si.taxRatePercent),
         },
         qty,
       );
@@ -560,6 +592,10 @@ export class ReturnsService {
         // rename since must not change what the return says came back.
         variantSkuSnapshot: si.variantSkuSnapshot,
         variantNameSnapshot: si.variantNameSnapshot,
+        // D101 (3.11) — the rate REVERSED, copied from the sale line for the
+        // same reason: a rate change between purchase and return must not alter
+        // the refund, and a credit note should be self-contained.
+        taxRatePercent: si.taxRatePercent === null ? null : Number(si.taxRatePercent),
         imageUrlSnapshot: null,
         originalUnitPrice: line.originalUnitPrice,
         purchasedQuantity: purchased,

@@ -169,6 +169,14 @@ export interface PersistReturnItem {
    */
   variantSkuSnapshot: string | null;
   variantNameSnapshot: string | null;
+  /**
+   * D101 (3.11) — the tax rate REVERSED, copied from the original SaleItem.
+   *
+   * Required-nullable rather than optional: null is a meaningful value here
+   * (the sale predates 3.8), so a construction site must say which it means
+   * rather than getting null by omission.
+   */
+  taxRatePercent: number | null;
   imageUrlSnapshot: string | null;
   originalUnitPrice: number;
   purchasedQuantity: number;
