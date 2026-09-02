@@ -79,6 +79,28 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  /*
+   * Leave NO global state behind.
+   *
+   * This is the only spec in the suite that configures a non-zero tax rate, and
+   * `beforeEach` above fixes the leak WITHIN this file. It does not fix the leak
+   * ACROSS files: the last test leaves its rate in `TenantSettings`, keyed by
+   * the deterministic fixture id `tile-tenant`, and every later suite that seeds
+   * a tile shop reuses that exact id.
+   *
+   * `SettingsService.onModuleInit` hydrates its cache from the database at boot,
+   * and a suite boots its app BEFORE its first `resetDatabase`. So a later suite
+   * would start holding this file's 18% for a tenant it is about to recreate at
+   * 0% — and `catalog-adoption`'s "42 — sale inventory adoption is unchanged"
+   * pays exactly 2,000 for two 1,000 products, with no headroom for 360 of tax.
+   * It fails as a credit sale needing a customer, nowhere near the real cause.
+   *
+   * Truncating here is stronger than resetting the rate to 0: it removes the row
+   * rather than trusting a later reader to interpret it. The leak also survives
+   * the jest PROCESS — a leftover row poisons the next run — which is why this
+   * belongs in `afterAll` and not only in `beforeEach`.
+   */
+  await resetDatabase(prisma);
   await testModule.close();
   await disconnectTestPrisma();
 });

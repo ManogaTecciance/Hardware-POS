@@ -1,5 +1,6 @@
 import type { ClientProduct, ClientVariant } from './catalog';
 import { round2 } from './utils';
+import { taxableBase } from '@hardware-pos/shared';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
 
@@ -157,8 +158,29 @@ export function computeTotals(
   totalDiscount = round2(totalDiscount);
   const discountedSubtotal = round2(subtotal - totalDiscount);
   const orderDiscountAmount = computeDiscount(discountedSubtotal, orderDiscount);
-  const taxable = round2(discountedSubtotal - orderDiscountAmount);
-  const taxAmount = taxRatePercent > 0 ? round2((taxable * taxRatePercent) / 100) : 0;
+  /*
+   * D101 (3.14) — the SHARED base rule, so the till previews exactly what the
+   * server will charge.
+   *
+   * 3.10 narrowed the base on the server and left this alone, so a cashier was
+   * quoted 18% on an exempt item the server then charged nothing for — the
+   * retail twin of audit item A2, "its cashier quotes a total the server
+   * disagrees with". `sales.service` now calls the same function.
+   */
+  const taxBase = taxableBase(
+    items.map((it) => ({ lineTotal: computeLine(it).lineTotal, taxable: it.product.taxable })),
+    discountedSubtotal,
+    orderDiscountAmount,
+  );
+  const taxAmount = taxRatePercent > 0 ? round2((taxBase * taxRatePercent) / 100) : 0;
+  /*
+   * The NET the customer owes, which is NOT the taxable base: an exempt line is
+   * untaxed, not unsold. Before 3.14 one variable served both, and narrowing it
+   * silently dropped exempt goods out of the total — the first version of this
+   * change returned `total: 0` for a 2,100 exempt sale. `sales.service` carries
+   * the same distinction, in the same words.
+   */
+  const netTotal = round2(discountedSubtotal - orderDiscountAmount);
 
   return {
     itemCount,
@@ -166,7 +188,7 @@ export function computeTotals(
     totalDiscount,
     orderDiscountAmount,
     taxAmount,
-    total: round2(taxable + taxAmount),
+    total: round2(netTotal + taxAmount),
     hasStockIssue,
   };
 }

@@ -38,6 +38,7 @@ function product(variants: ClientVariant[] = []): ClientProduct {
     quantityOnHand: 20,
     stockState: 'IN_STOCK',
     imageUrl: null,
+    taxable: true,
     variants,
   };
 }

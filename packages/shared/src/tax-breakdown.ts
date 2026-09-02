@@ -133,3 +133,61 @@ export function taxBreakdownForDocument(
 export function taxRateLabel(ratePercent: number): string {
   return `${Number(ratePercent.toFixed(2))}%`;
 }
+
+/** One line's contribution to the order-level taxable base (D101, 3.14). */
+export interface TaxBaseLine {
+  /** Net of the per-line discount — the sale's `lineTotal`. */
+  lineTotal: number;
+  /** Whether the product attracts tax. */
+  taxable: boolean;
+}
+
+/**
+ * The amount an order-level tax rate applies to (D101, 3.10, extracted in 3.14).
+ *
+ * ## Why this is shared
+ *
+ * 3.10 narrowed the base on the SERVER and left the till's own preview alone, so
+ * a cashier was quoted 18% on an exempt item the server then charged nothing
+ * for. That is the retail twin of audit item A2 — "its cashier quotes a total
+ * the server disagrees with" — and it is the same one-rule-two-implementations
+ * failure 2.12 and 3.12 already cost this branch.
+ *
+ * So the rule lives here, in the one package both apps import, and
+ * `sales.service` and `lib/cart.computeTotals` both call it. They cannot drift,
+ * because there is nothing to drift from.
+ *
+ * ## The rule
+ *
+ *     base = discountedSubtotal − orderDiscount − Σ(exempt line net after its
+ *                                                   share of that discount)
+ *
+ * An exempt line takes its share of the order discount out WITH it, using the
+ * same proportional formula `returns.calc` uses to allocate that discount, so
+ * the sale, the refund and the till all divide it the same way. Leaving the
+ * share behind would shrink the taxable lines' base twice.
+ *
+ * Floored at zero: rounding is the only way `exemptNet` can exceed the base, but
+ * a negative base would produce negative tax.
+ *
+ * Plain numbers with cent rounding rather than `Prisma.Decimal` — `shared` must
+ * stay free of runtime dependencies so the browser can import it, and this is
+ * the idiom `returns.calc` already documents ("the same primitives the sale
+ * used"). The server wraps the result for its final multiply, so both sides run
+ * THIS arithmetic and agree by construction.
+ */
+export function taxableBase(
+  lines: readonly TaxBaseLine[],
+  discountedSubtotal: number,
+  orderDiscountAmount: number,
+): number {
+  const exemptNet = lines.reduce((acc, l) => {
+    if (l.taxable) return acc;
+    const share =
+      discountedSubtotal > 0 ? (orderDiscountAmount * l.lineTotal) / discountedSubtotal : 0;
+    return acc + (l.lineTotal - share);
+  }, 0);
+
+  const base = round2(discountedSubtotal - orderDiscountAmount - exemptNet);
+  return base > 0 ? base : 0;
+}

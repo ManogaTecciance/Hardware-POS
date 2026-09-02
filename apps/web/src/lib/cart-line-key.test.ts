@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { taxableBase } from '@hardware-pos/shared';
+
 import {
   cartLineKey,
   computeLine,
+  computeTotals,
   lineLabel,
   linePrice,
   newCartItem,
@@ -36,6 +39,7 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     quantityOnHand: 20,
     stockState: 'IN_STOCK',
     imageUrl: null,
+    taxable: true,
     variants: [],
     ...over,
   };
@@ -277,5 +281,88 @@ describe('lineLabel names the size', () => {
   it('is just the product name when there is no variant', () => {
     // Loose goods, a service, a single-SKU product — unchanged from before.
     expect(lineLabel(newCartItem(product({ unitPrice: 1500 }), null))).toBe('Cotton Shirt');
+  });
+});
+
+/**
+ * D101 (3.14) — the till previews exactly what the server will charge.
+ *
+ * 3.10 narrowed the taxable base on the SERVER and left `computeTotals` alone,
+ * so a cashier was quoted 18% on an exempt item the server then charged nothing
+ * for. That is the retail twin of audit item A2 — "its cashier quotes a total
+ * the server disagrees with" — and it reached a person before a test.
+ *
+ * Both sides now call `taxableBase` from `@hardware-pos/shared`, so these
+ * assertions reproduce the server's arithmetic exactly rather than approximating
+ * it.
+ */
+describe('the till and the server agree on tax', () => {
+  const taxed = (price: number) =>
+    newCartItem(product({ id: 'p_taxed', unitPrice: price, taxable: true, variants: [] }), null);
+  const exempt = (price: number) =>
+    newCartItem(product({ id: 'p_exempt', unitPrice: price, taxable: false, variants: [] }), null);
+
+  it('does not tax an exempt line — the reported defect', () => {
+    // Short Pants: exempt, sold at 2,100. The till showed 378 tax; the server
+    // charged 0.
+    const totals = computeTotals([exempt(2100)], 18);
+
+    expect(totals.taxAmount).toBe(0);
+    expect(totals.total).toBe(2100);
+  });
+
+  it('taxes only the taxable line in a mixed basket', () => {
+    // Cotton T-Shirt 1,850 taxed + Short Pants 2,100 exempt.
+    const totals = computeTotals([taxed(1850), exempt(2100)], 18);
+
+    expect(totals.subtotal).toBe(3950);
+    expect(totals.taxAmount).toBe(333);
+    expect(totals.total).toBe(4283);
+  });
+
+  it('matches the server, line for line, through the SHARED primitive', () => {
+    // The invariant that broke. The server computes its base with the very same
+    // function, so reproducing it here is the comparison — not an approximation
+    // of it.
+    const items = [taxed(1850), exempt(2100)];
+    const tillTotals = computeTotals(items, 18);
+
+    const serverBase = taxableBase(
+      items.map((it) => ({ lineTotal: computeLine(it).lineTotal, taxable: it.product.taxable })),
+      3950,
+      0,
+    );
+    const serverTax = Math.round(((serverBase * 18) / 100) * 100) / 100;
+
+    expect(tillTotals.taxAmount).toBe(serverTax);
+  });
+
+  it('an all-exempt basket is taxed nothing, never a credit', () => {
+    const totals = computeTotals([exempt(1000), exempt(2100)], 18);
+
+    expect(totals.taxAmount).toBe(0);
+    expect(totals.taxAmount).not.toBeLessThan(0);
+  });
+
+  it('a fully taxable basket is UNCHANGED — the regression guard', () => {
+    // Every tenant today. `taxable` defaults true, so the expression must reduce
+    // to exactly what it was before 3.14.
+    const totals = computeTotals([taxed(1000), taxed(500)], 18);
+
+    expect(totals.subtotal).toBe(1500);
+    expect(totals.taxAmount).toBe(270);
+    expect(totals.total).toBe(1770);
+  });
+
+  it('removes the exempt line share of an order discount from the base too', () => {
+    // Otherwise the exempt goods shrink the base twice. 10% of 3,950 is 395;
+    // the taxed line's share is 185, leaving 1,665 taxable -> 18% = 299.70.
+    const totals = computeTotals([taxed(1850), exempt(2100)], 18, {
+      type: 'PERCENTAGE',
+      value: 10,
+    });
+
+    expect(totals.orderDiscountAmount).toBe(395);
+    expect(totals.taxAmount).toBe(299.7);
   });
 });

@@ -60,6 +60,14 @@ export interface ClientProduct {
    */
   stockState: StockState;
   imageUrl: string | null;
+  /**
+   * D101 (3.14) — whether the product attracts tax.
+   *
+   * The till needs it to preview the same total the server will charge. Absent
+   * on a response from an API predating the field, and `?? true` keeps that
+   * behaving as it always did rather than silently zero-rating.
+   */
+  taxable: boolean;
   /** D99 — empty for a single-SKU product; the sizes to choose from otherwise. */
   variants: ClientVariant[];
 }
@@ -106,6 +114,8 @@ interface ApiSellableItem {
   subcategory: { id: string; name: string } | null;
   imageUrl: string | null;
   hasVariants: boolean;
+  /** D101 (3.14); absent on responses predating the field. */
+  taxable?: boolean;
   variants?: {
     id: string;
     sku: string;
@@ -181,6 +191,7 @@ function normalizeApi(item: ApiSellableItem): ClientProduct {
     unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
     quantityOnHand: item.availableQuantity != null ? Number(item.availableQuantity) : 0,
     stockState: item.stockState ?? 'UNTRACKED',
+    taxable: item.taxable ?? true,
     imageUrl: item.imageUrl,
     variants: (item.variants ?? [])
       .filter((v) => v.isActive)

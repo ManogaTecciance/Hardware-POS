@@ -31,6 +31,7 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     quantityOnHand: 20,
     stockState: 'IN_STOCK',
     imageUrl: null,
+    taxable: true,
     variants: [],
     ...over,
   };

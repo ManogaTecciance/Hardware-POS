@@ -78,6 +78,14 @@ export interface SellableItem {
   category: { id: string; name: string } | null;
   subcategory: { id: string; name: string } | null;
   hasVariants: boolean;
+  /**
+   * D101 (3.14) — whether this product attracts tax.
+   *
+   * The till needs it to preview the same total the server will charge. 3.10
+   * narrowed the taxable base on the server only, so a cashier was quoted 18%
+   * on an exempt item the server then charged nothing for.
+   */
+  taxable: boolean;
   variants?: {
     id: string;
     sku: string;
@@ -365,6 +373,7 @@ export class SellableService {
         category: p.category ? { id: p.category.id, name: p.category.name } : null,
         subcategory: p.subcategory ? { id: p.subcategory.id, name: p.subcategory.name } : null,
         hasVariants: p.hasVariants,
+        taxable: p.taxable,
         promotions: p.promotionItems
           .map((pi) => validPromotionsById.get(pi.promotionId))
           .filter((v): v is NonNullable<typeof v> => Boolean(v)),
