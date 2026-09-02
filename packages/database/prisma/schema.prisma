@@ -768,6 +768,18 @@ model Product {
   /// columns; description goes here. Never read by pricing, tax, inventory
   /// or settlement — those read typed columns only. GIN-indexed so domain
   /// screens can filter on it.
+  /// D101 (3.8) — whether this product attracts tax at all.
+  ///
+  /// Defaults TRUE because that is already true of every product: there is no
+  /// per-product exemption anywhere today, tax is one rate on the whole bill,
+  /// so every product is taxed. The column writes down the existing fact rather
+  /// than changing it. A default of `false` would assert that every product in
+  /// every tenant is exempt — a restaurant selling a Rs 2,000 meal would charge
+  /// Rs 0 instead of Rs 360, silently, the moment anything read it.
+  ///
+  /// A hard boolean, not nullable: "we do not know whether this is taxable" is
+  /// not a state a till can price. Exemption is a decision somebody makes.
+  taxable               Boolean       @default(true)
   attributes            Json          @default("{}")
   lastSyncedAt          DateTime?
   syncStatus            SyncStatus    @default(NOT_SYNCED)
@@ -1026,6 +1038,22 @@ model SaleItem {
   discountReason      String?
   approvedByUserId    String?
   taxAmount           Decimal            @default(0) @db.Decimal(12, 2)
+  /// D101 (3.8) — the tax rate applied to THIS line, frozen at sale time.
+  ///
+  /// NULL for every line sold before per-line tax existed, and for a line sold
+  /// under no tax configuration. Deliberately distinct from `0.00`, which means
+  /// **zero-rated** — a real and different fact. Defaulting to 0 would claim
+  /// every historical sale was zero-rated, and a return against one would refund
+  /// no tax at all. NULL lets the returns path recognise "this line predates the
+  /// snapshot" and fall back to proration, so existing sales refund exactly as
+  /// they do today.
+  ///
+  /// Same reasoning as `RestaurantBranchConfig.taxRatePercent`, nullable
+  /// "because 0 is a meaningful rate and must be distinguishable from unset".
+  ///
+  /// Frozen, not joined (D44): a rate change next year must not rewrite last
+  /// year's receipt — or last year's refund.
+  taxRatePercent      Decimal?           @db.Decimal(5, 2)
   lineSubtotal        Decimal            @db.Decimal(12, 2)
   lineTotal           Decimal            @db.Decimal(12, 2)
   returnedQuantity    Decimal            @default(0) @db.Decimal(12, 3)
@@ -1398,6 +1426,17 @@ model ReturnItem {
   productDiscountAdjustment  Decimal          @default(0) @db.Decimal(12, 2)
   orderDiscountAdjustment    Decimal          @default(0) @db.Decimal(12, 2)
   taxAdjustment              Decimal          @default(0) @db.Decimal(12, 2)
+  /// D101 (3.8) — the rate that was REVERSED, copied from the original SaleItem.
+  ///
+  /// Copied, never re-resolved: 1a.20 established that a return reads the sale's
+  /// historical record rather than asking the client or the current config, so a
+  /// rate change between purchase and return cannot alter the refund. Also lets
+  /// a credit note show the breakdown rather than a lump sum the customer cannot
+  /// check.
+  ///
+  /// NULL carries the same meaning as on `SaleItem`: no rate was recorded, so
+  /// the proportional fallback applies.
+  taxRatePercent             Decimal?         @db.Decimal(5, 2)
   refundableAmount           Decimal          @db.Decimal(12, 2)
   createdAt                  DateTime         @default(now())
 
