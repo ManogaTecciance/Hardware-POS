@@ -58,6 +58,8 @@ import {
 
 import { ProductPreview } from './product-preview';
 import { StepAttributes } from './step-attributes';
+import { fetchSettings } from '@/lib/settings-api';
+
 import { StepDetails } from './step-details';
 import { StepPricingInventory } from './step-pricing-inventory';
 import { StepReview } from './step-review';
@@ -129,6 +131,30 @@ export function ProductWizard(props: Props) {
   // themselves (D31 — the resolver is the single authority), so the shell
   // derives it once here and passes it as a prop.
   const businessKind = resolveBusinessKind(profile?.businessType ?? null);
+  /*
+   * 3.15 — the tenant's tax rate, so the Taxable toggle can name the number it
+   * turns on instead of saying "this shop's configured rate".
+   *
+   * Fetched by the SHELL and passed down, the same way `businessKind` and
+   * `showRecipe` are: a step component that fetched its own settings would be
+   * the scattered lookup D31 exists to end.
+   *
+   * `null` means UNRESOLVED and is its own state — while it is loading, or if
+   * the request fails, the toggle keeps its original wording rather than
+   * asserting a rate it does not have. Never defaulted to 0, which would read
+   * as "this shop charges no tax" and be a lie on every taxed tenant.
+   */
+  const [taxRatePercent, setTaxRatePercent] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    if (!session) return;
+    let active = true;
+    fetchSettings(session)
+      .then((s) => active && setTaxRatePercent(s.taxRatePercent))
+      .catch(() => active && setTaxRatePercent(null));
+    return () => {
+      active = false;
+    };
+  }, [session]);
   // D65 — the recipe card exists only for tenants whose capabilities declare
   // it. Unresolved profile → no card, same fail-safe as everything else.
   const showRecipe = profile?.capabilities.catalogue.components === true;
@@ -400,6 +426,7 @@ export function ProductWizard(props: Props) {
               categories={categories}
               session={session}
               businessKind={businessKind}
+              taxRatePercent={taxRatePercent}
               onChange={patchState}
             />
           ) : null}

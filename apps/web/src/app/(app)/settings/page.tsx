@@ -91,6 +91,18 @@ export default function SettingsPage() {
 
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [docs, setDocs] = React.useState<DocumentSettings | null>(null);
+  /*
+   * 3.15 — the tenant-wide tax rate.
+   *
+   * It is a SIBLING of `documents` on AppSettings, not a member of it, so it
+   * cannot ride on `docs`/`set` and needs its own state, its own contribution
+   * to `dirty`, and its own key in the PUT body.
+   *
+   * Held as the raw string the operator typed, not a number: a controlled
+   * number input cannot represent "cleared" or a half-typed "18." without
+   * fighting the person using it. Parsed and bounds-checked once, at save.
+   */
+  const [taxRate, setTaxRate] = React.useState('');
   const [tab, setTab] = React.useState<Tab>('Business');
   /*
    * D96 — the restaurant-only tabs appear only where their record exists.
@@ -128,6 +140,7 @@ export default function SettingsPage() {
         if (!active) return;
         setSettings(s);
         setDocs(s.documents);
+        setTaxRate(String(s.taxRatePercent));
       })
       .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to load settings'))
       .finally(() => active && setLoading(false));
@@ -136,19 +149,45 @@ export default function SettingsPage() {
     };
   }, [session]);
 
-  const dirty = !!settings && !!docs && JSON.stringify(settings.documents) !== JSON.stringify(docs);
+  /*
+   * Mirrors the server's own bounds (`@Min(0) @Max(100)` on UpdateSettingsDto),
+   * so the field refuses locally what the API would refuse anyway. The server
+   * stays the authority — this only saves a round trip (D31).
+   */
+  const taxRateNumber = Number(taxRate);
+  const taxRateValid =
+    taxRate.trim() !== '' &&
+    Number.isFinite(taxRateNumber) &&
+    taxRateNumber >= 0 &&
+    taxRateNumber <= 100;
+  /*
+   * An INVALID entry counts as dirty on purpose: it keeps Save enabled so the
+   * click can explain what is wrong, instead of a dead button and no reason.
+   */
+  const taxRateDirty = !!settings && (!taxRateValid || taxRateNumber !== settings.taxRatePercent);
+  const documentsDirty =
+    !!settings && !!docs && JSON.stringify(settings.documents) !== JSON.stringify(docs);
+  const dirty = documentsDirty || taxRateDirty;
 
   const set = <K extends keyof DocumentSettings>(key: K, value: DocumentSettings[K]) =>
     setDocs((d) => (d ? { ...d, [key]: value } : d));
 
   const save = async () => {
     if (!session || !docs) return;
+    if (!taxRateValid) {
+      setError('Tax rate must be a number between 0 and 100.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const next = await updateSettings(session, { documents: docs });
+      const next = await updateSettings(session, {
+        documents: docs,
+        taxRatePercent: taxRateNumber,
+      });
       setSettings(next);
       setDocs(next.documents);
+      setTaxRate(String(next.taxRatePercent));
       showToast('Settings saved');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save settings');
@@ -165,6 +204,9 @@ export default function SettingsPage() {
       const next = await resetSettings(session);
       setSettings(next);
       setDocs(next.documents);
+      // The reset endpoint returns the whole record, so re-read the rate from
+      // it rather than leaving a stale number in a field nobody touched.
+      setTaxRate(String(next.taxRatePercent));
       showToast('Settings reset to defaults');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not reset settings');
@@ -277,7 +319,15 @@ export default function SettingsPage() {
       ) : null}
 
       {tab === 'Business' ? (
-        <BusinessTab docs={docs} set={set} disabled={!canManage} view={view} />
+        <BusinessTab
+          docs={docs}
+          set={set}
+          disabled={!canManage}
+          view={view}
+          taxRate={taxRate}
+          taxRateValid={taxRateValid}
+          onTaxRateChange={setTaxRate}
+        />
       ) : tab === 'Branding' ? (
         <BrandingTab
           docs={docs}
@@ -405,11 +455,17 @@ function BusinessTab({
   set,
   disabled,
   view,
+  taxRate,
+  taxRateValid,
+  onTaxRateChange,
 }: {
   docs: DocumentSettings;
   set: SetFn;
   disabled: boolean;
   view: DocumentSettingsPresentation;
+  taxRate: string;
+  taxRateValid: boolean;
+  onTaxRateChange: (value: string) => void;
 }) {
   return (
     <Card className="max-w-3xl">
@@ -428,6 +484,43 @@ function BusinessTab({
         </Field>
         <Field label="Tax / VAT number">
           <Input value={docs.taxNumber ?? ''} disabled={disabled} onChange={(e) => set('taxNumber', e.target.value)} placeholder="134567890-7000" />
+        </Field>
+        {/*
+          3.15 — the tenant-wide tax rate.
+
+          Until now `taxRatePercent` was writable only through the API, so an
+          owner could mark one shirt exempt in the wizard but never set the rate
+          everything else is charged at. It sits beside the VAT number an
+          operator already comes to this tab for.
+
+          Shown on EVERY template, ungated. `restaurant-totals.ts` reads the
+          very same `AppSettings.taxRatePercent`, so a food-service owner needs
+          it exactly as much as a retail one — and a business-type conditional
+          here is the scattered comparison D56 exists to end.
+
+          `disabled` is the same SETTINGS_MANAGE flag every other field on this
+          tab uses, so a Cashier reads it and cannot dirty it. The server
+          refuses the write regardless; this is usability, not authority (D31).
+        */}
+        <Field
+          label="Tax rate (%)"
+          hint="Charged on every product whose Taxable switch is on. 0 means no tax."
+        >
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            max={100}
+            step="0.01"
+            value={taxRate}
+            disabled={disabled}
+            aria-label="Tax rate (%)"
+            aria-invalid={!taxRateValid}
+            onChange={(e) => onTaxRateChange(e.target.value)}
+          />
+          {taxRateValid ? null : (
+            <p className="text-xs font-medium text-danger">Enter a number between 0 and 100.</p>
+          )}
         </Field>
         <Field label="Footer / thank-you line" hint="Printed at the bottom of every document." full>
           <Input value={docs.footerText} disabled={disabled} onChange={(e) => set('footerText', e.target.value)} />

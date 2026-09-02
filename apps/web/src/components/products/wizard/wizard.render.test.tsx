@@ -191,7 +191,17 @@ describe('Stepper', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('StepDetails', () => {
-  function Harness({ state, categories = categoryTree }: { state: WizardState; categories?: CategoryNode[] }) {
+  function Harness({
+    state,
+    categories = categoryTree,
+    // 3.15 — defaults to UNRESOLVED, which is what every pre-existing case
+    // here was implicitly exercising before the shell fetched a rate.
+    taxRatePercent = null,
+  }: {
+    state: WizardState;
+    categories?: CategoryNode[];
+    taxRatePercent?: number | null;
+  }) {
     const h = useHarness(state);
     // Errors mirror the shell's contract: it computes them from validateStep
     // and hands them to the step. Recomputing here keeps the pipeline honest.
@@ -203,6 +213,7 @@ describe('StepDetails', () => {
         categories={categories}
         session={noopSession}
         businessKind="RETAIL"
+        taxRatePercent={taxRatePercent}
         onChange={h.patch}
       />
     );
@@ -219,6 +230,7 @@ describe('StepDetails', () => {
         categories={categoryTree}
         session={noopSession}
         businessKind="RETAIL"
+        taxRatePercent={null}
         onChange={() => {}}
       />,
     );
@@ -229,6 +241,55 @@ describe('StepDetails', () => {
     // Negative: the shape is one message, not a stray "Category is required" or
     // any other field spilling into this step.
     expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  /*
+   * 3.15 — the Taxable helper text names the tenant's actual rate.
+   *
+   * Three states, not two, and each asserted against the OTHER two rather than
+   * on its own: a test that only checked "18%" appears would pass for a
+   * component that printed the rate unconditionally, including while it was
+   * still unresolved and while the switch was off.
+   */
+  describe('the Taxable helper text (3.15)', () => {
+    const helper = () => document.body.textContent ?? '';
+
+    it('names the rate once the shell has resolved it', () => {
+      render(<Harness state={initialState()} taxRatePercent={18} />);
+
+      expect(helper()).toMatch(/Tax applies at 18%/);
+      // NEGATIVE: the rate-free wording is gone, not merely joined.
+      expect(helper()).not.toMatch(/configured rate/);
+    });
+
+    it('keeps the rate-free wording while UNRESOLVED, rather than guessing', () => {
+      render(<Harness state={initialState()} taxRatePercent={null} />);
+
+      expect(helper()).toMatch(/this shop's configured rate/);
+      // NEGATIVE: and never invents a number, least of all 0 — `null` is "not
+      // known yet", which is a different fact from "this shop charges nothing".
+      expect(helper()).not.toMatch(/applies at \d/);
+      expect(helper()).not.toMatch(/0%/);
+    });
+
+    it('says so plainly when the shop has no rate set — the 0% dead end', () => {
+      render(<Harness state={initialState()} taxRatePercent={0} />);
+
+      // The question this answers is the operator's: "I switched Taxable on and
+      // nothing was charged." Silence there is what sent them to ask.
+      expect(helper()).toMatch(/tax rate is 0%/);
+      expect(helper()).toMatch(/Settings/);
+    });
+
+    it('says zero-rated when the switch is OFF, whatever the shop rate is', () => {
+      const off = { ...initialState(), taxable: false };
+      render(<Harness state={off} taxRatePercent={18} />);
+
+      expect(helper()).toMatch(/Zero-rated/);
+      // NEGATIVE: the shop's 18% must not leak into a product that is exempt —
+      // the exact confusion 3.14 was reported for.
+      expect(helper()).not.toMatch(/applies at 18%/);
+    });
   });
 
   it('picking Service disables the Track Inventory switch', () => {

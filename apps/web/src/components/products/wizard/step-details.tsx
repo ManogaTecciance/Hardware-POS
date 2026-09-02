@@ -45,6 +45,14 @@ interface Props {
    * a retail tenant on load. See `resolveBusinessKind` for the derivation.
    */
   businessKind: ProductBusinessKind | null;
+  /**
+   * The tenant's tax rate (3.15), fetched once by the wizard shell.
+   *
+   * `null` is UNRESOLVED, not zero: while it loads, or if the request fails,
+   * the Taxable helper text keeps its rate-free wording rather than asserting
+   * a number. Zero is a real, different fact and reads differently on screen.
+   */
+  taxRatePercent: number | null;
   onChange: (patch: Partial<WizardState>) => void;
 }
 
@@ -90,6 +98,7 @@ export function StepDetails({
   categories,
   session,
   businessKind,
+  taxRatePercent,
   onChange,
 }: Props) {
   const activeCategories = categories.filter((c) => c.isActive);
@@ -341,10 +350,25 @@ export function StepDetails({
             onCheckedChange={(v) => onChange({ taxable: v })}
             aria-label="Taxable"
           />
+          {/*
+            3.15 — name the rate rather than alluding to it. Before the tax rate
+            was reachable in Settings there was no number to name and no screen
+            to send anyone to; now there is both.
+
+            Three states, not two. `null` is UNRESOLVED — still loading, or the
+            request failed — and keeps the original wording rather than claiming
+            a rate. A rate of exactly 0 gets its own sentence: it is the honest
+            answer to "I switched Taxable on and nothing was charged", which is
+            otherwise a silent dead end.
+          */}
           <div className="text-xs text-muted-foreground">
-            {state.taxable
-              ? "Tax applies at this shop's configured rate."
-              : 'Zero-rated — no tax is charged on this product.'}
+            {!state.taxable
+              ? 'Zero-rated — no tax is charged on this product.'
+              : taxRatePercent === null
+                ? "Tax applies at this shop's configured rate."
+                : taxRatePercent === 0
+                  ? 'This shop’s tax rate is 0%, so nothing is charged yet. Set it in Settings → Business.'
+                  : `Tax applies at ${taxRatePercent}%.`}
           </div>
         </div>
       </div>
