@@ -128,17 +128,122 @@ describe('3.9 changes no money — the permanent regression guard', () => {
     expect(Number((await lineOf(sale.id)).taxAmount)).toBe(0);
   });
 
-  it('an exempt product does not change the money either', async () => {
-    // 3.9 records `taxable`; it does not yet act on it. A tenant that marks a
-    // product exempt today still pays the order-level tax, exactly as before.
-    // 3.10 and the per-line computation are what make the flag bite.
+  it('an exempt product now REDUCES the tax — 3.10 made the flag bite', async () => {
+    // This assertion is INVERTED from what 3.9 shipped, deliberately.
+    //
+    // 3.9 recorded `taxable` and changed no money, so an exempt line snapshotted
+    // 0.00 while the order-level tax still charged on it. A return refunding
+    // from that snapshot would have paid back Rs 0 on a line the customer paid
+    // Rs 180 of tax for. The old expectation described a state that was
+    // internally inconsistent; 3.10 is what removed it.
     await setTaxRate(18);
     await prisma.product.update({ where: { id: tenant.productAId }, data: { taxable: false } });
 
-    const sale = await sell(1, 1180);
+    const sale = await sell(1, 1000);
 
+    expect(Number(sale.taxAmount)).toBe(0);
+    // Untaxed, not unsold: the goods are still on the bill at full price.
+    expect(Number(sale.subtotal)).toBe(1000);
+    expect(Number(sale.total)).toBe(1000);
+  });
+});
+
+describe('3.10 — Product.taxable narrows the taxable base', () => {
+  it('taxes only the taxable line in a mixed basket', async () => {
+    // The case the whole of Phase 3 exists for: a zero-rated staple beside a
+    // standard-rated item. B is exempt, A is not.
+    await setTaxRate(18);
+    await prisma.product.update({ where: { id: tenant.productBId }, data: { taxable: false } });
+
+    const sale = await sales.complete(tenant.tenantId, owner, {
+      branchId: tenant.branchId,
+      registerId: tenant.registerId,
+      items: [
+        { productId: tenant.productAId, quantity: 1 },
+        { productId: tenant.productBId, quantity: 1 },
+      ],
+      payments: [{ method: 'CASH', amount: 1430.5 }],
+    });
+
+    // Fixture A is 1000.00 and B is 250.50. A is taxed at 18% -> 180.00; B is
+    // exempt -> 0. Subtotal is the full 1250.50: exempt is untaxed, not unsold.
+    expect(Number(sale.subtotal)).toBe(1250.5);
     expect(Number(sale.taxAmount)).toBe(180);
-    expect(Number(sale.total)).toBe(1180);
+    expect(Number(sale.total)).toBe(1430.5);
+
+    // And each line records what it was actually charged at. Keyed by PRODUCT
+    // rather than by row order: ordering by price put the cheaper exempt line
+    // first, and an assertion that depends on which fixture happens to cost more
+    // is a test that breaks when somebody edits a price.
+    const lines = await prisma.saleItem.findMany({ where: { saleId: sale.id } });
+    const rateOf = (productId: string) =>
+      Number(lines.find((l) => l.productId === productId)!.taxRatePercent);
+
+    expect(rateOf(tenant.productAId)).toBe(18);
+    expect(rateOf(tenant.productBId)).toBe(0);
+  });
+
+  it('an all-exempt basket is taxed nothing, never a credit', async () => {
+    // Rounding is the only way `exemptNet` could exceed the base, but a negative
+    // base would produce NEGATIVE tax — money moving the wrong way.
+    await setTaxRate(18);
+    await prisma.product.update({ where: { id: tenant.productAId }, data: { taxable: false } });
+
+    const sale = await sell(3, 3000);
+
+    expect(Number(sale.taxAmount)).toBe(0);
+    expect(Number(sale.taxAmount)).not.toBeLessThan(0);
+  });
+
+  it('removes the exempt line share of the ORDER discount from the base too', async () => {
+    // Otherwise the exempt goods would shrink the base twice: once as their own
+    // net, once again through a discount share that was never theirs. The
+    // formula matches the one `returns.calc` uses to allocate that discount, so
+    // sale and refund agree by construction.
+    await setTaxRate(10);
+    await prisma.product.update({ where: { id: tenant.productBId }, data: { taxable: false } });
+
+    const sale = await sales.complete(tenant.tenantId, owner, {
+      branchId: tenant.branchId,
+      registerId: tenant.registerId,
+      items: [
+        { productId: tenant.productAId, quantity: 1 },
+        { productId: tenant.productBId, quantity: 1 },
+      ],
+      orderDiscountType: 'PERCENTAGE',
+      orderDiscountValue: 10,
+      payments: [{ method: 'CASH', amount: 1215.45 }],
+    });
+
+    // Subtotal 1250.50, 10% order discount = 125.05. A's proportional share is
+    // 125.05 x 1000/1250.50 = 100.00, so A's taxable net is 900.00 -> 10% = 90.
+    // B's 25.05 share leaves the base WITH B, rather than shrinking A's tax
+    // twice.
+    expect(Number(sale.subtotal)).toBe(1250.5);
+    expect(Number(sale.orderDiscountAmount)).toBe(125.05);
+    expect(Number(sale.taxAmount)).toBe(90);
+    expect(Number(sale.total)).toBe(1215.45);
+  });
+
+  it('a fully taxable basket is byte-identical to before 3.10', async () => {
+    // The regression guard for hardware. `exemptNet` is 0 for every existing
+    // product, so the expression must reduce to exactly what it was.
+    await setTaxRate(18);
+
+    const sale = await sales.complete(tenant.tenantId, owner, {
+      branchId: tenant.branchId,
+      registerId: tenant.registerId,
+      items: [
+        { productId: tenant.productAId, quantity: 2 },
+        { productId: tenant.productBId, quantity: 1 },
+      ],
+      payments: [{ method: 'CASH', amount: 2655.59 }],
+    });
+
+    // 2 x 1000 + 250.50 = 2250.50, +18% = 405.09.
+    expect(Number(sale.subtotal)).toBe(2250.5);
+    expect(Number(sale.taxAmount)).toBe(405.09);
+    expect(Number(sale.total)).toBe(2655.59);
   });
 });
 

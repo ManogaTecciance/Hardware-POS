@@ -535,12 +535,57 @@ export class SalesService {
       orderDiscountInput,
     );
 
-    const taxableD = new Prisma.Decimal(discountedSubtotal).minus(orderDiscount.amount);
+    /*
+     * D101 (3.10) — `Product.taxable` narrows the taxable base.
+     *
+     * 3.9 recorded the flag and changed no money, which left the data internally
+     * inconsistent: an exempt line snapshotted 0.00 while the order-level tax
+     * still charged on it. A return refunding from that snapshot would have paid
+     * back Rs 0 on a line the customer paid Rs 180 of tax for — worse than the
+     * proportional method it replaces. The charge has to respect the flag before
+     * a refund can read it, so this step comes first.
+     *
+     * Narrower than the per-line computation D101 parked with grocery: the rate
+     * stays single and tenant-wide, and only WHAT IT APPLIES TO changes.
+     *
+     * An exempt line also takes its share of the order discount out of the base,
+     * using the SAME proportional formula `returns.calc` uses to allocate that
+     * discount — so the sale and the refund agree by construction rather than by
+     * two similar expressions happening to match.
+     *
+     * When nothing is exempt — every tenant today, since `taxable` defaults true
+     * — `exemptNet` is 0 and this reduces to exactly the previous expression.
+     * That is the property the 3.9 money tests already pin.
+     */
+    const exemptNet = lines.reduce((acc, l) => {
+      const product = byId.get(l.productId);
+      if (product?.taxable !== false) return acc;
+      const lineNet = new Prisma.Decimal(l.lineTotal);
+      const orderDiscountShare =
+        discountedSubtotal > 0
+          ? new Prisma.Decimal(orderDiscount.amount).mul(lineNet).div(discountedSubtotal)
+          : new Prisma.Decimal(0);
+      return acc.plus(lineNet).minus(orderDiscountShare);
+    }, new Prisma.Decimal(0));
+
+    const taxableD = new Prisma.Decimal(discountedSubtotal)
+      .minus(orderDiscount.amount)
+      .minus(exemptNet)
+      // A basket of nothing but exempt goods must not produce a negative base
+      // and a tax credit. Rounding is the only way `exemptNet` can exceed the
+      // base, but "only by a cent" is still money moving the wrong way.
+      .toDecimalPlaces(2);
+    const taxBase = taxableD.greaterThan(0) ? taxableD : new Prisma.Decimal(0);
     const taxAmount =
       settings.taxRatePercent > 0
-        ? taxableD.mul(settings.taxRatePercent).div(100).toDecimalPlaces(2).toNumber()
+        ? taxBase.mul(settings.taxRatePercent).div(100).toDecimalPlaces(2).toNumber()
         : 0;
-    const total = taxableD.plus(taxAmount).toNumber();
+    // The TOTAL still starts from the full discounted subtotal: an exempt line is
+    // untaxed, not unsold.
+    const total = new Prisma.Decimal(discountedSubtotal)
+      .minus(orderDiscount.amount)
+      .plus(taxAmount)
+      .toNumber();
 
     return {
       lines,
