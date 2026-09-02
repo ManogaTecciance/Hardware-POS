@@ -3822,6 +3822,123 @@ build breaks. That is the intended pressure, not an obstacle to work around.
 
 ---
 
+## 2026-09-02 — Phase 3 tax: scope, and backwards compatibility
+
+### D101 — per-line tax snapshots; per-category rates wait for grocery
+
+Tech Lead, 2026-09-02. Supersedes nothing; narrows the Phase 3 scope D99
+authorised.
+
+#### What D99 said, and what changed
+
+D99 authorises "per-category and global tax, no price bands, displayed
+tax-inclusive". Building it was scoped as `TaxRate` and `TaxRule` tables with a
+resolution hierarchy.
+
+Two facts, established by reading the code rather than the plan:
+
+1. **The flat-rate engine already works for retail.** `computeDocumentTotals` is
+   shared by sales, quotations and restaurant (D59). Setting a tenant rate on a
+   clothing workspace and selling produced `1,850 → 333 tax → 2,183` with no code
+   written.
+2. **Per-category rates are a grocery requirement, not a clothing one.** Zero-rated
+   staples beside standard-rated goods is what forces a hierarchy. Clothing is
+   uniformly standard-rated, and grocery is parked pending a customer (open
+   decision 12).
+
+#### Decided — option B
+
+Phase 3 narrows to what the clothing pilot needs and what is correct regardless:
+
+- **No `TaxRate` / `TaxRule` tables.** The flat rate stays.
+- **Three additive columns** (below).
+- **Returns stop prorating** and read the per-line snapshot.
+- **Receipts show a tax breakdown.**
+
+Per-category resolution moves to sit **with grocery**, where the requirement
+lives. It stays cheap to add later: the columns below are the hard part, and a
+resolution service writes into them.
+
+The deciding argument is not effort. Building a rate hierarchy means surgery on
+the one engine all three templates share, for a capability the clothing pilot
+cannot demonstrate — and this branch has just spent a day proving it does not
+break the restaurant and hardware teams (2.15). Guessing at a grocer's categories
+before a grocer exists is the same mistake refused for grocery attributes.
+
+#### The three columns
+
+| Table | Column | Type |
+|---|---|---|
+| `Product` | `taxable` | `Boolean @default(true)` |
+| `SaleItem` | `taxRatePercent` | `Decimal? @db.Decimal(5, 2)` |
+| `ReturnItem` | `taxRatePercent` | `Decimal? @db.Decimal(5, 2)` |
+
+No new tables, no enum, no backfill. One migration — **D99a's two-migration rule
+does not apply**, being scoped to `ALTER TYPE … ADD VALUE`, and nothing here adds
+an enum value.
+
+#### Why `taxable` defaults to TRUE
+
+**Because it is already true of every product in the system.** There is no
+per-product exemption anywhere today; tax is one rate on the whole bill, so every
+product is taxed. The column writes down the existing fact rather than changing
+it.
+
+A default of `false` would assert that every product in every tenant is exempt.
+The moment anything read it, a restaurant selling a Rs 2,000 meal would charge
+**Rs 0 tax instead of Rs 360** — silently, across every tenant.
+
+The name misleads, which is why this is recorded: `taxable = true` reads as
+*turning tax on*. It means *this product is subject to whatever rate the tenant
+has configured*, which for a tenant configured at 0% is still zero.
+
+In the first step neither default changes behaviour, because nothing reads the
+column. `true` matters later, and later it means "carry on exactly as before".
+
+#### Why the rate snapshots are NULL, not 0.00
+
+**`0.00` means zero-rated. `NULL` means no rate was recorded.** They are different
+facts and the distinction is load-bearing.
+
+Defaulting to `0.00` would claim every historical sale was zero-rated, and a
+return against one would refund no tax at all. With `NULL`, the returns path reads
+"this line predates per-line tax" and falls back to today's proportional method —
+so **every existing sale keeps refunding exactly as it does now**.
+
+This follows `RestaurantBranchConfig.taxRatePercent`, nullable for the same stated
+reason: *"0 is a meaningful rate and must be distinguishable from unset"*.
+
+#### Why returns must stop prorating
+
+`returns.calc.ts` refunds tax as `saleTax × (line's share of the taxable base)`.
+That is correct **only** while one rate covers the whole bill, and its own comment
+says so: *"Tax was a flat rate on the sale's taxable base."*
+
+The moment rates differ per line it is wrong:
+
+> Rice (0%, Rs 1,000) and soap (18%, Rs 1,000). Total tax Rs 180. The customer
+> returns the rice. Proration refunds `180 × (1000/2000)` = **Rs 90 of tax on a
+> zero-rated item.**
+
+`SaleItem.taxRatePercent` is what makes the correct answer reachable, and
+`ReturnItem.taxRatePercent` records what was reversed so a credit note is
+self-contained and a later rate change cannot alter a past refund. Copied from the
+sale line, never re-resolved — the rule 1a.20 established for variants.
+
+#### Backwards compatibility
+
+Nothing reads the new columns in the schema step. It ships **inert**, the pattern
+`RestaurantBranchConfig.taxRatePercent` used: *"No UI yet, deliberately; the column
+and fallback ship first."*
+
+| Domain | Effect |
+|---|---|
+| Restaurant | none — `taxable` true is today's behaviour, rate columns null and unread |
+| Hardware | none |
+| Retail | none until the resolution logic lands |
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
