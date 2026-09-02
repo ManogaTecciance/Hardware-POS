@@ -94,6 +94,9 @@ export class ProductsService {
       quantityAsOfDate: dto.quantityAsOfDate ? new Date(dto.quantityAsOfDate) : new Date(),
       reorderLevel: dto.reorderLevel ?? null,
       isActive: dto.isActive ?? true,
+      // D101 (3.13) — absent means taxable. A `false` default here would
+      // zero-rate every product any client created without the field.
+      taxable: dto.taxable ?? true,
       // Pre-uploaded URL from the Add Product wizard (D44); optional in every
       // other flow, which historically calls `POST /products/:id/image` after
       // create.
@@ -186,6 +189,9 @@ export class ProductsService {
           : undefined,
       reorderLevel: dto.reorderLevel,
       isActive: dto.isActive,
+      // Undefined leaves the stored value alone; only an explicit boolean moves
+      // it, so a partial update cannot make a product exempt by omission.
+      taxable: dto.taxable,
       // Only forward `imageUrl` when the caller actually sent one — the field
       // is otherwise owned by `setImage` / `removeImage`, which take the file
       // path and manage storage.remove(). Skipping `undefined` keeps Prisma

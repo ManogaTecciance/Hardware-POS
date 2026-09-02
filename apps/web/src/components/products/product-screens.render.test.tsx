@@ -112,6 +112,7 @@ const product: ManagedProduct = {
   inventoryAssetAccount: null,
   imageUrl: null,
   isActive: true,
+  taxable: true,
   // A perfectly valid local product: never reached QuickBooks, and under LOCAL or
   // DISABLED never will. This is the row that must not be styled as a fault.
   quickbooksItemId: null,

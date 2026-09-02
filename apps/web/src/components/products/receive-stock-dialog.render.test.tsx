@@ -63,6 +63,7 @@ const singleVariantProduct: ManagedProduct = {
   inventoryAssetAccount: null,
   imageUrl: null,
   isActive: true,
+  taxable: true,
   quickbooksItemId: null,
   syncStatus: 'NOT_SYNCED',
   lastSyncedAt: null,

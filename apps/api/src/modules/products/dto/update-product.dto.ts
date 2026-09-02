@@ -87,6 +87,15 @@ export class UpdateProductDto {
   @IsOptional()
   isActive?: boolean;
 
+  /**
+   * D101 (3.13) — whether this product attracts tax. Undefined leaves the
+   * stored value alone, so a partial update cannot make a product exempt by
+   * omission; only an explicit boolean moves it.
+   */
+  @IsBoolean()
+  @IsOptional()
+  taxable?: boolean;
+
   /** POS-side product photo (D44). See CreateProductDto for context. */
   @IsString()
   @IsOptional()

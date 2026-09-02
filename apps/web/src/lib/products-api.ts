@@ -41,6 +41,8 @@ export interface ManagedProduct {
   /** POS-side product photo (S3) — never pushed to QuickBooks. */
   imageUrl: string | null;
   isActive: boolean;
+  /** D101 — read back so the edit wizard can round-trip it. */
+  taxable: boolean;
   quickbooksItemId: string | null;
   syncStatus: ProductSyncStatus;
   lastSyncedAt: string | null;
@@ -96,6 +98,12 @@ export interface ProductInput {
   quantityAsOfDate?: string | null;
   reorderLevel?: number | null;
   isActive?: boolean;
+  /**
+   * D101 (3.13) — whether the product attracts tax. Omitted means TAXABLE: the
+   * server defaults it to true, so a client that never learned about this field
+   * cannot zero-rate a product by silence.
+   */
+  taxable?: boolean;
   /**
    * URL for a POS-side photo that was pre-uploaded via `POST /products/image`
    * before the product existed (Add Product wizard, D44). Once created, use

@@ -97,6 +97,19 @@ export class CreateProductDto {
   isActive?: boolean;
 
   /**
+   * D101 (3.13) — whether this product attracts tax.
+   *
+   * Optional on the wire, and ABSENT MEANS TAXABLE. The service defaults it to
+   * true, matching the column default and for the same reason: there is no
+   * per-product exemption in any tenant's history, so every product already is
+   * taxable. A client that omits the field must not silently zero-rate a
+   * product.
+   */
+  @IsBoolean()
+  @IsOptional()
+  taxable?: boolean;
+
+  /**
    * POS-side product photo, previously uploaded via `POST /products/image` for
    * the Add Product wizard (D44). Kept out of the QuickBooks payload — this is
    * a POS presentation asset, not a QBO field.

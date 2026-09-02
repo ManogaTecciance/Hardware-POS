@@ -315,6 +315,40 @@ export function StepDetails({
         </div>
       )}
 
+      {/*
+        D101 (3.13) — the toggle that makes `Product.taxable` reachable.
+
+        Defaults ON, because that is already true of every product: there is no
+        per-product exemption in any tenant's history, so the switch records the
+        existing fact rather than changing it.
+
+        NOT disabled for a Service, unlike Track inventory — a service can
+        legitimately be taxable, and the sale engine handles it either way.
+
+        Shown on every template. Hiding it for food service would need a
+        business-type conditional, which is the scattered comparison D56 exists
+        to end, and a restaurant may legitimately zero-rate an item too.
+
+        The helper text names the EFFECT rather than repeating the label:
+        "Taxable" alone is ambiguous — a shopkeeper can read it as "tax is
+        included in the price". Saying what happens removes that.
+      */}
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">Taxable</span>
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+          <Switch
+            checked={state.taxable}
+            onCheckedChange={(v) => onChange({ taxable: v })}
+            aria-label="Taxable"
+          />
+          <div className="text-xs text-muted-foreground">
+            {state.taxable
+              ? "Tax applies at this shop's configured rate."
+              : 'Zero-rated — no tax is charged on this product.'}
+          </div>
+        </div>
+      </div>
+
       {isRestaurant ? (
         <Field label="Dietary tags">
           <div className="flex flex-wrap gap-2" role="group" aria-label="Dietary tags">

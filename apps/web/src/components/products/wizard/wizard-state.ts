@@ -88,6 +88,12 @@ export interface WizardState {
   brand: string;
   description: string;
   trackInventory: boolean;
+  /**
+   * D101 (3.13) — whether the product attracts tax. Defaults true, because that
+   * is already true of every product: there is no per-product exemption in any
+   * tenant's history.
+   */
+  taxable: boolean;
   imageUrl: string;
 
   // Step 2 — Variations
@@ -182,6 +188,7 @@ export function initialState(): WizardState {
     brand: '',
     description: '',
     trackInventory: true,
+    taxable: true,
     imageUrl: '',
     hasVariations: false,
     variations: [],
@@ -277,6 +284,9 @@ export function hydrateFromProduct(
     brand: '',
     description: product.description ?? '',
     trackInventory: product.type === 'Inventory',
+    // Round-trips on edit. `?? true` guards a response from an API that predates
+    // the field, which must not silently flip a product to exempt.
+    taxable: product.taxable ?? true,
     imageUrl: product.imageUrl ?? '',
     hasVariations,
     variations: variationDrafts,
@@ -573,6 +583,8 @@ export interface ProductCreatePayload {
   costPrice: number | null;
   reorderLevel: number | null;
   isActive: boolean;
+  /** D101 (3.13) — always sent, so the value the operator saw is what is stored. */
+  taxable: boolean;
   imageUrl?: string | null;
   /**
    * D45 — Restaurant fields. Emitted for every tenant; Retail tenants send
@@ -616,6 +628,9 @@ export function buildCreateInput(
     reorderLevel:
       useSimpleForRoot && simple.reorderLevel ? Number(simple.reorderLevel) : null,
     isActive: true,
+    // Always sent, so the value the operator saw is the value stored. The server
+    // also defaults it (`dto.taxable ?? true`) for clients that omit it.
+    taxable: state.taxable,
     imageUrl: imageUrl || null,
     // D45 — Restaurant fields. `foodType` sent as null when empty so a
     // Retail create (which never surfaces the picker) explicitly clears

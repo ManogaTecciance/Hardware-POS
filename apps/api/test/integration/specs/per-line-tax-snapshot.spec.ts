@@ -9,6 +9,10 @@ import { PlatformModule } from '../../../src/modules/platform/platform.module';
 import { ProvidersModule } from '../../../src/modules/providers/providers.module';
 import { SalesModule } from '../../../src/modules/sales/sales.module';
 import { SalesService } from '../../../src/modules/sales/sales.service';
+import { ProductsModule } from '../../../src/modules/products/products.module';
+import { ProductsService } from '../../../src/modules/products/products.service';
+import { CreateProductDto } from '../../../src/modules/products/dto/create-product.dto';
+import { UpdateProductDto } from '../../../src/modules/products/dto/update-product.dto';
 import { ReturnsModule } from '../../../src/modules/returns/returns.module';
 import { ReturnsService } from '../../../src/modules/returns/returns.service';
 import { CreateReturnDto } from '../../../src/modules/returns/dto/create-return.dto';
@@ -44,6 +48,7 @@ let prisma: PrismaClient;
 let testModule: TestingModule;
 let sales: SalesService;
 let returns: ReturnsService;
+let products: ProductsService;
 let settings: SettingsService;
 let tenant: SeededTenant;
 let owner: AuthenticatedUser;
@@ -62,12 +67,14 @@ beforeAll(async () => {
       ProvidersModule,
       SalesModule,
       ReturnsModule,
+      ProductsModule,
     ],
   }).compile();
   testModule.useLogger(false);
   await testModule.init();
   sales = testModule.get(SalesService);
   returns = testModule.get(ReturnsService);
+  products = testModule.get(ProductsService);
   settings = testModule.get(SettingsService);
 });
 
@@ -501,5 +508,82 @@ describe('3.11 — returns refund the tax the line actually paid', () => {
     expect(
       (await prisma.returnItem.findFirstOrThrow({ where: { returnId: ret.id } })).taxRatePercent,
     ).toBeNull();
+  });
+});
+
+/**
+ * D101 (3.13) — the API accepts `taxable`, and absent means taxable.
+ *
+ * This is the step that makes everything 3.8–3.12 built REACHABLE: until now
+ * the flag could only be set by writing the column directly.
+ */
+describe('3.13 — the API layer defaults to taxable', () => {
+  const newProduct = (over: Record<string, unknown> = {}) =>
+    products.create(
+      tenant.tenantId,
+      dto(CreateProductDto, { name: 'Wizard Product', type: 'Inventory', unitPrice: 500, ...over }),
+    );
+
+  it('creates a TAXABLE product when the field is omitted', async () => {
+    // THE zero-breakage guarantee. Any client that predates this field -- an
+    // integration, an older build, an import script -- must not silently
+    // zero-rate what it creates.
+    const created = await newProduct();
+
+    expect((await prisma.product.findFirstOrThrow({ where: { id: created.id } })).taxable).toBe(
+      true,
+    );
+  });
+
+  it('honours an explicit false', async () => {
+    const created = await newProduct({ taxable: false });
+
+    expect((await prisma.product.findFirstOrThrow({ where: { id: created.id } })).taxable).toBe(
+      false,
+    );
+  });
+
+  it('an update that omits the field leaves the stored value alone', async () => {
+    // A partial update must not make a product exempt by omission -- the reason
+    // the service passes `dto.taxable` through rather than defaulting it again.
+    const created = await newProduct({ taxable: false });
+
+    await products.update(tenant.tenantId, created.id, dto(UpdateProductDto, { name: 'Renamed' }), 'OWNER');
+
+    const row = await prisma.product.findFirstOrThrow({ where: { id: created.id } });
+    expect(row.name).toBe('Renamed');
+    expect(row.taxable).toBe(false);
+  });
+
+  it('an update can flip it back', async () => {
+    const created = await newProduct({ taxable: false });
+
+    await products.update(tenant.tenantId, created.id, dto(UpdateProductDto, { taxable: true }), 'OWNER');
+
+    expect((await prisma.product.findFirstOrThrow({ where: { id: created.id } })).taxable).toBe(
+      true,
+    );
+  });
+
+  it('a product marked exempt through the API is untaxed on a real sale', async () => {
+    // The end-to-end proof that the toggle reaches the money: 3.13 -> 3.10.
+    // Everything between them is inert without this.
+    await setTaxRate(18);
+    const exempt = await newProduct({ taxable: false, unitPrice: 500, quantityOnHand: 10 });
+
+    const sale = await sales.complete(tenant.tenantId, owner, {
+      branchId: tenant.branchId,
+      registerId: tenant.registerId,
+      items: [{ productId: exempt.id, quantity: 2 }],
+      payments: [{ method: 'CASH', amount: 1000 }],
+    });
+
+    expect(Number(sale.subtotal)).toBe(1000);
+    expect(Number(sale.taxAmount)).toBe(0);
+    expect(Number(sale.total)).toBe(1000);
+
+    // And the line records the rate it was actually charged at.
+    const line = await lineOf(sale.id);
+    expect(Number(line.taxRatePercent)).toBe(0);
   });
 });

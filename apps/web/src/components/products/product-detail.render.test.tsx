@@ -121,6 +121,7 @@ function makeProduct(overrides: Partial<ManagedProduct> = {}): ManagedProduct {
     inventoryAssetAccount: null,
     imageUrl: null,
     isActive: true,
+    taxable: true,
     quickbooksItemId: null,
     syncStatus: 'NOT_SYNCED',
     lastSyncedAt: null,
