@@ -61,11 +61,29 @@ export interface ProviderContext {
 export interface StockLine {
   productId: string;
   /**
-   * The exact variant sold, or null for a product that has none.
-   * A provider that honours it must still fall back to product-level stock when
-   * it is null.
+   * The exact variant sold. Absent or null for a product that has none, and a
+   * provider that honours it must still fall back to product-level stock.
+   *
+   * **Optional, and that is a deliberate reversal (2.15).** 1a.4 made it
+   * required-nullable so the compiler would name every construction site — which
+   * worked, and is how the sell path was threaded correctly. But two of those
+   * sites are in `RoundDepletionService`, and its spec asserts the StockLine
+   * shape with an EXACT object match:
+   *
+   *     expect(reduceStock).toHaveBeenCalledWith(tx, ctx, [
+   *       { productId: 'p1', productName: 'Bottled Beer', quantity: 2, trackInventory: true },
+   *     ]);
+   *
+   * An added key fails that assertion even though the behaviour is identical —
+   * `aggregateByVariant` treats absent and null the same, proven in
+   * `stock-state.spec`. So a compile-time convenience for us broke a green test
+   * belonging to a module other developers are working on in parallel.
+   *
+   * Optional restores their call shape byte-for-byte. Our own construction sites
+   * still pass it explicitly; what the compiler no longer does, the sell-path
+   * tests do.
    */
-  productVariantId: string | null;
+  productVariantId?: string | null;
   /** Used verbatim in user-facing errors, exactly as the current code does. */
   productName: string;
   quantity: number;

@@ -1,6 +1,10 @@
 import { Prisma } from '@hardware-pos/database';
 
 import { aggregateVariantStock, stockStateFor, type VariantStockCell } from './stock-state';
+import {
+  aggregate,
+  aggregateByVariant,
+} from '../modules/providers/inventory/local-inventory.provider';
 
 /**
  * D99 (1c.6) — a product with variants derives its stock from the variant rows.
@@ -109,5 +113,61 @@ describe('stockStateFor is the single threshold rule', () => {
 
     expect(aggregateVariantStock([cell(3, 5)]).state).toBe('LOW');
     expect(aggregateVariantStock([cell(9, 5)]).state).toBe('IN_STOCK');
+  });
+});
+
+/**
+ * D99 (2.15) — the restaurant path through `restoreStock` did not change.
+ *
+ * 1a.20 switched `restoreStock` from `aggregate` (keyed by product) to
+ * `aggregateByVariant` (keyed by product+variant). RESTAURANT tenants run LOCAL
+ * inventory, so they go through this provider, and `RoundDepletionService`
+ * restores voided items through it.
+ *
+ * Their lines always carry `productVariantId: null` (D65 — rounds deplete
+ * through components at product level), so the two functions must agree
+ * exactly for that shape. Asserted rather than reasoned about, because "it
+ * looks equivalent" is how a shared-code change breaks somebody else's module.
+ */
+describe('aggregateByVariant matches aggregate for product-level lines', () => {
+  const line = (productId: string, name: string, quantity: number, trackInventory = true) => ({
+    productId,
+    productVariantId: null,
+    productName: name,
+    quantity,
+    trackInventory,
+  });
+
+  it('produces the same products, quantities and names', () => {
+    const lines = [
+      line('bun', 'Bun', 2),
+      line('patty', 'Patty', 1),
+      line('bun', 'Bun', 3), // same product twice — must sum, not overwrite
+    ];
+
+    const old = aggregate(lines);
+    const now = aggregateByVariant(lines);
+
+    expect(now.map((t) => t.productId).sort()).toEqual([...old.keys()].sort());
+    for (const t of now) {
+      expect(t.qty).toBe(old.get(t.productId)!.qty);
+      expect(t.name).toBe(old.get(t.productId)!.name);
+      // The restaurant shape: never a variant.
+      expect(t.productVariantId).toBeNull();
+    }
+    expect(now.find((t) => t.productId === 'bun')!.qty).toBe(5);
+  });
+
+  it('skips untracked lines identically', () => {
+    // D65 — a SERVICE line or an unmigrated null-product line moves nothing.
+    const lines = [line('bun', 'Bun', 2, false), line('patty', 'Patty', 1)];
+
+    expect(aggregateByVariant(lines).map((t) => t.productId)).toEqual([...aggregate(lines).keys()]);
+    expect(aggregateByVariant(lines)).toHaveLength(1);
+  });
+
+  it('an empty round aggregates to nothing on both', () => {
+    expect(aggregateByVariant([])).toEqual([]);
+    expect(aggregate([]).size).toBe(0);
   });
 });

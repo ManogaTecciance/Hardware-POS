@@ -607,7 +607,10 @@ export function aggregateByVariant(lines: StockLine[]): VariantStockTotal[] {
     const prev = totals.get(key);
     totals.set(key, {
       productId: line.productId,
-      productVariantId: line.productVariantId,
+      // Normalised here, once: `StockLine.productVariantId` is OPTIONAL (2.15),
+      // so a caller that omits it and one that passes null must be the same
+      // product-level line downstream. Everything past this point sees null.
+      productVariantId: line.productVariantId ?? null,
       name: line.productName,
       qty: (prev?.qty ?? 0) + line.quantity,
     });

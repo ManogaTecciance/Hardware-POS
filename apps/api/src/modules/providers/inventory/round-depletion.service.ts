@@ -118,10 +118,6 @@ export class RoundDepletionService {
 
       const lines: StockLine[] = tracked.map((t) => ({
         productId: t.productId,
-        // D99 — restaurant rounds deplete through components at product level
-        // (D65). Variant-level depletion is a food-service question that the
-        // retail work does not answer, so this stays null deliberately.
-        productVariantId: null,
         productName: t.productName,
         quantity: t.quantity,
         trackInventory: true,
@@ -199,8 +195,6 @@ export class RoundDepletionService {
       await provider.restoreStock(tx, { tenantId, branchId: movement.branchId }, [
         {
           productId: movement.productId,
-          // D99 — mirrors the depletion above: product level, deliberately.
-          productVariantId: null,
           productName: names.get(movement.productId) ?? movement.productId,
           quantity: qty,
           trackInventory: true,
