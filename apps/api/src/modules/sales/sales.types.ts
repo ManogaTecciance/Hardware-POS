@@ -97,6 +97,16 @@ export interface ComputedLine {
   discountReason: string | null;
   approvedByUserId: string | null;
   taxAmount: number;
+  /**
+   * D101 (3.9) — the tax rate this line was charged at, frozen at sale time.
+   *
+   * A number, never null, on every NEW line. `SaleItem.taxRatePercent` is
+   * nullable only so that lines written before 3.8 can be recognised as
+   * historical — that is the signal `3.10` uses to fall back to proportional
+   * refunding. If a new sale could write null the fallback could not tell an old
+   * line from a new untaxed one, so the invariant is enforced here in the type.
+   */
+  taxRatePercent: number;
   lineSubtotal: number;
   lineTotal: number;
 }

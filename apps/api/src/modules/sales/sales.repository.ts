@@ -568,6 +568,9 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
       ? { approvedBy: { connect: { id: line.approvedByUserId } } }
       : {}),
     taxAmount: line.taxAmount,
+    // D101 (3.9) — the frozen rate. Required on ComputedLine, so a new row can
+    // never carry the null that marks a pre-3.8 line.
+    taxRatePercent: line.taxRatePercent,
     lineSubtotal: line.lineSubtotal,
     lineTotal: line.lineTotal,
   };

@@ -488,7 +488,30 @@ export class SalesService {
           discountAmount,
           discountReason: item.discountReason ?? null,
           approvedByUserId,
+          // Still 0. Splitting the order-level tax across lines is per-line
+          // COMPUTATION, which is parked with grocery (D101). 3.9 records the
+          // rate; it does not change a single figure.
           taxAmount: 0,
+          /*
+           * D101 (3.9) — the rate this line was charged at, frozen now.
+           *
+           * `taxable` defaults true, so for every existing product this is the
+           * tenant rate — exactly what the order-level arithmetic below already
+           * applies. Writing it down changes no money.
+           *
+           * An exempt product and a tenant configured at 0% BOTH snapshot 0.00,
+           * and that is correct rather than a conflation: the column records
+           * WHAT WAS CHARGED, and both charged nothing. Whether that was because
+           * the product is exempt or because the tenant taxes nothing is a
+           * question `Product.taxable` still answers, by joining. Recorded here
+           * because two paths reaching the same value looks like a bug to
+           * whoever reads it next.
+           *
+           * Never null on a new line. Null on `SaleItem.taxRatePercent` means
+           * "written before 3.8", which is the signal 3.10 uses to fall back to
+           * proportional refunding — so a new sale must never produce one.
+           */
+          taxRatePercent: product.taxable ? settings.taxRatePercent : 0,
           lineSubtotal,
           lineTotal: computedLine.lineTotal.toNumber(),
         };
