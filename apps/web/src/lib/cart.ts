@@ -1,6 +1,6 @@
 import type { ClientProduct, ClientVariant } from './catalog';
 import { round2 } from './utils';
-import { taxableBase } from '@hardware-pos/shared';
+import { applyPromotions, taxableBase, type PromotionRule } from '@hardware-pos/shared';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
 
@@ -118,6 +118,72 @@ export function computeLine(item: CartItem): LineTotals {
   };
 }
 
+/** One cart line, priced — including whatever promotion claimed it. */
+export interface CartLineTotals extends LineTotals {
+  lineKey: string;
+  /** D102 (4.4) — already subtracted from `lineTotal`. Kept for display. */
+  promotionDiscountAmount: number;
+  promotionId: string | null;
+  promotionName: string | null;
+}
+
+/**
+ * D102 (4.4) — the ONE place a cart line's money is derived.
+ *
+ * A promotion cannot be computed per line: a bundle spans lines and a BOGO counts
+ * across them, so it needs the whole basket. That makes `computeLine` alone
+ * insufficient the moment promotions exist — and `computeLine` was being called
+ * independently in three render paths (the cart list, the payment table, the
+ * fallback receipt). Left as they were, each would have shown a PRE-promotion
+ * line total under a post-promotion footer, and the cart would visibly not add
+ * up. That is the same shape as the four sale-line renderers 2.12 found.
+ *
+ * So every renderer reads this instead. The one caller that deliberately still
+ * uses `computeLine` is the discount-limit check, which asks "how big is this
+ * MANUAL discount?" — a question a promotion must not answer.
+ *
+ * `promotionRules` defaults to empty, so a caller without them prices exactly as
+ * before rather than throwing.
+ */
+export function computeCartLines(
+  items: CartItem[],
+  promotionRules: readonly PromotionRule[] = [],
+): CartLineTotals[] {
+  const base = items.map((item) => ({ item, line: computeLine(item) }));
+
+  const promo = applyPromotions({
+    lines: base.map(({ item, line }) => ({
+      id: item.lineKey,
+      productId: item.product.id,
+      unitPrice: linePrice(item),
+      quantity: item.quantity,
+      lineSubtotal: line.lineSubtotal,
+      // Precedence lives in the applier: a manually discounted line is invisible
+      // to promotions, so it cannot even complete a bundle (D102).
+      manualDiscountAmount: line.discountAmount,
+    })),
+    promotions: [...promotionRules],
+  });
+
+  const claimed = new Map(promo.lines.map((l) => [l.lineId, l]));
+
+  return base.map(({ item, line }) => {
+    const won = claimed.get(item.lineKey);
+    const promotionDiscountAmount = won?.discountAmount ?? 0;
+    return {
+      ...line,
+      lineKey: item.lineKey,
+      promotionDiscountAmount,
+      promotionId: won?.promotionId ?? null,
+      promotionName: won?.promotionName ?? null,
+      // The promotion reduces the LINE. Everything downstream — the order
+      // discount's base, and `taxableBase` — reads `lineTotal`, so tax follows
+      // with no tax code at all (D102).
+      lineTotal: round2(line.lineTotal - promotionDiscountAmount),
+    };
+  });
+}
+
 /** Whole-cart discount, applied after per-line (product) discounts. */
 export interface OrderDiscount {
   type: DiscountType;
@@ -140,16 +206,30 @@ export function computeTotals(
   items: CartItem[],
   taxRatePercent: number,
   orderDiscount?: OrderDiscount,
+  promotionRules: readonly PromotionRule[] = [],
 ): CartTotals {
+  // D102 (4.4) — one derivation, shared with every renderer. Computing lines
+  // here independently is how the footer and the list come to disagree.
+  const lines = computeCartLines(items, promotionRules);
   let subtotal = 0;
   let totalDiscount = 0;
   let itemCount = 0;
   let hasStockIssue = false;
 
-  for (const item of items) {
-    const line = computeLine(item);
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i]!;
+    const line = lines[i]!;
     subtotal += line.lineSubtotal;
-    totalDiscount += line.discountAmount;
+    /*
+     * D102 (4.4) — `totalDiscount` is every LINE-level reduction, manual and
+     * promotional. It has to be: `discountedSubtotal` is derived from it, and
+     * `discountedSubtotal` must equal Σ lineTotal or the order discount is
+     * computed on money the customer never owed and the tax base drifts with it.
+     *
+     * The two are mutually exclusive per line (manual overrides promotion), so
+     * this sum never double-counts.
+     */
+    totalDiscount += line.discountAmount + line.promotionDiscountAmount;
     itemCount += item.quantity;
     if (line.outOfStock) hasStockIssue = true;
   }
@@ -168,7 +248,7 @@ export function computeTotals(
    * disagrees with". `sales.service` now calls the same function.
    */
   const taxBase = taxableBase(
-    items.map((it) => ({ lineTotal: computeLine(it).lineTotal, taxable: it.product.taxable })),
+    lines.map((l, i) => ({ lineTotal: l.lineTotal, taxable: items[i]!.product.taxable })),
     discountedSubtotal,
     orderDiscountAmount,
   );

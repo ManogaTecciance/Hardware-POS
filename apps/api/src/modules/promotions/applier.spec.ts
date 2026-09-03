@@ -58,6 +58,9 @@ const rule = (over: Partial<PromotionRule> & { id: string; type: PromotionRule['
   amountOff: null,
   buyQuantity: null,
   getQuantity: null,
+  // Mirrors `Promotion.stackable`'s own default, so a fixture never describes a
+  // promotion the database could not produce.
+  stackable: false,
   items: [],
   ...over,
 });
@@ -496,5 +499,77 @@ describe('the basket rules D102 fixed', () => {
     expect(
       applyPromotions({ lines: [item('l1', 'p', 100)], promotions: [] }).totalDiscount,
     ).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// stackable — basket-level exclusivity (4.4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('stackable', () => {
+  const pct = (id: string, productId: string, percentageOff: number, stackable: boolean) =>
+    rule({
+      id,
+      type: 'PERCENTAGE_DISCOUNT',
+      percentageOff,
+      stackable,
+      items: [{ productId, role: 'BUNDLE', quantity: 1 }],
+    });
+
+  it('a NON-stackable winner locks the basket, even on untouched lines', () => {
+    const lines = [item('l1', 'a', 1000), item('l2', 'b', 1000)];
+    const winner = pct('r_win', 'a', 50, false); // 500 — the larger
+    const other = pct('r_other', 'b', 10, true); // 100, different line
+
+    const result = applyPromotions({ lines, promotions: [winner, other] });
+
+    // POSITIVE: the winner applied…
+    expect(byLine(result)).toEqual({ l1: 500 });
+    // NEGATIVE: …and locked the basket, so l2 got nothing despite being free and
+    // its promotion being stackable. Exclusivity is basket-level, not line-level.
+    expect(result.lines.map((l) => l.lineId)).not.toContain('l2');
+  });
+
+  it('a stackable winner lets other STACKABLE promotions join on other lines', () => {
+    const lines = [item('l1', 'a', 1000), item('l2', 'b', 1000)];
+    const winner = pct('r_win', 'a', 50, true); // 500
+    const joiner = pct('r_join', 'b', 10, true); // 100
+
+    const result = applyPromotions({ lines, promotions: [winner, joiner] });
+
+    expect(byLine(result)).toEqual({ l1: 500, l2: 100 });
+    expect(result.totalDiscount).toBe(600);
+  });
+
+  it('a stackable winner still shuts out a NON-stackable follower', () => {
+    const lines = [item('l1', 'a', 1000), item('l2', 'b', 1000)];
+    const winner = pct('r_win', 'a', 50, true); // 500
+    const follower = pct('r_follow', 'b', 10, false); // 100, not stackable
+
+    const result = applyPromotions({ lines, promotions: [winner, follower] });
+
+    // POSITIVE CONTROL: the identical basket with a STACKABLE follower does give
+    // l2 its 100 (asserted above), so this negative is about the flag and not a
+    // fixture that never qualified.
+    expect(byLine(result)).toEqual({ l1: 500 });
+  });
+
+  it('a lone non-stackable promotion still applies', () => {
+    const lines = [item('l1', 'a', 1000)];
+
+    // The flag restricts COMPANY, not the promotion itself.
+    expect(applyPromotions({ lines, promotions: [pct('r1', 'a', 25, false)] }).totalDiscount).toBe(
+      250,
+    );
+  });
+
+  it('the flag does not change the deterministic order', () => {
+    const lines = [item('l1', 'a', 1000), item('l2', 'b', 1000)];
+    const a = pct('r_a', 'a', 50, true);
+    const b = pct('r_b', 'b', 10, true);
+
+    expect(applyPromotions({ lines, promotions: [a, b] })).toEqual(
+      applyPromotions({ lines, promotions: [b, a] }),
+    );
   });
 });

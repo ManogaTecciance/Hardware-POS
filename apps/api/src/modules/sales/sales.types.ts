@@ -107,6 +107,20 @@ export interface ComputedLine {
    * line from a new untaxed one, so the invariant is enforced here in the type.
    */
   taxRatePercent: number;
+  /**
+   * D102 (4.4) — the promotion that claimed this line, if any.
+   *
+   * `promotionDiscountAmount` is ALREADY subtracted from `lineTotal` and is
+   * already inside the sale's `totalDiscount`. It is carried separately so the
+   * receipt can name the offer and Phase 8 can report on it — a mirror, never a
+   * second source of truth (the D100 relationship).
+   *
+   * Mutually exclusive with `discountAmount`: a manual line discount overrides
+   * any promotion on that line, so at most one of the two is non-zero.
+   */
+  promotionDiscountAmount: number;
+  promotionId: string | null;
+  promotionNameSnapshot: string | null;
   lineSubtotal: number;
   lineTotal: number;
 }

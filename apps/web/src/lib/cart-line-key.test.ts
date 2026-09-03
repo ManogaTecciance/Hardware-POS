@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { taxableBase } from '@hardware-pos/shared';
+import { taxableBase, type PromotionRule } from '@hardware-pos/shared';
 
 import {
   cartLineKey,
+  computeCartLines,
   computeLine,
   computeTotals,
   lineLabel,
@@ -364,5 +365,141 @@ describe('the till and the server agree on tax', () => {
 
     expect(totals.orderDiscountAmount).toBe(395);
     expect(totals.taxAmount).toBe(299.7);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D102 (4.4) — promotions on the till
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The figures below are the SAME ones the server-side integration spec
+ * (`promotion-sale.spec.ts`) asserts against a real sale. Both sides run
+ * `applyPromotions` from `@hardware-pos/shared`, so pinning identical numbers in
+ * both places is the till-server agreement — the guarantee 3.14 established for
+ * tax, extended to promotions.
+ */
+describe('promotions on the till (4.4)', () => {
+  const shirt = product({ id: 'p_shirt', name: 'Shirt', unitPrice: 1000, variants: [] });
+  const tie = product({ id: 'p_tie', name: 'Tie', unitPrice: 500, variants: [] });
+
+  const bogo = (over: Partial<PromotionRule> = {}): PromotionRule => ({
+    id: 'promo_bogo',
+    name: 'Buy 2 shirts, tie free',
+    type: 'BUY_X_GET_Y',
+    fixedPrice: null,
+    percentageOff: null,
+    amountOff: null,
+    buyQuantity: 2,
+    getQuantity: 1,
+    stackable: false,
+    items: [
+      { productId: 'p_shirt', role: 'BUY', quantity: 1 },
+      { productId: 'p_tie', role: 'GET', quantity: 1 },
+    ],
+    ...over,
+  });
+
+  /** 2 shirts at 1,000 and a tie at 500. */
+  const basket = (): CartItem[] => {
+    const a = newCartItem(shirt, null);
+    a.quantity = 2;
+    return [a, newCartItem(tie, null)];
+  };
+
+  it('prices the promoted basket exactly as the server does', () => {
+    const totals = computeTotals(basket(), 18, undefined, [bogo()]);
+
+    expect(totals.subtotal).toBe(2500);
+    // The tie is free: 500 off, and it is a LINE reduction, so it lands in
+    // `totalDiscount` alongside any manual one.
+    expect(totals.totalDiscount).toBe(500);
+    // Tax follows automatically — 18% of 2,000, not of 2,500.
+    expect(totals.taxAmount).toBe(360);
+    expect(totals.total).toBe(2360);
+  });
+
+  it('the whole saving sits on the FREE line, not spread across the basket', () => {
+    const lines = computeCartLines(basket(), [bogo()]);
+    const byProduct = Object.fromEntries(
+      lines.map((l, i) => [i === 0 ? 'shirt' : 'tie', l]),
+    );
+
+    // POSITIVE: the tie carries all 500 and nets to zero, so returning it
+    // refunds nothing (D102).
+    expect(byProduct.tie!.promotionDiscountAmount).toBe(500);
+    expect(byProduct.tie!.lineTotal).toBe(0);
+    expect(byProduct.tie!.promotionName).toBe('Buy 2 shirts, tie free');
+    // NEGATIVE: the shirts are untouched. Spreading the saving by value would
+    // give the tie only 100 and refund 400 on a free item.
+    expect(byProduct.shirt!.promotionDiscountAmount).toBe(0);
+    expect(byProduct.shirt!.lineTotal).toBe(2000);
+  });
+
+  it('INVARIANT — discountedSubtotal equals the sum of lineTotal', () => {
+    /*
+     * The load-bearing pair. `discountedSubtotal` is derived from
+     * `totalDiscount`, and the tax base and the order discount are both derived
+     * from IT. If a promotion reduced the lines without entering `totalDiscount`
+     * — or the reverse — the two drift silently and the customer is charged tax
+     * on money they never owed.
+     */
+    const items = basket();
+    const rules = [bogo()];
+    const totals = computeTotals(items, 18, undefined, rules);
+    const lines = computeCartLines(items, rules);
+
+    const sumLineTotals = Math.round(lines.reduce((a, l) => a + l.lineTotal, 0) * 100) / 100;
+    const discountedSubtotal =
+      Math.round((totals.subtotal - totals.totalDiscount) * 100) / 100;
+
+    expect(discountedSubtotal).toBe(sumLineTotals);
+    expect(discountedSubtotal).toBe(2000);
+  });
+
+  it('a promoted EXEMPT product is still untaxed', () => {
+    const exemptTie = product({ id: 'p_tie', name: 'Tie', unitPrice: 500, taxable: false, variants: [] });
+    const a = newCartItem(shirt, null);
+    a.quantity = 2;
+    const totals = computeTotals([a, newCartItem(exemptTie, null)], 18, undefined, [bogo()]);
+
+    // The tie is both free AND exempt. Tax is 18% of the shirts alone either
+    // way, which is the point: the two rules compose without knowing about
+    // each other.
+    expect(totals.taxAmount).toBe(360);
+    expect(totals.total).toBe(2360);
+  });
+
+  it('a manual discount on one line and a promotion on another — each takes its own', () => {
+    const items = basket();
+    items[0]!.discount = { type: 'PERCENTAGE', value: 10 }; // 200 off the shirts
+
+    const lines = computeCartLines(items, [bogo()]);
+
+    // POSITIVE: the manual discount applied to the shirts…
+    expect(lines[0]!.discountAmount).toBe(200);
+    expect(lines[0]!.promotionDiscountAmount).toBe(0);
+    /*
+     * NEGATIVE: …and the BOGO did NOT fire, because the shirts are the BUY
+     * side and a manually discounted line is invisible to promotions — it
+     * cannot even satisfy a threshold (D102). The tie stays full price.
+     */
+    expect(lines[1]!.promotionDiscountAmount).toBe(0);
+    expect(lines[1]!.lineTotal).toBe(500);
+  });
+
+  it('ZERO-CHANGE — a basket with no promotions prices exactly as before', () => {
+    const items = basket();
+
+    const withNone = computeTotals(items, 18, undefined, []);
+    const withoutArg = computeTotals(items, 18);
+
+    // The argument is optional and empty means "none", so every existing caller
+    // and every pre-4.4 figure is untouched.
+    expect(withNone).toEqual(withoutArg);
+    expect(withNone.subtotal).toBe(2500);
+    expect(withNone.totalDiscount).toBe(0);
+    expect(withNone.taxAmount).toBe(450);
+    expect(withNone.total).toBe(2950);
   });
 });

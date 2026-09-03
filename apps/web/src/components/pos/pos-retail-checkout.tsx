@@ -38,6 +38,7 @@ import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
 import { useAuth } from '@/lib/auth';
 import {
+  computeCartLines,
   computeLine,
   computeTotals,
   linePrice,
@@ -266,6 +267,12 @@ export function PosRetailCheckout() {
   const handleLineDiscountApply = (lineKey: CartLineKey, discount: LineDiscount) => {
     const item = cart.items.find((it) => it.lineKey === lineKey);
     if (!item) return;
+    /*
+     * Deliberately `computeLine`, not `computeCartLines` (4.4). This asks "how
+     * large is this MANUAL discount?" so it can be checked against the cashier's
+     * role limit. Netting a promotion into that percentage would let an approval
+     * limit be dodged by discounting an already-promoted line.
+     */
     const line = computeLine({ ...item, discount });
     const percent = line.lineSubtotal > 0 ? (line.discountAmount / line.lineSubtotal) * 100 : 0;
     if (withinDiscountLimit(discountLimitFor(session!.user.role), percent)) {
@@ -301,7 +308,21 @@ export function PosRetailCheckout() {
     return res.reason ?? 'Not approved';
   };
 
-  const totals = computeTotals(cart.items, data.settings.taxRatePercent, cart.orderDiscount);
+  const totals = computeTotals(
+    cart.items,
+    data.settings.taxRatePercent,
+    cart.orderDiscount,
+    data.promotionRules,
+  );
+  /*
+   * D102 (4.4) — the list below reads THESE lines, not its own `computeLine`.
+   * A promotion needs the whole basket to resolve, so a per-line call cannot see
+   * it: the rows would show pre-promotion totals under a post-promotion footer,
+   * and the cart would visibly not add up.
+   */
+  const linesByKey = new Map(
+    computeCartLines(cart.items, data.promotionRules).map((l) => [l.lineKey, l]),
+  );
   const orderBase = round2(totals.subtotal - totals.totalDiscount);
 
   const handleOrderDiscountApply = (discount: OrderDiscount) => {
@@ -430,7 +451,7 @@ export function PosRetailCheckout() {
           </div>
         ) : (
           cart.items.map((item) => {
-            const line = computeLine(item);
+            const line = linesByKey.get(item.lineKey)!;
             return (
               // D99 (1c.6) — keyed by the LINE, not the product. 1c.2 re-keyed the
               // cart's own map but left this list on `product.id`, so two sizes of

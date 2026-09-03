@@ -571,6 +571,20 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
     // D101 (3.9) — the frozen rate. Required on ComputedLine, so a new row can
     // never carry the null that marks a pre-3.8 line.
     taxRatePercent: line.taxRatePercent,
+    /*
+     * D102 (4.4) — what the applier decided, frozen.
+     *
+     * `lineTotal` above is already net of this; the amount is stored separately
+     * so a receipt can name the offer and Phase 8 can report on it. The name is
+     * a SNAPSHOT because a promotion can be renamed or deleted and a reprint
+     * must still say what the customer was given (D44).
+     *
+     * A return reverses `promotionDiscountAmount × frac` — line-level, like the
+     * product discount and unlike the order discount's basket-weighted share.
+     */
+    promotionDiscountAmount: line.promotionDiscountAmount,
+    promotionId: line.promotionId,
+    promotionNameSnapshot: line.promotionNameSnapshot,
     lineSubtotal: line.lineSubtotal,
     lineTotal: line.lineTotal,
   };

@@ -5,7 +5,16 @@ import { Prisma,
   PaymentStatus,
   QuickBooksDocumentType,
 } from '@hardware-pos/database';
-import { CURRENCY_SYMBOL, taxableBase, type Paginated } from '@hardware-pos/shared';
+import {
+  CURRENCY_SYMBOL,
+  applyPromotions,
+  taxableBase,
+  type Paginated,
+  type PromotionRule,
+} from '@hardware-pos/shared';
+
+import { isPromotionActive } from '../promotions/promotions.evaluator';
+import { PromotionsRepository, type PromotionWithItems } from '../promotions/promotions.repository';
 
 import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
@@ -33,6 +42,7 @@ import {
 } from './sales.repository';
 import {
   CartItemInput,
+  ComputedLine,
   ComputedSale,
   OrderDiscountInput,
   PersistSaleInput,
@@ -47,6 +57,33 @@ function requireProductId(productId: string | null, saleItemId: string): string 
   return productId;
 }
 
+/**
+ * D102 (4.4) — the Decimal → number boundary for promotions, in one place.
+ *
+ * `shared` carries no runtime dependency on Prisma, so the applier works in
+ * plain numbers with cent rounding. `catalog.ts` performs the mirror-image
+ * conversion from the wire strings, so both callers hand the applier the same
+ * shape and the same values.
+ */
+function toPromotionRule(p: PromotionWithItems): PromotionRule {
+  return {
+    id: p.id,
+    name: p.name,
+    type: p.type as PromotionRule['type'],
+    fixedPrice: p.fixedPrice === null ? null : Number(p.fixedPrice),
+    percentageOff: p.percentageOff === null ? null : Number(p.percentageOff),
+    amountOff: p.amountOff === null ? null : Number(p.amountOff),
+    buyQuantity: p.buyQuantity,
+    getQuantity: p.getQuantity,
+    stackable: p.stackable,
+    items: p.items.map((it) => ({
+      productId: it.productId,
+      role: it.role as PromotionRule['items'][number]['role'],
+      quantity: it.quantity,
+    })),
+  };
+}
+
 @Injectable()
 export class SalesService {
   constructor(
@@ -55,6 +92,7 @@ export class SalesService {
     private readonly discountsService: DiscountsService,
     private readonly accountingProviders: AccountingProviderFactory,
     private readonly inventoryProviders: InventoryProviderFactory,
+    private readonly promotions: PromotionsRepository,
   ) {}
 
   async list(tenantId: string, query: QuerySalesDto): Promise<Paginated<SaleListItem>> {
@@ -370,8 +408,10 @@ export class SalesService {
         ? await inventory.getVariantAvailability({ tenantId, branchId }, variantIds)
         : null;
 
-    const lines = await Promise.all(
-      items.map(async (item) => {
+    const lines: ComputedLine[] = await Promise.all(
+      // Annotated so the `promotionId: null` seeds below widen to `string |
+      // null`; the basket pass writes into them a few lines further down.
+      items.map(async (item): Promise<ComputedLine> => {
         const product = byId.get(item.productId);
         if (!product) {
           throw new BadRequestException(`Unknown product ${item.productId}`);
@@ -512,19 +552,84 @@ export class SalesService {
            * proportional refunding — so a new sale must never produce one.
            */
           taxRatePercent: product.taxable ? settings.taxRatePercent : 0,
+          // Filled by the basket pass below — a promotion needs every line to
+          // resolve, so it cannot be decided inside this per-line map.
+          promotionDiscountAmount: 0,
+          promotionId: null,
+          promotionNameSnapshot: null,
           lineSubtotal,
           lineTotal: computedLine.lineTotal.toNumber(),
         };
       }),
     );
 
+    /*
+     * D102 (4.4) — promotions, as a BASKET pass.
+     *
+     * It cannot live in the loop above: a bundle spans lines and a BOGO counts
+     * across them. It runs after, and folds its answer back into each line.
+     *
+     * Eligibility reuses the badge path's own read — `listForCatalogue` +
+     * `isPromotionActive` — so the offer a customer sees on the till and the
+     * price charged here cannot disagree about what is live. `COUNTER` is the
+     * channel `catalog.ts` sends; omitting it would make a channel-scoped
+     * promotion apply on the till and NOT here, since the evaluator refuses a
+     * scoped promotion when the context names no channel.
+     */
+    const eligiblePromotions = (await this.promotions.listForCatalogue(tenantId))
+      .filter((p) => isPromotionActive(p, { now: new Date(), branchId, channel: 'COUNTER' }))
+      .map(toPromotionRule);
+
+    const promotionResult = applyPromotions({
+      lines: lines.map((l, i) => ({
+        id: String(i),
+        productId: l.productId,
+        unitPrice: l.unitPrice,
+        quantity: l.quantity,
+        lineSubtotal: l.lineSubtotal,
+        // Precedence (D102) is enforced inside the applier: a manually
+        // discounted line is invisible to promotions and cannot complete a
+        // bundle. Passing it truthfully is this call site's whole obligation.
+        manualDiscountAmount: l.discountAmount,
+      })),
+      promotions: eligiblePromotions,
+    });
+
+    for (const won of promotionResult.lines) {
+      const line = lines[Number(won.lineId)];
+      if (!line) continue;
+      line.promotionDiscountAmount = won.discountAmount;
+      line.promotionId = won.promotionId;
+      line.promotionNameSnapshot = won.promotionName;
+      // The promotion reduces the LINE, which is what makes tax follow with no
+      // tax code: `taxableBase` reads `lineTotal`.
+      line.lineTotal = new Prisma.Decimal(line.lineTotal)
+        .minus(won.discountAmount)
+        .toDecimalPlaces(2)
+        .toNumber();
+    }
+
     // D59: sums and tax in Decimal. Line figures are 2dp, so these sums are
     // exact; sum2's float accumulation could drift a hair below a half.
     const subtotal = lines
       .reduce((acc, l) => acc.plus(l.lineSubtotal), new Prisma.Decimal(0))
       .toNumber();
+    /*
+     * D102 (4.4) — every LINE-level reduction, manual and promotional.
+     *
+     * It has to be both. `discountedSubtotal` is derived from this and must
+     * equal Σ lineTotal; if a promotion reduced the lines but not this sum, the
+     * order discount would be computed on money the customer never owed and the
+     * tax base would drift with it. `returns.calc` reads the stored figure as
+     * its denominator for the same reason.
+     *
+     * The two are mutually exclusive per line, so this never double-counts.
+     */
     const totalDiscount = lines
-      .reduce((acc, l) => acc.plus(l.discountAmount), new Prisma.Decimal(0))
+      .reduce(
+        (acc, l) => acc.plus(l.discountAmount).plus(l.promotionDiscountAmount),
+        new Prisma.Decimal(0),
+      )
       .toNumber();
     // Order-level discount applies to the subtotal AFTER per-line discounts.
     const discountedSubtotal = new Prisma.Decimal(subtotal).minus(totalDiscount).toNumber();

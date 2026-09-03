@@ -147,6 +147,7 @@ function toPromotionRule(api: ApiPromotionRule): PromotionRule {
     amountOff: num(api.amountOff),
     buyQuantity: api.buyQuantity,
     getQuantity: api.getQuantity,
+    stackable: api.stackable,
     items: api.items.map((it) => ({
       productId: it.productId,
       role: it.role as PromotionRule['items'][number]['role'],

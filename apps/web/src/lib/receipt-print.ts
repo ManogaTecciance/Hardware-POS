@@ -1,3 +1,5 @@
+import type { PromotionRule } from '@hardware-pos/shared';
+
 import { api } from './api';
 import {
   RECEIPT_WIDTH_MM,
@@ -7,7 +9,7 @@ import {
 } from './thermal-bill';
 import type { Session } from './auth';
 import type { CartItem } from './cart';
-import { computeLine, linePrice } from './cart';
+import { computeCartLines, linePrice } from './cart';
 import type { CompletedSale } from './sales';
 import { getCachedDocumentProfile, type DocumentProfile } from './document-template-service';
 import { formatMoney } from './utils';
@@ -17,6 +19,12 @@ export interface ReceiptContext {
   currency: string;
   customerName: string;
   items: CartItem[];
+  /**
+   * D102 (4.4) — the promotions this sale was priced with. Empty is safe and
+   * means "none applied"; without them the fallback would print pre-promotion
+   * line totals under a post-promotion total.
+   */
+  promotionRules?: readonly PromotionRule[];
   subtotal: number;
   totalDiscount: number;
   orderDiscount: number;
@@ -35,9 +43,12 @@ function esc(v: unknown): string {
 
 /** Minimal printable receipt used as a fallback when the server render fails. */
 function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
+  const priced = new Map(
+    computeCartLines(ctx.items, ctx.promotionRules ?? []).map((l) => [l.lineKey, l]),
+  );
   const rows = ctx.items
     .map((it) => {
-      const line = computeLine(it);
+      const line = priced.get(it.lineKey)!;
       // D99 (1c.7 / 2.12) — the size goes on the paper. Unlike the server
       // document this reads the live cart rather than a snapshot, because it
       // prints at the moment of sale: there is nothing yet to have drifted from.

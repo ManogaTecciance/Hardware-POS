@@ -30,7 +30,9 @@ import {
   computeLine,
   lineLabel,
   linePrice,
+  computeCartLines,
   computeTotals,
+  type CartLineTotals,
   type CartItem,
   type CartLineKey,
 } from '@/lib/cart';
@@ -76,7 +78,18 @@ export default function PaymentPage() {
   const cart = usePosCart();
 
   const currency = data.settings.currency;
-  const totals = computeTotals(cart.items, data.settings.taxRatePercent, cart.orderDiscount);
+  const totals = computeTotals(
+    cart.items,
+    data.settings.taxRatePercent,
+    cart.orderDiscount,
+    data.promotionRules,
+  );
+  // Same derivation the totals above used, so the table and the footer cannot
+  // disagree (D102, 4.4).
+  const cartLines = React.useMemo(
+    () => new Map(computeCartLines(cart.items, data.promotionRules).map((l) => [l.lineKey, l])),
+    [cart.items, data.promotionRules],
+  );
   const total = totals.total;
 
   const [mode, setMode] = React.useState<Mode>('CASH');
@@ -238,6 +251,9 @@ export default function PaymentPage() {
         currency,
         customerName,
         items: cart.items,
+        // D102 (4.4) — the fallback receipt prices from the live cart, so it
+        // needs the same rules the totals above were derived with.
+        promotionRules: data.promotionRules,
         subtotal: totals.subtotal,
         totalDiscount: totals.totalDiscount,
         orderDiscount: totals.orderDiscountAmount,
@@ -318,6 +334,7 @@ export default function PaymentPage() {
         <div className="hidden min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm tab:flex tab:max-h-full tab:self-start">
           <OrderSummary
             items={cart.items}
+            lines={cartLines}
             totals={totals}
             currency={currency}
             taxRatePercent={data.settings.taxRatePercent}
@@ -640,6 +657,7 @@ export default function PaymentPage() {
         <div className="-mx-6 -my-3 flex h-full min-h-0 flex-col">
           <OrderSummary
             items={cart.items}
+            lines={cartLines}
             totals={totals}
             currency={currency}
             taxRatePercent={data.settings.taxRatePercent}
@@ -661,6 +679,7 @@ export default function PaymentPage() {
  */
 function OrderSummary({
   items,
+  lines,
   totals,
   currency,
   taxRatePercent,
@@ -669,6 +688,13 @@ function OrderSummary({
   hideHeader,
 }: {
   items: CartItem[];
+  /**
+   * D102 (4.4) — priced by `computeCartLines`, the same derivation the footer
+   * uses. Recomputing here with `computeLine` would miss any promotion, since a
+   * promotion needs the whole basket to resolve, and the rows would not add up
+   * to the total printed beneath them.
+   */
+  lines: Map<string, CartLineTotals>;
   totals: ReturnType<typeof computeTotals>;
   currency: string;
   taxRatePercent: number;
@@ -701,7 +727,7 @@ function OrderSummary({
           </thead>
           <tbody>
             {items.map((it) => {
-              const line = computeLine(it);
+              const line = lines.get(it.lineKey)!;
               return (
                 <tr
                   // D99 (1c.8) — keyed by the LINE. Same collision 1c.6 fixed in the

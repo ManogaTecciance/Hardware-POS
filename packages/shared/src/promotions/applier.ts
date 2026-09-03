@@ -85,6 +85,12 @@ export interface PromotionRule {
   amountOff: number | null;
   buyQuantity: number | null;
   getQuantity: number | null;
+  /**
+   * Promotion-to-promotion stacking (4.4). It cannot mean "two promotions on one
+   * line" — `SaleItem` holds a single `promotionId`, so that is already
+   * impossible. It means basket-level exclusivity: see `applyPromotions`.
+   */
+  stackable: boolean;
   items: readonly PromotionRuleItem[];
 }
 
@@ -389,9 +395,17 @@ function claimsFor(lines: readonly PromotionCartLine[], rule: PromotionRule): Cl
  * Largest-first is the customer-favourable reading, and deterministic ordering
  * means two tills with the same basket produce the same bill.
  *
- * `stackable` is deliberately NOT read here — it is promotion-to-promotion
- * policy and lands with the call sites in 4.4, where the manual-discount
- * interaction it modifies also lives.
+ * **`stackable` is basket-level exclusivity** (4.4, PO-confirmed). It cannot mean
+ * "two promotions on one line" — the single `promotionId` already forbids that.
+ * So:
+ *
+ *   • the best candidate always applies;
+ *   • if it is NOT stackable it locks the basket and nothing else applies;
+ *   • if it is stackable, further STACKABLE non-overlapping candidates apply in
+ *     turn, and non-stackable ones are skipped once anything has applied.
+ *
+ * Read against the deterministic order above, so "the best one wins, and what it
+ * permits alongside it" is the same answer on every till.
  */
 export function applyPromotions(context: PromotionContext): PromotionResult {
   // A manually discounted line is invisible to promotions, so it cannot even
@@ -413,9 +427,18 @@ export function applyPromotions(context: PromotionContext): PromotionResult {
 
   const claimedLines = new Set<string>();
   const results: PromotionLineResult[] = [];
+  let anyApplied = false;
+  let basketLocked = false;
 
   for (const candidate of candidates) {
+    // A non-stackable promotion took the basket; nothing may join it.
+    if (basketLocked) break;
+    // …and a non-stackable one may not join something already applied.
+    if (anyApplied && !candidate.rule.stackable) continue;
     if (candidate.claims.some((c) => claimedLines.has(c.lineId))) continue;
+    anyApplied = true;
+    // Applied first and not stackable: it takes the whole basket.
+    if (!candidate.rule.stackable) basketLocked = true;
     for (const claim of candidate.claims) {
       claimedLines.add(claim.lineId);
       results.push({
