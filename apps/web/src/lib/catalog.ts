@@ -1,6 +1,6 @@
 'use client';
 
-import { DEFAULT_CURRENCY } from '@hardware-pos/shared';
+import { DEFAULT_CURRENCY, type PromotionRule } from '@hardware-pos/shared';
 import * as React from 'react';
 
 import { api } from './api';
@@ -131,10 +131,50 @@ interface ApiSellableItem {
   stockState?: StockState;
 }
 
+/**
+ * Wire → applier. The payload carries Decimals as strings because JSON numbers
+ * cannot hold one safely; the applier works in plain numbers with cent rounding.
+ * Converting in exactly one place keeps that boundary somewhere a reader can find.
+ */
+function toPromotionRule(api: ApiPromotionRule): PromotionRule {
+  const num = (v: string | null): number | null => (v === null ? null : Number(v));
+  return {
+    id: api.id,
+    name: api.name,
+    type: api.type as PromotionRule['type'],
+    fixedPrice: num(api.fixedPrice),
+    percentageOff: num(api.percentageOff),
+    amountOff: num(api.amountOff),
+    buyQuantity: api.buyQuantity,
+    getQuantity: api.getQuantity,
+    items: api.items.map((it) => ({
+      productId: it.productId,
+      role: it.role as PromotionRule['items'][number]['role'],
+      quantity: it.quantity,
+    })),
+  };
+}
+
+/** D102 (4.3) — the priceable shape, as it arrives. Decimals are strings. */
+interface ApiPromotionRule {
+  id: string;
+  name: string;
+  type: string;
+  fixedPrice: string | null;
+  percentageOff: string | null;
+  amountOff: string | null;
+  buyQuantity: number | null;
+  getQuantity: number | null;
+  stackable: boolean;
+  items: { productId: string; role: string; quantity: number }[];
+}
+
 interface ApiSellableResponse {
   items: ApiSellableItem[];
   total: number;
   nextCursor: string | null;
+  /** Absent on a response from an API predating 4.3 — treated as no promotions. */
+  promotionRules?: ApiPromotionRule[];
 }
 
 const DEFAULT_SETTINGS: PosSettings = { currency: DEFAULT_CURRENCY, taxRatePercent: 0 };
@@ -148,6 +188,15 @@ export interface CheckoutData {
   /** Category tree (id, name, subcategories) for the POS category + subcategory filter. */
   categoryTree: CatalogCategory[];
   settings: PosSettings;
+  /**
+   * D102 (4.3) — the promotions eligible for this till, in the shape the shared
+   * applier consumes. Empty when the API predates 4.3, so an older server simply
+   * prices nothing rather than throwing.
+   *
+   * `ClientProduct.promotions` remains the BADGE. This is what makes the badge
+   * chargeable, and 4.4 is where `computeTotals` starts reading it.
+   */
+  promotionRules: PromotionRule[];
   /** Re-fetch the catalog (e.g. after the API comes back up). */
   reload: () => void;
 }
@@ -228,8 +277,15 @@ const MAX_PAGES = 100;
 async function fetchAllSellable(
   auth: { token: string; tenantId: string },
   branchId: string,
-): Promise<ApiSellableItem[]> {
+): Promise<{ items: ApiSellableItem[]; promotionRules: ApiPromotionRule[] }> {
   const items: ApiSellableItem[] = [];
+  /*
+   * Every page repeats the same eligible set — one `isPromotionActive` pass per
+   * request, not per page — so collect by id rather than concatenating. A
+   * `BUNDLE_FIXED_PRICE` rule appended once per page would be applied once per
+   * page too, and a bundle would discount three times on a three-page catalogue.
+   */
+  const rulesById = new Map<string, ApiPromotionRule>();
   let cursor: string | null = null;
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -247,10 +303,11 @@ async function fetchAllSellable(
       auth,
     );
     items.push(...res.items);
-    if (!res.nextCursor) return items;
+    for (const rule of res.promotionRules ?? []) rulesById.set(rule.id, rule);
+    if (!res.nextCursor) return { items, promotionRules: [...rulesById.values()] };
     cursor = res.nextCursor;
   }
-  return items;
+  return { items, promotionRules: [...rulesById.values()] };
 }
 
 /**
@@ -292,6 +349,7 @@ export function useCheckoutData(session: Session): CheckoutData {
     loading: true,
     error: null,
     products: [],
+    promotionRules: [],
     categories: [],
     categoryTree: [],
     settings: DEFAULT_SETTINGS,
@@ -316,12 +374,12 @@ export function useCheckoutData(session: Session): CheckoutData {
         if (!branchId) {
           throw new Error('No branch assigned to this session — the POS needs one to load stock');
         }
-        const [items, settings] = await Promise.all([
+        const [sellable, settings] = await Promise.all([
           fetchAllSellable(auth, branchId),
           api.get<PosSettings>('/settings', auth),
         ]);
         if (cancelled) return;
-        const products = items.map(normalizeApi);
+        const products = sellable.items.map(normalizeApi);
         const categoryTree = deriveCategoryTree(products);
         setData({
           loading: false,
@@ -330,6 +388,7 @@ export function useCheckoutData(session: Session): CheckoutData {
           categories: deriveCategories(products),
           categoryTree,
           settings,
+          promotionRules: sellable.promotionRules.map(toPromotionRule),
         });
       } catch (err) {
         if (cancelled) return;
@@ -340,6 +399,9 @@ export function useCheckoutData(session: Session): CheckoutData {
           categories: [],
           categoryTree: [],
           settings: DEFAULT_SETTINGS,
+          // Unresolved is its own state: a failed load prices nothing rather
+          // than guessing at an offer the server never confirmed (D31).
+          promotionRules: [],
         });
       }
     })();

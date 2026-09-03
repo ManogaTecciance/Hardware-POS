@@ -130,10 +130,47 @@ export interface SellableItem {
   stockState?: StockState;
 }
 
+/**
+ * D102 (4.3) — a promotion in the shape the APPLIER needs, not the badge.
+ *
+ * `SellableItem.promotions` above carries `{ id, name, type, description }`: enough
+ * to show "Buy 2 Get 1" on a tile, and nothing to price it with. The till could
+ * therefore advertise an offer it was unable to apply — which is why 4.4 needs
+ * this, and why the badge shape is left exactly as it was.
+ *
+ * Sent ONCE per response rather than copied onto every participating product. A
+ * bundle rule spans products by nature, so a per-product copy would repeat the
+ * same rule on each of its members and invite two readers to diverge — the
+ * one-rule-many-implementations failure this branch has paid for three times.
+ *
+ * Decimals are STRINGS, like `unitPrice`, `priceDelta` and `availableQuantity`
+ * everywhere else in this payload: JSON numbers cannot carry a Decimal safely.
+ * The client converts once, in `catalog.ts`, on the way into the applier.
+ */
+export interface SellablePromotionRule {
+  id: string;
+  name: string;
+  type: string;
+  fixedPrice: string | null;
+  percentageOff: string | null;
+  amountOff: string | null;
+  buyQuantity: number | null;
+  getQuantity: number | null;
+  /** Promotion-to-promotion stacking. Read by 4.4, not by the applier itself. */
+  stackable: boolean;
+  items: { productId: string; role: string; quantity: number }[];
+}
+
 export interface SellableResponse {
   items: SellableItem[];
   total: number;
   nextCursor: string | null;
+  /**
+   * Every promotion eligible for THIS request — same `isPromotionActive` pass
+   * that decides the badges above, so the badge and the price can never disagree
+   * about which promotions are live.
+   */
+  promotionRules: SellablePromotionRule[];
 }
 
 const MAX_LIMIT = 200;
@@ -323,6 +360,10 @@ export class SellableService {
       string,
       { id: string; name: string; type: string; description: string | null }
     >();
+    // 4.3 — built in the SAME pass as the badges, deliberately. Two loops with
+    // two copies of the eligibility test is how a badge and a price come to
+    // disagree about which promotions are live.
+    const promotionRules: SellablePromotionRule[] = [];
     for (const promo of activePromotions) {
       if (isPromotionActive(promo, { now, branchId: query.branchId, channel: query.channel })) {
         validPromotionsById.set(promo.id, {
@@ -330,6 +371,22 @@ export class SellableService {
           name: promo.name,
           type: promo.type,
           description: promo.description,
+        });
+        promotionRules.push({
+          id: promo.id,
+          name: promo.name,
+          type: promo.type,
+          fixedPrice: promo.fixedPrice?.toString() ?? null,
+          percentageOff: promo.percentageOff?.toString() ?? null,
+          amountOff: promo.amountOff?.toString() ?? null,
+          buyQuantity: promo.buyQuantity,
+          getQuantity: promo.getQuantity,
+          stackable: promo.stackable,
+          items: promo.items.map((it) => ({
+            productId: it.productId,
+            role: it.role,
+            quantity: it.quantity,
+          })),
         });
       }
     }
@@ -471,6 +528,7 @@ export class SellableService {
       items,
       total,
       nextCursor: rows.length > limit && last ? encodeCursor(last.name, last.id) : null,
+      promotionRules,
     };
   }
 }
