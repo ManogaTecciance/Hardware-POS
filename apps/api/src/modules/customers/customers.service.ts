@@ -3,6 +3,7 @@ import { Customer, Prisma } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
+import { QuickBooksCustomersService } from '../quickbooks/quickbooks-customers.service';
 import { CustomersRepository } from './customers.repository';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { QueryCustomersDto } from './dto/query-customers.dto';
@@ -10,7 +11,10 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 
 @Injectable()
 export class CustomersService {
-  constructor(private readonly customersRepository: CustomersRepository) {}
+  constructor(
+    private readonly customersRepository: CustomersRepository,
+    private readonly quickbooksCustomers: QuickBooksCustomersService,
+  ) {}
 
   async list(tenantId: string, query: QueryCustomersDto): Promise<Paginated<Customer>> {
     const [items, total] = await this.customersRepository.search(
@@ -96,12 +100,30 @@ export class CustomersService {
     return this.customersRepository.update(id, data);
   }
 
-  /** Queue a customer for QuickBooks (stub — real QBO customer writes come later). */
+  /**
+   * Push a locally-created customer to QuickBooks now.
+   *
+   * Previously this only flagged the row PENDING and wrote a log line: no job
+   * type existed for customers, so nothing ever drained it and the customer sat
+   * PENDING forever. It now performs the push, adopting an existing QuickBooks
+   * customer of the same name where there is one.
+   */
   async syncToQuickBooks(tenantId: string, id: string): Promise<Customer> {
     const customer = await this.getById(tenantId, id);
     if (customer.quickbooksCustomerId) {
       throw new BadRequestException('Customer is already linked to QuickBooks');
     }
-    return this.customersRepository.queueQuickBooksSync(tenantId, id);
+    try {
+      // The push writes its own SYNCED sync-log entry and sets the status, so no
+      // PENDING row is queued first — the old stub left one behind permanently,
+      // because nothing ever drained a customer queue that does not exist.
+      await this.quickbooksCustomers.pushCustomer(tenantId, id);
+    } catch (err) {
+      await this.customersRepository.markQuickBooksSyncFailed(tenantId, id, (err as Error).message);
+      throw new BadRequestException(
+        `Could not sync customer to QuickBooks: ${(err as Error).message}`,
+      );
+    }
+    return this.getById(tenantId, id);
   }
 }

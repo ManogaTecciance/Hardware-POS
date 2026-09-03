@@ -111,7 +111,7 @@ export interface QboDocument {
   DocNumber?: string;
 }
 
-interface RequestParams {
+export interface RequestParams {
   apiBase: string;
   realmId: string;
   accessToken: string;
@@ -201,6 +201,19 @@ export async function queryAllVendors(params: RequestParams): Promise<QboVendor[
   return json.QueryResponse?.Vendor ?? [];
 }
 
+/** Body for creating a QuickBooks Customer. Only DisplayName is required. */
+export interface QboCustomerInput {
+  DisplayName: string;
+  CompanyName?: string;
+  PrimaryEmailAddr?: { Address: string };
+  PrimaryPhone?: { FreeFormNumber: string };
+  Mobile?: { FreeFormNumber: string };
+  Fax?: { FreeFormNumber: string };
+  WebAddr?: { URI: string };
+  BillAddr?: QboAddress;
+  ResaleNum?: string;
+}
+
 /** A QuickBooks Customer (the fields party sync + pull-create need). */
 export interface QboCustomer {
   Id: string;
@@ -216,6 +229,46 @@ export interface QboCustomer {
   Active?: boolean;
 }
 
+/**
+ * Escape a value for a QuickBooks query string literal. QBO's query language
+ * delimits with single quotes and has no parameter binding, so a name carrying an
+ * apostrophe ("O'Brien Hardware") would otherwise terminate the literal early and
+ * produce a malformed query.
+ */
+function escapeQueryLiteral(value: string): string {
+  return value.replace(/'/g, "\\'");
+}
+
+/**
+ * Find a customer by exact DisplayName. QuickBooks enforces DisplayName
+ * uniqueness across the company, so this is the pre-check that turns a would-be
+ * duplicate into a link to the existing record.
+ */
+export async function queryCustomerByName(
+  params: RequestParams,
+  displayName: string,
+): Promise<QboCustomer | null> {
+  const json = await runQuery<{ QueryResponse?: { Customer?: QboCustomer[] } }>(
+    params,
+    `select * from Customer where DisplayName = '${escapeQueryLiteral(displayName)}'`,
+  );
+  // Skip deactivated records, matching the inbound pull's `Active !== false`
+  // filter: adopting a deactivated customer would only fail again at the invoice.
+  return json.QueryResponse?.Customer?.find((c) => c.Active !== false) ?? null;
+}
+
+/** Create a QuickBooks Customer. `DisplayName` is required and must be unique. */
+export async function createCustomer(
+  params: RequestParams,
+  body: QboCustomerInput,
+): Promise<QboCustomer> {
+  const json = await postEntity<{ Customer?: QboCustomer }>(params, 'customer', body);
+  if (!json.Customer?.Id) {
+    throw new Error('QuickBooks Customer response did not include an Id');
+  }
+  return json.Customer;
+}
+
 /** List customers with full detail for a reconciliation / pull-create pass. */
 export async function queryAllCustomers(params: RequestParams): Promise<QboCustomer[]> {
   const json = await runQuery<{ QueryResponse?: { Customer?: QboCustomer[] } }>(
@@ -226,7 +279,10 @@ export async function queryAllCustomers(params: RequestParams): Promise<QboCusto
 }
 
 /** Fetch one Vendor by id. */
-export async function queryVendorById(params: RequestParams, id: string): Promise<QboVendor | null> {
+export async function queryVendorById(
+  params: RequestParams,
+  id: string,
+): Promise<QboVendor | null> {
   const json = await runQuery<{ QueryResponse?: { Vendor?: QboVendor[] } }>(
     params,
     `select Id, DisplayName, Balance, Active from Vendor where Id = '${id.replace(/'/g, '')}'`,
@@ -332,7 +388,8 @@ export async function createCreditMemo(
 /** POST a JSON entity to the Accounting API and return the parsed response. */
 async function postEntity<T>(
   params: RequestParams,
-  entity: 'salesreceipt' | 'invoice' | 'payment' | 'refundreceipt' | 'creditmemo' | 'item',
+  entity:
+    'salesreceipt' | 'invoice' | 'payment' | 'refundreceipt' | 'creditmemo' | 'item' | 'customer',
   body: unknown,
 ): Promise<T> {
   const url = `${params.apiBase}/v3/company/${params.realmId}/${entity}?minorversion=65`;

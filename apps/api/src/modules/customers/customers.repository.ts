@@ -54,21 +54,23 @@ export class CustomersRepository {
     return this.prisma.customer.update({ where: { id }, data });
   }
 
-  /** Queue a locally-created customer for a QuickBooks push (stub until real QBO writes). */
-  async queueQuickBooksSync(tenantId: string, id: string): Promise<Customer> {
-    return this.prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.update({ where: { id }, data: { syncStatus: 'PENDING' } });
+  /**
+   * Record a failed QuickBooks push so the customer does not read as synced and
+   * the reason is visible in the Sync log rather than only in the API response.
+   */
+  async markQuickBooksSyncFailed(tenantId: string, id: string, reason: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.customer.update({ where: { id }, data: { syncStatus: 'FAILED' } });
       await tx.syncLog.create({
         data: {
           tenantId,
           entityType: 'CUSTOMER',
           entityId: id,
           direction: 'OUTBOUND',
-          status: 'PENDING',
-          message: `Customer "${customer.name}" queued for QuickBooks sync`,
+          status: 'FAILED',
+          message: `QuickBooks customer push failed: ${reason}`,
         },
       });
-      return customer;
     });
   }
 }

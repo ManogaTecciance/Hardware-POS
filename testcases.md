@@ -298,8 +298,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-010 | List search across fields | Search by phone fragment / company | Matching rows | P | Not Run |
 | CUST-011 | Type + active filters | CREDIT + Active | Intersection only | P | Not Run |
 | CUST-012 | Legacy address preserved | Pre-migration customer | Old single-line address appears in Street | P | Not Run |
-| CUST-013 | Sync single customer to QuickBooks | Profile → Sync to QuickBooks | Queued; status chip transitions; QB id stored | P | Not Run |
+| CUST-013 | Sync single customer to QuickBooks | Profile → Sync to QuickBooks | Customer pushed to QuickBooks and the returned id stored | P | Not Run |
 | CUST-014 | Walk-in behavior preserved | Sale without customer, then store-credit return | Return blocked per RET-009 | P | Not Run |
+| CUST-015 | Sync to QuickBooks stores a real id | Profile → Sync to QuickBooks on a POS-created customer | `quickbooksCustomerId` populated; status SYNCED | P | Not Run |
+| CUST-016 | Sync while disconnected fails clearly | Same action with QuickBooks disconnected | Error names the disconnection; no id written; status not left claiming success | N | Not Run |
 
 ## CIMP — Customer Bulk Import
 
@@ -378,6 +380,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | QB-023 | Retry from sync log | POST /quickbooks/retry/:syncLogId on a FAILED row | Entity re-pushed; log updated | P | Not Run |
 | QB-024 | Vendor search filters server-side | Type a term in the mapping drawer | Result list narrowed by DisplayName match | P | Not Run |
 | QB-025 | Credit settlement pushed as QBO Payment | Settle a credit (invoice) sale | Payment created in QuickBooks against the invoice | P | Not Run |
+| QB-026 | Credit sale for a POS-created customer syncs | Add a customer at the till, make a credit sale, sync | Customer created in QuickBooks; Invoice carries its CustomerRef; no 6560 | P | Not Run |
+| QB-027 | Re-sync creates no second QuickBooks customer | Retry the sync of QB-026's sale | Same customer id reused; QuickBooks customer list unchanged | P | Not Run |
+| QB-028 | Existing QuickBooks customer is adopted, not duplicated | Create a POS customer whose name already exists in QuickBooks, then sell to them | Local record links to the existing QuickBooks customer | P | Not Run |
+| QB-029 | Sales Receipt names its customer | Cash sale with a customer attached, then sync | Sales Receipt in QuickBooks shows the customer (previously blank) | P | Not Run |
+| QB-030 | Walk-in cash sale still syncs | Cash sale with no customer | Sales Receipt created with no CustomerRef; no customer invented | P | Not Run |
+| QB-031 | Name clashing with a vendor reports clearly | Customer named the same as an existing QuickBooks vendor | Sync fails with a message naming the clash, not a raw 6240 | N | Not Run |
 
 ## SET — Settings
 
@@ -494,18 +502,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 14 |
+| AUTH | 15 | CUST | 16 |
 | PERM | 15 | CIMP | 10 |
 | DASH | 20 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
-| PIMP | 13 | QB | 25 |
+| PIMP | 13 | QB | 31 |
 | POS | 38 | SET | 19 |
 | PAY | 22 | DOC | 11 |
 | SALE | 20 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 352 test cases** (≈60% positive / 40% negative).
+**Total: 360 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

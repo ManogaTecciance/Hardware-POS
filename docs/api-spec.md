@@ -311,7 +311,10 @@ POST /v1/quickbooks/sync-products      # quickbooks:manage — requires an activ
 
 Pushes a completed sale to QuickBooks. A **fully paid** sale becomes a **Sales Receipt**; a
 **credit / partial** sale becomes an **Invoice**, and when any amount was paid a **Payment** is
-created and linked to that invoice. Both the document and its linked Payment carry a `TxnDate`
+created and linked to that invoice. The `CustomerRef` on each document is resolved from
+`Customer.quickbooksCustomerId`; a customer not yet in QuickBooks is created there first (or an
+existing one of the same name adopted) and the id stored, so a credit sale for a customer added at
+the till syncs without manual linking. Both the document and its linked Payment carry a `TxnDate`
 equal to the sale's invoice date (a bare `YYYY-MM-DD` in server-local time), so a backdated POS
 sale is filed in QuickBooks on the day it happened rather than the day it was keyed in.
 Sale line items reference their `quickbooksItemId` when the

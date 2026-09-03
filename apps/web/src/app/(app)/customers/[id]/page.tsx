@@ -28,6 +28,10 @@ export default function CustomerDetailPage() {
   const [customer, setCustomer] = React.useState<ManagedCustomer | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  // Kept apart from `error`: that one means "the page could not load" and
+  // replaces the whole view. A sync that fails should leave the customer on
+  // screen and say so, not blank the page.
+  const [syncError, setSyncError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
 
@@ -37,7 +41,10 @@ export default function CustomerDetailPage() {
     setLoading(true);
     fetchCustomer(session, id)
       .then((c) => !cancelled && setCustomer(c))
-      .catch((err: unknown) => !cancelled && setError(err instanceof Error ? err.message : 'Could not load customer'))
+      .catch(
+        (err: unknown) =>
+          !cancelled && setError(err instanceof Error ? err.message : 'Could not load customer'),
+      )
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -47,11 +54,12 @@ export default function CustomerDetailPage() {
   const handleSync = async () => {
     if (!session || !customer) return;
     setBusy(true);
+    setSyncError(null);
     try {
       await syncCustomerToQuickBooks(session, customer.id);
       setReloadKey((k) => k + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sync failed');
+      setSyncError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setBusy(false);
     }
@@ -62,11 +70,16 @@ export default function CustomerDetailPage() {
   if (error || !customer) {
     return (
       <div className="space-y-4">
-        <Link href="/customers" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
+        <Link
+          href="/customers"
+          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+        >
           <ArrowLeft className="h-4 w-4" /> Back to customers
         </Link>
         <Card>
-          <CardContent className="py-16 text-center text-sm text-danger">{error ?? 'Customer not found'}</CardContent>
+          <CardContent className="py-16 text-center text-sm text-danger">
+            {error ?? 'Customer not found'}
+          </CardContent>
         </Card>
       </div>
     );
@@ -74,9 +87,17 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="space-y-6">
+      {syncError ? (
+        <Card>
+          <CardContent className="py-3 text-sm text-danger">{syncError}</CardContent>
+        </Card>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <Link href="/customers" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
+          <Link
+            href="/customers"
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
             <ArrowLeft className="h-4 w-4" /> Back to customers
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight">{customer.name}</h1>
@@ -102,7 +123,11 @@ export default function CustomerDetailPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {customer.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}
+        {customer.isActive ? (
+          <Badge variant="success">Active</Badge>
+        ) : (
+          <Badge variant="danger">Inactive</Badge>
+        )}
         {customer.quickbooksCustomerId ? (
           <Badge variant="primary">QuickBooks-linked</Badge>
         ) : (
@@ -125,7 +150,10 @@ export default function CustomerDetailPage() {
             <Detail label="Fax" value={customer.fax ?? '—'} />
             <Detail label="Website" value={customer.website ?? '—'} />
             <Detail label="Resale number" value={customer.resaleNumber ?? '—'} />
-            <Detail label="QuickBooks customer ID" value={customer.quickbooksCustomerId ?? 'Not synced'} />
+            <Detail
+              label="QuickBooks customer ID"
+              value={customer.quickbooksCustomerId ?? 'Not synced'}
+            />
           </CardContent>
         </Card>
 

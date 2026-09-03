@@ -58,6 +58,33 @@ Line items map to QBO `SalesItemLineDetail` using each product's QBO `Item` id, 
 unit price, quantity, and the product-wise discount (as a line discount or a discount line,
 per QBO's model). A customer reference is required on Invoices.
 
+### 4.1 Customer references
+
+`CustomerRef` is resolved from **`Customer.quickbooksCustomerId`** — the same field the inbound
+pull populates, mirroring how products resolve through `Product.quickbooksItemId`. The
+`QuickBooksMapping` table is **not** consulted; it has never been written and is legacy.
+
+It is **required** on an Invoice, a Credit Memo and a Payment, and **optional** on a Sales
+Receipt or Refund Receipt (a walk-in cash sale legitimately has no customer).
+
+A customer created in the POS has no link yet, so one is established before the document is
+built:
+
+1. If `quickbooksCustomerId` is already set, use it.
+2. Otherwise look for an **active** QuickBooks customer with the same `DisplayName` and adopt it,
+   rather than creating a second record for the same person.
+3. Otherwise create the customer in QuickBooks and store the returned id.
+
+The write is idempotent, which matters because the sync queue retries: the id is claimed
+write-once (`quickbooksCustomerId: null` compare-and-set), so two sales syncing concurrently for
+the same new customer end up sharing one QuickBooks record. QuickBooks enforces `DisplayName`
+uniqueness across customers, vendors and employees; a clash (error 6240) is recovered by adopting
+the existing customer, and reported plainly when the name belongs to a vendor or a deactivated
+record instead.
+
+`openingBalance` is deliberately never pushed — QuickBooks owns the live A/R balance, and sending
+one would post an opening-balance journal entry on top of the invoices the POS already sends.
+
 Every document carries `TxnDate` — the POS **invoice date**, sent as a bare `YYYY-MM-DD`
 calendar date derived in server-local time, so the day filed in QuickBooks is the day picked
 at the till. A backdated sale is therefore filed in the period it belongs to rather than the

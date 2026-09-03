@@ -171,10 +171,10 @@ Unit: `QuickBooksSalesSyncService.buildLines` / `buildDocumentBody` for a fully-
 | ID | Case | Expected |
 | --- | --- | --- |
 | U-13-1 | Routing | Credit/partial builds an `invoice` body. |
-| U-13-2 | CustomerRef from mapping | Uses `QuickBooksMapping` (`CUSTOMER`) when present. |
+| U-13-2 | CustomerRef from the customer record | Resolved from `Customer.quickbooksCustomerId` (mirroring `Product.quickbooksItemId`); `QuickBooksMapping` is never consulted. A customer with no link is created in QuickBooks first, or an existing one of the same name adopted. Covered by `apps/api/src/modules/quickbooks/quickbooks-customers.service.spec.ts`. |
 | U-13-3 | Payment created when paid>0 | A `payment` body with `TotalAmt=paidAmount`, `LinkedTxn → invoice`. |
 | U-13-4 | Pure credit (paid=0) | Invoice only, no payment. |
-| U-13-5 | Paid>0 but no customer mapping | Fails with a clear message (payment needs CustomerRef). |
+| U-13-5 | Invoice with no resolvable customer | Fails with a clear POS-worded message before calling QuickBooks, rather than surfacing QBO's raw `CustomerRef is required` (6560). |
 | U-13-6 | Payment date | The linked Payment carries the same `TxnDate` as its invoice, so it is never dated ahead of the sale it settles. |
 
 ## 14. Sync queue & retry logic

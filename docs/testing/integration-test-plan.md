@@ -145,7 +145,7 @@ Precondition: connected; a fully-paid sale (I-08-1); stub records created docs.
 
 ## 13. QuickBooks Invoice + Payment sync (credit / partial)
 
-Precondition: connected; customer with a `QuickBooksMapping (CUSTOMER)`; a partial sale (I-10-1).
+Precondition: connected; a customer with `Customer.quickbooksCustomerId` set (or deliberately unset, to exercise create-on-miss); a partial sale (I-10-1).
 
 | ID | Request | Expected |
 | --- | --- | --- |

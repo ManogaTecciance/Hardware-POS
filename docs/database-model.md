@@ -181,7 +181,7 @@ the core tables above. Field-level detail lives in `packages/database/prisma/sch
 | `Receipt`              | Printed-receipt record per sale (number, print count, content).         |
 | `SyncJob`              | A unit of sync work (type, direction, attempts, status) with `SyncLog`s.|
 | `QuickBooksConnection` | Per-tenant OAuth tokens, realm id, and environment.                     |
-| `QuickBooksMapping`    | Correlates local entity ids with their QuickBooks ids.                  |
+| `QuickBooksMapping`    | **Unused / legacy — never written.** Entity linkage lives on the entities themselves: `Product.quickbooksItemId`, `Customer.quickbooksCustomerId`, `Supplier.quickbooksVendorId`. |
 | `AuditLog`             | Append-only record of user/system actions.                              |
 
 ### Dates and times
