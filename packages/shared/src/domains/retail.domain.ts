@@ -71,7 +71,24 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
   // RETAIL_MODULES minus QUICKBOOKS, per D99. Filtered rather than re-listed so a
   // module added to the shared list arrives here too; the exclusion is the only
   // thing this descriptor is asserting.
-  modules: [...SHARED_CORE_MODULES, ...RETAIL_MODULES.filter((m) => m !== 'QUICKBOOKS')],
+  /*
+   * D103 — `PROMOTIONS` is declared HERE rather than added to `RETAIL_MODULES`.
+   *
+   * `HARDWARE` composes its default set from `RETAIL_MODULES` too, and
+   * `platform.constants.spec` pins that set as byte-equal to
+   * `LEGACY_TENANT_DEFAULTS` — the modules a tenant with no business profile
+   * falls back to. Adding it there would quietly widen another team's template
+   * and the legacy fallback with it. This template declares the module it needs.
+   *
+   * Hardware never had a working Promotions screen either (the D45 hotfix gated
+   * it on MENU_MANAGEMENT, which hardware also lacks). That is theirs to decide,
+   * and a `TenantModule` row enables it per tenant meanwhile.
+   */
+  modules: [
+    ...SHARED_CORE_MODULES,
+    ...RETAIL_MODULES.filter((m) => m !== 'QUICKBOOKS'),
+    'PROMOTIONS',
+  ],
   navigation: RETAIL_NAVIGATION,
   roleTemplates: HARDWARE_ROLE_TEMPLATES,
   capabilities: RETAIL_CAPABILITIES,

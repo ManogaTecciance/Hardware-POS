@@ -45,4 +45,8 @@ export const FOOD_SERVICE_MODULES: readonly ModuleKey[] = [
   'TAKEAWAY',
   'KITCHEN',
   'RESERVATIONS',
+  // D103 — the same key retail carries. The D45 hotfix gated promotions on
+  // MENU_MANAGEMENT to fix food service and broke retail; naming the surface
+  // fixes both without either borrowing the other's module.
+  'PROMOTIONS',
 ];

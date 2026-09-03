@@ -276,6 +276,9 @@ enum ModuleKey {
   RETURNS
   EXCHANGES
   SUPPLIERS
+  /// D103 — its own key: promotions are an admin surface BOTH retail and food
+  /// service own, and no pre-existing module was common to the two.
+  PROMOTIONS
   REPORTING
   USERS
   BRANCHES

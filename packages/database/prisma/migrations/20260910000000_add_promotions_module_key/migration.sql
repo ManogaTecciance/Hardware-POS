@@ -1,0 +1,30 @@
+-- D103 — `PROMOTIONS` becomes its own module key.
+--
+-- `/promotions` was gated on `MENU_MANAGEMENT`, a food-service module, so a
+-- RETAIL tenant reached the Promotions screen and was told "Feature not
+-- available" — after Phase 4 had built the whole discount engine behind it.
+--
+-- Neither existing module works for both templates: `INVENTORY` is retail-only
+-- and `MENU_MANAGEMENT` is food-service-only, so any choice among the existing
+-- keys refuses one tenant type. Promotions are an admin surface BOTH own.
+--
+-- ── Why one migration ─────────────────────────────────────────────────────────
+--
+-- D99a's two-migration rule is about USING a new enum label in the transaction
+-- that adds it — PostgreSQL refuses that. Nothing here writes a row with the new
+-- value, so adding it alone is correct and safe.
+--
+-- `IF NOT EXISTS` follows the D44 variants and D99a precedent.
+--
+-- ── No backfill, and no tenant loses the screen ───────────────────────────────
+--
+-- `resolveModules` composes the business type's DEFAULT set and then adds
+-- explicitly-enabled `TenantModule` rows; an explicit row only ever wins as a
+-- revocation. Its docblock states the consequence: "a tenant created before a
+-- new module shipped picks it up without a data migration."
+--
+-- Verified against live data before relying on it: of five tenants, four carry no
+-- `TenantModule` rows and one carries twelve. All five gain PROMOTIONS from the
+-- default set, because none can hold an `isEnabled: false` row for a key that did
+-- not exist until this migration.
+ALTER TYPE "ModuleKey" ADD VALUE IF NOT EXISTS 'PROMOTIONS';

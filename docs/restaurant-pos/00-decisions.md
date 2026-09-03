@@ -4084,3 +4084,102 @@ write none of these columns and take the defaults — the same mechanism that le
 `taxRatePercent` null there (3.16). Additive and nullable only; no reader may
 assume non-null on `SaleItem`.
 
+---
+
+### D103 — `PROMOTIONS` is its own module key
+
+Tech Lead, 2026-09-03. Corrects the D45 hotfix; unblocks Phase 4 for retail.
+
+#### What was wrong
+
+`/promotions` was gated on `MENU_MANAGEMENT`, a **food-service** module. A retail
+tenant has no such module, so the Promotions screen answered **"Feature not
+available"** — after Phase 4 had built the entire discount engine behind it.
+
+The controller predicted this in its own docblock:
+
+> Gated on `INVENTORY` because … `INVENTORY` is the one module that BOTH
+> Restaurant and Retail tenants carry by default. **Restaurant-only modules like
+> `MENU_MANAGEMENT` would refuse Retail's later use of promotions.**
+
+A later "D45 hotfix" changed the gate to `MENU_MANAGEMENT` anyway, because
+restaurant tenants turned out **not** to carry `INVENTORY`. The hotfix fixed food
+service and caused exactly the failure the docblock warned about. Phase 4 is
+"Retail's later use of promotions".
+
+#### Why neither existing module works
+
+Verified against the module sets rather than assumed:
+
+| Set | Members |
+|---|---|
+| `SHARED_CORE_MODULES` | `CUSTOMERS` `REPORTING` `USERS` `BRANCHES` `SETTINGS` `BRANDING` |
+| `RETAIL_MODULES` | `RETAIL_POS` `INVENTORY` `QUOTATIONS` `RETURNS` `EXCHANGES` `SUPPLIERS` `QUICKBOOKS` |
+| `FOOD_SERVICE_MODULES` | `MENU_MANAGEMENT` `DINING` `TABLE_MANAGEMENT` `TAKEAWAY` `KITCHEN` `RESERVATIONS` |
+
+`INVENTORY` is retail-only. `MENU_MANAGEMENT` is food-service-only. **No module
+common to both governs a catalogue admin surface**, so every choice among the
+existing keys refuses one tenant type. Accepting either module would encode the
+confusion rather than resolve it, and would leave the next reader unable to say
+what actually gates the screen.
+
+#### Decided
+
+**A dedicated `PROMOTIONS` module key**, in both default sets.
+
+Promotions are not a food-service feature that retail borrows, nor an inventory
+feature: they are their own admin surface that both templates own. The key says
+so, and a gate that names the thing it protects needs no comment explaining why
+it names something else.
+
+| Change | Where |
+|---|---|
+| `PROMOTIONS` added to the `ModuleKey` enum | `schema.prisma` + migration |
+| …and to `MODULE_KEY_VALUES` | `packages/shared/src/types/platform.ts` |
+| Added to `FOOD_SERVICE_MODULES` | `domains/modules.ts` |
+| Declared on the RETAIL descriptor, **not** on `RETAIL_MODULES` | `domains/retail.domain.ts` |
+| `@RequireModule(ModuleKey.PROMOTIONS)` | `promotions.controller.ts` |
+
+#### Why retail declares it and food service does not
+
+`HARDWARE` composes its default set from `RETAIL_MODULES`, and
+`platform.constants.spec` pins that set as **byte-equal to
+`LEGACY_TENANT_DEFAULTS`** — the modules a tenant with no business profile falls
+back to. Adding `PROMOTIONS` there would silently widen another team's template
+and the legacy fallback with it, so the RETAIL descriptor declares the module
+instead and `RETAIL_MODULES` is untouched.
+
+`FOOD_SERVICE_MODULES` has no such equality test and food service **must** gain
+the key, because regating the controller would otherwise take away a screen they
+have today.
+
+**Hardware is left as it was, deliberately.** It never had a working Promotions
+screen either — the D45 hotfix gated it on `MENU_MANAGEMENT`, which hardware also
+lacks — so this changes nothing for them. Whether they want it is theirs to
+decide; a `TenantModule` row enables it per tenant in the meantime.
+
+#### No backfill, and no tenant loses the screen
+
+`resolveModules` composes the default set for the business type and **adds**
+explicitly-enabled rows; an explicit row only ever wins as a *revocation*. Its own
+docblock states the consequence: *"a tenant created before a new module shipped
+picks it up without a data migration."*
+
+Checked against live data rather than trusted: of five tenants, four carry no
+`TenantModule` rows at all and one carries twelve. All five gain `PROMOTIONS`
+from the default set, because none of them has an explicit `isEnabled: false` for
+a key that did not exist until now.
+
+#### Migration shape
+
+One statement, `ALTER TYPE "ModuleKey" ADD VALUE IF NOT EXISTS 'PROMOTIONS'`.
+D99a's two-migration rule is about **using** a new enum label in the transaction
+that adds it; nothing here writes a row with the new value, so one migration is
+correct. `IF NOT EXISTS` follows the D44 and D99a precedent.
+
+#### What this does not change
+
+Food service keeps its promotions screen — it gains `PROMOTIONS` in the same
+change, so the hotfix's fix is preserved rather than reverted. No route, screen or
+permission moves; only the module that names the gate.
+

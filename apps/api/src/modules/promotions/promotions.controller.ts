@@ -24,21 +24,31 @@ import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { PromotionView, PromotionsService } from './promotions.service';
 
 /**
- * D45 — Promotions module. Gated on `INVENTORY` because the Promotions admin
- * UI lives under the Inventory navigation tab, and INVENTORY is the one module
- * that BOTH Restaurant and Retail tenants carry by default (Restaurant needs
- * ingredient-level stock, Retail needs on-hand for QBO parity). Restaurant-only
- * modules like MENU_MANAGEMENT would refuse Retail's later use of promotions,
- * and the discount module's RETAIL_POS gate mirrors the wrong side of the
- * split. See D45 (`docs/restaurant-pos/00-decisions.md`) for the rationale.
+ * D45 — Promotions module.
+ *
+ * Superseded by D103 on the gate only. This originally read "gated on
+ * INVENTORY … INVENTORY is the one module that BOTH Restaurant and Retail
+ * tenants carry by default", which was mistaken — food service has no
+ * `INVENTORY` — while correctly predicting that a food-service-only module
+ * "would refuse Retail's later use of promotions". Both halves are now moot:
+ * the gate is `PROMOTIONS`, which both templates carry.
  */
 @Controller('promotions')
-// D45 hotfix — Promotion is a Restaurant admin surface introduced by D45,
-// primarily attached to Restaurant products. `INVENTORY` was the initial
-// guess but Restaurant tenants don't have it in their default module set —
-// `MENU_MANAGEMENT` is the module that governs their catalogue admin and
-// is present on every Restaurant / Cafe / Bakery tenant.
-@RequireModule(ModuleKey.MENU_MANAGEMENT)
+/*
+ * D103 — gated on its OWN key.
+ *
+ * The docblock above was right that `MENU_MANAGEMENT` would refuse retail, and
+ * the D45 hotfix was right that food service lacks `INVENTORY`. Both are true:
+ * no module common to the two templates governs a catalogue admin surface, so
+ * every choice among the existing keys refuses one of them. The hotfix fixed
+ * food service and produced "Feature not available" on a retail Promotions
+ * screen — found by walking the UI after Phase 4 had built the engine behind it.
+ *
+ * `PROMOTIONS` is carried by RETAIL_MODULES and FOOD_SERVICE_MODULES alike, and
+ * a gate that names the surface it protects needs no comment explaining why it
+ * names something else.
+ */
+@RequireModule(ModuleKey.PROMOTIONS)
 export class PromotionsController {
   constructor(private readonly service: PromotionsService) {}
 

@@ -70,6 +70,8 @@ export const MODULE_KEY_VALUES = [
   'RETURNS',
   'EXCHANGES',
   'SUPPLIERS',
+  // D103 — its own key; no module was common to retail and food service.
+  'PROMOTIONS',
   'REPORTING',
   'USERS',
   'BRANCHES',

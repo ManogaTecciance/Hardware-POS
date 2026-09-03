@@ -108,7 +108,7 @@ const G = BranchScopeKind.GLOBAL_PLATFORM;
 
 /** Every route the API serves, classified. 245 entries after D45 — 233 pre-D45
  *  plus 12 new endpoints: 4 SHARED_CORE product-side attachments
- *  (`modifier-groups`, `kitchen-stations`), 7 INVENTORY-gated promotions
+ *  (`modifier-groups`, `kitchen-stations`), 7 PROMOTIONS-gated promotions
  *  endpoints, and 1 RETAIL_POS-gated Restaurant POS Catalogue read. */
 const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /audit-logs': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
@@ -232,13 +232,13 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // is the module that governs their catalogue admin and is present on
   // every Restaurant / Cafe / Bakery tenant. The prior INVENTORY gate
   // silently denied the whole feature to the target audience.
-  'GET /promotions': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'POST /promotions': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'GET /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'PATCH /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'DELETE /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'POST /promotions/:id/activate': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'POST /promotions/:id/deactivate': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'GET /promotions': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'POST /promotions': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'GET /promotions/:id': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'PATCH /promotions/:id': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'DELETE /promotions/:id': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'POST /promotions/:id/activate': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'POST /promotions/:id/deactivate': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
   'GET /public/quotations/:token': { module: 'QUOTATIONS', guard: 'public-no-tenant', scope: G },
   'GET /quickbooks/callback': { module: 'QUICKBOOKS', guard: 'public-no-tenant', scope: G },
   'GET /quickbooks/connect': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
@@ -554,6 +554,8 @@ describe('7.6 — every route is classified', () => {
       'RETURNS',
       'EXCHANGES',
       'SUPPLIERS',
+      // D103 — its own key; no module was common to retail and food service.
+      'PROMOTIONS',
       'REPORTING',
       'USERS',
       'BRANCHES',
