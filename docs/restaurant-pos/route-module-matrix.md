@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 283
-- Module-guarded routes: 196
+- Total routes: 284
+- Module-guarded routes: 197
 - Ungated routes: 87
 
 ## How to read the Guard column
@@ -361,6 +361,16 @@ LEGACY `/restaurant/menus…` reads keep their MENU_MANAGEMENT gate unchanged.
 | POST | `/restaurant/bills/:saleId/splits` | TABLE_MANAGEMENT | ENFORCED | bill:split |
 | POST | `/restaurant/bills/:saleId/split-by-items` | TABLE_MANAGEMENT | ENFORCED | bill:split |
 | POST | `/restaurant/bills/:saleId/reopen` | TABLE_MANAGEMENT | ENFORCED | bill:split |
+
+### RestaurantOrdersController
+
+Unified Orders-screen read model (Pilot Change 2 Slice D): the polled list,
+and the per-row detail the drawer fetches.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/branches/:branchId/orders` | TABLE_MANAGEMENT | ENFORCED | table:view |
+| GET | `/restaurant/branches/:branchId/orders/:orderId` | TABLE_MANAGEMENT | ENFORCED | table:view |
 
 ### TakeawayController
 

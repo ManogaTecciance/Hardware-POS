@@ -45,6 +45,7 @@ import type {
   TakeawayView,
   TopMenuItemView,
   UnifiedChannel,
+  UnifiedOrderDetail,
   UnifiedOrderStatus,
   UnifiedOrderView,
   VoidReportRow,
@@ -943,6 +944,13 @@ export const restaurantOrders = {
     const query = params.toString() ? `?${params.toString()}` : '';
     return api.get<UnifiedOrdersPage>(
       `/restaurant/branches/${branchId}/orders${query}`,
+      auth(session),
+    );
+  },
+  /** Full record for the drawer. Null when the row is gone — not an error. */
+  detail(session: Session, branchId: string, orderId: string) {
+    return api.get<UnifiedOrderDetail | null>(
+      `/restaurant/branches/${branchId}/orders/${encodeURIComponent(orderId)}`,
       auth(session),
     );
   },

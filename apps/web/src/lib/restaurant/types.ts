@@ -602,6 +602,44 @@ export interface UnifiedOrderView {
   itemPreview: { name: string; qty: number }[];
 }
 
+/** One priced line on the order detail — submit-time snapshots, never live menu prices. */
+export interface UnifiedOrderDetailItem {
+  name: string;
+  variantName: string | null;
+  quantity: string;
+  unitPrice: string;
+  modifierTotal: string;
+  /** (unitPrice + modifierTotal) × quantity, computed server-side. */
+  lineTotal: string;
+  specialInstructions: string | null;
+  modifiers: { optionName: string; groupName: string; priceDelta: string }[];
+}
+
+/**
+ * The full record behind one queue row, fetched when the drawer opens —
+ * deliberately not part of the polled list payload. `deliveryAddress` is the
+ * `[Delivery]` notes workaround already parsed apart server-side; `timeline`
+ * differs in depth per channel (takeaway records only its handover instant).
+ */
+export interface UnifiedOrderDetail extends UnifiedOrderView {
+  deliveryAddress: string | null;
+  notes: string | null;
+  items: UnifiedOrderDetailItem[];
+  /** Settled-Sale breakdown; null while there is no Sale (open order, 3rd-party). */
+  financials: {
+    subtotal: string;
+    totalDiscount: string;
+    serviceChargeAmount: string;
+    packagingCharge: string;
+    taxAmount: string;
+    total: string;
+    paidAmount: string;
+    balanceAmount: string;
+  } | null;
+  payments: { method: PaymentMethod; amount: string; reference: string | null; at: string }[];
+  timeline: { at: string; status: UnifiedOrderStatus }[];
+}
+
 // ── Reports ─────────────────────────────────────────────────────────────────
 export interface SalesSummaryView {
   branchId: string;

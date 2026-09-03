@@ -361,6 +361,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /delivery-hub/external-orders/:externalOrderId': { module: 'ONLINE_ORDERS', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/kds/board': { module: 'KITCHEN_DISPLAY', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/orders': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: B },
+  'GET /restaurant/branches/:branchId/orders/:orderId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: B },
   'POST /restaurant/branches/:branchId/dining-areas': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/branches/:branchId/dining-areas/:areaId': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'DELETE /restaurant/branches/:branchId/dining-areas/:areaId': { module: 'DINING', guard: 'ENFORCED', scope: T },

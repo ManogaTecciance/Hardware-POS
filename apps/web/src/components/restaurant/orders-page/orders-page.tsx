@@ -501,9 +501,15 @@ export function OrdersPage({ session, branchId }: Props) {
                     label={UNIFIED_CHANNEL_LABELS[r.channel]}
                     tone={UNIFIED_CHANNEL_TONES[r.channel]}
                   />
-                  <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {UNIFIED_SOURCE_LABELS[r.source]}
-                  </span>
+                  {/* Partner chip only. On first-party channels the source
+                      (POS / walk-in / phone) repeats what the channel badge
+                      already says; on 3rd-party it is the one thing naming
+                      the partner, so it stays. */}
+                  {r.channel === 'THIRD_PARTY' ? (
+                    <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      {UNIFIED_SOURCE_LABELS[r.source]}
+                    </span>
+                  ) : null}
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -582,7 +588,11 @@ export function OrdersPage({ session, branchId }: Props) {
       ) : null}
 
       {openRow ? (
-        <OrderDetailDrawer order={openRow} onClose={() => patch({ open: null })} />
+        <OrderDetailDrawer
+          order={openRow}
+          branchId={branchId}
+          onClose={() => patch({ open: null })}
+        />
       ) : null}
     </div>
   );

@@ -7,7 +7,7 @@ import { RequirePermissions } from '../../common/decorators/permissions.decorato
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
 import {
-  OrderView,
+  OrderDetailView,
   OrdersPage,
   OrdersQuery,
   RestaurantOrdersService,
@@ -57,6 +57,22 @@ export class RestaurantOrdersController {
       pageSize: toPositiveInt(pageSize),
     };
     return this.service.listOrders(tenantId, branchId, q);
+  }
+
+  /**
+   * Full record for the drawer — line prices, financial breakdown, payments,
+   * delivery destination, status timeline. Same gates as the list: anyone who
+   * can see the queue can open a row on it.
+   */
+  @Get('branches/:branchId/orders/:orderId')
+  @RequirePermissions(Permission.TABLE_VIEW)
+  @BranchScope(BranchScopeKind.BRANCH_SCOPED)
+  detail(
+    @TenantId() tenantId: string,
+    @Param('branchId') branchId: string,
+    @Param('orderId') orderId: string,
+  ): Promise<OrderDetailView | null> {
+    return this.service.getOrderDetail(tenantId, branchId, orderId);
   }
 }
 

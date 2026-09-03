@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   DeliveryPlatformKind,
   ExternalOrderStatus,
+  Prisma,
   RestaurantOrderChannel,
   RestaurantOrderStatus,
   TakeawayOrderStatus,
@@ -63,6 +64,58 @@ export interface OrderView {
   saleId: string | null;
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
+}
+
+/** One priced line on the order detail — snapshots, never live menu prices. */
+export interface OrderDetailItemView {
+  name: string;
+  variantName: string | null;
+  quantity: string;
+  unitPrice: string;
+  modifierTotal: string;
+  /** (unitPrice + modifierTotal) × quantity, in Decimal arithmetic. */
+  lineTotal: string;
+  specialInstructions: string | null;
+  modifiers: { optionName: string; groupName: string; priceDelta: string }[];
+}
+
+/**
+ * The full record behind one Orders-screen row, fetched when the operator
+ * opens the drawer. Kept OFF the polled list on purpose: the queue refetches
+ * every 8 s and does not need line items, payments or a timeline riding on
+ * every row of every poll.
+ */
+export interface OrderDetailView extends OrderView {
+  /**
+   * Delivery destination for a counter delivery order. The schema has no
+   * address column yet — the counter POS stores it in
+   * `TakeawayOrderProfile.notes` with a `[Delivery]` prefix (see
+   * payment-popup.tsx), and this endpoint is where that workaround is parsed
+   * back out so the queue shows a destination, not a notes convention.
+   */
+  deliveryAddress: string | null;
+  /** Operator notes with the `[Delivery]` piece removed; null when empty. */
+  notes: string | null;
+  items: OrderDetailItemView[];
+  /** Settled-Sale money breakdown; null while there is no Sale (open order, 3rd-party). */
+  financials: {
+    subtotal: string;
+    totalDiscount: string;
+    serviceChargeAmount: string;
+    packagingCharge: string;
+    taxAmount: string;
+    total: string;
+    paidAmount: string;
+    balanceAmount: string;
+  } | null;
+  payments: { method: string; amount: string; reference: string | null; at: string }[];
+  /**
+   * Status transitions in the unified vocabulary, oldest first. Built from
+   * what is already recorded — RestaurantOrderStatusHistory, the takeaway
+   * profile's handover timestamp, ExternalOrderEvent rows — so channels
+   * differ in how much history they can show.
+   */
+  timeline: { at: string; status: UnifiedOrderStatus }[];
 }
 
 export interface OrdersQuery {
@@ -206,47 +259,8 @@ export class RestaurantOrdersService {
       const saleById = new Map(sales.map((s) => [s.id, s]));
 
       for (const o of restaurant) {
-        const isTakeaway = o.channel === 'TAKEAWAY';
-        const sale = o.session?.finalSaleId ? saleById.get(o.session.finalSaleId) : null;
-        const unified = unifiedStatusForRestaurantOrder({
-          orderStatus: o.status,
-          roundStatuses: o.rounds.map((r) => r.status),
-          takeawayStatus: o.takeawayProfile?.status ?? null,
-        });
-        const source: UnifiedSource = isTakeaway
-          ? o.takeawayProfile?.customerPhone
-            ? 'PHONE_ORDER'
-            : o.takeawayProfile?.customerName
-              ? 'POS'
-              : 'WALK_IN'
-          : 'POS';
-
-        const contextLabel = isTakeaway
-          ? o.takeawayProfile?.customerName ?? 'Walk-in'
-          : o.session?.table
-            ? o.session.table.label ?? o.session.table.code
-            : null;
-
-        rows.push({
-          id: o.id,
-          channel: isTakeaway ? 'TAKEAWAY' : 'DINE_IN',
-          source,
-          orderNumber: o.orderNumber,
-          unifiedStatus: unified,
-          paymentStatus: sale?.paymentStatus ?? null,
-          customerName: o.takeawayProfile?.customerName ?? null,
-          customerPhone: o.takeawayProfile?.customerPhone ?? null,
-          contextLabel,
-          pickupAt: o.takeawayProfile?.pickupAt?.toISOString() ?? null,
-          createdAt: o.createdAt.toISOString(),
-          total: sale?.total?.toFixed(2) ?? null,
-          saleId: sale?.id ?? null,
-          itemCount: o.items.reduce((s, i) => s + Number(i.quantity), 0),
-          itemPreview: o.items.slice(0, 3).map((i) => ({
-            name: i.menuItemName,
-            qty: Number(i.quantity),
-          })),
-        });
+        const sale = o.session?.finalSaleId ? saleById.get(o.session.finalSaleId) ?? null : null;
+        rows.push(restaurantOrderBaseView(o, sale));
       }
     }
 
@@ -262,30 +276,7 @@ export class RestaurantOrdersService {
         include: { platform: { select: { kind: true } } },
       });
       for (const e of external) {
-        rows.push({
-          id: e.id,
-          channel: 'THIRD_PARTY',
-          source: platformToSource(e.platform.kind),
-          orderNumber: e.externalOrderRef,
-          unifiedStatus: unifiedStatusForExternalOrder(e.status),
-          // Payment status for 3rd party lives on the platform side; the
-          // MOCK adapter does not surface it, so we return null and the
-          // UI shows "—".
-          paymentStatus: null,
-          customerName: null,
-          customerPhone: null,
-          contextLabel: e.externalOrderRef,
-          pickupAt: null,
-          createdAt: e.receivedAt.toISOString(),
-          total: e.externalTotal?.toFixed(2) ?? null,
-          // A third-party order settles on the partner's side; there is no
-          // Sale of ours to open.
-          saleId: null,
-          // ExternalOrder does not persist a per-item breakdown in this
-          // schema; the UI shows the total as the only summary.
-          itemCount: 0,
-          itemPreview: [],
-        });
+        rows.push(externalOrderBaseView(e));
       }
     }
 
@@ -339,6 +330,277 @@ export class RestaurantOrdersService {
       statusCounts,
     };
   }
+
+  /**
+   * The full record behind one queue row, for the drawer. The row id is
+   * channel-typed at the source — a RestaurantOrder id for dine-in/takeaway,
+   * an ExternalOrder id for 3rd-party — so the lookup tries the restaurant
+   * table first and falls through to external. Null (not 404) for an unknown
+   * id: the queue polls under the open drawer, and a row that was archived
+   * mid-look should degrade to the row data, not to an error screen.
+   */
+  async getOrderDetail(
+    tenantId: string,
+    branchId: string,
+    orderId: string,
+  ): Promise<OrderDetailView | null> {
+    const o = await this.prisma.restaurantOrder.findFirst({
+      where: { id: orderId, tenantId, branchId },
+      include: {
+        session: { include: { table: { select: { code: true, label: true } } } },
+        items: {
+          where: { status: { not: 'VOIDED' } },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            modifiers: { select: { optionName: true, groupName: true, priceDelta: true } },
+          },
+        },
+        rounds: { select: { status: true } },
+        takeawayProfile: true,
+      },
+    });
+
+    if (o) {
+      const sale = o.session?.finalSaleId
+        ? await this.prisma.sale.findFirst({
+            where: { id: o.session.finalSaleId, tenantId },
+            include: { payments: { orderBy: { createdAt: 'asc' } } },
+          })
+        : null;
+      const history = await this.prisma.restaurantOrderStatusHistory.findMany({
+        where: { tenantId, orderId: o.id },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      const timeline = history.map((h) => ({
+        at: h.createdAt.toISOString(),
+        status: coarseUnifiedForOrderStatus(h.toStatus),
+      }));
+      // Takeaway transitions are not written to the history table; the
+      // handover instant is the one the profile does record, so it joins the
+      // timeline from there rather than being invented.
+      if (o.takeawayProfile?.handoverAt) {
+        timeline.push({
+          at: o.takeawayProfile.handoverAt.toISOString(),
+          status: 'HANDED_OVER' as const,
+        });
+      }
+      timeline.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+
+      const { deliveryAddress, notes } = splitDeliveryNotes(o.takeawayProfile?.notes ?? null);
+
+      return {
+        ...restaurantOrderBaseView(o, sale),
+        deliveryAddress,
+        notes,
+        items: o.items.map((i) => ({
+          name: i.menuItemName,
+          variantName: i.variantNameSnapshot ?? null,
+          quantity: i.quantity.toString(),
+          unitPrice: i.unitPrice.toFixed(2),
+          modifierTotal: i.modifierTotal.toFixed(2),
+          lineTotal: i.unitPrice.plus(i.modifierTotal).times(i.quantity).toFixed(2),
+          specialInstructions: i.specialInstructions ?? null,
+          modifiers: i.modifiers.map((m) => ({
+            optionName: m.optionName,
+            groupName: m.groupName,
+            priceDelta: m.priceDelta.toFixed(2),
+          })),
+        })),
+        financials: sale
+          ? {
+              subtotal: sale.subtotal.toFixed(2),
+              totalDiscount: sale.totalDiscount.toFixed(2),
+              serviceChargeAmount: sale.serviceChargeAmount.toFixed(2),
+              packagingCharge: sale.packagingCharge.toFixed(2),
+              taxAmount: sale.taxAmount.toFixed(2),
+              total: sale.total.toFixed(2),
+              paidAmount: sale.paidAmount.toFixed(2),
+              balanceAmount: sale.balanceAmount.toFixed(2),
+            }
+          : null,
+        payments: (sale?.payments ?? []).map((p) => ({
+          method: p.method,
+          amount: p.amount.toFixed(2),
+          reference: p.reference ?? null,
+          at: p.createdAt.toISOString(),
+        })),
+        timeline,
+      };
+    }
+
+    const e = await this.prisma.externalOrder.findFirst({
+      where: { id: orderId, tenantId, branchId },
+      include: {
+        platform: { select: { kind: true } },
+        events: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (!e) return null;
+    return {
+      ...externalOrderBaseView(e),
+      deliveryAddress: null,
+      notes: null,
+      items: [],
+      financials: null,
+      payments: [],
+      timeline: e.events.map((ev) => ({
+        at: ev.createdAt.toISOString(),
+        status: unifiedStatusForExternalOrder(ev.toStatus),
+      })),
+    };
+  }
+}
+
+/**
+ * The queue-row projection of a RestaurantOrder, shared by the list scan and
+ * the detail endpoint so the two cannot drift on source/context/status
+ * derivation. `quantity` is `Prisma.Decimal | number` because the paging spec
+ * stubs rows with plain numbers.
+ */
+function restaurantOrderBaseView(
+  o: {
+    id: string;
+    channel: RestaurantOrderChannel;
+    orderNumber: string;
+    status: RestaurantOrderStatus;
+    createdAt: Date;
+    rounds: { status: string }[];
+    session: { table: { code: string; label: string | null } | null } | null;
+    takeawayProfile: {
+      status: TakeawayOrderStatus;
+      customerName: string | null;
+      customerPhone: string | null;
+      pickupAt: Date | null;
+    } | null;
+    items: { menuItemName: string; quantity: Prisma.Decimal | number }[];
+  },
+  sale: {
+    id: string;
+    paymentStatus: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED';
+    total: Prisma.Decimal | null;
+  } | null,
+): OrderView {
+  const isTakeaway = o.channel === 'TAKEAWAY';
+  const unified = unifiedStatusForRestaurantOrder({
+    orderStatus: o.status,
+    roundStatuses: o.rounds.map((r) => r.status),
+    takeawayStatus: o.takeawayProfile?.status ?? null,
+  });
+  const source: UnifiedSource = isTakeaway
+    ? o.takeawayProfile?.customerPhone
+      ? 'PHONE_ORDER'
+      : o.takeawayProfile?.customerName
+        ? 'POS'
+        : 'WALK_IN'
+    : 'POS';
+
+  const contextLabel = isTakeaway
+    ? o.takeawayProfile?.customerName ?? 'Walk-in'
+    : o.session?.table
+      ? o.session.table.label ?? o.session.table.code
+      : null;
+
+  return {
+    id: o.id,
+    channel: isTakeaway ? 'TAKEAWAY' : 'DINE_IN',
+    source,
+    orderNumber: o.orderNumber,
+    unifiedStatus: unified,
+    paymentStatus: sale?.paymentStatus ?? null,
+    customerName: o.takeawayProfile?.customerName ?? null,
+    customerPhone: o.takeawayProfile?.customerPhone ?? null,
+    contextLabel,
+    pickupAt: o.takeawayProfile?.pickupAt?.toISOString() ?? null,
+    createdAt: o.createdAt.toISOString(),
+    total: sale?.total?.toFixed(2) ?? null,
+    saleId: sale?.id ?? null,
+    itemCount: o.items.reduce((s, i) => s + Number(i.quantity), 0),
+    itemPreview: o.items.slice(0, 3).map((i) => ({
+      name: i.menuItemName,
+      qty: Number(i.quantity),
+    })),
+  };
+}
+
+/** The queue-row projection of an ExternalOrder — see restaurantOrderBaseView. */
+function externalOrderBaseView(e: {
+  id: string;
+  externalOrderRef: string;
+  status: ExternalOrderStatus;
+  receivedAt: Date;
+  externalTotal: Prisma.Decimal | null;
+  platform: { kind: DeliveryPlatformKind };
+}): OrderView {
+  return {
+    id: e.id,
+    channel: 'THIRD_PARTY',
+    source: platformToSource(e.platform.kind),
+    orderNumber: e.externalOrderRef,
+    unifiedStatus: unifiedStatusForExternalOrder(e.status),
+    // Payment status for 3rd party lives on the platform side; the
+    // MOCK adapter does not surface it, so we return null and the
+    // UI shows "—".
+    paymentStatus: null,
+    customerName: null,
+    customerPhone: null,
+    contextLabel: e.externalOrderRef,
+    pickupAt: null,
+    createdAt: e.receivedAt.toISOString(),
+    total: e.externalTotal?.toFixed(2) ?? null,
+    // A third-party order settles on the partner's side; there is no
+    // Sale of ours to open.
+    saleId: null,
+    // ExternalOrder does not persist a per-item breakdown in this
+    // schema; the UI shows the total as the only summary.
+    itemCount: 0,
+    itemPreview: [],
+  };
+}
+
+/**
+ * Order-SHELL transitions only, for the detail timeline. Coarser than
+ * `unifiedStatusForRestaurantOrder` on purpose: a history row records the
+ * RestaurantOrderStatus that changed, without the round/takeaway context the
+ * live derivation reads, so each shell status maps to the nearest unified
+ * entry rather than pretending to know the kitchen state at that instant.
+ */
+function coarseUnifiedForOrderStatus(s: RestaurantOrderStatus): UnifiedOrderStatus {
+  switch (s) {
+    case 'DRAFT':
+      return 'DRAFT';
+    case 'SUBMITTED':
+      return 'PENDING';
+    case 'PARTIAL':
+      return 'IN_PROGRESS';
+    case 'COMPLETED':
+      return 'COMPLETED';
+    case 'CANCELLED':
+      return 'CANCELLED';
+  }
+}
+
+/**
+ * Undo the counter POS's address workaround: no address column exists, so
+ * payment-popup.tsx stores the destination in `TakeawayOrderProfile.notes` as
+ * a `[Delivery] <address>` piece (' · '-joined with any other pieces, address
+ * last). Parsed HERE, once, so no client ever string-matches notes itself —
+ * when a real column lands, this function is the only thing that changes.
+ */
+function splitDeliveryNotes(notes: string | null): {
+  deliveryAddress: string | null;
+  notes: string | null;
+} {
+  if (!notes) return { deliveryAddress: null, notes: null };
+  const marker = '[Delivery] ';
+  const ix = notes.indexOf(marker);
+  if (ix === -1) return { deliveryAddress: null, notes };
+  const deliveryAddress = notes.slice(ix + marker.length).trim();
+  const rest = notes
+    .slice(0, ix)
+    .replace(/\s*·\s*$/, '')
+    .trim();
+  return { deliveryAddress: deliveryAddress || null, notes: rest || null };
 }
 
 /** Every status at zero, so a status absent from the page still has a count. */
