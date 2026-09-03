@@ -287,6 +287,9 @@ describe('BUY_X_GET_Y', () => {
       type: 'BUY_X_GET_Y',
       buyQuantity: 2,
       getQuantity: 1,
+      // Explicitly free. Left implicit, these cases passed against a broken
+      // applier that ignored the field entirely.
+      percentageOff: 100,
       items: [
         { productId: 'p_shirt', role: 'BUY', quantity: 1 },
         { productId: 'p_tie', role: 'GET', quantity: 1 },
@@ -307,6 +310,74 @@ describe('BUY_X_GET_Y', () => {
     expect(result.totalDiscount).toBe(500);
   });
 
+  it('honours the discount ON THE REWARD, not just "free"', () => {
+    /*
+     * The defect this case exists for. The promotion editor collects
+     * `percentageOff` as "the discount on the Get item (100 = free)", and the
+     * applier ignored it — every BOGO gave the reward away at full value. A shop
+     * running "buy 2, get the 3rd half price" was handing it over for nothing.
+     *
+     * Every earlier BOGO case here used a free reward, which is exactly the one
+     * value where the broken code was right. The fixture hid the bug.
+     */
+    const lines = [item('l_shirt', 'p_shirt', 1000, 2), item('l_tie', 'p_tie', 500)];
+    const halfOff = rule({
+      id: 'r1',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 2,
+      getQuantity: 1,
+      percentageOff: 50,
+      items: [
+        { productId: 'p_shirt', role: 'BUY', quantity: 1 },
+        { productId: 'p_tie', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    // POSITIVE: half of 500, on the reward line.
+    expect(byLine(applyPromotions({ lines, promotions: [halfOff] }))).toEqual({ l_tie: 250 });
+
+    // POSITIVE CONTROL: 100 still means free, so the D102 case is unchanged.
+    const free = rule({ ...halfOff, id: 'r2', percentageOff: 100 });
+    expect(byLine(applyPromotions({ lines, promotions: [free] }))).toEqual({ l_tie: 500 });
+  });
+
+  it('treats a missing percentage as FREE — every row written before 4.7', () => {
+    const lines = [item('l_shirt', 'p_shirt', 1000, 2), item('l_tie', 'p_tie', 500)];
+    const legacy = rule({
+      id: 'r1',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 2,
+      getQuantity: 1,
+      percentageOff: null,
+      items: [
+        { productId: 'p_shirt', role: 'BUY', quantity: 1 },
+        { productId: 'p_tie', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    // `?? 100`. A null percentage meant a giveaway before this was read, and it
+    // still does — no stored promotion changes meaning.
+    expect(byLine(applyPromotions({ lines, promotions: [legacy] }))).toEqual({ l_tie: 500 });
+  });
+
+  it('rounds the reward discount to the cent, per unit', () => {
+    // 333.33 at 33% = 109.9989 -> 110.00, and two rewarded units earn it twice.
+    const lines = [item('l_buy', 'p_buy', 100, 4), item('l_get', 'p_get', 333.33, 2)];
+    const promo = rule({
+      id: 'r1',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 2,
+      getQuantity: 1,
+      percentageOff: 33,
+      items: [
+        { productId: 'p_buy', role: 'BUY', quantity: 1 },
+        { productId: 'p_get', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    expect(byLine(applyPromotions({ lines, promotions: [promo] }))).toEqual({ l_get: 220 });
+  });
+
   it('does not apply when the buy threshold is not met', () => {
     const lines = [item('l_shirt', 'p_shirt', 1000, 1), item('l_tie', 'p_tie', 500)];
     const promo = rule({
@@ -314,6 +385,9 @@ describe('BUY_X_GET_Y', () => {
       type: 'BUY_X_GET_Y',
       buyQuantity: 2,
       getQuantity: 1,
+      // Explicitly free. Left implicit, these cases passed against a broken
+      // applier that ignored the field entirely.
+      percentageOff: 100,
       items: [
         { productId: 'p_shirt', role: 'BUY', quantity: 1 },
         { productId: 'p_tie', role: 'GET', quantity: 1 },
@@ -334,6 +408,9 @@ describe('BUY_X_GET_Y', () => {
       type: 'BUY_X_GET_Y',
       buyQuantity: 2,
       getQuantity: 1,
+      // Explicitly free. Left implicit, these cases passed against a broken
+      // applier that ignored the field entirely.
+      percentageOff: 100,
       items: [
         { productId: 'p_shirt', role: 'BUY', quantity: 1 },
         { productId: 'p_tie', role: 'GET', quantity: 1 },
@@ -354,6 +431,9 @@ describe('BUY_X_GET_Y', () => {
       type: 'BUY_X_GET_Y',
       buyQuantity: 2,
       getQuantity: 1,
+      // Explicitly free. Left implicit, these cases passed against a broken
+      // applier that ignored the field entirely.
+      percentageOff: 100,
       items: [
         { productId: 'p', role: 'BUY', quantity: 1 },
         { productId: 'p', role: 'GET', quantity: 1 },
@@ -384,6 +464,9 @@ describe('BUY_X_GET_Y', () => {
       type: 'BUY_X_GET_Y',
       buyQuantity: 2,
       getQuantity: 1,
+      // Explicitly free. Left implicit, these cases passed against a broken
+      // applier that ignored the field entirely.
+      percentageOff: 100,
       items: [
         { productId: 'p_shirt', role: 'BUY', quantity: 1 },
         { productId: 'p_tie', role: 'GET', quantity: 1 },

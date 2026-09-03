@@ -289,18 +289,24 @@ function applyBundle(lines: readonly PromotionCartLine[], rule: PromotionRule): 
 }
 
 /**
- * Buy X, get Y free.
+ * Buy X, get Y at a discount — free when that discount is 100%.
  *
- * **The freed units are the CHEAPEST qualifying ones.** That is the conventional
- * retail reading of "buy two get one free" and the one a shopkeeper expects; the
- * schema carries no field to configure it, so it is a choice made here and worth
- * confirming with the PO before the pilot.
+ * **`percentageOff` is the discount on the REWARD unit**, not on the basket. The
+ * promotion editor collects it as "the discount on the Get item (100 = free)",
+ * so a shop can run "buy 2, get the 3rd half price" as well as a giveaway.
+ *
+ * A missing percentage means FREE. Every row written before this was read meant
+ * a giveaway, and `?? 100` keeps them behaving exactly as they did.
+ *
+ * **The discounted units are the CHEAPEST qualifying ones.** That is the
+ * conventional retail reading of "buy two get one free" and the one a shopkeeper
+ * expects (open decision 14, resolved: cheapest-first is permanent policy).
  *
  * Two shapes, because they count differently:
  *
  *   • **Distinct products** ("buy 2 shirts, get a tie free") — the buy pool and
  *     the reward pool are separate, so applications are `floor(buyQty / X)` and
- *     the freed units come from the GET lines.
+ *     the rewarded units come from the GET lines.
  *   • **Same product** ("buy 2 get 1 free" on one shirt) — the free unit comes
  *     out of the SAME pool, so the customer must hold `X + Y` units for one
  *     application. Counting `floor(qty / X)` here would free a unit at two in
@@ -311,13 +317,21 @@ function applyBuyXGetY(lines: readonly PromotionCartLine[], rule: PromotionRule)
   const getQty = rule.getQuantity ?? 0;
   if (buyQty <= 0 || getQty <= 0) return [];
 
+  /*
+   * The discount ON THE REWARD, capped at the goods. `?? 100` means "free",
+   * which is what every rule written before this was read intended — and what
+   * the editor's own help text calls out ("100 = free").
+   */
+  const rewardPercent = Math.min(rule.percentageOff ?? 100, 100);
+  if (rewardPercent <= 0) return [];
+
   const buyIds = new Set(requiredByProduct(rule, 'BUY').keys());
   const getIds = new Set(requiredByProduct(rule, 'GET').keys());
   if (getIds.size === 0) return [];
 
   const overlapping = [...getIds].some((id) => buyIds.has(id));
 
-  /** Units eligible to be freed, cheapest first. */
+  /** Units eligible for the reward discount, cheapest first. */
   const rewardUnits: { lineId: string; unitPrice: number }[] = [];
   let freeUnits = 0;
 
@@ -353,7 +367,11 @@ function applyBuyXGetY(lines: readonly PromotionCartLine[], rule: PromotionRule)
 
   const byLine = new Map<string, number>();
   for (const unit of rewardUnits.slice(0, freeUnits)) {
-    byLine.set(unit.lineId, round2((byLine.get(unit.lineId) ?? 0) + unit.unitPrice));
+    // Per UNIT, not per line: two rewarded units of one product each earn their
+    // own share, and rounding once per unit is what a receipt can be checked
+    // against by hand.
+    const off = round2((unit.unitPrice * rewardPercent) / 100);
+    byLine.set(unit.lineId, round2((byLine.get(unit.lineId) ?? 0) + off));
   }
 
   return [...byLine.entries()]
