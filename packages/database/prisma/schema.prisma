@@ -1054,6 +1054,25 @@ model SaleItem {
   /// Frozen, not joined (D44): a rate change next year must not rewrite last
   /// year's receipt — or last year's refund.
   taxRatePercent      Decimal?           @db.Decimal(5, 2)
+  /// D102 (4.1) — the promotion that reduced this line, if any.
+  ///
+  /// `promotionDiscountAmount` is a MIRROR, not the authority: `lineTotal` is
+  /// already net of it, and `lineTotal` is what tax (`taxableBase`) and returns
+  /// read. The column exists so a promotion is separately reportable without a
+  /// second source of truth — the relationship D100 records for
+  /// `Product.quantityOnHand`.
+  ///
+  /// At most ONE of `discountAmount` and `promotionDiscountAmount` is non-zero on
+  /// a line: a manual discount overrides any promotion on that line. Enforced in
+  /// the applier and pinned by test, not by a constraint — this schema uses
+  /// neither CHECK constraints nor triggers.
+  ///
+  /// `promotionId` carries no relation, deliberately: a foreign key would
+  /// restrict deleting a promotion that has ever been sold, and
+  /// `promotionNameSnapshot` beside it is what a reprinted document renders (D44).
+  promotionDiscountAmount Decimal        @default(0) @db.Decimal(12, 2)
+  promotionId             String?
+  promotionNameSnapshot   String?
   lineSubtotal        Decimal            @db.Decimal(12, 2)
   lineTotal           Decimal            @db.Decimal(12, 2)
   returnedQuantity    Decimal            @default(0) @db.Decimal(12, 3)
@@ -1425,6 +1444,14 @@ model ReturnItem {
   originalLineSubtotal       Decimal          @db.Decimal(12, 2)
   productDiscountAdjustment  Decimal          @default(0) @db.Decimal(12, 2)
   orderDiscountAdjustment    Decimal          @default(0) @db.Decimal(12, 2)
+  /// D102 (4.1) — the promotion reversed on this return line.
+  ///
+  /// A THIRD adjustment beside the two above, and deliberately of the LINE-level
+  /// shape: `promotionDiscountAmount × frac`, like the product discount and
+  /// unlike the order discount's basket-weighted share. A BOGO saving belongs to
+  /// the free item, not to the basket by value — allocating it order-wide would
+  /// refund money on an item the customer got for nothing.
+  promotionDiscountAdjustment Decimal         @default(0) @db.Decimal(12, 2)
   taxAdjustment              Decimal          @default(0) @db.Decimal(12, 2)
   /// D101 (3.8) — the rate that was REVERSED, copied from the original SaleItem.
   ///
