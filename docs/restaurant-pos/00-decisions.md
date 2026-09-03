@@ -3948,3 +3948,139 @@ and fallback ship first."*
 | O3 | Service-charge tax treatment specifics, to be confirmed with an accountant (D8). | Phase 8 |
 | O4 | Pilot restaurant: which tenant, how many branches, which printers, which channels. | Phase 4 |
 | O5 | Commercial model (per-branch / per-register / per-module) — blocks subscription and entitlement design. | before entitlements |
+
+---
+
+### D102 — promotions allocate per line, frozen at sale time
+
+Tech Lead, 2026-09-03. Supersedes nothing; scopes Phase 4 (audit item **A4**).
+
+#### The question
+
+Phase 4 builds the discount engine — the models, the four types and the schedule
+exist, but nothing turns a promotion into money. Before writing the applier, one
+question had to be answered: **where does a promotion discount live**, and how is
+it reversed when part of the sale comes back?
+
+Two candidates. Bake it into the line, the way a manual discount already works;
+or hold it as an order-level figure with its own proportional allocation, the way
+the storewide order discount works.
+
+#### Decided — per line, baked into `lineTotal`, frozen at sale time
+
+A promotion reduces the line it applies to. The amount is computed **once, when
+the sale is written**, and never re-derived afterwards. A return reverses it by
+the same `× frac` scaling the per-line manual discount already uses.
+
+**Returns allocate; they do not re-evaluate.** Returning one item of a "2 for 1"
+does not recompute the basket as though the promotion never qualified. This
+follows D101's returns rule directly — *"allocation, not recomputation: a return
+can never refund a different amount of tax than the sale charged"* — and extends
+it from tax to promotions.
+
+#### Why not the order-level shape — the argument that decided it
+
+Two shirts at 1,000 and a tie at 500, tie free under buy-two-get-one. The
+customer pays **2,000** and returns the tie.
+
+Allocating the 500 saving order-wide by line value gives the tie a weight of 500
+against the shirts' 2,000, so the tie absorbs 100 of it:
+
+    refund = 500 (its subtotal) − 100 (its share) = 400
+
+**Rs 400 refunded on an item the customer paid nothing for.**
+
+That is the same defect D101's `3.11` removed — refunding tax on a zero-rated
+line — with the same cause: a basket-wide proportional allocation applied to a
+saving that was never basket-wide. A BOGO discount belongs to the free *item*,
+not to the basket by value.
+
+Per line, the tie carries `promotionDiscountAmount = 500` and `lineTotal = 0`, so
+the refund is `500 − 500 = 0`. Correct, with no special case.
+
+#### Composition order
+
+    unit price × quantity
+      → line discount   (manual OR promotion — never both, see the invariant)
+      → order discount  (computed on the subtotal AFTER the above)
+      → tax             (on the base narrowed by `Product.taxable`, D101)
+
+A promotion therefore **does** reduce the base a storewide order discount is
+computed against. This needs no new logic: `sales.service` already resolves the
+order discount against `subtotal − totalDiscount`, so a promotion inside that
+rollup is inside the base by construction.
+
+#### The invariant: manual and promotion are mutually exclusive per line
+
+A manual line discount **overrides** any promotion on that line, so at most one of
+`discountAmount` and `promotionDiscountAmount` is non-zero on any line. Enforced
+in the applier and pinned by test, not by a database constraint — the repository
+uses neither CHECK constraints nor triggers, and a rule that lives in one place in
+code is easier to prove than one split across both.
+
+Why manual wins: a cashier discounting is acting deliberately, usually under a
+role-based approval limit the system enforces. An automatic promotion stacking on
+top would push the total past a figure nobody approved.
+
+#### Bundle allocation
+
+`BUNDLE_FIXED_PRICE` spans lines, so its saving is distributed **proportionally to
+gross line value, with the largest-remainder method for the final cent**. The
+distribution happens inside the applier, once, at sale time, and is then frozen —
+so the printed rows sum to the printed total and a later reader never re-divides
+it differently.
+
+This is the same reasoning that put the tax breakdown's remainder on the largest
+row rather than letting four renderers each round independently.
+
+#### The four columns
+
+| Table | Column | Type |
+|---|---|---|
+| `SaleItem` | `promotionDiscountAmount` | `Decimal @default(0) @db.Decimal(12, 2)` |
+| `SaleItem` | `promotionId` | `String?` |
+| `SaleItem` | `promotionNameSnapshot` | `String?` |
+| `ReturnItem` | `promotionDiscountAdjustment` | `Decimal @default(0) @db.Decimal(12, 2)` |
+
+All additive, all defaulted or nullable, no backfill, no table rewrite. They ship
+**inert** — nothing reads them until the applier lands.
+
+`promotionNameSnapshot` exists because a promotion can be renamed or deleted after
+the sale, and a reprinted receipt must still name what the customer was given.
+That is D44's snapshot rule applied unchanged.
+
+**`promotionDiscountAmount` is a mirror, not the authority.** `lineTotal` is
+already net of it and is what tax and returns read. The column exists so a
+promotion is separately reportable in Phase 8 without a second source of truth —
+the same relationship D100 records between `Product.quantityOnHand` and the
+per-variant rows.
+
+#### What this buys with no further work
+
+- **Tax follows automatically.** `taxableBase` reads `lineTotal` (D101, 3.14), so
+  a promoted line is taxed on what the customer actually pays.
+- **The returns denominator stays correct.** `computeReturnLine` derives its
+  order-discount base from `sale.subtotal − sale.totalDiscount`, and the promotion
+  is inside `totalDiscount`.
+- **The till and the server agree**, provided the applier lives in
+  `@hardware-pos/shared` and both call it — the rule 3.14 was written to enforce.
+
+#### What this deliberately does not solve
+
+**Bundle breaking.** Return one shirt from a buy-two-get-one and the customer
+keeps a free tie, having paid for one shirt. The shop absorbs the difference.
+
+Re-evaluating the basket would recover it, but the refund would then depend on the
+order items came back in, could be zero, and could produce a debt — a customer
+being told they owe money on a return. We take the loss by default. If the
+business wants protection it must be an **explicit rule an operator can see** —
+refusing or flagging a partial return that breaks a bundle — never a silent
+recomputation.
+
+#### Restaurant impact: none
+
+`ProjectedSaleItem` carries only the fields it lists, so restaurant settlements
+write none of these columns and take the defaults — the same mechanism that leaves
+`taxRatePercent` null there (3.16). Additive and nullable only; no reader may
+assume non-null on `SaleItem`.
+
