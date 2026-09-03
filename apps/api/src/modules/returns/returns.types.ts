@@ -71,6 +71,8 @@ export interface ReturnPreviewItem {
   originalUnitPrice: number;
   originalLineSubtotal: number;
   productDiscountAdjustment: number;
+  /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
   taxAdjustment: number;
   refundableAmount: number;
@@ -86,6 +88,8 @@ export interface ReturnPreview {
   items: ReturnPreviewItem[];
   subtotal: number;
   productDiscountAdjustment: number;
+  /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;
@@ -188,6 +192,8 @@ export interface PersistReturnItem {
   note: string | null;
   originalLineSubtotal: number;
   productDiscountAdjustment: number;
+  /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
   taxAdjustment: number;
   refundableAmount: number;
@@ -207,6 +213,8 @@ export interface PersistReturnInput {
   notes: string | null;
   subtotal: number;
   productDiscountAdjustment: number;
+  /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;

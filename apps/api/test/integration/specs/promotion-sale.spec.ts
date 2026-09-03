@@ -32,16 +32,22 @@ import { PlatformModule } from '../../../src/modules/platform/platform.module';
 import { ProvidersModule } from '../../../src/modules/providers/providers.module';
 import { SalesModule } from '../../../src/modules/sales/sales.module';
 import { SalesService } from '../../../src/modules/sales/sales.service';
+import { ReturnsModule } from '../../../src/modules/returns/returns.module';
+import { ReturnsService } from '../../../src/modules/returns/returns.service';
+import { CreateReturnDto } from '../../../src/modules/returns/dto/create-return.dto';
+import { ApproveReturnDto } from '../../../src/modules/returns/dto/approve-return.dto';
+import { dto } from '../dto';
 import { SettingsService } from '../../../src/modules/settings/settings.service';
 import type { AuthenticatedUser } from '../../../src/modules/auth/auth.types';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
 import { resetDatabase } from '../db-reset';
-import { seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
+import { MANAGER_PIN, seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let sales: SalesService;
+let returns: ReturnsService;
 let settings: SettingsService;
 let tenant: SeededTenant;
 let owner: AuthenticatedUser;
@@ -60,11 +66,13 @@ beforeAll(async () => {
       PlatformModule,
       ProvidersModule,
       SalesModule,
+      ReturnsModule,
     ],
   }).compile();
   testModule.useLogger(false);
   await testModule.init();
   sales = testModule.get(SalesService);
+  returns = testModule.get(ReturnsService);
   settings = testModule.get(SettingsService);
 });
 
@@ -247,5 +255,136 @@ describe('4.4 — a promotion reduces what the customer pays', () => {
       expect(l.promotionId).toBeNull();
       expect(l.promotionNameSnapshot).toBeNull();
     }
+  });
+});
+
+describe('4.5 — a return reverses the promotion it was given', () => {
+  /**
+   * A return, with a manager approval token when the refund crosses the value
+   * threshold. The threshold is a pre-existing rule and nothing to do with
+   * promotions — it simply has to be satisfied to exercise a full basket.
+   */
+  const returnOf = async (
+    saleId: string,
+    saleItemId: string,
+    qty: number,
+    approveFor?: number,
+  ) => {
+    let approvalToken: string | undefined;
+    if (approveFor !== undefined) {
+      const approval = await returns.approve(
+        tenant.tenantId,
+        dto(ApproveReturnDto, {
+          managerPin: MANAGER_PIN,
+          originalSaleId: saleId,
+          refundTotal: approveFor,
+        }),
+      );
+      if (!approval.approved || !approval.approvalToken) {
+        throw new Error(`Fixture approval refused: ${approval.reason ?? 'unknown'}`);
+      }
+      approvalToken = approval.approvalToken;
+    }
+
+    return returns.complete(
+      tenant.tenantId,
+      owner,
+      dto(CreateReturnDto, {
+        originalSaleId: saleId,
+        refundMethod: 'CASH',
+        ...(approvalToken ? { approvalToken } : {}),
+        items: [
+          {
+            saleItemId,
+            returnQuantity: qty,
+            returnReason: 'CHANGED_MIND',
+            itemCondition: 'GOOD',
+            stockDisposition: 'RETURN_TO_STOCK',
+          },
+        ],
+      }),
+      null,
+    );
+  };
+
+  it('THE D102 CASE — returning the free tie refunds exactly 0.00', async () => {
+    await seedBogo();
+    const sale = await sellBasket(2360);
+    const [, tieLine] = await linesOf(sale.id); // 'Shirt' then 'Tie'
+
+    const ret = await returnOf(sale.id, tieLine!.id, 1);
+
+    /*
+     * End to end, against the database, with real money moved. The customer paid
+     * nothing for the tie and gets nothing back.
+     *
+     * Had the 500 been allocated ORDER-WIDE by line value — weight 500 against
+     * the shirts' 2,000 — the tie would have absorbed 100 and this refund would
+     * be 400 on a free item. That is what D102 Option A was chosen to prevent,
+     * and it is why the breakdown is asserted and not only the total.
+     */
+    expect(Number(ret.refundTotal)).toBe(0);
+
+    const items = await prisma.returnItem.findMany({ where: { returnId: ret.id } });
+    expect(items).toHaveLength(1);
+    expect(Number(items[0]!.promotionDiscountAdjustment)).toBe(500);
+    expect(Number(items[0]!.originalLineSubtotal)).toBe(500);
+    expect(Number(items[0]!.taxAdjustment)).toBe(0);
+    expect(Number(items[0]!.refundableAmount)).toBe(0);
+  });
+
+  it('the PAID item still refunds everything it paid — the control', async () => {
+    await seedBogo();
+    const sale = await sellBasket(2360);
+    const [shirtLine] = await linesOf(sale.id);
+
+    const ret = await returnOf(sale.id, shirtLine!.id, 1);
+
+    // One of two shirts: 1,000 of goods plus its half of the 360 tax. Proves the
+    // zero above is about the promotion, not a calculator refunding nothing.
+    expect(Number(ret.refundTotal)).toBe(1180);
+    const items = await prisma.returnItem.findMany({ where: { returnId: ret.id } });
+    expect(Number(items[0]!.promotionDiscountAdjustment)).toBe(0);
+  });
+
+  it('returning EVERYTHING, piece by piece, gives back exactly what was paid', async () => {
+    await seedBogo();
+    const sale = await sellBasket(2360);
+    const [shirtLine, tieLine] = await linesOf(sale.id);
+
+    /*
+     * Three separate transactions, deliberately: the free tie, then one shirt,
+     * then the other. Allocation makes each share exact on its own, so the parts
+     * sum to the whole however the customer splits the return and no line has to
+     * absorb a remainder — the reconciliation property 3.11 built and D102
+     * inherits by allocating rather than re-evaluating.
+     *
+     * Each refund stays under the manager-approval threshold, which is a
+     * pre-existing value rule and nothing to do with promotions.
+     */
+    const tie = await returnOf(sale.id, tieLine!.id, 1);
+    const firstShirt = await returnOf(sale.id, shirtLine!.id, 1);
+    // The third one completes the sale, so it trips the pre-existing
+    // "Full-sale return" approval rule — nothing to do with promotions.
+    const secondShirt = await returnOf(sale.id, shirtLine!.id, 1, 1180);
+
+    expect(Number(tie.refundTotal)).toBe(0);
+    expect(Number(firstShirt.refundTotal)).toBe(1180);
+    expect(Number(secondShirt.refundTotal)).toBe(1180);
+    expect(
+      Number(tie.refundTotal) + Number(firstShirt.refundTotal) + Number(secondShirt.refundTotal),
+    ).toBe(2360);
+  });
+
+  it('ZERO-CHANGE — an unpromoted sale refunds exactly as it did before', async () => {
+    const sale = await sellBasket(2950);
+    const [shirtLine] = await linesOf(sale.id);
+
+    const ret = await returnOf(sale.id, shirtLine!.id, 1);
+
+    // 1,000 of goods + 180 tax, and nothing promotional recorded.
+    expect(Number(ret.refundTotal)).toBe(1180);
+    const items = await prisma.returnItem.findMany({ where: { returnId: ret.id } });
+    expect(Number(items[0]!.promotionDiscountAdjustment)).toBe(0);
   });
 });

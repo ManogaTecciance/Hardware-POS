@@ -18,7 +18,7 @@ describe('computeReturnLine', () => {
   it('refunds the original price for a partial return with no discounts or tax', () => {
     const line = computeReturnLine(
       PLAIN_SALE,
-      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, lineTotal: 400, taxRatePercent: null },
+      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 400, taxRatePercent: null },
       2,
     );
     expect(line.originalLineSubtotal).toBe(200);
@@ -32,7 +32,7 @@ describe('computeReturnLine', () => {
     // 100 × 4 with a 40 (10%) line discount → lineTotal 360.
     const line = computeReturnLine(
       { subtotal: 400, totalDiscount: 40, orderDiscountAmount: 0, taxAmount: 0, taxWeightTotal: null },
-      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 40, lineTotal: 360, taxRatePercent: null },
+      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 40, promotionDiscountAmount: 0, lineTotal: 360, taxRatePercent: null },
       2,
     );
     expect(line.originalLineSubtotal).toBe(200);
@@ -44,7 +44,7 @@ describe('computeReturnLine', () => {
     // 10% order discount (40) on a single 100×4 line.
     const line = computeReturnLine(
       { subtotal: 400, totalDiscount: 0, orderDiscountAmount: 40, taxAmount: 0, taxWeightTotal: null },
-      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, lineTotal: 400, taxRatePercent: null },
+      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 400, taxRatePercent: null },
       2,
     );
     expect(line.orderDiscountAdjustment).toBe(20); // 40 × (200/400)
@@ -54,7 +54,7 @@ describe('computeReturnLine', () => {
   it('reverses tax proportionally', () => {
     const line = computeReturnLine(
       { subtotal: 400, totalDiscount: 0, orderDiscountAmount: 0, taxAmount: 40, taxWeightTotal: null },
-      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, lineTotal: 400, taxRatePercent: null },
+      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 400, taxRatePercent: null },
       2,
     );
     expect(line.taxAdjustment).toBe(20); // 40 × (200/400)
@@ -73,7 +73,7 @@ describe('computeReturnLine', () => {
     };
     const line = computeReturnLine(
       sale,
-      { unitPrice: 100, purchasedQuantity: 2, discountAmount: 20, lineTotal: 180, taxRatePercent: null },
+      { unitPrice: 100, purchasedQuantity: 2, discountAmount: 20, promotionDiscountAmount: 0, lineTotal: 180, taxRatePercent: null },
       1,
     );
     expect(line.originalLineSubtotal).toBe(100);
@@ -95,12 +95,12 @@ describe('sumReturnTotals — full sale return equals the sale total', () => {
     };
     const line1 = computeReturnLine(
       sale,
-      { unitPrice: 100, purchasedQuantity: 2, discountAmount: 20, lineTotal: 180, taxRatePercent: null },
+      { unitPrice: 100, purchasedQuantity: 2, discountAmount: 20, promotionDiscountAmount: 0, lineTotal: 180, taxRatePercent: null },
       2,
     );
     const line2 = computeReturnLine(
       sale,
-      { unitPrice: 100, purchasedQuantity: 2, discountAmount: 0, lineTotal: 200, taxRatePercent: null },
+      { unitPrice: 100, purchasedQuantity: 2, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 200, taxRatePercent: null },
       2,
     );
     const totals = sumReturnTotals([line1, line2]);
@@ -115,12 +115,12 @@ describe('sumReturnTotals — full sale return equals the sale total', () => {
   it('aggregates a multi-item partial return', () => {
     const line1 = computeReturnLine(
       PLAIN_SALE,
-      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, lineTotal: 400, taxRatePercent: null },
+      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 400, taxRatePercent: null },
       1,
     );
     const line2 = computeReturnLine(
       PLAIN_SALE,
-      { unitPrice: 50, purchasedQuantity: 2, discountAmount: 0, lineTotal: 100, taxRatePercent: null },
+      { unitPrice: 50, purchasedQuantity: 2, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 100, taxRatePercent: null },
       2,
     );
     const totals = sumReturnTotals([line1, line2]);
@@ -144,6 +144,7 @@ describe('weighted allocation — uniform rates converge on the old formula', ()
       unitPrice: 100,
       purchasedQuantity: 4,
       discountAmount: 0,
+      promotionDiscountAmount: 0,
       lineTotal: 400,
       taxRatePercent: 18,
     };
@@ -181,7 +182,7 @@ describe('weighted allocation — a mixed basket', () => {
   it('refunds the taxable line everything it paid', () => {
     const line = computeReturnLine(
       MIXED,
-      { unitPrice: 1000, purchasedQuantity: 1, discountAmount: 0, lineTotal: 1000, taxRatePercent: 18 },
+      { unitPrice: 1000, purchasedQuantity: 1, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 1000, taxRatePercent: 18 },
       1,
     );
 
@@ -194,7 +195,7 @@ describe('weighted allocation — a mixed basket', () => {
   it('refunds the exempt line nothing', () => {
     const line = computeReturnLine(
       MIXED,
-      { unitPrice: 250.5, purchasedQuantity: 1, discountAmount: 0, lineTotal: 250.5, taxRatePercent: 0 },
+      { unitPrice: 250.5, purchasedQuantity: 1, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 250.5, taxRatePercent: 0 },
       1,
     );
 
@@ -207,12 +208,12 @@ describe('weighted allocation — a mixed basket', () => {
   it('the two together reconcile to the sale exactly', () => {
     const a = computeReturnLine(
       MIXED,
-      { unitPrice: 1000, purchasedQuantity: 1, discountAmount: 0, lineTotal: 1000, taxRatePercent: 18 },
+      { unitPrice: 1000, purchasedQuantity: 1, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 1000, taxRatePercent: 18 },
       1,
     );
     const b = computeReturnLine(
       MIXED,
-      { unitPrice: 250.5, purchasedQuantity: 1, discountAmount: 0, lineTotal: 250.5, taxRatePercent: 0 },
+      { unitPrice: 250.5, purchasedQuantity: 1, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 250.5, taxRatePercent: 0 },
       1,
     );
 
@@ -235,6 +236,7 @@ describe('weighted allocation — split returns reconcile', () => {
     unitPrice: 250,
     purchasedQuantity: 4,
     discountAmount: 0,
+    promotionDiscountAmount: 0,
     lineTotal: 1000,
     taxRatePercent: 18,
   };
@@ -262,7 +264,7 @@ describe('weighted allocation — degenerate inputs refuse rather than divide', 
     // holds while another module behaves is not a guard.
     const line = computeReturnLine(
       { subtotal: 400, totalDiscount: 0, orderDiscountAmount: 0, taxAmount: 40, taxWeightTotal: 0 },
-      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, lineTotal: 400, taxRatePercent: 0 },
+      { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 400, taxRatePercent: 0 },
       2,
     );
 
@@ -274,10 +276,173 @@ describe('weighted allocation — degenerate inputs refuse rather than divide', 
     for (const weight of [null, 7200]) {
       const line = computeReturnLine(
         { subtotal: 400, totalDiscount: 0, orderDiscountAmount: 0, taxAmount: 0, taxWeightTotal: weight },
-        { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, lineTotal: 400, taxRatePercent: 18 },
+        { unitPrice: 100, purchasedQuantity: 4, discountAmount: 0, promotionDiscountAmount: 0, lineTotal: 400, taxRatePercent: 18 },
         2,
       );
       expect(line.taxAdjustment).toBe(0);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D102 (4.5) — promotions are reversed at LINE level
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The exact basket D102 was decided on.
+ *
+ * Two shirts at 1,000 and a tie at 500, tie free under buy-two-get-one, 18% tax.
+ * The customer pays 2,360:
+ *
+ *   subtotal        2,500   (2,000 shirts + 500 tie)
+ *   totalDiscount     500   (the whole promotion, held on the tie's line)
+ *   discountedSub   2,000
+ *   tax @18%          360
+ *   total           2,360
+ *
+ * `taxWeightTotal` = Σ(lineTaxable × rate) = 2,000×18 + 0×18 = 36,000. The tie
+ * contributes nothing because its `lineTotal` is zero — it was never taxed.
+ */
+const BOGO_SALE: OriginalSaleSnapshot = {
+  subtotal: 2500,
+  totalDiscount: 500,
+  orderDiscountAmount: 0,
+  taxAmount: 360,
+  taxWeightTotal: 36000,
+};
+
+/** The shirts: 2 × 1,000, no discount, no promotion. */
+const SHIRT_LINE = {
+  unitPrice: 1000,
+  purchasedQuantity: 2,
+  discountAmount: 0,
+  promotionDiscountAmount: 0,
+  lineTotal: 2000,
+  taxRatePercent: 18,
+};
+
+/** The tie: 1 × 500, entirely paid for by the promotion. */
+const TIE_LINE = {
+  unitPrice: 500,
+  purchasedQuantity: 1,
+  discountAmount: 0,
+  promotionDiscountAmount: 500,
+  lineTotal: 0,
+  taxRatePercent: 18,
+};
+
+describe('promotions on a return (D102, 4.5)', () => {
+  it('THE D102 CASE — returning a free item refunds exactly 0.00', () => {
+    const line = computeReturnLine(BOGO_SALE, TIE_LINE, 1);
+
+    // The whole point of Option A. The customer paid nothing for the tie, so
+    // they get nothing back for it.
+    expect(line.refundableAmount).toBe(0);
+
+    /*
+     * …and the parts that produce it, so a zero cannot arrive by accident:
+     * the goods are worth 500, the promotion reverses all 500, and no tax was
+     * charged on a line whose net was zero.
+     *
+     * Had the 500 been allocated ORDER-WIDE by line value instead — weight 500
+     * against the shirts' 2,000 — the tie would have absorbed only 100 and this
+     * refund would be 400. That is the defect D102 exists to prevent, and it is
+     * why this asserts the breakdown and not just the total.
+     */
+    expect(line.originalLineSubtotal).toBe(500);
+    expect(line.promotionDiscountAdjustment).toBe(500);
+    expect(line.taxAdjustment).toBe(0);
+  });
+
+  it('the paid item still refunds everything it paid, tax included', () => {
+    // POSITIVE CONTROL for the zero above: the same sale refunds properly on the
+    // line that was actually charged, so the 0.00 is about the promotion and not
+    // a calculator that refunds nothing.
+    const line = computeReturnLine(BOGO_SALE, SHIRT_LINE, 1);
+
+    expect(line.originalLineSubtotal).toBe(1000);
+    expect(line.promotionDiscountAdjustment).toBe(0);
+    // Half the line returned, so half its tax: 360 × 18,000/36,000.
+    expect(line.taxAdjustment).toBe(180);
+    expect(line.refundableAmount).toBe(1180);
+  });
+
+  it('the whole sale reconciles — Σ refunds equals what was paid', () => {
+    const shirts = computeReturnLine(BOGO_SALE, SHIRT_LINE, 2);
+    const tie = computeReturnLine(BOGO_SALE, TIE_LINE, 1);
+    const totals = sumReturnTotals([shirts, tie]);
+
+    // Returning everything gives back exactly the 2,360 that was paid — no
+    // remainder to absorb, which is the reconciliation property D101 built and
+    // D102 inherits by allocating rather than re-evaluating.
+    expect(totals.refundTotal).toBe(2360);
+    expect(totals.promotionDiscountAdjustment).toBe(500);
+    expect(totals.taxAdjustment).toBe(360);
+  });
+
+  it('reverses a promotion PROPORTIONALLY on a partial return', () => {
+    // 4 units at 100 with 40 of promotion across the line → lineTotal 360.
+    const line = computeReturnLine(
+      PLAIN_SALE,
+      {
+        unitPrice: 100,
+        purchasedQuantity: 4,
+        discountAmount: 0,
+        promotionDiscountAmount: 40,
+        lineTotal: 360,
+        taxRatePercent: null,
+      },
+      2,
+    );
+
+    expect(line.originalLineSubtotal).toBe(200);
+    // Half the units back, half the promotion reversed.
+    expect(line.promotionDiscountAdjustment).toBe(20);
+    expect(line.refundableAmount).toBe(180);
+  });
+
+  it('splits a promoted line across two returns without losing a cent', () => {
+    // 3 units at 100 with 10 of promotion — 10/3 does not divide evenly.
+    const promoted = {
+      unitPrice: 100,
+      purchasedQuantity: 3,
+      discountAmount: 0,
+      promotionDiscountAmount: 10,
+      lineTotal: 290,
+      taxRatePercent: null,
+    };
+
+    const first = computeReturnLine(PLAIN_SALE, promoted, 1);
+    const rest = computeReturnLine(PLAIN_SALE, promoted, 2);
+
+    // Allocation by `frac` means the parts sum to the whole however the customer
+    // splits the return — no line has to absorb a remainder, which is precisely
+    // why 3.11 allocates and does not re-evaluate.
+    expect(first.refundableAmount + rest.refundableAmount).toBe(290);
+  });
+
+  it('a promotion and a manual discount never both reverse on one line', () => {
+    /*
+     * They are mutually exclusive by construction (D102): a manual discount
+     * makes a line invisible to promotions, so at most one is non-zero. Asserted
+     * here because `lineNet` subtracts BOTH — if that invariant were ever broken
+     * upstream, this calculator would happily refund less than the customer paid.
+     */
+    const manual = computeReturnLine(
+      PLAIN_SALE,
+      {
+        unitPrice: 100,
+        purchasedQuantity: 2,
+        discountAmount: 20,
+        promotionDiscountAmount: 0,
+        lineTotal: 180,
+        taxRatePercent: null,
+      },
+      2,
+    );
+
+    expect(manual.productDiscountAdjustment).toBe(20);
+    expect(manual.promotionDiscountAdjustment).toBe(0);
+    expect(manual.refundableAmount).toBe(180);
   });
 });

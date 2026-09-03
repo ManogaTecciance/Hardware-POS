@@ -284,6 +284,9 @@ export class ReturnsRepository {
               note: it.note,
               originalLineSubtotal: it.originalLineSubtotal,
               productDiscountAdjustment: it.productDiscountAdjustment,
+              // D102 (4.5) — the promotion reversed on this line. Stored beside
+              // the other two adjustments so a credit note is self-contained.
+              promotionDiscountAdjustment: it.promotionDiscountAdjustment,
               orderDiscountAdjustment: it.orderDiscountAdjustment,
               taxAdjustment: it.taxAdjustment,
               refundableAmount: it.refundableAmount,

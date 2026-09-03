@@ -50,6 +50,10 @@ function makeSale(overrides: Partial<Record<string, unknown>> = {}) {
         unitPrice: 100,
         quantity: 4,
         discountAmount: 0,
+        // D102 (4.4) — the column is NOT NULL DEFAULT 0, so a real row always
+        // carries it. The double says so too (D30: a fixture must represent the
+        // production structure).
+        promotionDiscountAmount: 0,
         lineTotal: 400,
         returnedQuantity: 0,
         product: { id: 'p1', imageUrl: null },
@@ -165,6 +169,10 @@ describe('ReturnsService.preview', () => {
           unitPrice: 100,
           quantity: 4,
           discountAmount: 0,
+          // D102 (4.4) — the column is NOT NULL DEFAULT 0, so a real row always
+          // carries it. The double says so too (D30: a fixture must represent the
+          // production structure).
+          promotionDiscountAmount: 0,
           lineTotal: 400,
           returnedQuantity: 3, // only 1 left
           product: { id: 'p1', imageUrl: null },

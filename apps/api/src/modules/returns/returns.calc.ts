@@ -44,7 +44,20 @@ export interface OriginalLineSnapshot {
   purchasedQuantity: number;
   /** Product-level discount for the whole original line. */
   discountAmount: number;
-  /** Net of the product discount: unitPrice*qty - discountAmount. */
+  /**
+   * D102 (4.4) — the promotion that claimed this line, for the WHOLE line.
+   *
+   * Already subtracted from `lineTotal` and already inside the sale's
+   * `totalDiscount`. Reversed here at line level, `× frac`, exactly like the
+   * product discount above — and deliberately NOT like the order discount's
+   * basket-weighted share.
+   */
+  promotionDiscountAmount: number;
+  /**
+   * Net of BOTH line-level reductions: unitPrice*qty - discountAmount -
+   * promotionDiscountAmount. The two are mutually exclusive per line, so at most
+   * one of them is non-zero.
+   */
   lineTotal: number;
   /**
    * D101 (3.11) — the rate this line was charged at, frozen at sale time.
@@ -61,6 +74,8 @@ export interface ComputedReturnLine {
   originalLineSubtotal: number;
   /** Proportional share of the line's product discount reversed. */
   productDiscountAdjustment: number;
+  /** D102 (4.5) — proportional share of the line's PROMOTION reversed. */
+  promotionDiscountAdjustment: number;
   /** Proportional share of the sale's order discount reversed. */
   orderDiscountAdjustment: number;
   /** Proportional share of the sale's tax reversed. */
@@ -72,6 +87,7 @@ export interface ComputedReturnLine {
 export interface ComputedReturnTotals {
   subtotal: number;
   productDiscountAdjustment: number;
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;
@@ -97,7 +113,29 @@ export function computeReturnLine(
   const productDiscountAdjustment = round2(line.discountAmount * frac);
 
   // Net of the product discount for the returned portion.
-  const lineNet = round2(originalLineSubtotal - productDiscountAdjustment);
+  /*
+   * 2b. D102 (4.5) — the promotion, reversed proportionally.
+   *
+   * LINE-level, `× frac`, the same shape as the product discount above and
+   * deliberately not the order discount's basket-weighted share below. That
+   * difference is the whole of D102:
+   *
+   *   Two shirts at 1,000 and a tie at 500, tie free. The customer pays 2,000
+   *   and returns the tie. Weighting the 500 saving across the basket by line
+   *   value would give the tie 100 and refund 500 − 100 = 400 — on an item the
+   *   customer paid nothing for. Held on the line, the tie carries the whole 500
+   *   and refunds 0.
+   *
+   * Allocation, never re-evaluation: returning one shirt does not recompute the
+   * basket as though the promotion had never qualified. The shop absorbs a broken
+   * bundle by design (D102); any protection must be an explicit rule an operator
+   * can see, not a silent recomputation here.
+   */
+  const promotionDiscountAdjustment = round2(line.promotionDiscountAmount * frac);
+
+  const lineNet = round2(
+    originalLineSubtotal - productDiscountAdjustment - promotionDiscountAdjustment,
+  );
 
   // 3. Proportional order-level discount. The sale spread its order discount
   //    across the sum of line nets (discountedSubtotal); this line's full share is
@@ -193,6 +231,7 @@ export function computeReturnLine(
     returnQuantity,
     originalLineSubtotal,
     productDiscountAdjustment,
+    promotionDiscountAdjustment,
     orderDiscountAdjustment,
     taxAdjustment,
     refundableAmount,
@@ -204,6 +243,7 @@ export function sumReturnTotals(lines: ComputedReturnLine[]): ComputedReturnTota
   return {
     subtotal: sum2(lines.map((l) => l.originalLineSubtotal)),
     productDiscountAdjustment: sum2(lines.map((l) => l.productDiscountAdjustment)),
+    promotionDiscountAdjustment: sum2(lines.map((l) => l.promotionDiscountAdjustment)),
     orderDiscountAdjustment: sum2(lines.map((l) => l.orderDiscountAdjustment)),
     taxAdjustment: sum2(lines.map((l) => l.taxAdjustment)),
     refundTotal: sum2(lines.map((l) => l.refundableAmount)),

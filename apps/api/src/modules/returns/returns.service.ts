@@ -184,6 +184,7 @@ export class ReturnsService {
       items: computed.previewItems,
       subtotal: computed.totals.subtotal,
       productDiscountAdjustment: computed.totals.productDiscountAdjustment,
+      promotionDiscountAdjustment: computed.totals.promotionDiscountAdjustment,
       orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
       taxAdjustment: computed.totals.taxAdjustment,
       refundTotal: computed.totals.refundTotal,
@@ -262,8 +263,23 @@ export class ReturnsService {
     const settings = this.settingsService.getSettings(tenantId);
     const computed = this.computeReturn(sale, dto.items);
     const refundTotal = computed.totals.refundTotal;
-    if (refundTotal <= 0) {
-      throw new BadRequestException('Refund total must be greater than zero');
+    /*
+     * D102 (4.5) — NEGATIVE is refused; ZERO is a real return.
+     *
+     * This guard was `<= 0` when a zero refund could only come from a degenerate
+     * input. Promotions made zero legitimate: a customer returning a free
+     * buy-two-get-one item is owed nothing, but the goods still come back and the
+     * stock must still be restored. Refusing it would leave the item unreturnable
+     * and its stock permanently lost — a worse outcome than the case the guard was
+     * written for.
+     *
+     * Nothing is opened up by this. An empty return is already impossible:
+     * `ReturnItemInputDto.returnQuantity` carries `@IsPositive()`, so the quantity
+     * is validated before this line runs. What remains refused is a NEGATIVE
+     * refund, which is money flowing the wrong way and never correct.
+     */
+    if (refundTotal < 0) {
+      throw new BadRequestException('Refund total cannot be negative');
     }
 
     this.validateRefundMethod(sale, dto.refundMethod, refundTotal, settings.returns);
@@ -332,6 +348,7 @@ export class ReturnsService {
           notes: dto.notes?.trim() || null,
           subtotal: computed.totals.subtotal,
           productDiscountAdjustment: computed.totals.productDiscountAdjustment,
+          promotionDiscountAdjustment: computed.totals.promotionDiscountAdjustment,
           orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
           taxAdjustment: computed.totals.taxAdjustment,
           refundTotal,
@@ -553,6 +570,14 @@ export class ReturnsService {
           unitPrice: Number(si.unitPrice),
           purchasedQuantity: purchased,
           discountAmount: Number(si.discountAmount),
+          // D102 (4.5) — reversed line-level, `× frac`, like the product
+          // discount above and not like the order discount's weighted share.
+          // `?? 0` is defence in depth, not a NULL/0 distinction: the column is
+          // NOT NULL DEFAULT 0, so absent can only mean zero. Without it a row
+          // missing the field yields `Number(undefined)` = NaN, which would
+          // propagate silently into a refund total — the worst failure mode
+          // available here.
+          promotionDiscountAmount: Number(si.promotionDiscountAmount ?? 0),
           lineTotal: Number(si.lineTotal),
           // Null means this line predates 3.8 — the fallback signal.
           taxRatePercent: si.taxRatePercent === null ? null : Number(si.taxRatePercent),
@@ -570,6 +595,7 @@ export class ReturnsService {
         originalUnitPrice: line.originalUnitPrice,
         originalLineSubtotal: line.originalLineSubtotal,
         productDiscountAdjustment: line.productDiscountAdjustment,
+        promotionDiscountAdjustment: line.promotionDiscountAdjustment,
         orderDiscountAdjustment: line.orderDiscountAdjustment,
         taxAdjustment: line.taxAdjustment,
         refundableAmount: line.refundableAmount,
@@ -607,6 +633,7 @@ export class ReturnsService {
         note: input.note?.trim() || null,
         originalLineSubtotal: line.originalLineSubtotal,
         productDiscountAdjustment: line.productDiscountAdjustment,
+        promotionDiscountAdjustment: line.promotionDiscountAdjustment,
         orderDiscountAdjustment: line.orderDiscountAdjustment,
         taxAdjustment: line.taxAdjustment,
         refundableAmount: line.refundableAmount,
