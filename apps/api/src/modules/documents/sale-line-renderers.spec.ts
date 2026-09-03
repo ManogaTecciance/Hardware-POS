@@ -206,10 +206,31 @@ describe('the breakdown is silent unless it adds information', () => {
     expect(taxBreakdownForDocument([line(1000, 18), line(500, 18)], 270)).toEqual([]);
   });
 
-  it('returns nothing for a RESTAURANT sale, which has no lines at all', () => {
-    // `closeSession` writes totals only; the lines live on the session's orders
-    // (billing.service, D51). Structurally unreachable, not merely matching.
+  it('returns nothing when a document carries no lines at all', () => {
+    /*
+     * Kept as its own case because the function must handle it, but NOT as the
+     * restaurant case any more — see below. Under D51 `closeSession` wrote
+     * totals only and this WAS the restaurant shape; D58 changed that, and the
+     * old justification here outlived the fact it described (found in 3.16).
+     */
     expect(taxBreakdownForDocument([], 360)).toEqual([]);
+  });
+
+  it('returns nothing for a RESTAURANT sale — lines PRESENT, every rate null', () => {
+    /*
+     * The shape a restaurant bill actually has since D58: `table-sessions` and
+     * `takeaway` settle by projecting order items into SaleItem rows, so the
+     * sale DOES carry lines. `ProjectedSaleItem` has no `taxRatePercent` field,
+     * so every one of those rows is written NULL — on a bill settled today, not
+     * only on history.
+     *
+     * That, and not the absence of lines, is why a restaurant bill prints no
+     * breakdown. Deliberately the same assertion shape as the pre-3.8 case
+     * below and deliberately NOT merged with it: one code path, two unrelated
+     * real-world causes, and collapsing them is how the stale justification
+     * above survived as long as it did.
+     */
+    expect(taxBreakdownForDocument([line(1200, null), line(800, null)], 360)).toEqual([]);
   });
 
   it('returns nothing for a sale predating 3.8', () => {

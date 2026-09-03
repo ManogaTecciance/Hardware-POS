@@ -71,9 +71,12 @@ export function totalTaxWeight(lines: readonly TaxableLine[]): number | null {
  *
  * Returns nothing — meaning "render exactly what you rendered before" — when:
  *
- *   • there are no lines. A RESTAURANT Sale carries none: `closeSession` writes
- *     totals only and the lines live on the session's orders. Their bill is
- *     untouched by this feature, which is a stronger guarantee than matching.
+ *   • there are no lines at all.
+ *   • the sale is a RESTAURANT bill. Not because it has no lines — since D58 it
+ *     does, projected from the order items — but because `ProjectedSaleItem`
+ *     carries no `taxRatePercent`, so every restaurant line is written NULL and
+ *     the weight below is unusable. Their bill is untouched by this feature
+ *     either way; 3.16 corrected the REASON, which was stated wrongly here.
  *   • any line lacks a rate, i.e. the sale predates 3.8.
  *   • **every line shares one rate.** A breakdown that repeats the single total
  *     already printed adds a row and no information, so a single-rate sale —

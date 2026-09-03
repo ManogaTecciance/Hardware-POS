@@ -136,9 +136,36 @@ export function computeReturnLine(
   const lineTaxableFull = line.lineTotal - orderDiscountShareFull;
   const returnLineTaxable = lineTaxableFull * frac;
 
-  // A sale is never mixed: 3.9 writes a rate on every line, so a sale is wholly
-  // pre-3.8 or wholly post. Both halves are checked because either being absent
-  // means the same thing — this sale predates the snapshot.
+  /*
+   * What a NULL rate actually means (corrected in 3.16).
+   *
+   * TWO origins produce it, not one. The original comment here said a null rate
+   * meant "this sale predates the snapshot", and that is only half true:
+   *
+   *   1. The sale predates the 3.8 migration — nothing recorded a rate because
+   *      the column did not exist.
+   *   2. The sale is a RESTAURANT bill. Since D58 `table-sessions` and
+   *      `takeaway` settle by projecting order items into SaleItem rows, and
+   *      `ProjectedSaleItem` carries no `taxRatePercent`, so every restaurant
+   *      line is written NULL — on a bill settled TODAY, not only on history.
+   *
+   * Both take the fallback, and both are correct under it today: a restaurant
+   * bill is charged one flat rate, and `computeRestaurantTotals` never consults
+   * `Product.taxable`, so it has no exempt lines. With no exemptions the
+   * proportional method and the weighted one agree exactly.
+   *
+   * The invariant that does NOT hold, and must not be relied on: "a null rate
+   * means an old sale". If the restaurant path ever gains per-product exemption
+   * while still writing NULL, these refunds break SILENTLY — the fallback would
+   * refund tax on an exempt line that was never charged, which is precisely the
+   * defect 3.11 removed for retail. The fix belongs at the WRITE (snapshot the
+   * rate onto `ProjectedSaleItem`), not at this read; raised with the restaurant
+   * team in 3.16 rather than patched here, because their module is theirs.
+   *
+   * A sale is still never MIXED, which is what this check does rely on: retail
+   * writes a rate on every line (3.9) and restaurant writes none on any, so
+   * `taxWeightTotal` is null exactly when the line rate is.
+   */
   const hasSnapshot = line.taxRatePercent !== null && sale.taxWeightTotal !== null;
 
   let taxAdjustment = 0;

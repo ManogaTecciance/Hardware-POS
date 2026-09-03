@@ -493,10 +493,15 @@ function BusinessTab({
           everything else is charged at. It sits beside the VAT number an
           operator already comes to this tab for.
 
-          Shown on EVERY template, ungated. `restaurant-totals.ts` reads the
-          very same `AppSettings.taxRatePercent`, so a food-service owner needs
-          it exactly as much as a retail one — and a business-type conditional
-          here is the scattered comparison D56 exists to end.
+          Shown on EVERY template, ungated. Food service reads this rate too —
+          `table-sessions` resolves `RestaurantBranchConfig.taxRatePercent ??
+          AppSettings.taxRatePercent`, so this field is their EFFECTIVE rate
+          today (that override has no DTO, no UI and no rows) and their fallback
+          if it is ever wired up. Either way a food-service owner needs it as
+          much as a retail one, and a business-type conditional here is the
+          scattered comparison D56 exists to end. Precision added in 3.16: the
+          first version of this comment called it "the very same" field, which
+          overstated it.
 
           `disabled` is the same SETTINGS_MANAGE flag every other field on this
           tab uses, so a Cashier reads it and cannot dirty it. The server

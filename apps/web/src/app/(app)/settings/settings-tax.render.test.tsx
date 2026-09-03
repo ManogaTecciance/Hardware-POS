@@ -327,10 +327,13 @@ describe('3.15 — SETTINGS_MANAGE gates the rate', () => {
 describe('3.15 — every template, because every template reads this rate', () => {
   it('food service gets the field too', async () => {
     /*
-     * `restaurant-totals.ts` documents its rate as coming "from the tenant's
-     * AppSettings.taxRatePercent" — the same field. Hiding it from a restaurant
-     * owner would leave them exactly as stuck as a retail one, and would need a
-     * business-type conditional, which is the scattered comparison D56 ends.
+     * Food service reads this rate too. `table-sessions` resolves
+     * `RestaurantBranchConfig.taxRatePercent ?? AppSettings.taxRatePercent`, and
+     * that per-branch override has no DTO, no UI and no rows — so this field is
+     * a restaurant's effective rate today, and its fallback if the override is
+     * ever wired up. Hiding it would leave a restaurant owner exactly as stuck
+     * as a retail one, and would need a business-type conditional, which is the
+     * scattered comparison D56 ends.
      */
     tenant.businessType = 'RESTAURANT';
     await openBusinessTab();
