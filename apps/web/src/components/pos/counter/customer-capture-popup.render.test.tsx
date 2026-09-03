@@ -24,6 +24,7 @@ import type { Session } from '@/lib/session-store';
 
 const get = vi.fn();
 const post = vi.fn();
+const patch = vi.fn();
 
 class FakeApiError extends Error {
   status: number;
@@ -38,6 +39,7 @@ vi.mock('@/lib/api', () => ({
   api: {
     get: (...args: unknown[]) => get(...args),
     post: (...args: unknown[]) => post(...args),
+    patch: (...args: unknown[]) => patch(...args),
   },
 }));
 
@@ -59,16 +61,15 @@ const SESSION = {
   registerName: 'R1',
 } as unknown as Session;
 
-function renderPopup() {
+function renderPopup(
+  // Takeaway: Skip is offered, so the dialog is at its most permissive —
+  // if validation holds here it holds in the stricter Delivery mode too.
+  // Delivery cases pass THIRD_PARTY explicitly.
+  mode: 'TAKEAWAY' | 'THIRD_PARTY' = 'TAKEAWAY',
+  onChoose: ReturnType<typeof vi.fn> = vi.fn(),
+) {
   return render(
-    <CustomerCapturePopup
-      session={SESSION}
-      // Takeaway: Skip is offered, so the dialog is at its most permissive —
-      // if validation holds here it holds in the stricter Delivery mode too.
-      mode="TAKEAWAY"
-      onChoose={vi.fn()}
-      onBack={vi.fn()}
-    />,
+    <CustomerCapturePopup session={SESSION} mode={mode} onChoose={onChoose} onBack={vi.fn()} />,
   );
 }
 
@@ -84,9 +85,11 @@ async function typeUnknownMobile(value: string) {
 beforeEach(() => {
   get.mockReset();
   post.mockReset();
+  patch.mockReset();
   // No existing customer, so the dialog reveals the New Customer fields.
   get.mockResolvedValue({ items: [] });
   post.mockResolvedValue({ id: 'cus_1', name: 'Nimal Perera' });
+  patch.mockResolvedValue({});
 });
 
 afterEach(cleanup);
@@ -231,6 +234,8 @@ describe('an invalid entry never reaches the API', () => {
       name: 'Nimal Perera',
       mobile: '0771234567',
     });
+    // Takeaway collects no address, so none must be invented for the record.
+    expect(post.mock.calls[0]?.[1]).not.toHaveProperty('street');
   });
 });
 
@@ -270,19 +275,19 @@ describe('the Name field survives a follow-up lookup', () => {
     expect(screen.getByLabelText('Name')).toBeTruthy();
   });
 
-  it('hides the New Customer fields once a customer is actually found', async () => {
+  it('swaps the New Customer fields for the pick-list once a match lands', async () => {
     renderPopup();
     await typeUnknownMobile('0771234567');
     expect(screen.getByLabelText('Name')).toBeTruthy();
 
     // The other half: the fields are kept across a re-search, not pinned open
-    // forever. A match still replaces them with the found card.
+    // forever. A match still replaces them with the list of candidates.
     get.mockResolvedValue({
       items: [{ id: 'cus_9', name: 'Kamal Silva', mobile: '0779999999' }],
     });
     fireEvent.change(mobileInput(), { target: { value: '0779999999' } });
 
-    await waitFor(() => expect(screen.getByText('Customer found')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Kamal Silva/ })).toBeTruthy());
     expect(screen.queryByLabelText('Name')).toBeNull();
   });
 
@@ -295,5 +300,403 @@ describe('the Name field survives a follow-up lookup', () => {
     // Nothing has been looked up, so there is no result to keep showing.
     expect(screen.queryByLabelText('Name')).toBeNull();
     expect(screen.queryByText('Searching…')).toBeNull();
+  });
+});
+
+// ── Choosing an existing customer ────────────────────────────────────────────
+//
+// The lookup OFFERS matches; it never decides. The old dialog pinned the first
+// hit as "Customer found", which looked done while being silently wrong for a
+// shared or mistyped number. The standard POS flow is pick-list → tap → pinned
+// card with a Change affordance, and New Customer stays reachable throughout.
+
+const addressInput = () => screen.getByLabelText('Delivery address') as HTMLTextAreaElement;
+const useCustomerButton = () =>
+  screen.getByRole('button', { name: /Use customer/ }) as HTMLButtonElement;
+const matchRow = (name: RegExp) => screen.getByRole('button', { name });
+
+const FOUND_WITH_ADDRESS = {
+  items: [
+    {
+      id: 'cus_9',
+      name: 'Kamal Silva',
+      mobile: '0779999999',
+      street: '12 Galle Rd',
+      city: 'Colombo',
+    },
+  ],
+};
+
+const FOUND_WITHOUT_ADDRESS = {
+  items: [{ id: 'cus_8', name: 'Sunil Perera', mobile: '0778888888' }],
+};
+
+const TWO_MATCHES = {
+  items: [
+    { id: 'cus_8', name: 'Sunil Perera', mobile: '0778888888' },
+    { id: 'cus_9', name: 'Kamal Silva', mobile: '0778888899' },
+  ],
+};
+
+describe('the pick-list offers matches without deciding', () => {
+  it('lists every candidate and pins none of them', async () => {
+    renderPopup();
+    get.mockResolvedValue(TWO_MATCHES);
+    fireEvent.change(mobileInput(), { target: { value: '07788888' } });
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+
+    expect(matchRow(/Kamal Silva/)).toBeTruthy();
+    // Nothing chosen yet, so there is nothing to continue with.
+    expect(screen.queryByRole('button', { name: /Use customer/ })).toBeNull();
+  });
+
+  it('pins the tapped customer as a card, and hands over exactly that record', async () => {
+    const onChoose = vi.fn();
+    renderPopup('TAKEAWAY', onChoose);
+    get.mockResolvedValue(TWO_MATCHES);
+    fireEvent.change(mobileInput(), { target: { value: '07788888' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+
+    fireEvent.click(matchRow(/Kamal Silva/));
+
+    expect(screen.getByText('Customer')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Change' })).toBeTruthy();
+    fireEvent.click(useCustomerButton());
+    expect(onChoose).toHaveBeenCalledWith({
+      customerId: 'cus_9',
+      name: 'Kamal Silva',
+      phone: '0778888899',
+      deliveryAddress: undefined,
+    });
+  });
+
+  it('mirrors the picked customer number into the field, clearing the length warning', async () => {
+    renderPopup();
+    get.mockResolvedValue(FOUND_WITH_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '07799' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+    // The prefix that surfaced the match is legitimately "too short"…
+    expect(screen.getByText('Mobile number needs at least 9 digits.')).toBeTruthy();
+
+    fireEvent.click(matchRow(/Kamal Silva/));
+
+    // …but once a customer is pinned, the field shows their number, and a
+    // warning about the abandoned prefix would be noise.
+    expect(mobileInput().value).toBe('0779999999');
+    expect(screen.queryByText(/Mobile number needs/)).toBeNull();
+  });
+
+  it('unpins when the number is edited — a new search is a new question', async () => {
+    renderPopup();
+    get.mockResolvedValue(TWO_MATCHES);
+    fireEvent.change(mobileInput(), { target: { value: '07788888' } });
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+    fireEvent.click(matchRow(/Sunil Perera/));
+    expect(screen.getByRole('button', { name: 'Change' })).toBeTruthy();
+
+    fireEvent.change(mobileInput(), { target: { value: '077888881' } });
+
+    expect(screen.queryByRole('button', { name: 'Change' })).toBeNull();
+  });
+
+  it('keeps New Customer reachable while matches exist, and offers a way back', async () => {
+    renderPopup();
+    get.mockResolvedValue(TWO_MATCHES);
+    fireEvent.change(mobileInput(), { target: { value: '0778888800' } });
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+
+    // Right number, wrong person — the matches must not trap the cashier.
+    fireEvent.click(screen.getByRole('button', { name: /New customer with this number/ }));
+    expect(screen.getByLabelText('Name')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Sunil Perera/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Back to matches/ }));
+    expect(matchRow(/Sunil Perera/)).toBeTruthy();
+    expect(screen.queryByLabelText('Name')).toBeNull();
+  });
+
+  it('completes a half-typed number from a single match when starting a new customer', async () => {
+    renderPopup();
+    get.mockResolvedValue(FOUND_WITH_ADDRESS);
+    // The prefix surfaced Kamal; "this number" can only mean his — a family
+    // member ordering from the same phone should not retype what the till
+    // just displayed (PO decision, 2026-09-02).
+    fireEvent.change(mobileInput(), { target: { value: '07799' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /New customer with this number/ }));
+
+    expect(mobileInput().value).toBe('0779999999');
+    expect(screen.getByLabelText('Name')).toBeTruthy();
+  });
+
+  it('leaves the typed prefix alone when the matches carry different numbers', async () => {
+    renderPopup();
+    get.mockResolvedValue(TWO_MATCHES);
+    fireEvent.change(mobileInput(), { target: { value: '07788' } });
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /New customer with this number/ }));
+
+    // Two different full numbers on screen — there is no "this number" to
+    // take, so nothing is guessed onto the new record.
+    expect(mobileInput().value).toBe('07788');
+    expect(screen.getByLabelText('Name')).toBeTruthy();
+  });
+
+  it('never replaces a complete number the cashier typed', async () => {
+    renderPopup();
+    get.mockResolvedValue(FOUND_WITH_ADDRESS);
+    // A valid number that merely resembles Kamal's — the cashier meant what
+    // they typed, and the match must not overwrite it.
+    fireEvent.change(mobileInput(), { target: { value: '0779999900' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /New customer with this number/ }));
+
+    expect(mobileInput().value).toBe('0779999900');
+  });
+});
+
+// ── Delivery mode ────────────────────────────────────────────────────────────
+//
+// The address belongs to the order, not the customer record. The original
+// markup nested the address textarea inside the New Customer block, so the
+// moment the lookup matched a customer the field unmounted — the typed address
+// vanished, and "Use customer" let a delivery order through with no
+// destination at all.
+
+describe('delivery keeps the address across a customer match', () => {
+  it('leaves the field mounted, holding what was typed, through match and pick', async () => {
+    renderPopup('THIRD_PARTY');
+    fireEvent.change(addressInput(), { target: { value: '45/2 Temple Lane, Kandy' } });
+
+    get.mockResolvedValue(FOUND_WITHOUT_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '0778888888' } });
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+
+    // The name form goes while the list is up; the destination must not.
+    expect(screen.queryByLabelText('Name')).toBeNull();
+    expect(addressInput().value).toBe('45/2 Temple Lane, Kandy');
+
+    fireEvent.click(matchRow(/Sunil Perera/));
+    expect(addressInput().value).toBe('45/2 Temple Lane, Kandy');
+  });
+
+  it('offers the saved address as the pre-selected destination, with no editable box', async () => {
+    const onChoose = vi.fn();
+    renderPopup('THIRD_PARTY', onChoose);
+    get.mockResolvedValue(FOUND_WITH_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '0779999999' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+    fireEvent.click(matchRow(/Kamal Silva/));
+
+    const saved = screen.getByRole('radio', { name: /Saved address/ }) as HTMLInputElement;
+    expect(saved.checked).toBe(true);
+    expect(screen.getByText('12 Galle Rd, Colombo')).toBeTruthy();
+    // No duplicate, editable copy of the address — the box appears only for
+    // "a different address".
+    expect(screen.queryByLabelText('Delivery address')).toBeNull();
+
+    // Continuing delivers to the saved address, and the record needs no
+    // backfill — it already has one.
+    fireEvent.click(useCustomerButton());
+    expect(onChoose).toHaveBeenCalledWith(
+      expect.objectContaining({ deliveryAddress: '12 Galle Rd, Colombo' }),
+    );
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('reveals an empty box for a different address', async () => {
+    renderPopup('THIRD_PARTY');
+    get.mockResolvedValue(FOUND_WITH_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '0779999999' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+    fireEvent.click(matchRow(/Kamal Silva/));
+
+    fireEvent.click(screen.getByRole('radio', { name: /different address/ }));
+
+    // Empty — nothing to delete before typing the one-off destination.
+    expect(addressInput().value).toBe('');
+    // And no destination chosen yet means no continuing yet.
+    expect(useCustomerButton().disabled).toBe(true);
+  });
+
+  it('keeps a destination typed before the pick selected over the saved one', async () => {
+    renderPopup('THIRD_PARTY');
+    fireEvent.change(addressInput(), { target: { value: 'Office: 90 Union Pl' } });
+
+    get.mockResolvedValue(FOUND_WITH_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '0779999999' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+    fireEvent.click(matchRow(/Kamal Silva/));
+
+    // The cashier already knew where this order goes; the saved address must
+    // not shove their work aside.
+    const other = screen.getByRole('radio', { name: /different address/ }) as HTMLInputElement;
+    expect(other.checked).toBe(true);
+    expect(addressInput().value).toBe('Office: 90 Union Pl');
+  });
+});
+
+describe('delivery saves a new customer with their first address', () => {
+  it('writes the typed address to the record as one street line', async () => {
+    const onChoose = vi.fn();
+    renderPopup('THIRD_PARTY', onChoose);
+    // No match, so this order creates the customer — the address typed here
+    // is the only chance to give the record one, and without it the next
+    // delivery for this customer starts from a blank box.
+    fireEvent.change(mobileInput(), { target: { value: '0766727512' } });
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeTruthy());
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Kasun Perera' } });
+    fireEvent.change(addressInput(), { target: { value: '45/2 Temple Lane\nKandy' } });
+
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    // Newlines collapse: the street column feeds one-line displays and QBO.
+    expect(post.mock.calls[0]?.[1]).toMatchObject({
+      name: 'Kasun Perera',
+      mobile: '0766727512',
+      street: '45/2 Temple Lane, Kandy',
+    });
+    // The order itself still carries the address exactly as typed.
+    await waitFor(() =>
+      expect(onChoose).toHaveBeenCalledWith(
+        expect.objectContaining({ deliveryAddress: '45/2 Temple Lane\nKandy' }),
+      ),
+    );
+  });
+});
+
+describe('a prefill belongs to the customer it came from', () => {
+  // One number, two people, only one with a saved address — the shape that
+  // let Kamal's address ride along onto Sunil's order via Change.
+  const MIXED_MATCHES = {
+    items: [
+      { id: 'cus_8', name: 'Sunil Perera', mobile: '0778888888' },
+      {
+        id: 'cus_9',
+        name: 'Kamal Silva',
+        mobile: '0778888899',
+        street: '12 Galle Rd',
+        city: 'Colombo',
+      },
+    ],
+  };
+
+  it('gives the next customer a clean slate — no address rides along via Change', async () => {
+    renderPopup('THIRD_PARTY');
+    get.mockResolvedValue(MIXED_MATCHES);
+    fireEvent.change(mobileInput(), { target: { value: '07788888' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+
+    fireEvent.click(matchRow(/Kamal Silva/));
+    expect(screen.getByText('12 Galle Rd, Colombo')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+    fireEvent.click(matchRow(/Sunil Perera/));
+
+    // Kamal's address must not become Sunil's delivery: Sunil has no saved
+    // address, so the plain box comes back — empty.
+    expect(addressInput().value).toBe('');
+  });
+
+  it('keeps a hand-typed one-off address through the same switch', async () => {
+    renderPopup('THIRD_PARTY');
+    get.mockResolvedValue(MIXED_MATCHES);
+    fireEvent.change(mobileInput(), { target: { value: '07788888' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+    fireEvent.click(matchRow(/Kamal Silva/));
+
+    // The cashier redirected this order on purpose; that work survives.
+    fireEvent.click(screen.getByRole('radio', { name: /different address/ }));
+    fireEvent.change(addressInput(), { target: { value: 'Office: 90 Union Pl' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+    fireEvent.click(matchRow(/Sunil Perera/));
+
+    expect(addressInput().value).toBe('Office: 90 Union Pl');
+  });
+});
+
+describe('an address-less record adopts its first delivery address', () => {
+  it('backfills the record when Use customer completes with a typed address', async () => {
+    const onChoose = vi.fn();
+    renderPopup('THIRD_PARTY', onChoose);
+    get.mockResolvedValue(FOUND_WITHOUT_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '0778888888' } });
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+    fireEvent.click(matchRow(/Sunil Perera/));
+    fireEvent.change(addressInput(), { target: { value: '45/2 Temple Lane\nKandy' } });
+
+    fireEvent.click(useCustomerButton());
+
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(patch.mock.calls[0]?.[0]).toBe('/customers/cus_8');
+    expect(patch.mock.calls[0]?.[1]).toEqual({ street: '45/2 Temple Lane, Kandy' });
+    // The order continues regardless of the backfill round-trip.
+    expect(onChoose).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: 'cus_8', deliveryAddress: '45/2 Temple Lane\nKandy' }),
+    );
+  });
+
+  it('never rewrites a record that already has an address', async () => {
+    const onChoose = vi.fn();
+    renderPopup('THIRD_PARTY', onChoose);
+    get.mockResolvedValue(FOUND_WITH_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '0779999999' } });
+    await waitFor(() => expect(matchRow(/Kamal Silva/)).toBeTruthy());
+    fireEvent.click(matchRow(/Kamal Silva/));
+
+    // A one-off redirect: office today, home unchanged.
+    fireEvent.click(screen.getByRole('radio', { name: /different address/ }));
+    fireEvent.change(addressInput(), { target: { value: 'Office: 90 Union Pl' } });
+    fireEvent.click(useCustomerButton());
+
+    expect(patch).not.toHaveBeenCalled();
+    expect(onChoose).toHaveBeenCalledWith(
+      expect.objectContaining({ deliveryAddress: 'Office: 90 Union Pl' }),
+    );
+  });
+});
+
+describe('delivery requires a destination even for an existing customer', () => {
+  it('blocks Use customer while the address is empty, and never calls onChoose', async () => {
+    const onChoose = vi.fn();
+    renderPopup('THIRD_PARTY', onChoose);
+    get.mockResolvedValue(FOUND_WITHOUT_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '0778888888' } });
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+    fireEvent.click(matchRow(/Sunil Perera/));
+
+    // The address input must still be there to type into — cus_8 has no
+    // saved address, which is exactly the reported bug's shape.
+    expect(addressInput()).toBeTruthy();
+    expect(useCustomerButton().disabled).toBe(true);
+    // The handler guard, for paths that bypass the disabled attribute.
+    fireEvent.click(useCustomerButton());
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it('continues with the address on the chosen customer once one is entered', async () => {
+    const onChoose = vi.fn();
+    renderPopup('THIRD_PARTY', onChoose);
+    get.mockResolvedValue(FOUND_WITHOUT_ADDRESS);
+    fireEvent.change(mobileInput(), { target: { value: '0778888888' } });
+    await waitFor(() => expect(matchRow(/Sunil Perera/)).toBeTruthy());
+    fireEvent.click(matchRow(/Sunil Perera/));
+
+    fireEvent.change(addressInput(), { target: { value: '45/2 Temple Lane, Kandy' } });
+    expect(useCustomerButton().disabled).toBe(false);
+
+    fireEvent.click(useCustomerButton());
+    expect(onChoose).toHaveBeenCalledWith({
+      customerId: 'cus_8',
+      name: 'Sunil Perera',
+      phone: '0778888888',
+      deliveryAddress: '45/2 Temple Lane, Kandy',
+    });
   });
 });

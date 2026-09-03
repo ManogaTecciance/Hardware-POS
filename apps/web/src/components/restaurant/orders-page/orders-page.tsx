@@ -14,6 +14,7 @@ import { normalizeSearchTerm } from '@/lib/search-term';
 import { type Session } from '@/lib/auth';
 import { restaurantOrders } from '@/lib/restaurant/api';
 import { formatElapsed, formatMoney } from '@/lib/restaurant/labels';
+import { playNewOrderChime } from '@/lib/restaurant/new-order-chime';
 import type {
   UnifiedChannel,
   UnifiedOrderStatus,
@@ -56,7 +57,9 @@ const CHANNEL_CHIPS: Array<{ key: UnifiedChannel | 'ALL'; label: string }> = [
 /**
  * The unified Orders screen. Filters live in the URL so a manager can
  * bookmark "Takeaway Ready" and share it. The page polls the unified
- * `/restaurant/branches/:b/orders` endpoint every 8 s.
+ * `/restaurant/branches/:b/orders` endpoint every 8 s while the tab is
+ * visible (a hidden tab stops polling and catches up on return), and rings
+ * a chime when a poll brings new orders into the filter being watched.
  */
 /**
  * Rows per page for this screen.
@@ -102,6 +105,12 @@ export function OrdersPage({ session, branchId }: Props) {
   const [showMore, setShowMore] = React.useState(false);
   const [localSearch, setLocalSearch] = React.useState(search);
 
+  /*
+   * Last total seen per filter set — the chime's memory. Null until the first
+   * response lands, which is why opening the page never dings (see `load`).
+   */
+  const chimeBaseline = React.useRef<{ key: string; total: number } | null>(null);
+
   // Debounce URL writes for search so every keystroke doesn't push a new
   // history entry.
   React.useEffect(() => {
@@ -146,6 +155,19 @@ export function OrdersPage({ session, branchId }: Props) {
         setPageSize(res.pageSize);
         setRefreshedAt(new Date());
         setError(null);
+        /*
+         * Chime on `total` growth, not on unseen row ids: ids shift between
+         * pages as orders land, so page 2 would ding for orders that merely
+         * moved. The key re-baselines whenever the filter set changes —
+         * switching "Pending" → "All" multiplies the total without a single
+         * order arriving. `page` stays out of the key because paging never
+         * changes `total`. A growing total under an unchanged filter means an
+         * order entered this view — exactly what the operator is watching for.
+         */
+        const key = `${channel}|${status}|${search}`;
+        const prev = chimeBaseline.current;
+        if (prev && prev.key === key && res.total > prev.total) playNewOrderChime();
+        chimeBaseline.current = { key, total: res.total };
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load orders'))
       .finally(() => setLoading(false));
@@ -155,9 +177,25 @@ export function OrdersPage({ session, branchId }: Props) {
     load();
   }, [load]);
 
+  /*
+   * The 8 s poll only runs while the tab is actually on someone's screen — a
+   * queue left open behind the POS would otherwise hit the API all shift for
+   * nobody. `focus`/`visibilitychange` refetch immediately on return, so
+   * coming back never means waiting out the rest of an interval on stale
+   * rows. Same shape as the dashboard's poll (use-dashboard-data.ts).
+   */
   React.useEffect(() => {
-    const t = setInterval(load, 8000);
-    return () => clearInterval(t);
+    const loadIfVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    const t = setInterval(loadIfVisible, 8000);
+    window.addEventListener('focus', loadIfVisible);
+    document.addEventListener('visibilitychange', loadIfVisible);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', loadIfVisible);
+      document.removeEventListener('visibilitychange', loadIfVisible);
+    };
   }, [load]);
 
   const filteredByPartner = React.useMemo(() => {
