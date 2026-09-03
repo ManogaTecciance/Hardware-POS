@@ -37,6 +37,7 @@ import {
   type PromotionType,
 } from '@/lib/products/promotions-api';
 import { type ManagedProduct } from '@/lib/products-api';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 
 /**
  * Promotion editor (D45 — Promotions admin).
@@ -80,6 +81,7 @@ const DAY_LABELS: Record<PromotionDayOfWeek, string> = {
 };
 
 const CHANNEL_LABELS: Record<PromotionChannel, string> = {
+  COUNTER: 'Counter',
   DINE_IN: 'Dine-in',
   TAKEAWAY: 'Takeaway',
   ONLINE: 'Online',
@@ -160,6 +162,22 @@ export function PromotionEditor({
   successHref = '/products/promotions',
 }: Props) {
   const router = useRouter();
+  /*
+   * D56 (4.9) — the channels THIS tenant sells on, from the resolver.
+   *
+   * `capabilities.fulfilment.channels` already answers this per template —
+   * `['COUNTER']` for retail, `['DINE_IN','TAKEAWAY','ONLINE']` for food service
+   * — and this editor used to hardcode the food-service three. A retail
+   * shopkeeper was offered Dine-in / Takeaway / Online, and picking any of them
+   * scoped the promotion to a channel their till never sends, so
+   * `isPromotionActive` refused it and the offer silently never fired.
+   *
+   * Unresolved is its own state (D31): while the profile loads, no chips render
+   * rather than a guessed list. An empty scope already means "every channel", so
+   * a promotion saved in that moment is unrestricted, never mis-restricted.
+   */
+  const { profile } = useEffectiveProfile();
+  const channels = (profile?.capabilities.fulfilment.channels ?? []) as PromotionChannel[];
   const searchParams = useSearchParams();
   const linkProductId = searchParams?.get('linkProductId') ?? null;
   const isEdit = !!promotionId;
@@ -725,7 +743,7 @@ export function PromotionEditor({
         <div>
           <span className="text-sm font-medium">Channel</span>
           <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Channels">
-            {PROMOTION_CHANNELS.map((c) => {
+            {channels.map((c) => {
               const active = state.channelScope.includes(c);
               return (
                 <button

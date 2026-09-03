@@ -26,7 +26,15 @@ export type PromotionItemRole = 'BUY' | 'GET' | 'BUNDLE';
 
 export type PromotionDayOfWeek = 'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN';
 
-export type PromotionChannel = 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
+/**
+ * D56 (4.9) — every channel `OrderChannel` has, not the food-service three.
+ *
+ * `COUNTER` is the channel a RETAIL till sells on — `catalog.ts` and
+ * `sales.service` both send it — and it was missing here. A retail shopkeeper
+ * ticking "Dine-in" scoped their promotion to a channel their tenant never uses,
+ * so `isPromotionActive` refused it and the offer silently never fired.
+ */
+export type PromotionChannel = 'COUNTER' | 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
 
 export const PROMOTION_DAYS_OF_WEEK: PromotionDayOfWeek[] = [
   'MON',
@@ -38,7 +46,17 @@ export const PROMOTION_DAYS_OF_WEEK: PromotionDayOfWeek[] = [
   'SUN',
 ];
 
-export const PROMOTION_CHANNELS: PromotionChannel[] = ['DINE_IN', 'TAKEAWAY', 'ONLINE'];
+/**
+ * Every channel the enum has. NOT what an editor should offer — a template shows
+ * only the channels its own `capabilities.fulfilment.channels` declares (D56).
+ * Kept for typing and for tests that need the full set.
+ */
+export const PROMOTION_CHANNELS: PromotionChannel[] = [
+  'COUNTER',
+  'DINE_IN',
+  'TAKEAWAY',
+  'ONLINE',
+];
 
 // ── Views ────────────────────────────────────────────────────────────────────
 

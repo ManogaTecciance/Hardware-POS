@@ -45,6 +45,8 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   RETURNS: 'Returns',
   EXCHANGES: 'Exchanges',
   SUPPLIERS: 'Suppliers',
+  // D103 — its own module key, carried by retail and food service alike.
+  PROMOTIONS: 'Promotions',
   REPORTING: 'Reports',
   USERS: 'Users and roles',
   BRANCHES: 'Branches',
