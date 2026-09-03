@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsPositive, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Length, Matches, MaxLength, Min } from 'class-validator';
 
 /**
  * A cashier submits a manager's PIN to authorise a high-risk return. Returns a
@@ -14,8 +14,20 @@ export class ApproveReturnDto {
   @IsString()
   originalSaleId!: string;
 
+  /**
+   * D102 (4.6) — `@Min(0)`, not `@IsPositive()`.
+   *
+   * A refund of exactly zero is a real return since promotions: a customer
+   * handing back a free buy-two-get-one item is owed nothing, but the goods come
+   * back and the stock is restored. `ReturnsService.complete` was widened to
+   * accept that in 4.5, and this validator has to agree — otherwise the moment
+   * any approval rule fires on a zero-refund return, the manager authorising it
+   * would be refused by validation and the return could never complete.
+   *
+   * Negative is still rejected: money flowing the wrong way is never correct.
+   */
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   refundTotal!: number;
 
   @IsString()

@@ -59,3 +59,25 @@ export function saleLineLabel(
   if (!variant) return productName;
   return `${productName} (${variant.split(STORED_SEPARATOR).join(DOCUMENT_SEPARATOR)})`;
 }
+
+/**
+ * The promotion note printed beneath a sale line (D102, 4.6).
+ *
+ * A bill that shows a tie at 0.00 with no explanation reads as a pricing error;
+ * naming the offer is what makes the zero legible, and it is what a customer
+ * argues a return from. `promotionNameSnapshot` is frozen at sale time (D44), so
+ * a reprint says what the customer was actually given even if the promotion has
+ * since been renamed or deleted.
+ *
+ * Here for the same reason `saleLineLabel` is: four renderers print a sale line,
+ * and `sale-line-renderers.spec` enumerates all four and fails if one skips it.
+ *
+ * Returns `null` when there is nothing to say, so a renderer's own falsy check
+ * stays a single `?`.
+ */
+export function saleLinePromotionNote(
+  promotionName: string | null | undefined,
+): string | null {
+  const name = promotionName?.trim();
+  return name ? `Promotion: ${name}` : null;
+}

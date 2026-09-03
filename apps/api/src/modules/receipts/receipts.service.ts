@@ -11,7 +11,12 @@ import {
 import { ReceiptsRepository, SaleForReceipt } from './receipts.repository';
 import { CustomerReceiptData, renderCustomerReceipt } from './receipt-templates';
 import { QueryPrintJobsDto } from './dto/query-print-jobs.dto';
-import { saleLineLabel, taxBreakdownForDocument } from '@hardware-pos/shared';
+import {
+  saleLineLabel,
+  saleLinePromotionNote,
+  splitLineDiscounts,
+  taxBreakdownForDocument,
+} from '@hardware-pos/shared';
 
 export interface CustomerReceiptResult {
   receiptNumber: string;
@@ -130,6 +135,9 @@ export class ReceiptsService {
         // renderer was missed by 1c.7, so the same sale printed with the variant
         // from the A4 endpoint and without it from here.
         name: saleLineLabel(it.productName, it.variantNameSnapshot),
+        // D102 (4.6) — the offer, on the paper the customer walks out with. A
+        // free line printed at 0.00 with no reason reads as a pricing error.
+        promotionNote: saleLinePromotionNote(it.promotionNameSnapshot),
         sku: it.variantSkuSnapshot ?? it.sku,
         quantity: Number(it.quantity),
         unitPrice: Number(it.unitPrice),
@@ -138,6 +146,12 @@ export class ReceiptsService {
       })),
       subtotal: Number(sale.subtotal),
       totalDiscount: Number(sale.totalDiscount),
+      // D102 (4.6) — the SHARED split, so this receipt and the A4 divide the
+      // same figure the same way.
+      promotionDiscount: splitLineDiscounts(
+        sale.items.map((it) => ({ promotionDiscountAmount: Number(it.promotionDiscountAmount) })),
+        Number(sale.totalDiscount),
+      ).promotional,
       orderDiscount: Number(sale.orderDiscountAmount),
       taxAmount: Number(sale.taxAmount),
       // D101 (3.12) — the SHARED allocation, so the printed rows and a later

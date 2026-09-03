@@ -7,6 +7,8 @@ import { taxRateLabel } from '@hardware-pos/shared';
 
 export interface ReceiptLine {
   name: string;
+  /** D102 (4.6) — "Promotion: <name>", printed under the item. Null when none. */
+  promotionNote: string | null;
   sku: string | null;
   quantity: number;
   unitPrice: number;
@@ -24,6 +26,8 @@ export interface CustomerReceiptData {
   items: ReceiptLine[];
   subtotal: number;
   totalDiscount: number;
+  /** D102 (4.6) — the promotional part of `totalDiscount`, printed separately. */
+  promotionDiscount: number;
   orderDiscount: number;
   taxAmount: number;
   /**
@@ -60,7 +64,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
     .map(
       (it) => `
       <tr>
-        <td>${esc(it.name)}${it.sku ? `<br><span class="muted">${esc(it.sku)}</span>` : ''}</td>
+        <td>${esc(it.name)}${it.promotionNote ? `<br><span class="muted">${esc(it.promotionNote)}</span>` : ''}${it.sku ? `<br><span class="muted">${esc(it.sku)}</span>` : ''}</td>
         <td class="r">${it.quantity}</td>
         <td class="r">${money(it.unitPrice, d.currency)}</td>
         <td class="r">${it.discountAmount > 0 ? '-' + money(it.discountAmount, d.currency) : '—'}</td>
@@ -107,7 +111,8 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
     </table>
     <div class="totals">
       <div class="row"><span>Subtotal</span><span>${money(d.subtotal, d.currency)}</span></div>
-      <div class="row"><span>Product discount</span><span>-${money(d.totalDiscount, d.currency)}</span></div>
+      ${d.totalDiscount - d.promotionDiscount > 0 ? `<div class="row"><span>Product discount</span><span>-${money(d.totalDiscount - d.promotionDiscount, d.currency)}</span></div>` : ''}
+      ${d.promotionDiscount > 0 ? `<div class="row"><span>Promotions</span><span>-${money(d.promotionDiscount, d.currency)}</span></div>` : ''}
       ${d.orderDiscount > 0 ? `<div class="row"><span>Order discount</span><span>-${money(d.orderDiscount, d.currency)}</span></div>` : ''}
       ${(d.taxBreakdown ?? [])
         .map(

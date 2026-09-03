@@ -6,7 +6,7 @@ import type { DocumentProfile, SaleDocumentMeta } from '@/lib/document-template-
 import { resolveImageUrl } from '@/lib/products-api';
 import type { SaleDetail } from '@/lib/sales';
 import { formatMoney } from '@/lib/utils';
-import { saleLineLabel } from '@hardware-pos/shared';
+import { saleLineLabel, saleLinePromotionNote, splitLineDiscounts } from '@hardware-pos/shared';
 import { taxBreakdownForDocument, taxRateLabel, type TaxableLine } from '@hardware-pos/shared';
 
 /**
@@ -71,6 +71,8 @@ export function SaleA4Document({
   const accent = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(profile.accentColor)
     ? profile.accentColor
     : '#006c68';
+  // D102 (4.6) — one authority for the division, shared with the server A4.
+  const discountSplit = splitLineDiscounts(sale.items, sale.totalDiscount);
   const logo = resolveImageUrl(profile.logoUrl);
   const signature = resolveImageUrl(profile.signatureUrl);
   const stamp = resolveImageUrl(profile.stampUrl);
@@ -166,7 +168,17 @@ export function SaleA4Document({
                     server's, and 1c.7 fixed only the server's. The same sale
                     printed with the size from one endpoint and without it from
                     here. Both now call `saleLineLabel`. */}
-                <td>{saleLineLabel(it.productName, it.variantName)}</td>
+                <td>
+                  {saleLineLabel(it.productName, it.variantName)}
+                  {/* D102 (4.6) — the offer, as a muted sub-line, exactly where
+                      the server A4 puts it. A line at 0.00 with no reason reads
+                      as a pricing error. */}
+                  {saleLinePromotionNote(it.promotionName) ? (
+                    <div style={{ color: '#94a3b8', fontSize: '10.5px' }}>
+                      {saleLinePromotionNote(it.promotionName)}
+                    </div>
+                  ) : null}
+                </td>
                 {profile.showSku ? <td>{it.sku ?? '—'}</td> : null}
                 <td className="r">{it.quantity}</td>
                 <td className="r">{formatMoney(it.unitPrice)}</td>
@@ -184,7 +196,14 @@ export function SaleA4Document({
           <table>
             <tbody>
               <SumRow k="Subtotal" v={formatMoney(sale.subtotal)} />
-              {sale.totalDiscount > 0 ? <SumRow k="Product discount" v={`- ${formatMoney(sale.totalDiscount)}`} muted /> : null}
+              {/* D102 (4.6) — the SHARED split, so this A4 and the server's
+                  divide the same figure the same way. */}
+              {discountSplit.manual > 0 ? (
+                <SumRow k="Product discount" v={`- ${formatMoney(discountSplit.manual)}`} muted />
+              ) : null}
+              {discountSplit.promotional > 0 ? (
+                <SumRow k="Promotions" v={`- ${formatMoney(discountSplit.promotional)}`} muted />
+              ) : null}
               {sale.orderDiscountAmount > 0 ? <SumRow k="Order discount" v={`- ${formatMoney(sale.orderDiscountAmount)}`} muted /> : null}
               {/* D101 (3.12) — the SHARED allocation. Empty for a single-rate
                   sale, so this renders exactly what it rendered before. */}

@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { saleLineLabel, taxBreakdownForDocument, taxRateLabel } from '@hardware-pos/shared';
+import {
+  saleLineLabel,
+  saleLinePromotionNote,
+  splitLineDiscounts,
+  taxBreakdownForDocument,
+  taxRateLabel,
+} from '@hardware-pos/shared';
 
 import { referencesIdentifier, stripComments } from '../providers/testkit/source-analysis';
 
@@ -103,6 +109,61 @@ describe('every sale-line renderer uses the shared formatter', () => {
       referencesIdentifier(source, 'taxBreakdownForDocument') ||
         referencesIdentifier(source, 'taxRateLabel'),
     ).toBe(true);
+  });
+
+  it.each(SALE_LINE_RENDERERS)('$file also names the promotion (D102, 4.6)', ({ file }) => {
+    /*
+     * Same enumeration, third shared rule. A promoted line prints at 0.00, and a
+     * zero with no reason beside it reads as a pricing error rather than a gift.
+     *
+     * `receipts.service` builds the note and its TEMPLATE prints it, so either
+     * identifier counts for that file — the same allowance the tax breakdown
+     * above makes, and for the same split.
+     */
+    const source = stripComments(sourceOf(file));
+
+    expect(
+      referencesIdentifier(source, 'saleLinePromotionNote') ||
+        referencesIdentifier(source, 'promotionNote'),
+    ).toBe(true);
+  });
+
+  it.each(SALE_LINE_RENDERERS)('$file splits the discount rows the same way', ({ file }) => {
+    /*
+     * 4.4 folded promotions into `totalDiscount` because the maths requires it,
+     * which left every bill printing "Product discount" for a buy-two-get-one.
+     * `splitLineDiscounts` is the one authority for the division; four
+     * subtractions would be four chances to disagree.
+     */
+    const source = stripComments(sourceOf(file));
+
+    expect(
+      referencesIdentifier(source, 'splitLineDiscounts') ||
+        referencesIdentifier(source, 'promotionDiscount'),
+    ).toBe(true);
+  });
+
+  it('the shared formatter names the offer, and says nothing when there is none', () => {
+    expect(saleLinePromotionNote('Buy 2 shirts, tie free')).toBe(
+      'Promotion: Buy 2 shirts, tie free',
+    );
+    // NEGATIVE: null rather than an empty string, so a renderer's `?` is enough.
+    expect(saleLinePromotionNote(null)).toBeNull();
+    expect(saleLinePromotionNote('   ')).toBeNull();
+  });
+
+  it('the shared split reduces to today for a sale with no promotions', () => {
+    // The zero-change guarantee, held in one place rather than four.
+    expect(splitLineDiscounts([{ promotionDiscountAmount: 0 }], 120)).toEqual({
+      manual: 120,
+      promotional: 0,
+    });
+    // …and divides when there is something to divide.
+    expect(
+      splitLineDiscounts([{ promotionDiscountAmount: 500 }, { promotionDiscountAmount: 0 }], 700),
+    ).toEqual({ manual: 200, promotional: 500 });
+    // NEGATIVE: rounding cannot produce a negative manual row.
+    expect(splitLineDiscounts([{ promotionDiscountAmount: 500 }], 499.99).manual).toBe(0);
   });
 
   it('names all four renderers — a fifth added blind is the failure mode', () => {

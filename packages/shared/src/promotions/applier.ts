@@ -455,3 +455,48 @@ export function applyPromotions(context: PromotionContext): PromotionResult {
     totalDiscount: round2(results.reduce((acc, r) => acc + r.discountAmount, 0)),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Documents (4.6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One persisted sale line, as a document renderer sees it. */
+export interface DiscountSplitLine {
+  promotionDiscountAmount: number;
+}
+
+/** What a bill should print on its two discount rows. */
+export interface DiscountSplit {
+  /** Manual line discounts a cashier applied. */
+  manual: number;
+  /** Reductions that came from a promotion. */
+  promotional: number;
+}
+
+/**
+ * Split a sale's `totalDiscount` into what a cashier gave and what a promotion
+ * did (D102, 4.6).
+ *
+ * 4.4 folded promotions into `totalDiscount` because the maths requires it —
+ * `discountedSubtotal` derives from that figure and must equal Σ `lineTotal`.
+ * The cost was the wording: a bill printed "Product discount −500" for a
+ * buy-two-get-one, which is the right amount under the wrong name. This is the
+ * one place that division is expressed, for the same reason `saleLineLabel` and
+ * `taxBreakdownForDocument` are: four renderers print this, and four
+ * subtractions is four chances to disagree.
+ *
+ * A sale with no promotions returns `{ manual: totalDiscount, promotional: 0 }`,
+ * so every pre-4.4 document renders byte-identically. That is the zero-change
+ * guarantee, held here rather than in four renderers that could each drift.
+ *
+ * `manual` is floored at zero: only rounding could push the promotional sum past
+ * the recorded total, and a negative discount row is never right.
+ */
+export function splitLineDiscounts(
+  lines: readonly DiscountSplitLine[],
+  totalDiscount: number,
+): DiscountSplit {
+  const promotional = round2(lines.reduce((acc, l) => acc + l.promotionDiscountAmount, 0));
+  const manual = round2(totalDiscount - promotional);
+  return { manual: manual > 0 ? manual : 0, promotional };
+}

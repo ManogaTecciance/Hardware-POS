@@ -13,7 +13,7 @@ import { computeCartLines, linePrice } from './cart';
 import type { CompletedSale } from './sales';
 import { getCachedDocumentProfile, type DocumentProfile } from './document-template-service';
 import { formatMoney } from './utils';
-import { saleLineLabel, taxRateLabel } from '@hardware-pos/shared';
+import { saleLineLabel, saleLinePromotionNote, splitLineDiscounts, taxRateLabel } from '@hardware-pos/shared';
 
 export interface ReceiptContext {
   currency: string;
@@ -46,6 +46,15 @@ function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
   const priced = new Map(
     computeCartLines(ctx.items, ctx.promotionRules ?? []).map((l) => [l.lineKey, l]),
   );
+  /*
+   * D102 (4.6) — the SHARED split, so this fallback and the server receipt
+   * divide the same figure the same way. The live cart is the source here, so
+   * the promotional part is summed from the lines just priced.
+   */
+  const split = splitLineDiscounts(
+    [...priced.values()].map((l) => ({ promotionDiscountAmount: l.promotionDiscountAmount })),
+    ctx.totalDiscount,
+  );
   const rows = ctx.items
     .map((it) => {
       const line = priced.get(it.lineKey)!;
@@ -54,7 +63,10 @@ function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
       // prints at the moment of sale: there is nothing yet to have drifted from.
       // The FORMAT is shared, so this fallback and the server render identically.
       const label = saleLineLabel(it.product.name, it.variant?.name ?? null);
-      return `<tr><td>${esc(label)}<br><span class="m">${it.quantity} × ${formatMoney(linePrice(it), ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
+      // D102 (4.6) — the offer, under the item, exactly as the other three
+      // renderers print it. A free line at 0.00 with no reason reads as an error.
+      const promo = saleLinePromotionNote(line.promotionName);
+      return `<tr><td>${esc(label)}${promo ? `<br><span class="m">${esc(promo)}</span>` : ''}<br><span class="m">${it.quantity} × ${formatMoney(linePrice(it), ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
     })
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(sale.saleNumber)}</title>
@@ -70,7 +82,8 @@ table{width:100%;border-collapse:collapse;font-size:12px}td{padding:3px 0;vertic
 <table>${rows}</table>
 <div class="tot">
 <div class="row"><span>Subtotal</span><span>${formatMoney(ctx.subtotal, ctx.currency)}</span></div>
-<div class="row"><span>Product discount</span><span>-${formatMoney(ctx.totalDiscount, ctx.currency)}</span></div>
+${split.manual > 0 ? `<div class="row"><span>Product discount</span><span>-${formatMoney(split.manual, ctx.currency)}</span></div>` : ''}
+${split.promotional > 0 ? `<div class="row"><span>Promotions</span><span>-${formatMoney(split.promotional, ctx.currency)}</span></div>` : ''}
 ${ctx.orderDiscount > 0 ? `<div class="row"><span>Order discount</span><span>-${formatMoney(ctx.orderDiscount, ctx.currency)}</span></div>` : ''}
 ${(ctx.taxBreakdown ?? [])
   .map(

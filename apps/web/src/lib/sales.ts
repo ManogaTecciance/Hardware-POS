@@ -211,6 +211,13 @@ export interface SaleDetailItem {
    * different.
    */
   taxRatePercent: number | null;
+  /**
+   * D102 (4.6) — the promotion that claimed this line, frozen at sale time.
+   * Null when none, and on any sale written before 4.4.
+   */
+  promotionName: string | null;
+  /** Already subtracted from `lineTotal`; carried so a bill can split the rows. */
+  promotionDiscountAmount: number;
   sku: string | null;
   unitPrice: number;
   quantity: number;
@@ -305,6 +312,9 @@ interface ApiSaleDetail {
     variantNameSnapshot?: string | null;
     /** D101 snapshot; absent on responses predating per-line tax. */
     taxRatePercent?: string | number | null;
+    /** D102 snapshots; absent on responses predating 4.4. */
+    promotionNameSnapshot?: string | null;
+    promotionDiscountAmount?: string | number | null;
     sku: string | null;
     unitPrice: string | number;
     quantity: string | number;
@@ -419,6 +429,9 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       // server has always returned this; the client was dropping it, so a
       // returns clerk could not see which size a past sale was for.
       variantName: it.variantNameSnapshot ?? null,
+      promotionName: it.promotionNameSnapshot ?? null,
+      // `?? 0` is absence, not an unknown: the column is NOT NULL DEFAULT 0.
+      promotionDiscountAmount: Number(it.promotionDiscountAmount ?? 0),
       taxRatePercent: it.taxRatePercent != null ? Number(it.taxRatePercent) : null,
       sku: it.sku,
       unitPrice: Number(it.unitPrice),

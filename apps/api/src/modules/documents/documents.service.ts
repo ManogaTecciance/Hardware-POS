@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
-import { ITEM_CONDITION_LABELS, QUOTATION_STATUS_LABELS, QuotationStatusCode, RETURN_REASON_LABELS, formatCurrency, saleLineLabel, taxBreakdownForDocument, taxRateLabel, type ItemConditionCode, type ReturnReasonCode, type TaxableLine } from '@hardware-pos/shared';
+import { ITEM_CONDITION_LABELS, QUOTATION_STATUS_LABELS, QuotationStatusCode, RETURN_REASON_LABELS, formatCurrency, saleLineLabel, saleLinePromotionNote, splitLineDiscounts, taxBreakdownForDocument, taxRateLabel, type ItemConditionCode, type ReturnReasonCode, type TaxableLine } from '@hardware-pos/shared';
 
 import { customerAddressLine } from '../../common/customer-display';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -247,7 +247,11 @@ export class DocumentsService {
       // for, and into `saleLineLabel` so all four renderers agree.
       name: saleLineLabel(it.productName, it.variantNameSnapshot),
       sku: it.variantSkuSnapshot ?? it.sku,
-      description: null,
+      // D102 (4.6) — a line at 0.00 with no explanation reads as a pricing
+      // error. `description` renders as the muted sub-line beneath the name,
+      // which is where 2.12 originally put the size. Snapshot, not the live
+      // promotion, so a reprint says what the customer was actually given (D44).
+      description: saleLinePromotionNote(it.promotionNameSnapshot),
       quantity: num(it.quantity),
       unitType: null,
       unitPrice: num(it.unitPrice),
@@ -259,8 +263,27 @@ export class DocumentsService {
     const paid = num(sale.paidAmount);
     const balance = num(sale.balanceAmount);
     const summary: A4SummaryLine[] = [{ label: 'Subtotal', value: formatCurrency(num(sale.subtotal)) }];
-    if (num(sale.totalDiscount) > 0)
-      summary.push({ label: 'Product discounts', value: `- ${formatCurrency(num(sale.totalDiscount))}`, muted: true });
+    /*
+     * D102 (4.6) — the two discount rows.
+     *
+     * 4.4 folded promotions into `totalDiscount` because the maths requires it,
+     * which left this row printing "Product discounts" for a buy-two-get-one:
+     * the right amount under the wrong name. `splitLineDiscounts` is the single
+     * authority for the division, so all four renderers divide it identically.
+     *
+     * A sale with no promotions yields `{ manual: totalDiscount, promotional: 0 }`
+     * and renders exactly as it always did.
+     */
+    const discountSplit = splitLineDiscounts(
+      // `num` at the boundary: `shared` works in plain numbers so a browser can
+      // import it, and Prisma hands back Decimals.
+      sale.items.map((it) => ({ promotionDiscountAmount: num(it.promotionDiscountAmount) })),
+      num(sale.totalDiscount),
+    );
+    if (discountSplit.manual > 0)
+      summary.push({ label: 'Product discounts', value: `- ${formatCurrency(discountSplit.manual)}`, muted: true });
+    if (discountSplit.promotional > 0)
+      summary.push({ label: 'Promotions', value: `- ${formatCurrency(discountSplit.promotional)}`, muted: true });
     if (num(sale.orderDiscountAmount) > 0)
       summary.push({ label: 'Order discount', value: `- ${formatCurrency(num(sale.orderDiscountAmount))}`, muted: true });
     if (num(sale.taxAmount) > 0) {
