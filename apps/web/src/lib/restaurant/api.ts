@@ -727,6 +727,14 @@ export const kitchen = {
       auth(session),
     );
   },
+  /** D100 — recall: pulling a wrongly bumped ticket back onto the pass. */
+  reopen(session: Session, branchId: string, ticketId: string) {
+    return api.post<KitchenTicketView>(
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/reopen`,
+      undefined,
+      auth(session),
+    );
+  },
   kdsBoard(session: Session, branchId: string, status?: KitchenTicketStatus) {
     const query = status ? `?status=${status}` : '';
     return api.get<KitchenTicketView[]>(

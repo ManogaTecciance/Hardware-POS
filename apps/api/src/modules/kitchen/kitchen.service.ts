@@ -432,6 +432,48 @@ export class KitchenService {
       return toView(full, await this.waiterNames([full]));
     });
   }
+
+  /**
+   * D100 — recall: pulling a bumped ticket back onto the pass.
+   *
+   * The bump control is optimistic and finger-sized; on a busy pass some
+   * completions are simply wrong, and until now the only remedy was food
+   * that existed on no screen. Reopening clears the completion record
+   * entirely — a recalled ticket is work to do again, and a stale "done by"
+   * name would say otherwise. Mirrors completeTicket's idempotency in the
+   * other direction: recalling a ticket that was never completed returns it
+   * unchanged.
+   */
+  async reopenTicket(
+    tenantId: string,
+    branchId: string,
+    ticketId: string,
+  ): Promise<KitchenTicketView> {
+    return this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.kitchenTicket.findFirst({
+        where: { id: ticketId, tenantId, branchId },
+        select: { id: true, status: true },
+      });
+      if (!ticket) throw new KitchenTicketNotFoundError();
+
+      if (ticket.status === KitchenTicketStatus.COMPLETED) {
+        await tx.kitchenTicket.update({
+          where: { id: ticket.id },
+          data: {
+            status: KitchenTicketStatus.QUEUED,
+            completedAt: null,
+            completedByUserId: null,
+          },
+        });
+      }
+
+      const full = await tx.kitchenTicket.findFirstOrThrow({
+        where: { id: ticketId, tenantId },
+        include: TICKET_INCLUDE,
+      });
+      return toView(full, await this.waiterNames([full]));
+    });
+  }
 }
 
 /** Thrown for a ticket that is not this tenant's, or not in this branch. */

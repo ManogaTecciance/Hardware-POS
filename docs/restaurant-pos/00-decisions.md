@@ -3703,6 +3703,50 @@ bounds keep it unnecessary.
 **Verified how:** the strip printed from both browsers on the till, and the
 numbers it produced recorded here.
 
+
+### D100 — the board reads like a kitchen screen, and a bump can be taken back
+
+PO, 2026-09-03: the board's content was right and its ergonomics were not —
+compared against mainstream KDS products, it read like an office web page.
+Four changes, one record, because they are one statement: the kitchen board
+is furniture in a kitchen, not a page in a browser.
+
+**Age escalation.** The big timer sits where the status badge sat — on the
+outstanding tab every badge read "To make", which the tab already says — and
+the ticket turns amber at 10 minutes and red at 15 (timer colour + card
+border). The thresholds are constants, not settings: they follow the
+mainstream KDS defaults, and nobody has asked to tune them. The 5 s poll
+doubles as the timer tick. Completed tickets stop ageing; a done dish is no
+longer waiting.
+
+**The bump is the whole bottom of the card.** `Mark done` was a
+footer-sized button beside Details; the finger pressing it is wet, gloved,
+or holding a plate. It is now full-width and 48px tall. Recall (below) gets
+the same target but an outline variant — it is the undo, not the job.
+
+**Type at arm's length.** Place `text-xl`, items `text-base`, everything
+else one step up from where it was. The board is read from across a pass,
+not from a desk.
+
+**Recall.** `POST …/kitchen-tickets/:ticketId/reopen`, gated on
+`KITCHEN_STATUS_UPDATE` exactly like complete: whoever may say the food is
+done may say it is not. D68's write surface grows its second verb — the
+undo every mainstream KDS carries, because optimistic finger-sized bumps
+are sometimes wrong. Reopening rewrites the ticket to `QUEUED` and CLEARS
+`completedAt`/`completedByUserId` — a recalled ticket is work to do again,
+and a stale "done by" name would say otherwise. Idempotent in mirror image
+of complete: recalling a never-completed ticket writes nothing. Audited as
+`KITCHEN_TICKET_REOPENED`. No migration: `QUEUED` already exists.
+
+D94 is untouched: the till still holds `KOT_VIEW` alone, so it sees neither
+verb, and WS-408's contrast still holds — its selectors (`Mark done`,
+`Details` by accessible name) survived the relayout unchanged.
+`kitchen-board.render.test.tsx` pins the new behaviour in pairs: escalation
+(a late board turns red AND a fresh board carries no warning colour),
+the write gate (no verbs without the permission, Details as the positive
+control), and both verbs' optimistic card drop against api mocks that empty
+their rows — a reload must not resurrect a bumped card.
+
 ---
 
 ## Open decisions

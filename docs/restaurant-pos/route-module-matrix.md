@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 284
-- Module-guarded routes: 197
+- Total routes: 285
+- Module-guarded routes: 198
 - Ungated routes: 87
 
 ## How to read the Guard column
@@ -401,6 +401,7 @@ and the per-row detail the drawer fetches.
 | GET | `/restaurant/branches/:branchId/kitchen-tickets` | KITCHEN | ENFORCED | kot:view |
 | GET | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/order` | KITCHEN | ENFORCED | kot:view |
 | POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/complete` | KITCHEN | ENFORCED | kitchen:status:update |
+| POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen` | KITCHEN | ENFORCED | kitchen:status:update |
 
 ### TableSessionsController
 

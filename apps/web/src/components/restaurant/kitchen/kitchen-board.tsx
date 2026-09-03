@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Clock, Loader2, ListTree, UtensilsCrossed } from 'lucide-react';
+import { Check, Clock, ListTree, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import * as React from 'react';
 
 import { StatusBadge } from '@/components/restaurant/status-badge';
@@ -31,6 +31,40 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'COMPLETED', label: 'Done' },
 ];
 
+/*
+ * D100 — age escalation. A ticket's age is the first thing the pass needs
+ * from the board, and grey footer text does not survive being read from
+ * across a kitchen: the timer is large, and the whole card turns amber and
+ * then red as the dish waits. Thresholds follow the mainstream KDS defaults
+ * rather than a per-tenant setting — a setting nobody has asked for is
+ * configuration debt, and the constants can move to config the day a tenant
+ * asks.
+ */
+const WARN_AFTER_MS = 10 * 60_000;
+const LATE_AFTER_MS = 15 * 60_000;
+
+type Urgency = 'fresh' | 'warn' | 'late';
+
+function urgencyOf(createdAtIso: string, now: Date): Urgency {
+  const age = now.getTime() - new Date(createdAtIso).getTime();
+  if (Number.isNaN(age)) return 'fresh';
+  if (age >= LATE_AFTER_MS) return 'late';
+  if (age >= WARN_AFTER_MS) return 'warn';
+  return 'fresh';
+}
+
+const URGENCY_CARD_CLASS: Record<Urgency, string | undefined> = {
+  fresh: undefined,
+  warn: 'border-2 border-warning',
+  late: 'border-2 border-danger',
+};
+
+const URGENCY_TIMER_CLASS: Record<Urgency, string> = {
+  fresh: 'text-muted-foreground',
+  warn: 'text-warning',
+  late: 'text-danger',
+};
+
 /**
  * The kitchen board (D68).
  *
@@ -40,15 +74,20 @@ const FILTERS: { key: Filter; label: string }[] = [
  * cannot plate a dish it can see but cannot place, so each ticket names its
  * table, its order and its round the way a printed KOT used to.
  *
- * Kitchen staff mark a ticket done when the food is up. That is the whole
- * write surface; the floor is not theirs and neither is the money.
+ * Kitchen staff mark a ticket done when the food is up, and recall it when
+ * the bump was wrong (D100). That is the whole write surface; the floor is
+ * not theirs and neither is the money.
  *
  * Polls every 5 s. Shorter cadences read as jitter on a wall-mounted screen;
- * longer ones leave a dish sitting unseen while a table waits.
+ * longer ones leave a dish sitting unseen while a table waits. The poll
+ * doubles as the age-escalation tick: every refresh re-renders the cards,
+ * which is where the timers and colours advance.
  */
 export function KitchenBoard({ session, branchId }: Props) {
   const { hasPermission } = useAuth();
-  const canComplete = hasPermission(Permission.KITCHEN_STATUS_UPDATE);
+  // Gates BOTH write verbs. D94 grants the till KOT_VIEW alone, so a cashier
+  // sees this board with no buttons on it — that contrast is pinned by WS-408.
+  const canUpdate = hasPermission(Permission.KITCHEN_STATUS_UPDATE);
 
   const [tickets, setTickets] = React.useState<KitchenTicketView[]>([]);
   const [filter, setFilter] = React.useState<Filter>('OUTSTANDING');
@@ -77,20 +116,26 @@ export function KitchenBoard({ session, branchId }: Props) {
     return () => clearInterval(t);
   }, [load]);
 
-  const complete = async (ticket: KitchenTicketView) => {
+  /*
+   * Both verbs move the ticket OFF the current tab (done leaves "To make",
+   * recalled leaves "Done"), so they share the same optimistic shape: drop
+   * the card immediately rather than waiting for the next poll — on a busy
+   * pass a button that stays put for five seconds gets pressed again, and
+   * the person doing it has both hands full.
+   */
+  const mutate = async (
+    ticket: KitchenTicketView,
+    send: () => Promise<unknown>,
+    failure: string,
+  ) => {
     setPending((cur) => new Set(cur).add(ticket.id));
     setError(null);
     try {
-      await kitchen.complete(session, branchId, ticket.id);
-      /*
-       * Drop the card immediately rather than waiting for the next poll: on
-       * a busy pass a button that stays put for five seconds gets pressed
-       * again, and the person doing it has both hands full.
-       */
+      await send();
       setTickets((cur) => cur.filter((t) => t.id !== ticket.id));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not mark this ticket done');
+      setError(err instanceof Error ? err.message : failure);
       await load();
     } finally {
       setPending((cur) => {
@@ -100,6 +145,21 @@ export function KitchenBoard({ session, branchId }: Props) {
       });
     }
   };
+
+  const complete = (ticket: KitchenTicketView) =>
+    mutate(
+      ticket,
+      () => kitchen.complete(session, branchId, ticket.id),
+      'Could not mark this ticket done',
+    );
+
+  /** D100 — the bump's undo. */
+  const recall = (ticket: KitchenTicketView) =>
+    mutate(
+      ticket,
+      () => kitchen.reopen(session, branchId, ticket.id),
+      'Could not recall this ticket',
+    );
 
   return (
     <div className="space-y-4">
@@ -168,9 +228,10 @@ export function KitchenBoard({ session, branchId }: Props) {
             <TicketCard
               key={t.id}
               ticket={t}
-              canComplete={canComplete && t.status !== 'COMPLETED'}
+              canUpdate={canUpdate}
               pending={pending.has(t.id)}
               onComplete={() => void complete(t)}
+              onRecall={() => void recall(t)}
               onDetails={() => setDetailFor(t)}
             />
           ))}
@@ -252,112 +313,141 @@ function TicketOrderDialog({
       className="sm:max-w-lg"
       footer={<Button onClick={onClose}>Close</Button>}
     >
-      {error ? <p className="text-sm text-danger">{error}</p> : null}
-      {!order && !error ? (
-        <p className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading…
-        </p>
-      ) : null}
+      {/*
+       * min-h on BOTH states: the dialog used to open at spinner height and
+       * jump open when the order landed, which read as a glitch at the pass.
+       * With a shared floor the common one-round order never resizes at all;
+       * a long order still grows, but downward, once.
+       */}
+      <div className="min-h-44">
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        {!order && !error ? (
+          // A skeleton in the shape of the answer: a round header and a few
+          // item lines, where they will actually appear.
+          <div className="space-y-3" aria-hidden>
+            <div className="h-3 w-20 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+            <div className="h-5 w-3/4 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+            <div className="h-5 w-2/3 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+            <div className="h-5 w-1/2 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+          </div>
+        ) : null}
 
-      {order ? (
-        <div className="space-y-4">
-          {byRound.map(([round, items]) => (
-            <div key={round ?? 'x'}>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {round ? `Round ${round}` : 'Items'}
-              </p>
-              <ul className="space-y-1.5">
-                {items.map((item) => (
-                  <li key={item.id} className="text-sm">
-                    <span className="font-medium">
-                      {trimQuantity(item.quantity)}× {item.name}
-                      {item.variantName ? ` (${item.variantName})` : ''}
-                    </span>
-                    {/* The station is what makes this view worth opening: it
-                        says who else is working on this table. */}
-                    {item.stationName ? (
-                      <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                        {item.stationName}
+        {order ? (
+          <div className="space-y-4">
+            {byRound.map(([round, items]) => (
+              <div key={round ?? 'x'}>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {round ? `Round ${round}` : 'Items'}
+                </p>
+                <ul className="space-y-1.5">
+                  {items.map((item) => (
+                    <li key={item.id} className="text-sm">
+                      <span className="font-medium">
+                        {trimQuantity(item.quantity)}× {item.name}
+                        {item.variantName ? ` (${item.variantName})` : ''}
                       </span>
-                    ) : (
-                      <span className="ml-2 rounded bg-warning-soft px-1.5 py-0.5 text-xs text-warning">
-                        no station
-                      </span>
-                    )}
-                    {item.modifierNames.length > 0 ? (
-                      <span className="block text-xs text-muted-foreground">
-                        {item.modifierNames.join(', ')}
-                      </span>
-                    ) : null}
-                    {item.specialInstructions ? (
-                      <span className="block text-xs font-medium text-warning">
-                        {item.specialInstructions}
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      ) : null}
+                      {/* The station is what makes this view worth opening: it
+                          says who else is working on this table. */}
+                      {item.stationName ? (
+                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                          {item.stationName}
+                        </span>
+                      ) : (
+                        <span className="ml-2 rounded bg-warning-soft px-1.5 py-0.5 text-xs text-warning">
+                          no station
+                        </span>
+                      )}
+                      {item.modifierNames.length > 0 ? (
+                        <span className="block text-xs text-muted-foreground">
+                          {item.modifierNames.join(', ')}
+                        </span>
+                      ) : null}
+                      {item.specialInstructions ? (
+                        <span className="block text-xs font-medium text-warning">
+                          {item.specialInstructions}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </Dialog>
   );
 }
 
 function TicketCard({
   ticket,
-  canComplete,
+  canUpdate,
   pending,
   onComplete,
+  onRecall,
   onDetails,
 }: {
   ticket: KitchenTicketView;
-  canComplete: boolean;
+  canUpdate: boolean;
   pending: boolean;
   onComplete: () => void;
+  onRecall: () => void;
   onDetails: () => void;
 }) {
   const done = ticket.status === 'COMPLETED';
+  // Completed tickets stop ageing: the colour answers "how long has this
+  // dish been waiting?", which a done dish no longer is.
+  const urgency: Urgency = done ? 'fresh' : urgencyOf(ticket.createdAt, new Date());
   return (
-    <Card className={done ? 'opacity-70' : undefined}>
+    <Card className={done ? 'opacity-70' : URGENCY_CARD_CLASS[urgency]}>
       <CardContent className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             {/* The place is the biggest thing on the card: a dish the pass
                 cannot place is a dish that does not leave the kitchen. */}
-            <p className="truncate text-lg font-semibold">
+            <p className="truncate text-xl font-semibold">
               {ticket.placeLabel ?? 'No table'}
             </p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-sm text-muted-foreground">
               {ticket.stationName}
               {ticket.orderNumber ? ` · ${ticket.orderNumber}` : ''}
               {ticket.roundNumber ? ` · round ${ticket.roundNumber}` : ''}
               {ticket.waiterName ? ` · ${ticket.waiterName}` : ''}
             </p>
           </div>
-          <StatusBadge
-            tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
-            label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
-          />
+          {done ? (
+            <StatusBadge
+              tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
+              label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
+            />
+          ) : (
+            // The timer sits where a status badge would, because on the
+            // outstanding tab the age IS the status — every badge there read
+            // "To make", which the tab already says.
+            <span
+              className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
+            >
+              {formatElapsed(ticket.createdAt)}
+            </span>
+          )}
         </div>
 
         <ul className="space-y-2">
           {ticket.items.map((item) => (
-            <li key={item.id} className="text-sm">
+            <li key={item.id} className="text-base">
               <span className="font-medium">
                 {trimQuantity(item.quantity)}× {item.menuItemName}
                 {item.variantName ? ` (${item.variantName})` : ''}
               </span>
               {item.modifierNames.length > 0 ? (
-                <span className="block text-xs text-muted-foreground">
+                <span className="block text-sm text-muted-foreground">
                   {item.modifierNames.join(', ')}
                 </span>
               ) : null}
               {item.specialInstructions ? (
                 // Special instructions are the one thing on a ticket that
                 // ruins a plate when missed, so they are not muted.
-                <span className="block text-xs font-medium text-warning">
+                <span className="block text-sm font-medium text-warning">
                   {item.specialInstructions}
                 </span>
               ) : null}
@@ -365,22 +455,22 @@ function TicketCard({
           ))}
         </ul>
 
-        <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-            {done ? (
-              <>
-                <Check className="h-3.5 w-3.5" />
-                {ticket.completedByName ?? 'Done'}
-                {ticket.completedAt ? ` · ${formatTime(ticket.completedAt)}` : ''}
-              </>
-            ) : (
-              <>
-                <Clock className="h-3.5 w-3.5" />
-                {formatElapsed(ticket.createdAt)} · {ticket.ticketNumber}
-              </>
-            )}
-          </span>
-          <div className="flex items-center gap-2">
+        <div className="space-y-2 border-t border-border pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+              {done ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  {ticket.completedByName ?? 'Done'}
+                  {ticket.completedAt ? ` · ${formatTime(ticket.completedAt)}` : ''}
+                </>
+              ) : (
+                <>
+                  <Clock className="h-4 w-4" />
+                  {ticket.ticketNumber}
+                </>
+              )}
+            </span>
             <Button
               size="sm"
               variant="ghost"
@@ -389,17 +479,35 @@ function TicketCard({
             >
               Details
             </Button>
-            {canComplete ? (
+          </div>
+          {/*
+           * D100 — the write verb is the whole bottom of the card, because
+           * the finger pressing it is wet, gloved, or holding a plate. Recall
+           * is deliberately quieter than the bump (outline, not filled): it
+           * is the undo, not the job.
+           */}
+          {canUpdate ? (
+            done ? (
               <Button
-                size="sm"
-                leftIcon={<UtensilsCrossed className="h-4 w-4" />}
+                variant="outline"
+                className="h-12 w-full text-base"
+                leftIcon={<RotateCcw className="h-5 w-5" />}
+                isLoading={pending}
+                onClick={onRecall}
+              >
+                Recall
+              </Button>
+            ) : (
+              <Button
+                className="h-12 w-full text-base"
+                leftIcon={<UtensilsCrossed className="h-5 w-5" />}
                 isLoading={pending}
                 onClick={onComplete}
               >
                 Mark done
               </Button>
-            ) : null}
-          </div>
+            )
+          ) : null}
         </div>
       </CardContent>
     </Card>
