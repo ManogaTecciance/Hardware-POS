@@ -503,8 +503,14 @@ function claimsFor(lines: readonly PromotionCartLine[], rule: PromotionRule): Cl
  *
  *   • the best candidate always applies;
  *   • if it is NOT stackable it locks the basket and nothing else applies;
- *   • if it is stackable, further STACKABLE non-overlapping candidates apply in
- *     turn, and non-stackable ones are skipped once anything has applied.
+ *   • if it is stackable, further STACKABLE candidates apply in turn — each
+ *     over whatever lines are still unclaimed — and non-stackable ones are
+ *     skipped once anything has applied.
+ *
+ * A stackable candidate that overlaps is NOT discarded: it is re-evaluated
+ * against the free lines, and its own rule decides whether it still qualifies.
+ * Discarding it wholesale lost the discount on lines nobody else wanted, which
+ * looks from the till exactly like one promotion resetting another.
  *
  * Read against the deterministic order above, so "the best one wins, and what it
  * permits alongside it" is the same answer on every till.
@@ -537,11 +543,39 @@ export function applyPromotions(context: PromotionContext): PromotionResult {
     if (basketLocked) break;
     // …and a non-stackable one may not join something already applied.
     if (anyApplied && !candidate.rule.stackable) continue;
-    if (candidate.claims.some((c) => claimedLines.has(c.lineId))) continue;
+
+    /*
+     * PARTIAL OVERLAP: re-offer this promotion the lines that are still free.
+     *
+     * This used to `continue` — one shared line and the whole promotion was
+     * discarded. A 10%-off over {Short Pants, Black Suit} therefore vanished
+     * COMPLETELY the moment a bundle claimed Black Suit, taking the discount on
+     * Short Pants with it, even though nothing else in the basket touched Short
+     * Pants. From the till that reads as one promotion resetting another.
+     *
+     * The rule decides for itself whether it still qualifies, so this stays
+     * generic across every promotion type rather than special-casing any of
+     * them: `applyPercentage` keeps whichever lines remain, while `applyBundle`
+     * and `applyBuyXGetY` return [] when their required set is no longer
+     * complete — a half bundle is not a smaller discount, it is a wrong one.
+     *
+     * Only reachable for a STACKABLE candidate. A non-stackable one either
+     * `continue`d above (something had already applied) or is the first to
+     * apply, in which case nothing is claimed yet and there is no overlap. So
+     * basket-level exclusivity is untouched, which is asserted in the spec
+     * rather than left to this comment.
+     */
+    let claims = candidate.claims;
+    if (claims.some((c) => claimedLines.has(c.lineId))) {
+      const freeLines = eligibleLines.filter((l) => !claimedLines.has(l.id));
+      claims = claimsFor(freeLines, candidate.rule);
+      if (claims.length === 0) continue;
+    }
+
     anyApplied = true;
     // Applied first and not stackable: it takes the whole basket.
     if (!candidate.rule.stackable) basketLocked = true;
-    for (const claim of candidate.claims) {
+    for (const claim of claims) {
       claimedLines.add(claim.lineId);
       results.push({
         lineId: claim.lineId,

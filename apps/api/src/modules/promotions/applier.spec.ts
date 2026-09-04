@@ -934,3 +934,274 @@ describe('outstandingRewards', () => {
     expect(outstandingRewards({ lines, promotions: [offer('p_a', 'p_b')] })).toEqual([]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Partial overlap — a stackable promotion keeps the lines nobody else claimed
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A stackable promotion must not be thrown away because ONE of its lines was
+ * taken by another promotion.
+ *
+ * ## What was wrong
+ *
+ * The loop read `if (candidate.claims.some(c => claimedLines.has(c.lineId)))
+ * continue;` — one shared line and the entire candidate was discarded. A 10%-off
+ * over {Short Pants, Black Suit} therefore vanished COMPLETELY the moment a
+ * bundle claimed Black Suit, taking with it the discount on Short Pants, which
+ * no other promotion in the basket touched.
+ *
+ * Reported from the till as "the bundle offer replaces the 10% discount" — a
+ * fair description of what it looked like, because the operator watched a
+ * discount they had already been shown disappear when an unrelated promotion
+ * became eligible.
+ *
+ * ## The rule, and what it deliberately does NOT change
+ *
+ * The overlapping candidate is re-evaluated against the lines still free, and
+ * its own rule decides whether it still qualifies. That keeps the fix generic:
+ * no promotion type is special-cased, and no product or percentage is named.
+ *
+ * Three things stay exactly as they were, each asserted below rather than
+ * assumed:
+ *   • basket-level exclusivity — a non-stackable promotion still takes the lot;
+ *   • one promotion per line — `SaleItem.promotionId` is a single column;
+ *   • atomicity — a bundle or BOGO whose required set is broken applies NOTHING,
+ *     because half a bundle is not a smaller discount, it is a wrong one.
+ *
+ * ## What makes these assertions non-vacuous (D30)
+ *
+ * The divisible case and the atomic case are asserted against each other. "The
+ * overlapping promotion keeps its free lines" alone would pass for an applier
+ * that also applied half a bundle — the most expensive way to get this wrong,
+ * since it would charge a bundle price for an incomplete bundle. Every
+ * partial-application test therefore has an atomic counterpart proving the
+ * opposite.
+ *
+ * MUTATION PROOF is recorded at the end of this block.
+ */
+describe('a stackable promotion that partially overlaps keeps its free lines', () => {
+  const pct = (id: string, productIds: string[], percentageOff: number, stackable: boolean) =>
+    rule({
+      id,
+      type: 'PERCENTAGE_DISCOUNT',
+      percentageOff,
+      stackable,
+      items: productIds.map((productId) => ({ productId, role: 'BUY' as const, quantity: 1 })),
+    });
+
+  const bundleRule = (
+    id: string,
+    productIds: string[],
+    fixedPrice: number,
+    stackable: boolean,
+  ) =>
+    rule({
+      id,
+      type: 'BUNDLE_FIXED_PRICE',
+      fixedPrice,
+      stackable,
+      items: productIds.map((productId) => ({ productId, role: 'BUNDLE' as const, quantity: 1 })),
+    });
+
+  it('keeps the discount on a line the winner never touched — the reported defect', () => {
+    // The reported basket: 10% over {shortpants, suit}; a bundle over
+    // {suit, shirt, jeans, tie}. They overlap on `suit` only.
+    const lines = [
+      item('l_sp', 'shortpants', 2100),
+      item('l_suit', 'suit', 2000),
+      item('l_shirt', 'shirt', 1000),
+      item('l_jeans', 'jeans', 4500),
+      item('l_tie', 'tie', 500),
+    ];
+    const promotions = [
+      bundleRule('r_bundle', ['suit', 'shirt', 'jeans', 'tie'], 2500, true),
+      pct('r_pct', ['shortpants', 'suit'], 10, true),
+    ];
+
+    const result = applyPromotions({ lines, promotions });
+
+    // POSITIVE: Short Pants keeps its 10%. This is the line that used to be
+    // silently lost, and it is worth 210 to the customer.
+    expect(byLine(result)).toEqual({
+      l_sp: 210,
+      l_suit: 1375,
+      l_shirt: 687.5,
+      l_jeans: 3093.75,
+      l_tie: 343.75,
+    });
+
+    // NEGATIVE: the contested line went to the bundle and to the bundle ONLY.
+    // One promotion per line is a schema fact, not a preference.
+    const suitClaims = result.lines.filter((l) => l.lineId === 'l_suit');
+    expect(suitClaims).toHaveLength(1);
+    expect(suitClaims[0]!.promotionId).toBe('r_bundle');
+
+    // Both promotions are visible on the bill, which is what was actually asked
+    // for.
+    expect(new Set(result.lines.map((l) => l.promotionId))).toEqual(
+      new Set(['r_bundle', 'r_pct']),
+    );
+    expect(result.totalDiscount).toBe(5710);
+  });
+
+  it('applies NOTHING when an atomic promotion loses a required product', () => {
+    /*
+     * The counterpart that stops the fix going too far. The bundle needs both;
+     * the percentage claims `tie` first, so the bundle can no longer be
+     * completed. It must apply nothing at all — charging a bundle price for one
+     * of two items would be the most expensive possible bug here.
+     */
+    const lines = [item('l_suit', 'suit', 100), item('l_tie', 'tie', 9000)];
+    const promotions = [
+      // Wins on size and claims `tie`: 90% of 9000 = 8100, against the bundle's
+      // 9100 - 5000 = 4100. Stackable, so the bundle still gets its second
+      // chance — which is the branch under test.
+      pct('r_pct', ['tie'], 90, true),
+      bundleRule('r_bundle', ['suit', 'tie'], 5000, true),
+    ];
+
+    const result = applyPromotions({ lines, promotions });
+
+    // POSITIVE: the percentage applied.
+    expect(byLine(result)).toEqual({ l_tie: 8100 });
+    // NEGATIVE: the bundle applied nothing — not a reduced discount on the one
+    // line it could still reach.
+    expect(result.lines.map((l) => l.promotionId)).not.toContain('r_bundle');
+  });
+
+  it('DOCUMENTS a separate, pre-existing gap: a BOGO claims only its reward line', () => {
+    /*
+     * NOT a consequence of the partial-overlap change, and deliberately not
+     * fixed here — pinned so the behaviour is a decision rather than a surprise.
+     *
+     * `applyBuyXGetY` returns claims on the REWARD lines only; the BUY units
+     * that earned the reward are never claimed. So the overlap check cannot see
+     * that those units are already paying for another promotion, and the reward
+     * is granted anyway. Below, two shirts take 50% off AND earn a free tie.
+     *
+     * Whether that is generous or wrong is a pricing policy question, not a
+     * mechanical one: the line-level invariant still holds (the shirt line
+     * carries the percentage, the tie line carries the BOGO, neither carries
+     * two), so nothing here is unpersistable. Changing it would make every BOGO
+     * block discounts on its qualifying products, which is a real behavioural
+     * change and needs a decision record — outside the scope of the reported
+     * fix, whose brief was explicitly not to alter unrelated promotion
+     * behaviour.
+     *
+     * Verified pre-existing: `claims` is `[l_tie]` either way, so the overlap
+     * branch is never entered on this path and the old and new code agree.
+     */
+    const lines = [item('l_shirt', 'shirt', 1000, 2), item('l_tie', 'tie', 500)];
+    const promotions = [
+      pct('r_pct', ['shirt'], 50, true),
+      rule({
+        id: 'r_bogo',
+        type: 'BUY_X_GET_Y',
+        percentageOff: 100,
+        buyQuantity: 2,
+        getQuantity: 1,
+        stackable: true,
+        items: [
+          { productId: 'shirt', role: 'BUY', quantity: 2 },
+          { productId: 'tie', role: 'GET', quantity: 1 },
+        ],
+      }),
+    ];
+
+    const result = applyPromotions({ lines, promotions });
+
+    // Current behaviour, stated exactly: the shirts are discounted 50% and the
+    // tie is still free.
+    expect(byLine(result)).toEqual({ l_shirt: 1000, l_tie: 500 });
+    // The line-level invariant is intact — this is why it is a policy question
+    // and not a correctness bug.
+    expect(result.lines.filter((l) => l.lineId === 'l_shirt')).toHaveLength(1);
+    expect(result.lines.filter((l) => l.lineId === 'l_tie')).toHaveLength(1);
+  });
+
+  it('leaves basket-level exclusivity exactly as it was', () => {
+    /*
+     * The re-evaluation branch must be unreachable for a NON-stackable
+     * candidate: it either `continue`s (something already applied) or is first,
+     * in which case nothing is claimed and there is no overlap. Asserted rather
+     * than left to the comment that says so.
+     */
+    const lines = [item('l_sp', 'shortpants', 2100), item('l_suit', 'suit', 2000)];
+    const promotions = [
+      bundleRule('r_bundle', ['suit'], 500, false), // 1500, non-stackable, wins
+      pct('r_pct', ['shortpants', 'suit'], 10, true),
+    ];
+
+    const result = applyPromotions({ lines, promotions });
+
+    // The non-stackable winner takes the basket. Short Pants gets nothing even
+    // though it is free and its own promotion is stackable — unchanged, and the
+    // reason a basket of non-stackable promotions behaves as it does today.
+    expect(byLine(result)).toEqual({ l_suit: 1500 });
+    expect(result.lines.map((l) => l.promotionId)).not.toContain('r_pct');
+  });
+
+  it('re-offers only the free lines, never a line already claimed', () => {
+    const lines = [item('l_a', 'a', 1000), item('l_b', 'b', 1000), item('l_c', 'c', 1000)];
+    const promotions = [
+      pct('r_1', ['a', 'b', 'c'], 50, true), // 1500 — takes everything
+      pct('r_2', ['b', 'c'], 30, true), // 600 — both already taken
+      pct('r_3', ['c'], 10, true), // 100 — already taken
+    ];
+
+    const result = applyPromotions({ lines, promotions });
+
+    // The first promotion took all three lines, so the other two have nothing
+    // left to re-evaluate against and must not double-discount any line.
+    expect(byLine(result)).toEqual({ l_a: 500, l_b: 500, l_c: 500 });
+    expect(result.lines).toHaveLength(3);
+    expect(new Set(result.lines.map((l) => l.promotionId))).toEqual(new Set(['r_1']));
+  });
+
+  it('lets a third promotion take what the second could not', () => {
+    const lines = [item('l_a', 'a', 1000), item('l_b', 'b', 1000), item('l_c', 'c', 1000)];
+    const promotions = [
+      pct('r_1', ['a'], 90, true), // 900 — largest, takes a
+      pct('r_2', ['a', 'b'], 40, true), // 800 — overlaps on a, keeps b
+      pct('r_3', ['c'], 10, true), // 100 — untouched
+    ];
+
+    const result = applyPromotions({ lines, promotions });
+
+    // r_2 kept `b` at its own 40% rather than being discarded, and r_3 still ran.
+    expect(byLine(result)).toEqual({ l_a: 900, l_b: 400, l_c: 100 });
+    expect(new Set(result.lines.map((l) => l.promotionId))).toEqual(
+      new Set(['r_1', 'r_2', 'r_3']),
+    );
+  });
+});
+
+/*
+ * MUTATION PROOF (D30 section 5) for the block above. Every line is a run that
+ * was executed, not a prediction — two of these disagreed with what was expected
+ * before running them, and the record follows the runs.
+ *
+ * 1. The defect as it shipped — `continue` on any overlap:
+ *      x keeps the discount on a line the winner never touched
+ *      x lets a third promotion take what the second could not
+ *    2 of 7. The five that pass are cases where discarding and re-evaluating
+ *    give the same answer, which is exactly why the reported bug survived a
+ *    52-test suite untouched.
+ *
+ * 2. Over-corrected — filter the ORIGINAL claims to the free lines instead of
+ *    letting the rule re-qualify (the tempting one-line version):
+ *      x applies NOTHING when an atomic promotion loses a required product
+ *    1 of 7. NOTE: this was expected to fail 2, on the strength of the BOGO
+ *    case as well. It does not, because that test now documents the pre-existing
+ *    reward-line gap rather than asserting atomicity. One test therefore stands
+ *    between this codebase and a bundle price charged for an incomplete bundle,
+ *    which is worth knowing rather than assuming.
+ *
+ * 3. Basket exclusivity removed (`anyApplied && !stackable` guard deleted):
+ *      x a stackable winner still shuts out a NON-stackable follower
+ *    1 of 7 — and it is a PRE-EXISTING test that catches it, not the new
+ *    'leaves basket-level exclusivity exactly as it was'. That new test uses a
+ *    non-stackable winner applying first, so the deleted guard never runs in it.
+ *    Both are kept: they cover the rule from opposite sides.
+ */
