@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft, FileDown, HandCoins, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
-import { paymentMethodLabel } from '@hardware-pos/shared';
+import { paymentMethodLabel, paymentStatusLabel } from '@hardware-pos/shared';
 
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { SaleReturnStatusBadge } from '@/components/returns/status-badges';
@@ -20,14 +20,13 @@ import { fetchSaleReturns, type ReturnDetail } from '@/lib/returns';
 import { fetchSale, retrySaleSync, type PaymentStatusCode, type SaleDetail } from '@/lib/sales';
 import { formatMoney } from '@/lib/utils';
 
-const PAYMENT_STATUS: Record<
-  PaymentStatusCode,
-  { label: string; variant: 'success' | 'warning' | 'neutral' | 'danger' }
-> = {
-  PAID: { label: 'Paid', variant: 'success' },
-  PARTIAL: { label: 'Partially paid', variant: 'warning' },
-  UNPAID: { label: 'Credit / Unpaid', variant: 'danger' },
-  REFUNDED: { label: 'Refunded', variant: 'neutral' },
+// Wording comes from PAYMENT_STATUS_LABELS so the detail page and the list can
+// never word the same sale differently; only the colour is local.
+const PAYMENT_STATUS_VARIANT: Record<PaymentStatusCode, 'success' | 'neutral' | 'danger'> = {
+  PAID: 'success',
+  PARTIAL: 'danger',
+  UNPAID: 'danger',
+  REFUNDED: 'neutral',
 };
 
 /** A due date reads as a day; the time of day on it means nothing. */
@@ -138,7 +137,7 @@ export default function SaleDetailPage() {
     );
   }
 
-  const pay = PAYMENT_STATUS[sale.paymentStatus];
+  const payVariant = PAYMENT_STATUS_VARIANT[sale.paymentStatus];
   const canRetry = sale.syncStatus === 'FAILED' || sale.syncStatus === 'PENDING';
   const canReturn =
     sale.status === 'COMPLETED' &&
@@ -196,7 +195,7 @@ export default function SaleDetailPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={pay.variant}>{pay.label}</Badge>
+        <Badge variant={payVariant}>{paymentStatusLabel(sale.paymentStatus)}</Badge>
         <SaleReturnStatusBadge status={sale.returnStatus} />
         <SyncBadge status={sale.syncStatus} />
         {sale.quickbooksDocumentType ? (

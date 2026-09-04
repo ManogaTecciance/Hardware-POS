@@ -98,11 +98,13 @@ export function paymentStatusMeta(
   switch (status) {
     case 'PAID':
       return { label: 'Paid', tone: 'success' };
-    case 'PARTIAL':
-      return { label: 'Partial', tone: 'warning' };
     case 'REFUNDED':
       return { label: 'Refund', tone: 'danger' };
     default:
+      // PARTIAL falls through with UNPAID: a sale that still owes anything is a
+      // credit sale, and the dashboard has no room to draw a distinction the
+      // shop does not make. (The compact 'Credit' is this surface's own wording
+      // for the same thing the sales list spells out in full.)
       return { label: 'Credit', tone: 'muted' };
   }
 }

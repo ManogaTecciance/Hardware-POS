@@ -48,6 +48,27 @@ export function paymentMethodLabel(method: string): string {
 }
 
 /**
+ * How a sale's payment status reads to a user.
+ *
+ * PARTIAL and UNPAID deliberately read the SAME. The shop does not distinguish
+ * "some of it is owed" from "all of it is owed" — either way the sale went out
+ * on credit and money is outstanding, and that is the only thing anyone acts on.
+ * The enum keeps them apart because the arithmetic needs to (a part payment is
+ * not a fresh credit sale); the screen does not.
+ */
+export const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  PAID: 'Paid',
+  PARTIAL: 'Credit / Unpaid',
+  UNPAID: 'Credit / Unpaid',
+  REFUNDED: 'Refunded',
+};
+
+/** A payment status's label, falling back to the raw code for anything unrecognised. */
+export function paymentStatusLabel(status: string): string {
+  return PAYMENT_STATUS_LABELS[status] ?? status;
+}
+
+/**
  * How an unpaid balance reads where a payment method is expected. Not a
  * `PaymentMethod` — nothing is tendered on credit, which is the whole point —
  * so it exists only at render time.

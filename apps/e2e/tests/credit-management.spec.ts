@@ -217,6 +217,47 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
     expect(String(row.paymentDueDate).slice(0, 10)).toBe(DUE);
   });
 
+  test('SALE-028 the Credit / Unpaid filter includes part-paid sales', async ({ ownerApi }) => {
+    // The app shows a part-paid sale as "Credit / Unpaid", so the filter behind
+    // that label must return it — otherwise the list hides sales it says exist.
+    const partPaid = await creditSale(ownerApi);
+    await ownerApi.post('/payments', {
+      saleId: partPaid.sale.id,
+      method: 'CASH',
+      amount: Math.round((partPaid.total / 2) * 100) / 100,
+    });
+    const wholly = await creditSale(ownerApi);
+    const settled = await creditSale(ownerApi);
+    await ownerApi.post('/payments', {
+      saleId: settled.sale.id,
+      method: 'CASH',
+      amount: settled.total,
+    });
+
+    const page = await ownerApi.get('/sales?page=1&pageSize=200&paymentStatus=UNPAID');
+    const ids = page.items.map((s: any) => s.id);
+    expect(ids).toContain(partPaid.sale.id);
+    expect(ids).toContain(wholly.sale.id);
+    expect(ids).not.toContain(settled.sale.id);
+  });
+
+  test('SALE-029 filtering by PARTIAL alone still narrows to part-paid sales', async ({
+    ownerApi,
+  }) => {
+    const partPaid = await creditSale(ownerApi);
+    await ownerApi.post('/payments', {
+      saleId: partPaid.sale.id,
+      method: 'CASH',
+      amount: Math.round((partPaid.total / 2) * 100) / 100,
+    });
+    const wholly = await creditSale(ownerApi);
+
+    const page = await ownerApi.get('/sales?page=1&pageSize=200&paymentStatus=PARTIAL');
+    const ids = page.items.map((s: any) => s.id);
+    expect(ids).toContain(partPaid.sale.id);
+    expect(ids).not.toContain(wholly.sale.id);
+  });
+
   // ── REQ003 / REQ004 — available credit and total receivable ────────────────
 
   test('CUST-017 available credit is the limit minus what is owed', async ({ ownerApi }) => {

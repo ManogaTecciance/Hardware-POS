@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import * as React from 'react';
 import { AlarmClock, Printer, ReceiptText, RefreshCw, Search } from 'lucide-react';
 
@@ -19,6 +20,8 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
+import { paymentStatusLabel } from '@hardware-pos/shared';
+
 import { useAuth } from '@/lib/auth';
 import { reprintCustomerReceipt } from '@/lib/receipt-print';
 import {
@@ -70,22 +73,22 @@ function isOverdue(s: SaleListItem, now: Date = new Date()): boolean {
   return s.paymentDueDate !== null && s.balanceAmount > 0 && new Date(s.paymentDueDate) < now;
 }
 
+// A sale that still owes anything reads the same whether part of it was paid or
+// none of it was — see PAYMENT_STATUS_LABELS for why.
+const STATUS_VARIANT: Record<PaymentStatusCode, 'success' | 'neutral' | 'danger'> = {
+  PAID: 'success',
+  PARTIAL: 'danger',
+  UNPAID: 'danger',
+  REFUNDED: 'neutral',
+};
+
 function PaymentStatusBadge({ status }: { status: PaymentStatusCode }) {
-  const map: Record<
-    PaymentStatusCode,
-    { label: string; variant: 'success' | 'warning' | 'neutral' | 'danger' }
-  > = {
-    PAID: { label: 'Paid', variant: 'success' },
-    PARTIAL: { label: 'Partially paid', variant: 'warning' },
-    UNPAID: { label: 'Credit / Unpaid', variant: 'danger' },
-    REFUNDED: { label: 'Refunded', variant: 'neutral' },
-  };
-  const { label, variant } = map[status];
-  return <Badge variant={variant}>{label}</Badge>;
+  return <Badge variant={STATUS_VARIANT[status]}>{paymentStatusLabel(status)}</Badge>;
 }
 
 export default function SalesPage() {
   const { session } = useAuth();
+  const router = useRouter();
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -177,6 +180,34 @@ export default function SalesPage() {
     }
   };
 
+  /**
+   * Open a sale from anywhere in its row.
+   *
+   * The row is a mouse convenience over the sale-number link, which stays as the
+   * keyboard and screen-reader path — making the row itself focusable would add
+   * a second tab stop to the same destination and announce the whole row as a
+   * link.
+   *
+   * Three clicks are deliberately not a same-tab navigation: one that lands on
+   * something interactive (the link itself, the reprint / retry buttons), which
+   * owns its own behaviour; one that ends a text selection, because reading a
+   * sale number off the table is a copy and not a click; and a right-click,
+   * which belongs to the context menu. A middle- or modifier-click still opens
+   * the sale, in the new tab the user asked for rather than in this one.
+   */
+  const handleOpen = (event: React.MouseEvent<HTMLTableRowElement>, id: string) => {
+    // Right-click belongs to the context menu; onAuxClick fires for it too.
+    if (event.button === 2) return;
+    if ((event.target as HTMLElement).closest('a, button, input, select, textarea')) return;
+    if (window.getSelection()?.toString().trim()) return;
+    const href = `/sales/${id}`;
+    if (event.button === 1 || event.metaKey || event.ctrlKey || event.shiftKey) {
+      window.open(href, '_blank', 'noopener');
+      return;
+    }
+    router.push(href);
+  };
+
   const handleRetry = async (id: string) => {
     if (!session) return;
     setBusyId(id);
@@ -223,7 +254,8 @@ export default function SalesPage() {
         >
           <option value="">All payments</option>
           <option value="PAID">Paid</option>
-          <option value="PARTIAL">Partially paid</option>
+          {/* No separate "partially paid" choice: this one covers everything
+              still owed, part-paid or not, matching how the column reads. */}
           <option value="UNPAID">Credit / Unpaid</option>
           <option value="REFUNDED">Refunded</option>
         </Select>
@@ -302,7 +334,12 @@ export default function SalesPage() {
                 </tr>
               ) : (
                 rows.map((s) => (
-                  <tr key={s.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                  <tr
+                    key={s.id}
+                    onClick={(e) => handleOpen(e, s.id)}
+                    onAuxClick={(e) => handleOpen(e, s.id)}
+                    className="cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-muted/30"
+                  >
                     <td className="px-4 py-3">
                       <Link
                         href={`/sales/${s.id}`}

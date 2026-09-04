@@ -88,7 +88,16 @@ export class SalesRepository {
     const where: Prisma.SaleWhereInput = {
       tenantId,
       ...(filter.syncStatus ? { syncStatus: filter.syncStatus } : {}),
-      ...(filter.paymentStatus ? { paymentStatus: filter.paymentStatus } : {}),
+      // UNPAID means "still owes something", which includes a part-paid sale:
+      // the app shows both as "Credit / Unpaid", so a filter that returned only
+      // the wholly unpaid ones would quietly hide sales the column says are
+      // there. PARTIAL is still accepted on its own for a caller that genuinely
+      // wants just those.
+      ...(filter.paymentStatus === 'UNPAID'
+        ? { paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] } }
+        : filter.paymentStatus
+          ? { paymentStatus: filter.paymentStatus }
+          : {}),
       // Kept in AND so the date clause's OR cannot collide with the search OR.
       ...(businessDate.length ? { AND: businessDate } : {}),
       // Overdue: the due date has passed and money is still owed. A settled sale

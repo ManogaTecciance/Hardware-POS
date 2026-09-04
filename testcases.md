@@ -259,6 +259,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE-022 | Settling drops a sale from the overdue filter | Record a full payment on an overdue sale, re-query | No longer returned | P | Automated |
 | SALE-023 | Sales list reports the last payment received | Part-pay a credit sale, read the list row | `lastPaymentAt` set; `paymentDueDate` returned | P | Automated |
 | SALE-024 | Due column blank for a fully paid sale | Cash sale in the sales list | Due column shows "—", not an invented date | P | Not Run |
+| SALE-028 | Credit / Unpaid filter includes part-paid sales | Filter the sales list by Credit / Unpaid with one part-paid, one wholly unpaid and one settled sale | Both owing sales returned; the settled one is not | P | Automated |
+| SALE-029 | PARTIAL still narrows via the API | GET /sales?paymentStatus=PARTIAL | Only the part-paid sale — the enum still discriminates for API callers | P | Automated |
+| SALE-030 | No "Partially paid" anywhere on screen | Part-pay a credit sale; check the sales list, the sale detail badge and the dashboard recent sales | All read Credit / Unpaid (dashboard: "Credit"); the filter dropdown offers no Partially paid option | P | Not Run |
 | SALE-027 | Total is red while a sale is owed for | Sales list with one credit and one cash sale | Credit sale's Total is red; the paid one is not; there is no Balance column | P | Not Run |
 | SALE-025 | Last payment blank for a counter sale | Cash sale in the sales list | Last payment column shows "—" (the sale never ran on credit) | P | Not Run |
 | SALE-026 | Overdue export matches the screen | Apply the Overdue filter, export PDF/XLSX | Export covers exactly the filtered sales and names the filter | P | Not Run |
@@ -547,11 +550,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PIMP | 13 | QB | 31 |
 | POS | 38 | SET | 19 |
 | PAY | 41 | DOC | 11 |
-| SALE | 27 | ADM | 14 |
+| SALE | 30 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 399 test cases** (≈60% positive / 40% negative).
+**Total: 402 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

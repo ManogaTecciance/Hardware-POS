@@ -228,6 +228,10 @@ body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "payme
 GET  /v1/sales?page=1&pageSize=25&syncStatus=FAILED
 200 → paginated sales history (syncStatus per sale)
 # Filters: search, paymentStatus, syncStatus, dateFrom, dateTo, overdue=true.
+#   paymentStatus=UNPAID means "still owes something" and therefore matches PARTIAL
+#   too — the app words both as "Credit / Unpaid", and a filter behind that label
+#   must not hide the part-paid ones. PARTIAL on its own still narrows to exactly
+#   those, for a caller that wants them.
 #   overdue=true keeps only COMPLETED sales whose paymentDueDate has passed and
 #   which still owe money. GET /v1/sales/report accepts the same filters, so an
 #   export always covers exactly the sales the screen was showing.
