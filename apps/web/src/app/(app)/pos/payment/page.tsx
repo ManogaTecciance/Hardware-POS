@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 
+import { CustomerCombobox } from '@/components/pos/customer-combobox';
 import { NumericKeypad, QuickAmountButtons } from '@/components/pos/payment/numeric-keypad';
 import { PaymentMethodSelector, type Mode } from '@/components/pos/payment/payment-method-selector';
 import { Badge } from '@/components/ui/badge';
@@ -105,8 +106,9 @@ export default function PaymentPage() {
 
   // Selected customers always pass through cart.addCustomer, so the cart's own
   // list is sufficient to resolve the display name.
-  const customerName =
-    cart.addedCustomers.find((c) => c.id === cart.customerId)?.name ?? 'Walk-in customer';
+  const selectedCustomerName =
+    cart.addedCustomers.find((c) => c.id === cart.customerId)?.name ?? null;
+  const customerName = selectedCustomerName ?? 'Walk-in customer';
   const hasCustomer = !!cart.customerId;
 
   // Redirect back to the cart if it emptied (but not right after a successful sale).
@@ -432,6 +434,21 @@ export default function PaymentPage() {
             </span>
             <span className="font-semibold text-primary">{formatMoney(total, currency)}</span>
           </button>
+
+          {/* Customer — pickable here as well as in the cart. A credit or partial
+              sale needs one, and being told so on this screen while only being
+              able to fix it on the previous one is a poor trade. Selecting one
+              re-reads their credit position, since the panel below keys on it. */}
+          <div className="shrink-0 border-b border-border px-4 py-3">
+            <CustomerCombobox
+              session={session!}
+              customerId={cart.customerId}
+              customerName={selectedCustomerName}
+              onSelect={(customer) =>
+                customer ? cart.addCustomer(customer) : cart.setCustomerId('')
+              }
+            />
+          </div>
 
           {/* TOP ZONE — Amount due + selected method (always visible). */}
           <div className="grid shrink-0 grid-cols-1 gap-4 p-5 sm:grid-cols-2 sm:items-center">

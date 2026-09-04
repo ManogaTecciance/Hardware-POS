@@ -219,6 +219,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-027 | Instalments each kept as their own record | Two part payments against one sale | Two Payment rows, each with its own date/time, method and reference | P | Automated |
 | PAY-034 | Credit warning appears as the order grows | Credit customer, raise a quantity in the payment page order summary until the total passes their limit | Warning appears live with available vs needed; Complete Payment disables — without pressing it. The credit panel is the ONLY place it is stated; no duplicate in the footer notice | P | Not Run |
 | PAY-035 | Credit warning clears when payment covers it | With the warning showing, switch to Partial and enter enough to bring the balance under the limit | Warning clears; Complete Payment re-enables | P | Not Run |
+| POS-039 | Customer can be chosen on the payment page | Open /pos/payment with no customer, pick one from the dropdown above Amount Due | Selection sticks, the header names them, and the credit panel appears for a credit sale — without going back to the cart | P | Not Run |
+| POS-040 | Clearing the customer on the payment page | Pick a customer, then clear the selection | Reverts to Walk-in customer; the credit panel disappears and the credit-sale guard reappears | P | Not Run |
 | PAY-036 | Non-credit customer flagged up front | Select a customer with creditAllowed false, choose Credit | "not approved for credit" shown immediately, not on submit | N | Not Run |
 | PAY-037 | Unlimited customer is never blocked | creditAllowed with creditLimit null, large credit sale | No warning; sale completes | P | Not Run |
 | PAY-038 | Credit unreadable does not block selling | Break /customers/{id}/credit (offline), take a credit sale | Non-blocking notice; Complete Payment still enabled; server enforces on completion | N | Not Run |
@@ -550,13 +552,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DASH | 24 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
-| POS | 38 | SET | 19 |
+| POS | 40 | SET | 19 |
 | PAY | 41 | DOC | 11 |
 | SALE | 31 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 404 test cases** (≈60% positive / 40% negative).
+**Total: 406 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
