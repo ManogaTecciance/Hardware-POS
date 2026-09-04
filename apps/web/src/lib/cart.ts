@@ -207,6 +207,76 @@ function priceCart(
   return { lines, orderPromotion: promo.orderPromotion };
 }
 
+/**
+ * D102 open decision 3 (PO-confirmed 2026-09-04) — a manual discount that costs
+ * the customer MORE than it saves them.
+ *
+ * A manually discounted line is invisible to promotions (D102): the cashier is
+ * acting deliberately, usually under an approval limit, and a promotion stacking
+ * on top would push the total past a figure nobody approved. The maths is right.
+ * What was missing is that nobody was told: knock Rs 50 off a line carrying a
+ * Rs 500 promotion and the customer quietly pays Rs 450 more, with the till
+ * showing a discount either way.
+ *
+ * This reports it. It does not block, and it does not "helpfully" pick the
+ * better one — the cashier may have every reason to honour the manual price, and
+ * silently overriding them is how a till stops being trustworthy.
+ */
+export interface ForgonePromotion {
+  lineKey: CartLineKey;
+  productName: string;
+  /** What the cashier took off. */
+  manualDiscountAmount: number;
+  /** What the line would have received instead, and lost. */
+  promotionDiscountAmount: number;
+  promotionName: string;
+}
+
+/**
+ * Lines whose manual discount displaced a LARGER promotion.
+ *
+ * Works by re-pricing the basket with every manual discount removed and
+ * comparing. All of them, not just the line in question: a bundle needs its
+ * whole set, so a line can only learn what it gave up in a basket where nothing
+ * is suppressed. That also means the figure is "what this basket would have
+ * earned", which is the number a cashier can act on.
+ *
+ * Returns only the cases that cost the customer money — `promotion > manual`.
+ * A manual discount that beats the promotion is the cashier being generous and
+ * needs no warning.
+ */
+export function forgonePromotions(
+  items: CartItem[],
+  promotionRules: readonly PromotionRule[] = [],
+): ForgonePromotion[] {
+  if (promotionRules.length === 0) return [];
+
+  const discounted = items.filter((i) => computeLine(i).discountAmount > 0);
+  if (discounted.length === 0) return [];
+
+  // The same basket with the cashier's hand taken off it.
+  const withoutManual = items.map((i) => ({ ...i, discount: undefined }));
+  const wouldBe = new Map(
+    priceCart(withoutManual, promotionRules).lines.map((l) => [l.lineKey, l]),
+  );
+
+  const out: ForgonePromotion[] = [];
+  for (const item of discounted) {
+    const hypothetical = wouldBe.get(item.lineKey);
+    if (!hypothetical || !hypothetical.promotionName) continue;
+    const manualDiscountAmount = computeLine(item).discountAmount;
+    if (hypothetical.promotionDiscountAmount <= manualDiscountAmount) continue;
+    out.push({
+      lineKey: item.lineKey,
+      productName: item.product.name,
+      manualDiscountAmount,
+      promotionDiscountAmount: hypothetical.promotionDiscountAmount,
+      promotionName: hypothetical.promotionName,
+    });
+  }
+  return out;
+}
+
 /** Whole-cart discount, applied after per-line (product) discounts. */
 export interface OrderDiscount {
   type: DiscountType;

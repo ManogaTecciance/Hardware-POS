@@ -40,6 +40,7 @@ import { useAuth } from '@/lib/auth';
 import {
   computeCartLines,
   computeLine,
+  forgonePromotions,
   computeTotals,
   linePrice,
   type CartLineKey,
@@ -377,6 +378,17 @@ export function PosRetailCheckout() {
   );
 
   /** The promotion names the product; the catalogue names the product to a human. */
+  /*
+   * Open decision 3 (PO-confirmed) — a manual discount that displaced a LARGER
+   * promotion. Warns; never blocks and never silently swaps to the better one.
+   * The cashier may have every reason to honour the manual price, and a till
+   * that overrides them quietly is a till nobody trusts.
+   */
+  const forgone = React.useMemo(
+    () => forgonePromotions(cart.items, data.promotionRules),
+    [cart.items, data.promotionRules],
+  );
+
   const outstandingLabel = (productId: string) =>
     data.products.find((p) => p.id === productId)?.name ?? 'promotional item';
 
@@ -527,6 +539,30 @@ export function PosRetailCheckout() {
           <p className="pt-0.5 text-[11px] font-medium text-primary/80">
             Payment is unavailable until the offer is complete.
           </p>
+        </div>
+      ) : null}
+
+      {forgone.length > 0 ? (
+        <div className="mx-4 mb-2 space-y-1.5 rounded-xl border border-warning/40 bg-warning-soft px-3 py-2.5">
+          {forgone.map((f) => (
+            <div key={f.lineKey} className="text-xs">
+              <p className="font-semibold text-warning">
+                ⚠ Your discount on {f.productName} is smaller than its offer
+              </p>
+              <p className="mt-0.5 text-muted-foreground">
+                You took{' '}
+                <span className="font-semibold text-foreground">
+                  {formatMoney(f.manualDiscountAmount, currency)}
+                </span>{' '}
+                off. <span className="font-semibold">{f.promotionName}</span> would have taken{' '}
+                <span className="font-semibold text-foreground">
+                  {formatMoney(f.promotionDiscountAmount, currency)}
+                </span>
+                . A manual discount replaces the offer on that line — remove it to use the offer
+                instead.
+              </p>
+            </div>
+          ))}
         </div>
       ) : null}
 

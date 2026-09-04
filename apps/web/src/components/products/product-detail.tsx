@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Toast } from '@/components/ui/toast';
 import { type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
-import { variantPriceLabel } from '@/lib/products/product-price-display';
+import { variantPriceLabel } from '@hardware-pos/shared';
 import { resolveProductManagementPresentation } from '@/lib/products/product-presentation';
 import type { BranchSummary } from '@/lib/products/branches-api';
 import { useIsTabletUp } from '@/lib/use-viewport';

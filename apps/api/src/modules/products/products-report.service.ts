@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { CURRENCY_CODE, CURRENCY_LOCALE, CURRENCY_SYMBOL } from '@hardware-pos/shared';
+import {
+  CURRENCY_CODE,
+  CURRENCY_LOCALE,
+  CURRENCY_SYMBOL,
+  pricedByVariants,
+  variantPriceLabel,
+  variantSkuLabel,
+} from '@hardware-pos/shared';
 import { Product } from '@hardware-pos/database';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
@@ -22,7 +29,21 @@ interface ReportRow {
   type: string;
   sku: string | null;
   category: string;
+  /**
+   * The parent price. Meaningless for a variant product (D44 says it is not
+   * read), which is why `priceCell` exists beside it — this stays for the
+   * summary arithmetic and for legacy rows, where it is authoritative.
+   */
   unitPrice: number;
+  /**
+   * What the Price column actually shows.
+   *
+   * A NUMBER for a legacy product, so the spreadsheet keeps a numeric column
+   * that can be summed and sorted — every existing export is unchanged. A
+   * STRING for a variant product, because "1,200.00 - 4,300.00" is the honest
+   * answer and no single number is. Exporting the parent 0.00 was the defect.
+   */
+  priceCell: number | string;
   costPrice: number | null;
   quantityOnHand: number;
   reorderLevel: number | null;
@@ -119,7 +140,16 @@ export class ProductsReportService {
     });
     const categoryName = new Map(categories.map((c) => [c.id, c.name]));
 
-    const rows = products.map((p): ReportRow => this.toRow(p, categoryName));
+    /*
+     * D44 — the same variant aggregate the products list uses, so the export and
+     * the screen cannot disagree. One extra groupBy for the whole report.
+     */
+    const variantSummary = await this.productsRepository.variantPriceSummary(
+      tenantId,
+      products.filter((p) => p.hasVariants).map((p) => p.id),
+    );
+
+    const rows = products.map((p): ReportRow => this.toRow(p, categoryName, variantSummary));
 
     const summary = rows.reduce<ReportSummary>(
       (acc, r) => {
@@ -160,15 +190,39 @@ export class ProductsReportService {
     return { rows, summary, totalMatching, generatedAt: new Date(), filters };
   }
 
-  private toRow(p: Product, categoryName: Map<string, string>): ReportRow {
+  private toRow(
+    p: Product,
+    categoryName: Map<string, string>,
+    variantSummary: Map<string, { count: number; min: number | null; max: number | null }>,
+  ): ReportRow {
     const qty = Number(p.quantityOnHand);
     const cost = p.costPrice != null ? Number(p.costPrice) : null;
+
+    /*
+     * D44 (PO decision, 2026-09-04) — the export uses the SAME rule as the admin
+     * screens, not a copy of it: `variantPriceLabel` and `variantSkuLabel` live
+     * in `@hardware-pos/shared` precisely so this file cannot drift from the
+     * products list. Before this, every variant product exported as `0.00` with
+     * a blank SKU while the screen beside it showed the real range.
+     */
+    const shape = {
+      hasVariants: p.hasVariants,
+      unitPrice: Number(p.unitPrice),
+      sku: p.sku,
+      variantCount: variantSummary.get(p.id)?.count ?? 0,
+      variantPriceMin: variantSummary.get(p.id)?.min ?? null,
+      variantPriceMax: variantSummary.get(p.id)?.max ?? null,
+    };
+
     return {
       name: p.name,
       type: p.type,
-      sku: p.sku,
+      sku: variantSkuLabel(shape),
       category: (p.categoryId && categoryName.get(p.categoryId)) || 'Uncategorized',
       unitPrice: Number(p.unitPrice),
+      priceCell: pricedByVariants(shape)
+        ? variantPriceLabel(shape, fmtMoney)
+        : Number(p.unitPrice),
       costPrice: cost,
       quantityOnHand: qty,
       reorderLevel: p.reorderLevel != null ? Number(p.reorderLevel) : null,
@@ -221,7 +275,7 @@ export class ProductsReportService {
         TYPE_LABEL[r.type] ?? r.type,
         r.sku ?? '',
         r.category,
-        r.unitPrice,
+        r.priceCell,
         r.costPrice ?? '',
         r.type === 'Inventory' ? r.quantityOnHand : '',
         r.reorderLevel ?? '',
@@ -331,7 +385,7 @@ export class ProductsReportService {
           TYPE_LABEL[r.type] ?? r.type,
           r.sku ?? '—',
           r.category,
-          fmtMoney(r.unitPrice),
+          typeof r.priceCell === 'number' ? fmtMoney(r.priceCell) : r.priceCell,
           r.costPrice != null ? fmtMoney(r.costPrice) : '—',
           inventory ? String(r.quantityOnHand) : '—',
           r.reorderLevel != null ? String(r.reorderLevel) : '—',

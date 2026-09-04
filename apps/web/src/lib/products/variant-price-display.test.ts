@@ -30,7 +30,7 @@ import {
   variantPriceLabel,
   variantSkuLabel,
   type VariantPricedProduct,
-} from './product-price-display';
+} from '@hardware-pos/shared';
 
 /** Stands in for either screen's formatter; distinctive so it can be asserted. */
 const money = (n: number) => `Rs. ${n.toFixed(2)}`;

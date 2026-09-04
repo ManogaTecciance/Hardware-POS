@@ -29,6 +29,7 @@
  */
 
 import { ConfigModule } from '@nestjs/config';
+import * as ExcelJS from 'exceljs';
 import { Test, type TestingModule } from '@nestjs/testing';
 import {
   AccountingProviderKind,
@@ -45,6 +46,8 @@ import { ProvidersModule } from '../../../src/modules/providers/providers.module
 import { ProductsModule } from '../../../src/modules/products/products.module';
 import { SalesModule } from '../../../src/modules/sales/sales.module';
 import { ProductsService } from '../../../src/modules/products/products.service';
+import { ProductsReportService } from '../../../src/modules/products/products-report.service';
+import { QueryProductsReportDto } from '../../../src/modules/products/dto/query-products-report.dto';
 import { QueryProductsDto } from '../../../src/modules/products/dto/query-products.dto';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
@@ -54,6 +57,7 @@ import { seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let products: ProductsService;
+let reports: ProductsReportService;
 let tile: SeededTenant;
 
 beforeAll(async () => {
@@ -75,6 +79,7 @@ beforeAll(async () => {
   testModule.useLogger(false);
   await testModule.init();
   products = testModule.get(ProductsService);
+  reports = testModule.get(ProductsReportService);
 });
 
 afterAll(async () => {
@@ -275,3 +280,78 @@ describe('the products list prices a variant product from its variants (D44)', (
  *      3 of 5 fail. This is the mutation a mocked client could never catch: a
  *      Decimal reaching the browser serialises as an object, not a price.
  */
+
+/**
+ * D44 (PO decision, 2026-09-04) — the EXPORT reads the same rule as the screen.
+ *
+ * ## What was wrong
+ *
+ * `products-report.service` wrote `Number(p.unitPrice)` and `p.sku` straight into
+ * the spreadsheet, so every variant product exported as `0.00` with a blank SKU
+ * while the products list beside it showed the real range. The screens were fixed
+ * in 4.17 and the export was left behind — the same "one caller updated, the
+ * other forgotten" shape as 4.15 and 4.21.
+ *
+ * ## Why this is an integration test
+ *
+ * The unit tests for `variantPriceLabel` prove the RULE. What they cannot prove
+ * is that the report calls it — which is exactly what was broken. This renders a
+ * real workbook from real rows and reads the cell back, so a report that
+ * regressed to the parent column fails here even though the shared helper stays
+ * green.
+ */
+describe('the products export prices variant products like the screen does', () => {
+  it('writes the variant range, not the parent 0.00, and names the SKU count', async () => {
+    await makeVariantProduct([
+      { sku: 'SHT-30', price: 1200 },
+      { sku: 'SHT-32', price: 4300 },
+    ]);
+
+    const query = Object.assign(new QueryProductsReportDto(), { format: 'xlsx' as const });
+    const report = await reports.generate(tile.tenantId, query);
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(report.buffer as never);
+    const ws = wb.worksheets[0]!;
+
+    // Names are READ from the database rather than written as literals here: a
+    // renamed fixture would otherwise silently match nothing and this test would
+    // assert against `undefined` instead of failing (D30 section 7).
+    const [variantProduct, legacyProduct] = await Promise.all([
+      prisma.product.findUniqueOrThrow({ where: { id: tile.productAId } }),
+      prisma.product.findUniqueOrThrow({ where: { id: tile.productBId } }),
+    ]);
+
+    let variantRow: ExcelJS.Row | undefined;
+    let legacyRow: ExcelJS.Row | undefined;
+    ws.eachRow((row) => {
+      const name = String(row.getCell(1).value ?? '');
+      if (name === variantProduct.name) variantRow = row;
+      if (name === legacyProduct.name) legacyRow = row;
+    });
+
+    // Defined, not merely truthy: a renamed fixture matches nothing and every
+    // assertion below would then run against `undefined` and pass vacuously.
+    expect(variantRow).toBeDefined();
+    expect(legacyRow).toBeDefined();
+
+    const price = String(variantRow!.getCell(5).value ?? '');
+    const sku = String(variantRow!.getCell(3).value ?? '');
+
+    // POSITIVE: both bounds are present, as text, because no single number is
+    // the honest answer for a product priced 1,200 to 4,300.
+    expect(price).toContain('1,200');
+    expect(price).toContain('4,300');
+    expect(sku).toBe('2 variants');
+
+    // NEGATIVE: the defect itself. A cell reading 0 or 0.00 is the parent column
+    // leaking back in.
+    expect(price).not.toMatch(/^0(\.00)?$/);
+    expect(variantRow!.getCell(5).value).not.toBe(0);
+
+    // The legacy product is UNTOUCHED and still a NUMBER, so the spreadsheet
+    // keeps a sortable, summable price column for every row that has one.
+    expect(typeof legacyRow!.getCell(5).value).toBe('number');
+    expect(Number(legacyRow!.getCell(5).value)).toBeGreaterThan(0);
+  });
+});

@@ -9,6 +9,7 @@ import {
   computeTotals,
   lineLabel,
   linePrice,
+  forgonePromotions,
   newCartItem,
   type CartItem,
 } from './cart';
@@ -502,5 +503,143 @@ describe('promotions on the till (4.4)', () => {
     expect(withNone.totalDiscount).toBe(0);
     expect(withNone.taxAmount).toBe(450);
     expect(withNone.total).toBe(2950);
+  });
+});
+
+/**
+ * Open decision 3 (PO-confirmed 2026-09-04) — a manual discount that costs the
+ * customer more than it saves.
+ *
+ * ## What was wrong
+ *
+ * D102 makes a manually discounted line invisible to promotions: the cashier is
+ * acting deliberately, usually under an approval limit, and a promotion stacking
+ * on top would push the total past a figure nobody approved. That is correct and
+ * stays. What was missing is that nobody was told — knock Rs 50 off a line
+ * carrying a Rs 500 promotion and the customer quietly pays Rs 450 MORE, with
+ * the till showing a discount either way. This is 4.19's shape again: right
+ * behaviour, invisible cause.
+ *
+ * ## What makes these assertions non-vacuous (D30)
+ *
+ * The warning is asserted to appear when it should AND to stay silent in the
+ * three cases that look similar but are not: a manual discount that BEATS the
+ * promotion (the cashier being generous), a discounted line that no promotion
+ * would have touched, and a promotion the basket does not qualify for. A helper
+ * that returned every discounted line would pass a "warns when it should" test
+ * on its own and put a warning on nearly every discounted sale.
+ *
+ * The figures are asserted, not just the presence of a warning: the number the
+ * cashier gave up is the whole point of showing it.
+ *
+ * MUTATION PROOF (D30 section 5), both runs executed:
+ *
+ *   1. Drop the `promotion > manual` comparison, warning on every discounted line:
+ *        x stays silent when the manual discount BEATS the promotion
+ *        x reports each affected line, and leaves the others alone
+ *      2 of 6 fail. That comparison is the whole judgement, and both failures are
+ *      the cases where a naive implementation nags a cashier who did nothing wrong.
+ *
+ *   2. Drop the `!hypothetical.promotionName` guard:
+ *        (nothing fails)
+ *      Recorded because it is true, not because it is comfortable. That guard is
+ *      TYPE NARROWING, not a behavioural branch: a line with no promotion has
+ *      `promotionDiscountAmount === 0`, and 0 can never exceed a manual discount
+ *      that is greater than zero, so the comparison below already excludes it.
+ *      No test is added for it, because there is no behaviour to assert.
+ */
+describe('forgonePromotions — a manual discount that displaced a bigger offer', () => {
+  const shirtP = product({ id: 'p_shirt', name: 'Shirt', unitPrice: 1000, variants: [] });
+  const capP = product({ id: 'p_cap', name: 'Cap', unitPrice: 800, variants: [] });
+
+  const halfOffShirts = (over: Partial<PromotionRule> = {}): PromotionRule => ({
+    id: 'promo_half',
+    name: 'Half price shirts',
+    type: 'PERCENTAGE_DISCOUNT',
+    fixedPrice: null,
+    percentageOff: 50,
+    amountOff: null,
+    minimumSpend: null,
+    buyQuantity: null,
+    getQuantity: null,
+    stackable: true,
+    items: [{ productId: 'p_shirt', role: 'BUY', quantity: 1 }],
+    ...over,
+  });
+
+  const withDiscount = (p: ClientProduct, value: number) => ({
+    ...newCartItem(p),
+    discount: { type: 'FIXED' as const, value },
+  });
+
+  it('warns, and names what was given up', () => {
+    // Rs 50 off a shirt that had Rs 500 waiting for it.
+    const items = [withDiscount(shirtP, 50)];
+
+    const [warning, ...rest] = forgonePromotions(items, [halfOffShirts()]);
+
+    expect(rest).toHaveLength(0);
+    expect(warning).toMatchObject({
+      productName: 'Shirt',
+      manualDiscountAmount: 50,
+      promotionDiscountAmount: 500,
+      promotionName: 'Half price shirts',
+    });
+  });
+
+  it('stays silent when the manual discount BEATS the promotion', () => {
+    // Rs 600 off against a Rs 500 offer — the cashier is being generous, and
+    // warning here would be nagging them about a decision that helped.
+    expect(forgonePromotions([withDiscount(shirtP, 600)], [halfOffShirts()])).toEqual([]);
+  });
+
+  it('stays silent for a discounted line no promotion covers', () => {
+    // The Cap is discounted; the promotion is about Shirts. Nothing was lost.
+    expect(forgonePromotions([withDiscount(capP, 100)], [halfOffShirts()])).toEqual([]);
+  });
+
+  it('stays silent when nothing is discounted, and when there are no promotions', () => {
+    expect(forgonePromotions([newCartItem(shirtP)], [halfOffShirts()])).toEqual([]);
+    expect(forgonePromotions([withDiscount(shirtP, 50)], [])).toEqual([]);
+  });
+
+  it('reports each affected line, and leaves the others alone', () => {
+    const capOffer = halfOffShirts({
+      id: 'promo_cap',
+      name: 'Cap deal',
+      percentageOff: 25,
+      items: [{ productId: 'p_cap', role: 'BUY', quantity: 1 }],
+    });
+    // Shirt: 50 vs 500 -> warn. Cap: 300 vs 200 -> the cashier won, stay quiet.
+    const items = [withDiscount(shirtP, 50), withDiscount(capP, 300)];
+
+    const warnings = forgonePromotions(items, [halfOffShirts(), capOffer]);
+
+    expect(warnings.map((w) => w.productName)).toEqual(['Shirt']);
+  });
+
+  it('does not warn about a promotion the basket cannot earn', () => {
+    /*
+     * A BOGO needing two shirts, with one in the cart. Removing the manual
+     * discount would still earn nothing, so there is nothing to regret — this is
+     * the case a naive "what would this line get" check gets wrong.
+     */
+    const tieP = product({ id: 'p_tie', name: 'Tie', unitPrice: 500, variants: [] });
+    const bogoRule = halfOffShirts({
+      id: 'promo_bogo2',
+      name: 'Buy 2 shirts get a tie',
+      type: 'BUY_X_GET_Y',
+      percentageOff: 100,
+      buyQuantity: 2,
+      getQuantity: 1,
+      items: [
+        { productId: 'p_shirt', role: 'BUY', quantity: 2 },
+        { productId: 'p_tie', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    expect(forgonePromotions([withDiscount(shirtP, 50), newCartItem(tieP)], [bogoRule])).toEqual(
+      [],
+    );
   });
 });

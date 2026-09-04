@@ -11,7 +11,7 @@ import {
   pricedByVariants,
   variantPriceLabel,
   variantSkuLabel,
-} from '@/lib/products/product-price-display';
+} from '@hardware-pos/shared';
 import { fetchProducts, type ManagedProduct } from '@/lib/products-api';
 import { formatMoney } from '@/lib/restaurant/labels';
 

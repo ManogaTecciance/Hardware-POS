@@ -39,7 +39,7 @@ import {
 import {
   variantPriceLabel,
   variantSkuLabel,
-} from '@/lib/products/product-price-display';
+} from '@hardware-pos/shared';
 import { cn, formatMoney } from '@/lib/utils';
 import { resolveImageUrl } from '@/lib/products-api';
 
