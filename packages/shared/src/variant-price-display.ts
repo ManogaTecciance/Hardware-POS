@@ -18,10 +18,22 @@
  * every variant product in the catalogue.
  *
  * Pure, and formatter-injected: the products list formats money as `Rs. 1,850.00`
- * (`@/lib/utils`) and the picker as `LKR 1,850.00` (`@/lib/restaurant/labels`).
- * Taking `money` as an argument keeps both screens rendering exactly the currency
- * style they render today — this change is about which NUMBER is shown, not how
- * it is formatted.
+ * (`@/lib/utils`), the picker as `LKR 1,850.00` (`@/lib/restaurant/labels`), and
+ * the CSV/PDF export as whatever `products-report.service` uses. Taking `money`
+ * as an argument keeps every caller rendering exactly the currency style it
+ * renders today — this is about which NUMBER is shown, not how it is formatted.
+ *
+ * ## Why it lives in `shared` and not in `apps/web`
+ *
+ * It started in `apps/web`, and 4.17 fixed the three screens that read it. The
+ * products EXPORT was a FOURTH caller of the same rule and was not touched, so
+ * `products-report.service` kept writing `Number(p.unitPrice)` and `p.sku` — every
+ * variant product exported as 0.00 with a blank SKU while the list beside it
+ * showed the range.
+ *
+ * Copying the rule into the API would have been two implementations of one
+ * decision, which is the shape D28 exists to prevent and the reason a fourth
+ * caller could drift in the first place. One function, four callers.
  */
 
 /** The subset of a product these helpers read. */

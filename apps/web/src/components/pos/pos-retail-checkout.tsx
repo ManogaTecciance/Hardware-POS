@@ -40,8 +40,8 @@ import { useAuth } from '@/lib/auth';
 import {
   computeCartLines,
   computeLine,
-  forgonePromotions,
   computeTotals,
+  forgonePromotions,
   linePrice,
   type CartLineKey,
   type LineDiscount,
@@ -377,7 +377,6 @@ export function PosRetailCheckout() {
     [cart.items, data.promotionRules],
   );
 
-  /** The promotion names the product; the catalogue names the product to a human. */
   /*
    * Open decision 3 (PO-confirmed) — a manual discount that displaced a LARGER
    * promotion. Warns; never blocks and never silently swaps to the better one.
@@ -389,6 +388,7 @@ export function PosRetailCheckout() {
     [cart.items, data.promotionRules],
   );
 
+  /** The promotion names the product; the catalogue names the product to a human. */
   const outstandingLabel = (productId: string) =>
     data.products.find((p) => p.id === productId)?.name ?? 'promotional item';
 
