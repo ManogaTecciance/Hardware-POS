@@ -61,18 +61,26 @@ export default function SaleDetailPage() {
   const [busy, setBusy] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
   const [payOpen, setPayOpen] = React.useState(false);
+  const loadedOnce = React.useRef(false);
 
   React.useEffect(() => {
     if (!session || !id) return;
     let cancelled = false;
-    setLoading(true);
+    // Only the FIRST load blanks the page. Recording a payment refetches through
+    // this same effect, and replacing the whole sale with "Loading sale…" for a
+    // moment is a poor way to show someone the row they just added.
+    if (!loadedOnce.current) setLoading(true);
     setError(null);
     fetchSale(session, id)
       .then((s) => !cancelled && setSale(s))
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load sale');
       })
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => {
+        if (cancelled) return;
+        loadedOnce.current = true;
+        setLoading(false);
+      });
     // Prior returns for the "Returns" section (best-effort; may be empty).
     fetchSaleReturns(session, id)
       .then((r) => !cancelled && setReturns(r))
@@ -273,36 +281,6 @@ export default function SaleDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Payments</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              {sale.payments.length === 0 ? (
-                <p className="text-muted-foreground">No payments recorded (credit sale).</p>
-              ) : (
-                sale.payments.map((p) => (
-                  <div key={p.id} className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-foreground">
-                        {paymentMethodLabel(p.method)}
-                        {p.reference ? (
-                          <span className="text-muted-foreground"> · {p.reference}</span>
-                        ) : null}
-                      </div>
-                      {/* Date and time both: two instalments on one day are only
-                          told apart by the time they came in. */}
-                      <div className="text-xs text-muted-foreground">
-                        {formatDateTime(p.createdAt)}
-                      </div>
-                    </div>
-                    <span className="whitespace-nowrap font-medium">{formatMoney(p.amount)}</span>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle>QuickBooks</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
@@ -326,6 +304,66 @@ export default function SaleDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* Payments received — full width under the items, because on a credit sale
+          this is a history to read across (when, how, how much), not a figure to
+          glance at. The Summary card keeps the totals. */}
+      <Card className="overflow-hidden">
+        <CardHeader>
+          <CardTitle>Payments received</CardTitle>
+        </CardHeader>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
+                <th className="px-4 py-3 font-medium">Date &amp; time</th>
+                <th className="px-4 py-3 font-medium">Method</th>
+                <th className="px-4 py-3 font-medium">Reference</th>
+                <th className="px-4 py-3 text-right font-medium">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sale.payments.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                    {sale.balanceAmount > 0
+                      ? 'Nothing received yet — this sale is entirely on credit.'
+                      : 'No payments recorded.'}
+                  </td>
+                </tr>
+              ) : (
+                sale.payments.map((p) => (
+                  <tr key={p.id} className="border-b border-border last:border-0">
+                    {/* Date and time both: two instalments on one day are only
+                        told apart by the time they came in. */}
+                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                      {formatDateTime(p.createdAt)}
+                    </td>
+                    <td className="px-4 py-3">{paymentMethodLabel(p.method)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{p.reference ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
+                      {formatMoney(p.amount)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            {sale.payments.length > 1 ? (
+              // Only earns its row once there is more than one payment to add up.
+              <tfoot>
+                <tr className="border-t border-border bg-muted/50">
+                  <td className="px-4 py-3 font-medium" colSpan={3}>
+                    Total received
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
+                    {formatMoney(sale.paidAmount)}
+                  </td>
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+        </div>
+      </Card>
 
       {/* Returns against this sale */}
       {returns.length > 0 ? (

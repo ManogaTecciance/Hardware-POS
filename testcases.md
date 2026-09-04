@@ -224,7 +224,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-038 | Credit unreadable does not block selling | Break /customers/{id}/credit (offline), take a credit sale | Non-blocking notice; Complete Payment still enabled; server enforces on completion | N | Not Run |
 | PAY-028 | Due date required in the POS | Choose Credit/Partial at checkout, leave the due date blank | Complete Payment stays disabled and names the missing due date | N | Not Run |
 | PAY-029 | Due date field hidden on a fully paid sale | Choose Cash for the full amount | No due-date field shown; none sent | P | Not Run |
-| PAY-030 | Record payment from the sale detail | Sale detail → Record payment, amount/method/reference | Payment listed with date and time; balance and status update | P | Not Run |
+| PAY-030 | Record payment from the sale detail | Sale detail → Record payment, amount/method/reference | New row appears in the Payments received table with its date and time; balance and status update in place, without the page blanking to "Loading sale…" | P | Not Run |
+| PAY-039 | Payment history is a full-width table under the items | Open a credit sale that has instalments | "Payments received" table sits below the item table with Date & time / Method / Reference / Amount, one row per instalment, and a Total received row once there is more than one | P | Not Run |
+| PAY-040 | Payment history states an unpaid credit sale | Open a credit sale with nothing received | Table shows "Nothing received yet — this sale is entirely on credit." | P | Not Run |
 | PAY-031 | Payment method printed on the bill | Open the A4 bill for a card sale, then for a credit sale | "Method: Card"; a sale taken on credit reads "Credit"; a part payment reads "Cash, Credit"; the due date is printed | P | Not Run |
 | PAY-032 | Bill updates to the real method once settled | Record a bank transfer settling a credit sale, reprint the A4 bill | Method now reads "Bank transfer" — Credit is gone | P | Not Run |
 | PAY-033 | Thermal receipt states credit too | Print the thermal receipt for a part-paid credit sale | Payment lines read "Cash <paid>" and "Credit <balance>", labelled not raw codes | P | Not Run |
@@ -544,12 +546,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
 | POS | 38 | SET | 19 |
-| PAY | 39 | DOC | 11 |
+| PAY | 41 | DOC | 11 |
 | SALE | 27 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 397 test cases** (≈60% positive / 40% negative).
+**Total: 399 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
