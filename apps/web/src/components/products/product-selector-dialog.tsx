@@ -7,6 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { type Session } from '@/lib/auth';
+import {
+  pricedByVariants,
+  variantPriceLabel,
+  variantSkuLabel,
+} from '@/lib/products/product-price-display';
 import { fetchProducts, type ManagedProduct } from '@/lib/products-api';
 import { formatMoney } from '@/lib/restaurant/labels';
 
@@ -14,6 +19,15 @@ interface Props {
   session: Session;
   onSelect: (product: ManagedProduct) => void;
   onBack: () => void;
+  /**
+   * Dialog copy. Defaults to the menu-admin wording this component shipped
+   * with, so `step-restaurant-additions.tsx` renders exactly as before; the
+   * promotion editor passes its own, because "surface on this menu ... menu
+   * name and menu price are set on the next step" is nonsense on a retail
+   * promotion screen, where nothing is a menu and no next step sets a price.
+   */
+  title?: string;
+  description?: string;
 }
 
 /**
@@ -35,7 +49,13 @@ interface Props {
  * that does not clear the last result set — the operator can retry without
  * losing context.
  */
-export function ProductSelectorDialog({ session, onSelect, onBack }: Props) {
+export function ProductSelectorDialog({
+  session,
+  onSelect,
+  onBack,
+  title = 'Link an existing product',
+  description = 'Pick an inventory product to surface on this menu. The product stays the inventory authority — menu name and menu price are set on the next step.',
+}: Props) {
   const [q, setQ] = React.useState('');
   const [rows, setRows] = React.useState<ManagedProduct[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -73,8 +93,8 @@ export function ProductSelectorDialog({ session, onSelect, onBack }: Props) {
     <Dialog
       open
       onClose={onBack}
-      title="Link an existing product"
-      description="Pick an inventory product to surface on this menu. The product stays the inventory authority — menu name and menu price are set on the next step."
+      title={title}
+      description={description}
       footer={
         <Button variant="ghost" onClick={onBack}>
           Back
@@ -131,7 +151,7 @@ export function ProductSelectorDialog({ session, onSelect, onBack }: Props) {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold">{p.name}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      SKU {p.sku ?? '—'}
+                      SKU {variantSkuLabel(p)}
                       {p.type === 'Inventory'
                         ? ` · Stock ${p.quantityOnHand}`
                         : ` · ${p.type}`}
@@ -139,9 +159,12 @@ export function ProductSelectorDialog({ session, onSelect, onBack }: Props) {
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-semibold text-primary">
-                      {formatMoney(p.unitPrice)}
+                      {variantPriceLabel(p, formatMoney)}
                     </p>
-                    <p className="text-xs text-muted-foreground">Base price</p>
+                    <p className="text-xs text-muted-foreground">
+                      {/* "Base price" is a single figure; a span is not one. */}
+                      {pricedByVariants(p) ? 'Variant prices' : 'Base price'}
+                    </p>
                   </div>
                 </button>
               </li>

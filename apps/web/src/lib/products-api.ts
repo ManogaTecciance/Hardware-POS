@@ -58,6 +58,21 @@ export interface ManagedProduct {
    */
   averageCost: number | null;
   /**
+   * D44 — active variants, and the span of their prices.
+   *
+   * Once `hasVariants` is true the parent `unitPrice` and `sku` are legacy
+   * fallbacks the schema says are "not read": the variant rows own them. Screens
+   * that showed `unitPrice` were therefore rendering Rs 0.00 against every
+   * variant product. Read these instead — see `variantPriceLabel`.
+   *
+   * `variantCount` is 0 and both bounds are null for a legacy single-SKU product.
+   * Optional so a response predating the aggregate degrades to the old reading
+   * rather than to `undefined` arithmetic.
+   */
+  variantCount?: number;
+  variantPriceMin?: number | null;
+  variantPriceMax?: number | null;
+  /**
    * D64 — domain attributes, keyed per the tenant descriptor's attribute
    * schema (`GET /products/attribute-schema`). `{}` for every tenant whose
    * domain declares none.

@@ -21,6 +21,20 @@ import { QueryProductsDto } from './dto/query-products.dto';
 import { SearchProductsDto } from './dto/search-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 
+/**
+ * A product row widened with the facts a variant product's price and SKU
+ * actually live on (D44). `Product` remains structurally a subset, so every
+ * existing consumer of the list endpoints keeps compiling and reading the same
+ * fields.
+ */
+export type ManagedProductView = Product & {
+  /** Active variants. 0 for a legacy single-SKU product. */
+  variantCount: number;
+  /** Cheapest / dearest active variant. Null when there are no variants. */
+  variantPriceMin: number | null;
+  variantPriceMax: number | null;
+};
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -31,7 +45,7 @@ export class ProductsService {
     private readonly attributes: ProductAttributesService,
   ) {}
 
-  async list(tenantId: string, query: QueryProductsDto): Promise<Paginated<Product>> {
+  async list(tenantId: string, query: QueryProductsDto): Promise<Paginated<ManagedProductView>> {
     const [items, total] = await this.productsRepository.listManaged(
       tenantId,
       {
@@ -46,10 +60,10 @@ export class ProductsService {
       query.skip,
       query.take,
     );
-    return paginate(items, total, query.page, query.pageSize);
+    return paginate(await this.withVariantPrices(tenantId, items), total, query.page, query.pageSize);
   }
 
-  async search(tenantId: string, query: SearchProductsDto): Promise<Paginated<Product>> {
+  async search(tenantId: string, query: SearchProductsDto): Promise<Paginated<ManagedProductView>> {
     const [items, total] = await this.productsRepository.advancedSearch(
       tenantId,
       {
@@ -62,7 +76,36 @@ export class ProductsService {
       query.skip,
       query.take,
     );
-    return paginate(items, total, query.page, query.pageSize);
+    return paginate(await this.withVariantPrices(tenantId, items), total, query.page, query.pageSize);
+  }
+
+  /**
+   * Widen a page of products with their active-variant count and price span.
+   *
+   * Purely additive: `unitPrice` and `sku` keep the exact values they had, so a
+   * consumer that never learned about these fields behaves as before. Screens
+   * that show a price for a VARIANT product read the span instead, because D44
+   * makes the parent-level columns meaningless there.
+   *
+   * Variant-less products get `count: 0` and null bounds rather than a span
+   * equal to their own price — "no variants" and "one variant priced the same"
+   * are different facts, and a caller must be able to tell them apart.
+   */
+  private async withVariantPrices(
+    tenantId: string,
+    items: Product[],
+  ): Promise<ManagedProductView[]> {
+    const variantIds = items.filter((p) => p.hasVariants).map((p) => p.id);
+    const summary = await this.productsRepository.variantPriceSummary(tenantId, variantIds);
+    return items.map((p) => {
+      const s = summary.get(p.id);
+      return {
+        ...p,
+        variantCount: s?.count ?? 0,
+        variantPriceMin: s?.min ?? null,
+        variantPriceMax: s?.max ?? null,
+      };
+    });
   }
 
   async getById(tenantId: string, id: string): Promise<Product> {

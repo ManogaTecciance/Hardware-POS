@@ -36,6 +36,10 @@ import {
   type ProductSyncStatus,
   type ReportFormat,
 } from '@/lib/products-api';
+import {
+  variantPriceLabel,
+  variantSkuLabel,
+} from '@/lib/products/product-price-display';
 import { cn, formatMoney } from '@/lib/utils';
 import { resolveImageUrl } from '@/lib/products-api';
 
@@ -408,8 +412,10 @@ export default function ProductsPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{p.sku ?? '—'}</td>
-                    <td className="px-4 py-3 text-right font-medium">{formatMoney(p.unitPrice)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{variantSkuLabel(p)}</td>
+                    <td className="px-4 py-3 text-right font-medium">
+                      {variantPriceLabel(p, formatMoney)}
+                    </td>
                     {screen.showStockControls ? (
                       <td className="px-4 py-3 text-right">
                         {p.type === 'Inventory' ? (

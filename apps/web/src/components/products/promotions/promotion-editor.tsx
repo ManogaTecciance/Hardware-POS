@@ -855,6 +855,8 @@ export function PromotionEditor({
           session={session}
           onSelect={addProduct}
           onBack={() => setProductPickerOpen(false)}
+          title="Add a product to this promotion"
+          description="Pick the product this promotion applies to. Its role and quantity are set on the row once it is added."
         />
       ) : null}
 
