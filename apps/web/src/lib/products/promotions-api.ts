@@ -102,6 +102,12 @@ export interface Promotion {
 interface ApiPromotionItem {
   id: string;
   productId: string;
+  /**
+   * 4.10 — joined by the server so the editor never renders a cuid. Declared
+   * here because the wire shape is what `toItem` is allowed to read: leaving it
+   * out silently dropped the name even though every other layer carried it.
+   */
+  productName?: string | null;
   role: PromotionItemRole;
   quantity: string | number;
 }
@@ -139,6 +145,11 @@ function toItem(i: ApiPromotionItem): PromotionItem {
   return {
     id: i.id,
     productId: i.productId,
+    // `productName` is optional on both sides, so omitting it here type-checked
+    // cleanly while throwing the server's join away — the edit screen fell back
+    // to the raw cuid. Null (product deleted) is preserved as null; a response
+    // predating the join stays undefined.
+    productName: i.productName,
     role: i.role,
     quantity: Number(i.quantity),
   };
