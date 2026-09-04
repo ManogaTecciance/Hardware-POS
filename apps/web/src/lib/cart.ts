@@ -127,6 +127,40 @@ export function computeLine(item: CartItem): LineTotals {
   };
 }
 
+/**
+ * Which variant the till gives away when a promotion rewards a product (4.12).
+ *
+ * `isDefault` (D46) wins when a shop has set one — but only **3 of 48** variants
+ * carry it in practice, and neither product in the reported case did. 4.11
+ * refused to auto-add without one, which meant the feature declined on almost
+ * every real catalogue: the cart showed "add a Tie to claim it" instead of the
+ * free tie.
+ *
+ * Falling back to the CHEAPEST in-stock variant, ties broken by id so two tills
+ * pick the same one. Cheapest matches the policy already settled for which UNIT
+ * is freed (open decision 14, resolved: cheapest-first) — the shop gives away
+ * the least valuable qualifying item, and the cashier can swap it because the
+ * line is badged and removable.
+ *
+ * Returns `null` when every variant is out of stock, so the caller can say so
+ * rather than adding something unsellable.
+ */
+export function chooseRewardVariant(product: ClientProduct): ClientVariant | null {
+  if (product.variants.length === 0) return null;
+
+  // UNTRACKED means the tenant tracks no stock, which is availability, not zero.
+  const inStock = product.variants.filter(
+    (v) => v.stockState === 'UNTRACKED' || (v.quantityOnHand ?? 0) > 0,
+  );
+  if (inStock.length === 0) return null;
+
+  return (
+    inStock.find((v) => v.isDefault) ??
+    [...inStock].sort((a, b) => a.unitPrice - b.unitPrice || a.id.localeCompare(b.id))[0] ??
+    null
+  );
+}
+
 /** One cart line, priced — including whatever promotion claimed it. */
 export interface CartLineTotals extends LineTotals {
   lineKey: string;

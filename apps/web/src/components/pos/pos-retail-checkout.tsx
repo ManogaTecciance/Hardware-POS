@@ -38,6 +38,7 @@ import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
 import { useAuth } from '@/lib/auth';
 import {
+  chooseRewardVariant,
   computeCartLines,
   computeLine,
   computeTotals,
@@ -369,9 +370,12 @@ export function PosRetailCheckout() {
 
       let variant: ClientVariant | null = null;
       if (product.variants.length > 0) {
-        variant = product.variants.find((v) => v.isDefault) ?? null;
+        // 4.12 — `isDefault` when a shop set one, cheapest in-stock otherwise.
+        // Requiring a default meant refusing on almost every real catalogue:
+        // only 3 of 48 variants carry the flag.
+        variant = chooseRewardVariant(product);
         if (!variant) {
-          hint = `${reward.promotionName}: add a ${product.name} to claim it.`;
+          hint = `${reward.promotionName}: ${product.name} is out of stock.`;
           continue;
         }
       }

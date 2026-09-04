@@ -4,6 +4,7 @@ import { taxableBase, type PromotionRule } from '@hardware-pos/shared';
 
 import {
   cartLineKey,
+  chooseRewardVariant,
   computeCartLines,
   computeLine,
   computeTotals,
@@ -501,5 +502,87 @@ describe('promotions on the till (4.4)', () => {
     expect(withNone.totalDiscount).toBe(0);
     expect(withNone.taxAmount).toBe(450);
     expect(withNone.total).toBe(2950);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4.12 — which variant the till gives away
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('chooseRewardVariant', () => {
+  const v = (over: Partial<ClientVariant> & { id: string }): ClientVariant => ({
+    sku: over.id,
+    barcode: null,
+    name: over.id,
+    unitPrice: 100,
+    isDefault: false,
+    quantityOnHand: 5,
+    stockState: 'IN_STOCK',
+    ...over,
+  });
+
+  it('honours isDefault when a shop has set one', () => {
+    const p = product({
+      variants: [v({ id: 'cheap', unitPrice: 100 }), v({ id: 'chosen', unitPrice: 900, isDefault: true })],
+    });
+
+    // The shop's own choice beats the price rule (D46).
+    expect(chooseRewardVariant(p)?.id).toBe('chosen');
+  });
+
+  it('falls back to the CHEAPEST in-stock variant — the reported case', () => {
+    /*
+     * 4.11 required `isDefault` and refused without it, so the cart showed
+     * "add a Tie to claim it" instead of the free tie. Only 3 of 48 variants in
+     * the real catalogue carry the flag, and neither product in the report did.
+     *
+     * Cheapest matches the policy already settled for which UNIT is freed
+     * (decision 14, cheapest-first).
+     */
+    const p = product({
+      variants: [v({ id: 'b', unitPrice: 900 }), v({ id: 'a', unitPrice: 300 })],
+    });
+
+    expect(chooseRewardVariant(p)?.id).toBe('a');
+  });
+
+  it('skips variants with no stock, and says nothing when none are left', () => {
+    const someOut = product({
+      variants: [
+        v({ id: 'gone', unitPrice: 100, quantityOnHand: 0, stockState: 'OUT' }),
+        v({ id: 'here', unitPrice: 900 }),
+      ],
+    });
+    // POSITIVE: the dearer one is taken because the cheap one cannot be given.
+    expect(chooseRewardVariant(someOut)?.id).toBe('here');
+
+    // NEGATIVE: nothing at all when the whole product is out — the caller says
+    // so rather than adding a line that cannot be fulfilled.
+    const allOut = product({
+      variants: [v({ id: 'x', quantityOnHand: 0, stockState: 'OUT' })],
+    });
+    expect(chooseRewardVariant(allOut)).toBeNull();
+  });
+
+  it('treats UNTRACKED as available, not as zero', () => {
+    // A tenant that tracks no stock has `quantityOnHand: null`; refusing there
+    // would disable the reward for every non-stocked catalogue.
+    const p = product({
+      variants: [v({ id: 'u', quantityOnHand: null, stockState: 'UNTRACKED' })],
+    });
+
+    expect(chooseRewardVariant(p)?.id).toBe('u');
+  });
+
+  it('is deterministic when two variants cost the same', () => {
+    // Two tills must give away the same one, so equal prices break by id.
+    const p = product({ variants: [v({ id: 'zeta' }), v({ id: 'alpha' })] });
+
+    expect(chooseRewardVariant(p)?.id).toBe('alpha');
+    expect(chooseRewardVariant(p)?.id).toBe(chooseRewardVariant(p)?.id);
+  });
+
+  it('returns null for a product with no variants — the caller adds it plain', () => {
+    expect(chooseRewardVariant(product({ variants: [] }))).toBeNull();
   });
 });
