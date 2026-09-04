@@ -17,4 +17,9 @@ export class QueryCustomersDto extends PaginationQueryDto {
   @IsIn(['true', 'false'])
   @IsOptional()
   isActive?: string;
+
+  /** Only customers who currently owe money — the dashboard receivables card links here. */
+  @IsIn(['true'])
+  @IsOptional()
+  hasOutstandingCredit?: string;
 }

@@ -68,9 +68,27 @@ or **Rejected** and add comments. Nothing here requires technical knowledge.
 
 **Accept?** ☐ Yes ☐ No — Comments: ____________________
 
+### Scenario 7a — Selling on credit and collecting later
+- When a customer takes goods without paying in full, the till **asks when payment is due** and
+  will not complete the sale until it is given.
+- The **bill shows** how the customer paid (cash, card, …) and when the balance falls due.
+- The customers list shows each customer's **available credit** — their limit less what they owe.
+  A customer with no limit set shows nothing there, not zero.
+- When the customer pays, staff record it from the sale: **amount, method, reference**. Paying in
+  instalments is fine — each payment is listed with its own date and time.
+- Once the balance reaches zero the sale reads **Paid**, and the customer's available credit is
+  free to use again.
+- The sales list can be filtered to **overdue** payments, and shows when each customer last paid.
+- The dashboard shows the **total owed to the shop**, and clicking it lists exactly who owes it.
+
+**Accept?** ☐ Yes ☐ No — Comments: ____________________
+
 ### Scenario 8 — Sales flow into QuickBooks automatically
 - A **fully paid** sale appears in QuickBooks as a **Sales Receipt**.
 - A **credit / partial** sale appears as an **Invoice**, and any amount paid shows as a **Payment** against that invoice.
+- That Invoice carries the **due date agreed at the till**, so QuickBooks ages the debt correctly.
+- Note: a payment **recorded later** in the POS does not yet reach QuickBooks — the accountant
+  still applies it there.
 - The figures in QuickBooks match the POS. No duplicates are created.
 
 **Accept?** ☐ Yes ☐ No — Comments: ____________________

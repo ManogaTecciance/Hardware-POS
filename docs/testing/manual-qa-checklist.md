@@ -79,6 +79,23 @@ Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · 
 - [ ] Sale is recorded as **credit/partial** (Invoice type); balance visible in `/sales`.
 - [ ] Attempt a partial/credit sale **without** a customer → blocked with a clear message.
 
+## 10a. Payment due date & settlement
+- [ ] Choosing **Credit** or **Partial** reveals a required **Payment due date**; Complete Payment
+      stays disabled until it is set, and says so.
+- [ ] Switching back to a **full** payment hides the field, and the sale completes without one.
+- [ ] A due date **earlier than the invoice date** is refused (try it on a backdated sale).
+- [ ] The sales list shows the **Due** date for that sale and "—" for a fully paid one.
+- [ ] The **Overdue** filter lists only sales past due that still owe; exporting from the filtered
+      view covers the same sales.
+- [ ] Sale detail → **Record payment**: part-pay, then pay the rest. Each payment is listed with its
+      own date and time; status goes PARTIAL → PAID; the balance reaches zero.
+- [ ] Paying **more** than the balance is refused.
+- [ ] The customer's **Available credit** on /customers rises by what was settled.
+- [ ] The dashboard's **Credit Receivable** card falls by the same amount and, clicked, opens the
+      customers list filtered to those who still owe.
+- [ ] The A4 bill shows the **payment method** used (and "On credit" when nothing has been paid),
+      plus the **Payment due** date.
+
 ## 11. Receipt print
 - [ ] Customer receipt renders with lines, discounts, totals, paid/balance; browser **Print** works.
 - [ ] A sale containing a **warehouse-pickup** product also produces a **warehouse picking copy** (pickup items only).

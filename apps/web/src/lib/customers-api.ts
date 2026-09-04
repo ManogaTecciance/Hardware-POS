@@ -21,6 +21,10 @@ export const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
 export interface ManagedCustomer {
   id: string;
   name: string;
+  /** List responses only: unpaid balance across this customer's unsettled sales. */
+  outstandingCredit?: number;
+  /** List responses only: credit limit less what is owed. Null when no limit is set. */
+  availableCredit?: number | null;
   company: string | null;
   /** QuickBooks' free-text customer type taxonomy (e.g. "Wholesale Trade"). */
   qbCustomerType: string | null;
@@ -60,6 +64,8 @@ export interface CustomersQuery {
   search?: string;
   customerType?: CustomerType;
   isActive?: 'true' | 'false';
+  /** Only customers who currently owe money — the dashboard receivables card links here. */
+  hasOutstandingCredit?: 'true';
 }
 
 export interface CustomerInput {
@@ -86,9 +92,14 @@ export interface CustomerInput {
 }
 
 /** Raw JSON — Prisma Decimals may arrive as strings. */
-type ApiCustomer = Omit<ManagedCustomer, 'creditLimit' | 'openingBalance'> & {
+type ApiCustomer = Omit<
+  ManagedCustomer,
+  'creditLimit' | 'openingBalance' | 'outstandingCredit' | 'availableCredit'
+> & {
   creditLimit: string | number | null;
   openingBalance: string | number | null;
+  outstandingCredit?: string | number | null;
+  availableCredit?: string | number | null;
 };
 
 function auth(session: Session): { token: string; tenantId: string } {
@@ -124,6 +135,12 @@ function toManaged(c: ApiCustomer): ManagedCustomer {
     ...c,
     creditLimit: c.creditLimit != null ? Number(c.creditLimit) : null,
     openingBalance: c.openingBalance != null ? Number(c.openingBalance) : null,
+    outstandingCredit: c.outstandingCredit != null ? Number(c.outstandingCredit) : undefined,
+    // Null is meaningful here — "no limit set" — so it must survive the coercion
+    // rather than collapsing into undefined alongside "the detail endpoint does
+    // not send this field at all".
+    availableCredit:
+      c.availableCredit === undefined ? undefined : c.availableCredit === null ? null : Number(c.availableCredit),
   };
 }
 
@@ -133,6 +150,7 @@ function buildQuery(q: CustomersQuery): string {
   params.set('pageSize', String(q.pageSize ?? 25));
   if (q.search) params.set('search', q.search);
   if (q.customerType) params.set('customerType', q.customerType);
+  if (q.hasOutstandingCredit) params.set('hasOutstandingCredit', q.hasOutstandingCredit);
   if (q.isActive) params.set('isActive', q.isActive);
   return params.toString();
 }

@@ -160,6 +160,17 @@ All product/category read routes require `product:read`; every role has it.
 ```
 GET /v1/customers?query=acme
 200 → { "data": { "items": [ { "id", "qboId", "name", "email", "phone" } ], ... } }
+
+GET /v1/customers?page=1&pageSize=20&hasOutstandingCredit=true
+200 → paginated customers, each row carrying its credit position:
+      { ..., "creditLimit", "outstandingCredit", "availableCredit" }
+# outstandingCredit: unpaid balance summed across the customer's COMPLETED,
+#   unsettled sales — the same figure the credit-limit guard enforces against.
+# availableCredit: creditLimit − outstandingCredit, or **null** when no limit is
+#   configured. Null is not zero: "no limit set" and "no credit left" are
+#   different answers and clients must not conflate them.
+# hasOutstandingCredit=true: only customers who currently owe something (the
+#   dashboard's receivable card deep-links here).
 ```
 
 ## Sales
@@ -177,12 +188,13 @@ body: { "branchId", "registerId?", "customerId?",
 200 → { "data": <sale with items, status DRAFT, syncStatus NOT_SYNCED> }
 
 POST /v1/sales/complete                # complete a draft (saleId) OR a full cart in one shot
-body (draft):    { "saleId", "customerId?", "saleDate?", "payments": [ { "method", "amount", "reference?" } ] }
-body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "items": [ ... ], "payments": [ ... ] }
+body (draft):    { "saleId", "customerId?", "saleDate?", "paymentDueDate?", "payments": [ { "method", "amount", "reference?" } ] }
+body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "paymentDueDate?", "items": [ ... ], "payments": [ ... ] }
 201 → { "data": <sale status COMPLETED, paymentStatus, quickbooksDocumentType, syncStatus PENDING> }
 400 → validation error (empty cart, price changed, insufficient stock,
        unapproved high discount, credit/partial sale without a customer,
-       or a sale date in the future)
+       a sale date in the future, a missing payment due date on a sale that
+       leaves a balance, or a payment due date on a fully paid sale)
 
 # saleDate: the invoice date, as a YYYY-MM-DD calendar date. Omitted = now. It is
 #   interpreted in the SERVER's timezone and stored as the sale's `completedAt`, which
@@ -194,9 +206,21 @@ body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "items
 #   items, payments → enqueue an outbound QuickBooks sync job.
 # Transaction type: paidAmount >= total → SALES_RECEIPT; otherwise INVOICE (customer required).
 # Payments: full, partial, or none (full credit) are all supported.
+# paymentDueDate: when the balance is expected, as a YYYY-MM-DD calendar date.
+#   REQUIRED whenever the payments leave a balance, and REJECTED on a fully paid
+#   sale, which owes nothing. It may not fall before the invoice date (a backdated
+#   sale may therefore be recorded already overdue). Interpreted in the shop's
+#   timezone and stored as the end of that day; pushed to QuickBooks as the
+#   Invoice `DueDate`.
 
 GET  /v1/sales?page=1&pageSize=25&syncStatus=FAILED
 200 → paginated sales history (syncStatus per sale)
+# Filters: search, paymentStatus, syncStatus, dateFrom, dateTo, overdue=true.
+#   overdue=true keeps only COMPLETED sales whose paymentDueDate has passed and
+#   which still owe money. GET /v1/sales/report accepts the same filters, so an
+#   export always covers exactly the sales the screen was showing.
+# Each row carries `paymentDueDate` (null when nothing is owed) and
+#   `lastPaymentAt` (when money was last received against the sale, null if never).
 
 GET  /v1/sales/{id}
 200 → full sale with items, payments, customer
@@ -206,6 +230,36 @@ POST /v1/sales/{id}/sync               # push the sale to QuickBooks (mock for n
       the sync job closes and a SyncLog entry is written
 400 → sale is not COMPLETED
 ```
+
+## Payments received
+
+Recording money received against a credit sale, after the sale itself is closed. Requires
+`payment:create`.
+
+```
+POST /v1/payments
+body: { "saleId", "method", "amount", "reference?" }
+201 → { "data": <the new Payment> }
+400 → amount ≤ 0, amount greater than the outstanding balance, the sale is already
+       fully paid, or the sale is not COMPLETED
+404 → no such sale in this tenant
+
+GET  /v1/payments?saleId={id}          # payments against one sale, oldest first
+GET  /v1/payments/{id}
+```
+
+Each call creates its **own** payment row, so a customer settling in instalments leaves a
+trail rather than one overwritten figure; every row keeps its method, optional reference,
+who took it, and when. The sale's `paidAmount`, `balanceAmount` and `paymentStatus` move in
+the same transaction — `PAID` once the balance reaches zero, `PARTIAL` while any remains —
+and the balance is re-read **inside** that transaction, so two tills settling the same sale
+at once cannot between them overpay it.
+
+The customer's available credit needs no separate update: it is derived from the balances of
+unsettled sales, so settling one releases the headroom automatically.
+
+> `TODO(accountant)`: the payment is not yet pushed to QuickBooks against the original
+> invoice, so QuickBooks still shows that invoice unpaid after the customer has settled.
 
 ## Receipts & print jobs
 
@@ -316,7 +370,9 @@ created and linked to that invoice. The `CustomerRef` on each document is resolv
 existing one of the same name adopted) and the id stored, so a credit sale for a customer added at
 the till syncs without manual linking. Both the document and its linked Payment carry a `TxnDate`
 equal to the sale's invoice date (a bare `YYYY-MM-DD` in server-local time), so a backdated POS
-sale is filed in QuickBooks on the day it happened rather than the day it was keyed in.
+sale is filed in QuickBooks on the day it happened rather than the day it was keyed in. An
+Invoice additionally carries a `DueDate` taken from the sale's `paymentDueDate`, so the terms
+agreed at the till are the terms QuickBooks ages the receivable against.
 Sale line items reference their `quickbooksItemId` when the
 product has been synced. Product-wise discounts are baked into each line's net amount (QuickBooks
 has no per-line discount field) and noted in the line description — see the `TODO(accountant)`

@@ -191,7 +191,7 @@ export class DashboardRepository {
     // trades, not where the server happens to run.
     const { from: startOfToday, to: endOfToday } = lastNDaysInTimeZone(1, tz);
 
-    const [todayAgg, productsCached, pendingSyncs, inventoryRows] = await Promise.all([
+    const [todayAgg, productsCached, pendingSyncs, receivableAgg, inventoryRows] = await Promise.all([
       this.prisma.sale.aggregate({
         where: {
           tenantId,
@@ -204,6 +204,12 @@ export class DashboardRepository {
       this.prisma.product.count({ where: { tenantId, isActive: true } }),
       this.prisma.sale.count({
         where: { tenantId, status: 'COMPLETED', syncStatus: { not: 'SYNCED' } },
+      }),
+      // Receivable is a running balance, deliberately unbounded by the day
+      // window above: money owed does not stop being owed at midnight.
+      this.prisma.sale.aggregate({
+        where: { tenantId, status: 'COMPLETED', paymentStatus: { in: ['UNPAID', 'PARTIAL'] } },
+        _sum: { balanceAmount: true },
       }),
       // Column-by-column product of qty × cost needs raw SQL (no aggregate for it).
       // Items without a cost price contribute nothing rather than a fake value.
@@ -220,6 +226,7 @@ export class DashboardRepository {
       todayTransactions: todayAgg._count._all,
       productsCached,
       pendingSyncs,
+      outstandingReceivable: Number(receivableAgg._sum.balanceAmount ?? 0),
       inventoryValue: Number(inventoryRows[0]?.value ?? 0),
       stockedProducts: Number(inventoryRows[0]?.stocked ?? 0),
     };

@@ -140,6 +140,39 @@ Unit: payment-status derivation in `SalesService.complete`.
 | U-10-3 | Invoice needs customer | INVOICE without `customerId` → `BadRequestException`. |
 | U-10-4 | Split payments | Multiple payment lines sum correctly to `paidAmount`. |
 
+## 10a. Payment due date
+
+Unit: `resolvePaymentDueDate` (`apps/api/src/modules/sales/sale-date.ts`), covered by
+`sale-date.spec.ts`.
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| U-10a-1 | Balance left, date given | Returns the end of that day in the shop's timezone. |
+| U-10a-2 | Balance left, no date | `BadRequestException` — a credit sale must say when it is due. |
+| U-10a-3 | Fully paid, date given | `BadRequestException` — nothing is outstanding to be due. |
+| U-10a-4 | Fully paid, no date | `null`. |
+| U-10a-5 | Malformed date | `BadRequestException` (must be `YYYY-MM-DD`). |
+| U-10a-6 | Due before the invoice date | Rejected; compared as calendar days in the shop's zone. |
+| U-10a-7 | Due **on** the invoice date | Allowed — payment may fall due the same day. |
+| U-10a-8 | Backdated sale, past due date | Allowed; the sale is simply already overdue. |
+
+## 10b. Recording a payment received
+
+Unit: `PaymentsRepository.recordAgainstSale`, covered by `payments.repository.spec.ts`.
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| U-10b-1 | Part payment | Balance reduces; `paymentStatus=PARTIAL`; a new Payment row. |
+| U-10b-2 | Final payment | Balance 0; `PAID`. |
+| U-10b-3 | Instalments | Three payments accumulate; three rows kept, none overwritten. |
+| U-10b-4 | Over the balance | `BadRequestException`; no payment row created. |
+| U-10b-5 | Exactly the balance | Allowed. |
+| U-10b-6 | Already settled sale | `BadRequestException`. |
+| U-10b-7 | Draft sale | `BadRequestException` — payments need a completed sale. |
+| U-10b-8 | Unknown sale for this tenant | `NotFoundException`. |
+| U-10b-9 | Concurrent settlement | Balance re-read **inside** the transaction, so two tills cannot overpay. |
+| U-10b-10 | Cent-exact arithmetic | Repeated instalments leave no floating-point drift. |
+
 ## 11. Receipt generation
 
 Units: receipt HTML builder + warehouse-pickup detection.

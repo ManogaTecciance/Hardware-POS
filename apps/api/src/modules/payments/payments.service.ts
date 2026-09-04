@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, NotImplementedException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Payment } from '@hardware-pos/database';
 
+import { AuthenticatedUser } from '../auth/auth.types';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentsRepository } from './payments.repository';
 
@@ -21,11 +22,28 @@ export class PaymentsService {
   }
 
   /**
-   * Record a payment against a sale.
-   * TODO: validate the sale, update its paid/balance amounts and payment status,
-   * then enqueue a QuickBooks Payment sync for credit/invoice sales.
+   * Record a payment received against a credit sale.
+   *
+   * The sale's paid/balance amounts and payment status move with it, in the same
+   * transaction — see `PaymentsRepository.recordAgainstSale`. A customer's
+   * available credit needs no separate update: it is derived from the balances of
+   * unsettled sales, so reducing one releases the credit automatically.
+   *
+   * TODO(accountant): push the payment to QuickBooks against the original
+   * invoice. Until then QuickBooks continues to show the invoice as unpaid after
+   * the customer has settled with the shop.
    */
-  create(_tenantId: string, _dto: CreatePaymentDto): Promise<Payment> {
-    throw new NotImplementedException('Payment creation is not implemented yet');
+  async create(tenantId: string, actor: AuthenticatedUser, dto: CreatePaymentDto): Promise<Payment> {
+    if (dto.amount <= 0) {
+      throw new BadRequestException('A payment must be greater than zero');
+    }
+    return this.paymentsRepository.recordAgainstSale({
+      tenantId,
+      saleId: dto.saleId,
+      receivedByUserId: actor.id,
+      amount: dto.amount,
+      method: dto.method,
+      reference: dto.reference,
+    });
   }
 }

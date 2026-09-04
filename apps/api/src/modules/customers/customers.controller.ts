@@ -26,7 +26,7 @@ import {
   type ImportCommitSummary,
   type ParsedCustomerRow,
 } from './customers-import.service';
-import { CustomersService } from './customers.service';
+import { CustomersService, type CustomerListItem } from './customers.service';
 import { CommitCustomerImportDto } from './dto/commit-import.dto';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { QueryCustomersDto } from './dto/query-customers.dto';
@@ -46,7 +46,10 @@ export class CustomersController {
 
   @Get()
   @RequirePermissions(Permission.CUSTOMER_READ)
-  list(@TenantId() tenantId: string, @Query() query: QueryCustomersDto): Promise<Paginated<Customer>> {
+  list(
+    @TenantId() tenantId: string,
+    @Query() query: QueryCustomersDto,
+  ): Promise<Paginated<CustomerListItem>> {
     return this.customersService.list(tenantId, query);
   }
 

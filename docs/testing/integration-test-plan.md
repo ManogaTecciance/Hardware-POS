@@ -120,6 +120,30 @@ The cart is client-side; the server equivalent is a **draft** sale.
 | I-10-3 | INVOICE without customer | 400. |
 | I-10-4 | Split payment lines | `paidAmount` = Σ lines; each `Payment` persisted. |
 
+## 10a. Credit management (due dates, settlement, receivables)
+
+Automated end-to-end in `apps/e2e/tests/credit-management.spec.ts`.
+
+| ID | Request | Expected |
+| --- | --- | --- |
+| I-10a-1 | Complete leaving a balance, no `paymentDueDate` | 400, message names the due date. |
+| I-10a-2 | Complete fully paid **with** a `paymentDueDate` | 400. |
+| I-10a-3 | Complete on credit with a due date | 201; `GET /sales/{id}` returns it. |
+| I-10a-4 | Due date before the invoice date | 400. |
+| I-10a-5 | `GET /sales?overdue=true` | Only COMPLETED sales past due and still owing. |
+| I-10a-6 | Settle an overdue sale, re-query | The sale drops out of the overdue filter. |
+| I-10a-7 | `POST /payments` part, then the rest | `PARTIAL` → `PAID`; balance reaches 0. |
+| I-10a-8 | Two instalments | Two `Payment` rows, each with its own `createdAt`, method and reference. |
+| I-10a-9 | Payment over the balance | 400; balance unchanged. |
+| I-10a-10 | Payment against a settled sale | 400. |
+| I-10a-11 | Sales list row after a payment | `lastPaymentAt` set; `paymentDueDate` returned. |
+| I-10a-12 | Customers list for a credit customer | `outstandingCredit` = owed; `availableCredit` = limit − owed. |
+| I-10a-13 | Customer with `creditLimit: null` | `availableCredit` is **null**, not 0. |
+| I-10a-14 | Settle, then re-read the customer | Outstanding 0; available back to the full limit. |
+| I-10a-15 | `GET /customers?hasOutstandingCredit=true` | Only customers who currently owe. |
+| I-10a-16 | `GET /dashboard/stats` before/after a credit sale | `outstandingReceivable` rises by the sale total. |
+| I-10a-17 | `GET /dashboard/stats` after settlement | It falls back by the same amount. |
+
 ## 11. Receipt print
 
 | ID | Request | Expected |

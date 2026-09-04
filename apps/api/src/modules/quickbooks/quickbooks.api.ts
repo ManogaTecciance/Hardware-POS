@@ -73,6 +73,12 @@ export interface QboSalesDocumentInput {
    * the day it happened; QuickBooks defaults to today when it is omitted.
    */
   TxnDate?: string;
+  /**
+   * `YYYY-MM-DD`. Invoice only — when payment is expected. Without it QuickBooks
+   * applies the company's own default terms, which would quietly disagree with
+   * the date the customer was given at the till.
+   */
+  DueDate?: string;
   Line: QboSalesLine[];
   TxnTaxDetail?: { TotalTax: number };
 }

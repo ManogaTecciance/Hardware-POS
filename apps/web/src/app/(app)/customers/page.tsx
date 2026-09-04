@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import * as React from 'react';
-import { FileUp, Search, UserPlus } from 'lucide-react';
+import { FileUp, Search, UserPlus, X } from 'lucide-react';
 
 import { ImportCustomersDialog } from '@/components/customers/import-customers-dialog';
 import { PageHeader } from '@/components/page-header';
@@ -29,6 +30,14 @@ const TYPE_OPTIONS = Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[];
 export default function CustomersPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.CUSTOMER_MANAGE);
+  const searchParams = useSearchParams();
+
+  // Seeded from the URL so the dashboard's receivable card can deep-link
+  // straight to the customers who owe it. Only the initial value comes from the
+  // URL — after that the filter is the user's to clear.
+  const [owingOnly, setOwingOnly] = React.useState(
+    () => searchParams.get('hasOutstandingCredit') === 'true',
+  );
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -51,7 +60,7 @@ export default function CustomersPage() {
 
   React.useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, customerType, active, pageSize]);
+  }, [debouncedSearch, customerType, active, owingOnly, pageSize]);
 
   React.useEffect(() => {
     if (!session) return;
@@ -64,6 +73,7 @@ export default function CustomersPage() {
       search: debouncedSearch || undefined,
       customerType: customerType || undefined,
       isActive: active || undefined,
+      hasOutstandingCredit: owingOnly ? 'true' : undefined,
     };
     fetchCustomers(session, query)
       .then((res) => {
@@ -81,7 +91,7 @@ export default function CustomersPage() {
     return () => {
       cancelled = true;
     };
-  }, [session, page, pageSize, debouncedSearch, customerType, active, reloadKey]);
+  }, [session, page, pageSize, debouncedSearch, customerType, active, owingOnly, reloadKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -137,6 +147,14 @@ export default function CustomersPage() {
           <option value="false">Inactive</option>
           <option value="">All</option>
         </Select>
+        <Button
+          variant={owingOnly ? 'primary' : 'outline'}
+          onClick={() => setOwingOnly((v) => !v)}
+          aria-pressed={owingOnly}
+        >
+          Credit outstanding
+          {owingOnly ? <X className="h-4 w-4" aria-label="Clear filter" /> : null}
+        </Button>
       </div>
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -150,6 +168,7 @@ export default function CustomersPage() {
                 <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">Phone</th>
                 <th className="px-4 py-3 font-medium">Credit</th>
+                <th className="px-4 py-3 font-medium">Available credit</th>
                 <th className="px-4 py-3 font-medium">Sync</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
@@ -157,13 +176,13 @@ export default function CustomersPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
                     Loading customers…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
                     No customers found.
                   </td>
                 </tr>
@@ -196,6 +215,19 @@ export default function CustomersPage() {
                           {c.creditLimit != null ? formatMoney(c.creditLimit) : 'No limit'}
                         </span>
                       ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {c.availableCredit != null ? (
+                        <span
+                          className={c.availableCredit < 0 ? 'text-danger' : 'text-muted-foreground'}
+                        >
+                          {formatMoney(c.availableCredit)}
+                        </span>
+                      ) : (
+                        // No limit set means there is nothing to count down from —
+                        // showing zero here would read as "no credit left".
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>

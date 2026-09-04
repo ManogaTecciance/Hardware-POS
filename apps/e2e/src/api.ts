@@ -160,6 +160,8 @@ export class Api {
       payments?: Array<{ method: string; amount: number; reference?: string }>;
       /** Backdate the invoice (YYYY-MM-DD). Omitted keeps the "dated now" default path. */
       saleDate?: string;
+      /** Required by the API whenever the payments leave a balance. */
+      paymentDueDate?: string;
     } = {},
   ): Promise<any> {
     // Server computes totals; a preview tells us what to tender for exact cash.
@@ -169,6 +171,7 @@ export class Api {
       customerId: opts.customerId,
       // Only sent when asked, so existing callers keep covering the default.
       ...(opts.saleDate ? { saleDate: opts.saleDate } : {}),
+      ...(opts.paymentDueDate ? { paymentDueDate: opts.paymentDueDate } : {}),
       items,
       payments: opts.payments ?? [{ method: 'CASH', amount: 10_000_000 }],
     });
@@ -182,6 +185,11 @@ export class Api {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${d.getFullYear()}-${month}-${day}`;
+  }
+
+  /** `YYYY-MM-DD` for `days` from now — a payment due date a credit sale can carry. */
+  static daysAhead(days: number): string {
+    return Api.daysAgo(-days);
   }
 
   /** Total for a cart via the quotation preview endpoint (same pricing engine). */

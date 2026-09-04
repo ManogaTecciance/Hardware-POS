@@ -63,6 +63,11 @@ The POS is authoritative for:
 
 - **FR-10** Optionally attach a customer (searched from the local customer cache) to a sale.
 - **FR-11** A customer is **required** for credit/partial sales (invoices), optional for cash sales.
+- **FR-19** Show each customer's **available credit** on the customers list: their credit limit
+  minus everything they currently owe across completed, unsettled sales. A customer with no
+  limit configured shows **nothing** — not zero, which would read as "no credit left".
+- **FR-20** Let the customers list be filtered to customers who currently have credit
+  outstanding, and make that filter addressable by URL so the dashboard can link into it.
 
 ### 3.5 Payment & completion
 
@@ -81,6 +86,11 @@ The POS is authoritative for:
   while printed and emailed documents — invoice, receipt, PDF/XLSX reports — use the configured
   **shop timezone**, so one document reads the same date for everyone who opens it.
 - **FR-18** Let an owner/admin set the shop timezone in Settings (IANA name; default `Asia/Colombo`).
+- **FR-21** Require a **payment due date** when completing a sale that leaves a balance, and
+  reject one on a fully paid sale, which owes nothing. The due date may not fall before the
+  invoice date — a backdated sale may therefore be recorded already overdue.
+- **FR-22** Send the payment due date to QuickBooks as the Invoice `DueDate`, and print it on
+  the bill alongside the payment method(s) used.
 
 ### 3.6 Receipt
 
@@ -91,6 +101,17 @@ The POS is authoritative for:
 - **FR-16** Sales history list with per-sale **sync status** (pending / syncing / synced / failed).
 - **FR-17** A **sync log** view showing each sync attempt, its result, and any error.
 - **FR-18** Manual **retry** of a failed sync.
+- **FR-23** **Record a payment received** against a credit sale, capturing the amount, method
+  and an optional reference. Payments accumulate: each is kept as its own record with its own
+  date and time, so instalments read as a history rather than one overwritten figure. The
+  sale moves to PAID when the balance reaches zero, and the customer's available credit is
+  released by the same act.
+- **FR-24** Show on the sales list, per sale: the **due date** (blank when nothing is owed),
+  the **last payment received** (blank for a sale that never ran on credit), and offer an
+  **overdue** filter — past its due date and still owing. Report exports honour the same filter.
+- **FR-25** Show the shop's **total outstanding receivable** on the dashboard, as a running
+  total unaffected by the dashboard's date range (money owed does not stop being owed at
+  midnight). Clicking it opens the customers list filtered to those who owe.
 
 ## 4. Transaction rules
 

@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Clock3,
   FileText,
+  HandCoins,
   Info,
   Link2,
   PackagePlus,
@@ -92,7 +93,7 @@ export function AdminDashboard({
   const canQuickBooks = hasPermission(Permission.QUICKBOOKS_READ);
 
   const netSales = data.stats?.todaySalesTotal ?? 0;
-  const txns = data.stats?.todayTransactions ?? 0;
+  const outstandingReceivable = data.stats?.outstandingReceivable ?? 0;
   const inventoryValue = data.stats?.inventoryValue ?? 0;
   const stockedProducts = data.stats?.stockedProducts ?? 0;
   const summary = data.summary;
@@ -139,16 +140,19 @@ export function AdminDashboard({
         ]
       : []),
     {
-      icon: Receipt,
+      icon: HandCoins,
       metric: {
-        id: 'transactions',
-        label: 'Transactions',
-        value: count(txns),
-        rawValue: txns,
-        format: count,
-        helpText: 'Number of sales completed today.',
-        footnote: 'Completed today',
-        destination: '/sales',
+        id: 'outstanding-receivable',
+        label: 'Credit Receivable',
+        value: formatMoneyCompact(outstandingReceivable),
+        rawValue: outstandingReceivable,
+        format: formatMoneyCompact,
+        helpText:
+          'Money customers still owe across every completed sale that has not been settled. A running total, so it does not move with the date range above.',
+        footnote: 'Outstanding across all customers',
+        // Straight to the customers who owe it, already filtered — the number is
+        // only actionable if you can see who it is owed by.
+        destination: '/customers?hasOutstandingCredit=true',
         iconAccent: 'info',
       },
     },

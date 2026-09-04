@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, Product } from '@hardware-pos/database';
+import { PaymentStatus, Prisma, Product } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
@@ -22,7 +22,7 @@ export type SaleListRow = Prisma.SaleGetPayload<{
   include: {
     customer: { select: { name: true } };
     cashier: { select: { name: true } };
-    payments: { select: { method: true } };
+    payments: { select: { method: true; createdAt: true } };
     _count: { select: { items: true } };
   };
 }>;
@@ -39,7 +39,7 @@ const saleInclude = {
 const saleListInclude = {
   customer: { select: { name: true } },
   cashier: { select: { name: true } },
-  payments: { select: { method: true } },
+  payments: { select: { method: true, createdAt: true } },
   _count: { select: { items: true } },
 } satisfies Prisma.SaleInclude;
 
@@ -91,6 +91,16 @@ export class SalesRepository {
       ...(filter.paymentStatus ? { paymentStatus: filter.paymentStatus } : {}),
       // Kept in AND so the date clause's OR cannot collide with the search OR.
       ...(businessDate.length ? { AND: businessDate } : {}),
+      // Overdue: the due date has passed and money is still owed. A settled sale
+      // is never overdue whatever its date, and one with no due date — a sale
+      // paid in full at the till — is not owed at all, so it cannot be late.
+      ...(filter.overdueAsOf
+        ? {
+            paymentDueDate: { not: null, lt: filter.overdueAsOf },
+            paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+            status: 'COMPLETED' as const,
+          }
+        : {}),
       ...(filter.search
         ? {
             OR: [
@@ -149,37 +159,6 @@ export class SalesRepository {
     });
   }
 
-  /**
-   * A customer's credit terms plus how much they currently owe (sum of unpaid
-   * balances on their completed sales). Used to enforce the credit limit before
-   * a new credit/partial sale is accepted.
-   */
-  async getCustomerCredit(
-    tenantId: string,
-    customerId: string,
-  ): Promise<{ creditAllowed: boolean; creditLimit: number | null; outstanding: number } | null> {
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: customerId, tenantId },
-      select: { creditAllowed: true, creditLimit: true },
-    });
-    if (!customer) return null;
-
-    const agg = await this.prisma.sale.aggregate({
-      where: {
-        tenantId,
-        customerId,
-        status: 'COMPLETED',
-        paymentStatus: { in: ['UNPAID', 'PARTIAL'] },
-      },
-      _sum: { balanceAmount: true },
-    });
-
-    return {
-      creditAllowed: customer.creditAllowed,
-      creditLimit: customer.creditLimit != null ? Number(customer.creditLimit) : null,
-      outstanding: agg._sum.balanceAmount != null ? Number(agg._sum.balanceAmount) : 0,
-    };
-  }
 
   // ── writes ─────────────────────────────────────────────────────────────────
 
@@ -236,6 +215,7 @@ export class SalesRepository {
           saleNumber,
           status: 'COMPLETED',
           completedAt: input.saleDate,
+          paymentDueDate: input.paymentDueDate,
           subtotal: input.computed.subtotal,
           totalDiscount: input.computed.totalDiscount,
           ...orderDiscountData(input.computed),
@@ -278,6 +258,7 @@ export class SalesRepository {
         data: {
           status: 'COMPLETED',
           completedAt: input.saleDate,
+          paymentDueDate: input.paymentDueDate,
           customerId: input.customerId ?? null,
           subtotal: input.computed.subtotal,
           totalDiscount: input.computed.totalDiscount,

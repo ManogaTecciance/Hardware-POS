@@ -66,3 +66,47 @@ export function resolveSaleDate(
 export function toQuickBooksTxnDate(date: Date, tz: string): string {
   return dayInTimeZone(date, safeTimeZone(tz));
 }
+
+/**
+ * Turn the DTO's optional `paymentDueDate` into the instant stored on the sale.
+ *
+ * Anchored in the shop's timezone like the invoice date, and at end of day: the
+ * money is due by the close of that date, so a payment taken during it is not
+ * late. A fully paid sale owes nothing and must not carry a due date at all —
+ * the sales list distinguishes "nothing due" from "due on some date", and a
+ * placeholder would erase that difference.
+ *
+ * @throws BadRequestException when required and absent, supplied when not owed,
+ *         malformed, or earlier than the invoice date
+ */
+export function resolvePaymentDueDate(
+  input: string | undefined,
+  opts: { leavesBalance: boolean; saleDate: Date; tz: string },
+): Date | null {
+  const zone = safeTimeZone(opts.tz);
+
+  if (!opts.leavesBalance) {
+    if (input) {
+      throw new BadRequestException(
+        'A fully paid sale has nothing outstanding, so it cannot carry a payment due date',
+      );
+    }
+    return null;
+  }
+
+  if (!input) {
+    throw new BadRequestException('A payment due date is required for a credit sale');
+  }
+  const parts = parseDay(input);
+  if (!parts) {
+    throw new BadRequestException('paymentDueDate must be a valid date (YYYY-MM-DD)');
+  }
+
+  // Compared as calendar days in the shop's zone: payment may fall due on the
+  // day of the sale, but never before it.
+  if (input < dayInTimeZone(opts.saleDate, zone)) {
+    throw new BadRequestException('The payment due date cannot be earlier than the invoice date');
+  }
+
+  return zonedTimeToUtc(parts.year, parts.month, parts.day, 23, 59, 59, zone);
+}

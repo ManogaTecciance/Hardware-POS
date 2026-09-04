@@ -53,6 +53,11 @@ export interface CompleteSaleDto {
   customerId?: string;
   /** Invoice date as `YYYY-MM-DD`. Omitted = now; the API rejects a future date. */
   saleDate?: string;
+  /**
+   * When payment is expected, as `YYYY-MM-DD`. Required when the payments do not
+   * cover the total; the API rejects it on a fully paid sale.
+   */
+  paymentDueDate?: string;
   items: SaleItemPayload[];
   payments: SalePaymentPayload[];
   orderDiscountType?: DiscountType;
@@ -126,6 +131,10 @@ export interface SaleListItem {
   balanceAmount: number;
   paymentStatus: PaymentStatusCode;
   paymentMethods: PaymentMethodCode[];
+  /** When payment is expected. Null on a fully paid sale — the column stays blank. */
+  paymentDueDate: string | null;
+  /** When the most recent payment was received. Null when none has been. */
+  lastPaymentAt: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: number;
   quickbooksDocumentType: string | null;
@@ -147,6 +156,8 @@ export interface SalesQuery {
   syncStatus?: SyncStatusCode;
   dateFrom?: string;
   dateTo?: string;
+  /** Only sales past their due date that still owe money. */
+  overdue?: 'true';
 }
 
 /** Detailed sale (matches the API `SaleWithRelations`, decimals as strings). */
@@ -170,6 +181,8 @@ export interface SaleDetailPayment {
   amount: number;
   reference: string | null;
   syncStatus: SyncStatusCode;
+  /** When the payment was received, as an ISO instant. */
+  createdAt: string;
 }
 
 export interface SaleCustomerContact {
@@ -203,6 +216,8 @@ export interface SaleDetail {
   paidAmount: number;
   balanceAmount: number;
   paymentStatus: PaymentStatusCode;
+  /** When payment is expected. Null on a sale that was settled in full. */
+  paymentDueDate: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: number;
   quickbooksDocumentType: string | null;
@@ -234,6 +249,7 @@ interface ApiSaleDetail {
   paidAmount: string | number;
   balanceAmount: string | number;
   paymentStatus: PaymentStatusCode;
+  paymentDueDate: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: string | number;
   quickbooksDocumentType: string | null;
@@ -259,6 +275,7 @@ interface ApiSaleDetail {
     amount: string | number;
     reference: string | null;
     syncStatus: SyncStatusCode;
+    createdAt: string;
   }>;
 }
 
@@ -271,6 +288,7 @@ function buildQuery(q: SalesQuery): string {
   if (q.syncStatus) params.set('syncStatus', q.syncStatus);
   if (q.dateFrom) params.set('dateFrom', q.dateFrom);
   if (q.dateTo) params.set('dateTo', q.dateTo);
+  if (q.overdue) params.set('overdue', q.overdue);
   return params.toString();
 }
 
@@ -298,6 +316,7 @@ export async function downloadSalesReport(
   if (query.syncStatus) params.set('syncStatus', query.syncStatus);
   if (query.dateFrom) params.set('dateFrom', query.dateFrom);
   if (query.dateTo) params.set('dateTo', query.dateTo);
+  if (query.overdue) params.set('overdue', query.overdue);
 
   const res = await authorizedFetch(`/sales/report?${params.toString()}`, session);
   if (!res.ok) {
@@ -343,6 +362,7 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
     paidAmount: Number(s.paidAmount),
     balanceAmount: Number(s.balanceAmount),
     paymentStatus: s.paymentStatus,
+    paymentDueDate: s.paymentDueDate ?? null,
     returnStatus: s.returnStatus,
     returnedAmount: Number(s.returnedAmount),
     quickbooksDocumentType: s.quickbooksDocumentType,
@@ -368,8 +388,30 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       amount: Number(p.amount),
       reference: p.reference,
       syncStatus: p.syncStatus,
+      createdAt: p.createdAt,
     })),
   };
+}
+
+export interface RecordPaymentPayload {
+  saleId: string;
+  method: PaymentMethodCode;
+  amount: number;
+  reference?: string;
+}
+
+/**
+ * Record a payment received against a credit sale.
+ *
+ * Each call adds its own payment row, so a customer paying in instalments leaves
+ * a trail rather than one overwritten figure. The API moves the sale's balance
+ * and status in the same transaction.
+ */
+export async function recordPayment(
+  session: Session,
+  payload: RecordPaymentPayload,
+): Promise<void> {
+  await api.post('/payments', payload, auth(session));
 }
 
 /** Retry the QuickBooks push for a completed sale. */

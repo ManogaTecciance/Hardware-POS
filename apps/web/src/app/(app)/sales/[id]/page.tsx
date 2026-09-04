@@ -3,10 +3,13 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as React from 'react';
-import { ArrowLeft, FileDown, Printer, RefreshCw, Undo2 } from 'lucide-react';
+import { ArrowLeft, FileDown, HandCoins, Printer, RefreshCw, Undo2 } from 'lucide-react';
+
+import { paymentMethodLabel } from '@hardware-pos/shared';
 
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { SaleReturnStatusBadge } from '@/components/returns/status-badges';
+import { RecordPaymentDialog } from '@/components/sales/record-payment-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,15 +30,14 @@ const PAYMENT_STATUS: Record<
   REFUNDED: { label: 'Refunded', variant: 'neutral' },
 };
 
-const METHOD_LABEL: Record<string, string> = {
-  CASH: 'Cash',
-  CARD: 'Card',
-  BANK_TRANSFER: 'Bank Transfer',
-  QR_PAYMENT: 'QR Payment',
-  CHECK: 'Cheque',
-  STORE_CREDIT: 'Store Credit',
-  OTHER: 'Other',
-};
+/** A due date reads as a day; the time of day on it means nothing. */
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-LK', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  });
+}
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-LK', {
@@ -58,6 +60,7 @@ export default function SaleDetailPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
+  const [payOpen, setPayOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!session || !id) return;
@@ -133,6 +136,10 @@ export default function SaleDetailPage() {
     sale.status === 'COMPLETED' &&
     sale.returnStatus !== 'FULLY_RETURNED' &&
     hasPermission(Permission.RETURN_CREATE);
+  const canRecordPayment =
+    sale.status === 'COMPLETED' &&
+    sale.balanceAmount > 0 &&
+    hasPermission(Permission.PAYMENT_CREATE);
 
   return (
     <div className="space-y-6">
@@ -151,6 +158,12 @@ export default function SaleDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {canRecordPayment ? (
+            <Button onClick={() => setPayOpen(true)} disabled={busy}>
+              <HandCoins className="h-4 w-4" />
+              Record payment
+            </Button>
+          ) : null}
           {canReturn ? (
             <Link href={`/returns/new?saleId=${sale.id}`}>
               <Button>
@@ -252,6 +265,9 @@ export default function SaleDetailPage() {
                   <span>{formatMoney(sale.balanceAmount)}</span>
                 </div>
               ) : null}
+              {sale.paymentDueDate ? (
+                <Row label="Payment due" value={formatDay(sale.paymentDueDate)} />
+              ) : null}
             </CardContent>
           </Card>
 
@@ -264,12 +280,21 @@ export default function SaleDetailPage() {
                 <p className="text-muted-foreground">No payments recorded (credit sale).</p>
               ) : (
                 sale.payments.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      {METHOD_LABEL[p.method] ?? p.method}
-                      {p.reference ? ` · ${p.reference}` : ''}
-                    </span>
-                    <span className="font-medium">{formatMoney(p.amount)}</span>
+                  <div key={p.id} className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-foreground">
+                        {paymentMethodLabel(p.method)}
+                        {p.reference ? (
+                          <span className="text-muted-foreground"> · {p.reference}</span>
+                        ) : null}
+                      </div>
+                      {/* Date and time both: two instalments on one day are only
+                          told apart by the time they came in. */}
+                      <div className="text-xs text-muted-foreground">
+                        {formatDateTime(p.createdAt)}
+                      </div>
+                    </div>
+                    <span className="whitespace-nowrap font-medium">{formatMoney(p.amount)}</span>
                   </div>
                 ))
               )}
@@ -336,7 +361,7 @@ export default function SaleDetailPage() {
                     </td>
                     <td className="px-4 py-3 text-right">{r.items.length}</td>
                     <td className="px-4 py-3 text-right font-medium">{formatMoney(r.refundTotal)}</td>
-                    <td className="px-4 py-3">{r.refundMethod ? METHOD_LABEL[r.refundMethod] ?? r.refundMethod : '—'}</td>
+                    <td className="px-4 py-3">{r.refundMethod ? paymentMethodLabel(r.refundMethod) : '—'}</td>
                     <td className="px-4 py-3">{r.createdBy?.name ?? '—'}</td>
                     <td className="px-4 py-3">{r.approvedBy?.name ?? '—'}</td>
                     <td className="px-4 py-3">
@@ -355,6 +380,18 @@ export default function SaleDetailPage() {
             </table>
           </div>
         </Card>
+      ) : null}
+
+      {session ? (
+        <RecordPaymentDialog
+          session={session}
+          saleId={sale.id}
+          saleNumber={sale.saleNumber}
+          outstanding={sale.balanceAmount}
+          open={payOpen}
+          onClose={() => setPayOpen(false)}
+          onRecorded={() => setReloadKey((k) => k + 1)}
+        />
       ) : null}
     </div>
   );

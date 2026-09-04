@@ -2,32 +2,62 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Customer, Prisma } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { round2 } from '../../common/money';
 import { paginate } from '../../common/pagination';
+import { CreditService } from '../credit/credit.service';
 import { QuickBooksCustomersService } from '../quickbooks/quickbooks-customers.service';
 import { CustomersRepository } from './customers.repository';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { QueryCustomersDto } from './dto/query-customers.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
+/** A customer row plus the credit figures the list column needs. */
+export interface CustomerListItem extends Customer {
+  /** Total unpaid balance across this customer's completed, unsettled sales. */
+  outstandingCredit: number;
+  /** `creditLimit - outstandingCredit`; null when no limit is configured. */
+  availableCredit: number | null;
+}
+
 @Injectable()
 export class CustomersService {
   constructor(
     private readonly customersRepository: CustomersRepository,
     private readonly quickbooksCustomers: QuickBooksCustomersService,
+    private readonly credit: CreditService,
   ) {}
 
-  async list(tenantId: string, query: QueryCustomersDto): Promise<Paginated<Customer>> {
+  async list(tenantId: string, query: QueryCustomersDto): Promise<Paginated<CustomerListItem>> {
     const [items, total] = await this.customersRepository.search(
       tenantId,
       {
         search: query.search,
         customerType: query.customerType,
         isActive: query.isActive === undefined ? undefined : query.isActive === 'true',
+        hasOutstandingCredit: query.hasOutstandingCredit === 'true',
       },
       query.skip,
       query.take,
     );
-    return paginate(items, total, query.page, query.pageSize);
+
+    // One grouped query for the whole page rather than an aggregate per row.
+    const outstandingByCustomer = await this.credit.outstandingByCustomer(
+      tenantId,
+      items.map((c) => c.id),
+    );
+    const withCredit = items.map((customer) => {
+      const outstanding = outstandingByCustomer.get(customer.id) ?? 0;
+      const creditLimit = customer.creditLimit != null ? Number(customer.creditLimit) : null;
+      return {
+        ...customer,
+        outstandingCredit: outstanding,
+        // Null, not zero: "no limit set" and "no credit left" are different
+        // answers and the table must not conflate them.
+        availableCredit: creditLimit != null ? round2(creditLimit - outstanding) : null,
+      };
+    });
+
+    return paginate(withCredit, total, query.page, query.pageSize);
   }
 
   async getById(tenantId: string, id: string): Promise<Customer> {

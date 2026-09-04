@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { dayInTimeZone } from '@hardware-pos/shared';
 
-import { resolveSaleDate, toQuickBooksTxnDate } from './sale-date';
+import { resolvePaymentDueDate, resolveSaleDate, toQuickBooksTxnDate } from './sale-date';
 
 const COLOMBO = 'Asia/Colombo'; // +5:30, no DST
 const NEW_YORK = 'America/New_York'; // -5/-4, DST
@@ -107,5 +107,84 @@ describe('toQuickBooksTxnDate', () => {
 
   it('emits a bare calendar date with no time component', () => {
     expect(toQuickBooksTxnDate(NOW, COLOMBO)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('resolvePaymentDueDate', () => {
+  const saleDate = resolveSaleDate('2026-08-01', COLOMBO, NOW);
+
+  it('is not carried by a fully paid sale', () => {
+    expect(
+      resolvePaymentDueDate(undefined, { leavesBalance: false, saleDate, tz: COLOMBO }),
+    ).toBeNull();
+  });
+
+  it('refuses a due date on a sale that owes nothing', () => {
+    // Otherwise the sales list would show a due date against a settled sale.
+    expect(() =>
+      resolvePaymentDueDate('2026-09-01', { leavesBalance: false, saleDate, tz: COLOMBO }),
+    ).toThrow(BadRequestException);
+  });
+
+  it('requires one when the sale leaves a balance', () => {
+    expect(() =>
+      resolvePaymentDueDate(undefined, { leavesBalance: true, saleDate, tz: COLOMBO }),
+    ).toThrow(/required/i);
+  });
+
+  it('falls at the end of the day in the shop zone', () => {
+    // 23:59:59 Colombo on 31 Aug is 18:29:59Z — money is due by the close of the
+    // day, so a payment taken during it is not late.
+    const due = resolvePaymentDueDate('2026-08-31', {
+      leavesBalance: true,
+      saleDate,
+      tz: COLOMBO,
+    });
+    expect(due?.toISOString()).toBe('2026-08-31T18:29:59.000Z');
+    expect(dayInTimeZone(due as Date, COLOMBO)).toBe('2026-08-31');
+  });
+
+  it('allows payment to fall due on the day of the sale', () => {
+    const due = resolvePaymentDueDate('2026-08-01', {
+      leavesBalance: true,
+      saleDate,
+      tz: COLOMBO,
+    });
+    expect(dayInTimeZone(due as Date, COLOMBO)).toBe('2026-08-01');
+  });
+
+  it('rejects a due date before the invoice date', () => {
+    expect(() =>
+      resolvePaymentDueDate('2026-07-31', { leavesBalance: true, saleDate, tz: COLOMBO }),
+    ).toThrow(/earlier than the invoice date/i);
+  });
+
+  it('allows a backdated sale to be already overdue', () => {
+    // A sale entered today but dated two months back can legitimately have a due
+    // date that has already passed — it is overdue the moment it is recorded.
+    const backdated = resolveSaleDate('2026-06-01', COLOMBO, NOW);
+    const due = resolvePaymentDueDate('2026-07-01', {
+      leavesBalance: true,
+      saleDate: backdated,
+      tz: COLOMBO,
+    });
+    expect(dayInTimeZone(due as Date, COLOMBO)).toBe('2026-07-01');
+    expect((due as Date).getTime()).toBeLessThan(NOW.getTime());
+  });
+
+  it.each(['not-a-date', '2026-13-01', '2026-02-30'])('rejects %s', (v) => {
+    expect(() =>
+      resolvePaymentDueDate(v, { leavesBalance: true, saleDate, tz: COLOMBO }),
+    ).toThrow(BadRequestException);
+  });
+
+  it('anchors to a western shop zone the same way', () => {
+    const nySale = resolveSaleDate('2026-08-01', NEW_YORK, NOW);
+    const due = resolvePaymentDueDate('2026-08-31', {
+      leavesBalance: true,
+      saleDate: nySale,
+      tz: NEW_YORK,
+    });
+    expect(dayInTimeZone(due as Date, NEW_YORK)).toBe('2026-08-31');
   });
 });

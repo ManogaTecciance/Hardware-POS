@@ -27,6 +27,10 @@ export interface SaleListItem {
   balanceAmount: number;
   paymentStatus: PaymentStatus;
   paymentMethods: PaymentMethod[];
+  /** When payment is expected. Null on a fully paid sale — the column stays blank. */
+  paymentDueDate: Date | null;
+  /** When the most recent payment was received. Null when none has been. */
+  lastPaymentAt: Date | null;
   returnStatus: SaleReturnStatus;
   returnedAmount: number;
   quickbooksDocumentType: QuickBooksDocumentType | null;
@@ -40,6 +44,8 @@ export interface SalesListFilter {
   search?: string;
   dateFrom?: Date;
   dateTo?: Date;
+  /** Only sales past their due date that still owe money. */
+  overdueAsOf?: Date;
 }
 
 /** Normalized cart line coming into the compute pipeline. */
@@ -117,6 +123,8 @@ export interface PersistSaleInput {
   customerId?: string | null;
   /** Invoice date — the user-chosen sale date, or now. Stored as `completedAt`. */
   saleDate: Date;
+  /** When payment is expected. Null on a fully paid sale. */
+  paymentDueDate: Date | null;
   computed: ComputedSale;
   payments: PaymentInput[];
   paidAmount: number;

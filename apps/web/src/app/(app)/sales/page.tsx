@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import * as React from 'react';
-import { Printer, ReceiptText, RefreshCw, Search } from 'lucide-react';
+import { AlarmClock, Printer, ReceiptText, RefreshCw, Search } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
@@ -45,6 +45,31 @@ function formatDateTime(iso: string): string {
   });
 }
 
+/** A due date or payment stamp: the day alone, since the time of day says nothing. */
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-LK', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  });
+}
+
+/**
+ * Whether the sale ever ran on credit.
+ *
+ * A due date is only recorded on a sale that left a balance, so its presence is
+ * the marker. The balance check catches sales completed before due dates were
+ * captured, which would otherwise look like counter sales.
+ */
+function isCreditSale(s: SaleListItem): boolean {
+  return s.paymentDueDate !== null || s.balanceAmount > 0;
+}
+
+/** Past its due date and still owing — the same rule the API's Overdue filter uses. */
+function isOverdue(s: SaleListItem, now: Date = new Date()): boolean {
+  return s.paymentDueDate !== null && s.balanceAmount > 0 && new Date(s.paymentDueDate) < now;
+}
+
 function PaymentStatusBadge({ status }: { status: PaymentStatusCode }) {
   const map: Record<
     PaymentStatusCode,
@@ -67,6 +92,7 @@ export default function SalesPage() {
   const [dateRange, setDateRange] = React.useState<DateRangeValue>({ preset: 'ALL' });
   const [paymentStatus, setPaymentStatus] = React.useState<PaymentStatusCode | ''>('');
   const [syncStatus, setSyncStatus] = React.useState<SyncStatusCode | ''>('');
+  const [overdueOnly, setOverdueOnly] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
 
@@ -87,7 +113,7 @@ export default function SalesPage() {
   // Reset to page 1 whenever a filter changes.
   React.useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, dateRange, paymentStatus, syncStatus, pageSize]);
+  }, [debouncedSearch, dateRange, paymentStatus, syncStatus, overdueOnly, pageSize]);
 
   /** The filters currently applied to the table (report exports reuse these). */
   const filterQuery = React.useMemo<Omit<SalesQuery, 'page' | 'pageSize'>>(
@@ -95,9 +121,10 @@ export default function SalesPage() {
       search: debouncedSearch || undefined,
       paymentStatus: paymentStatus || undefined,
       syncStatus: syncStatus || undefined,
+      overdue: overdueOnly ? ('true' as const) : undefined,
       ...resolveDateRange(dateRange),
     }),
-    [debouncedSearch, paymentStatus, syncStatus, dateRange],
+    [debouncedSearch, paymentStatus, syncStatus, overdueOnly, dateRange],
   );
 
   React.useEffect(() => {
@@ -211,6 +238,14 @@ export default function SalesPage() {
           <option value="FAILED">Failed</option>
           <option value="NOT_SYNCED">Not synced</option>
         </Select>
+        <Button
+          variant={overdueOnly ? 'primary' : 'outline'}
+          onClick={() => setOverdueOnly((v) => !v)}
+          aria-pressed={overdueOnly}
+        >
+          <AlarmClock className="h-4 w-4" />
+          Overdue
+        </Button>
 
         {/* Report export — covers every sale matching the current filters. */}
         <div className="ml-auto">
@@ -236,7 +271,9 @@ export default function SalesPage() {
                 <th className="px-4 py-3 text-right font-medium">Items</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 text-right font-medium">Balance</th>
+                <th className="px-4 py-3 font-medium">Due</th>
                 <th className="px-4 py-3 font-medium">Payment</th>
+                <th className="px-4 py-3 font-medium">Last payment</th>
                 <th className="px-4 py-3 font-medium">Sync</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
@@ -244,13 +281,13 @@ export default function SalesPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={12} className="px-4 py-16 text-center text-muted-foreground">
                     Loading sales…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-16 text-center">
+                  <td colSpan={12} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
                         <ReceiptText className="h-6 w-6" />
@@ -296,11 +333,25 @@ export default function SalesPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      {s.paymentDueDate ? (
+                        <span className={cn(isOverdue(s) ? 'font-medium text-danger' : 'text-muted-foreground')}>
+                          {formatDay(s.paymentDueDate)}
+                        </span>
+                      ) : (
+                        // Nothing owed, nothing due — an invented date here would
+                        // read as a deadline the customer does not have.
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1">
                         <PaymentStatusBadge status={s.paymentStatus} />
                         <SaleReturnStatusBadge status={s.returnStatus} />
                       </div>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                      {isCreditSale(s) && s.lastPaymentAt ? formatDay(s.lastPaymentAt) : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <SyncBadge status={s.syncStatus} />

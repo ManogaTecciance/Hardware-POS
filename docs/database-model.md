@@ -96,11 +96,18 @@ One completed (or in-progress) transaction.
 | qboId         | string?       | id of the created QBO SalesReceipt/Invoice — **unique**       |
 | syncStatus    | SyncStatus    | `PENDING` \| `SYNCING` \| `SYNCED` \| `FAILED`                 |
 | completedAt   | datetime?     | Invoice date — user-selectable at completion, defaults to now, never future. Printed on documents, filed in QBO, and the column reports/dashboards filter on. Indexed. |
+| paymentDueDate | datetime?    | When the balance is expected. Required at completion when the sale leaves a balance, forbidden when it does not — so **null means nothing is owed**, which is what lets the sales list leave the Due column blank rather than invent a date. Stored as the end of the chosen day in the shop's timezone; pushed to QBO as the Invoice `DueDate`. |
 | createdAt     | datetime      |                                                                |
 | updatedAt     | datetime      |                                                                |
 
 Indexes: `@unique(number)`, `@unique(qboId)`, `@index(syncStatus)`, `@index(cashierId)`,
-`@index(createdAt)`.
+`@index(createdAt)`, `@index(tenantId, paymentDueDate)` — the overdue filter asks for "due
+before today and still owing", which is a tenant-scoped range scan over the due date.
+
+There is no stored "amount outstanding per customer": it is derived on read by summing
+`balanceAmount` over the customer's COMPLETED, unsettled sales. One source of truth means the
+credit-limit guard, the customers list's available-credit column, and the dashboard's
+receivable total cannot drift apart, and recording a payment updates all three at once.
 
 ### SaleItem
 
@@ -131,8 +138,10 @@ One or more payments against a sale.
 | saleId    | uuid FK       | → Sale                                    |
 | method    | enum          | `CASH` \| `CARD`                          |
 | amount    | Decimal(12,2) |                                          |
+| reference | string?       | cheque number, transfer id, receipt no   |
+| receivedByUserId | uuid FK | → User who took the money                |
 | qboId     | string?       | QBO Payment id (for INVOICE sales)       |
-| createdAt | datetime      |                                          |
+| createdAt | datetime      | when the money came in — a settlement recorded weeks after the sale keeps its own timestamp, which is what the sale detail and the "last payment" column report |
 
 Index: `@index(saleId)`.
 

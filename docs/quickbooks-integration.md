@@ -58,6 +58,19 @@ Line items map to QBO `SalesItemLineDetail` using each product's QBO `Item` id, 
 unit price, quantity, and the product-wise discount (as a line discount or a discount line,
 per QBO's model). A customer reference is required on Invoices.
 
+### 4.0 Dates on the document
+
+`TxnDate` is the sale's invoice date, so a backdated POS sale is filed on the day it happened.
+An **Invoice** additionally carries `DueDate`, taken from the sale's `paymentDueDate` — the date
+the cashier agreed with the customer at the till. Without it QuickBooks would apply the
+customer's default terms and age the receivable against a date nobody agreed to. Both are sent
+as bare `YYYY-MM-DD` calendar days; a SalesReceipt has nothing outstanding and so carries no
+`DueDate`.
+
+> `TODO(accountant)`: a payment **received after** the sale (POS "Record payment") is not yet
+> pushed to QuickBooks against the original invoice, so that invoice stays open in QBO until
+> the accountant applies the payment there.
+
 ### 4.1 Customer references
 
 `CustomerRef` is resolved from **`Customer.quickbooksCustomerId`** — the same field the inbound

@@ -26,6 +26,7 @@ import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/lib/auth';
 import { computeLine, computeTotals, type CartItem } from '@/lib/cart';
 import { useCheckoutData } from '@/lib/catalog';
+import { isValidYmd } from '@/lib/dates';
 import { usePosCart } from '@/lib/pos-cart';
 import { printCustomerReceipt, type ReceiptContext } from '@/lib/receipt-print';
 import {
@@ -83,6 +84,7 @@ export default function PaymentPage() {
   const [partialAmount, setPartialAmount] = React.useState('');
   const [partialMethod, setPartialMethod] = React.useState<PaymentMethodCode>('CASH');
   const [splitLines, setSplitLines] = React.useState<SplitLine[]>([]);
+  const [dueDate, setDueDate] = React.useState('');
   const [printAfter, setPrintAfter] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -152,6 +154,13 @@ export default function PaymentPage() {
   const needsCustomer = paidAmount < total; // partial or credit → invoice needs a customer
   const isBackdated = cart.saleDateValid && cart.saleDate < cart.today;
 
+  // Money left owing needs a date by which it is owed. A fully paid sale must
+  // not carry one — the API rejects it, and a "due date" on a settled sale is
+  // meaningless anyway.
+  const needsDueDate = balance > 0;
+  // Compared as plain YYYY-MM-DD strings, which sort chronologically.
+  const dueDateValid = isValidYmd(dueDate) && dueDate >= cart.saleDate;
+
   // Gated here as well as in the cart: /pos/payment is reachable by a direct
   // reload, which rehydrates from sessionStorage without passing through /pos.
   const invalid =
@@ -161,6 +170,7 @@ export default function PaymentPage() {
     !cart.saleDateValid ||
     (needsCustomer && !hasCustomer) ||
     (mode === 'CASH' && tenderedNum < total) ||
+    (needsDueDate && !dueDateValid) ||
     (mode === 'PARTIAL' && (paidAmount <= 0 || paidAmount >= total)) ||
     (mode === 'SPLIT' && (payments.length === 0 || paidAmount > total));
 
@@ -186,6 +196,10 @@ export default function PaymentPage() {
       disabledReason = 'Add at least one split payment.';
     } else if (mode === 'SPLIT' && paidAmount > total) {
       disabledReason = 'Split total is more than the amount due.';
+    } else if (needsDueDate && !isValidYmd(dueDate)) {
+      disabledReason = 'Set the date this balance is due.';
+    } else if (needsDueDate && dueDate < cart.saleDate) {
+      disabledReason = 'The payment due date cannot be before the invoice date.';
     }
   }
 
@@ -225,6 +239,7 @@ export default function PaymentPage() {
         ...saleLocation(session!),
         customerId: cart.customerId || undefined,
         saleDate: cart.submittedSaleDate,
+        paymentDueDate: needsDueDate ? dueDate : undefined,
         items: cart.items.map((it) => ({
           productId: it.product.id,
           quantity: it.quantity,
@@ -553,6 +568,26 @@ export default function PaymentPage() {
                 The full {formatMoney(total, currency)} will be recorded as credit (an Invoice). A
                 saved customer is required.
               </p>
+            ) : null}
+
+            {needsDueDate ? (
+              <div className="mt-5 max-w-md space-y-1.5">
+                <Label htmlFor="due-date">
+                  Payment due date <span className="text-danger">*</span>
+                </Label>
+                <Input
+                  id="due-date"
+                  type="date"
+                  value={dueDate}
+                  min={cart.saleDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className="h-12"
+                />
+                <p className="text-xs text-muted-foreground">
+                  When the remaining {formatMoney(balance, currency)} is expected. Cannot be earlier
+                  than the invoice date.
+                </p>
+              </div>
             ) : null}
 
             {error ? (

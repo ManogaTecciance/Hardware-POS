@@ -560,6 +560,10 @@ model Sale {
   paidAmount                Decimal                 @default(0) @db.Decimal(12, 2)
   balanceAmount             Decimal                 @default(0) @db.Decimal(12, 2)
   paymentStatus             PaymentStatus           @default(UNPAID)
+  /// When payment is expected on a credit/partial sale. Null on a fully paid
+  /// sale, which owes nothing — the sales list leaves the column blank rather
+  /// than inventing a date.
+  paymentDueDate            DateTime?
   returnStatus              SaleReturnStatus        @default(NOT_RETURNED)
   returnedAmount            Decimal                 @default(0) @db.Decimal(12, 2)
   quickbooksDocumentType    QuickBooksDocumentType?
@@ -593,6 +597,9 @@ model Sale {
   // the business date, which backdating decouples from createdAt. Composite
   // because every one of those queries is already tenant-scoped.
   @@index([tenantId, completedAt])
+  // The overdue filter asks for "due before today and still owing", so the due
+  // date is a tenant-scoped range scan.
+  @@index([tenantId, paymentDueDate])
 }
 
 model SaleItem {

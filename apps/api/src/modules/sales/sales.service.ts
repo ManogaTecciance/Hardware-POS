@@ -6,12 +6,13 @@ import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { DiscountsService, ORDER_DISCOUNT_KEY } from '../discounts/discounts.service';
+import { CreditService } from '../credit/credit.service';
 import { SettingsService } from '../settings/settings.service';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { CompleteSaleDto } from './dto/complete-sale.dto';
 import { QuerySalesDto } from './dto/query-sales.dto';
 import { SaleItemInputDto } from './dto/sale-item.dto';
-import { resolveSaleDate } from './sale-date';
+import { resolvePaymentDueDate, resolveSaleDate } from './sale-date';
 import { SaleListRow, SaleWithRelations, SalesRepository } from './sales.repository';
 import {
   CartItemInput,
@@ -27,6 +28,7 @@ export class SalesService {
     private readonly salesRepository: SalesRepository,
     private readonly settingsService: SettingsService,
     private readonly discountsService: DiscountsService,
+    private readonly credit: CreditService,
   ) {}
 
   async list(tenantId: string, query: QuerySalesDto): Promise<Paginated<SaleListItem>> {
@@ -38,6 +40,9 @@ export class SalesService {
         search: query.search?.trim() || undefined,
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        // "Past due" means the shop's day has moved on from the due date. The
+        // due date itself sits at end of day, so today's dues are not yet late.
+        overdueAsOf: query.overdue === 'true' ? new Date() : undefined,
       },
       query.skip,
       query.take,
@@ -139,6 +144,16 @@ export class SalesService {
       throw new BadRequestException('A customer is required for a credit/partial sale (Invoice)');
     }
 
+    // After the customer check, so a credit sale with no customer is told the
+    // more fundamental thing first. Resolved once the balance is known: whether
+    // a due date is required, and whether one is even allowed, both depend on
+    // the sale leaving money owed.
+    const paymentDueDate = resolvePaymentDueDate(dto.paymentDueDate, {
+      leavesBalance: balanceAmount > 0,
+      saleDate,
+      tz: this.settingsService.getSettings(tenantId).timezone,
+    });
+
     // A sale that leaves a balance is credit — the customer must be allowed
     // credit and stay within their limit (including what they already owe).
     if (balanceAmount > 0 && customerId) {
@@ -152,6 +167,7 @@ export class SalesService {
       registerId,
       customerId,
       saleDate,
+      paymentDueDate,
       computed,
       payments: dto.payments.map((p) => ({
         method: p.method,
@@ -356,7 +372,7 @@ export class SalesService {
     customerId: string,
     newBalance: number,
   ): Promise<void> {
-    const credit = await this.salesRepository.getCustomerCredit(tenantId, customerId);
+    const credit = await this.credit.forCustomer(tenantId, customerId);
     if (!credit) return; // existence already validated by assertLocations
 
     if (!credit.creditAllowed) {
@@ -368,7 +384,7 @@ export class SalesService {
     if (credit.creditLimit != null) {
       const projected = round2(credit.outstanding + newBalance);
       if (projected > credit.creditLimit) {
-        const available = round2(Math.max(0, credit.creditLimit - credit.outstanding));
+        const available = Math.max(0, credit.available ?? 0);
         throw new BadRequestException(
           `Credit limit exceeded. Limit ${CURRENCY_SYMBOL} ${credit.creditLimit.toFixed(2)}, ` +
             `already outstanding ${CURRENCY_SYMBOL} ${credit.outstanding.toFixed(2)}, ` +
@@ -399,6 +415,13 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
     balanceAmount: Number(row.balanceAmount),
     paymentStatus: row.paymentStatus,
     paymentMethods: [...new Set(row.payments.map((p) => p.method))],
+    paymentDueDate: row.paymentDueDate,
+    // Derived from the payments already joined for the method chips, so the list
+    // needs no extra query and no denormalised column to keep in step.
+    lastPaymentAt: row.payments.reduce<Date | null>(
+      (latest, p) => (latest === null || p.createdAt > latest ? p.createdAt : latest),
+      null,
+    ),
     returnStatus: row.returnStatus,
     returnedAmount: Number(row.returnedAmount),
     quickbooksDocumentType: row.quickbooksDocumentType,

@@ -95,7 +95,10 @@ export class QuickBooksSalesSyncService {
       );
       const lines = await this.buildLines(tenantId, sale);
       const txnDate = this.txnDate(tenantId, sale);
-      const docBody = this.buildDocumentBody(sale, lines, customerRef, txnDate);
+      const dueDate = sale.paymentDueDate
+        ? toQuickBooksTxnDate(sale.paymentDueDate, this.settings.getSettings(tenantId).timezone)
+        : undefined;
+      const docBody = this.buildDocumentBody(sale, lines, customerRef, txnDate, dueDate);
 
       let documentId: string;
       let quickbooksPaymentId: string | null = null;
@@ -263,6 +266,7 @@ export class QuickBooksSalesSyncService {
     lines: QboSalesLine[],
     customerRef: QboRef | null,
     txnDate: string,
+    dueDate?: string,
   ): QboSalesDocumentInput {
     const body: QboSalesDocumentInput = {
       DocNumber: sale.saleNumber,
@@ -270,6 +274,9 @@ export class QuickBooksSalesSyncService {
       // File the document under the POS invoice date, so a backdated sale lands
       // in the right QuickBooks period instead of defaulting to today.
       TxnDate: txnDate,
+      // Only meaningful on an Invoice; a Sales Receipt is already paid. Sent as
+      // the shop's calendar day, like TxnDate, so the books and the paper agree.
+      ...(dueDate ? { DueDate: dueDate } : {}),
       Line: lines,
     };
     if (customerRef) body.CustomerRef = customerRef;

@@ -70,6 +70,11 @@ export interface DashboardStats {
   productsCached: number;
   /** Completed sales not yet pushed to QuickBooks (pending, syncing, or failed). */
   pendingSyncs: number;
+  /**
+   * Everything the shop is currently owed — the unpaid balance across all
+   * completed, unsettled sales. A running balance, not a windowed figure.
+   */
+  outstandingReceivable: number;
   /** Stock on hand valued at cost across active Inventory products. */
   inventoryValue: number;
   /** Active Inventory products with stock on hand. */

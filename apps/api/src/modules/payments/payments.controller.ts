@@ -2,8 +2,10 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { Payment } from '@hardware-pos/database';
 
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
+import { AuthenticatedUser } from '../auth/auth.types';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentsService } from './payments.service';
 
@@ -26,7 +28,11 @@ export class PaymentsController {
 
   @Post()
   @RequirePermissions(Permission.PAYMENT_CREATE)
-  create(@TenantId() tenantId: string, @Body() dto: CreatePaymentDto): Promise<Payment> {
-    return this.paymentsService.create(tenantId, dto);
+  create(
+    @TenantId() tenantId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreatePaymentDto,
+  ): Promise<Payment> {
+    return this.paymentsService.create(tenantId, user, dto);
   }
 }

@@ -68,7 +68,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
-| DASH-001 | Admin KPI band shows 5 cards | Owner opens dashboard | Net Sales, Gross Profit, Transactions, Total Inventory Value, Open Quotations | P | Not Run |
+| DASH-001 | Admin KPI band shows 5 cards | Owner opens dashboard | Net Sales, Gross Profit, Credit Receivable, Total Inventory Value, Open Quotations | P | Automated |
 | DASH-002 | KPI cards on one row at laptop width | 1280×800 viewport, sidebar expanded | All 5 cards share one row | P | Not Run |
 | DASH-003 | KPI row unaffected by sidebar collapse | Collapse sidebar at 1280×800 | Still one row | P | Not Run |
 | DASH-004 | Millions render compactly | Inventory value ≥ Rs. 1,000,000 | Shown as `Rs. X.XXXXmil` (≤4 decimals, zeros trimmed) | P | Not Run |
@@ -88,6 +88,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DASH-018 | Top categories/products ranked correctly | Known sales mix in window | Ranked by amount; units and sale counts correct | P | Not Run |
 | DASH-019 | "Today" boundary respected | Sale completed yesterday (server-local midnight) | Excluded from today's Net Sales / Transactions | P | Not Run |
 | DASH-020 | Cashier register health card | Cashier dashboard | QuickBooks health + expected cash consistent with shift summary | P | Not Run |
+| DASH-021 | Receivable card counts every unsettled balance | Read /dashboard/stats, complete a credit sale, read again | `outstandingReceivable` rises by exactly the sale total | P | Automated |
+| DASH-022 | Settlement removes a sale from the receivable | Record a full payment against that sale, read stats again | Figure falls back by the same amount | P | Automated |
+| DASH-023 | Receivable is not windowed | Switch the dashboard range (Today → 1Y) | Credit Receivable is unchanged — money owed does not stop being owed at midnight | P | Not Run |
+| DASH-024 | Receivable card deep-links to who owes | Click Credit Receivable | Customers page opens filtered to customers with credit outstanding | P | Not Run |
 
 ## PROD — Products & Categories
 
@@ -193,7 +197,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-005 | Partial payment for credit customer | creditAllowed customer, pay half | Sale COMPLETED/PARTIAL with balance | P | Not Run |
 | PAY-006 | Credit sale (pay later) | creditAllowed customer, zero tender | COMPLETED/UNPAID with full balance | P | Not Run |
 | PAY-007 | Credit blocked for non-credit customer | Balance>0 with creditAllowed=false | 400 "not approved for credit…" | N | Not Run |
-| PAY-008 | Credit blocked without customer | Balance>0, no customer selected | Rejected (credit needs a saved customer) | N | Not Run |
+| PAY-008 | Credit blocked without customer | Balance>0, no customer selected | Rejected naming the missing customer (checked before the due date) | N | Automated |
 | PAY-009 | Credit limit enforced | Outstanding + new balance > creditLimit | 400 with limit / outstanding / remaining figures | N | Not Run |
 | PAY-010 | Credit exactly at limit allowed | New balance = remaining limit | Sale completes | P | Not Run |
 | PAY-011 | Null credit limit = unlimited | creditAllowed, creditLimit null, huge balance | Sale completes | P | Not Run |
@@ -204,10 +208,19 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-016 | Zero-total sale disallowed | Empty cart complete attempt | Blocked client- and server-side | N | Not Run |
 | PAY-017 | Bank transfer / QR / cheque with reference | Pay via each method with a reference string | Method + reference stored and visible on sale detail | P | Not Run |
 | PAY-018 | Cash tender below total blocked (non-credit) | Walk-in, tender < total | Cannot complete the sale | N | Not Run |
-| PAY-019 | Settle credit sale with POST /payments | Record payment {saleId, method, amount} against UNPAID sale | Balance reduces; PARTIAL→PAID when it reaches zero | P | Not Run |
+| PAY-019 | Settle credit sale with POST /payments | Record payment {saleId, method, amount} against UNPAID sale | Balance reduces; PARTIAL→PAID when it reaches zero | P | Automated |
 | PAY-020 | Settlement frees credit headroom | Settle a sale, then retry a previously over-limit credit sale | Now allowed — outstanding recomputed from balances | P | Not Run |
-| PAY-021 | Overpayment on settlement rejected | Payment amount > remaining balance | 400 | N | Not Run |
-| PAY-022 | Payment against a PAID sale rejected | POST /payments on a settled sale | 400 | N | Not Run |
+| PAY-021 | Overpayment on settlement rejected | Payment amount > remaining balance | 400 | N | Automated |
+| PAY-022 | Payment against a PAID sale rejected | POST /payments on a settled sale | 400 | N | Automated |
+| PAY-023 | Due date required when a balance remains | Complete a credit/partial sale with no `paymentDueDate` | 400; message names the due date | N | Automated |
+| PAY-024 | Due date rejected on a fully paid sale | Complete a fully paid sale carrying a `paymentDueDate` | 400 — nothing is outstanding to fall due | N | Automated |
+| PAY-025 | Due date stored on the sale | Complete on credit with a due date, read the sale | `paymentDueDate` returned as given | P | Automated |
+| PAY-026 | Due date before the invoice date rejected | `paymentDueDate` earlier than `saleDate` | 400 | N | Automated |
+| PAY-027 | Instalments each kept as their own record | Two part payments against one sale | Two Payment rows, each with its own date/time, method and reference | P | Automated |
+| PAY-028 | Due date required in the POS | Choose Credit/Partial at checkout, leave the due date blank | Complete Payment stays disabled and names the missing due date | N | Not Run |
+| PAY-029 | Due date field hidden on a fully paid sale | Choose Cash for the full amount | No due-date field shown; none sent | P | Not Run |
+| PAY-030 | Record payment from the sale detail | Sale detail → Record payment, amount/method/reference | Payment listed with date and time; balance and status update | P | Not Run |
+| PAY-031 | Payment method printed on the bill | Open the A4 bill for a card sale, then for a credit sale | "Method: Card"; a credit sale with nothing paid reads "On credit"; the due date is printed | P | Not Run |
 
 ## SALE — Sales History
 
@@ -233,6 +246,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE-018 | Backdated sale prints its invoice date | Open the A4 bill for a backdated sale | Document date is the picked date | P | Not Run |
 | SALE-019 | QuickBooks filed under the invoice date | Sync a backdated sale | QBO document `TxnDate` equals the picked day | P | Not Run |
 | SALE-020 | Quotation conversion is not backdated | Convert a quotation to a sale | Sale is dated now; no backdating on this path | P | Not Run |
+| SALE-021 | Overdue filter returns only sales past due and owing | `GET /sales?overdue=true` with one overdue and one not-yet-due credit sale | Overdue one present, the other absent; every row still owes money | P | Automated |
+| SALE-022 | Settling drops a sale from the overdue filter | Record a full payment on an overdue sale, re-query | No longer returned | P | Automated |
+| SALE-023 | Sales list reports the last payment received | Part-pay a credit sale, read the list row | `lastPaymentAt` set; `paymentDueDate` returned | P | Automated |
+| SALE-024 | Due column blank for a fully paid sale | Cash sale in the sales list | Due column shows "—", not an invented date | P | Not Run |
+| SALE-025 | Last payment blank for a counter sale | Cash sale in the sales list | Last payment column shows "—" (the sale never ran on credit) | P | Not Run |
+| SALE-026 | Overdue export matches the screen | Apply the Overdue filter, export PDF/XLSX | Export covers exactly the filtered sales and names the filter | P | Not Run |
 
 ## RET — Returns & Refunds
 
@@ -302,6 +321,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-014 | Walk-in behavior preserved | Sale without customer, then store-credit return | Return blocked per RET-009 | P | Not Run |
 | CUST-015 | Sync to QuickBooks stores a real id | Profile → Sync to QuickBooks on a POS-created customer | `quickbooksCustomerId` populated; status SYNCED | P | Not Run |
 | CUST-016 | Sync while disconnected fails clearly | Same action with QuickBooks disconnected | Error names the disconnection; no id written; status not left claiming success | N | Not Run |
+| CUST-017 | Available credit = limit − outstanding | Credit customer with a limit and one unpaid sale | List row shows limit minus what is owed | P | Automated |
+| CUST-018 | No limit shows nothing, not zero | Credit customer with `creditLimit` null | `availableCredit` is null; the column renders "—" | P | Automated |
+| CUST-019 | Settling releases the credit again | Record a full payment on that customer's sale | Outstanding 0; available back to the full limit | P | Automated |
+| CUST-020 | Filter to customers with credit outstanding | `hasOutstandingCredit=true` with one owing and one settled customer | Only the owing customer returned | P | Automated |
+| CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
 
 ## CIMP — Customer Bulk Import
 
@@ -502,18 +526,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 16 |
+| AUTH | 15 | CUST | 21 |
 | PERM | 15 | CIMP | 10 |
-| DASH | 20 | SUP | 15 |
+| DASH | 24 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
 | POS | 38 | SET | 19 |
-| PAY | 22 | DOC | 11 |
-| SALE | 20 | ADM | 14 |
+| PAY | 31 | DOC | 11 |
+| SALE | 26 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 360 test cases** (≈60% positive / 40% negative).
+**Total: 384 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
@@ -523,3 +547,6 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
   script as fixtures; QB-* cases need a QuickBooks sandbox connection and are
   best tagged `@quickbooks` so they can be excluded from CI without secrets.
 - Concurrency cases (PAY-014, PAY-015) are API-level tests, not browser tests.
+- Credit-management cases (PAY-019/021–027, SALE-021–023, CUST-017–020, DASH-021/022) are
+  automated API-level in `apps/e2e/tests/credit-management.spec.ts`; the remaining ones in
+  those groups are browser cases still to be scripted.

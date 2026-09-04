@@ -2,11 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Customer, CustomerType, Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreditService } from '../credit/credit.service';
 
 export interface CustomerListFilters {
   search?: string;
   customerType?: CustomerType;
   isActive?: boolean;
+  /** Narrow to customers with at least one completed, unsettled sale. */
+  hasOutstandingCredit?: boolean;
 }
 
 @Injectable()
@@ -34,6 +37,9 @@ export class CustomersRepository {
         : {}),
       ...(filters.customerType ? { customerType: filters.customerType } : {}),
       ...(filters.isActive !== undefined ? { isActive: filters.isActive } : {}),
+      // A relational `some` rather than an aggregate: "owes anything at all" is a
+      // question about the existence of an unsettled sale, not about a total.
+      ...(filters.hasOutstandingCredit ? CreditService.HAS_OUTSTANDING : {}),
     };
 
     return this.prisma.$transaction([

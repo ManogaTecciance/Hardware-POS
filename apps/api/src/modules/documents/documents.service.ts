@@ -1,13 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
 import {
-  formatCurrency,
-  formatDateInTimeZone,
-  formatDateTimeInTimeZone,
   ITEM_CONDITION_LABELS,
   QUOTATION_STATUS_LABELS,
   QuotationStatusCode,
   RETURN_REASON_LABELS,
+  formatCurrency,
+  formatDateInTimeZone,
+  formatDateTimeInTimeZone,
+  paymentMethodLabel,
   safeTimeZone,
   type ItemConditionCode,
   type ReturnReasonCode,
@@ -229,11 +230,19 @@ export class DocumentsService {
     summary.push({ label: 'Paid', value: formatCurrency(paid) });
     if (balance > 0) summary.push({ label: 'Balance due', value: formatCurrency(balance) });
 
-    const paymentMethods = sale.payments.map((p) => p.method).join(', ');
+    // Deduped: a split payment across two cards should read "Card", not "Card, Card".
+    const paymentMethods = [...new Set(sale.payments.map((p) => paymentMethodLabel(p.method)))].join(
+      ', ',
+    );
     const meta = [
       { label: 'Date', value: this.date((sale.completedAt ?? sale.createdAt).toISOString(), this.tz(tenantId)) },
       { label: 'Payment', value: sale.paymentStatus },
-      ...(paymentMethods ? [{ label: 'Method', value: paymentMethods }] : []),
+      // A credit sale with nothing paid yet has no method — say so, rather than
+      // dropping the row and leaving the reader to wonder.
+      { label: 'Method', value: paymentMethods || 'On credit' },
+      ...(sale.paymentDueDate
+        ? [{ label: 'Payment due', value: this.date(sale.paymentDueDate.toISOString(), this.tz(tenantId)) }]
+        : []),
     ];
 
     return {
