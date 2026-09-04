@@ -58,7 +58,10 @@ export function Header() {
         <ThemeToggle className="hidden tab:inline-flex" />
         <ProfileMenu
           name={session.user.name}
-          role={session.user.role}
+          // The role row's display name; the enum is a legacy label that can
+          // disagree (a waiter's enum says CASHIER). Enum only for sessions
+          // minted before roleName existed.
+          role={session.user.roleName ?? session.user.role}
           branch={session.branchName}
           register={session.registerName}
           onLogout={onLogout}

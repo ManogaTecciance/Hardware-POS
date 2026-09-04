@@ -46,6 +46,14 @@ export interface AuthTokenResult {
     name: string;
     email: string | null;
     role: UserRole;
+    /**
+     * Display name of the role that actually granted this session's
+     * permissions — the linked role row's name ("Waiter"), or a label derived
+     * from the enum for a not-yet-migrated user. `role` is the legacy enum and
+     * can disagree (a waiter's enum says CASHIER); anything shown to a human
+     * should use this field.
+     */
+    roleName: string;
   };
   /**
    * The permissions this session actually holds, resolved the same way

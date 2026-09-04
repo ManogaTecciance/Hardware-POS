@@ -13,6 +13,14 @@ export interface ResolvedAuthority {
   permissions: ReadonlySet<Permission>;
   /** Set when the source is DENIED — why, for the audit trail and diagnostics. */
   reason?: string;
+  /**
+   * Display name of the role row that granted these permissions (DATABASE
+   * source only). The enum on `User.role` is a legacy label that can disagree
+   * with the real authority — a waiter's enum says CASHIER — so callers that
+   * show a role to a human should show this, falling back to the enum only
+   * when there is no row.
+   */
+  roleName?: string;
 }
 
 const CATALOGUE = new Set<string>(ALL_PERMISSIONS);
@@ -70,6 +78,7 @@ export class PermissionResolver {
           select: {
             id: true,
             key: true,
+            name: true,
             tenantId: true,
             isActive: true,
             permissions: { select: { key: true } },
@@ -134,6 +143,10 @@ export class PermissionResolver {
       return { source: 'DENIED', permissions: new Set(), reason: 'unknown-permission' };
     }
 
-    return { source: 'DATABASE', permissions: new Set(assigned as Permission[]) };
+    return {
+      source: 'DATABASE',
+      permissions: new Set(assigned as Permission[]),
+      roleName: row.customRole.name,
+    };
   }
 }

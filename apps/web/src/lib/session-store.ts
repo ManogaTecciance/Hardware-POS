@@ -11,6 +11,13 @@ export interface SessionUser {
   name: string;
   email: string | null;
   role: UserRole;
+  /**
+   * Display name of the role that granted this session's permissions ("Waiter").
+   * `role` is the legacy enum and can disagree with the real authority; show
+   * this one. Optional because a session minted before the field existed may
+   * still be in localStorage — fall back to the enum then.
+   */
+  roleName?: string;
   tenantId: string;
   permissions: Permission[];
 }

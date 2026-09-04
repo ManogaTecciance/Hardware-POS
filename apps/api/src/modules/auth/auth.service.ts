@@ -45,8 +45,19 @@ export interface CurrentUserView {
   name: string;
   email: string | null;
   role: UserRole;
+  /** Display name of the granting role row; enum-derived for legacy users. */
+  roleName: string;
   branchId: string | null;
   permissions: Permission[];
+}
+
+/**
+ * Human label for a legacy enum role — only used when no role row resolves,
+ * i.e. the LEGACY_FALLBACK and DENIED authority sources.
+ */
+function enumRoleLabel(role: UserRole): string {
+  const words = role.toLowerCase().replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 @Injectable()
@@ -294,6 +305,7 @@ export class AuthService {
         name: user.name,
         email: user.email,
         role: user.role,
+        roleName: authority.roleName ?? enumRoleLabel(user.role),
       },
       permissions: [...authority.permissions],
       // D55: the web app redirects a platform admin to the console instead of
@@ -357,6 +369,7 @@ export class AuthService {
       name: user.name,
       email: user.email,
       role: user.role,
+      roleName: authority.roleName ?? enumRoleLabel(user.role),
       branchId: user.branchId,
       permissions: [...authority.permissions],
     };
