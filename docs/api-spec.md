@@ -161,6 +161,18 @@ All product/category read routes require `product:read`; every role has it.
 GET /v1/customers?query=acme
 200 → { "data": { "items": [ { "id", "qboId", "name", "email", "phone" } ], ... } }
 
+GET /v1/customers/{id}/credit          # customer:read — live credit position
+200 → { "creditAllowed", "creditLimit", "outstanding", "available" }
+404 → no such customer in this tenant
+# Served from the same CreditService the sale-completion guard uses, so the figure a
+#   cashier is shown is the figure they are held to. `creditLimit: null` means no limit
+#   is configured, i.e. unlimited — NOT zero. `available` is unclamped and CAN be
+#   negative (a limit lowered after the fact); clamp it at zero for display, as the
+#   server does in its own error message.
+# The POS payment page re-reads this as the order changes, so a cashier sees "over the
+#   credit limit" while adjusting quantities rather than when they press Complete
+#   Payment. It is advisory: the server re-checks on completion and decides.
+
 GET /v1/customers?page=1&pageSize=20&hasOutstandingCredit=true
 200 → paginated customers, each row carrying its credit position:
       { ..., "creditLimit", "outstandingCredit", "availableCredit" }

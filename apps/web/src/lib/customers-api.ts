@@ -170,6 +170,42 @@ export async function fetchCustomer(session: Session, id: string): Promise<Manag
   return toManaged(await api.get<ApiCustomer>(`/customers/${id}`, auth(session)));
 }
 
+/** A customer's live credit position, as the sale-completion guard sees it. */
+export interface CustomerCredit {
+  creditAllowed: boolean;
+  /** null = no limit configured, which means unlimited — NOT zero. */
+  creditLimit: number | null;
+  /** Unpaid balance across this customer's completed, unsettled sales. */
+  outstanding: number;
+  /** `creditLimit - outstanding`, or null when there is no limit. Can be negative. */
+  available: number | null;
+}
+
+/**
+ * Fetch what a customer owes right now.
+ *
+ * Deliberately not cached in the cart: outstanding moves when any till records a
+ * payment or completes another credit sale, so a figure stored alongside the
+ * order goes stale exactly when it matters.
+ */
+export async function fetchCustomerCredit(
+  session: Session,
+  id: string,
+): Promise<CustomerCredit> {
+  const c = await api.get<{
+    creditAllowed: boolean;
+    creditLimit: string | number | null;
+    outstanding: string | number;
+    available: string | number | null;
+  }>(`/customers/${id}/credit`, auth(session));
+  return {
+    creditAllowed: c.creditAllowed,
+    creditLimit: c.creditLimit == null ? null : Number(c.creditLimit),
+    outstanding: Number(c.outstanding),
+    available: c.available == null ? null : Number(c.available),
+  };
+}
+
 export async function createCustomer(
   session: Session,
   input: CustomerInput,

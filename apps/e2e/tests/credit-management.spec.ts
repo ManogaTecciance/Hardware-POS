@@ -260,6 +260,76 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
     expect(ids).not.toContain(settled.customer.id);
   });
 
+  test('CUST-022 the credit endpoint reports the position the till shows', async ({ ownerApi }) => {
+    const { customer, total } = await creditSale(ownerApi, { creditLimit: 100_000 });
+    const credit = await ownerApi.get(`/customers/${customer.id}/credit`);
+    expect(credit.creditAllowed).toBe(true);
+    expect(Number(credit.creditLimit)).toBe(100_000);
+    expect(Number(credit.outstanding)).toBeCloseTo(total, 2);
+    expect(Number(credit.available)).toBeCloseTo(100_000 - total, 2);
+  });
+
+  test('CUST-023 no limit reports null available, not zero', async ({ ownerApi }) => {
+    const { customer } = await creditSale(ownerApi, { creditLimit: null });
+    const credit = await ownerApi.get(`/customers/${customer.id}/credit`);
+    expect(credit.creditLimit).toBeNull();
+    expect(credit.available).toBeNull();
+  });
+
+  test('CUST-024 the figure the till shows is the figure the guard enforces', async ({
+    ownerApi,
+  }) => {
+    // The whole point of the live warning: what the cashier is told is available
+    // must be exactly what completes. A sale for that amount goes through, and a
+    // cent more does not.
+    const product = await ownerApi.createProduct({ quantityOnHand: 500, unitPrice: 100 });
+    // A limit that is a whole number of units, so "exactly the headroom" is a
+    // quantity and not a rounding argument — tax, if any, is already in `unit`.
+    const unit = await ownerApi.cartTotal([{ productId: product.id, quantity: 1 }]);
+    const UNITS = 50;
+    const customer = await ownerApi.createCustomer({
+      creditAllowed: true,
+      creditLimit: unit * UNITS,
+    });
+
+    const before = await ownerApi.get(`/customers/${customer.id}/credit`);
+    expect(Number(before.available)).toBeCloseTo(unit * UNITS, 2);
+
+    const tooBig = await ownerApi.postRaw('/sales/complete', {
+      branchId: 'brn_dev',
+      registerId: 'reg_dev',
+      customerId: customer.id,
+      items: [{ productId: product.id, quantity: UNITS + 1 }],
+      payments: [],
+      paymentDueDate: DUE,
+    });
+    expect(tooBig.status()).toBe(400);
+    expect(await tooBig.text()).toContain('Credit limit exceeded');
+
+    // Exactly the available headroom completes — the server tests strictly
+    // greater-than, and the till's warning must not be stricter than that.
+    const exact = await ownerApi.post('/sales/complete', {
+      branchId: 'brn_dev',
+      registerId: 'reg_dev',
+      customerId: customer.id,
+      items: [{ productId: product.id, quantity: UNITS }],
+      payments: [],
+      paymentDueDate: DUE,
+    });
+    expect(exact.status).toBe('COMPLETED');
+
+    const after = await ownerApi.get(`/customers/${customer.id}/credit`);
+    expect(Number(after.available)).toBe(0);
+  });
+
+  test('CUST-025 a customer barred from credit reports it before any sale', async ({ ownerApi }) => {
+    const customer = await ownerApi.createCustomer({ creditAllowed: false, creditLimit: 10_000 });
+    const credit = await ownerApi.get(`/customers/${customer.id}/credit`);
+    // The till reads this and says so, rather than letting the cashier find out
+    // when Complete Payment is pressed.
+    expect(credit.creditAllowed).toBe(false);
+  });
+
   test('DASH-021 the receivable stat counts every unsettled balance', async ({ ownerApi }) => {
     const before = await ownerApi.get('/dashboard/stats');
     const { total } = await creditSale(ownerApi);

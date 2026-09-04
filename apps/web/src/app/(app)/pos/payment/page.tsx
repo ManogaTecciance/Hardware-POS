@@ -26,6 +26,8 @@ import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/lib/auth';
 import { computeLine, computeTotals, type CartItem } from '@/lib/cart';
 import { useCheckoutData } from '@/lib/catalog';
+import { checkCredit } from '@/lib/credit-guard';
+import { fetchCustomerCredit, type CustomerCredit } from '@/lib/customers-api';
 import { isValidYmd } from '@/lib/dates';
 import { usePosCart } from '@/lib/pos-cart';
 import { printCustomerReceipt, type ReceiptContext } from '@/lib/receipt-print';
@@ -85,6 +87,14 @@ export default function PaymentPage() {
   const [partialMethod, setPartialMethod] = React.useState<PaymentMethodCode>('CASH');
   const [splitLines, setSplitLines] = React.useState<SplitLine[]>([]);
   const [dueDate, setDueDate] = React.useState('');
+  // Page-local, never stored with the cart: outstanding moves whenever any till
+  // takes a payment, so a figure carried alongside the order goes stale exactly
+  // when it matters. `customerId` travels with it so a slow response for a
+  // previously selected customer cannot be applied to the current one.
+  const [credit, setCredit] = React.useState<(CustomerCredit & { customerId: string }) | null>(
+    null,
+  );
+  const [creditUnavailable, setCreditUnavailable] = React.useState(false);
   const [printAfter, setPrintAfter] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -109,6 +119,42 @@ export default function PaymentPage() {
   React.useEffect(() => {
     setTendered(total ? total.toFixed(2) : '');
   }, [total]);
+
+  // Re-read the customer's credit whenever the selection changes, and again
+  // whenever the till is brought back to the foreground — another till may have
+  // settled one of their invoices in the meantime.
+  const customerId = cart.customerId;
+  const [creditKey, setCreditKey] = React.useState(0);
+  React.useEffect(() => {
+    if (!session || !customerId) {
+      setCredit(null);
+      setCreditUnavailable(false);
+      return;
+    }
+    let ignore = false;
+    fetchCustomerCredit(session, customerId)
+      .then((c) => {
+        if (ignore) return;
+        setCredit({ ...c, customerId });
+        setCreditUnavailable(false);
+      })
+      .catch(() => {
+        // Fail OPEN: a transport problem must not stop the shop selling. The
+        // server checks the limit again on completion, which is the real gate.
+        if (ignore) return;
+        setCredit(null);
+        setCreditUnavailable(true);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [session, customerId, creditKey]);
+
+  React.useEffect(() => {
+    const refresh = () => setCreditKey((k) => k + 1);
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, []);
 
   // ── derive payments from the selected mode ─────────────────────────────────
   const splitPaid = round2(splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0));
@@ -161,6 +207,18 @@ export default function PaymentPage() {
   // Compared as plain YYYY-MM-DD strings, which sort chronologically.
   const dueDateValid = isValidYmd(dueDate) && dueDate >= cart.saleDate;
 
+  // Derived on every render, not snapshotted, so editing a quantity in the order
+  // summary moves it immediately. The rule itself lives in checkCredit, which
+  // mirrors the server guard; this only ever explains the button, and the server
+  // re-checks on completion and remains what actually decides.
+  const {
+    applies: creditApplies,
+    refused: creditRefused,
+    overLimit,
+    available: creditAvailable,
+    credit: liveCredit,
+  } = checkCredit(balance, customerId, credit);
+
   // Gated here as well as in the cart: /pos/payment is reachable by a direct
   // reload, which rehydrates from sessionStorage without passing through /pos.
   const invalid =
@@ -171,6 +229,8 @@ export default function PaymentPage() {
     (needsCustomer && !hasCustomer) ||
     (mode === 'CASH' && tenderedNum < total) ||
     (needsDueDate && !dueDateValid) ||
+    creditRefused ||
+    overLimit ||
     (mode === 'PARTIAL' && (paidAmount <= 0 || paidAmount >= total)) ||
     (mode === 'SPLIT' && (payments.length === 0 || paidAmount > total));
 
@@ -185,6 +245,12 @@ export default function PaymentPage() {
       disabledReason = 'The invoice date must be today or earlier — fix it in the cart.';
     } else if (needsCustomer && !hasCustomer) {
       disabledReason = 'Select a customer to record a credit or partial sale.';
+    } else if (creditRefused) {
+      disabledReason = 'This customer is not approved for credit — take full payment to complete.';
+    } else if (overLimit) {
+      disabledReason =
+        `Over the credit limit: ${formatMoney(creditAvailable, currency)} available, ` +
+        `this sale needs ${formatMoney(balance, currency)}. Take a larger payment now.`;
     } else if (mode === 'CASH' && tenderedNum < total) {
       disabledReason = `Enter at least ${formatMoney(total, currency)} to complete this cash payment.`;
     } else if (mode === 'PARTIAL' && paidAmount <= 0) {
@@ -276,6 +342,10 @@ export default function PaymentPage() {
       // The failure may be another register beating us to the stock (or a
       // price change) — refresh the catalog so the cart reflects reality.
       data.reload();
+      // ...and the customer may have taken on credit elsewhere since we last
+      // looked, so re-read it too: a retry should be measured against the same
+      // numbers the server just used to refuse.
+      setCreditKey((k) => k + 1);
     } finally {
       setSubmitting(false);
     }
@@ -567,6 +637,60 @@ export default function PaymentPage() {
               <p className="max-w-md rounded-xl bg-muted px-4 py-3 text-sm text-muted-foreground">
                 The full {formatMoney(total, currency)} will be recorded as credit (an Invoice). A
                 saved customer is required.
+              </p>
+            ) : null}
+
+            {creditApplies && liveCredit ? (
+              <div
+                className={cn(
+                  'mt-5 max-w-md rounded-xl px-4 py-3 text-sm',
+                  overLimit || creditRefused ? 'bg-danger-soft text-danger' : 'bg-muted',
+                )}
+                role={overLimit || creditRefused ? 'alert' : 'status'}
+              >
+                {creditRefused ? (
+                  <p className="font-medium">
+                    {customerName} is not approved for credit — take full payment.
+                  </p>
+                ) : liveCredit.creditLimit == null ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Credit outstanding</span>
+                    <span className="font-medium">
+                      {formatMoney(liveCredit.outstanding, currency)} · no limit set
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={overLimit ? undefined : 'text-muted-foreground'}>
+                        Credit available
+                      </span>
+                      <span className="font-medium">{formatMoney(creditAvailable, currency)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={overLimit ? undefined : 'text-muted-foreground'}>
+                        This sale needs
+                      </span>
+                      <span className="font-medium">{formatMoney(balance, currency)}</span>
+                    </div>
+                    {overLimit ? (
+                      <p className="mt-1.5 font-medium">
+                        Over the limit by{' '}
+                        {formatMoney(round2(balance - creditAvailable), currency)} — take a larger
+                        payment now, or reduce the order.
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {creditApplies && creditUnavailable ? (
+              // Advisory only: the sale is not blocked, it is simply unchecked
+              // here. The server still enforces the limit on completion.
+              <p className="mt-5 max-w-md rounded-xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+                Could not read this customer&rsquo;s credit position. The limit will still be
+                checked when you complete the sale.
               </p>
             ) : null}
 

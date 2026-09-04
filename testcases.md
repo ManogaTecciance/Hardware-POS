@@ -217,6 +217,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-025 | Due date stored on the sale | Complete on credit with a due date, read the sale | `paymentDueDate` returned as given | P | Automated |
 | PAY-026 | Due date before the invoice date rejected | `paymentDueDate` earlier than `saleDate` | 400 | N | Automated |
 | PAY-027 | Instalments each kept as their own record | Two part payments against one sale | Two Payment rows, each with its own date/time, method and reference | P | Automated |
+| PAY-034 | Credit warning appears as the order grows | Credit customer, raise a quantity in the payment page order summary until the total passes their limit | Warning appears live with available vs needed; Complete Payment disables — without pressing it | P | Not Run |
+| PAY-035 | Credit warning clears when payment covers it | With the warning showing, switch to Partial and enter enough to bring the balance under the limit | Warning clears; Complete Payment re-enables | P | Not Run |
+| PAY-036 | Non-credit customer flagged up front | Select a customer with creditAllowed false, choose Credit | "not approved for credit" shown immediately, not on submit | N | Not Run |
+| PAY-037 | Unlimited customer is never blocked | creditAllowed with creditLimit null, large credit sale | No warning; sale completes | P | Not Run |
+| PAY-038 | Credit unreadable does not block selling | Break /customers/{id}/credit (offline), take a credit sale | Non-blocking notice; Complete Payment still enabled; server enforces on completion | N | Not Run |
 | PAY-028 | Due date required in the POS | Choose Credit/Partial at checkout, leave the due date blank | Complete Payment stays disabled and names the missing due date | N | Not Run |
 | PAY-029 | Due date field hidden on a fully paid sale | Choose Cash for the full amount | No due-date field shown; none sent | P | Not Run |
 | PAY-030 | Record payment from the sale detail | Sale detail → Record payment, amount/method/reference | Payment listed with date and time; balance and status update | P | Not Run |
@@ -328,6 +333,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-018 | No limit shows nothing, not zero | Credit customer with `creditLimit` null | `availableCredit` is null; the column renders "—" | P | Automated |
 | CUST-019 | Settling releases the credit again | Record a full payment on that customer's sale | Outstanding 0; available back to the full limit | P | Automated |
 | CUST-020 | Filter to customers with credit outstanding | `hasOutstandingCredit=true` with one owing and one settled customer | Only the owing customer returned | P | Automated |
+| CUST-022 | Credit endpoint reports the till's figures | GET /customers/{id}/credit for a customer with one unpaid sale | creditAllowed, creditLimit, outstanding and available all match the sale | P | Automated |
+| CUST-023 | No limit reports null available | Same for a customer with creditLimit null | `creditLimit` and `available` are both null, not 0 | P | Automated |
+| CUST-024 | Shown figure equals enforced figure | Sell exactly the available headroom, then one unit more | The exact-headroom sale completes; one more is 400 "Credit limit exceeded" | P | Automated |
+| CUST-025 | Credit refusal visible before the sale | GET credit for a customer with creditAllowed false | `creditAllowed: false` — the till says so up front | P | Automated |
 | CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
 
 ## CIMP — Customer Bulk Import
@@ -529,18 +538,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 21 |
+| AUTH | 15 | CUST | 25 |
 | PERM | 15 | CIMP | 10 |
 | DASH | 24 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
 | POS | 38 | SET | 19 |
-| PAY | 34 | DOC | 11 |
+| PAY | 39 | DOC | 11 |
 | SALE | 27 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 388 test cases** (≈60% positive / 40% negative).
+**Total: 397 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

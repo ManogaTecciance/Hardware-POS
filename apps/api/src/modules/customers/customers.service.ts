@@ -4,7 +4,7 @@ import type { Paginated } from '@hardware-pos/shared';
 
 import { round2 } from '../../common/money';
 import { paginate } from '../../common/pagination';
-import { CreditService } from '../credit/credit.service';
+import { CreditService, type CustomerCredit } from '../credit/credit.service';
 import { QuickBooksCustomersService } from '../quickbooks/quickbooks-customers.service';
 import { CustomersRepository } from './customers.repository';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -58,6 +58,15 @@ export class CustomersService {
     });
 
     return paginate(withCredit, total, query.page, query.pageSize);
+  }
+
+  /** Live credit position for one customer; 404 when the customer is not theirs. */
+  async creditFor(tenantId: string, id: string): Promise<CustomerCredit> {
+    const credit = await this.credit.forCustomer(tenantId, id);
+    if (!credit) {
+      throw new NotFoundException(`Customer ${id} not found`);
+    }
+    return credit;
   }
 
   async getById(tenantId: string, id: string): Promise<Customer> {
