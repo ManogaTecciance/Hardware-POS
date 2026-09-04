@@ -300,7 +300,6 @@ export default function SalesPage() {
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 font-medium">Customer</th>
                 <th className="px-4 py-3 font-medium">Cashier</th>
-                <th className="px-4 py-3 text-right font-medium">Items</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 font-medium">Due</th>
                 <th className="px-4 py-3 font-medium">Payment</th>
@@ -312,13 +311,13 @@ export default function SalesPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={10} className="px-4 py-16 text-center text-muted-foreground">
                     Loading sales…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-16 text-center">
+                  <td colSpan={10} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
                         <ReceiptText className="h-6 w-6" />
@@ -358,7 +357,6 @@ export default function SalesPage() {
                     </td>
                     <td className="px-4 py-3">{s.customerName ?? 'Walk-in customer'}</td>
                     <td className="px-4 py-3 text-muted-foreground">{s.cashierName ?? '—'}</td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">{s.itemCount}</td>
                     {/* Red while the sale is still owed for — the colour carries what
                         the old Balance column said, without a column of its own. */}
                     <td

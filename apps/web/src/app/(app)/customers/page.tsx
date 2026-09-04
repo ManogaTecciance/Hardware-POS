@@ -210,13 +210,14 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{c.phone ?? '—'}</td>
                     <td className="px-4 py-3">
-                      {c.creditAllowed ? (
-                        <span className="text-muted-foreground">
-                          {c.creditLimit != null ? formatMoney(c.creditLimit) : 'No limit'}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      {/* Only a figure earns a place here. A customer with no limit
+                          configured has no number to show, so the cell stays empty
+                          rather than carrying wording the column cannot explain —
+                          the detail page states it in full, next to whether credit
+                          is allowed at all. */}
+                      <span className="text-muted-foreground">
+                        {c.creditAllowed && c.creditLimit != null ? formatMoney(c.creditLimit) : '—'}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       {c.availableCredit != null ? (

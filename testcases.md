@@ -261,6 +261,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE-024 | Due column blank for a fully paid sale | Cash sale in the sales list | Due column shows "—", not an invented date | P | Not Run |
 | SALE-028 | Credit / Unpaid filter includes part-paid sales | Filter the sales list by Credit / Unpaid with one part-paid, one wholly unpaid and one settled sale | Both owing sales returned; the settled one is not | P | Automated |
 | SALE-029 | PARTIAL still narrows via the API | GET /sales?paymentStatus=PARTIAL | Only the part-paid sale — the enum still discriminates for API callers | P | Automated |
+| SALE-031 | Sales list has no Items column | Open the sales list | Columns are Sale, Date, Customer, Cashier, Total, Due, Payment, Last payment, Sync, Actions — no item count | P | Not Run |
 | SALE-030 | No "Partially paid" anywhere on screen | Part-pay a credit sale; check the sales list, the sale detail badge and the dashboard recent sales | All read Credit / Unpaid (dashboard: "Credit"); the filter dropdown offers no Partially paid option | P | Not Run |
 | SALE-027 | Total is red while a sale is owed for | Sales list with one credit and one cash sale | Credit sale's Total is red; the paid one is not; there is no Balance column | P | Not Run |
 | SALE-025 | Last payment blank for a counter sale | Cash sale in the sales list | Last payment column shows "—" (the sale never ran on credit) | P | Not Run |
@@ -342,6 +343,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-023 | No limit reports null available | Same for a customer with creditLimit null | `creditLimit` and `available` are both null, not 0 | P | Automated |
 | CUST-024 | Shown figure equals enforced figure | Sell exactly the available headroom, then one unit more | The exact-headroom sale completes; one more is 400 "Credit limit exceeded" | P | Automated |
 | CUST-025 | Credit refusal visible before the sale | GET credit for a customer with creditAllowed false | `creditAllowed: false` — the till says so up front | P | Automated |
+| CUST-026 | Credit column shows a figure or nothing | Customers list with three rows: credit + limit, credit + no limit, credit not allowed | Only the first shows an amount; the other two are blank — the words "No limit" appear nowhere in the table | P | Not Run |
 | CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
 
 ## CIMP — Customer Bulk Import
@@ -543,18 +545,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 25 |
+| AUTH | 15 | CUST | 26 |
 | PERM | 15 | CIMP | 10 |
 | DASH | 24 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
 | POS | 38 | SET | 19 |
 | PAY | 41 | DOC | 11 |
-| SALE | 30 | ADM | 14 |
+| SALE | 31 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 402 test cases** (≈60% positive / 40% negative).
+**Total: 404 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
