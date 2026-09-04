@@ -46,7 +46,13 @@ export interface SellableQuery {
 }
 
 export type PriceSource = 'BASE' | 'COLLECTION_OVERRIDE' | 'CHANNEL_OVERRIDE';
-export type StockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED';
+/**
+ * D101 — SOLD_OUT is its own state, not OUT: OUT is what a COUNT says about
+ * a tracked item, SOLD_OUT is what a PERSON said about an untracked one (the
+ * 86 switch). A client that greys both still must not offer "adjust stock"
+ * on a dish.
+ */
+export type StockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED' | 'SOLD_OUT';
 
 export interface SellableItem {
   id: string;
@@ -402,7 +408,9 @@ export class SellableService {
         // kitchen is happily cooking.
         if (p.sellableKind === 'SERVICE' || p.sellableKind === 'COMPOSED_ITEM') {
           item.availableQuantity = null;
-          item.stockState = 'UNTRACKED';
+          // D101 — the 86 switch is the ONLY thing that can make an
+          // untracked item unavailable; its meaningless count never does.
+          item.stockState = p.soldOutAt ? 'SOLD_OUT' : 'UNTRACKED';
         } else {
           const qty = p.quantityOnHand;
           item.availableQuantity = qty.toFixed(3);

@@ -3,8 +3,10 @@
 import { Search, X } from 'lucide-react';
 import * as React from 'react';
 
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
+import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
@@ -41,6 +43,18 @@ export interface PosBrowserServerQuery {
   loadedCount: number;
 }
 
+/**
+ * D101 — the 86 switch at the till. Present only when the workspace can
+ * wire it (a session with `product:availability:set`); absent keeps the
+ * browser a pure picker, unchanged.
+ */
+export interface PosBrowserAvailability {
+  /** The operator holds the permission — long-press offers the switch. */
+  canToggle: boolean;
+  /** Flip one item, then refresh the catalogue. Rejections surface in the dialog. */
+  onToggle: (item: MenuItemView, available: boolean) => Promise<void>;
+}
+
 interface Props {
   data: MenuData;
   loading: boolean;
@@ -50,6 +64,7 @@ interface Props {
    * what matched. Absent = the original client-side substring filter.
    */
   serverQuery?: PosBrowserServerQuery;
+  availability?: PosBrowserAvailability;
 }
 
 /**
@@ -68,9 +83,62 @@ interface Props {
  * Empty and loading states are handled here rather than by the caller so
  * every mode gets the same behaviour.
  */
-export function PosMenuBrowser({ data, loading, onPick, serverQuery }: Props) {
+export function PosMenuBrowser({ data, loading, onPick, serverQuery, availability }: Props) {
   const [localSearch, setLocalSearch] = React.useState('');
   const [selectedSectionId, setSelectedSectionId] = React.useState<string | null>(null);
+  /*
+   * D101 — the availability dialog's subject, opened by a long-press on an
+   * 86-able card (the Square gesture) or a tap on a sold-out one. Only
+   * UNTRACKED/SOLD_OUT items qualify: a tracked item's availability is its
+   * count, and the server would refuse the switch anyway.
+   */
+  const [availabilityItem, setAvailabilityItem] = React.useState<MenuItemView | null>(null);
+  const [availabilityBusy, setAvailabilityBusy] = React.useState(false);
+  const [availabilityError, setAvailabilityError] = React.useState<string | null>(null);
+  const pressTimer = React.useRef<number | null>(null);
+  /*
+   * A long-press and the click it ends with are one gesture: the browser
+   * still fires `click` on pointer-up, and without this flag that click
+   * would add the item the operator was trying to 86.
+   */
+  const longPressFired = React.useRef(false);
+
+  const canEightySix = React.useCallback(
+    (it: MenuItemView) =>
+      availability?.canToggle === true &&
+      (it.stockState === 'UNTRACKED' || it.stockState === 'SOLD_OUT'),
+    [availability],
+  );
+
+  const startPress = (it: MenuItemView) => {
+    if (!canEightySix(it)) return;
+    longPressFired.current = false;
+    pressTimer.current = window.setTimeout(() => {
+      longPressFired.current = true;
+      setAvailabilityError(null);
+      setAvailabilityItem(it);
+    }, 550);
+  };
+  const cancelPress = () => {
+    if (pressTimer.current != null) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+  };
+
+  const applyAvailability = async (available: boolean) => {
+    if (!availability || !availabilityItem) return;
+    setAvailabilityBusy(true);
+    setAvailabilityError(null);
+    try {
+      await availability.onToggle(availabilityItem, available);
+      setAvailabilityItem(null);
+    } catch (err) {
+      setAvailabilityError(err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  };
   /*
    * Which section the operator has narrowed the RESULTS to, `null` for "All".
    *
@@ -333,34 +401,133 @@ export function PosMenuBrowser({ data, loading, onPick, serverQuery }: Props) {
         // side by side. Below `tab:` we keep the two-column density so a
         // portrait iPad still shows six cards above the fold.
         <div className="grid grid-cols-2 gap-3 tab:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-          {filtered.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              onClick={() => onPick(it)}
-              className="flex h-full flex-col rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary hover:shadow"
-            >
-              <div className="mb-2 flex h-16 items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 text-2xl">
-                {emojiFor(it.name)}
-              </div>
-              <span className="text-sm font-semibold leading-tight">{it.name}</span>
-              {it.description ? (
-                <span className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                  {it.description}
+          {filtered.map((it) => {
+            // D101 — a sold-out card stays visible (the operator must SEE
+            // what is 86'd to bring it back) but stops adding; tapping it
+            // opens the availability dialog for whoever holds the switch.
+            const soldOut = it.stockState === 'SOLD_OUT';
+            return (
+              <button
+                key={it.id}
+                type="button"
+                onPointerDown={() => startPress(it)}
+                onPointerUp={cancelPress}
+                onPointerLeave={cancelPress}
+                onPointerCancel={cancelPress}
+                onClick={() => {
+                  if (longPressFired.current) {
+                    longPressFired.current = false;
+                    return;
+                  }
+                  if (soldOut) {
+                    if (canEightySix(it)) {
+                      setAvailabilityError(null);
+                      setAvailabilityItem(it);
+                    }
+                    return;
+                  }
+                  onPick(it);
+                }}
+                aria-disabled={soldOut || undefined}
+                className={`flex h-full flex-col rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors ${
+                  soldOut ? 'opacity-60' : 'hover:border-primary hover:shadow'
+                }`}
+              >
+                <div className="mb-2 flex h-16 items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 text-2xl">
+                  {emojiFor(it.name)}
+                </div>
+                <span className="text-sm font-semibold leading-tight">{it.name}</span>
+                {it.description ? (
+                  <span className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                    {it.description}
+                  </span>
+                ) : null}
+                {soldOut ? (
+                  <span className="mt-1 inline-flex w-fit items-center rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-danger">
+                    Sold out
+                  </span>
+                ) : null}
+                <span
+                  className={`mt-auto pt-2 text-sm font-semibold ${
+                    soldOut ? 'text-muted-foreground' : 'text-primary'
+                  }`}
+                >
+                  {formatMoney(it.basePrice)}
                 </span>
-              ) : null}
-              <span className="mt-auto pt-2 text-sm font-semibold text-primary">
-                {formatMoney(it.basePrice)}
-              </span>
-              {it.modifierGroupIds.length > 0 ? (
-                <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  Modifiers
-                </span>
-              ) : null}
-            </button>
-          ))}
+                {/* D101 — count hints for tracked items. Informational only:
+                    oversell stays permitted, so the card stays tappable. */}
+                {it.stockState === 'OUT' ? (
+                  <span className="text-[11px] font-medium text-danger">Out of stock</span>
+                ) : it.stockState === 'LOW' ? (
+                  <span className="text-[11px] font-medium text-warning">Low stock</span>
+                ) : null}
+                {it.modifierGroupIds.length > 0 ? (
+                  <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    Modifiers
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       )}
+
+      {/* D101 — the availability dialog. One subject, two verbs. */}
+      {availabilityItem ? (
+        <Dialog
+          open
+          onClose={() => {
+            if (availabilityBusy) return;
+            setAvailabilityItem(null);
+            setAvailabilityError(null);
+          }}
+          title={availabilityItem.name}
+          description={
+            availabilityItem.stockState === 'SOLD_OUT'
+              ? 'Sold out — customers cannot order it until it is marked available.'
+              : 'Mark this item sold out to pull it off the menu for now.'
+          }
+          footer={
+            <>
+              <Button
+                variant="outline"
+                disabled={availabilityBusy}
+                onClick={() => {
+                  setAvailabilityItem(null);
+                  setAvailabilityError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              {availabilityItem.stockState === 'SOLD_OUT' ? (
+                <Button disabled={availabilityBusy} onClick={() => void applyAvailability(true)}>
+                  {availabilityBusy ? 'Saving…' : 'Mark as available'}
+                </Button>
+              ) : (
+                <Button
+                  variant="destructive"
+                  disabled={availabilityBusy}
+                  onClick={() => void applyAvailability(false)}
+                >
+                  {availabilityBusy ? 'Saving…' : 'Mark as sold out'}
+                </Button>
+              )}
+            </>
+          }
+        >
+          {availabilityError ? (
+            <p className="text-sm text-danger" role="alert">
+              {availabilityError}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {availabilityItem.stockState === 'SOLD_OUT'
+                ? 'Bring it back when the kitchen has it again.'
+                : 'The card stays on the grid, greyed out, so it can be brought back with one tap.'}
+            </p>
+          )}
+        </Dialog>
+      ) : null}
 
       {/*
         Paging lives below the grid, not as an infinite scroller: a POS grid is

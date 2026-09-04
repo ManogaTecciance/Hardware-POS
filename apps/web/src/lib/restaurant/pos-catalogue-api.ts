@@ -31,6 +31,13 @@ import type { Session } from '../auth';
 export type PosCatalogueFoodType = 'FOOD' | 'BEVERAGE' | 'DESSERT';
 export type PosCatalogueChannel = 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
 
+/**
+ * D101 — the sellable read model's stock verdict for one item. Counts speak
+ * for tracked items (IN_STOCK/LOW/OUT); the 86 switch speaks for untracked
+ * ones (UNTRACKED/SOLD_OUT). Absent for tenants that track nothing.
+ */
+export type PosCatalogueStockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED' | 'SOLD_OUT';
+
 export interface PosCatalogueVariant {
   id: string;
   sku: string;
@@ -88,6 +95,8 @@ export interface PosCatalogueItem {
   modifierGroups: PosCatalogueModifierGroup[];
   stations: PosCatalogueStation[];
   promotions: PosCataloguePromotion[];
+  /** D101 — null when the tenant tracks no stock at all. */
+  stockState: PosCatalogueStockState | null;
 }
 
 export interface PosCatalogueResponse {
@@ -164,6 +173,8 @@ interface ApiItem {
   modifierGroups?: ApiModifierGroup[];
   stations?: PosCatalogueStation[];
   promotions: PosCataloguePromotion[];
+  /** D101 — present only when the tenant tracks stock (capability-shaped). */
+  stockState?: PosCatalogueStockState;
 }
 
 interface ApiResponse {
@@ -225,6 +236,7 @@ function toItem(i: ApiItem): PosCatalogueItem {
     modifierGroups: (i.modifierGroups ?? []).map(toModifierGroup),
     stations: i.stations ?? [],
     promotions: i.promotions,
+    stockState: i.stockState ?? null,
   };
 }
 

@@ -751,6 +751,12 @@ model Product {
   /// valid unchanged; the convergence backfill reclassifies Service rows and
   /// D45 restaurant products.
   sellableKind          SellableKind  @default(STOCK_ITEM)
+  /// D101 — the 86 switch: null = available, a timestamp = sold out since
+  /// then. Only meaningful for kinds whose availability no count governs
+  /// (COMPOSED_ITEM / SERVICE — the availability endpoint refuses the rest).
+  /// Product-level, not per-branch, because LOCAL inventory refuses
+  /// multi-branch tenants; a multi-branch future moves this to a satellite.
+  soldOutAt             DateTime?
   /// D45 — Restaurant Product wizard fields. All nullable / defaulted so
   /// Retail (Tile Shop, Hardware) rows stay valid without a backfill.
   /// `foodType` reuses the D41 `MenuItemType` enum to avoid a second

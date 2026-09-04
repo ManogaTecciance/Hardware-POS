@@ -17,7 +17,7 @@
  * rendered every row always would pass the server-mode cases alone, and one
  * that rendered nothing would pass the negatives alone.
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import * as React from 'react';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -46,6 +46,8 @@ function item(id: string, name: string, description: string | null = null): PosC
     modifierGroups: [],
     stations: [],
     promotions: [],
+    // D101 — a dish under LOCAL inventory; SOLD_OUT cases override this.
+    stockState: 'UNTRACKED',
   };
 }
 
@@ -492,5 +494,127 @@ describe('releasing a narrowed search', () => {
     expect(
       screen.getByRole('button', { name: 'Beverage' }).getAttribute('data-active'),
     ).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D101 — sold-out cards and the 86 switch
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('D101 — sold out at the picker', () => {
+  const SOLD_OUT_MENU = catalogueToMenuData([
+    { ...item('p1', 'Rice and Curry'), stockState: 'SOLD_OUT' as const },
+    item('p2', 'Kottu'),
+  ]);
+
+  it('a sold-out card shows the badge and stops adding; an available one still adds', () => {
+    const onPick = vi.fn();
+    render(<PosMenuBrowser data={SOLD_OUT_MENU} loading={false} onPick={onPick} />);
+
+    // POSITIVE: the badge names the state.
+    expect(screen.getByText(/sold out/i)).toBeTruthy();
+
+    // NEGATIVE: tapping the sold-out card adds nothing.
+    fireEvent.click(screen.getByRole('button', { name: /rice and curry/i }));
+    expect(onPick).not.toHaveBeenCalled();
+
+    // POSITIVE CONTROL: the available card still adds — the guard is the
+    // flag, not a picker that stopped picking.
+    fireEvent.click(screen.getByRole('button', { name: /kottu/i }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+  });
+
+  it('without the availability wiring, a sold-out tap opens nothing', () => {
+    render(<PosMenuBrowser data={SOLD_OUT_MENU} loading={false} onPick={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /rice and curry/i }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('with the switch, tapping a sold-out card offers "Mark as available" and applies it', async () => {
+    const onToggle = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PosMenuBrowser
+        data={SOLD_OUT_MENU}
+        loading={false}
+        onPick={vi.fn()}
+        availability={{ canToggle: true, onToggle }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /rice and curry/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toMatch(/rice and curry/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /mark as available/i }));
+
+    await vi.waitFor(() => {
+      expect(onToggle).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'p1' }),
+        true,
+      );
+    });
+    // The dialog closes on success.
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('long-pressing an available untracked card offers "Mark as sold out" without adding it', async () => {
+    vi.useFakeTimers();
+    try {
+      const onPick = vi.fn();
+      const onToggle = vi.fn().mockResolvedValue(undefined);
+      render(
+        <PosMenuBrowser
+          data={SOLD_OUT_MENU}
+          loading={false}
+          onPick={onPick}
+          availability={{ canToggle: true, onToggle }}
+        />,
+      );
+
+      const card = screen.getByRole('button', { name: /kottu/i });
+      fireEvent.pointerDown(card);
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      fireEvent.pointerUp(card);
+      // The click that ends the same gesture must not add the item.
+      fireEvent.click(card);
+
+      expect(onPick).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog').textContent).toMatch(/kottu/i);
+      expect(screen.getByRole('button', { name: /mark as sold out/i })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a released press stays a tap — under the threshold the item simply adds', () => {
+    vi.useFakeTimers();
+    try {
+      const onPick = vi.fn();
+      render(
+        <PosMenuBrowser
+          data={SOLD_OUT_MENU}
+          loading={false}
+          onPick={onPick}
+          availability={{ canToggle: true, onToggle: vi.fn() }}
+        />,
+      );
+
+      const card = screen.getByRole('button', { name: /kottu/i });
+      fireEvent.pointerDown(card);
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      fireEvent.pointerUp(card);
+      fireEvent.click(card);
+
+      expect(onPick).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('dialog')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

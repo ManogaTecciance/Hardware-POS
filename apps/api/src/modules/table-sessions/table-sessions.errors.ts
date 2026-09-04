@@ -17,6 +17,9 @@ export const SESSION_ERROR_CODES = {
   // client can differentiate a bad Product id from a bad MenuItem id.
   PRODUCT_NOT_FOUND: 'PRODUCT_NOT_FOUND',
   PRODUCT_INACTIVE: 'PRODUCT_INACTIVE',
+  // D101 — the item is 86'd. Distinct from INACTIVE so the till can say
+  // "sold out" (a shift fact) rather than "not available" (a config fact).
+  PRODUCT_SOLD_OUT: 'PRODUCT_SOLD_OUT',
   PRODUCT_VARIANT_NOT_FOUND: 'PRODUCT_VARIANT_NOT_FOUND',
   PRODUCT_VARIANT_INACTIVE: 'PRODUCT_VARIANT_INACTIVE',
   VARIANT_NOT_ON_PRODUCT: 'VARIANT_NOT_ON_PRODUCT',
@@ -137,6 +140,18 @@ export class ProductNotFoundError extends NotFoundException {
 export class ProductInactiveError extends BadRequestException {
   constructor(name: string) {
     super(err(SESSION_ERROR_CODES.PRODUCT_INACTIVE, `Product "${name}" is not currently available`));
+  }
+}
+
+/** D101 — the item is 86'd; the message names the recovery (the switch). */
+export class ProductSoldOutError extends BadRequestException {
+  constructor(name: string) {
+    super(
+      err(
+        SESSION_ERROR_CODES.PRODUCT_SOLD_OUT,
+        `"${name}" is sold out — mark it available again to sell it`,
+      ),
+    );
   }
 }
 

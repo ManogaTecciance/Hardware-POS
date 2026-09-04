@@ -10,6 +10,7 @@
  */
 import {
   BarChart3,
+  BookOpen,
   CalendarDays,
   ChefHat,
   FileText,
@@ -44,6 +45,7 @@ import type { ModuleKey } from './platform-api';
  */
 export const NAV_ICONS: Record<NavIconName, LucideIcon> = {
   BarChart3,
+  BookOpen,
   CalendarDays,
   ChefHat,
   FileText,

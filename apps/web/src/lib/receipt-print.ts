@@ -1,7 +1,7 @@
 import { api } from './api';
 import { renderThermalBill, type ThermalBillInput } from './thermal-bill';
 import {
-  pxToMm,
+  pageHeightMm,
   readBillGeometry,
   resolveBillGeometry,
   type BillGeometry,
@@ -164,16 +164,29 @@ export function printReceipt(html: string, options: { fitToContent?: boolean } =
  * `size: 78mm auto` would be the obvious thing to write and is invalid CSS —
  * the property takes one or two lengths — so the height is measured. After
  * images settle: a logo that has not decoded reports no height and would
- * truncate the receipt to the height of its text. Plus 2 mm so the cutter
- * does not shave the footer.
+ * truncate the receipt to the height of its text.
+ *
+ * D102 — the height itself comes from `pageHeightMm`, which floors it above the
+ * paper width. Those two lengths carry the ORIENTATION: a page wider than it is
+ * tall is a landscape page, and a bill short enough to hit that printed
+ * sideways on the roll.
  */
 function fitPageToContent(win: Window, g: BillGeometry): void {
   const doc = win.document;
   const heightPx = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
-  if (heightPx <= 0) return; // nothing laid out — leave the default sheet alone
-  // Plus 2mm so the cutter does not shave the last line; a receipt cut flush
-  // against its footer looks torn.
-  const heightMm = Math.ceil(pxToMm(heightPx)) + 2;
+  /*
+   * Nothing laid out — leave the driver's own sheet alone. Deliberately NOT
+   * the D102 floor: a failed measurement is a bug, and printing a minimum-size
+   * page would hide it behind a plausible-looking receipt.
+   */
+  if (heightPx <= 0) return;
+  /*
+   * D102 — the arithmetic, including the floor that keeps the page taller than
+   * it is wide, belongs to the geometry module. A height computed here would be
+   * a second source of truth for the one number that decides which way up the
+   * bill comes out.
+   */
+  const heightMm = pageHeightMm(g, heightPx);
   const style = doc.createElement('style');
   style.dataset.role = 'page-size';
   /*

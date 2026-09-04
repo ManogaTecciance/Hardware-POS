@@ -163,11 +163,12 @@ describe('Restaurant navigation', () => {
     // Pilot Change 2 rebuild: POS + Orders replace the standalone Takeaway
     // entry (PO decision 3 — Takeaway is now `POS → Takeaway`).
     //
-    // D45: `Menu` is intentionally absent — Restaurant tenants author every
-    // sellable item from Products (labelled "Inventory" in the rail) and the
-    // POS reads them via `/restaurant/pos-catalogue`. The `/menu` route file
-    // still exists for support-only access at `?view=legacy`, but the nav
-    // entry is gone.
+    // D45: the legacy `/menu` ROUTE has no nav entry — Restaurant tenants
+    // author every sellable item from Products and the POS reads them via
+    // the sellable read model. D103 renamed that entry's LABEL to "Menu"
+    // (the mainstream restaurant word; "Inventory" claimed stock semantics
+    // most menu items no longer have under D101) — the href is still
+    // /products.
     expect(labels(restaurant)).toEqual([
       'Dashboard',
       'POS',
@@ -176,10 +177,10 @@ describe('Restaurant navigation', () => {
       'Tables',
       // D47 — the reservation calendar.
       'Calendar',
-      // Restaurant tenants label the shared product catalogue "Inventory"
-      // so it reads as the single authoring surface for menu items. Retail
-      // keeps "Products" — asserted in the Tile Shop block above.
-      'Inventory',
+      // D103 — the shared product catalogue, labelled "Menu" for
+      // food-service. Retail keeps "Products" — asserted in the Tile Shop
+      // block above.
+      'Menu',
       'Customers',
       'Sales',
       'Reports',
@@ -187,15 +188,20 @@ describe('Restaurant navigation', () => {
     ]);
   });
 
-  it('does not surface a Menu link (D45)', () => {
-    // Positive assertion of a D45 negative: the Menu nav entry was removed,
-    // and the shape assertion above would still pass a resolver that dropped
-    // several entries — this one nails the exact removal.
-    const shown = labels(restaurant);
-    expect(shown).not.toContain('Menu');
-    // Positive control: the retail list also does not contain Menu, so if
-    // both flipped to including it the test above and this one would agree.
-    // Assert against the RETAIL nav here so the intent is visible.
+  it('the Menu entry points at /products, never at the legacy /menu route (D45/D103)', () => {
+    // POSITIVE: the "Menu" label exists and resolves to the products
+    // surface — a resolver that dropped the entry would fail here, so the
+    // negatives below cannot pass vacuously.
+    const menuItems = restaurant
+      .flatMap((g) => g.items)
+      .filter((i) => i.label === 'Menu');
+    expect(menuItems.map((i) => i.href)).toEqual(['/products']);
+    // NEGATIVE (the surviving D45 claim): no destination anywhere is the
+    // legacy /menu route, in either workspace.
+    expect(hrefs(restaurant)).not.toContain('/menu');
+    expect(hrefs(nav('HARDWARE', LEGACY_MODULES))).not.toContain('/menu');
+    // Retail never adopts the food-service label — the sidebar
+    // disambiguation asserted in the Tile Shop block stays real.
     expect(labels(nav('HARDWARE', LEGACY_MODULES))).not.toContain('Menu');
   });
 
@@ -222,9 +228,8 @@ describe('Restaurant navigation', () => {
   it('marks every unbuilt destination as upcoming, and no built one', () => {
     // Every Restaurant destination is live: POS + Orders replaced the
     // standalone Takeaway entry in Pilot Change 2, and D45 removed the
-    // Menu entry (Products is now the single authoring surface for a
-    // Restaurant tenant). Nothing in the sidebar carries the "Soon"
-    // marker today.
+    // legacy /menu entry (D103's "Menu" below is the /products surface).
+    // Nothing in the sidebar carries the "Soon" marker today.
     const byLabel = Object.fromEntries(
       restaurant.flatMap((g) => g.items).map((i) => [i.label, Boolean(i.upcoming)]),
     );
@@ -235,7 +240,7 @@ describe('Restaurant navigation', () => {
       Kitchen: false,
       Tables: false,
       Calendar: false,
-      Inventory: false,
+      Menu: false,
       Customers: false,
       Sales: false,
       Reports: false,

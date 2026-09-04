@@ -59,6 +59,45 @@ export function pxToMm(px: number): number {
 }
 
 /**
+ * Added past the measured content so the cutter does not shave the last line;
+ * a receipt cut flush against its footer looks torn.
+ *
+ * It lives here rather than as a literal inside `fitPageToContent` because
+ * `pageHeightMm` needs it twice — once for the content and once for the floor.
+ */
+export const CUTTER_MARGIN_MM = 2;
+
+/**
+ * D102 — the page height to declare, and the one rule it must obey: **a page is
+ * never wider than it is tall.**
+ *
+ * `@page { size: W H }` has no separate orientation property. The two lengths
+ * ARE the orientation, so a page box whose width exceeds its height is a
+ * LANDSCAPE page and the print pipeline rotates it. Nothing used to bound this
+ * number, and a bill short enough to fall under the paper's own width printed
+ * sideways on the roll: clear every header field and the logo, print one item,
+ * and the content came to about 180px — a 78mm x 50mm page.
+ *
+ * The floor is the paper width plus the cutter margin, so it tracks whatever
+ * roll the workspace calibrated rather than being another 78. It is strictly
+ * greater than the width, never equal: a square page is the ambiguous case and
+ * there is no reason to hand a driver one.
+ *
+ * The cost is bounded and was chosen deliberately — a very short receipt gets
+ * up to ~30mm of blank paper before the cut, and that disappears the moment the
+ * bill has a header or a second line.
+ *
+ * This does not touch D77's position. Every height failure that record names is
+ * a height too LARGE — 432mm and 223mm, scaled down by a driver that could not
+ * honour them. This is the opposite end of the same axis, which D77 never had
+ * cause to consider.
+ */
+export function pageHeightMm(g: BillGeometry, contentHeightPx: number): number {
+  const measured = Math.ceil(pxToMm(contentHeightPx)) + CUTTER_MARGIN_MM;
+  return Math.max(measured, g.pageWidthMm + CUTTER_MARGIN_MM);
+}
+
+/**
  * The Xprinter XP-365B this ships against: stock "USER", Maximum Size 78.7mm
  * wide, with the head stopping about 3.5mm short of the right edge (D80).
  *

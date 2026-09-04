@@ -172,6 +172,10 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
         Permission.RESERVATION_MANAGE,
         // D49 — joining tables is a shift decision.
         Permission.OPEN_TABLE_MANAGE,
+        // D101 — 86ing an item is a shift decision too; the switch is not
+        // catalogue authorship, so it rides beside PRODUCT_MANAGE rather
+        // than inside it.
+        Permission.PRODUCT_AVAILABILITY_SET,
       ].sort(),
     );
     // NEGATIVE: the escalations a manager must not have.

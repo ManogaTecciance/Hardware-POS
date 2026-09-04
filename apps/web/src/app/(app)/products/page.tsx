@@ -2,7 +2,17 @@
 
 import Link from 'next/link';
 import * as React from 'react';
-import { Ban, FileUp, FolderTree, PackagePlus, Pencil, RotateCcw, Search } from 'lucide-react';
+import {
+  Ban,
+  CircleCheck,
+  CircleOff,
+  FileUp,
+  FolderTree,
+  PackagePlus,
+  Pencil,
+  RotateCcw,
+  Search,
+} from 'lucide-react';
 
 import { ProductImage } from '@/components/product-image';
 import { ImportProductsDialog } from '@/components/products/import-products-dialog';
@@ -21,6 +31,7 @@ import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import { useEffectiveProfile } from '@/lib/platform-profile';
 import {
+  resolveItemStockPresentation,
   resolveProductManagementPresentation,
   type ProfileInventoryState,
 } from '@/lib/products/product-presentation';
@@ -30,6 +41,7 @@ import {
   fetchCategoryTree,
   fetchProducts,
   setProductActive,
+  setProductAvailability,
   type CategoryNode,
   type ManagedProduct,
   type ProductsQuery,
@@ -71,6 +83,9 @@ function SourceCell({
 export default function ProductsPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.PRODUCT_MANAGE);
+  // D101 — the 86 switch has its own permission so the till can hold it
+  // without catalogue write access.
+  const canSetAvailability = hasPermission(Permission.PRODUCT_AVAILABILITY_SET);
 
   // The only mode-dependent value on this screen. Everything below reads flags off
   // it rather than asking what the tenant is configured for.
@@ -181,6 +196,20 @@ export default function ProductsPage() {
     try {
       if (p.isActive) await deactivateProduct(session, p.id);
       else await setProductActive(session, p.id, true);
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // D101 — flip the 86 switch; the server refuses kinds a count governs.
+  const toggleAvailability = async (p: ManagedProduct) => {
+    if (!session) return;
+    setBusyId(p.id);
+    try {
+      await setProductAvailability(session, p.id, p.soldOutAt != null);
       setReloadKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Update failed');
@@ -386,7 +415,11 @@ export default function ProductsPage() {
                   </td>
                 </tr>
               ) : (
-                rows.map((p) => (
+                rows.map((p) => {
+                  // D101 — per-ITEM stock rendering: a count, the 86 switch,
+                  // or nothing, resolved in one place (no kind comparison here).
+                  const itemStock = resolveItemStockPresentation(screen, p.sellableKind);
+                  return (
                   <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -412,7 +445,13 @@ export default function ProductsPage() {
                     <td className="px-4 py-3 text-right font-medium">{formatMoney(p.unitPrice)}</td>
                     {screen.showStockControls ? (
                       <td className="px-4 py-3 text-right">
-                        {p.type === 'Inventory' ? (
+                        {itemStock === 'AVAILABILITY' ? (
+                          // D101 — an untracked item's cell says what a person
+                          // decided, not a number nothing maintains.
+                          <Badge variant={p.soldOutAt ? 'danger' : 'success'}>
+                            {p.soldOutAt ? 'Sold out' : 'Available'}
+                          </Badge>
+                        ) : itemStock === 'QUANTITY' && p.type === 'Inventory' ? (
                           <>
                             <span
                               className={cn(
@@ -452,6 +491,26 @@ export default function ProductsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        {/* D101 — the 86 switch, for whoever holds it (the
+                            till included); catalogue write stays canManage. */}
+                        {canSetAvailability && itemStock === 'AVAILABILITY' && p.isActive ? (
+                          <Tooltip label={p.soldOutAt ? 'Mark available' : 'Mark sold out'}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={p.soldOutAt ? 'Mark available' : 'Mark sold out'}
+                              disabled={busyId === p.id}
+                              onClick={() => toggleAvailability(p)}
+                              className={p.soldOutAt ? 'text-success' : 'text-warning'}
+                            >
+                              {p.soldOutAt ? (
+                                <CircleCheck className="h-4 w-4" />
+                              ) : (
+                                <CircleOff className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </Tooltip>
+                        ) : null}
                         {canManage ? (
                           <>
                             <Tooltip label="Edit product">
@@ -491,7 +550,8 @@ export default function ProductsPage() {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

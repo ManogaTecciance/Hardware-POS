@@ -23,8 +23,10 @@ import {
   billBodyGeometryCss,
   billGeometryMetaTags,
   BILL_GEOMETRY_LIMITS,
+  CUTTER_MARGIN_MM,
   DEFAULT_BILL_GEOMETRY,
   mmToPx,
+  pageHeightMm,
   pxToMm,
   readBillGeometry,
   resolveBillGeometry,
@@ -174,6 +176,95 @@ describe('mm and px', () => {
     expect(mmToPx(78)).toBe(295);
     expect(mmToPx(58)).toBe(219);
     expect(pxToMm(96)).toBeCloseTo(25.4, 6);
+  });
+});
+
+describe('pageHeightMm — D102, a page is never wider than it is tall', () => {
+  const g = resolveBillGeometry(DEFAULT_DOCUMENT_PROFILE);
+
+  it('takes the height from the content whenever the content is tall enough', () => {
+    // 267mm is the value every existing @page spec pins from a 1000px fixture.
+    // Asserting it here is what proves the floor does not disturb the normal
+    // path — the path that has been printing correctly all along.
+    expect(pageHeightMm(g, 1000)).toBe(267);
+    expect(pageHeightMm(g, 520)).toBe(140);
+    expect(pageHeightMm(g, 300)).toBe(82);
+  });
+
+  it('floors a short bill above the paper width, instead of turning it sideways', () => {
+    /*
+     * The reported bug, with the numbers MEASURED in Chromium at a 295px
+     * layout width rather than estimated: with the logo and every header field
+     * cleared, a one-item bill renders 213px (56.4mm) and used to declare a
+     * 78mm x 59mm page. That is a landscape page box, and the till printed it
+     * rotated 90° on the roll.
+     */
+    expect(pageHeightMm(g, 213)).toBe(80);
+    /*
+     * The calibration strip measures 275px (72.8mm) and declared 78mm x 75mm —
+     * which is exactly what the live run on 2026-09-01 was observed injecting.
+     * The instrument built for D99 was carrying this defect itself.
+     */
+    expect(pageHeightMm(g, 275)).toBe(80);
+    /*
+     * The boundary, walked one step at a time. The crossover sits at exactly
+     * `mmToPx(pageWidthMm)` — 295px — which is the rule restated: the floor
+     * stops applying at the moment the content becomes as tall as the paper is
+     * wide. Below that the floor answers; at and above it the content does.
+     */
+    expect(mmToPx(g.pageWidthMm)).toBe(295);
+    expect(pageHeightMm(g, 287)).toBe(80); // content would ask 78mm — a square page
+    expect(pageHeightMm(g, 294)).toBe(80); // content would ask 80mm — a tie
+    expect(pageHeightMm(g, 295)).toBe(81); // content wins from here on
+    expect(pageHeightMm(g, 310)).toBe(85);
+  });
+
+  it('never returns a height that is not strictly greater than the width', () => {
+    /*
+     * The rule itself, as a property rather than a handful of samples. A page
+     * box carries its orientation in its two lengths, so this single inequality
+     * is the whole of what keeps the bill upright — and a square page is the
+     * ambiguous case, which is why it is `>` and not `>=`.
+     */
+    for (let px = 1; px <= 2000; px += 7) {
+      expect(pageHeightMm(g, px)).toBeGreaterThan(g.pageWidthMm);
+    }
+    // Zero and negative reach this function only if a caller drops its guard;
+    // it must still answer with a printable page rather than 2mm.
+    expect(pageHeightMm(g, 0)).toBeGreaterThan(g.pageWidthMm);
+    expect(pageHeightMm(g, -500)).toBeGreaterThan(g.pageWidthMm);
+  });
+
+  it('takes the floor from the workspace’s roll, not from a default 78', () => {
+    const narrow = resolveBillGeometry({
+      billPaperWidthMm: 58,
+      billLeftInsetMm: 2,
+      billRightInsetMm: 4,
+    });
+    expect(pageHeightMm(narrow, 180)).toBe(60);
+    // The anti-hard-code half: 80 is the 78mm roll's floor and must not appear.
+    expect(pageHeightMm(narrow, 180)).not.toBe(80);
+    expect(pageHeightMm(narrow, 180)).toBeGreaterThan(narrow.pageWidthMm);
+    // …and a wide roll floors higher still, so the floor really does track it.
+    expect(pageHeightMm(resolveBillGeometry({ billPaperWidthMm: 110 }), 180)).toBe(112);
+  });
+
+  it('MUTATION PROOF — the fixtures above really are in the landscape regime', () => {
+    /*
+     * `pageHeightMm(g, 180) === 80` says nothing on its own: a function that
+     * ignored the floor entirely would be caught only if 180px would otherwise
+     * have produced something SMALLER than the page width. That is the claim,
+     * written out — this is the exact arithmetic the code used before D102.
+     */
+    const beforeD102 = (px: number) => Math.ceil(pxToMm(px)) + CUTTER_MARGIN_MM;
+    expect(beforeD102(213)).toBe(59);
+    expect(beforeD102(275)).toBe(75);
+    expect(beforeD102(213)).toBeLessThan(g.pageWidthMm);
+    expect(beforeD102(275)).toBeLessThan(g.pageWidthMm);
+    // …and the companion: the tall fixture is NOT in the regime, so the
+    // "takes the height from the content" test above is not floored either.
+    expect(beforeD102(1000)).toBe(267);
+    expect(beforeD102(1000)).toBeGreaterThan(g.pageWidthMm);
   });
 });
 

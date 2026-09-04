@@ -443,6 +443,9 @@ function toMenuItemView(
     // the legacy `{menuItemId}` shape. `productId` alone is not a safe
     // discriminator — legacy MenuItems may link a Product for inventory.
     catalogueSource: 'PRODUCT',
+    // D101 — the stock verdict rides along so the picker can grey a
+    // sold-out dish and hint a low/out count without a second fetch.
+    ...(item.stockState ? { stockState: item.stockState } : {}),
     // Only actives surface to the runtime picker; the Customise dialog
     // treats the whole list as authoritative and does not re-filter.
     variants: activeVariants.map((v) => ({

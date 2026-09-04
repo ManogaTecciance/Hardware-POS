@@ -131,6 +131,17 @@ export class CreateProductDto {
   foodType?: ProductFoodType;
 
   /**
+   * D101 — the wizard's Track-stock answer, consulted ONLY when `foodType`
+   * is set: a food-typed item with `trackStock: true` is a packaged good the
+   * branch counts (STOCK_ITEM — bottled water); false or absent means a
+   * prepared item (COMPOSED_ITEM). Without a foodType the D65 rule stands
+   * and this field is ignored.
+   */
+  @IsBoolean()
+  @IsOptional()
+  trackStock?: boolean;
+
+  /**
    * D64 — domain attributes, validated against the tenant descriptor's
    * `catalogue.attributeSchema` by `ProductAttributesService` (the decorator
    * only enforces the container shape; keys and value types are the domain

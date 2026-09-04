@@ -48,7 +48,13 @@ let opened = 0;
 let injected: string[] = [];
 let frameStyle = '';
 let styleAtMeasureTime = '';
-const BODY_HEIGHT_PX = 1000;
+/*
+ * Settable, because D102 turns the measured height into something the injected
+ * page depends on non-linearly: below the paper width the floor takes over.
+ * Reset in beforeEach so one test cannot leak a height into the next.
+ */
+const DEFAULT_BODY_HEIGHT_PX = 1000;
+let bodyHeight = DEFAULT_BODY_HEIGHT_PX;
 
 /**
  * A frame backed by a real parsed document, so `readBillGeometry` runs against
@@ -80,7 +86,7 @@ function fakeFrame() {
         // provisional default and the error is invisible on a 78mm roll.
         get scrollHeight() {
           styleAtMeasureTime = frameStyle;
-          return BODY_HEIGHT_PX;
+          return bodyHeight;
         },
       };
     },
@@ -132,6 +138,7 @@ beforeEach(() => {
   injected = [];
   frameStyle = '';
   styleAtMeasureTime = '';
+  bodyHeight = DEFAULT_BODY_HEIGHT_PX;
 
   const frame = fakeFrame();
   vi.stubGlobal('document', {
@@ -242,6 +249,36 @@ describe('the frame and the stylesheet come from the same geometry', () => {
     await vi.runAllTimersAsync();
     expect(frameStyle).toContain('width:295px');
     expect(injected).toEqual(['@page{size:78mm 267mm;margin:0}']);
+  });
+
+  it('D102 — a short bill still gets a page taller than it is wide', async () => {
+    /*
+     * `pageHeightMm` could be correct and simply not called, so the rule is
+     * asserted again here through the real printer. 213px is the stripped bill
+     * — no logo, no header, one item — measured in Chromium at a 295px
+     * layout width, not estimated. It used to declare `78mm 59mm`: a page box
+     * wider than it is tall, which IS a landscape page, and the till printed
+     * it rotated 90° on the roll.
+     */
+    bodyHeight = 213;
+    printReceipt(bill({}));
+    await vi.runAllTimersAsync();
+
+    expect(injected).toEqual(['@page{size:78mm 80mm;margin:0}']);
+    // The negative names the old output exactly — this is the string that came
+    // out sideways.
+    expect(injected.join('')).not.toContain('78mm 59mm');
+  });
+
+  it('D102 — and takes the floor from the workspace’s own roll', async () => {
+    // Same short document on a 58mm roll: 60mm, not the 78mm roll's 80mm. A
+    // floor hard-coded to the default would answer 80 here.
+    bodyHeight = 213;
+    printReceipt(bill({ billPaperWidthMm: 58, billLeftInsetMm: 2, billRightInsetMm: 4 }));
+    await vi.runAllTimersAsync();
+
+    expect(injected).toEqual(['@page{size:58mm 60mm;margin:0}']);
+    expect(injected.join('')).not.toContain('80mm');
   });
 
   it('honours a workspace that switched one-page fitting off', async () => {

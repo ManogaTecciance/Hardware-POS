@@ -175,6 +175,9 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'DELETE /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'PATCH /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // D101 — the 86 switch. SHARED_CORE like the rest of the product surface;
+  // the service refuses kinds whose availability stock or bookings govern.
+  'PUT /products/:id/availability': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'DELETE /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/:id/sync-to-quickbooks': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },

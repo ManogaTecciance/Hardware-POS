@@ -206,6 +206,16 @@ export const Permission = {
   // creator-owned floor administration. Not creator-owned.
   /** Create and dissolve open tables (ad-hoc joined tables). */
   OPEN_TABLE_MANAGE: 'open-table:manage',
+
+  // ── D101 — Item availability (86) ────────────────────────────────────────
+  //
+  // Separate from PRODUCT_MANAGE on purpose: 86ing the last kottu mid-service
+  // is a till/floor action, and granting catalogue write access to whoever
+  // is nearest the pass would be the alternative. Only kinds whose
+  // availability is not governed elsewhere accept it (the service refuses
+  // STOCK_ITEM/BUNDLE — the count governs those — and the booking kinds).
+  /** Mark a prepared item sold out ("86") or available again. */
+  PRODUCT_AVAILABILITY_SET: 'product:availability:set',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
@@ -319,6 +329,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     Permission.RESERVATION_MANAGE,
     // D49 — joining tables is a shift decision.
     Permission.OPEN_TABLE_MANAGE,
+    // D101 — 86ing an item is a shift decision too.
+    Permission.PRODUCT_AVAILABILITY_SET,
   ],
   CASHIER: [
     Permission.SALE_CREATE,

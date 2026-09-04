@@ -242,6 +242,13 @@ export interface MenuItemView {
    * single-select radios above the modifier groups when non-empty.
    */
   variants?: MenuItemVariantView[];
+  /**
+   * D101 — the sellable read model's stock verdict, carried through the
+   * catalogue adapter: counts speak for tracked items (IN_STOCK/LOW/OUT),
+   * the 86 switch for untracked ones (UNTRACKED/SOLD_OUT). Undefined on
+   * legacy MenuItem rows and for tenants that track nothing.
+   */
+  stockState?: 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED' | 'SOLD_OUT';
 }
 
 export interface ModifierOptionView {

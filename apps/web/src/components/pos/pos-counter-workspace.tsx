@@ -10,6 +10,7 @@ import { ApiError } from '@/lib/api';
 import { useAuth, type Session } from '@/lib/auth';
 import { discountLimitFor, withinDiscountLimit, Permission } from '@/lib/permissions';
 import { useEffectiveProfile } from '@/lib/platform-profile';
+import { setProductAvailability } from '@/lib/products-api';
 import { restaurantConfig, tableSessions, takeaway } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
@@ -79,6 +80,8 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const router = useRouter();
   const { hasPermission } = useAuth();
   const canPlaceTakeaway = hasPermission(Permission.TAKEAWAY_CREATE);
+  // D101 — the 86 switch at the till (waiter and cashier templates hold it).
+  const canSetAvailability = hasPermission(Permission.PRODUCT_AVAILABILITY_SET);
   /*
    * D69 — dine-in is gated on a DIFFERENT permission, and it matters: the
    * WAITER template deliberately holds ORDER_SEND_TO_KITCHEN and not
@@ -531,6 +534,23 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
                     onLoadMore: catalogue.loadMore,
                     total: catalogue.total,
                     loadedCount: catalogue.loadedCount,
+                  }
+                : undefined
+            }
+            /*
+             * D101 — only the catalogue path carries the 86 switch: its rows
+             * are Products (the item id IS the product id). The legacy
+             * admin-menu fallback has no stock verdict and no product behind
+             * every row, so it stays a pure picker.
+             */
+            availability={
+              isRestaurantProfile && canSetAvailability
+                ? {
+                    canToggle: true,
+                    onToggle: async (item, available) => {
+                      await setProductAvailability(session, item.id, available);
+                      catalogue.reload();
+                    },
                   }
                 : undefined
             }

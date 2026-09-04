@@ -166,6 +166,15 @@ export function ProductWizard(props: Props) {
   const isDesktop = useIsDesktop();
   const [previewOpen, setPreviewOpen] = React.useState(false);
 
+  // D101 — a restaurant CREATE starts with stock untracked: dishes are the
+  // common case, and the D44 default (true) belongs to retail. Flips once
+  // when the profile resolves, and never after the operator touches the
+  // form — their answer outranks the default.
+  React.useEffect(() => {
+    if (mode !== 'create' || businessKind !== 'RESTAURANT' || dirty.current) return;
+    setState((prev) => (prev.trackInventory ? { ...prev, trackInventory: false } : prev));
+  }, [mode, businessKind]);
+
   // Load categories (if not passed) and branches on mount.
   React.useEffect(() => {
     let cancelled = false;

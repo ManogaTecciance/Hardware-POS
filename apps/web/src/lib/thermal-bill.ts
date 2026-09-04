@@ -284,6 +284,26 @@ export function renderThermalBill(input: ThermalBillInput): string {
   const contact = [p.phone, p.email].filter(Boolean).map((v) => esc(v)).join('<br>');
 
   /*
+   * D102 — the header block is only emitted when it has something in it.
+   *
+   * Every row inside it is conditional, so a workspace that has cleared the
+   * logo and all four header fields used to get an empty `div` containing the
+   * template's own newlines. Whitespace in a block still generates a line box,
+   * and nothing in this stylesheet sets a `font-size` on `body`, so it
+   * inherited the browser's 16px and printed as a blank line at the top of the
+   * bill. Blank paper the operator did not ask for reads as a fault.
+   */
+  const headerRows = [
+    logo,
+    !logo && name ? `<h1>${esc(name)}</h1>` : '',
+    p.addressLine ? `<p class="addr">${esc(p.addressLine)}</p>` : '',
+    contact ? `<p class="addr">${contact}</p>` : '',
+    p.taxNumber ? `<p class="addr">VAT ${esc(p.taxNumber)}</p>` : '',
+    input.copyLabel ? `<p class="copy">${esc(input.copyLabel)}</p>` : '',
+  ].filter(Boolean);
+  const header = headerRows.length ? `<div class="c">\n${headerRows.join('\n')}\n</div>` : '';
+
+  /*
    * D86 — no "Total Qty" row. The reference bill carried one; the PO does
    * not want it. A guest counts plates, not units, and the number is the
    * only figure on the receipt that is neither money nor a line they
@@ -327,14 +347,7 @@ export function renderThermalBill(input: ThermalBillInput): string {
     input.documentNumber,
   )}</title>${billGeometryMetaTags(g)}<style>${css(g)}</style></head>
 <body>
-<div class="c">
-${logo}
-${!logo && name ? `<h1>${esc(name)}</h1>` : ''}
-${p.addressLine ? `<p class="addr">${esc(p.addressLine)}</p>` : ''}
-${contact ? `<p class="addr">${contact}</p>` : ''}
-${p.taxNumber ? `<p class="addr">VAT ${esc(p.taxNumber)}</p>` : ''}
-${input.copyLabel ? `<p class="copy">${esc(input.copyLabel)}</p>` : ''}
-</div>
+${header}
 
 <div class="meta">
 ${input.servedBy ? `<div>Served By: ${esc(input.servedBy)}</div>` : ''}

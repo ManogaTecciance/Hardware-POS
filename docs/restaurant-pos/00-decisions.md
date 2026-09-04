@@ -3749,6 +3749,191 @@ their rows — a reload must not resurrect a bumped card.
 
 ---
 
+### D101 — Sold out is a switch, not a count
+
+PO, 2026-09-03: the restaurant catalogue behaved like a hardware store's.
+Every item a restaurant authors carried stock fields, and the number in them
+was one nothing maintains — a curry's `quantityOnHand` neither depletes nor
+means anything, yet it rendered as though it did. The mainstream shape
+(Toast, Square) splits availability by what the item IS:
+
+**Prepared items don't count units — they get an 86 switch.** New nullable
+`Product.soldOutAt` (null = available). `PUT /v1/products/:id/availability`
+sets or clears it, gated on the new `PRODUCT_AVAILABILITY_SET` permission —
+held by OWNER/ADMIN/MANAGER and, deliberately, by the food-service Waiter
+and Cashier templates: 86ing the last kottu is a till/floor action in the
+middle of service, not an owner's console visit. The endpoint REFUSES kinds
+whose availability is governed elsewhere (`STOCK_ITEM`/`BUNDLE` by the
+count; `TIME_SLOT`/`STAY_UNIT` by booking calendars) with
+`PRODUCT_AVAILABILITY_STOCK_GOVERNED` — one authority per fact. The flag is
+product-level, not per-branch, because LOCAL inventory already refuses
+multi-branch tenants; when multi-branch food service arrives, this moves to
+a branch satellite with its own decision record.
+
+**Bought-in sellables keep real counts.** The D65 authoring rule
+(`foodType != null → COMPOSED_ITEM`) made a tracked bottled water
+impossible: the restaurant wizard stamps every item with a foodType, so a
+packaged drink classified as a dish, reported UNTRACKED, and depleted
+nothing. The rule gains the operator's own answer: the wizard's Track-stock
+switch (restaurant default OFF — dishes are the common case) now travels as
+`trackStock`, and `foodType != null` derives `STOCK_ITEM` when it is true,
+`COMPOSED_ITEM` otherwise. Update re-derives only when one of the rule's
+inputs (`type`, `foodType`, `trackStock`) is in the patch, so existing rows
+keep their classification until someone actually edits the decision.
+
+**The server refuses a sold-out sale.** `resolveRoundItemInputs` — the ONE
+resolver both intake paths share (dine-in rounds and takeaway, which the
+counter routes every mode through) — now throws `PRODUCT_SOLD_OUT` for a
+sold-out product, next to the existing inactive check. POS greying is
+usability; the refusal is the rule (D31's stance). Out-of-stock STOCK_ITEMs
+are deliberately NOT blocked — oversell stays permitted, unchanged.
+
+**Presentation is per-item, resolved in one place.** The sellable read
+model reports `stockState: 'SOLD_OUT'` (a new state beside UNTRACKED — a
+sold-out dish must not read as OUT, which stock governs). The web resolver
+gains `resolveItemStockPresentation(presentation, sellableKind)`:
+EXTERNAL_CATALOGUE shows counts for every kind (Tile Shop pixels untouched,
+D16); LOCAL splits QUANTITY (STOCK_ITEM/BUNDLE) from AVAILABILITY
+(COMPOSED_ITEM/SERVICE) from NONE (booking kinds); no component compares a
+kind inline. At the POS, sold-out cards grey out and stop adding; a
+long-press (the Square gesture) opens the availability dialog for untracked
+items when the operator holds the permission.
+
+---
+
+### D102 — a page is never wider than it is tall
+
+Report, 2026-09-01, on the D99 delivery: with the bill printing correctly, one
+case was found where it comes out **rotated 90° on the roll** — the words run
+along the paper instead of across it. To reproduce: clear every document field
+(business name, address, phone, email, tax number, footer, bill note) **and**
+the logo, then print a bill with **one** item.
+
+**The mechanism.** `@page { size: W H }` has no separate orientation property.
+The two lengths *are* the orientation: a page box whose width exceeds its
+height **is** a landscape page, and the print pipeline rotates it to suit.
+
+`fitPageToContent` measured the content and declared `size: <paperWidth>mm
+<measuredHeight>mm`. Nothing bounded that height. Its only guard was
+`heightPx <= 0`, and the geometry module's three `min` constants — the page
+width's floor, the inset floor, `minContentMm` — are every one of them about
+the horizontal axis. Strip the header and the bill falls under the paper's own
+width, and the page turns over.
+
+Measured in Chromium at the real 295 px layout width, not estimated:
+
+| document | content | declared page | |
+|---|---|---|---|
+| normal bill, logo and header | ~520 px | 78 × 140 mm | portrait |
+| **stripped bill, one item** | **213 px (56.4 mm)** | **78 × 59 mm** | **landscape** |
+| **calibration strip** | **275 px (72.8 mm)** | **78 × 75 mm** | **landscape** |
+
+**The instrument had the defect it was built to find.** That 78 × 75 mm is not
+a calculation — it is what the D99 calibration strip was observed injecting on
+the live stack the day it shipped. The strip prints through the identical path,
+so the tool for diagnosing the last print bug was quietly carrying the next one.
+
+**The rule.** The declared height is now floored at the paper width plus the
+cutter margin — 80 mm on a 78 mm roll, 60 mm on a 58 mm one. It tracks whatever
+roll the workspace calibrated rather than being another hard-coded 78, and it is
+strictly greater than the width, never equal: a square page is the ambiguous
+case and there is no reason to hand a driver one.
+
+The floor earns its place twice. Orientation is the first reason. The second is
+that a cut needs somewhere to land — the `+2 mm` cutter margin was already
+admitting as much for the bottom of a long bill, and a 50 mm page gives the
+mechanism less paper than the head-to-cutter distance on most 80 mm printers.
+
+The arithmetic moved out of `fitPageToContent` and into `pageHeightMm` in
+`thermal-bill-geometry.ts`, beside the rest of the geometry, with
+`CUTTER_MARGIN_MM` following it. The number that decides which way up the bill
+comes out should not be computed in the middle of DOM code, and it is now
+testable without a browser.
+
+**Cost, stated plainly.** A very short receipt gets up to about 30 mm of blank
+paper before the cut. That is the trade, it is bounded, and it disappears the
+moment a bill has a letterhead or a second line.
+
+**What D77 keeps, untouched.** The fitting is still opt-in and still measured;
+the template still declares no `@page { size }` of its own. Every height failure
+D77 records is a height too **large** — 432 mm and then 223 mm, scaled down by a
+driver that could not honour them — and it drew the right conclusion from them.
+This is the opposite end of the same axis, which nothing in D73–D99 had cause to
+consider. D79's Xprinter dialog is the same story: it states a *Maximum* Length
+and no minimum at all.
+
+**An empty header no longer prints a blank line.** Every row in the header block
+is conditional, but the block itself was not, so a workspace with the logo and
+all four fields cleared got an empty `div` holding the template's own newlines.
+Whitespace in a block still generates a line box, and nothing in that stylesheet
+sets a `font-size` on `body`, so it inherited the browser's 16 px and printed as
+a blank line at the top of the paper. It is emitted only when it has content
+now. Adjacent to the reported bug rather than part of it, and recorded so.
+
+**Why the suite did not catch this, which is the D30 lesson here.** Every
+`@page` assertion in the repository is driven by a fixture whose body reports
+**1000 px** → 267 mm, comfortably portrait. The entire regime below the page
+width had no coverage — not a weak test, no test. A tripwire cannot fail in a
+region no fixture visits, and "all the assertions pass" said nothing about it.
+
+Tripwires added, and mutation-proven inline:
+
+- `thermal-bill-geometry.test.ts` — the rule as a **property**, swept across
+  1…2000 px, requiring `pageHeightMm(g, px) > g.pageWidthMm` for every one,
+  rather than sampling a few heights. Plus the floor tracking a 58 mm and a
+  110 mm roll, asserted negatively against the 78 mm roll's 80 mm so a
+  hard-coded default cannot pass. The mutation proof states the pre-D102
+  arithmetic explicitly — `ceil(pxToMm(213)) + 2 === 59`, and `59 < 78` — because
+  `pageHeightMm(g, 213) === 80` proves nothing unless 213 px is shown to sit in
+  the landscape regime.
+- `receipt-print.geometry.test.ts` — the same claim through the real
+  `printReceipt`, since the pure function could be correct and simply not
+  called. Exact injected set, with the old sideways output named as the
+  negative.
+- `thermal-bill.test.ts` — the header block absent when empty, present the
+  moment one field is filled, so it cannot pass by deleting every letterhead.
+
+**D16.** No existing assertion changed. Every `@page` spec uses the 1000 px
+fixture, which is above the floor, so all of them still pass untouched — which
+is itself the evidence that the normal printing path is unaffected.
+
+**Verified:** the heights above were measured in a real browser rather than
+computed; the reported case reprinted upright on the till.
+
+---
+
+### D103 — the rail entry is called "Menu", because that is what it is
+
+PO, 2026-09-04: after D101 landed, "I can still see the inventory tab."
+Correct on both counts it could mean, and both are fixed under this record.
+
+**The label.** D45 made `/products` the single authoring surface and, when
+it removed the legacy `/menu` nav entry, labelled the food-service rail
+entry "Inventory" so it would read as that surface. It never did: every
+mainstream restaurant POS calls this surface the **Menu** (Toast,
+Lightspeed; Square says Items), and after D101 the word "Inventory" is
+actively wrong — most of what a restaurant authors there deliberately has
+NO inventory. The entry is now labelled **Menu** with a book icon
+(`BookOpen` joins the icon vocabulary). Nothing else moved: the href is
+still `/products`, retail still says "Products", and the D45 rule that the
+legacy `/menu` ROUTE gets no nav entry stands — `nav.test.ts` now pins
+that claim by href, which is the invariant, rather than by the absence of
+a label that legitimately exists again.
+
+**The detail page.** A dish's detail page still offered Inventory and
+Purchases tabs — per-branch counts and GRNs behind two clicks, for an item
+whose D101 stock cell says a count means nothing. Both tabs now render
+only for items whose stock presentation is QUANTITY, the same resolver
+answer that gates the Receive Stock button. Overview and History remain
+for every kind; availability lives on the Overview, where D101 put it.
+
+Paired per D30: the nav spec asserts the Menu label present AND resolving
+to `/products`, `/menu` absent from every workspace's hrefs, and retail
+free of the label; the detail spec asserts a dish hides the two tabs while
+a stock item keeps them.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

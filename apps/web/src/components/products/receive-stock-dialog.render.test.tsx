@@ -69,6 +69,9 @@ const singleVariantProduct: ManagedProduct = {
   hasVariants: false,
   averageCost: null,
   attributes: {},
+  sellableKind: 'STOCK_ITEM',
+  soldOutAt: null,
+  foodType: null,
 };
 
 /** One live variant, seeded with a weighted-average so cost-jump assertions bite. */

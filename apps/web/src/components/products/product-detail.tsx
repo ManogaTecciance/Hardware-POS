@@ -19,7 +19,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Toast } from '@/components/ui/toast';
 import { type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
-import { resolveProductManagementPresentation } from '@/lib/products/product-presentation';
+import {
+  resolveItemStockPresentation,
+  resolveProductManagementPresentation,
+  type ItemStockPresentation,
+} from '@/lib/products/product-presentation';
 import type { BranchSummary } from '@/lib/products/branches-api';
 import { useIsTabletUp } from '@/lib/use-viewport';
 import {
@@ -36,7 +40,7 @@ import {
   type ProductVariationDimension,
   type VariantBranchInventory,
 } from '@/lib/products/variants-api';
-import type { CategoryNode, ManagedProduct } from '@/lib/products-api';
+import { setProductAvailability, type CategoryNode, type ManagedProduct } from '@/lib/products-api';
 import { fetchSuppliers } from '@/lib/suppliers/suppliers-api';
 import type { Supplier } from '@/lib/suppliers/types';
 import { cn, formatMoney } from '@/lib/utils';
@@ -76,6 +80,8 @@ interface Props {
   syncBusy: boolean;
   onSync: () => void;
   onReload: () => void;
+  /** D101 — the operator holds `product:availability:set` (the 86 switch). */
+  canSetAvailability: boolean;
 }
 
 type TabKey = 'overview' | 'variants' | 'inventory' | 'purchases' | 'history';
@@ -99,6 +105,7 @@ export function ProductDetail({
   syncBusy,
   onSync,
   onReload,
+  canSetAvailability,
 }: Props) {
   const [variants, setVariants] = React.useState<ProductVariant[]>(initialVariants);
   const [tab, setTab] = React.useState<TabKey>('overview');
@@ -185,6 +192,22 @@ export function ProductDetail({
 
   const canReceive = hasReceivePermission && presentation.managementMode === 'LOCAL';
 
+  // D101 — how THIS item's stock renders: a count, the 86 switch, or nothing.
+  const itemStock = resolveItemStockPresentation(presentation, product.sellableKind);
+  const [availabilityBusy, setAvailabilityBusy] = React.useState(false);
+  const toggleAvailability = async () => {
+    setAvailabilityBusy(true);
+    try {
+      await setProductAvailability(session, product.id, product.soldOutAt != null);
+      setToast(product.soldOutAt ? 'Marked available.' : 'Marked sold out.');
+      onReload();
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : 'Could not update availability');
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -220,6 +243,10 @@ export function ProductDetail({
                 </Badge>
               ) : null}
               <ProductStatusBadge presentation={presentation} syncStatus={product.syncStatus} />
+              {/* D101 — the 86 state, loud enough to explain a greyed POS card. */}
+              {itemStock === 'AVAILABILITY' && product.soldOutAt ? (
+                <Badge variant="danger">Sold out</Badge>
+              ) : null}
               {product.sku ? (
                 <span className="text-xs text-muted-foreground">SKU: {product.sku}</span>
               ) : null}
@@ -251,9 +278,20 @@ export function ProductDetail({
               Edit
             </Link>
           ) : null}
-          {canReceive ? (
+          {canReceive && itemStock === 'QUANTITY' ? (
             <Button leftIcon={<PackagePlus className="h-4 w-4" />} onClick={() => setReceiveOpen(true)}>
               Receive Stock
+            </Button>
+          ) : null}
+          {/* D101 — the 86 switch, for untracked items only; tracked ones
+              answer to Receive Stock above. */}
+          {canSetAvailability && itemStock === 'AVAILABILITY' && product.isActive ? (
+            <Button
+              variant={product.soldOutAt ? 'primary' : 'outline'}
+              disabled={availabilityBusy}
+              onClick={() => void toggleAvailability()}
+            >
+              {product.soldOutAt ? 'Mark as available' : 'Mark as sold out'}
             </Button>
           ) : null}
         </div>
@@ -263,8 +301,16 @@ export function ProductDetail({
         <TabsList aria-label="Product sections">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           {hasVariants ? <TabsTrigger value="variants">Variants</TabsTrigger> : null}
-          <TabsTrigger value="inventory">Inventory</TabsTrigger>
-          <TabsTrigger value="purchases">Purchases</TabsTrigger>
+          {/* D101/D103 — per-branch counts and GRNs are claims about a
+              tracked item; a dish's availability is the 86 switch on the
+              Overview, and offering these tabs would put numbers nothing
+              maintains behind them. */}
+          {itemStock === 'QUANTITY' ? (
+            <>
+              <TabsTrigger value="inventory">Inventory</TabsTrigger>
+              <TabsTrigger value="purchases">Purchases</TabsTrigger>
+            </>
+          ) : null}
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
@@ -274,6 +320,7 @@ export function ProductDetail({
             variants={variants}
             latestCost={latestCost}
             hasVariants={hasVariants}
+            itemStock={itemStock}
           />
         </TabsContent>
 
@@ -415,11 +462,14 @@ function OverviewTab({
   variants,
   latestCost,
   hasVariants,
+  itemStock,
 }: {
   product: ManagedProduct;
   variants: ProductVariant[];
   latestCost: number | null;
   hasVariants: boolean;
+  /** D101 — resolved by the parent; no kind comparison in here. */
+  itemStock: ItemStockPresentation;
 }) {
   // Low-stock warning aggregates across variants (matrix) or falls back to the
   // parent's own on-hand for single-variant / legacy products. The threshold is
@@ -454,7 +504,11 @@ function OverviewTab({
             <Fact label="Status" value={product.isActive ? 'Active' : 'Inactive'} />
             <Fact
               label="Track inventory"
-              value={product.type === 'Inventory' ? 'Yes' : 'No'}
+              // D101 — for an item whose cell is the 86 switch, "type:
+              // Inventory" is a wizard formality, not a stock claim.
+              value={
+                itemStock === 'QUANTITY' && product.type === 'Inventory' ? 'Yes' : 'No'
+              }
             />
             {product.description ? (
               <div className="sm:col-span-2">
@@ -478,15 +532,23 @@ function OverviewTab({
                 value={hasVariants ? `${variants.filter((v) => v.isActive).length} active` : 'Single-variant product'}
               />
               <Kpi
-                label="Total stock"
+                label={itemStock === 'AVAILABILITY' ? 'Availability' : 'Total stock'}
                 value={
-                  hasVariants
-                    ? '—'
-                    : product.type === 'Inventory'
-                      ? String(product.quantityOnHand)
-                      : 'Not tracked'
+                  itemStock === 'AVAILABILITY'
+                    ? product.soldOutAt
+                      ? 'Sold out'
+                      : 'Available'
+                    : hasVariants
+                      ? '—'
+                      : itemStock === 'QUANTITY' && product.type === 'Inventory'
+                        ? String(product.quantityOnHand)
+                        : 'Not tracked'
                 }
-                hint={hasVariants ? 'See Inventory tab for per-branch totals' : undefined}
+                hint={
+                  itemStock !== 'AVAILABILITY' && hasVariants
+                    ? 'See Inventory tab for per-branch totals'
+                    : undefined
+                }
               />
               <Kpi label="Latest cost" value={latestCost != null ? formatMoney(latestCost) : '—'} />
               <Kpi
@@ -494,10 +556,12 @@ function OverviewTab({
                 value={product.averageCost != null ? formatMoney(product.averageCost) : '—'}
               />
               <Kpi label="Selling price" value={formatMoney(product.unitPrice)} />
-              <Kpi
-                label="Reorder point"
-                value={product.reorderLevel != null ? String(product.reorderLevel) : '—'}
-              />
+              {itemStock === 'QUANTITY' ? (
+                <Kpi
+                  label="Reorder point"
+                  value={product.reorderLevel != null ? String(product.reorderLevel) : '—'}
+                />
+              ) : null}
             </div>
           </CardContent>
         </Card>

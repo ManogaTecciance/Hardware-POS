@@ -187,18 +187,23 @@ function SimpleForm({
         </Field>
       ) : null}
 
-      <Field label="Reorder point" htmlFor="simple-reorder">
-        <Input
-          id="simple-reorder"
-          type="number"
-          inputMode="decimal"
-          min={0}
-          step="0.001"
-          value={state.simple.reorderLevel}
-          onChange={(e) => set({ reorderLevel: e.target.value })}
-          placeholder="Optional"
-        />
-      </Field>
+      {/* D101 — a reorder point is a claim about a count; an untracked item
+          has neither. Tracked items (retail Inventory, restaurant packaged
+          goods) keep the field exactly as it was. */}
+      {state.trackInventory ? (
+        <Field label="Reorder point" htmlFor="simple-reorder">
+          <Input
+            id="simple-reorder"
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step="0.001"
+            value={state.simple.reorderLevel}
+            onChange={(e) => set({ reorderLevel: e.target.value })}
+            placeholder="Optional"
+          />
+        </Field>
+      ) : null}
     </div>
   );
 }
@@ -289,15 +294,17 @@ function VariantMatrix({
         >
           Generate SKUs
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={setReorderForAll}
-          disabled={enabledIndexes.length === 0}
-        >
-          Set reorder for all
-        </Button>
+        {state.trackInventory ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={setReorderForAll}
+            disabled={enabledIndexes.length === 0}
+          >
+            Set reorder for all
+          </Button>
+        ) : null}
       </div>
 
       {errors['pricing-none-enabled'] ? (
@@ -323,8 +330,10 @@ function VariantMatrix({
                 <Th>
                   Selling price<span className="text-danger">*</span>
                 </Th>
-                {isLocal ? <Th>Opening stock</Th> : null}
-                <Th>Reorder</Th>
+                {/* D101 — stock columns only for tracked items; an untracked
+                    dish's variants have no counts to seed or reorder. */}
+                {isLocal && state.trackInventory ? <Th>Opening stock</Th> : null}
+                {state.trackInventory ? <Th>Reorder</Th> : null}
               </tr>
             </thead>
             <tbody>
@@ -373,7 +382,7 @@ function VariantMatrix({
                         </p>
                       ) : null}
                     </td>
-                    {isLocal ? (
+                    {isLocal && state.trackInventory ? (
                       <td className="p-2">
                         <Input
                           type="number"
@@ -390,19 +399,21 @@ function VariantMatrix({
                         />
                       </td>
                     ) : null}
-                    <td className="p-2">
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="0.001"
-                        value={v.reorderLevel}
-                        onChange={(e) => updateVariant(idx, { reorderLevel: e.target.value })}
-                        aria-label={`Reorder point for ${label}`}
-                        placeholder="Optional"
-                        className="min-w-[6rem] touch-manipulation"
-                      />
-                    </td>
+                    {state.trackInventory ? (
+                      <td className="p-2">
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.001"
+                          value={v.reorderLevel}
+                          onChange={(e) => updateVariant(idx, { reorderLevel: e.target.value })}
+                          aria-label={`Reorder point for ${label}`}
+                          placeholder="Optional"
+                          className="min-w-[6rem] touch-manipulation"
+                        />
+                      </td>
+                    ) : null}
                   </tr>
                 );
               })}
@@ -472,7 +483,7 @@ function VariantMatrix({
                       </p>
                     ) : null}
                   </div>
-                  {isLocal ? (
+                  {isLocal && state.trackInventory ? (
                     <div className="space-y-1">
                       <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                         Opening stock
@@ -490,22 +501,24 @@ function VariantMatrix({
                       />
                     </div>
                   ) : null}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Reorder
-                    </label>
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      step="0.001"
-                      value={v.reorderLevel}
-                      onChange={(e) => updateVariant(idx, { reorderLevel: e.target.value })}
-                      aria-label={`Reorder point for ${label}`}
-                      placeholder="Optional"
-                      className="touch-manipulation"
-                    />
-                  </div>
+                  {state.trackInventory ? (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Reorder
+                      </label>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.001"
+                        value={v.reorderLevel}
+                        onChange={(e) => updateVariant(idx, { reorderLevel: e.target.value })}
+                        aria-label={`Reorder point for ${label}`}
+                        placeholder="Optional"
+                        className="touch-manipulation"
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </li>
             );

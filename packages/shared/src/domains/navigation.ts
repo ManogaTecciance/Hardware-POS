@@ -21,6 +21,7 @@ import type { ModuleKey } from '../types/platform.js';
  */
 export const NAV_ICON_NAMES = [
   'BarChart3',
+  'BookOpen',
   'CalendarDays',
   'ChefHat',
   'FileText',
@@ -248,17 +249,19 @@ export const FOOD_SERVICE_NAVIGATION: readonly NavGroupSpec[] = [
   {
     label: 'Catalog',
     items: [
-      // D45: `/menu` is intentionally absent. The Product Wizard (Restaurant)
-      // is the single authoring surface for sellable items; the legacy
-      // MenuBrowser stays reachable only via a typed URL. Do not re-add a
-      // `/menu` entry without a decision record.
+      // D45: `/menu` (the legacy MenuBrowser route) is intentionally absent
+      // and stays reachable only via a typed URL. Do not re-add a `/menu`
+      // ROUTE entry without a decision record.
       //
-      // Food-service tenants label the shared product catalogue "Inventory"
-      // so it reads clearly as the authoring surface for every sellable item.
+      // D103 — the entry is labelled "Menu": that is what every mainstream
+      // restaurant POS calls the item-authoring surface, and "Inventory"
+      // claimed stock semantics most menu items no longer have (D101). The
+      // href is still /products — the D45 single authoring surface is
+      // unchanged, only its name on the rail moved.
       {
         href: '/products',
-        label: 'Inventory',
-        icon: 'Package',
+        label: 'Menu',
+        icon: 'BookOpen',
         permission: Permission.PRODUCT_READ,
       },
       {

@@ -32,7 +32,7 @@
 import { domainFor } from '@hardware-pos/shared';
 import type { BusinessType, InventoryMode } from '@/lib/platform-api';
 
-import type { ProductSyncStatus } from '@/lib/products-api';
+import type { ProductSyncStatus, SellableKind } from '@/lib/products-api';
 
 /**
  * Kind of product surface a business runs, from the tenant's `businessType`.
@@ -424,4 +424,66 @@ export const ALL_INVENTORY_MODES: readonly Exclude<ProfileInventoryState, null>[
 /** The classified modes, for the exhaustiveness spec. */
 export function classifiedInventoryModes(): string[] {
   return Object.keys(CLASSIFICATION).sort();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D101 — per-ITEM stock presentation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How ONE item's stock cell renders: a count, an availability switch, or
+ * nothing. Mode-level flags stay the outer gate; this narrows them by what
+ * the item IS.
+ */
+export type ItemStockPresentation = 'QUANTITY' | 'AVAILABILITY' | 'NONE';
+
+/**
+ * D101 — what the item's `sellableKind` means for stock, under LOCAL
+ * inventory. A `Record` with no default branch on purpose (same pattern as
+ * {@link CLASSIFICATION}): a new kind is a compile error here until someone
+ * decides what its stock cell shows.
+ */
+const LOCAL_KIND_PRESENTATION: Record<SellableKind, ItemStockPresentation> = {
+  /** The count is the truth — quantity, low-stock, reorder point. */
+  STOCK_ITEM: 'QUANTITY',
+  BUNDLE: 'QUANTITY',
+  /** A person is the truth — the 86 switch; a count would be a number nothing maintains. */
+  COMPOSED_ITEM: 'AVAILABILITY',
+  SERVICE: 'AVAILABILITY',
+  /** A booking calendar is the truth; neither counts nor 86 apply. */
+  TIME_SLOT: 'NONE',
+  STAY_UNIT: 'NONE',
+};
+
+/**
+ * Resolve one item's stock presentation from the tenant presentation plus
+ * the item's kind, so no product component ever compares a `sellableKind`
+ * inline (the D31 rule, one level down).
+ *
+ * `EXTERNAL_CATALOGUE` shows QUANTITY for every kind: QuickBooks is the
+ * stock authority there and the Tile Shop screens must stay byte-identical
+ * (D16) — the kind split is a LOCAL-inventory refinement only.
+ */
+export function resolveItemStockPresentation(
+  presentation: Pick<ProductPresentation, 'managementMode' | 'showStockControls'>,
+  sellableKind: SellableKind,
+): ItemStockPresentation {
+  if (!presentation.showStockControls) return 'NONE';
+  if (presentation.managementMode === 'EXTERNAL_CATALOGUE') return 'QUANTITY';
+  return LOCAL_KIND_PRESENTATION[sellableKind];
+}
+
+/** Every SellableKind, as runtime data — the exhaustiveness spec's walk list. */
+export const ALL_SELLABLE_KINDS: readonly SellableKind[] = [
+  'STOCK_ITEM',
+  'COMPOSED_ITEM',
+  'SERVICE',
+  'BUNDLE',
+  'TIME_SLOT',
+  'STAY_UNIT',
+];
+
+/** The classified kinds, for the exhaustiveness spec. */
+export function classifiedSellableKinds(): string[] {
+  return Object.keys(LOCAL_KIND_PRESENTATION).sort();
 }

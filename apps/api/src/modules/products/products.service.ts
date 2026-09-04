@@ -112,8 +112,10 @@ export class ProductsService {
       // D65 — the same classification rule the D60 backfill applied, now at
       // authoring time so new rows cannot drift from backfilled ones: a
       // Service is a SERVICE, a dish (foodType set) is COMPOSED_ITEM,
-      // everything else is a plain STOCK_ITEM.
-      sellableKind: deriveSellableKind(dto.type ?? 'Inventory', dto.foodType ?? null),
+      // everything else is a plain STOCK_ITEM. D101 adds the operator's own
+      // answer for food-typed rows: trackStock=true names a packaged good
+      // the branch counts (STOCK_ITEM — bottled water), not a dish.
+      sellableKind: deriveSellableKind(dto.type ?? 'Inventory', dto.foodType ?? null, dto.trackStock),
       syncStatus: 'NOT_SYNCED',
     };
     // One provider for the operation, resolved from the authenticated tenant before
@@ -204,11 +206,16 @@ export class ProductsService {
       // D65 — re-derive ONLY when an input of the rule changes; an untouched
       // patch leaves the classification alone. (BUNDLE has no authoring
       // surface yet; when it does, this derivation moves behind it.)
+      // D101 — trackStock joins the trigger set. When a trigger fires
+      // WITHOUT a trackStock in the patch, the stored classification answers
+      // for it (STOCK_ITEM = tracked), so changing a bottled water's
+      // foodType cannot silently flip it back to an untracked dish.
       sellableKind:
-        dto.type !== undefined || dto.foodType !== undefined
+        dto.type !== undefined || dto.foodType !== undefined || dto.trackStock !== undefined
           ? deriveSellableKind(
               dto.type ?? existing.type,
               dto.foodType !== undefined ? dto.foodType : (existing.foodType as ProductFoodType | null),
+              dto.trackStock !== undefined ? dto.trackStock : existing.sellableKind === 'STOCK_ITEM',
             )
           : undefined,
     };
@@ -226,6 +233,33 @@ export class ProductsService {
     } catch (err) {
       throw this.mapWriteError(err);
     }
+  }
+
+  /**
+   * D101 — the 86 switch. Only kinds whose availability no OTHER authority
+   * governs may take it: a STOCK_ITEM / BUNDLE answers to its count, and the
+   * booking kinds to their calendars — one authority per fact. Idempotent in
+   * both directions, and a repeat 86 keeps the ORIGINAL timestamp so "sold
+   * out since" stays honest. No catalogue provider call: like a product
+   * image, availability is POS-local and never an external-catalogue field.
+   */
+  async setAvailability(tenantId: string, id: string, available: boolean): Promise<Product> {
+    const existing = await this.getById(tenantId, id);
+    const governedBy: Partial<Record<SellableKind, string>> = {
+      STOCK_ITEM: 'its stock count — receive or adjust stock instead',
+      BUNDLE: 'its stock count — receive or adjust stock instead',
+      TIME_SLOT: 'its booking calendar',
+      STAY_UNIT: 'its booking calendar',
+    };
+    const authority = governedBy[existing.sellableKind];
+    if (authority) {
+      throw new BadRequestException({
+        code: 'PRODUCT_AVAILABILITY_STOCK_GOVERNED',
+        message: `Availability for "${existing.name}" is governed by ${authority}.`,
+      });
+    }
+    if (available === (existing.soldOutAt == null)) return existing;
+    return this.productsRepository.update(id, { soldOutAt: available ? null : new Date() });
   }
 
   /** Soft-delete: deactivate rather than remove (sale history references it). */
@@ -388,13 +422,20 @@ export class ProductsService {
  * disagree. This is what the depletion engine branches on: SERVICE claims no
  * stock, COMPOSED_ITEM depletes via its recipe (or not at all without one),
  * STOCK_ITEM depletes 1:1.
+ *
+ * D101 — a food-typed row is no longer unconditionally a dish: the D45
+ * wizard stamps EVERY restaurant item with a foodType, which made a tracked
+ * bottled water impossible to author. `trackStock === true` names a
+ * packaged good the branch counts; absent/false keeps the D65 answer, so
+ * every pre-D101 row derives exactly what it always did.
  */
 function deriveSellableKind(
   type: string,
   foodType: ProductFoodType | null,
+  trackStock?: boolean,
 ): SellableKind {
   if (type === 'Service') return 'SERVICE';
-  if (foodType != null) return 'COMPOSED_ITEM';
+  if (foodType != null) return trackStock === true ? 'STOCK_ITEM' : 'COMPOSED_ITEM';
   return 'STOCK_ITEM';
 }
 

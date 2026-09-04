@@ -137,6 +137,13 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.RESERVATION_MANAGE,
       // D49: joining tables is a shift decision.
       Permission.OPEN_TABLE_MANAGE,
+      /*
+       * D101 — the kitchen tells the floor "no more kottu", and the person
+       * hearing it must be able to pull the item off the menu before the
+       * next order rings it. PRODUCT_MANAGE stays absent: 86 is a switch on
+       * one fact, not catalogue authorship.
+       */
+      Permission.PRODUCT_AVAILABILITY_SET,
       // Deliberately absent: ORDER_VOID_SENT and TABLE_TRANSFER/MERGE. Voiding an
       // order the kitchen has already started, and moving a table's bill, are the
       // two places where a waiter's mistake becomes someone else's loss — they
@@ -237,6 +244,9 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.RESERVATION_MANAGE,
       // D49: joining tables is a shift decision.
       Permission.OPEN_TABLE_MANAGE,
+      // D101 — the till is where "that's finished" lands first; same
+      // reasoning as the waiter grant, PRODUCT_MANAGE equally absent.
+      Permission.PRODUCT_AVAILABILITY_SET,
     ],
   },
 ];

@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 285
+- Total routes: 286
 - Module-guarded routes: 198
-- Ungated routes: 87
+- Ungated routes: 88
 
 ## How to read the Guard column
 
@@ -206,6 +206,7 @@ reach production unclassified.
 | DELETE | `/products/:id` | SHARED_CORE | shared-core | product:manage |
 | GET | `/products/:id` | SHARED_CORE | shared-core | product:read |
 | PATCH | `/products/:id` | SHARED_CORE | shared-core | product:manage |
+| PUT | `/products/:id/availability` | SHARED_CORE | shared-core | product:availability:set |
 | DELETE | `/products/:id/image` | SHARED_CORE | shared-core | product:manage |
 | POST | `/products/:id/image` | SHARED_CORE | shared-core | product:manage |
 | POST | `/products/:id/sync-to-quickbooks` | QUICKBOOKS | ENFORCED | quickbooks:manage |

@@ -465,7 +465,8 @@ export const reservations = {
     reservationId: string,
     body: Partial<{
       tableId: string;
-      customerId: string;
+      /** `null` unlinks the customer record; absent leaves the link alone. */
+      customerId: string | null;
       customerName: string;
       customerPhone: string;
       partySize: number;

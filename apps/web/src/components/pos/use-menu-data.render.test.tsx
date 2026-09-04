@@ -71,6 +71,7 @@ function item(id: string, name: string): PosCatalogueItem {
     modifierGroups: [],
     stations: [],
     promotions: [],
+    stockState: 'UNTRACKED',
   };
 }
 

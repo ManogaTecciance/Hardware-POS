@@ -400,6 +400,50 @@ describe('the printed page itself', () => {
     expect(bodyRuleOf(html)).toContain('padding:0 5mm 0 0mm');
   });
 
+  it('D102 — a header with nothing in it is not printed as a blank line', () => {
+    render({
+      profile: {
+        ...profile,
+        logoUrl: null,
+        companyName: null,
+        addressLine: null,
+        phone: null,
+        email: null,
+        taxNumber: null,
+        footerText: '',
+      },
+      fallbackName: '',
+      copyLabel: null,
+    });
+
+    /*
+     * Every row in the header block is conditional, so a workspace that has
+     * cleared the logo and all four fields used to get an empty `div` holding
+     * the template's own newlines. Whitespace in a block still makes a line
+     * box, and nothing here sets a `font-size` on `body`, so it inherited the
+     * browser's 16px and printed as a blank line at the top of the paper.
+     */
+    expect(html).not.toContain('class="c"');
+
+    /*
+     * POSITIVE, and it is what stops this passing on a template that rendered
+     * nothing at all: the rest of the bill is untouched. A receipt with no
+     * letterhead is still a receipt.
+     */
+    expect(html).toContain('class="meta"');
+    expect(html).toContain('DESCRIPTION');
+    expect(html).toContain('CHKN F/RCE/S');
+    expect(html).toContain('Bill Amount :');
+  });
+
+  it('D102 — but keeps the header the moment one field is filled in', () => {
+    // The other half. Without this, dropping the block unconditionally would
+    // satisfy the test above and silently delete every letterhead.
+    render({ profile: { ...profile, logoUrl: null, companyName: null, addressLine: '201 Road' } });
+    expect(html).toContain('class="c"');
+    expect(html).toContain('201 Road');
+  });
+
   it('carries the geometry as metadata, without declaring a page size', () => {
     render();
     /*
