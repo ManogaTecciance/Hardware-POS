@@ -21,6 +21,7 @@
 import {
   applyPromotions,
   distributeByLargestRemainder,
+  outstandingRewards,
   rewardEntitlements,
   type PromotionCartLine,
   type PromotionRule,
@@ -795,5 +796,141 @@ describe('rewardEntitlements', () => {
     expect(rewardEntitlements({ lines: [item('l1', 'p_shirt', 1000, 5)], promotions: [pct] })).toEqual(
       [],
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// outstandingRewards — what the cashier is asked to add (4.14)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The till no longer adds the free item; it states what is owed and blocks
+ * payment until the cashier has added it. These cases pin the count that drives
+ * both the message and the gate.
+ *
+ * Nothing here names a shirt or a tie beyond the fixtures: a rule rewarding any
+ * other product reads identically, because the promotion carries its own GET
+ * product and this only reports the id.
+ */
+describe('outstandingRewards', () => {
+  const offer = (buyProduct: string, getProduct: string, buyQty = 2, getQty = 1) =>
+    rule({
+      id: 'r_offer',
+      name: 'Buy 2 Get 1',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: buyQty,
+      getQuantity: getQty,
+      percentageOff: 100,
+      items: [
+        { productId: buyProduct, role: 'BUY', quantity: 1 },
+        { productId: getProduct, role: 'GET', quantity: 1 },
+      ],
+    });
+
+  it('asks for what is owed, naming the promotion and the reward product', () => {
+    const lines = [item('l_buy', 'p_a', 1000, 2)];
+
+    expect(outstandingRewards({ lines, promotions: [offer('p_a', 'p_b')] })).toEqual([
+      {
+        promotionId: 'r_offer',
+        promotionName: 'Buy 2 Get 1',
+        productId: 'p_b',
+        earned: 1,
+        held: 0,
+        outstanding: 1,
+      },
+    ]);
+  });
+
+  it('scales with the qualifying quantity — 6 buys earn 3', () => {
+    // Dynamic recalculation: the count follows the cart, with no quantity
+    // written down anywhere.
+    const lines = [item('l_buy', 'p_a', 1000, 6)];
+
+    expect(outstandingRewards({ lines, promotions: [offer('p_a', 'p_b')] })[0]!.outstanding).toBe(3);
+  });
+
+  it('counts down as the cashier adds them, and clears at the last one', () => {
+    const promo = [offer('p_a', 'p_b')];
+    const withHeld = (n: number) =>
+      outstandingRewards({
+        lines: [item('l_buy', 'p_a', 1000, 6), ...(n > 0 ? [item('l_get', 'p_b', 500, n)] : [])],
+        promotions: promo,
+      });
+
+    // 3 required: blocked at 0, 1 and 2 — allowed at 3.
+    expect(withHeld(0)[0]!.outstanding).toBe(3);
+    expect(withHeld(1)[0]!.outstanding).toBe(2);
+    expect(withHeld(2)[0]!.outstanding).toBe(1);
+    expect(withHeld(3)).toEqual([]);
+  });
+
+  it('reports nothing once satisfied — the payment gate opens', () => {
+    const lines = [item('l_buy', 'p_a', 1000, 2), item('l_get', 'p_b', 500, 1)];
+
+    expect(outstandingRewards({ lines, promotions: [offer('p_a', 'p_b')] })).toEqual([]);
+  });
+
+  it('reports nothing below the threshold — an offer not earned is not owed', () => {
+    const lines = [item('l_buy', 'p_a', 1000, 1)];
+
+    expect(outstandingRewards({ lines, promotions: [offer('p_a', 'p_b')] })).toEqual([]);
+  });
+
+  it('shrinks when the cashier reduces the qualifying quantity', () => {
+    // The reported failure from the auto-add design, as a pure assertion: the
+    // requirement must fall as well as rise.
+    const promo = [offer('p_a', 'p_b')];
+
+    expect(
+      outstandingRewards({ lines: [item('l_buy', 'p_a', 1000, 4)], promotions: promo })[0]!
+        .outstanding,
+    ).toBe(2);
+    expect(
+      outstandingRewards({ lines: [item('l_buy', 'p_a', 1000, 2)], promotions: promo })[0]!
+        .outstanding,
+    ).toBe(1);
+    expect(outstandingRewards({ lines: [item('l_buy', 'p_a', 1000, 1)], promotions: promo })).toEqual(
+      [],
+    );
+  });
+
+  it('is generic — a different product pair reads identically', () => {
+    // The acceptance criterion. Same shape, different ids, no code path knows
+    // which is which.
+    const lines = [item('l_buy', 'p_paint', 4000, 3)];
+    const three = offer('p_paint', 'p_brush', 3, 2);
+
+    expect(outstandingRewards({ lines, promotions: [three] })[0]).toMatchObject({
+      productId: 'p_brush',
+      outstanding: 2,
+    });
+  });
+
+  it('tracks two outstanding offers at once', () => {
+    const lines = [item('l_a', 'p_a', 1000, 2), item('l_c', 'p_c', 800, 2)];
+    const second = rule({
+      id: 'r_second',
+      name: 'Second offer',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 2,
+      getQuantity: 1,
+      percentageOff: 100,
+      items: [
+        { productId: 'p_c', role: 'BUY', quantity: 1 },
+        { productId: 'p_d', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    const owed = outstandingRewards({ lines, promotions: [offer('p_a', 'p_b'), second] });
+    expect(owed.map((o) => o.productId).sort()).toEqual(['p_b', 'p_d']);
+  });
+
+  it('a manually discounted qualifying line owes nothing', () => {
+    // Precedence (D102) still holds: a discounted line is invisible to
+    // promotions, so it earns no reward and the cashier is not asked for one.
+    const lines = [item('l_buy', 'p_a', 1000, 2, 50)];
+
+    expect(outstandingRewards({ lines, promotions: [offer('p_a', 'p_b')] })).toEqual([]);
   });
 });

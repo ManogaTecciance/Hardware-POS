@@ -602,3 +602,31 @@ export function splitLineDiscounts(
   const manual = round2(totalDiscount - promotional);
   return { manual: manual > 0 ? manual : 0, promotional };
 }
+
+/** A reward the basket has earned but the cashier has not yet added (4.14). */
+export interface OutstandingReward extends RewardEntitlement {
+  /** Units still to be added before the offer is complete. Always > 0. */
+  outstanding: number;
+}
+
+/**
+ * Rewards still owed to the customer (4.14).
+ *
+ * 4.11–4.13 had the till ADD the free item itself. That created more problems
+ * than it solved — which variant to give, what to do when the entitlement moved,
+ * an effect that fought its own state — so the till now tells the cashier what
+ * to add and refuses payment until they have.
+ *
+ * Generic by construction: the promotion names its own GET product and this
+ * reports the id. Nothing here knows what a shirt or a tie is, and a rule
+ * rewarding any other product reads exactly the same.
+ *
+ * Derived from `rewardEntitlements`, so the count a cashier is asked for is the
+ * same count the applier will price to zero. Recomputing it separately would be
+ * two answers to one question.
+ */
+export function outstandingRewards(context: PromotionContext): OutstandingReward[] {
+  return rewardEntitlements(context)
+    .map((ent) => ({ ...ent, outstanding: Math.max(0, ent.earned - ent.held) }))
+    .filter((r) => r.outstanding > 0);
+}

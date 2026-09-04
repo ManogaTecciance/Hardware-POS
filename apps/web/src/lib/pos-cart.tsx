@@ -73,19 +73,6 @@ interface PosCartValue extends PosCartState {
   hydrated: boolean;
   /** D99 — `variant` is optional so pre-picker callers keep working (1c.4 supplies it). */
   addToCart: (product: ClientProduct, variant?: ClientVariant | null) => void;
-  /**
-   * D45 (4.11) — add a reward line the basket has EARNED.
-   *
-   * Separate from `addToCart` because it is not a scan: it sets the quantity
-   * outright rather than incrementing, and marks the line so the cart can badge
-   * it and so a deliberate removal is not undone on the next render.
-   */
-  addRewardToCart: (
-    product: ClientProduct,
-    variant: ClientVariant | null,
-    quantity: number,
-    promotionId: string,
-  ) => void;
   changeQty: (lineKey: CartLineKey, delta: number) => void;
   /** Set an item's quantity to an absolute value (typed in). Clamped to >= 1. */
   setQty: (lineKey: CartLineKey, quantity: number) => void;
@@ -162,44 +149,6 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
             ? s.items.map((it) => (it.lineKey === key ? { ...it, quantity: it.quantity + 1 } : it))
             : [...s.items, newCartItem(product, variant)];
           return { ...s, items };
-        }),
-      addRewardToCart: (product, variant, quantity, promotionId) =>
-        setState((s) => {
-          const key = cartLineKey(product.id, variant?.id ?? null);
-          const cap = stockCap(product, variant);
-          const wanted = cap != null ? Math.min(quantity, cap) : quantity;
-          const found = s.items.find((it) => it.lineKey === key);
-
-          /*
-           * RETURN THE SAME STATE when nothing changes (4.13).
-           *
-           * The effect that calls this re-runs on every cart change, so a
-           * mutator that rebuilds the items array unconditionally re-triggers
-           * it forever — which is exactly what exhausted React's update depth
-           * in 4.11. Identity is the loop guard.
-           */
-          if (wanted < 1) return s;
-          if (found && found.quantity === wanted && found.addedByPromotionId === promotionId) {
-            return s;
-          }
-
-          if (found) {
-            return {
-              ...s,
-              items: s.items.map((it) =>
-                it.lineKey === key
-                  ? { ...it, quantity: wanted, addedByPromotionId: promotionId }
-                  : it,
-              ),
-            };
-          }
-          return {
-            ...s,
-            items: [
-              ...s.items,
-              { ...newCartItem(product, variant), quantity: wanted, addedByPromotionId: promotionId },
-            ],
-          };
         }),
       changeQty: (lineKey, delta) =>
         setState((s) => {

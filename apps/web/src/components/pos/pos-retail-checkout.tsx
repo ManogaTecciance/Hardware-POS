@@ -38,9 +38,7 @@ import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
 import { useAuth } from '@/lib/auth';
 import {
-  chooseRewardVariant,
   computeCartLines,
-  planRewardLines,
   computeLine,
   computeTotals,
   linePrice,
@@ -57,7 +55,7 @@ import {
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
-import { rewardEntitlements } from '@hardware-pos/shared';
+import { outstandingRewards } from '@hardware-pos/shared';
 
 import { stockCap, usePosCart } from '@/lib/pos-cart';
 import { resolveScan, type ScanHit } from '@/lib/scan-resolver';
@@ -344,75 +342,43 @@ export function PosRetailCheckout() {
    *     cashier is told to pick, because a till guessing a size is worse than a
    *     till asking.
    */
-  const [declinedRewards, setDeclinedRewards] = React.useState<Set<string>>(new Set());
-  const [rewardHint, setRewardHint] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (data.promotionRules.length === 0) return;
-
-    const entitlements = rewardEntitlements({
-      lines: cart.items.map((it) => {
-        const line = computeLine(it);
-        return {
-          id: it.lineKey,
-          productId: it.product.id,
-          unitPrice: linePrice(it),
-          quantity: it.quantity,
-          lineSubtotal: line.lineSubtotal,
-          manualDiscountAmount: line.discountAmount,
-        };
-      }),
-      promotions: data.promotionRules,
-    });
-
-    const actions = planRewardLines(cart.items, entitlements, declinedRewards);
-    let hint: string | null = null;
-
-    for (const action of actions) {
-      if (action.kind === 'remove') {
-        // Withdrawn because the basket no longer earns it. NOT a decline — the
-        // cashier did not choose this, so the reward returns if they scan the
-        // qualifying items again.
-        cart.removeItem(action.lineKey);
-        continue;
-      }
-      if (action.kind === 'setQuantity') {
-        cart.setQty(action.lineKey, action.quantity);
-        continue;
-      }
-
-      const product = data.products.find((p) => p.id === action.productId);
-      if (!product) continue;
-
-      let variant: ClientVariant | null = null;
-      if (product.variants.length > 0) {
-        variant = chooseRewardVariant(product);
-        if (!variant) {
-          hint = `${product.name} is out of stock, so the free item could not be added.`;
-          continue;
-        }
-      }
-      cart.addRewardToCart(product, variant, action.quantity, action.promotionId);
-    }
-
-    setRewardHint(hint);
-    // Reacts to the cart's ITEMS; `cart` itself is a stable context value.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart.items, data.promotionRules, data.products, declinedRewards]);
-
-  /**
-   * Removing a reward line is a DECISION: the cashier does not want it, so it
-   * must not reappear. Withdrawal by `planRewardLines` goes through
-   * `cart.removeItem` directly and is deliberately not recorded here.
+  /*
+   * D45 (4.14) — the cashier adds the reward; the till requires it.
+   *
+   * 4.11–4.13 had the till add the free item itself, and it created more
+   * problems than it solved: which variant to give away, what to do when the
+   * entitlement moved, and an effect that fought its own state. The till now
+   * states what is owed and refuses payment until it is in the basket, which
+   * leaves the choice of product, variant, colour and size where it belongs —
+   * with the person serving the customer.
+   *
+   * No effect and no cart writes: this is derived on every render from the cart
+   * and the rules, so it recalculates when either changes and cannot loop.
    */
-  const removeLine = (lineKey: CartLineKey) => {
-    const item = cart.items.find((it) => it.lineKey === lineKey);
-    if (item?.addedByPromotionId) {
-      const id = item.addedByPromotionId;
-      setDeclinedRewards((prev) => new Set(prev).add(id));
-    }
-    cart.removeItem(lineKey);
-  };
+  const outstanding = React.useMemo(
+    () =>
+      data.promotionRules.length === 0
+        ? []
+        : outstandingRewards({
+            lines: cart.items.map((it) => {
+              const line = computeLine(it);
+              return {
+                id: it.lineKey,
+                productId: it.product.id,
+                unitPrice: linePrice(it),
+                quantity: it.quantity,
+                lineSubtotal: line.lineSubtotal,
+                manualDiscountAmount: line.discountAmount,
+              };
+            }),
+            promotions: data.promotionRules,
+          }),
+    [cart.items, data.promotionRules],
+  );
+
+  /** The promotion names the product; the catalogue names the product to a human. */
+  const outstandingLabel = (productId: string) =>
+    data.products.find((p) => p.id === productId)?.name ?? 'promotional item';
 
   const linesByKey = new Map(
     computeCartLines(cart.items, data.promotionRules).map((l) => [l.lineKey, l]),
@@ -464,7 +430,15 @@ export function PosRetailCheckout() {
 
   const currency = data.settings.currency;
   const cartEmpty = cart.items.length === 0;
-  const canPay = !cartEmpty && !totals.hasStockIssue;
+  /*
+   * D45 (4.14) — an unclaimed reward blocks payment.
+   *
+   * The customer is entitled to it and the cashier has not added it yet, so
+   * completing the sale would short-change them silently. This is a workflow
+   * gate on the till, not a money rule: the server prices whatever it is sent
+   * and does not refuse a sale for a reward the customer declined.
+   */
+  const canPay = !cartEmpty && !totals.hasStockIssue && outstanding.length === 0;
 
   const goToPayment = () => {
     setCartOpen(false);
@@ -536,12 +510,23 @@ export function PosRetailCheckout() {
         ) : null}
       </div>
 
-      {/* D45 (4.11) — a reward with sizes needs one chosen. The till says so
-          rather than guessing, and rather than staying silent while the cashier
-          wonders why the offer did not fire. */}
-      {rewardHint ? (
-        <div className="mx-4 mb-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
-          {rewardHint}
+      {/* D45 (4.14) — what the customer is owed, and how many are still to come.
+          Named per promotion, because two offers can be outstanding at once. */}
+      {outstanding.length > 0 ? (
+        <div className="mx-4 mb-2 space-y-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2.5">
+          {outstanding.map((r) => (
+            <div key={r.promotionId} className="text-xs">
+              <p className="font-semibold text-primary">🎁 {r.promotionName}</p>
+              <p className="mt-0.5 text-muted-foreground">
+                Add <span className="font-semibold text-foreground">{r.outstanding}</span>{' '}
+                {outstandingLabel(r.productId)}
+                {r.outstanding === 1 ? '' : 's'} to complete this offer.
+              </p>
+            </div>
+          ))}
+          <p className="pt-0.5 text-[11px] font-medium text-primary/80">
+            Payment is unavailable until the offer is complete.
+          </p>
         </div>
       ) : null}
 
@@ -654,7 +639,7 @@ export function PosRetailCheckout() {
                       size="icon"
                       className="h-9 w-9 text-danger"
                       aria-label="Remove item"
-                      onClick={() => removeLine(item.lineKey)}
+                      onClick={() => cart.removeItem(item.lineKey)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

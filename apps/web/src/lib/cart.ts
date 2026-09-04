@@ -1,11 +1,6 @@
 import type { ClientProduct, ClientVariant } from './catalog';
 import { round2 } from './utils';
-import {
-  applyPromotions,
-  taxableBase,
-  type PromotionRule,
-  type RewardEntitlement,
-} from '@hardware-pos/shared';
+import { applyPromotions, taxableBase, type PromotionRule } from '@hardware-pos/shared';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
 
@@ -57,15 +52,6 @@ export interface CartItem {
   approvalToken?: string;
   /** The manager who approved the discount. */
   approvedByUserId?: string;
-  /**
-   * D45 (4.11) — set when the TILL added this line to claim a promotion the
-   * basket had earned, rather than the cashier scanning it.
-   *
-   * Drives the "Promo item" badge, and stops the line being re-added the moment
-   * a cashier deliberately removes it. It is a UI fact only: the server prices
-   * the line from the promotion rules like any other, and never sees this flag.
-   */
-  addedByPromotionId?: string;
 }
 
 export interface LineTotals {
@@ -130,118 +116,6 @@ export function computeLine(item: CartItem): LineTotals {
         item.quantity > (item.variant.quantityOnHand ?? 0)
       : item.quantity > item.product.quantityOnHand,
   };
-}
-
-/** One change the till should make to keep reward lines honest (4.13). */
-export type RewardAction =
-  | { kind: 'add'; promotionId: string; productId: string; quantity: number }
-  | { kind: 'setQuantity'; lineKey: CartLineKey; quantity: number }
-  | { kind: 'remove'; lineKey: CartLineKey };
-
-/**
- * Reconcile the reward lines the TILL added against what the basket now earns.
- *
- * 4.11 could only add, and both failures followed from that:
- *
- *   • four shirts never became two ties — the line existed, so nothing happened;
- *   • dropping to one shirt left the free tie in the basket, no longer earning a
- *     discount and therefore CHARGED. A customer paying for something the till
- *     put in their basket is worse than the offer never firing.
- *
- * So this returns the full set of changes, in both directions, and an EMPTY list
- * when the basket already matches. That emptiness is also the loop guard: 4.11
- * rebuilt the items array on every pass even when nothing changed, which is what
- * exhausted React's update depth.
- *
- * Only lines the till added (`addedByPromotionId`) are managed. A tie the cashier
- * scanned is theirs: it may be priced to zero by the promotion, but its quantity
- * is never rewritten and it is never removed.
- */
-export function planRewardLines(
-  items: readonly CartItem[],
-  entitlements: readonly RewardEntitlement[],
-  declined: ReadonlySet<string>,
-): RewardAction[] {
-  const actions: RewardAction[] = [];
-
-  for (const ent of entitlements) {
-    const managed = items.find((it) => it.addedByPromotionId === ent.promotionId);
-
-    // Units the customer brought themselves, which the entitlement already
-    // counts. The till only needs to make up the difference.
-    const scanned = items
-      .filter((it) => it.product.id === ent.productId && !it.addedByPromotionId)
-      .reduce((acc, it) => acc + it.quantity, 0);
-    const target = Math.max(0, ent.earned - scanned);
-
-    if (!managed) {
-      // A declined reward stays declined: re-adding it would make the trash
-      // button do nothing.
-      if (target > 0 && !declined.has(ent.promotionId)) {
-        actions.push({
-          kind: 'add',
-          promotionId: ent.promotionId,
-          productId: ent.productId,
-          quantity: target,
-        });
-      }
-      continue;
-    }
-
-    if (target === 0) {
-      actions.push({ kind: 'remove', lineKey: managed.lineKey });
-    } else if (managed.quantity !== target) {
-      actions.push({ kind: 'setQuantity', lineKey: managed.lineKey, quantity: target });
-    }
-  }
-
-  /*
-   * A reward line whose promotion is no longer eligible at all — the schedule
-   * lapsed, the rule was deactivated — is withdrawn too. Without this it would
-   * sit in the basket at full price with a "PROMO ITEM" badge on it.
-   */
-  const live = new Set(entitlements.map((e) => e.promotionId));
-  for (const it of items) {
-    if (it.addedByPromotionId && !live.has(it.addedByPromotionId)) {
-      actions.push({ kind: 'remove', lineKey: it.lineKey });
-    }
-  }
-
-  return actions;
-}
-
-/**
- * Which variant the till gives away when a promotion rewards a product (4.12).
- *
- * `isDefault` (D46) wins when a shop has set one — but only **3 of 48** variants
- * carry it in practice, and neither product in the reported case did. 4.11
- * refused to auto-add without one, which meant the feature declined on almost
- * every real catalogue: the cart showed "add a Tie to claim it" instead of the
- * free tie.
- *
- * Falling back to the CHEAPEST in-stock variant, ties broken by id so two tills
- * pick the same one. Cheapest matches the policy already settled for which UNIT
- * is freed (open decision 14, resolved: cheapest-first) — the shop gives away
- * the least valuable qualifying item, and the cashier can swap it because the
- * line is badged and removable.
- *
- * Returns `null` when every variant is out of stock, so the caller can say so
- * rather than adding something unsellable.
- */
-export function chooseRewardVariant(product: ClientProduct): ClientVariant | null {
-  if (product.variants.length === 0) return null;
-
-  // UNTRACKED means the tenant tracks no stock, which is availability, not zero.
-  const inStock = product.variants.filter(
-    (v) => v.stockState === 'UNTRACKED' || (v.quantityOnHand ?? 0) > 0,
-  );
-  if (inStock.length === 0) return null;
-
-  return (
-    inStock.find((v) => v.isDefault) ??
-    [...inStock].sort((a, b) => a.unitPrice - b.unitPrice || a.id.localeCompare(b.id))[0] ??
-    null
-  );
 }
 
 /** One cart line, priced — including whatever promotion claimed it. */
