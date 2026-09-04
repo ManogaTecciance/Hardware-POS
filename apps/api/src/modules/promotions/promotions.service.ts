@@ -7,6 +7,7 @@ import { Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { BusinessProfileService } from '../platform/business-profile.service';
 import {
   CreatePromotionDto,
   PROMOTION_TYPES,
@@ -20,7 +21,18 @@ import { PromotionWithItems, PromotionsRepository } from './promotions.repositor
 
 /** The vocabularies the DTO defers to the service. */
 const VALID_DAYS = new Set(['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']);
-const VALID_CHANNELS = new Set(['DINE_IN', 'TAKEAWAY', 'ONLINE']);
+/*
+ * D56 — channels are NOT a fixed list here. This constant used to be
+ * `['DINE_IN','TAKEAWAY','ONLINE']`, which made a retail promotion unsaveable:
+ * 4.9 taught the editor to offer the channels the tenant actually sells on
+ * (`COUNTER` for retail), and the server then rejected the only chip on screen
+ * with "Unknown channel 'COUNTER'". The allowed set is the tenant's
+ * `capabilities.fulfilment.channels`, read from the same resolver the chips use,
+ * so the screen and the server can no longer disagree.
+ *
+ * This is strictly TIGHTER than a blanket four-value list: food service still
+ * accepts exactly its three and nothing else, unchanged.
+ */
 
 /** Shape returned to controllers (JSON-friendly — Decimals stringified). */
 export interface PromotionView {
@@ -53,6 +65,7 @@ export class PromotionsService {
     private readonly prisma: PrismaService,
     private readonly repository: PromotionsRepository,
     private readonly audit: AuditLogService,
+    private readonly profiles: BusinessProfileService,
   ) {}
 
   async list(
@@ -106,6 +119,7 @@ export class PromotionsService {
   ): Promise<PromotionView> {
     this.validateTypeShape(dto.type, dto, dto.items);
     this.validateScheduleVocabulary(dto);
+    await this.assertChannelsSellable(tenantId, dto.channelScope);
     await this.assertScope(tenantId, dto.branchScope);
     await this.assertProductsInTenant(tenantId, dto.items.map((i) => i.productId));
 
@@ -182,6 +196,7 @@ export class PromotionsService {
     const merged = mergeForValidation(existing, dto);
     this.validateTypeShape(existing.type as PromotionTypeValue, merged.data, merged.items);
     this.validateScheduleVocabulary(dto);
+    await this.assertChannelsSellable(tenantId, dto.channelScope);
     if (dto.branchScope) await this.assertScope(tenantId, dto.branchScope);
     if (dto.items) {
       await this.assertProductsInTenant(
@@ -372,6 +387,29 @@ export class PromotionsService {
     }
   }
 
+  /**
+   * D56 — a promotion may only be scoped to a channel this tenant sells on.
+   *
+   * Async, and therefore separate from `validateScheduleVocabulary` (which stays
+   * sync for days and times): the allowed set comes from the effective business
+   * profile, not from a constant.
+   */
+  private async assertChannelsSellable(
+    tenantId: string,
+    channelScope: string[] | undefined,
+  ): Promise<void> {
+    if (!channelScope || channelScope.length === 0) return;
+    const profile = await this.profiles.getEffectiveProfile(tenantId);
+    const allowed = profile.capabilities.fulfilment.channels as readonly string[];
+    for (const c of channelScope) {
+      if (!allowed.includes(c)) {
+        throw new BadRequestException(
+          `Unknown channel '${c}'; expected one of ${allowed.join(', ')}.`,
+        );
+      }
+    }
+  }
+
   private validateScheduleVocabulary(
     dto: Partial<Pick<CreatePromotionDto, 'daysOfWeek' | 'channelScope' | 'startTime' | 'endTime'>>,
   ): void {
@@ -380,15 +418,6 @@ export class PromotionsService {
         if (!VALID_DAYS.has(d)) {
           throw new BadRequestException(
             `Unknown day-of-week '${d}'; expected one of ${[...VALID_DAYS].join(', ')}.`,
-          );
-        }
-      }
-    }
-    if (dto.channelScope) {
-      for (const c of dto.channelScope) {
-        if (!VALID_CHANNELS.has(c)) {
-          throw new BadRequestException(
-            `Unknown channel '${c}'; expected one of ${[...VALID_CHANNELS].join(', ')}.`,
           );
         }
       }
