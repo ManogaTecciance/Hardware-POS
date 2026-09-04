@@ -345,6 +345,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-023 | No limit reports null available | Same for a customer with creditLimit null | `creditLimit` and `available` are both null, not 0 | P | Automated |
 | CUST-024 | Shown figure equals enforced figure | Sell exactly the available headroom, then one unit more | The exact-headroom sale completes; one more is 400 "Credit limit exceeded" | P | Automated |
 | CUST-025 | Credit refusal visible before the sale | GET credit for a customer with creditAllowed false | `creditAllowed: false` — the till says so up front | P | Automated |
+| CUST-027 | Available credit explains itself on hover | Hover (or focus) the info icon beside Available credit | Tooltip reads "<used> of <limit> used · <left> left"; for a customer with no limit it reads "<used> used · no limit set" | P | Not Run |
 | CUST-026 | Credit column shows a figure or nothing | Customers list with three rows: credit + limit, credit + no limit, credit not allowed | Only the first shows an amount; the other two are blank — the words "No limit" appear nowhere in the table | P | Not Run |
 | CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
 
@@ -547,7 +548,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 26 |
+| AUTH | 15 | CUST | 27 |
 | PERM | 15 | CIMP | 10 |
 | DASH | 24 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
@@ -558,7 +559,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 406 test cases** (≈60% positive / 40% negative).
+**Total: 407 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

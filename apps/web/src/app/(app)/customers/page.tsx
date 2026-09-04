@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import * as React from 'react';
-import { FileUp, Search, UserPlus, X } from 'lucide-react';
+import { FileUp, Info, Search, UserPlus, X } from 'lucide-react';
 
 import { ImportCustomersDialog } from '@/components/customers/import-customers-dialog';
 import { PageHeader } from '@/components/page-header';
@@ -11,6 +11,7 @@ import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Tooltip } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth';
@@ -25,6 +26,21 @@ import { Permission } from '@/lib/permissions';
 import { formatMoney } from '@/lib/utils';
 
 const PAGE_SIZES = [20, 30, 40, 50];
+
+/**
+ * How much of the limit this customer has already used, and what that leaves.
+ *
+ * Spelled out rather than shown as three columns: the breakdown is what you want
+ * at the moment you are deciding on one customer, not while scanning the table.
+ */
+function creditBreakdown(c: ManagedCustomer): string {
+  const used = c.outstandingCredit ?? 0;
+  const limit = c.creditLimit;
+  if (limit == null) return `${formatMoney(used)} used · no limit set`;
+  return `${formatMoney(used)} of ${formatMoney(limit)} used · ${formatMoney(
+    Math.max(0, limit - used),
+  )} left`;
+}
 const TYPE_OPTIONS = Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[];
 
 export default function CustomersPage() {
@@ -221,10 +237,27 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-4 py-3">
                       {c.availableCredit != null ? (
-                        <span
-                          className={c.availableCredit < 0 ? 'text-danger' : 'text-muted-foreground'}
-                        >
-                          {formatMoney(c.availableCredit)}
+                        <span className="inline-flex items-center gap-1.5">
+                          <span
+                            className={
+                              c.availableCredit < 0 ? 'text-danger' : 'text-muted-foreground'
+                            }
+                          >
+                            {formatMoney(c.availableCredit)}
+                          </span>
+                          {/* The figure alone does not say what it was counted down
+                              from, and that is the question anyone about to approve
+                              a sale actually has. */}
+                          <Tooltip label={creditBreakdown(c)}>
+                            <span
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`Credit breakdown: ${creditBreakdown(c)}`}
+                              className="cursor-help rounded text-muted-foreground/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              <Info className="h-3.5 w-3.5" />
+                            </span>
+                          </Tooltip>
                         </span>
                       ) : (
                         // No limit set means there is nothing to count down from —
