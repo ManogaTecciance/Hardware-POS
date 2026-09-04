@@ -207,6 +207,12 @@ export function PaymentDialog({
           {totals.totalDiscount > 0 ? (
             <Line label="Product discount" value={`-${formatMoney(totals.totalDiscount, currency)}`} />
           ) : null}
+          {totals.promotionOrderDiscountAmount > 0 ? (
+            <Line
+              label={totals.promotionOrderName ?? 'Promotion'}
+              value={`-${formatMoney(totals.promotionOrderDiscountAmount, currency)}`}
+            />
+          ) : null}
           {totals.orderDiscountAmount > 0 ? (
             <Line label="Order discount" value={`-${formatMoney(totals.orderDiscountAmount, currency)}`} />
           ) : null}

@@ -60,6 +60,8 @@ export interface PromotionView {
   fixedPrice: string | null;
   percentageOff: string | null;
   amountOff: string | null;
+  /** D105 — the cart threshold; null when there is none. */
+  minimumSpend: string | null;
   buyQuantity: number | null;
   getQuantity: number | null;
   startsOn: string | null;
@@ -152,6 +154,8 @@ export class PromotionsService {
             percentageOff:
               dto.percentageOff != null ? new Prisma.Decimal(dto.percentageOff) : null,
             amountOff: dto.amountOff != null ? new Prisma.Decimal(dto.amountOff) : null,
+            minimumSpend:
+              dto.minimumSpend != null ? new Prisma.Decimal(dto.minimumSpend) : null,
             buyQuantity: dto.buyQuantity ?? null,
             getQuantity: dto.getQuantity ?? null,
             startsOn: dto.startsOn ? new Date(dto.startsOn) : null,
@@ -235,6 +239,8 @@ export class PromotionsService {
                 ? new Prisma.Decimal(dto.percentageOff)
                 : dto.percentageOff,
             amountOff: dto.amountOff != null ? new Prisma.Decimal(dto.amountOff) : dto.amountOff,
+            minimumSpend:
+              dto.minimumSpend != null ? new Prisma.Decimal(dto.minimumSpend) : dto.minimumSpend,
             buyQuantity: dto.buyQuantity,
             getQuantity: dto.getQuantity,
             startsOn: dto.startsOn === undefined ? undefined : dto.startsOn ? new Date(dto.startsOn) : null,
@@ -324,6 +330,7 @@ export class PromotionsService {
       fixedPrice?: number | null;
       percentageOff?: number | null;
       amountOff?: number | null;
+      minimumSpend?: number | null;
       buyQuantity?: number | null;
       getQuantity?: number | null;
     },
@@ -331,6 +338,17 @@ export class PromotionsService {
   ): void {
     if (!PROMOTION_TYPES.includes(type as PromotionTypeValue)) {
       throw new BadRequestException(`Unknown promotion type: ${type}`);
+    }
+
+    /*
+     * D105 — a threshold only means something for money-off. Silently ignoring
+     * it on a bundle would let an operator save "bundle, minimum spend 10,000"
+     * and watch it fire below the threshold with no explanation.
+     */
+    if (data.minimumSpend != null && data.minimumSpend > 0 && type !== 'FIXED_AMOUNT_DISCOUNT') {
+      throw new BadRequestException(
+        `minimumSpend applies only to FIXED_AMOUNT_DISCOUNT, not ${type}.`,
+      );
     }
 
     const roles = items.map((i) => i.role);
@@ -394,9 +412,19 @@ export class PromotionsService {
             'FIXED_AMOUNT_DISCOUNT requires a positive amountOff.',
           );
         }
-        if (buys < 1) {
+        /*
+         * D105 — two legal shapes, told apart by whether products are named:
+         *
+         *   items empty      -> CART-LEVEL: money off the whole order.
+         *   one or more BUY  -> product-scoped, exactly as before.
+         *
+         * The old rule was `buys < 1 -> reject`, which made the cart-level shape
+         * unconfigurable. Anything else is still refused, so a GET or BUNDLE
+         * role cannot be smuggled onto this type by a hand-written body.
+         */
+        if (items.length > 0 && buys !== items.length) {
           throw new BadRequestException(
-            'FIXED_AMOUNT_DISCOUNT requires at least one BUY item.',
+            'FIXED_AMOUNT_DISCOUNT items must all be BUY items, or the list must be empty for a cart-level discount.',
           );
         }
         break;
@@ -538,6 +566,7 @@ function toView(row: PromotionWithItems): PromotionView {
     fixedPrice: row.fixedPrice ? row.fixedPrice.toFixed(2) : null,
     percentageOff: row.percentageOff ? row.percentageOff.toFixed(2) : null,
     amountOff: row.amountOff ? row.amountOff.toFixed(2) : null,
+    minimumSpend: row.minimumSpend ? row.minimumSpend.toFixed(2) : null,
     buyQuantity: row.buyQuantity,
     getQuantity: row.getQuantity,
     startsOn: row.startsOn ? row.startsOn.toISOString() : null,
@@ -576,6 +605,7 @@ function mergeForValidation(
     fixedPrice: number | null;
     percentageOff: number | null;
     amountOff: number | null;
+    minimumSpend: number | null;
     buyQuantity: number | null;
     getQuantity: number | null;
   };
@@ -588,6 +618,7 @@ function mergeForValidation(
       fixedPrice: dto.fixedPrice ?? num(existing.fixedPrice),
       percentageOff: dto.percentageOff ?? num(existing.percentageOff),
       amountOff: dto.amountOff ?? num(existing.amountOff),
+      minimumSpend: dto.minimumSpend ?? num(existing.minimumSpend),
       buyQuantity: dto.buyQuantity ?? existing.buyQuantity,
       getQuantity: dto.getQuantity ?? existing.getQuantity,
     },

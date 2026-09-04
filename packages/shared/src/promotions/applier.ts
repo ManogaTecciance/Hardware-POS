@@ -91,7 +91,42 @@ export interface PromotionRule {
    * impossible. It means basket-level exclusivity: see `applyPromotions`.
    */
   stackable: boolean;
+  /**
+   * D105 — FIXED_AMOUNT_DISCOUNT only. The eligible cart amount the basket must
+   * reach before this applies. Null means no threshold.
+   *
+   * REQUIRED, not optional, and that is the whole point. It shipped optional for
+   * one build and a wire mapper promptly dropped it — `catalog.ts` built a rule
+   * without it, the compiler accepted the object because a missing optional
+   * field is a valid value, and the till read `undefined` as "no threshold" and
+   * took Rs 1,000 off a Rs 500 basket.
+   *
+   * That is the same failure as 4.15's dropped `productName`, and the lesson
+   * from it is applied here structurally rather than by another test: where a
+   * field must cross a wire, making it required turns "someone forgot" into a
+   * compile error. Callers with nothing to say pass `null` explicitly.
+   */
+  minimumSpend: number | null;
+  /**
+   * D105 — EMPTY on a FIXED_AMOUNT_DISCOUNT means the promotion is CART-LEVEL:
+   * it names no products and discounts the order rather than any line. Every
+   * other type, and a FIXED_AMOUNT_DISCOUNT that does name products, stays
+   * line-level and unchanged.
+   */
   items: readonly PromotionRuleItem[];
+}
+
+/**
+ * True when this rule discounts the ORDER rather than any particular line.
+ *
+ * Deliberately a property of the configuration, not a new promotion type: an
+ * operator writing "Rs 1,000 off the cart over Rs 10,000" is not choosing a
+ * different kind of promotion, they are declining to name products. Adding a
+ * fifth `PromotionKind` would have forced every switch, DTO and editor branch
+ * in the system to grow a case for something the existing type already covers.
+ */
+export function isCartLevel(rule: PromotionRule): boolean {
+  return rule.type === 'FIXED_AMOUNT_DISCOUNT' && rule.items.length === 0;
 }
 
 export interface PromotionContext {
@@ -109,8 +144,30 @@ export interface PromotionLineResult {
 
 export interface PromotionResult {
   lines: readonly PromotionLineResult[];
-  /** Σ of the line discounts. A convenience mirror, never a second source. */
+  /**
+   * Σ of the LINE discounts. A convenience mirror, never a second source.
+   *
+   * D105: this deliberately does NOT include `orderPromotion`. The invariant
+   * `discountedSubtotal === Σ lineTotal` is asserted on both the till and the
+   * server, and folding an order-level figure into it would break that on both
+   * sides at once. A cart-level discount is added where the manual order
+   * discount is added, and nowhere else.
+   */
   totalDiscount: number;
+  /**
+   * D105 — the single cart-level promotion that applied, or null.
+   *
+   * At most one: `Sale` carries one set of order-promotion columns, so the
+   * applier picks the best eligible candidate rather than summing several.
+   */
+  orderPromotion: OrderPromotionResult | null;
+}
+
+/** D105 — a promotion that reduced the ORDER, not a line. */
+export interface OrderPromotionResult {
+  promotionId: string;
+  promotionName: string;
+  discountAmount: number;
 }
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -522,6 +579,9 @@ export function applyPromotions(context: PromotionContext): PromotionResult {
   const eligibleLines = context.lines.filter((l) => l.manualDiscountAmount <= 0);
 
   const candidates = context.promotions
+    // D105 — cart-level rules discount the order, not a line. They are resolved
+    // in a second pass below, against what the line pass leaves behind.
+    .filter((rule) => !isCartLevel(rule))
     .map((rule) => {
       const claims = claimsFor(eligibleLines, rule);
       return {
@@ -586,10 +646,86 @@ export function applyPromotions(context: PromotionContext): PromotionResult {
     }
   }
 
+  const totalDiscount = round2(results.reduce((acc, r) => acc + r.discountAmount, 0));
+
   return {
     lines: results,
-    totalDiscount: round2(results.reduce((acc, r) => acc + r.discountAmount, 0)),
+    totalDiscount,
+    orderPromotion: resolveOrderPromotion(context, eligibleLines, results, {
+      anyApplied,
+      basketLocked,
+    }),
   };
+}
+
+/**
+ * D105 — the one cart-level promotion that applies, if any.
+ *
+ * Runs AFTER the line pass, which is what makes the threshold well-defined: it
+ * is measured against the money this discount would actually reduce, so the line
+ * promotions have to be settled first. It also means a cart-level promotion is
+ * never discarded because a line was claimed — it does not compete for lines at
+ * all, which was the whole reason the order level was chosen over `SaleItem`.
+ *
+ * Basket exclusivity (4.4) still governs it. A non-stackable promotion that took
+ * the basket blocks this pass too, and a non-stackable cart-level rule will not
+ * join something already applied. `stackable` keeps one meaning across both
+ * passes rather than acquiring a second one here.
+ */
+function resolveOrderPromotion(
+  context: PromotionContext,
+  eligibleLines: readonly PromotionCartLine[],
+  lineResults: readonly PromotionLineResult[],
+  state: { anyApplied: boolean; basketLocked: boolean },
+): OrderPromotionResult | null {
+  const cartRules = context.promotions.filter(isCartLevel);
+  if (cartRules.length === 0) return null;
+  if (state.basketLocked) return null;
+
+  /*
+   * The eligible net amount: what the line promotions left, over lines a
+   * promotion is allowed to touch at all. `eligibleLines` already excludes
+   * manually discounted lines (D102), so a threshold can never be cleared by
+   * money no promotion may reduce.
+   */
+  const claimedByLine = new Map<string, number>();
+  for (const r of lineResults) {
+    claimedByLine.set(r.lineId, round2((claimedByLine.get(r.lineId) ?? 0) + r.discountAmount));
+  }
+  const eligibleNet = round2(
+    eligibleLines.reduce(
+      (acc, l) => acc + l.lineSubtotal - (claimedByLine.get(l.id) ?? 0),
+      0,
+    ),
+  );
+  if (eligibleNet <= 0) return null;
+
+  const applicable = cartRules
+    .filter((rule) => {
+      const amount = rule.amountOff ?? 0;
+      if (amount <= 0) return false;
+      // `>=`, not `>`: a threshold of 10,000 is met BY 10,000. Stated because
+      // the boundary is exactly what an operator will test first.
+      const threshold = rule.minimumSpend ?? 0;
+      return eligibleNet >= threshold;
+    })
+    // Same deterministic order as the line pass: biggest first, id as the
+    // tie-break, so two tills reach the same bill.
+    .sort((a, b) => {
+      const av = Math.min(a.amountOff ?? 0, eligibleNet);
+      const bv = Math.min(b.amountOff ?? 0, eligibleNet);
+      return bv === av ? a.id.localeCompare(b.id) : bv - av;
+    });
+
+  for (const rule of applicable) {
+    if (state.anyApplied && !rule.stackable) continue;
+    // Capped at the eligible amount: a discount may not exceed the goods, and
+    // an order total must never go negative.
+    const discountAmount = round2(Math.min(rule.amountOff ?? 0, eligibleNet));
+    if (discountAmount <= 0) continue;
+    return { promotionId: rule.id, promotionName: rule.name, discountAmount };
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

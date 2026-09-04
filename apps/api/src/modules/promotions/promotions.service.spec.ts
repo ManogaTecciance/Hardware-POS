@@ -22,6 +22,8 @@ interface Row {
   fixedPrice: number | null;
   percentageOff: number | null;
   amountOff: number | null;
+  /** D105 — optional so existing fixtures stay untouched. */
+  minimumSpend?: number | null;
   buyQuantity: number | null;
   getQuantity: number | null;
   /** D56 — persisted by the double so a round-trip can be asserted. */
@@ -61,6 +63,7 @@ function fakePrisma(seed: { products: string[]; branches?: string[] } = { produc
           fixedPrice: data.fixedPrice != null ? Number(data.fixedPrice) : null,
           percentageOff: data.percentageOff != null ? Number(data.percentageOff) : null,
           amountOff: data.amountOff != null ? Number(data.amountOff) : null,
+          minimumSpend: data.minimumSpend != null ? Number(data.minimumSpend) : null,
           buyQuantity: data.buyQuantity ?? null,
           getQuantity: data.getQuantity ?? null,
           // D56 — the real column is persisted, so the double must persist it
@@ -138,6 +141,9 @@ function toRepoShape(row: Row): PromotionWithItems {
     fixedPrice: decimalish(row.fixedPrice),
     percentageOff: decimalish(row.percentageOff),
     amountOff: decimalish(row.amountOff),
+    // D105 — the double carries the column so a cart-level promotion is
+    // representable here, not just in the applier's own fixtures.
+    minimumSpend: decimalish(row.minimumSpend ?? null),
     buyQuantity: row.buyQuantity,
     getQuantity: row.getQuantity,
     startsOn: null,

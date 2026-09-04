@@ -96,6 +96,7 @@ interface EditorState {
   fixedPrice: string;
   percentageOff: string;
   amountOff: string;
+  minimumSpend: string;
   buyQuantity: string;
   getQuantity: string;
   startsOn: string;
@@ -117,6 +118,7 @@ function emptyState(type: PromotionType = 'BUNDLE_FIXED_PRICE'): EditorState {
     fixedPrice: '',
     percentageOff: '',
     amountOff: '',
+    minimumSpend: '',
     buyQuantity: '1',
     getQuantity: '1',
     startsOn: '',
@@ -139,6 +141,7 @@ function fromPromotion(p: Promotion): EditorState {
     fixedPrice: p.fixedPrice != null ? String(p.fixedPrice) : '',
     percentageOff: p.percentageOff != null ? String(p.percentageOff) : '',
     amountOff: p.amountOff != null ? String(p.amountOff) : '',
+    minimumSpend: p.minimumSpend != null ? String(p.minimumSpend) : '',
     buyQuantity: p.buyQuantity != null ? String(p.buyQuantity) : '1',
     getQuantity: p.getQuantity != null ? String(p.getQuantity) : '1',
     startsOn: p.startsOn?.slice(0, 10) ?? '',
@@ -330,7 +333,15 @@ export function PromotionEditor({
 
   const validate = (): string | null => {
     if (!state.name.trim()) return 'Give the promotion a name.';
-    if (state.items.length === 0) return 'Add at least one product.';
+    /*
+     * D105 — an EMPTY product list is how a FIXED_AMOUNT_DISCOUNT declares
+     * itself cart-level, so the blanket "add at least one product" no longer
+     * holds for that type. Every other type still needs its products, and the
+     * server re-checks all of it per type either way.
+     */
+    if (state.items.length === 0 && state.type !== 'FIXED_AMOUNT_DISCOUNT') {
+      return 'Add at least one product.';
+    }
     if (state.type === 'BUNDLE_FIXED_PRICE' && !state.fixedPrice) {
       return 'Bundle promotions need a fixed price.';
     }
@@ -370,6 +381,12 @@ export function PromotionEditor({
           : null,
       amountOff:
         state.type === 'FIXED_AMOUNT_DISCOUNT' && state.amountOff ? Number(state.amountOff) : null,
+      // D105 — only meaningful for money-off; the server rejects it elsewhere,
+      // so send null rather than leaving a stale value from a type switch.
+      minimumSpend:
+        state.type === 'FIXED_AMOUNT_DISCOUNT' && state.minimumSpend
+          ? Number(state.minimumSpend)
+          : null,
       buyQuantity: state.type === 'BUY_X_GET_Y' ? Number(state.buyQuantity) || 1 : null,
       getQuantity: state.type === 'BUY_X_GET_Y' ? Number(state.getQuantity) || 1 : null,
       startsOn: state.startsOn || null,
@@ -604,6 +621,25 @@ export function PromotionEditor({
               value={state.amountOff}
               onChange={(v) => patch({ amountOff: v })}
             />
+            <label className="block pt-2 text-sm font-medium" htmlFor="promo-min-spend">
+              Minimum spend
+            </label>
+            <MoneyInput
+              id="promo-min-spend"
+              value={state.minimumSpend}
+              onChange={(v) => patch({ minimumSpend: v })}
+            />
+            <p className="text-xs text-muted-foreground">
+              {/*
+                * D105 — the two shapes of this promotion type, said where the
+                * operator decides between them. Leaving Products empty is the
+                * ONLY way to get a whole-cart discount, and nothing else on the
+                * screen would tell them that.
+                */}
+              Leave <span className="font-medium">Products</span> empty for a whole-cart
+              discount. Add products to take the amount off those products only. Blank
+              minimum spend means no threshold.
+            </p>
           </div>
         ) : null}
 
@@ -623,7 +659,9 @@ export function PromotionEditor({
           </div>
           {state.items.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-muted-foreground">
-              No products added yet.
+              {state.type === 'FIXED_AMOUNT_DISCOUNT'
+                ? 'No products — this discount applies to the whole cart.'
+                : 'No products added yet.'}
             </p>
           ) : (
             <ul className="space-y-2">

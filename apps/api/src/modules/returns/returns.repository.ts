@@ -243,6 +243,7 @@ export class ReturnsRepository {
           subtotal: input.subtotal,
           productDiscountAdjustment: input.productDiscountAdjustment,
           orderDiscountAdjustment: input.orderDiscountAdjustment,
+          promotionOrderDiscountAdjustment: input.promotionOrderDiscountAdjustment,
           taxAdjustment: input.taxAdjustment,
           refundTotal: input.refundTotal,
           refundMethod: input.refundMethod,
@@ -288,6 +289,8 @@ export class ReturnsRepository {
               // the other two adjustments so a credit note is self-contained.
               promotionDiscountAdjustment: it.promotionDiscountAdjustment,
               orderDiscountAdjustment: it.orderDiscountAdjustment,
+              // D105 — this line's share of the cart-level promotion.
+              promotionOrderDiscountAdjustment: it.promotionOrderDiscountAdjustment,
               taxAdjustment: it.taxAdjustment,
               refundableAmount: it.refundableAmount,
             })),

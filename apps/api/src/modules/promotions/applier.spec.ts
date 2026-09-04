@@ -58,6 +58,7 @@ const rule = (over: Partial<PromotionRule> & { id: string; type: PromotionRule['
   fixedPrice: null,
   percentageOff: null,
   amountOff: null,
+  minimumSpend: null,
   buyQuantity: null,
   getQuantity: null,
   // Mirrors `Promotion.stackable`'s own default, so a fixture never describes a
@@ -580,7 +581,14 @@ describe('the basket rules D102 fixed', () => {
   });
 
   it('an empty basket and an empty promotion list both produce nothing', () => {
-    expect(applyPromotions({ lines: [], promotions: [] })).toEqual({ lines: [], totalDiscount: 0 });
+    // Exact object, deliberately: this is the assertion that notices a new
+    // field appearing on the result, which is how D105's `orderPromotion` was
+    // caught the moment it shipped rather than by a later surprise.
+    expect(applyPromotions({ lines: [], promotions: [] })).toEqual({
+      lines: [],
+      totalDiscount: 0,
+      orderPromotion: null,
+    });
     expect(
       applyPromotions({ lines: [item('l1', 'p', 100)], promotions: [] }).totalDiscount,
     ).toBe(0);

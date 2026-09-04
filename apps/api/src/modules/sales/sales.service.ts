@@ -73,6 +73,9 @@ function toPromotionRule(p: PromotionWithItems): PromotionRule {
     fixedPrice: p.fixedPrice === null ? null : Number(p.fixedPrice),
     percentageOff: p.percentageOff === null ? null : Number(p.percentageOff),
     amountOff: p.amountOff === null ? null : Number(p.amountOff),
+    // D105 — the cart threshold. Null on every rule written before D105, which
+    // the applier reads as "no threshold".
+    minimumSpend: p.minimumSpend === null ? null : Number(p.minimumSpend),
     buyQuantity: p.buyQuantity,
     getQuantity: p.getQuantity,
     stackable: p.stackable,
@@ -666,8 +669,27 @@ export class SalesService {
         : 0;
     // The TOTAL still starts from the full discounted subtotal: an exempt line is
     // untaxed, not unsold.
+    /*
+     * D105 — a cart-level promotion, capped so it can never exceed what is left
+     * to pay after the manual order discount.
+     *
+     * DELIBERATELY NOT in `taxableBase` above, which is where the MANUAL order
+     * discount is. Confirmed with the PO: tax is computed as it always was and
+     * this discount comes off afterwards. The asymmetry is intentional and is
+     * the reason it is applied here, three lines below the tax, rather than
+     * folded into `orderDiscount` where it would silently change tax on every
+     * sale that carries one.
+     */
+    const promotionOrderDiscountAmount = promotionResult.orderPromotion
+      ? Math.min(
+          promotionResult.orderPromotion.discountAmount,
+          new Prisma.Decimal(discountedSubtotal).minus(orderDiscount.amount).toNumber(),
+        )
+      : 0;
+
     const total = new Prisma.Decimal(discountedSubtotal)
       .minus(orderDiscount.amount)
+      .minus(promotionOrderDiscountAmount)
       .plus(taxAmount)
       .toNumber();
 
@@ -680,6 +702,13 @@ export class SalesService {
       orderDiscountAmount: orderDiscount.amount,
       orderDiscountReason: orderDiscount.reason,
       orderDiscountApprovedById: orderDiscount.approvedById,
+      promotionOrderDiscountAmount,
+      promotionOrderId: promotionOrderDiscountAmount > 0
+        ? (promotionResult.orderPromotion?.promotionId ?? null)
+        : null,
+      promotionOrderNameSnapshot: promotionOrderDiscountAmount > 0
+        ? (promotionResult.orderPromotion?.promotionName ?? null)
+        : null,
       taxAmount,
       total,
     };

@@ -154,6 +154,8 @@ export interface SellablePromotionRule {
   fixedPrice: string | null;
   percentageOff: string | null;
   amountOff: string | null;
+  /** D105 — the cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT. */
+  minimumSpend: string | null;
   buyQuantity: number | null;
   getQuantity: number | null;
   /** Promotion-to-promotion stacking. Read by 4.4, not by the applier itself. */
@@ -379,6 +381,11 @@ export class SellableService {
           fixedPrice: promo.fixedPrice?.toString() ?? null,
           percentageOff: promo.percentageOff?.toString() ?? null,
           amountOff: promo.amountOff?.toString() ?? null,
+          // D105 — a cart-level promotion carries no PromotionItem rows, and
+          // reaches the till anyway because these rules are built from the
+          // tenant's active promotions rather than from the promotions hanging
+          // off each product.
+          minimumSpend: promo.minimumSpend?.toString() ?? null,
           buyQuantity: promo.buyQuantity,
           getQuantity: promo.getQuantity,
           stackable: promo.stackable,

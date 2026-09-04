@@ -186,6 +186,7 @@ export class ReturnsService {
       productDiscountAdjustment: computed.totals.productDiscountAdjustment,
       promotionDiscountAdjustment: computed.totals.promotionDiscountAdjustment,
       orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
+      promotionOrderDiscountAdjustment: computed.totals.promotionOrderDiscountAdjustment,
       taxAdjustment: computed.totals.taxAdjustment,
       refundTotal: computed.totals.refundTotal,
       isFullReturn: computed.isFullReturn,
@@ -350,6 +351,8 @@ export class ReturnsService {
           productDiscountAdjustment: computed.totals.productDiscountAdjustment,
           promotionDiscountAdjustment: computed.totals.promotionDiscountAdjustment,
           orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
+          promotionOrderDiscountAdjustment:
+            computed.totals.promotionOrderDiscountAdjustment,
           taxAdjustment: computed.totals.taxAdjustment,
           refundTotal,
           refundMethod: dto.refundMethod,
@@ -514,6 +517,10 @@ export class ReturnsService {
       subtotal: Number(sale.subtotal),
       totalDiscount: Number(sale.totalDiscount),
       orderDiscountAmount: Number(sale.orderDiscountAmount),
+      // D105 — allocated back by the same weighting as the manual order
+      // discount. Deliberately NOT added into `taxWeightTotal` above: the sale
+      // did not reduce tax for it, so the refund must not either.
+      promotionOrderDiscountAmount: Number(sale.promotionOrderDiscountAmount ?? 0),
       taxAmount: Number(sale.taxAmount),
       taxWeightTotal,
     };
@@ -597,6 +604,7 @@ export class ReturnsService {
         productDiscountAdjustment: line.productDiscountAdjustment,
         promotionDiscountAdjustment: line.promotionDiscountAdjustment,
         orderDiscountAdjustment: line.orderDiscountAdjustment,
+        promotionOrderDiscountAdjustment: line.promotionOrderDiscountAdjustment,
         taxAdjustment: line.taxAdjustment,
         refundableAmount: line.refundableAmount,
         returnReason: input.returnReason,
@@ -635,6 +643,7 @@ export class ReturnsService {
         productDiscountAdjustment: line.productDiscountAdjustment,
         promotionDiscountAdjustment: line.promotionDiscountAdjustment,
         orderDiscountAdjustment: line.orderDiscountAdjustment,
+        promotionOrderDiscountAdjustment: line.promotionOrderDiscountAdjustment,
         taxAdjustment: line.taxAdjustment,
         refundableAmount: line.refundableAmount,
       });

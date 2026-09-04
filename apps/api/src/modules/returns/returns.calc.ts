@@ -26,6 +26,13 @@ export interface OriginalSaleSnapshot {
   totalDiscount: number;
   /** Order-level discount amount applied to the post-line-discount subtotal. */
   orderDiscountAmount: number;
+  /**
+   * D105 — the sale's cart-level promotion. Allocated exactly as
+   * `orderDiscountAmount` is, and separately, so a refund can still report which
+   * part of the order discount was the cashier's and which the promotion's.
+   * Optional so a snapshot taken before D105 reads as 0.
+   */
+  promotionOrderDiscountAmount?: number;
   /** Document-level tax amount on the sale. */
   taxAmount: number;
   /**
@@ -78,6 +85,8 @@ export interface ComputedReturnLine {
   promotionDiscountAdjustment: number;
   /** Proportional share of the sale's order discount reversed. */
   orderDiscountAdjustment: number;
+  /** D105 — proportional share of the sale's CART-LEVEL promotion reversed. */
+  promotionOrderDiscountAdjustment: number;
   /** Proportional share of the sale's tax reversed. */
   taxAdjustment: number;
   /** The amount actually refundable for this returned quantity. */
@@ -89,6 +98,7 @@ export interface ComputedReturnTotals {
   productDiscountAdjustment: number;
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;
 }
@@ -145,6 +155,21 @@ export function computeReturnLine(
     discountedSubtotal > 0 ? (sale.orderDiscountAmount * line.lineTotal) / discountedSubtotal : 0;
   const orderDiscountAdjustment =
     sale.orderDiscountAmount > 0 ? round2(orderDiscountShareFull * frac) : 0;
+
+  /*
+   * 3b. D105 — the cart-level promotion, allocated by the SAME weighting.
+   *
+   * It is a separate figure rather than folded into `orderDiscountAmount`
+   * because the two behave differently for tax: the manual order discount is
+   * inside `saleTaxable` below, and this one deliberately is not (the sale did
+   * not reduce tax for it, so the refund must not either). Sharing one variable
+   * would make that distinction impossible to keep.
+   */
+  const promotionOrderAmount = sale.promotionOrderDiscountAmount ?? 0;
+  const promotionOrderShareFull =
+    discountedSubtotal > 0 ? (promotionOrderAmount * line.lineTotal) / discountedSubtotal : 0;
+  const promotionOrderDiscountAdjustment =
+    promotionOrderAmount > 0 ? round2(promotionOrderShareFull * frac) : 0;
 
   /*
    * 4. Tax, allocated from the sale's RECORDED total rather than recomputed.
@@ -224,7 +249,12 @@ export function computeReturnLine(
   }
 
   // 5. Final refundable line amount.
-  const refundableAmount = round2(lineNet - orderDiscountAdjustment + taxAdjustment);
+  // D105 — the cart-level promotion comes off the refund too. The customer was
+  // never charged for it, so refunding it would hand back money that was never
+  // taken — the same reasoning that puts `orderDiscountAdjustment` here.
+  const refundableAmount = round2(
+    lineNet - orderDiscountAdjustment - promotionOrderDiscountAdjustment + taxAdjustment,
+  );
 
   return {
     originalUnitPrice: line.unitPrice,
@@ -233,6 +263,7 @@ export function computeReturnLine(
     productDiscountAdjustment,
     promotionDiscountAdjustment,
     orderDiscountAdjustment,
+    promotionOrderDiscountAdjustment,
     taxAdjustment,
     refundableAmount,
   };
@@ -245,6 +276,9 @@ export function sumReturnTotals(lines: ComputedReturnLine[]): ComputedReturnTota
     productDiscountAdjustment: sum2(lines.map((l) => l.productDiscountAdjustment)),
     promotionDiscountAdjustment: sum2(lines.map((l) => l.promotionDiscountAdjustment)),
     orderDiscountAdjustment: sum2(lines.map((l) => l.orderDiscountAdjustment)),
+    promotionOrderDiscountAdjustment: sum2(
+      lines.map((l) => l.promotionOrderDiscountAdjustment),
+    ),
     taxAdjustment: sum2(lines.map((l) => l.taxAdjustment)),
     refundTotal: sum2(lines.map((l) => l.refundableAmount)),
   };

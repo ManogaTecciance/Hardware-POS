@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -48,6 +47,12 @@ export class UpdatePromotionDto {
   @Min(0.01)
   @IsOptional()
   amountOff?: number;
+
+  /** D105 — the cart threshold. See `CreatePromotionDto.minimumSpend`. */
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @IsOptional()
+  minimumSpend?: number;
 
   @IsNumber()
   @Min(1)
@@ -102,11 +107,15 @@ export class UpdatePromotionDto {
 
   /**
    * Replace the entire item set. Sent only when the caller actually wants to
-   * reshape the promotion's items — undefined leaves them alone. Empty array
-   * is rejected because every PromotionType requires at least one item.
+   * reshape the promotion's items — undefined leaves them alone.
+   *
+   * D105 — an empty array is now ACCEPTED here, because clearing the products is
+   * how a product-scoped FIXED_AMOUNT_DISCOUNT becomes cart-level. It is not a
+   * hole: `update` re-runs `validateTypeShape` over the MERGED state, so
+   * emptying a bundle's items still fails, and fails with a message naming the
+   * items it needs rather than a generic "should not be empty".
    */
   @IsArray()
-  @ArrayNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => PromotionItemInputDto)
   @IsOptional()

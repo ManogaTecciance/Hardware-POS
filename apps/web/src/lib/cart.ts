@@ -1,6 +1,11 @@
 import type { ClientProduct, ClientVariant } from './catalog';
 import { round2 } from './utils';
-import { applyPromotions, taxableBase, type PromotionRule } from '@hardware-pos/shared';
+import {
+  applyPromotions,
+  taxableBase,
+  type OrderPromotionResult,
+  type PromotionRule,
+} from '@hardware-pos/shared';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
 
@@ -149,6 +154,22 @@ export function computeCartLines(
   items: CartItem[],
   promotionRules: readonly PromotionRule[] = [],
 ): CartLineTotals[] {
+  return priceCart(items, promotionRules).lines;
+}
+
+/**
+ * D105 — lines AND the cart-level promotion from ONE `applyPromotions` call.
+ *
+ * `computeTotals` needs both, and the threshold a cart-level promotion is
+ * measured against depends on what the line promotions took. Calling the applier
+ * twice would evaluate that threshold against a basket priced by a different
+ * invocation — the two would agree today and drift the first time anything about
+ * ordering changed. One call, both answers.
+ */
+function priceCart(
+  items: CartItem[],
+  promotionRules: readonly PromotionRule[],
+): { lines: CartLineTotals[]; orderPromotion: OrderPromotionResult | null } {
   const base = items.map((item) => ({ item, line: computeLine(item) }));
 
   const promo = applyPromotions({
@@ -167,7 +188,7 @@ export function computeCartLines(
 
   const claimed = new Map(promo.lines.map((l) => [l.lineId, l]));
 
-  return base.map(({ item, line }) => {
+  const lines = base.map(({ item, line }) => {
     const won = claimed.get(item.lineKey);
     const promotionDiscountAmount = won?.discountAmount ?? 0;
     return {
@@ -182,6 +203,8 @@ export function computeCartLines(
       lineTotal: round2(line.lineTotal - promotionDiscountAmount),
     };
   });
+
+  return { lines, orderPromotion: promo.orderPromotion };
 }
 
 /** Whole-cart discount, applied after per-line (product) discounts. */
@@ -197,6 +220,14 @@ export interface CartTotals {
   /** Sum of per-line (product) discounts. */
   totalDiscount: number;
   orderDiscountAmount: number;
+  /**
+   * D105 — a CART-LEVEL promotion (money off the whole order once it reaches a
+   * threshold), separate from `totalDiscount` because it never touches a line.
+   * 0 when none applies.
+   */
+  promotionOrderDiscountAmount: number;
+  /** The promotion behind that figure, so the till can name it. Null when none. */
+  promotionOrderName: string | null;
   taxAmount: number;
   total: number;
   hasStockIssue: boolean;
@@ -210,7 +241,7 @@ export function computeTotals(
 ): CartTotals {
   // D102 (4.4) — one derivation, shared with every renderer. Computing lines
   // here independently is how the footer and the list come to disagree.
-  const lines = computeCartLines(items, promotionRules);
+  const { lines, orderPromotion } = priceCart(items, promotionRules);
   let subtotal = 0;
   let totalDiscount = 0;
   let itemCount = 0;
@@ -260,13 +291,31 @@ export function computeTotals(
    * change returned `total: 0` for a 2,100 exempt sale. `sales.service` carries
    * the same distinction, in the same words.
    */
-  const netTotal = round2(discountedSubtotal - orderDiscountAmount);
+  /*
+   * D105 — the cart-level promotion, capped at what is left after the manual
+   * order discount so a total can never go negative.
+   *
+   * It is applied AFTER `taxBase` above and is deliberately absent from it: the
+   * PO confirmed tax is computed as it always was and this comes off afterwards.
+   * `sales.service` carries the same asymmetry in the same order, which is what
+   * keeps the till's preview equal to the server's charge.
+   */
+  const promotionOrderDiscountAmount = round2(
+    Math.min(orderPromotion?.discountAmount ?? 0, Math.max(0, discountedSubtotal - orderDiscountAmount)),
+  );
+
+  const netTotal = round2(
+    discountedSubtotal - orderDiscountAmount - promotionOrderDiscountAmount,
+  );
 
   return {
     itemCount,
     subtotal,
     totalDiscount,
     orderDiscountAmount,
+    promotionOrderDiscountAmount,
+    promotionOrderName:
+      promotionOrderDiscountAmount > 0 ? (orderPromotion?.promotionName ?? null) : null,
     taxAmount,
     total: round2(netTotal + taxAmount),
     hasStockIssue,

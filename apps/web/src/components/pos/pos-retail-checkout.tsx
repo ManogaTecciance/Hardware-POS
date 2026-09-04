@@ -693,6 +693,18 @@ export function PosRetailCheckout() {
             </>
           )}
         </button>
+        {/*
+          * D105 — a cart-level promotion. Named rather than folded into "Order
+          * discount": that row means the cashier's own decision and carries an
+          * approval badge, and putting an automatic promotion under it would
+          * make the badge's absence read as an unapproved manual discount.
+          */}
+        {totals.promotionOrderDiscountAmount > 0 ? (
+          <Row
+            label={totals.promotionOrderName ?? 'Promotion'}
+            value={`-${formatMoney(totals.promotionOrderDiscountAmount, currency)}`}
+          />
+        ) : null}
         <Row
           label={`VAT (${data.settings.taxRatePercent}%)`}
           value={formatMoney(totals.taxAmount, currency)}

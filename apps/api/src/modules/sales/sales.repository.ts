@@ -289,6 +289,9 @@ export class SalesRepository {
         orderDiscountAmount: input.computed.orderDiscountAmount,
         orderDiscountReason: input.computed.orderDiscountReason,
         orderDiscountApprovedById: input.computed.orderDiscountApprovedById,
+        promotionOrderDiscountAmount: input.computed.promotionOrderDiscountAmount,
+        promotionOrderId: input.computed.promotionOrderId,
+        promotionOrderNameSnapshot: input.computed.promotionOrderNameSnapshot,
         taxAmount: input.computed.taxAmount,
         total: input.computed.total,
         paidAmount: 0,
@@ -542,6 +545,12 @@ function orderDiscountData(computed: PersistSaleInput['computed']) {
     orderDiscountAmount: computed.orderDiscountAmount,
     orderDiscountReason: computed.orderDiscountReason,
     orderDiscountApprovedById: computed.orderDiscountApprovedById,
+    // D105 — travels with the order discount because it is one, just an
+    // automatic one. Kept in separate columns so a refund can say which was the
+    // cashier's decision and which the promotion's.
+    promotionOrderDiscountAmount: computed.promotionOrderDiscountAmount,
+    promotionOrderId: computed.promotionOrderId,
+    promotionOrderNameSnapshot: computed.promotionOrderNameSnapshot,
   };
 }
 

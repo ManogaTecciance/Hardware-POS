@@ -939,6 +939,25 @@ model Sale {
   orderDiscountAmount       Decimal                 @default(0) @db.Decimal(12, 2)
   orderDiscountReason       String?
   orderDiscountApprovedById String?
+  /// D105 — a CART-LEVEL promotion (FIXED_AMOUNT_DISCOUNT with no products),
+  /// stored beside the manual order discount rather than pushed onto a line.
+  ///
+  /// It cannot live on `SaleItem`: that row holds ONE `promotionId`, and a
+  /// cart-level promotion has to coexist with the line-level promotions that
+  /// already claimed those lines. The order-discount pattern beside it already
+  /// solves the same problem for a manual discount, including its return
+  /// allocation (`Return.orderDiscountAdjustment`), so this reuses that shape
+  /// rather than inventing one.
+  ///
+  /// AT MOST ONE per sale — there is one set of columns, so the applier picks
+  /// the single best eligible cart-level promotion. A second one would need a
+  /// child table and its own decision.
+  ///
+  /// Like D102's line columns, `promotionOrderId` carries no relation and the
+  /// name is snapshotted, so deleting a promotion never rewrites a sold document.
+  promotionOrderDiscountAmount Decimal              @default(0) @db.Decimal(12, 2)
+  promotionOrderId             String?
+  promotionOrderNameSnapshot   String?
   taxAmount                 Decimal                 @default(0) @db.Decimal(12, 2)
   /// Phase 8: restaurant service charge, computed at close from
   /// RestaurantBranchConfig.serviceChargePercent (D8). 0 for retail sales.
@@ -1379,6 +1398,10 @@ model Return {
   subtotal                  Decimal                       @default(0) @db.Decimal(12, 2)
   productDiscountAdjustment Decimal                       @default(0) @db.Decimal(12, 2)
   orderDiscountAdjustment   Decimal                       @default(0) @db.Decimal(12, 2)
+  /// D105 — the returned share of a cart-level promotion, allocated exactly as
+  /// `orderDiscountAdjustment` is. Separate from it so a refund can still say
+  /// which part was the cashier's decision and which the promotion's.
+  promotionOrderDiscountAdjustment Decimal                  @default(0) @db.Decimal(12, 2)
   taxAdjustment             Decimal                       @default(0) @db.Decimal(12, 2)
   refundTotal               Decimal                       @default(0) @db.Decimal(12, 2)
   refundMethod              PaymentMethod?
@@ -1447,6 +1470,10 @@ model ReturnItem {
   originalLineSubtotal       Decimal          @db.Decimal(12, 2)
   productDiscountAdjustment  Decimal          @default(0) @db.Decimal(12, 2)
   orderDiscountAdjustment    Decimal          @default(0) @db.Decimal(12, 2)
+  /// D105 — this line's share of a CART-LEVEL promotion, reversed. Stored per
+  /// item for the same reason D102 stores `promotionDiscountAdjustment` here:
+  /// a credit note has to be self-contained.
+  promotionOrderDiscountAdjustment Decimal     @default(0) @db.Decimal(12, 2)
   /// D102 (4.1) — the promotion reversed on this return line.
   ///
   /// A THIRD adjustment beside the two above, and deliberately of the LINE-level
@@ -3542,6 +3569,15 @@ model Promotion {
   percentageOff Decimal? @db.Decimal(5, 2)
   /// FIXED_AMOUNT_DISCOUNT — money-off.
   amountOff     Decimal? @db.Decimal(12, 2)
+  /// D105 — FIXED_AMOUNT_DISCOUNT only. The eligible cart amount the basket
+  /// must reach before the discount applies. NULL = no threshold, which is
+  /// every row that existed before D105, so the backfill is "do nothing".
+  ///
+  /// Measured against the amount the discount would reduce: line subtotals
+  /// less any line-level promotion, over lines that carry no MANUAL discount
+  /// (D102 makes a manually discounted line invisible to promotions, and a
+  /// threshold that counted it would be counting money no promotion may touch).
+  minimumSpend  Decimal? @db.Decimal(12, 2)
   /// BUY_X_GET_Y — how many of the BUY item(s) must be in the cart.
   buyQuantity   Int?
   /// BUY_X_GET_Y — how many rewards awarded per trigger.

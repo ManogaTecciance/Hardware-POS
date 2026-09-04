@@ -81,6 +81,8 @@ export interface Promotion {
   fixedPrice: number | null;
   percentageOff: number | null;
   amountOff: number | null;
+  /** D105 — cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT; null = none. */
+  minimumSpend: number | null;
   buyQuantity: number | null;
   getQuantity: number | null;
   startsOn: string | null;
@@ -121,6 +123,7 @@ interface ApiPromotion {
   fixedPrice: string | number | null;
   percentageOff: string | number | null;
   amountOff: string | number | null;
+  minimumSpend?: string | number | null;
   buyQuantity: string | number | null;
   getQuantity: string | number | null;
   startsOn: string | null;
@@ -165,6 +168,7 @@ function toPromotion(p: ApiPromotion): Promotion {
     fixedPrice: p.fixedPrice != null ? Number(p.fixedPrice) : null,
     percentageOff: p.percentageOff != null ? Number(p.percentageOff) : null,
     amountOff: p.amountOff != null ? Number(p.amountOff) : null,
+    minimumSpend: p.minimumSpend != null ? Number(p.minimumSpend) : null,
     buyQuantity: p.buyQuantity != null ? Number(p.buyQuantity) : null,
     getQuantity: p.getQuantity != null ? Number(p.getQuantity) : null,
     startsOn: p.startsOn,
@@ -197,6 +201,7 @@ export interface PromotionCreateInput {
   fixedPrice?: number | null;
   percentageOff?: number | null;
   amountOff?: number | null;
+  minimumSpend?: number | null;
   buyQuantity?: number | null;
   getQuantity?: number | null;
   startsOn?: string | null;

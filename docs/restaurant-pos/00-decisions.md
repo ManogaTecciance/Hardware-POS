@@ -4183,3 +4183,115 @@ Food service keeps its promotions screen — it gains `PROMOTIONS` in the same
 change, so the hotfix's fix is preserved rather than reverted. No route, screen or
 permission moves; only the module that names the gate.
 
+---
+
+## D105 — a cart-level promotion is an order discount, not a line discount
+
+**Status:** accepted, 2026-09-04. Supersedes nothing. Extends D102.
+
+### The requirement
+
+`FIXED_AMOUNT_DISCOUNT` could only ever mean *"Rs 1,000 off these products"*:
+`validateTypeShape` demanded at least one `BUY` item, and `applyFixedAmount`
+spread `amountOff` across those products' lines. The requirement is the other
+reading — *"Rs 1,000 off the cart once it reaches Rs 10,000"* — which the model
+could not express at all. There was no threshold column, and no way to say
+"applies to the whole basket".
+
+### The decision
+
+Two shapes of the same promotion type, told apart by whether it names products:
+
+| `items` | Meaning | Where the discount lands |
+|---|---|---|
+| non-empty | *"Rs X off these products"* — unchanged | the participating **lines** |
+| **empty** | *"Rs X off the cart"* — new | the **order** |
+
+`Promotion.minimumSpend` is the threshold. NULL means none, which is what every
+row predating this decision means, so the backfill is to do nothing.
+
+### Why the order level, and not `SaleItem`
+
+`SaleItem` holds a single `promotionId` (D102). A cart-level promotion has to
+coexist with the line-level promotions that already claimed those lines, so
+allocating it onto lines would either need a second promotion column per line or
+would displace a line promotion that is already correct.
+
+The order level already solves this exact problem for the **manual** order
+discount — `Sale.orderDiscountAmount` with `Return.orderDiscountAdjustment`
+allocating it back on a refund. A cart-level promotion is the same shape, so it
+gets the same treatment rather than a new mechanism:
+
+```
+Sale.promotionOrderDiscountAmount   +  promotionOrderId  +  promotionOrderNameSnapshot
+Return.promotionOrderDiscountAdjustment
+```
+
+Kept **separate** from the manual columns rather than folded into them: a refund
+has to be able to say which part of a discount was the cashier's decision and
+which was automatic, and `orderDiscountApprovedById` beside the manual figure
+means something that would be a lie next to a promotion.
+
+Like D102's line columns, `promotionOrderId` carries **no foreign key** and the
+name is snapshotted, so deleting a promotion never rewrites a document that has
+already been sold.
+
+### At most one cart-level promotion per sale
+
+There is one set of columns, so the applier picks the single best eligible
+cart-level candidate. This is a real limit, stated rather than hidden: a second
+concurrent cart-level promotion would need a child table and its own decision.
+Line-level promotions are unaffected — any number still apply, one per line.
+
+### What the threshold measures
+
+The **eligible net amount**: line subtotals less any line-level promotion, summed
+over lines that carry no manual discount.
+
+- *Net, not gross* — the threshold is compared against the money this discount
+  would actually reduce. Measuring gross would let a heavily discounted basket
+  clear a threshold it no longer reaches.
+- *Excluding manually discounted lines* — D102 already makes such a line
+  invisible to promotions. A threshold that counted it would be counting money
+  no promotion is allowed to touch.
+
+The discount is capped at that same amount, so a cart-level promotion can never
+drive an order below zero.
+
+### Evaluation order
+
+Line-level promotions resolve first, then the cart-level pass runs against what
+they left. That is what makes the threshold well-defined, and it is why a
+cart-level promotion is **never discarded because a line was claimed** — it does
+not compete for lines at all.
+
+Basket exclusivity (4.4) still governs it: a non-stackable promotion that has
+taken the basket blocks the cart-level pass too, and a non-stackable cart-level
+promotion will not join something already applied.
+
+### Tax is not touched
+
+Confirmed with the PO. The cart-level discount reduces the order total **after**
+tax is computed on the line totals, exactly as the manual order discount has
+always done (3.14). `Rs 12,600 → Rs 1,000 off → Rs 11,600`. No tax-base change,
+no new tax path, one code path for both order-level discounts.
+
+### A cart-level promotion never requires a promotional product
+
+`rewardEntitlements` only produces an entitlement for a rule carrying a `GET`
+item, and `buyXGetYOutcome` returns null for any type other than `BUY_X_GET_Y`.
+So `FIXED_AMOUNT_DISCOUNT` — either shape — cannot create an outstanding reward
+and cannot block payment. That was already true and is now pinned by test.
+
+### BOGO qualifying units are not consumed
+
+Also confirmed with the PO, and recorded here because it was previously implicit.
+`applyBuyXGetY` claims only its **reward** lines; the BUY units that earned the
+reward stay available to other stackable promotions. Two shirts may take a
+percentage discount *and* earn a free tie.
+
+The consequence is deliberate and worth stating plainly: a unit can be counted by
+more than one promotion — a shirt inside a bundle can also count toward a BOGO
+threshold. That is the intended generosity, not an accounting error; each line
+still carries exactly one promotion, so every figure remains persistable and
+refundable.

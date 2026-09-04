@@ -390,6 +390,7 @@ describe('promotions on the till (4.4)', () => {
     fixedPrice: null,
     percentageOff: null,
     amountOff: null,
+    minimumSpend: null,
     buyQuantity: 2,
     getQuantity: 1,
     stackable: false,

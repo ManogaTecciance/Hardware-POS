@@ -19,6 +19,8 @@ export interface PromotionWithItems {
   fixedPrice: Prisma.Decimal | null;
   percentageOff: Prisma.Decimal | null;
   amountOff: Prisma.Decimal | null;
+  /** D105 — the cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT. */
+  minimumSpend: Prisma.Decimal | null;
   buyQuantity: number | null;
   getQuantity: number | null;
   startsOn: Date | null;

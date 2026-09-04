@@ -74,6 +74,8 @@ export interface ReturnPreviewItem {
   /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  /** D105 — this line's share of a CART-LEVEL promotion, reversed. */
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundableAmount: number;
   returnReason: ReturnReason;
@@ -91,6 +93,8 @@ export interface ReturnPreview {
   /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  /** D105 — this line's share of a CART-LEVEL promotion, reversed. */
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;
   isFullReturn: boolean;
@@ -195,6 +199,8 @@ export interface PersistReturnItem {
   /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  /** D105 — this line's share of a CART-LEVEL promotion, reversed. */
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundableAmount: number;
 }
@@ -216,6 +222,8 @@ export interface PersistReturnInput {
   /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  /** D105 — this line's share of a CART-LEVEL promotion, reversed. */
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;
   refundMethod: PaymentMethod;

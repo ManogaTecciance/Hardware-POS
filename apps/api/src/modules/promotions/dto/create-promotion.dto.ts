@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -85,6 +84,19 @@ export class CreatePromotionDto {
   @IsOptional()
   amountOff?: number;
 
+  /**
+   * D105 — FIXED_AMOUNT_DISCOUNT only. The eligible cart amount the basket must
+   * reach before the discount applies. Omitted means no threshold.
+   *
+   * `@Min(0)` rather than `@Min(0.01)`: an explicit 0 is a meaningful way to say
+   * "no minimum", and refusing it would make the editor's empty-field and
+   * zero-field cases behave differently for no reason.
+   */
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @IsOptional()
+  minimumSpend?: number;
+
   @IsInt()
   @Min(1)
   @IsOptional()
@@ -136,8 +148,14 @@ export class CreatePromotionDto {
   @IsOptional()
   stackable?: boolean;
 
+  /*
+   * D105 — no `@ArrayNotEmpty()`. An EMPTY item list is how a
+   * FIXED_AMOUNT_DISCOUNT declares itself cart-level. Every other type still
+   * requires its items, but that is enforced by `validateTypeShape`, which can
+   * say which items are missing and why; a blanket decorator here could only
+   * say "should not be empty" and would refuse a shape that is now valid.
+   */
   @IsArray()
-  @ArrayNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => PromotionItemInputDto)
   items!: PromotionItemInputDto[];

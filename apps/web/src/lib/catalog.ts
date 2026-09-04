@@ -136,7 +136,12 @@ interface ApiSellableItem {
  * cannot hold one safely; the applier works in plain numbers with cent rounding.
  * Converting in exactly one place keeps that boundary somewhere a reader can find.
  */
-function toPromotionRule(api: ApiPromotionRule): PromotionRule {
+/**
+ * Exported for test only. A wire mapper is where a field goes to die — 4.15 lost
+ * `productName` here and D105 lost `minimumSpend` the same way — so this one is
+ * asserted directly rather than through three layers of catalogue fetching.
+ */
+export function toPromotionRule(api: ApiPromotionRule): PromotionRule {
   const num = (v: string | null): number | null => (v === null ? null : Number(v));
   return {
     id: api.id,
@@ -145,6 +150,10 @@ function toPromotionRule(api: ApiPromotionRule): PromotionRule {
     fixedPrice: num(api.fixedPrice),
     percentageOff: num(api.percentageOff),
     amountOff: num(api.amountOff),
+    // D105 — the cart threshold. `?? null` because a server predating D105 omits
+    // the field entirely, and `undefined` would read as "no threshold" and hand
+    // the discount to every basket regardless of size.
+    minimumSpend: num(api.minimumSpend ?? null),
     buyQuantity: api.buyQuantity,
     getQuantity: api.getQuantity,
     stackable: api.stackable,
@@ -157,13 +166,15 @@ function toPromotionRule(api: ApiPromotionRule): PromotionRule {
 }
 
 /** D102 (4.3) — the priceable shape, as it arrives. Decimals are strings. */
-interface ApiPromotionRule {
+export interface ApiPromotionRule {
   id: string;
   name: string;
   type: string;
   fixedPrice: string | null;
   percentageOff: string | null;
   amountOff: string | null;
+  /** D105 — optional on the WIRE: a server predating D105 does not send it. */
+  minimumSpend?: string | null;
   buyQuantity: number | null;
   getQuantity: number | null;
   stackable: boolean;

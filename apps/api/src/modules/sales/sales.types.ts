@@ -147,6 +147,14 @@ export interface ComputedSale {
   orderDiscountAmount: number;
   orderDiscountReason: string | null;
   orderDiscountApprovedById: string | null;
+  /**
+   * D105 — a cart-level promotion, stored beside the manual order discount
+   * rather than on a line. Unlike the manual figure this does NOT reduce the
+   * taxable base; see `sales.service` for why.
+   */
+  promotionOrderDiscountAmount: number;
+  promotionOrderId: string | null;
+  promotionOrderNameSnapshot: string | null;
   taxAmount: number;
   total: number;
 }
