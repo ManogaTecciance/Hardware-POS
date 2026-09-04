@@ -151,6 +151,11 @@ function fromPromotion(p: Promotion): EditorState {
       productId: i.productId,
       role: i.role,
       quantity: String(i.quantity ?? 1),
+      // 4.10 — without this the edit screen rendered the raw cuid: `name` is
+      // only set when a product comes from the picker, and the row falls back
+      // to `productId`. Creating showed "Shirt"; editing the same promotion
+      // showed "cmtldj0ta0003q4bs27ibki2q".
+      name: i.productName ?? undefined,
     })),
   };
 }

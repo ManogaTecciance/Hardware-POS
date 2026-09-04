@@ -35,6 +35,16 @@ export interface PromotionWithItems {
   items: {
     id: string;
     productId: string;
+    /**
+     * D45 (4.10) — the product's CURRENT name, joined not snapshotted.
+     *
+     * This is an admin screen, not a receipt: an editor must show what the
+     * product is called today. Without it `fromPromotion` had no name to give
+     * the row, and the editor rendered the raw cuid — so creating a promotion
+     * showed "Shirt" and editing the same one showed
+     * "cmtldj0ta0003q4bs27ibki2q".
+     */
+    product: { name: string } | null;
     role: string;
     quantity: number;
   }[];
@@ -50,7 +60,13 @@ export class PromotionsRepository {
       include: {
         items: {
           orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
-          select: { id: true, productId: true, role: true, quantity: true },
+          select: {
+            id: true,
+            productId: true,
+            role: true,
+            quantity: true,
+            product: { select: { name: true } },
+          },
         },
       },
     }) as Promise<PromotionWithItems | null>;
@@ -92,7 +108,13 @@ export class PromotionsRepository {
       include: {
         items: {
           orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
-          select: { id: true, productId: true, role: true, quantity: true },
+          select: {
+            id: true,
+            productId: true,
+            role: true,
+            quantity: true,
+            product: { select: { name: true } },
+          },
         },
       },
       take: opts.limit ?? 100,
@@ -111,7 +133,13 @@ export class PromotionsRepository {
       where: { tenantId, isActive: true },
       include: {
         items: {
-          select: { id: true, productId: true, role: true, quantity: true },
+          select: {
+            id: true,
+            productId: true,
+            role: true,
+            quantity: true,
+            product: { select: { name: true } },
+          },
         },
       },
     }) as Promise<PromotionWithItems[]>;

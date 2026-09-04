@@ -52,6 +52,15 @@ export interface CartItem {
   approvalToken?: string;
   /** The manager who approved the discount. */
   approvedByUserId?: string;
+  /**
+   * D45 (4.11) — set when the TILL added this line to claim a promotion the
+   * basket had earned, rather than the cashier scanning it.
+   *
+   * Drives the "Promo item" badge, and stops the line being re-added the moment
+   * a cashier deliberately removes it. It is a UI fact only: the server prices
+   * the line from the promotion rules like any other, and never sees this flag.
+   */
+  addedByPromotionId?: string;
 }
 
 export interface LineTotals {

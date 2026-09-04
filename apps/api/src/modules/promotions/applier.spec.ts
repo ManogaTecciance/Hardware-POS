@@ -21,6 +21,7 @@
 import {
   applyPromotions,
   distributeByLargestRemainder,
+  pendingRewards,
   type PromotionCartLine,
   type PromotionRule,
 } from '@hardware-pos/shared';
@@ -653,6 +654,123 @@ describe('stackable', () => {
 
     expect(applyPromotions({ lines, promotions: [a, b] })).toEqual(
       applyPromotions({ lines, promotions: [b, a] }),
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pendingRewards — what the till adds for the customer (4.11)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('pendingRewards', () => {
+  const bogo = (over: Partial<PromotionRule> = {}) =>
+    rule({
+      id: 'r_bogo',
+      name: 'Buy 2 shirts, tie free',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 2,
+      getQuantity: 1,
+      percentageOff: 100,
+      items: [
+        { productId: 'p_shirt', role: 'BUY', quantity: 1 },
+        { productId: 'p_tie', role: 'GET', quantity: 1 },
+      ],
+      ...over,
+    });
+
+  it('asks for the reward when the threshold is met and it is missing', () => {
+    // The reported case: two shirts in the basket, no tie, no discount — because
+    // the applier discounts a reward the customer HOLDS.
+    const lines = [item('l_shirt', 'p_shirt', 1000, 2)];
+
+    expect(pendingRewards({ lines, promotions: [bogo()] })).toEqual([
+      {
+        promotionId: 'r_bogo',
+        promotionName: 'Buy 2 shirts, tie free',
+        productId: 'p_tie',
+        quantity: 1,
+      },
+    ]);
+  });
+
+  it('asks for NOTHING once the reward is in the basket — the loop guard', () => {
+    /*
+     * The property that makes auto-add terminate. The till adds the tie, this
+     * runs again on the new basket, and finds nothing outstanding. Without it
+     * the effect would add a tie on every render.
+     */
+    const lines = [item('l_shirt', 'p_shirt', 1000, 2), item('l_tie', 'p_tie', 500, 1)];
+
+    expect(pendingRewards({ lines, promotions: [bogo()] })).toEqual([]);
+  });
+
+  it('asks for the SHORTFALL only, not the whole entitlement', () => {
+    // Four shirts earn two ties; one is already held.
+    const lines = [item('l_shirt', 'p_shirt', 1000, 4), item('l_tie', 'p_tie', 500, 1)];
+
+    expect(pendingRewards({ lines, promotions: [bogo()] })[0]!.quantity).toBe(1);
+  });
+
+  it('asks for nothing below the threshold', () => {
+    const lines = [item('l_shirt', 'p_shirt', 1000, 1)];
+
+    expect(pendingRewards({ lines, promotions: [bogo()] })).toEqual([]);
+  });
+
+  it('a manually discounted BUY line cannot earn a reward', () => {
+    // Precedence (D102) holds here too: a discounted line is invisible to
+    // promotions, so it cannot satisfy a threshold — and the till must not add
+    // an item the applier would then charge for.
+    const lines = [item('l_shirt', 'p_shirt', 1000, 2, 50)];
+
+    expect(pendingRewards({ lines, promotions: [bogo()] })).toEqual([]);
+  });
+
+  it('same-product BOGO asks for nothing — the reward is already the pool', () => {
+    /*
+     * "Buy 2 get 1 free" on ONE product: the customer must hold X + Y units for
+     * an application, so by the time it earns anything it already holds the
+     * reward. Adding another unit would earn nothing and charge for it.
+     */
+    const samePool = rule({
+      id: 'r_same',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 2,
+      getQuantity: 1,
+      percentageOff: 100,
+      items: [
+        { productId: 'p', role: 'BUY', quantity: 1 },
+        { productId: 'p', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    expect(pendingRewards({ lines: [item('l1', 'p', 100, 3)], promotions: [samePool] })).toEqual([]);
+  });
+
+  it('what it asks for is what the applier discounts — the agreement', () => {
+    // The property that makes auto-add safe: add exactly what this returns, and
+    // the applier prices it to zero. A line that appeared and was then charged
+    // for would be worse than the offer never firing.
+    const before = [item('l_shirt', 'p_shirt', 1000, 2)];
+    const [ask] = pendingRewards({ lines: before, promotions: [bogo()] });
+    expect(ask).toBeDefined();
+
+    const after = [...before, item('l_tie', ask!.productId, 500, ask!.quantity)];
+    const result = applyPromotions({ lines: after, promotions: [bogo()] });
+
+    expect(byLine(result)).toEqual({ l_tie: 500 });
+  });
+
+  it('ignores promotion types that grant no reward item', () => {
+    const pct = rule({
+      id: 'r_pct',
+      type: 'PERCENTAGE_DISCOUNT',
+      percentageOff: 10,
+      items: [{ productId: 'p_shirt', role: 'BUNDLE', quantity: 1 }],
+    });
+
+    expect(pendingRewards({ lines: [item('l1', 'p_shirt', 1000, 5)], promotions: [pct] })).toEqual(
+      [],
     );
   });
 });

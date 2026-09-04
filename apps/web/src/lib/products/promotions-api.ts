@@ -63,6 +63,11 @@ export const PROMOTION_CHANNELS: PromotionChannel[] = [
 export interface PromotionItem {
   id: string;
   productId: string;
+  /**
+   * 4.10 — the product's current name, joined by the server. Null when the
+   * product has been deleted, and absent on a response predating the join.
+   */
+  productName?: string | null;
   role: PromotionItemRole;
   quantity: number;
 }

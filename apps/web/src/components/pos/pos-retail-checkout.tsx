@@ -55,6 +55,8 @@ import {
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
+import { pendingRewards } from '@hardware-pos/shared';
+
 import { stockCap, usePosCart } from '@/lib/pos-cart';
 import { resolveScan, type ScanHit } from '@/lib/scan-resolver';
 import { useBarcodeScanner } from '@/lib/use-barcode-scanner';
@@ -320,6 +322,76 @@ export function PosRetailCheckout() {
    * it: the rows would show pre-promotion totals under a post-promotion footer,
    * and the cart would visibly not add up.
    */
+  /*
+   * D45 (4.11) — the till claims a reward the basket has earned.
+   *
+   * `pendingRewards` reads the SAME `buyXGetYOutcome` the applier prices from,
+   * so a line added here is always a line the applier discounts — never one that
+   * appears and is then charged for.
+   *
+   * Three guards, each for a real failure:
+   *
+   *   • DECLINED. Removing an auto-added line records the promotion, so it is
+   *     not put straight back. Without this the trash button does nothing and
+   *     the cashier cannot get rid of it.
+   *   • ALREADY PRESENT. `addRewardToCart` marks an existing line rather than
+   *     stacking a second, so a cashier who scanned the tie themselves sees the
+   *     badge and one line.
+   *   • VARIANTS. A reward with sizes needs one chosen. The default variant
+   *     (D45) is used when there is one; otherwise nothing is added and the
+   *     cashier is told to pick, because a till guessing a size is worse than a
+   *     till asking.
+   */
+  const [declinedRewards, setDeclinedRewards] = React.useState<Set<string>>(new Set());
+  const [rewardHint, setRewardHint] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (data.promotionRules.length === 0) return;
+
+    const pending = pendingRewards({
+      lines: cart.items.map((it) => ({
+        id: it.lineKey,
+        productId: it.product.id,
+        unitPrice: linePrice(it),
+        quantity: it.quantity,
+        lineSubtotal: computeLine(it).lineSubtotal,
+        manualDiscountAmount: computeLine(it).discountAmount,
+      })),
+      promotions: data.promotionRules,
+    });
+
+    let hint: string | null = null;
+    for (const reward of pending) {
+      if (declinedRewards.has(reward.promotionId)) continue;
+
+      const product = data.products.find((p) => p.id === reward.productId);
+      if (!product) continue;
+
+      let variant: ClientVariant | null = null;
+      if (product.variants.length > 0) {
+        variant = product.variants.find((v) => v.isDefault) ?? null;
+        if (!variant) {
+          hint = `${reward.promotionName}: add a ${product.name} to claim it.`;
+          continue;
+        }
+      }
+      cart.addRewardToCart(product, variant, reward.quantity, reward.promotionId);
+    }
+    setRewardHint(hint);
+    // `cart` is a stable context value; the cart's ITEMS are what this reacts to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart.items, data.promotionRules, data.products, declinedRewards]);
+
+  /** Removing an auto-added line is a decision, not an accident. */
+  const removeLine = (lineKey: CartLineKey) => {
+    const item = cart.items.find((it) => it.lineKey === lineKey);
+    if (item?.addedByPromotionId) {
+      const id = item.addedByPromotionId;
+      setDeclinedRewards((prev) => new Set(prev).add(id));
+    }
+    cart.removeItem(lineKey);
+  };
+
   const linesByKey = new Map(
     computeCartLines(cart.items, data.promotionRules).map((l) => [l.lineKey, l]),
   );
@@ -442,6 +514,15 @@ export function PosRetailCheckout() {
         ) : null}
       </div>
 
+      {/* D45 (4.11) — a reward with sizes needs one chosen. The till says so
+          rather than guessing, and rather than staying silent while the cashier
+          wonders why the offer did not fire. */}
+      {rewardHint ? (
+        <div className="mx-4 mb-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
+          {rewardHint}
+        </div>
+      ) : null}
+
       {/* Items — the only scroll region inside the cart */}
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
         {cartEmpty ? (
@@ -463,6 +544,14 @@ export function PosRetailCheckout() {
                     <div className="line-clamp-2 text-sm font-medium leading-tight">
                       {item.product.name}
                     </div>
+                    {/* D45 (4.11) — say WHY this line appeared. A row the
+                        cashier did not scan, priced at 0.00, reads as a bug
+                        unless the till names it. */}
+                    {item.addedByPromotionId ? (
+                      <span className="mt-1 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                        Promo item
+                      </span>
+                    ) : null}
                     <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
                       <span className="truncate">
                         {/* A variant parent's SKU is null by design (D44), so this
@@ -536,7 +625,7 @@ export function PosRetailCheckout() {
                       size="icon"
                       className="h-9 w-9 text-danger"
                       aria-label="Remove item"
-                      onClick={() => cart.removeItem(item.lineKey)}
+                      onClick={() => removeLine(item.lineKey)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

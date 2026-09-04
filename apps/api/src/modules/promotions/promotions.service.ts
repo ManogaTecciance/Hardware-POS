@@ -42,7 +42,7 @@ export interface PromotionView {
   channelScope: string[];
   stackable: boolean;
   isActive: boolean;
-  items: { id: string; productId: string; role: string; quantity: number }[];
+  items: { id: string; productId: string; productName: string | null; role: string; quantity: number }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -474,7 +474,15 @@ function toView(row: PromotionWithItems): PromotionView {
     channelScope: row.channelScope,
     stackable: row.stackable,
     isActive: row.isActive,
-    items: row.items,
+    // D45 (4.10) — flatten the joined name so the editor never has to render a
+    // cuid. Null when the product was deleted; the client falls back to the id.
+    items: row.items.map((it) => ({
+      id: it.id,
+      productId: it.productId,
+      productName: it.product?.name ?? null,
+      role: it.role,
+      quantity: it.quantity,
+    })),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

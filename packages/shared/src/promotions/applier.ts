@@ -312,28 +312,35 @@ function applyBundle(lines: readonly PromotionCartLine[], rule: PromotionRule): 
  *     application. Counting `floor(qty / X)` here would free a unit at two in
  *     the cart, giving away a third the customer never had.
  */
-function applyBuyXGetY(lines: readonly PromotionCartLine[], rule: PromotionRule): Claim[] {
+/**
+ * How many reward units a basket has EARNED, and which held units qualify.
+ *
+ * Extracted (4.11) so the discount and the till's auto-add agree by
+ * construction. Two answers to "how many are free?" is two chances to disagree,
+ * and the disagreement would be visible: a line added and then not discounted.
+ */
+export interface BuyXGetYOutcome {
+  /** Reward units the basket has earned, before what the customer holds. */
+  earned: number;
+  /** Reward units actually in the basket, cheapest first. */
+  held: { lineId: string; unitPrice: number }[];
+}
+
+export function buyXGetYOutcome(
+  lines: readonly PromotionCartLine[],
+  rule: PromotionRule,
+): BuyXGetYOutcome | null {
   const buyQty = rule.buyQuantity ?? 0;
   const getQty = rule.getQuantity ?? 0;
-  if (buyQty <= 0 || getQty <= 0) return [];
-
-  /*
-   * The discount ON THE REWARD, capped at the goods. `?? 100` means "free",
-   * which is what every rule written before this was read intended — and what
-   * the editor's own help text calls out ("100 = free").
-   */
-  const rewardPercent = Math.min(rule.percentageOff ?? 100, 100);
-  if (rewardPercent <= 0) return [];
+  if (rule.type !== 'BUY_X_GET_Y' || buyQty <= 0 || getQty <= 0) return null;
 
   const buyIds = new Set(requiredByProduct(rule, 'BUY').keys());
   const getIds = new Set(requiredByProduct(rule, 'GET').keys());
-  if (getIds.size === 0) return [];
+  if (getIds.size === 0) return null;
 
   const overlapping = [...getIds].some((id) => buyIds.has(id));
-
-  /** Units eligible for the reward discount, cheapest first. */
-  const rewardUnits: { lineId: string; unitPrice: number }[] = [];
-  let freeUnits = 0;
+  const held: { lineId: string; unitPrice: number }[] = [];
+  let earned = 0;
 
   if (overlapping) {
     // Same pool: one application costs X + Y units of that product.
@@ -341,32 +348,90 @@ function applyBuyXGetY(lines: readonly PromotionCartLine[], rule: PromotionRule)
     for (const productId of getIds) {
       const times = Math.floor(quantityOf(lines, productId) / groupSize);
       if (times < 1) continue;
-      freeUnits += times * getQty;
+      earned += times * getQty;
       for (const line of lines.filter((l) => l.productId === productId)) {
         for (let u = 0; u < line.quantity; u += 1) {
-          rewardUnits.push({ lineId: line.id, unitPrice: line.unitPrice });
+          held.push({ lineId: line.id, unitPrice: line.unitPrice });
         }
       }
     }
   } else {
     const buyPool = [...buyIds].reduce((acc, id) => acc + quantityOf(lines, id), 0);
-    const times = Math.floor(buyPool / buyQty);
-    if (times < 1) return [];
+    earned = Math.floor(buyPool / buyQty) * getQty;
     for (const line of participatingLines(lines, rule, 'GET')) {
       for (let u = 0; u < line.quantity; u += 1) {
-        rewardUnits.push({ lineId: line.id, unitPrice: line.unitPrice });
+        held.push({ lineId: line.id, unitPrice: line.unitPrice });
       }
     }
-    // Never free more reward units than the customer actually holds.
-    freeUnits = Math.min(times * getQty, rewardUnits.length);
   }
 
-  if (freeUnits < 1 || rewardUnits.length === 0) return [];
+  held.sort((a, b) => a.unitPrice - b.unitPrice);
+  return { earned, held };
+}
 
-  rewardUnits.sort((a, b) => a.unitPrice - b.unitPrice);
+/** One reward a basket has earned but is not holding (4.11). */
+export interface PendingReward {
+  promotionId: string;
+  promotionName: string;
+  /** The GET product to add. */
+  productId: string;
+  /** How many units short the basket is. */
+  quantity: number;
+}
+
+/**
+ * Rewards the basket has EARNED but does not hold.
+ *
+ * The till uses this to add the free item itself, so a cashier does not have to
+ * know an offer exists. It reads the same `buyXGetYOutcome` the discount does,
+ * so a line it adds is always a line the applier will discount — never one that
+ * appears and then gets charged for.
+ *
+ * Only the FIRST GET product of a rule is offered: a promotion naming two
+ * possible rewards is a choice for the customer, not for the till.
+ */
+export function pendingRewards(context: PromotionContext): PendingReward[] {
+  const eligibleLines = context.lines.filter((l) => l.manualDiscountAmount <= 0);
+  const out: PendingReward[] = [];
+
+  for (const rule of context.promotions) {
+    const outcome = buyXGetYOutcome(eligibleLines, rule);
+    if (!outcome || outcome.earned < 1) continue;
+    const short = outcome.earned - outcome.held.length;
+    if (short < 1) continue;
+
+    const first = rule.items.find((it) => it.role === 'GET');
+    if (!first) continue;
+    out.push({
+      promotionId: rule.id,
+      promotionName: rule.name,
+      productId: first.productId,
+      quantity: short,
+    });
+  }
+
+  return out;
+}
+
+function applyBuyXGetY(lines: readonly PromotionCartLine[], rule: PromotionRule): Claim[] {
+  // 4.11 — the SAME outcome the till's auto-add reads, so a line it adds is
+  // always a line this discounts.
+  const outcome = buyXGetYOutcome(lines, rule);
+  if (!outcome || outcome.earned < 1 || outcome.held.length === 0) return [];
+
+  /*
+   * The discount ON THE REWARD, capped at the goods. `?? 100` means "free",
+   * which is what every rule written before 4.7 read it intended — and what the
+   * editor's own help text calls out ("100 = free").
+   */
+  const rewardPercent = Math.min(rule.percentageOff ?? 100, 100);
+  if (rewardPercent <= 0) return [];
+
+  // Never discount more reward units than the customer is actually holding.
+  const rewarded = Math.min(outcome.earned, outcome.held.length);
 
   const byLine = new Map<string, number>();
-  for (const unit of rewardUnits.slice(0, freeUnits)) {
+  for (const unit of outcome.held.slice(0, rewarded)) {
     // Per UNIT, not per line: two rewarded units of one product each earn their
     // own share, and rounding once per unit is what a receipt can be checked
     // against by hand.

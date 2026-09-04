@@ -144,6 +144,9 @@ function toRepoShape(row: Row): PromotionWithItems {
     items: row.items.map((i, idx) => ({
       id: `pi_${idx}`,
       productId: i.productId,
+      // 4.10 — the repository joins the product; the double must say so too
+      // (D30: a fixture has to represent the production structure).
+      product: { name: `Product ${i.productId}` },
       role: i.role,
       quantity: i.quantity,
     })),
