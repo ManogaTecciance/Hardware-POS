@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import * as React from 'react';
-import { FileUp, Search, UserPlus } from 'lucide-react';
+import { FileUp, Search, UserPlus, X } from 'lucide-react';
 
 import { ImportCustomersDialog } from '@/components/customers/import-customers-dialog';
 import { PageHeader } from '@/components/page-header';
@@ -21,6 +21,8 @@ import {
   type ManagedCustomer,
 } from '@/lib/customers-api';
 import { Permission } from '@/lib/permissions';
+import { isModuleEnabled } from '@/lib/platform-api';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 import { formatMoney } from '@/lib/utils';
 
 const PAGE_SIZES = [20, 30, 40, 50];
@@ -29,6 +31,10 @@ const TYPE_OPTIONS = Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[];
 export default function CustomersPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.CUSTOMER_MANAGE);
+  const { profile } = useEffectiveProfile();
+  // Unresolved profile = no QuickBooks affordances, never the legacy default.
+  const quickbooksEnabled = profile ? isModuleEnabled(profile, 'QUICKBOOKS') : false;
+  const columnCount = quickbooksEnabled ? 5 : 4;
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -45,7 +51,9 @@ export default function CustomersPage() {
   const [reloadKey, setReloadKey] = React.useState(0);
 
   React.useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    // Collapse internal whitespace runs, not just the ends: the API matches
+    // with a literal `contains`, so "x  x" would otherwise miss "x x".
+    const t = window.setTimeout(() => setDebouncedSearch(search.replace(/\s+/g, ' ').trim()), 300);
     return () => window.clearTimeout(t);
   }, [search]);
 
@@ -89,7 +97,11 @@ export default function CustomersPage() {
     <div className="space-y-6">
       <PageHeader
         title="Customers"
-        description="Manage customers. New customers sync to QuickBooks on their first sale."
+        description={
+          quickbooksEnabled
+            ? 'Manage customers. New customers sync to QuickBooks on their first sale.'
+            : 'Manage customers.'
+        }
         actions={
           canManage ? (
             <div className="flex items-center gap-2">
@@ -113,8 +125,18 @@ export default function CustomersPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name, company, phone, or email…"
-            className="pl-10"
+            className="pl-10 pr-9"
           />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
         <Select
           value={customerType}
@@ -147,23 +169,22 @@ export default function CustomersPage() {
             <thead>
               <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Customer</th>
-                <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">Phone</th>
                 <th className="px-4 py-3 font-medium">Credit</th>
-                <th className="px-4 py-3 font-medium">Sync</th>
+                {quickbooksEnabled ? <th className="px-4 py-3 font-medium">Sync</th> : null}
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={columnCount} className="px-4 py-16 text-center text-muted-foreground">
                     Loading customers…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={columnCount} className="px-4 py-16 text-center text-muted-foreground">
                     No customers found.
                   </td>
                 </tr>
@@ -186,10 +207,9 @@ export default function CustomersPage() {
                         </Badge>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {CUSTOMER_TYPE_LABELS[c.customerType]}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">{c.phone ?? '—'}</td>
+                    {/* POS-created customers carry their number in `mobile` (capture popup
+    posts `mobile`), so read it the way the rest of the app does. */}
+                    <td className="px-4 py-3 text-muted-foreground">{c.mobile ?? c.phone ?? '—'}</td>
                     <td className="px-4 py-3">
                       {c.creditAllowed ? (
                         <span className="text-muted-foreground">
@@ -199,13 +219,15 @@ export default function CustomersPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      {c.quickbooksCustomerId ? (
-                        <SyncBadge status="SYNCED" />
-                      ) : (
-                        <SyncBadge status={c.syncStatus} />
-                      )}
-                    </td>
+                    {quickbooksEnabled ? (
+                      <td className="px-4 py-3">
+                        {c.quickbooksCustomerId ? (
+                          <SyncBadge status="SYNCED" />
+                        ) : (
+                          <SyncBadge status={c.syncStatus} />
+                        )}
+                      </td>
+                    ) : null}
                     <td className="px-4 py-3 text-right">
                       {canManage ? (
                         <Link
@@ -231,46 +253,54 @@ export default function CustomersPage() {
         </div>
       </Card>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span>Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="w-auto"
-          >
-            {PAGE_SIZES.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-muted-foreground">
-            {total === 0 ? '0' : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)}`} of{' '}
-            {total}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+      {/* Pager chrome only when it can do something (the Orders screen hides
+          its pager the same way): the footer needs more rows than the
+          smallest page size — gating on the CURRENT size would make the
+          selector vanish right after picking a larger one — and the buttons
+          need a second page to go to. */}
+      {total > Math.min(...PAGE_SIZES) ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <span>Rows per page</span>
+            <Select
+              value={String(pageSize)}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="w-auto"
             >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
+              {PAGE_SIZES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-muted-foreground">
+              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+            </span>
+            {totalPages > 1 ? (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
-      </div>
+      ) : null}
 
       {session ? (
         <ImportCustomersDialog

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import type { Session } from '@/lib/auth';
 import {
   CUSTOMER_TYPE_LABELS,
@@ -18,6 +19,9 @@ import {
   type CustomerType,
   type ManagedCustomer,
 } from '@/lib/customers-api';
+import { MOBILE_MAX_CHARS, mobileDigitsError, sanitizeMobile } from '@/lib/customer-mobile';
+import { isModuleEnabled } from '@/lib/platform-api';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 import { cn } from '@/lib/utils';
 
 const TYPE_OPTIONS = Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[];
@@ -26,6 +30,11 @@ const TYPE_OPTIONS = Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[];
  * Customer form — the QuickBooks Customer template fields (identity, address,
  * opening balance) plus the POS-side payment controls that drive credit
  * enforcement and returns rules.
+ *
+ * Tenants without the QUICKBOOKS module get a slimmer layout: no QB template
+ * fields, and one free-text Address bound to `street` — the same field the POS
+ * delivery popup writes. The hidden fields still round-trip untouched from
+ * `initialState`, so switching the module on later loses nothing.
  */
 
 interface FormState {
@@ -111,6 +120,9 @@ export function CustomerForm({
 }) {
   const router = useRouter();
   const editing = !!customer;
+  const { profile } = useEffectiveProfile();
+  // Unresolved profile = no QuickBooks affordances, never the legacy default.
+  const quickbooksEnabled = profile ? isModuleEnabled(profile, 'QUICKBOOKS') : false;
   const [form, setForm] = React.useState<FormState>(() => initialState(customer));
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -121,9 +133,38 @@ export function CustomerForm({
   const openingBalanceInvalid =
     form.openingBalance.trim() !== '' && !Number.isFinite(Number(form.openingBalance));
 
+  // Bounds match `CreateCustomerDto` (@MaxLength(200)) and the POS popup's
+  // "a single character is a slip" rule, so this form cannot build a payload
+  // the server refuses.
+  const nameLength = form.name.trim().length;
+  const nameError =
+    nameLength === 1
+      ? 'Customer name needs at least 2 characters.'
+      : nameLength > 200
+        ? 'Customer name cannot be more than 200 characters.'
+        : null;
+  // POS-grade digit rules only where mobile is the POS lookup key; the
+  // QuickBooks layout mirrors QBO's free-text phone fields untouched.
+  const mobileError = quickbooksEnabled ? null : mobileDigitsError(form.mobile);
+  const emailError =
+    form.email.trim() !== '' && !/^\S+@\S+\.\S+$/.test(form.email.trim())
+      ? 'Enter a valid email address.'
+      : null;
+  const creditLimitError =
+    form.creditAllowed &&
+    form.creditLimit.trim() !== '' &&
+    (!Number.isFinite(Number(form.creditLimit)) || Number(form.creditLimit) < 0)
+      ? 'Credit limit must be a non-negative number.'
+      : null;
+
   const submit = async () => {
     if (!form.name.trim()) {
       setError('Customer name is required');
+      return;
+    }
+    const fieldError = nameError ?? mobileError ?? emailError ?? creditLimitError;
+    if (fieldError) {
+      setError(fieldError);
       return;
     }
     if (openingBalanceInvalid) {
@@ -134,11 +175,12 @@ export function CustomerForm({
     setError(null);
     try {
       const input = buildCustomerInput(form);
-      const saved =
-        editing && customer
-          ? await updateCustomer(session, customer.id, input)
-          : await createCustomer(session, input);
-      router.push(`/customers/${saved.id}`);
+      if (editing && customer) {
+        await updateCustomer(session, customer.id, input);
+      } else {
+        await createCustomer(session, input);
+      }
+      router.push('/customers');
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save customer');
@@ -155,35 +197,61 @@ export function CustomerForm({
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <Field label="Name" required>
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Ravi Perera" />
+            {nameError ? <p className="text-xs text-danger">{nameError}</p> : null}
           </Field>
           <Field label="Company">
             <Input value={form.company} onChange={(e) => set('company', e.target.value)} placeholder="Optional" />
           </Field>
-          <Field label="Customer type (QuickBooks)">
-            <Input
-              value={form.qbCustomerType}
-              onChange={(e) => set('qbCustomerType', e.target.value)}
-              placeholder='e.g. "Retail Trade"'
-            />
-          </Field>
+          {quickbooksEnabled ? (
+            <Field label="Customer type (QuickBooks)">
+              <Input
+                value={form.qbCustomerType}
+                onChange={(e) => set('qbCustomerType', e.target.value)}
+                placeholder='e.g. "Retail Trade"'
+              />
+            </Field>
+          ) : null}
           <Field label="Email">
             <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="Optional" />
+            {emailError ? <p className="text-xs text-danger">{emailError}</p> : null}
           </Field>
-          <Field label="Phone">
-            <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="e.g. 077 123 4567" />
-          </Field>
+          {quickbooksEnabled ? (
+            <Field label="Phone">
+              <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="e.g. 077 123 4567" />
+            </Field>
+          ) : null}
           <Field label="Mobile">
-            <Input value={form.mobile} onChange={(e) => set('mobile', e.target.value)} placeholder="Optional" />
+            <Input
+              value={form.mobile}
+              inputMode="tel"
+              maxLength={quickbooksEnabled ? undefined : MOBILE_MAX_CHARS}
+              onChange={(e) =>
+                // Filtered on entry (POS rule) where mobile is the lookup key;
+                // the QBO layout mirrors QuickBooks' free-text field untouched.
+                set('mobile', quickbooksEnabled ? e.target.value : sanitizeMobile(e.target.value))
+              }
+              placeholder={quickbooksEnabled ? 'Optional' : 'e.g. 077 123 4567'}
+            />
+            {mobileError ? <p className="text-xs text-danger">{mobileError}</p> : null}
+            {quickbooksEnabled || mobileError ? null : (
+              <p className="text-xs text-muted-foreground">
+                The POS looks customers up by this number.
+              </p>
+            )}
           </Field>
-          <Field label="Fax">
-            <Input value={form.fax} onChange={(e) => set('fax', e.target.value)} placeholder="Optional" />
-          </Field>
-          <Field label="Website">
-            <Input value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="http://…" />
-          </Field>
-          <Field label="Resale number">
-            <Input value={form.resaleNumber} onChange={(e) => set('resaleNumber', e.target.value)} placeholder="Optional" />
-          </Field>
+          {quickbooksEnabled ? (
+            <>
+              <Field label="Fax">
+                <Input value={form.fax} onChange={(e) => set('fax', e.target.value)} placeholder="Optional" />
+              </Field>
+              <Field label="Website">
+                <Input value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="http://…" />
+              </Field>
+              <Field label="Resale number">
+                <Input value={form.resaleNumber} onChange={(e) => set('resaleNumber', e.target.value)} placeholder="Optional" />
+              </Field>
+            </>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -191,51 +259,69 @@ export function CustomerForm({
         <CardHeader>
           <CardTitle>Address</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Street" className="sm:col-span-2">
-            <Input value={form.street} onChange={(e) => set('street', e.target.value)} placeholder="Optional" />
-          </Field>
-          <Field label="City">
-            <Input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Optional" />
-          </Field>
-          <Field label="State / Province">
-            <Input value={form.state} onChange={(e) => set('state', e.target.value)} placeholder="Optional" />
-          </Field>
-          <Field label="ZIP / Postal code">
-            <Input value={form.zip} onChange={(e) => set('zip', e.target.value)} placeholder="Optional" />
-          </Field>
-          <Field label="Country">
-            <Input value={form.country} onChange={(e) => set('country', e.target.value)} placeholder="Optional" />
-          </Field>
-        </CardContent>
+        {quickbooksEnabled ? (
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <Field label="Street" className="sm:col-span-2">
+              <Input value={form.street} onChange={(e) => set('street', e.target.value)} placeholder="Optional" />
+            </Field>
+            <Field label="City">
+              <Input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Optional" />
+            </Field>
+            <Field label="State / Province">
+              <Input value={form.state} onChange={(e) => set('state', e.target.value)} placeholder="Optional" />
+            </Field>
+            <Field label="ZIP / Postal code">
+              <Input value={form.zip} onChange={(e) => set('zip', e.target.value)} placeholder="Optional" />
+            </Field>
+            <Field label="Country">
+              <Input value={form.country} onChange={(e) => set('country', e.target.value)} placeholder="Optional" />
+            </Field>
+          </CardContent>
+        ) : (
+          <CardContent>
+            <Field label="Address">
+              <Textarea
+                rows={3}
+                value={form.street}
+                onChange={(e) => set('street', e.target.value)}
+                placeholder="e.g. 45/2 Temple Lane, Kandy"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used as the delivery address at the POS.
+              </p>
+            </Field>
+          </CardContent>
+        )}
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Opening balance</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Opening balance">
-            <Input
-              inputMode="decimal"
-              value={form.openingBalance}
-              onChange={(e) => set('openingBalance', e.target.value)}
-              placeholder="As entered when added"
-            />
-          </Field>
-          <Field label="As of date">
-            <Input
-              type="date"
-              value={form.openingBalanceDate}
-              onChange={(e) => set('openingBalanceDate', e.target.value)}
-            />
-          </Field>
-          <p className="text-xs text-muted-foreground sm:col-span-2">
-            QuickBooks tracks the live receivable balance — this is only the balance entered when the
-            customer was added.
-          </p>
-        </CardContent>
-      </Card>
+      {quickbooksEnabled ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Opening balance</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <Field label="Opening balance">
+              <Input
+                inputMode="decimal"
+                value={form.openingBalance}
+                onChange={(e) => set('openingBalance', e.target.value)}
+                placeholder="As entered when added"
+              />
+            </Field>
+            <Field label="As of date">
+              <Input
+                type="date"
+                value={form.openingBalanceDate}
+                onChange={(e) => set('openingBalanceDate', e.target.value)}
+              />
+            </Field>
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              QuickBooks tracks the live receivable balance — this is only the balance entered when the
+              customer was added.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -254,8 +340,8 @@ export function CustomerForm({
               ))}
             </Select>
             <p className="text-xs text-muted-foreground">
-              Drives POS behaviour (walk-in rules, credit-memo routing) — separate from the QuickBooks
-              customer-type label above.
+              Drives POS behaviour (walk-in rules, credit-memo routing)
+              {quickbooksEnabled ? ' — separate from the QuickBooks customer-type label above.' : '.'}
             </p>
           </Field>
           <div className="flex items-start justify-between gap-4 rounded-xl border border-border p-3">
@@ -275,6 +361,7 @@ export function CustomerForm({
                 onChange={(e) => set('creditLimit', e.target.value)}
                 placeholder="Leave blank for no limit"
               />
+              {creditLimitError ? <p className="text-xs text-danger">{creditLimitError}</p> : null}
             </Field>
           ) : null}
           <div className="flex items-start justify-between gap-4 rounded-xl border border-border p-3">

@@ -6,6 +6,13 @@ import * as React from 'react';
 import { ApiError } from '@/lib/api';
 import { api } from '@/lib/api';
 import { type Session } from '@/lib/auth';
+import {
+  MOBILE_MAX_CHARS,
+  MOBILE_MAX_DIGITS,
+  MOBILE_MIN_DIGITS,
+  digitsOf,
+  sanitizeMobile,
+} from '@/lib/customer-mobile';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -62,46 +69,14 @@ interface CustomerRow {
   country?: string | null;
 }
 
-/*
- * Mobile rules.
- *
- * Counted in DIGITS, not characters, so the separators the placeholder invites
- * ("+94 77 123 4567") do not eat the allowance. Nine is the shortest real
- * local number once a leading 0 is dropped; fifteen is the E.164 ceiling, so
- * an international number entered in full still fits. The server caps `mobile`
- * at 40 characters, which the 24-character input cap stays inside.
- */
-const MOBILE_MIN_DIGITS = 9;
-const MOBILE_MAX_DIGITS = 15;
-const MOBILE_MAX_CHARS = 24;
+/* Mobile rules live in `lib/customer-mobile` — shared with the back-office
+ * customer form so the two surfaces cannot drift apart. */
 
 /** Matches `CreateCustomerDto.name` — @MaxLength(200) — so the form can never
  *  build a payload the server will refuse at the end of the order flow. */
 const NAME_MAX = 200;
 /** A single character is a slip, not a name; it makes the record unsearchable. */
 const NAME_MIN = 2;
-
-/**
- * Keep what a phone number is made of and drop the rest as it is typed.
- *
- * Filtering on entry rather than validating after the fact: `inputMode="tel"`
- * is only a soft-keyboard hint, so on a desktop till every letter went
- * straight through to the customer record. A cashier who pastes "077 123 4567
- * (home)" gets the number, not an error they have to go back and fix.
- *
- * `+` survives only in first position, where it means a country code; anywhere
- * else it is a typo.
- */
-function sanitizeMobile(raw: string): string {
-  const kept = raw.replace(/[^\d+\s-]/g, '');
-  const plus = kept.startsWith('+') ? '+' : '';
-  return (plus + kept.replace(/\+/g, '')).slice(0, MOBILE_MAX_CHARS);
-}
-
-/** Just the digits, which is what the length rules are about. */
-function digitsOf(value: string): string {
-  return value.replace(/\D/g, '');
-}
 
 /**
  * One line the rider can read, built from the structured QBO-style address

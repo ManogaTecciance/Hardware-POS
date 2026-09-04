@@ -17,12 +17,17 @@ import {
   type ManagedCustomer,
 } from '@/lib/customers-api';
 import { Permission } from '@/lib/permissions';
+import { isModuleEnabled } from '@/lib/platform-api';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 import { formatMoney } from '@/lib/utils';
 
 export default function CustomerDetailPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.CUSTOMER_MANAGE);
   const canSyncQb = hasPermission(Permission.QUICKBOOKS_MANAGE);
+  const { profile } = useEffectiveProfile();
+  // Unresolved profile = no QuickBooks affordances, never the legacy default.
+  const quickbooksEnabled = profile ? isModuleEnabled(profile, 'QUICKBOOKS') : false;
   const { id } = useParams<{ id: string }>();
 
   const [customer, setCustomer] = React.useState<ManagedCustomer | null>(null);
@@ -86,7 +91,7 @@ export default function CustomerDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {canSyncQb && !customer.quickbooksCustomerId ? (
+          {quickbooksEnabled && canSyncQb && !customer.quickbooksCustomerId ? (
             <Button variant="outline" onClick={handleSync} disabled={busy}>
               <RefreshCw className="h-4 w-4" />
               Sync to QuickBooks
@@ -103,12 +108,16 @@ export default function CustomerDetailPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         {customer.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}
-        {customer.quickbooksCustomerId ? (
-          <Badge variant="primary">QuickBooks-linked</Badge>
-        ) : (
-          <Badge variant="neutral">Not synced</Badge>
-        )}
-        <SyncBadge status={customer.quickbooksCustomerId ? 'SYNCED' : customer.syncStatus} />
+        {quickbooksEnabled ? (
+          <>
+            {customer.quickbooksCustomerId ? (
+              <Badge variant="primary">QuickBooks-linked</Badge>
+            ) : (
+              <Badge variant="neutral">Not synced</Badge>
+            )}
+            <SyncBadge status={customer.quickbooksCustomerId ? 'SYNCED' : customer.syncStatus} />
+          </>
+        ) : null}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -118,14 +127,20 @@ export default function CustomerDetailPage() {
           </CardHeader>
           <CardContent className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
             <Detail label="Company" value={customer.company ?? '—'} />
-            <Detail label="Customer type (QuickBooks)" value={customer.qbCustomerType ?? '—'} />
+            {quickbooksEnabled ? (
+              <Detail label="Customer type (QuickBooks)" value={customer.qbCustomerType ?? '—'} />
+            ) : null}
             <Detail label="Email" value={customer.email ?? '—'} />
             <Detail label="Phone" value={customer.phone ?? '—'} />
             <Detail label="Mobile" value={customer.mobile ?? '—'} />
-            <Detail label="Fax" value={customer.fax ?? '—'} />
-            <Detail label="Website" value={customer.website ?? '—'} />
-            <Detail label="Resale number" value={customer.resaleNumber ?? '—'} />
-            <Detail label="QuickBooks customer ID" value={customer.quickbooksCustomerId ?? 'Not synced'} />
+            {quickbooksEnabled ? (
+              <>
+                <Detail label="Fax" value={customer.fax ?? '—'} />
+                <Detail label="Website" value={customer.website ?? '—'} />
+                <Detail label="Resale number" value={customer.resaleNumber ?? '—'} />
+                <Detail label="QuickBooks customer ID" value={customer.quickbooksCustomerId ?? 'Not synced'} />
+              </>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -153,15 +168,32 @@ export default function CustomerDetailPage() {
           <CardHeader>
             <CardTitle>Address</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-            <Detail label="Street" value={customer.street ?? '—'} />
-            <Detail label="City" value={customer.city ?? '—'} />
-            <Detail label="State / Province" value={customer.state ?? '—'} />
-            <Detail label="ZIP / Postal code" value={customer.zip ?? '—'} />
-            <Detail label="Country" value={customer.country ?? '—'} />
-          </CardContent>
+          {quickbooksEnabled ? (
+            <CardContent className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+              <Detail label="Street" value={customer.street ?? '—'} />
+              <Detail label="City" value={customer.city ?? '—'} />
+              <Detail label="State / Province" value={customer.state ?? '—'} />
+              <Detail label="ZIP / Postal code" value={customer.zip ?? '—'} />
+              <Detail label="Country" value={customer.country ?? '—'} />
+            </CardContent>
+          ) : (
+            <CardContent className="text-sm">
+              {/* One composed block: POS-created customers carry the whole
+                  address in `street`, so labelled slots would read as blanks. */}
+              {composedAddressLines(customer).length > 0 ? (
+                <div className="space-y-0.5 font-medium">
+                  {composedAddressLines(customer).map((line) => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </CardContent>
+          )}
         </Card>
 
+        {quickbooksEnabled ? (
         <Card>
           <CardHeader>
             <CardTitle>Opening balance</CardTitle>
@@ -190,8 +222,17 @@ export default function CustomerDetailPage() {
             </p>
           </CardContent>
         </Card>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+/** Address as display lines, skipping empty parts (POS customers only fill `street`). */
+function composedAddressLines(c: ManagedCustomer): string[] {
+  const cityLine = [c.city, c.state].filter(Boolean).join(', ');
+  return [c.street, [cityLine, c.zip].filter(Boolean).join(' '), c.country].filter(
+    (line): line is string => !!line && line.trim() !== '',
   );
 }
 
