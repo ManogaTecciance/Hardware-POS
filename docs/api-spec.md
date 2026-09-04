@@ -231,6 +231,17 @@ POST /v1/sales/{id}/sync               # push the sale to QuickBooks (mock for n
 400 → sale is not COMPLETED
 ```
 
+### Payment method on a document
+
+A bill, PDF or thermal receipt states its method with the shared rule in
+`documentPaymentMethods` (`packages/shared`): while a balance remains the sale is running
+on credit, so **Credit** is listed — alongside anything already tendered, since a customer
+who paid half in cash did use cash. Once the sale is settled the list is simply what they
+paid with, so a bill reprinted after settlement reads `Bank transfer` rather than `Credit`.
+
+`Credit` is a render-time label, not a `PaymentMethod`: nothing is tendered on credit, so
+there is no enum member and nothing is stored.
+
 ## Payments received
 
 Recording money received against a credit sale, after the sale itself is closed. Requires

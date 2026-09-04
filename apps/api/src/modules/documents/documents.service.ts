@@ -8,6 +8,7 @@ import {
   formatCurrency,
   formatDateInTimeZone,
   formatDateTimeInTimeZone,
+  documentPaymentMethods,
   paymentMethodLabel,
   safeTimeZone,
   type ItemConditionCode,
@@ -230,16 +231,12 @@ export class DocumentsService {
     summary.push({ label: 'Paid', value: formatCurrency(paid) });
     if (balance > 0) summary.push({ label: 'Balance due', value: formatCurrency(balance) });
 
-    // Deduped: a split payment across two cards should read "Card", not "Card, Card".
-    const paymentMethods = [...new Set(sale.payments.map((p) => paymentMethodLabel(p.method)))].join(
-      ', ',
-    );
+    // "Credit" while a balance remains, the real method(s) once it is settled.
+    const paymentMethods = documentPaymentMethods(sale.payments, balance);
     const meta = [
       { label: 'Date', value: this.date((sale.completedAt ?? sale.createdAt).toISOString(), this.tz(tenantId)) },
       { label: 'Payment', value: sale.paymentStatus },
-      // A credit sale with nothing paid yet has no method — say so, rather than
-      // dropping the row and leaving the reader to wonder.
-      { label: 'Method', value: paymentMethods || 'On credit' },
+      { label: 'Method', value: paymentMethods },
       ...(sale.paymentDueDate
         ? [{ label: 'Payment due', value: this.date(sale.paymentDueDate.toISOString(), this.tz(tenantId)) }]
         : []),
@@ -330,7 +327,10 @@ export class DocumentsService {
     if (num(ret.taxAdjustment) > 0)
       summary.push({ label: 'Tax reversed', value: formatCurrency(num(ret.taxAdjustment)) });
     summary.push({ label: 'Total refund', value: formatCurrency(num(ret.refundTotal)), strong: true });
-    if (ret.refundMethod) summary.push({ label: 'Refund method', value: ret.refundMethod });
+    // Labelled, not the raw enum: the return note was printing "BANK_TRANSFER"
+    // at a customer while the invoice beside it said "Bank transfer".
+    if (ret.refundMethod)
+      summary.push({ label: 'Refund method', value: paymentMethodLabel(ret.refundMethod) });
     summary.push({ label: 'Refund status', value: ret.refundStatus });
 
     const meta = [

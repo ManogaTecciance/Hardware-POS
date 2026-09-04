@@ -220,7 +220,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-028 | Due date required in the POS | Choose Credit/Partial at checkout, leave the due date blank | Complete Payment stays disabled and names the missing due date | N | Not Run |
 | PAY-029 | Due date field hidden on a fully paid sale | Choose Cash for the full amount | No due-date field shown; none sent | P | Not Run |
 | PAY-030 | Record payment from the sale detail | Sale detail → Record payment, amount/method/reference | Payment listed with date and time; balance and status update | P | Not Run |
-| PAY-031 | Payment method printed on the bill | Open the A4 bill for a card sale, then for a credit sale | "Method: Card"; a credit sale with nothing paid reads "On credit"; the due date is printed | P | Not Run |
+| PAY-031 | Payment method printed on the bill | Open the A4 bill for a card sale, then for a credit sale | "Method: Card"; a sale taken on credit reads "Credit"; a part payment reads "Cash, Credit"; the due date is printed | P | Not Run |
+| PAY-032 | Bill updates to the real method once settled | Record a bank transfer settling a credit sale, reprint the A4 bill | Method now reads "Bank transfer" — Credit is gone | P | Not Run |
+| PAY-033 | Thermal receipt states credit too | Print the thermal receipt for a part-paid credit sale | Payment lines read "Cash <paid>" and "Credit <balance>", labelled not raw codes | P | Not Run |
 
 ## SALE — Sales History
 
@@ -250,6 +252,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE-022 | Settling drops a sale from the overdue filter | Record a full payment on an overdue sale, re-query | No longer returned | P | Automated |
 | SALE-023 | Sales list reports the last payment received | Part-pay a credit sale, read the list row | `lastPaymentAt` set; `paymentDueDate` returned | P | Automated |
 | SALE-024 | Due column blank for a fully paid sale | Cash sale in the sales list | Due column shows "—", not an invented date | P | Not Run |
+| SALE-027 | Total is red while a sale is owed for | Sales list with one credit and one cash sale | Credit sale's Total is red; the paid one is not; there is no Balance column | P | Not Run |
 | SALE-025 | Last payment blank for a counter sale | Cash sale in the sales list | Last payment column shows "—" (the sale never ran on credit) | P | Not Run |
 | SALE-026 | Overdue export matches the screen | Apply the Overdue filter, export PDF/XLSX | Export covers exactly the filtered sales and names the filter | P | Not Run |
 
@@ -532,12 +535,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
 | POS | 38 | SET | 19 |
-| PAY | 31 | DOC | 11 |
-| SALE | 26 | ADM | 14 |
+| PAY | 34 | DOC | 11 |
+| SALE | 27 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 384 test cases** (≈60% positive / 40% negative).
+**Total: 388 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

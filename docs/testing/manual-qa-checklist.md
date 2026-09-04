@@ -93,8 +93,9 @@ Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · 
 - [ ] The customer's **Available credit** on /customers rises by what was settled.
 - [ ] The dashboard's **Credit Receivable** card falls by the same amount and, clicked, opens the
       customers list filtered to those who still owe.
-- [ ] The A4 bill shows the **payment method** used (and "On credit" when nothing has been paid),
-      plus the **Payment due** date.
+- [ ] The A4 bill shows the **payment method**: "Credit" while a balance remains, "Cash, Credit"
+      for a part payment, and the real method(s) once settled — plus the **Payment due** date.
+      Check the bill printed from the app (`/print/sales/{id}`), not only the API's PDF.
 
 ## 11. Receipt print
 - [ ] Customer receipt renders with lines, discounts, totals, paid/balance; browser **Print** works.

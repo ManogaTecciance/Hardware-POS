@@ -270,7 +270,6 @@ export default function SalesPage() {
                 <th className="px-4 py-3 font-medium">Cashier</th>
                 <th className="px-4 py-3 text-right font-medium">Items</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
-                <th className="px-4 py-3 text-right font-medium">Balance</th>
                 <th className="px-4 py-3 font-medium">Due</th>
                 <th className="px-4 py-3 font-medium">Payment</th>
                 <th className="px-4 py-3 font-medium">Last payment</th>
@@ -281,13 +280,13 @@ export default function SalesPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={11} className="px-4 py-16 text-center text-muted-foreground">
                     Loading sales…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-16 text-center">
+                  <td colSpan={11} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
                         <ReceiptText className="h-6 w-6" />
@@ -323,15 +322,16 @@ export default function SalesPage() {
                     <td className="px-4 py-3">{s.customerName ?? 'Walk-in customer'}</td>
                     <td className="px-4 py-3 text-muted-foreground">{s.cashierName ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-muted-foreground">{s.itemCount}</td>
-                    <td className="px-4 py-3 text-right font-medium">{formatMoney(s.total)}</td>
-                    <td className="px-4 py-3 text-right">
-                      {s.balanceAmount > 0 ? (
-                        <span className="font-medium text-danger">
-                          {formatMoney(s.balanceAmount)}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
+                    {/* Red while the sale is still owed for — the colour carries what
+                        the old Balance column said, without a column of its own. */}
+                    <td
+                      className={cn(
+                        'px-4 py-3 text-right font-medium',
+                        s.balanceAmount > 0 && 'text-danger',
                       )}
+                      title={s.balanceAmount > 0 ? `${formatMoney(s.balanceAmount)} outstanding` : undefined}
+                    >
+                      {formatMoney(s.total)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
                       {s.paymentDueDate ? (
