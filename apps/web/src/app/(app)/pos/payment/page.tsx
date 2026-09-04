@@ -245,12 +245,9 @@ export default function PaymentPage() {
       disabledReason = 'The invoice date must be today or earlier — fix it in the cart.';
     } else if (needsCustomer && !hasCustomer) {
       disabledReason = 'Select a customer to record a credit or partial sale.';
-    } else if (creditRefused) {
-      disabledReason = 'This customer is not approved for credit — take full payment to complete.';
-    } else if (overLimit) {
-      disabledReason =
-        `Over the credit limit: ${formatMoney(creditAvailable, currency)} available, ` +
-        `this sale needs ${formatMoney(balance, currency)}. Take a larger payment now.`;
+      // No credit clause here on purpose: the credit panel above already states
+      // the position, in the same words and with the numbers. Repeating it in the
+      // footer says nothing new and puts the same sentence on screen twice.
     } else if (mode === 'CASH' && tenderedNum < total) {
       disabledReason = `Enter at least ${formatMoney(total, currency)} to complete this cash payment.`;
     } else if (mode === 'PARTIAL' && paidAmount <= 0) {

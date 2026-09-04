@@ -217,7 +217,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-025 | Due date stored on the sale | Complete on credit with a due date, read the sale | `paymentDueDate` returned as given | P | Automated |
 | PAY-026 | Due date before the invoice date rejected | `paymentDueDate` earlier than `saleDate` | 400 | N | Automated |
 | PAY-027 | Instalments each kept as their own record | Two part payments against one sale | Two Payment rows, each with its own date/time, method and reference | P | Automated |
-| PAY-034 | Credit warning appears as the order grows | Credit customer, raise a quantity in the payment page order summary until the total passes their limit | Warning appears live with available vs needed; Complete Payment disables — without pressing it | P | Not Run |
+| PAY-034 | Credit warning appears as the order grows | Credit customer, raise a quantity in the payment page order summary until the total passes their limit | Warning appears live with available vs needed; Complete Payment disables — without pressing it. The credit panel is the ONLY place it is stated; no duplicate in the footer notice | P | Not Run |
 | PAY-035 | Credit warning clears when payment covers it | With the warning showing, switch to Partial and enter enough to bring the balance under the limit | Warning clears; Complete Payment re-enables | P | Not Run |
 | PAY-036 | Non-credit customer flagged up front | Select a customer with creditAllowed false, choose Credit | "not approved for credit" shown immediately, not on submit | N | Not Run |
 | PAY-037 | Unlimited customer is never blocked | creditAllowed with creditLimit null, large credit sale | No warning; sale completes | P | Not Run |
