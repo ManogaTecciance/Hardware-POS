@@ -29,6 +29,8 @@ export interface SaleListItem {
   paymentMethods: PaymentMethod[];
   /** When payment is expected. Null on a fully paid sale — the column stays blank. */
   paymentDueDate: Date | null;
+  /** When an account settlement covered this invoice; null while it is on credit. */
+  creditSettledAt: Date | null;
   /** When the most recent payment was received. Null when none has been. */
   lastPaymentAt: Date | null;
   returnStatus: SaleReturnStatus;

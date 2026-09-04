@@ -89,7 +89,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DASH-019 | "Today" boundary respected | Sale completed yesterday (server-local midnight) | Excluded from today's Net Sales / Transactions | P | Not Run |
 | DASH-020 | Cashier register health card | Cashier dashboard | QuickBooks health + expected cash consistent with shift summary | P | Not Run |
 | DASH-021 | Receivable card counts every unsettled balance | Read /dashboard/stats, complete a credit sale, read again | `outstandingReceivable` rises by exactly the sale total | P | Automated |
-| DASH-022 | Settlement removes a sale from the receivable | Record a full payment against that sale, read stats again | Figure falls back by the same amount | P | Automated |
+| DASH-022 | An account payment comes off the receivable at once | Part-pay an account, then clear it | The receivable drops by the part payment immediately, and by the full amount once cleared | P | Automated |
 | DASH-023 | Receivable is not windowed | Switch the dashboard range (Today → 1Y) | Credit Receivable is unchanged — money owed does not stop being owed at midnight | P | Not Run |
 | DASH-024 | Receivable card deep-links to who owes | Click Credit Receivable | Customers page opens filtered to customers with credit outstanding | P | Not Run |
 
@@ -208,10 +208,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-016 | Zero-total sale disallowed | Empty cart complete attempt | Blocked client- and server-side | N | Not Run |
 | PAY-017 | Bank transfer / QR / cheque with reference | Pay via each method with a reference string | Method + reference stored and visible on sale detail | P | Not Run |
 | PAY-018 | Cash tender below total blocked (non-credit) | Walk-in, tender < total | Cannot complete the sale | N | Not Run |
-| PAY-019 | Settle credit sale with POST /payments | Record payment {saleId, method, amount} against UNPAID sale | Balance reduces; PARTIAL→PAID when it reaches zero | P | Automated |
-| PAY-020 | Settlement frees credit headroom | Settle a sale, then retry a previously over-limit credit sale | Now allowed — outstanding recomputed from balances | P | Not Run |
-| PAY-021 | Overpayment on settlement rejected | Payment amount > remaining balance | 400 | N | Automated |
-| PAY-022 | Payment against a PAID sale rejected | POST /payments on a settled sale | 400 | N | Automated |
+| PAY-019 | Part payment settles no invoice | Two credit sales for one customer, pay half the account | Account balance drops; BOTH invoices still read Credit — not even the oldest is settled | P | Automated |
+| PAY-020 | Clearing the account pays every invoice on it | Pay the full account balance | All invoices outstanding at that moment flip to Paid together | P | Automated |
+| PAY-021 | Overpayment on the account rejected | Payment greater than the account balance | 400; balance unchanged | N | Automated |
+| PAY-022 | Payment against a cleared account rejected | POST /payments for a customer who owes nothing | 400 "nothing outstanding" | N | Automated |
 | PAY-023 | Due date required when a balance remains | Complete a credit/partial sale with no `paymentDueDate` | 400; message names the due date | N | Automated |
 | PAY-024 | Due date rejected on a fully paid sale | Complete a fully paid sale carrying a `paymentDueDate` | 400 — nothing is outstanding to fall due | N | Automated |
 | PAY-025 | Due date stored on the sale | Complete on credit with a due date, read the sale | `paymentDueDate` returned as given | P | Automated |
@@ -548,18 +548,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 27 |
+| AUTH | 15 | CUST | 30 |
 | PERM | 15 | CIMP | 10 |
 | DASH | 24 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
 | POS | 40 | SET | 19 |
-| PAY | 41 | DOC | 11 |
-| SALE | 31 | ADM | 14 |
+| PAY | 44 | DOC | 11 |
+| SALE | 33 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 407 test cases** (≈60% positive / 40% negative).
+**Total: 415 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
@@ -569,6 +569,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
   script as fixtures; QB-* cases need a QuickBooks sandbox connection and are
   best tagged `@quickbooks` so they can be excluded from CI without secrets.
 - Concurrency cases (PAY-014, PAY-015) are API-level tests, not browser tests.
-- Credit-management cases (PAY-019/021–027, SALE-021–023, CUST-017–020, DASH-021/022) are
-  automated API-level in `apps/e2e/tests/credit-management.spec.ts`; the remaining ones in
-  those groups are browser cases still to be scripted.
+- Credit-management cases are automated API-level in
+  `apps/e2e/tests/credit-management.spec.ts` (28 cases); the remaining ones in those groups
+  are browser cases still to be scripted. Credit is settled per CUSTOMER ACCOUNT, so any new
+  case must exercise `POST /payments {customerId}` — there is no per-invoice settlement.

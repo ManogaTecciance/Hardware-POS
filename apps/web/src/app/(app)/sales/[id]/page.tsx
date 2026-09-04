@@ -3,13 +3,12 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as React from 'react';
-import { ArrowLeft, FileDown, HandCoins, Printer, RefreshCw, Undo2 } from 'lucide-react';
+import { ArrowLeft, FileDown, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
-import { paymentMethodLabel, paymentStatusLabel } from '@hardware-pos/shared';
+import { paymentMethodLabel, saleStatusLabel } from '@hardware-pos/shared';
 
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { SaleReturnStatusBadge } from '@/components/returns/status-badges';
-import { RecordPaymentDialog } from '@/components/sales/record-payment-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -59,7 +58,6 @@ export default function SaleDetailPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
-  const [payOpen, setPayOpen] = React.useState(false);
   const loadedOnce = React.useRef(false);
 
   React.useEffect(() => {
@@ -137,16 +135,14 @@ export default function SaleDetailPage() {
     );
   }
 
-  const payVariant = PAYMENT_STATUS_VARIANT[sale.paymentStatus];
+  // A sale covered by an account settlement reads as paid, whatever its own
+  // payment status says about what was tendered at the till.
+  const payVariant = sale.creditSettledAt ? 'success' : PAYMENT_STATUS_VARIANT[sale.paymentStatus];
   const canRetry = sale.syncStatus === 'FAILED' || sale.syncStatus === 'PENDING';
   const canReturn =
     sale.status === 'COMPLETED' &&
     sale.returnStatus !== 'FULLY_RETURNED' &&
     hasPermission(Permission.RETURN_CREATE);
-  const canRecordPayment =
-    sale.status === 'COMPLETED' &&
-    sale.balanceAmount > 0 &&
-    hasPermission(Permission.PAYMENT_CREATE);
 
   return (
     <div className="space-y-6">
@@ -165,12 +161,6 @@ export default function SaleDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {canRecordPayment ? (
-            <Button onClick={() => setPayOpen(true)} disabled={busy}>
-              <HandCoins className="h-4 w-4" />
-              Record payment
-            </Button>
-          ) : null}
           {canReturn ? (
             <Link href={`/returns/new?saleId=${sale.id}`}>
               <Button>
@@ -195,7 +185,9 @@ export default function SaleDetailPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={payVariant}>{paymentStatusLabel(sale.paymentStatus)}</Badge>
+        <Badge variant={payVariant}>
+          {saleStatusLabel(sale.paymentStatus, sale.creditSettledAt)}
+        </Badge>
         <SaleReturnStatusBadge status={sale.returnStatus} />
         <SyncBadge status={sale.syncStatus} />
         {sale.quickbooksDocumentType ? (
@@ -325,9 +317,11 @@ export default function SaleDetailPage() {
               {sale.payments.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
-                    {sale.balanceAmount > 0
-                      ? 'Nothing received yet — this sale is entirely on credit.'
-                      : 'No payments recorded.'}
+                    {sale.creditSettledAt
+                      ? 'Nothing was tendered here — covered when the customer settled their account.'
+                      : sale.balanceAmount > 0
+                        ? 'Nothing received yet — this sale is on the customer\u2019s credit account.'
+                        : 'No payments recorded.'}
                   </td>
                 </tr>
               ) : (
@@ -419,17 +413,6 @@ export default function SaleDetailPage() {
         </Card>
       ) : null}
 
-      {session ? (
-        <RecordPaymentDialog
-          session={session}
-          saleId={sale.id}
-          saleNumber={sale.saleNumber}
-          outstanding={sale.balanceAmount}
-          open={payOpen}
-          onClose={() => setPayOpen(false)}
-          onRecorded={() => setReloadKey((k) => k + 1)}
-        />
-      ) : null}
     </div>
   );
 }

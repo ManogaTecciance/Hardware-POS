@@ -132,10 +132,13 @@ Automated end-to-end in `apps/e2e/tests/credit-management.spec.ts`.
 | I-10a-4 | Due date before the invoice date | 400. |
 | I-10a-5 | `GET /sales?overdue=true` | Only COMPLETED sales past due and still owing. |
 | I-10a-6 | Settle an overdue sale, re-query | The sale drops out of the overdue filter. |
-| I-10a-7 | `POST /payments` part, then the rest | `PARTIAL` → `PAID`; balance reaches 0. |
-| I-10a-8 | Two instalments | Two `Payment` rows, each with its own `createdAt`, method and reference. |
-| I-10a-9 | Payment over the balance | 400; balance unchanged. |
-| I-10a-10 | Payment against a settled sale | 400. |
+| I-10a-7 | `POST /payments {customerId}` part payment | Account balance drops; NO invoice settled, not even the oldest. |
+| I-10a-8 | Pay the rest | Every sale outstanding at that moment gets `creditSettledAt`; `salesSettled` reports the count. |
+| I-10a-9 | Payment over the account balance | 400; balance unchanged. |
+| I-10a-10 | Payment against a cleared account | 400 "nothing outstanding". |
+| I-10a-18 | A sale after settlement | Starts a fresh balance; the covered sales stay settled. |
+| I-10a-19 | Settlement and the invoice figures | `paidAmount`/`balanceAmount`/payment rows unchanged — only `creditSettledAt` is written. |
+| I-10a-20 | Consumed payments | Retired via `Payment.settledAt`, so they are not subtracted from the next balance. |
 | I-10a-11 | Sales list row after a payment | `lastPaymentAt` set; `paymentDueDate` returned. |
 | I-10a-12 | Customers list for a credit customer | `outstandingCredit` = owed; `availableCredit` = limit − owed. |
 | I-10a-13 | Customer with `creditLimit: null` | `availableCredit` is **null**, not 0. |

@@ -2,16 +2,18 @@ import { test, expect } from '../src/fixtures';
 import { Api } from '../src/api';
 
 /**
- * Credit management: available credit, receivables, payment due dates, and
- * recording payments received.
+ * Credit management. Credit is an ACCOUNT balance, not a per-invoice one: money
+ * is received against the customer, every credit sale stays outstanding while
+ * anything is still owed, and the moment the account clears, the invoices it
+ * covered are all marked settled together.
  *
  * Driven through the API because these are arithmetic and guard rules — a rule
  * that only holds in the browser is not a rule.
  */
-test.describe('CREDIT — limits, due dates & settlement', () => {
+test.describe('CREDIT — accounts, due dates & settlement', () => {
   const DUE = Api.daysAhead(30);
 
-  /** A credit customer with a fresh unpaid sale; returns both plus the total. */
+  /** A credit customer, and one unpaid sale against their account. */
   async function creditSale(
     api: Api,
     opts: {
@@ -19,42 +21,154 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
       quantity?: number;
       paymentDueDate?: string;
       saleDate?: string;
+      customerId?: string;
+      unitPrice?: number;
     } = {},
   ) {
-    const product = await api.createProduct({ quantityOnHand: 100, unitPrice: 10_000 });
+    const product = await api.createProduct({
+      quantityOnHand: 1000,
+      unitPrice: opts.unitPrice ?? 10_000,
+    });
     const quantity = opts.quantity ?? 1;
     const total = await api.cartTotal([{ productId: product.id, quantity }]);
-    const customer = await api.createCustomer({
-      creditAllowed: true,
-      creditLimit: opts.creditLimit === undefined ? total * 10 : opts.creditLimit,
-    });
+    const customerId =
+      opts.customerId ??
+      (
+        await api.createCustomer({
+          creditAllowed: true,
+          creditLimit: opts.creditLimit === undefined ? total * 100 : opts.creditLimit,
+        })
+      ).id;
     const sale = await api.post('/sales/complete', {
       branchId: 'brn_dev',
       registerId: 'reg_dev',
-      customerId: customer.id,
+      customerId,
       items: [{ productId: product.id, quantity }],
       payments: [],
       ...(opts.saleDate ? { saleDate: opts.saleDate } : {}),
       paymentDueDate: opts.paymentDueDate ?? DUE,
     });
-    return { product, customer, sale, total };
+    return { product, customerId, sale, total };
   }
 
-  /**
-   * The customer's row as the customers LIST renders it — the credit figures
-   * live there, not on the detail endpoint. Factory names carry the run id, so
-   * a search by name resolves to exactly this customer.
-   */
-  async function customerRow(api: Api, customer: { id: string; name: string }) {
-    const page = await api.get(
-      `/customers?page=1&pageSize=100&search=${encodeURIComponent(customer.name)}`,
+  /** Pay against a customer's credit account. */
+  const payAccount = (api: Api, customerId: string, amount: number, method = 'CASH') =>
+    api.post('/payments', { customerId, method, amount });
+
+  const credit = (api: Api, customerId: string) => api.get(`/customers/${customerId}/credit`);
+  const saleOf = (api: Api, id: string) => api.get(`/sales/${id}`);
+
+  // ── Account-level settlement ───────────────────────────────────────────────
+
+  test('PAY-019 a part payment leaves every invoice on credit', async ({ ownerApi }) => {
+    const first = await creditSale(ownerApi);
+    const second = await creditSale(ownerApi, { customerId: first.customerId });
+    const owed = first.total + second.total;
+
+    const res = await payAccount(ownerApi, first.customerId, Math.round(owed / 2));
+    expect(Number(res.outstanding)).toBeGreaterThan(0);
+    expect(res.salesSettled).toBe(0);
+
+    // Neither invoice is settled — not even the older one.
+    for (const s of [first.sale, second.sale]) {
+      expect((await saleOf(ownerApi, s.id)).creditSettledAt).toBeNull();
+    }
+  });
+
+  test('PAY-020 clearing the account marks every invoice on it as paid', async ({ ownerApi }) => {
+    const first = await creditSale(ownerApi);
+    const second = await creditSale(ownerApi, { customerId: first.customerId });
+    const owed = await accountOwed(ownerApi, first.customerId);
+
+    const res = await payAccount(ownerApi, first.customerId, owed);
+    expect(Number(res.outstanding)).toBe(0);
+    expect(res.salesSettled).toBe(2);
+
+    for (const s of [first.sale, second.sale]) {
+      expect((await saleOf(ownerApi, s.id)).creditSettledAt).not.toBeNull();
+    }
+  });
+
+  test('PAY-034 a sale rung up after settlement starts a fresh balance', async ({ ownerApi }) => {
+    const first = await creditSale(ownerApi);
+    await payAccount(ownerApi, first.customerId, await accountOwed(ownerApi, first.customerId));
+
+    const later = await creditSale(ownerApi, { customerId: first.customerId });
+    expect((await saleOf(ownerApi, later.sale.id)).creditSettledAt).toBeNull();
+    // The already-covered invoice is untouched by the new debt.
+    expect((await saleOf(ownerApi, first.sale.id)).creditSettledAt).not.toBeNull();
+    expect(Number((await credit(ownerApi, first.customerId)).outstanding)).toBeCloseTo(
+      later.total,
+      2,
     );
-    const row = page.items.find((c: any) => c.id === customer.id);
-    expect(row, `customer ${customer.name} missing from the list`).toBeTruthy();
-    return row;
-  }
+  });
 
-  // ── REQ005 — payment due date ──────────────────────────────────────────────
+  test('PAY-035 settlement never rewrites what was tendered against an invoice', async ({
+    ownerApi,
+  }) => {
+    // The invoice's own figures must stay true: the printed bill and the refund
+    // guard read them, and nothing was tendered against this invoice.
+    const { sale, customerId } = await creditSale(ownerApi);
+    const before = await saleOf(ownerApi, sale.id);
+    await payAccount(ownerApi, customerId, await accountOwed(ownerApi, customerId));
+    const after = await saleOf(ownerApi, sale.id);
+
+    expect(Number(after.paidAmount)).toBe(Number(before.paidAmount));
+    expect(Number(after.balanceAmount)).toBe(Number(before.balanceAmount));
+    expect(after.payments).toHaveLength(0);
+    expect(after.creditSettledAt).not.toBeNull();
+  });
+
+  test('PAY-027 each account payment is kept as its own record', async ({ ownerApi }) => {
+    const { customerId, total } = await creditSale(ownerApi);
+    const third = Math.floor((total / 3) * 100) / 100;
+    await payAccount(ownerApi, customerId, third, 'CASH');
+    await ownerApi.post('/payments', {
+      customerId,
+      method: 'CARD',
+      amount: third,
+      reference: 'AUTH-2201',
+    });
+
+    const rows = await ownerApi.get(`/payments?customerId=${customerId}`);
+    expect(rows).toHaveLength(2);
+    for (const r of rows) expect(r.createdAt).toBeTruthy();
+    // Newest first.
+    expect(rows[0].method).toBe('CARD');
+    expect(rows[0].reference).toBe('AUTH-2201');
+    expect(rows.every((r: any) => r.saleId === null)).toBe(true);
+  });
+
+  test('PAY-021 a payment larger than the account balance is rejected', async ({ ownerApi }) => {
+    const { customerId } = await creditSale(ownerApi);
+    const owed = await accountOwed(ownerApi, customerId);
+    const res = await ownerApi.postRaw('/payments', {
+      customerId,
+      method: 'CASH',
+      amount: owed + 1,
+    });
+    expect(res.status()).toBe(400);
+    expect(await accountOwed(ownerApi, customerId)).toBeCloseTo(owed, 2);
+  });
+
+  test('PAY-022 a payment against a cleared account is rejected', async ({ ownerApi }) => {
+    const { customerId } = await creditSale(ownerApi);
+    await payAccount(ownerApi, customerId, await accountOwed(ownerApi, customerId));
+    const res = await ownerApi.postRaw('/payments', { customerId, method: 'CASH', amount: 1 });
+    expect(res.status()).toBe(400);
+    expect(await res.text()).toContain('nothing outstanding');
+  });
+
+  test('PAY-036 payments retire once they have cleared a balance', async ({ ownerApi }) => {
+    // Otherwise the money would keep being subtracted and every later balance
+    // would come out short.
+    const first = await creditSale(ownerApi);
+    await payAccount(ownerApi, first.customerId, await accountOwed(ownerApi, first.customerId));
+    const later = await creditSale(ownerApi, { customerId: first.customerId });
+    expect(await accountOwed(ownerApi, first.customerId)).toBeCloseTo(later.total, 2);
+  });
+
+  // ── REQ005 — payment due date (unchanged by the account model) ─────────────
 
   test('PAY-023 a sale that leaves a balance is refused without a due date', async ({
     ownerApi,
@@ -86,8 +200,7 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
 
   test('PAY-025 the due date is stored on the sale', async ({ ownerApi }) => {
     const { sale } = await creditSale(ownerApi);
-    const detail = await ownerApi.get(`/sales/${sale.id}`);
-    expect(detail.paymentDueDate).not.toBeNull();
+    const detail = await saleOf(ownerApi, sale.id);
     expect(String(detail.paymentDueDate).slice(0, 10)).toBe(DUE);
   });
 
@@ -105,10 +218,11 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
     expect(res.status()).toBe(400);
   });
 
-  test('SALE-021 the overdue filter returns only sales past due and still owing', async ({
+  // ── Sales list ─────────────────────────────────────────────────────────────
+
+  test('SALE-021 the overdue filter returns only sales past due and still owed', async ({
     ownerApi,
   }) => {
-    // Backdated, so a due date in the past is not also before the invoice date.
     const overdue = await creditSale(ownerApi, {
       saleDate: Api.daysAgo(5),
       paymentDueDate: Api.daysAgo(1),
@@ -119,167 +233,81 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
     const ids = page.items.map((s: any) => s.id);
     expect(ids).toContain(overdue.sale.id);
     expect(ids).not.toContain(notYetDue.sale.id);
-    for (const s of page.items) {
-      expect(Number(s.balanceAmount)).toBeGreaterThan(0);
-    }
   });
 
-  test('SALE-022 settling an overdue sale drops it from the overdue filter', async ({
+  test('SALE-022 clearing the account drops its sales from the overdue filter', async ({
     ownerApi,
   }) => {
-    const { sale, total } = await creditSale(ownerApi, {
+    const { sale, customerId } = await creditSale(ownerApi, {
       saleDate: Api.daysAgo(5),
       paymentDueDate: Api.daysAgo(1),
     });
-    await ownerApi.post('/payments', { saleId: sale.id, method: 'CASH', amount: total });
+    await payAccount(ownerApi, customerId, await accountOwed(ownerApi, customerId));
     const page = await ownerApi.get('/sales?page=1&pageSize=200&overdue=true');
     expect(page.items.map((s: any) => s.id)).not.toContain(sale.id);
   });
 
-  // ── REQ006 — recording payments received ───────────────────────────────────
-
-  test('PAY-019 recording a payment reduces the balance and settles at zero', async ({
+  test('SALE-028 the Credit filter excludes sales the account has cleared', async ({
     ownerApi,
   }) => {
-    const { sale, total } = await creditSale(ownerApi);
-    const half = Math.round((total / 2) * 100) / 100;
-
-    await ownerApi.post('/payments', { saleId: sale.id, method: 'CASH', amount: half });
-    let detail = await ownerApi.get(`/sales/${sale.id}`);
-    expect(detail.paymentStatus).toBe('PARTIAL');
-    expect(Number(detail.balanceAmount)).toBeCloseTo(total - half, 2);
-
-    await ownerApi.post('/payments', {
-      saleId: sale.id,
-      method: 'CARD',
-      amount: Math.round((total - half) * 100) / 100,
-    });
-    detail = await ownerApi.get(`/sales/${sale.id}`);
-    expect(detail.paymentStatus).toBe('PAID');
-    expect(Number(detail.balanceAmount)).toBe(0);
-  });
-
-  test('PAY-027 each instalment is kept as its own payment record', async ({ ownerApi }) => {
-    const { sale, total } = await creditSale(ownerApi);
-    const third = Math.floor((total / 3) * 100) / 100;
-    await ownerApi.post('/payments', { saleId: sale.id, method: 'CASH', amount: third });
-    await ownerApi.post('/payments', {
-      saleId: sale.id,
-      method: 'CARD',
-      amount: third,
-      reference: 'AUTH-2201',
-    });
-
-    const detail = await ownerApi.get(`/sales/${sale.id}`);
-    expect(detail.payments).toHaveLength(2);
-    // Each carries its own timestamp, so the list can show when money came in.
-    for (const p of detail.payments) {
-      expect(p.createdAt).toBeTruthy();
-    }
-    expect(detail.payments.map((p: any) => p.method)).toEqual(['CASH', 'CARD']);
-    expect(detail.payments[1].reference).toBe('AUTH-2201');
-  });
-
-  test('PAY-021 a payment larger than the balance is rejected', async ({ ownerApi }) => {
-    const { sale, total } = await creditSale(ownerApi);
-    const res = await ownerApi.postRaw('/payments', {
-      saleId: sale.id,
-      method: 'CASH',
-      amount: total + 1,
-    });
-    expect(res.status()).toBe(400);
-    const detail = await ownerApi.get(`/sales/${sale.id}`);
-    expect(Number(detail.balanceAmount)).toBeCloseTo(total, 2);
-  });
-
-  test('PAY-022 a payment against a settled sale is rejected', async ({ ownerApi }) => {
-    const { sale, total } = await creditSale(ownerApi);
-    await ownerApi.post('/payments', { saleId: sale.id, method: 'CASH', amount: total });
-    const res = await ownerApi.postRaw('/payments', {
-      saleId: sale.id,
-      method: 'CASH',
-      amount: 1,
-    });
-    expect(res.status()).toBe(400);
-  });
-
-  test('SALE-023 the sales list reports when the last payment came in', async ({ ownerApi }) => {
-    const { sale, total } = await creditSale(ownerApi);
-    await ownerApi.post('/payments', {
-      saleId: sale.id,
-      method: 'CASH',
-      amount: Math.round((total / 2) * 100) / 100,
-    });
-    const page = await ownerApi.get(`/sales?page=1&pageSize=50&search=${sale.saleNumber}`);
-    const row = page.items.find((s: any) => s.id === sale.id);
-    expect(row).toBeTruthy();
-    expect(row.lastPaymentAt).toBeTruthy();
-    expect(String(row.paymentDueDate).slice(0, 10)).toBe(DUE);
-  });
-
-  test('SALE-028 the Credit / Unpaid filter includes part-paid sales', async ({ ownerApi }) => {
-    // The app shows a part-paid sale as "Credit / Unpaid", so the filter behind
-    // that label must return it — otherwise the list hides sales it says exist.
-    const partPaid = await creditSale(ownerApi);
-    await ownerApi.post('/payments', {
-      saleId: partPaid.sale.id,
-      method: 'CASH',
-      amount: Math.round((partPaid.total / 2) * 100) / 100,
-    });
-    const wholly = await creditSale(ownerApi);
+    const owing = await creditSale(ownerApi);
     const settled = await creditSale(ownerApi);
-    await ownerApi.post('/payments', {
-      saleId: settled.sale.id,
-      method: 'CASH',
-      amount: settled.total,
-    });
+    await payAccount(ownerApi, settled.customerId, await accountOwed(ownerApi, settled.customerId));
 
     const page = await ownerApi.get('/sales?page=1&pageSize=200&paymentStatus=UNPAID');
     const ids = page.items.map((s: any) => s.id);
-    expect(ids).toContain(partPaid.sale.id);
-    expect(ids).toContain(wholly.sale.id);
+    expect(ids).toContain(owing.sale.id);
     expect(ids).not.toContain(settled.sale.id);
   });
 
-  test('SALE-029 filtering by PARTIAL alone still narrows to part-paid sales', async ({
-    ownerApi,
-  }) => {
-    const partPaid = await creditSale(ownerApi);
-    await ownerApi.post('/payments', {
-      saleId: partPaid.sale.id,
-      method: 'CASH',
-      amount: Math.round((partPaid.total / 2) * 100) / 100,
-    });
-    const wholly = await creditSale(ownerApi);
-
-    const page = await ownerApi.get('/sales?page=1&pageSize=200&paymentStatus=PARTIAL');
-    const ids = page.items.map((s: any) => s.id);
-    expect(ids).toContain(partPaid.sale.id);
-    expect(ids).not.toContain(wholly.sale.id);
+  test('SALE-032 the Paid filter includes sales the account has cleared', async ({ ownerApi }) => {
+    const { sale, customerId } = await creditSale(ownerApi);
+    await payAccount(ownerApi, customerId, await accountOwed(ownerApi, customerId));
+    const page = await ownerApi.get('/sales?page=1&pageSize=200&paymentStatus=PAID');
+    expect(page.items.map((s: any) => s.id)).toContain(sale.id);
   });
 
-  // ── REQ003 / REQ004 — available credit and total receivable ────────────────
+  test('SALE-033 a settled sale reports when its account cleared it', async ({ ownerApi }) => {
+    const { sale, customerId } = await creditSale(ownerApi);
+    await payAccount(ownerApi, customerId, await accountOwed(ownerApi, customerId));
+    const page = await ownerApi.get(`/sales?page=1&pageSize=50&search=${sale.saleNumber}`);
+    const row = page.items.find((s: any) => s.id === sale.id);
+    expect(row.creditSettledAt).toBeTruthy();
+  });
 
-  test('CUST-017 available credit is the limit minus what is owed', async ({ ownerApi }) => {
-    const { customer, total } = await creditSale(ownerApi, { creditLimit: 100_000 });
-    const row = await customerRow(ownerApi, customer);
-    expect(Number(row.outstandingCredit)).toBeCloseTo(total, 2);
-    expect(Number(row.availableCredit)).toBeCloseTo(100_000 - total, 2);
+  // ── Customer credit position ───────────────────────────────────────────────
+
+  test('CUST-017 available credit is the limit minus what the account owes', async ({
+    ownerApi,
+  }) => {
+    const { customerId, total } = await creditSale(ownerApi, { creditLimit: 100_000 });
+    const c = await credit(ownerApi, customerId);
+    expect(Number(c.outstanding)).toBeCloseTo(total, 2);
+    expect(Number(c.available)).toBeCloseTo(100_000 - total, 2);
+  });
+
+  test('CUST-028 a part payment releases credit immediately', async ({ ownerApi }) => {
+    // The invoices stay on credit, but the money is the shop's the moment it is
+    // taken, so the headroom must move even before the account clears.
+    const { customerId, total } = await creditSale(ownerApi, { creditLimit: 100_000 });
+    const half = Math.round((total / 2) * 100) / 100;
+    await payAccount(ownerApi, customerId, half);
+    const c = await credit(ownerApi, customerId);
+    expect(Number(c.outstanding)).toBeCloseTo(total - half, 2);
+    expect(Number(c.available)).toBeCloseTo(100_000 - (total - half), 2);
   });
 
   test('CUST-018 a customer with no limit reports no available credit', async ({ ownerApi }) => {
-    const { customer } = await creditSale(ownerApi, { creditLimit: null });
-    const row = await customerRow(ownerApi, customer);
-    // Null, not zero — "no limit set" must not read as "nothing left".
-    expect(row.availableCredit).toBeNull();
+    const { customerId } = await creditSale(ownerApi, { creditLimit: null });
+    expect((await credit(ownerApi, customerId)).available).toBeNull();
   });
 
-  test('CUST-019 settling a sale releases the credit again', async ({ ownerApi }) => {
-    const { customer, sale, total } = await creditSale(ownerApi, { creditLimit: 100_000 });
-    await ownerApi.post('/payments', { saleId: sale.id, method: 'CASH', amount: total });
-    const row = await customerRow(ownerApi, customer);
-    expect(Number(row.outstandingCredit)).toBe(0);
-    expect(Number(row.availableCredit)).toBeCloseTo(100_000, 2);
+  test('CUST-019 clearing the account releases the whole limit again', async ({ ownerApi }) => {
+    const { customerId } = await creditSale(ownerApi, { creditLimit: 100_000 });
+    await payAccount(ownerApi, customerId, await accountOwed(ownerApi, customerId));
+    const c = await credit(ownerApi, customerId);
+    expect(Number(c.outstanding)).toBe(0);
+    expect(Number(c.available)).toBeCloseTo(100_000, 2);
   });
 
   test('CUST-020 the customers list filters to those with credit outstanding', async ({
@@ -287,45 +315,21 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
   }) => {
     const owing = await creditSale(ownerApi);
     const settled = await creditSale(ownerApi);
-    await ownerApi.post('/payments', {
-      saleId: settled.sale.id,
-      method: 'CASH',
-      amount: settled.total,
-    });
+    await payAccount(ownerApi, settled.customerId, await accountOwed(ownerApi, settled.customerId));
 
     const page = await ownerApi.get(
       '/customers?page=1&pageSize=200&hasOutstandingCredit=true&isActive=true',
     );
     const ids = page.items.map((c: any) => c.id);
-    expect(ids).toContain(owing.customer.id);
-    expect(ids).not.toContain(settled.customer.id);
-  });
-
-  test('CUST-022 the credit endpoint reports the position the till shows', async ({ ownerApi }) => {
-    const { customer, total } = await creditSale(ownerApi, { creditLimit: 100_000 });
-    const credit = await ownerApi.get(`/customers/${customer.id}/credit`);
-    expect(credit.creditAllowed).toBe(true);
-    expect(Number(credit.creditLimit)).toBe(100_000);
-    expect(Number(credit.outstanding)).toBeCloseTo(total, 2);
-    expect(Number(credit.available)).toBeCloseTo(100_000 - total, 2);
-  });
-
-  test('CUST-023 no limit reports null available, not zero', async ({ ownerApi }) => {
-    const { customer } = await creditSale(ownerApi, { creditLimit: null });
-    const credit = await ownerApi.get(`/customers/${customer.id}/credit`);
-    expect(credit.creditLimit).toBeNull();
-    expect(credit.available).toBeNull();
+    expect(ids).toContain(owing.customerId);
+    expect(ids).not.toContain(settled.customerId);
   });
 
   test('CUST-024 the figure the till shows is the figure the guard enforces', async ({
     ownerApi,
   }) => {
-    // The whole point of the live warning: what the cashier is told is available
-    // must be exactly what completes. A sale for that amount goes through, and a
-    // cent more does not.
-    const product = await ownerApi.createProduct({ quantityOnHand: 500, unitPrice: 100 });
-    // A limit that is a whole number of units, so "exactly the headroom" is a
-    // quantity and not a rounding argument — tax, if any, is already in `unit`.
+    const unitPrice = 100;
+    const product = await ownerApi.createProduct({ quantityOnHand: 500, unitPrice });
     const unit = await ownerApi.cartTotal([{ productId: product.id, quantity: 1 }]);
     const UNITS = 50;
     const customer = await ownerApi.createCustomer({
@@ -333,8 +337,7 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
       creditLimit: unit * UNITS,
     });
 
-    const before = await ownerApi.get(`/customers/${customer.id}/credit`);
-    expect(Number(before.available)).toBeCloseTo(unit * UNITS, 2);
+    expect(Number((await credit(ownerApi, customer.id)).available)).toBeCloseTo(unit * UNITS, 2);
 
     const tooBig = await ownerApi.postRaw('/sales/complete', {
       branchId: 'brn_dev',
@@ -347,8 +350,7 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
     expect(tooBig.status()).toBe(400);
     expect(await tooBig.text()).toContain('Credit limit exceeded');
 
-    // Exactly the available headroom completes — the server tests strictly
-    // greater-than, and the till's warning must not be stricter than that.
+    // Exactly the headroom completes — the server tests strictly greater-than.
     const exact = await ownerApi.post('/sales/complete', {
       branchId: 'brn_dev',
       registerId: 'reg_dev',
@@ -358,18 +360,35 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
       paymentDueDate: DUE,
     });
     expect(exact.status).toBe('COMPLETED');
-
-    const after = await ownerApi.get(`/customers/${customer.id}/credit`);
-    expect(Number(after.available)).toBe(0);
+    expect(Number((await credit(ownerApi, customer.id)).available)).toBe(0);
   });
 
   test('CUST-025 a customer barred from credit reports it before any sale', async ({ ownerApi }) => {
     const customer = await ownerApi.createCustomer({ creditAllowed: false, creditLimit: 10_000 });
-    const credit = await ownerApi.get(`/customers/${customer.id}/credit`);
-    // The till reads this and says so, rather than letting the cashier find out
-    // when Complete Payment is pressed.
-    expect(credit.creditAllowed).toBe(false);
+    expect((await credit(ownerApi, customer.id)).creditAllowed).toBe(false);
   });
+
+  test('CUST-029 the credit history lists account payments, newest first', async ({ ownerApi }) => {
+    const { customerId, total } = await creditSale(ownerApi);
+    await payAccount(ownerApi, customerId, Math.round((total / 3) * 100) / 100);
+    const rows = await ownerApi.get(`/payments?customerId=${customerId}`);
+    expect(rows).toHaveLength(1);
+    // Not yet consumed — it is working against a balance that is still open.
+    expect(rows[0].settledAt).toBeNull();
+
+    await payAccount(ownerApi, customerId, await accountOwed(ownerApi, customerId));
+    const after = await ownerApi.get(`/payments?customerId=${customerId}`);
+    expect(after).toHaveLength(2);
+    // Both are retired by the settlement that closed the balance.
+    expect(after.every((r: any) => r.settledAt !== null)).toBe(true);
+  });
+
+  test('CUST-030 listing payments without a filter is refused', async ({ ownerApi }) => {
+    const res = await ownerApi.getRaw('/payments');
+    expect(res.status()).toBe(400);
+  });
+
+  // ── Dashboard ──────────────────────────────────────────────────────────────
 
   test('DASH-021 the receivable stat counts every unsettled balance', async ({ ownerApi }) => {
     const before = await ownerApi.get('/dashboard/stats');
@@ -381,14 +400,27 @@ test.describe('CREDIT — limits, due dates & settlement', () => {
     );
   });
 
-  test('DASH-022 settling a sale removes it from the receivable stat', async ({ ownerApi }) => {
-    const { sale, total } = await creditSale(ownerApi);
+  test('DASH-022 an account payment comes off the receivable at once', async ({ ownerApi }) => {
+    const { customerId, total } = await creditSale(ownerApi);
     const owing = await ownerApi.get('/dashboard/stats');
-    await ownerApi.post('/payments', { saleId: sale.id, method: 'CASH', amount: total });
+    const half = Math.round((total / 2) * 100) / 100;
+    await payAccount(ownerApi, customerId, half);
+    const partly = await ownerApi.get('/dashboard/stats');
+    // Money in hand reduces the receivable even though no invoice is settled yet.
+    expect(
+      Number(owing.outstandingReceivable) - Number(partly.outstandingReceivable),
+    ).toBeCloseTo(half, 2);
+
+    await payAccount(ownerApi, customerId, await accountOwed(ownerApi, customerId));
     const settled = await ownerApi.get('/dashboard/stats');
     expect(Number(owing.outstandingReceivable) - Number(settled.outstandingReceivable)).toBeCloseTo(
       total,
       2,
     );
   });
+
+  /** What the customer's account currently owes. */
+  async function accountOwed(api: Api, customerId: string): Promise<number> {
+    return Number((await api.get(`/customers/${customerId}/credit`)).outstanding);
+  }
 });

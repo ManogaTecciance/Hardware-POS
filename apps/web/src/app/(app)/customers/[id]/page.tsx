@@ -3,8 +3,11 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as React from 'react';
-import { ArrowLeft, Pencil, RefreshCw } from 'lucide-react';
+import { ArrowLeft, HandCoins, Pencil, RefreshCw } from 'lucide-react';
 
+import { paymentMethodLabel } from '@hardware-pos/shared';
+
+import { RecordPaymentDialog } from '@/components/customers/record-payment-dialog';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -13,7 +16,11 @@ import { useAuth } from '@/lib/auth';
 import {
   CUSTOMER_TYPE_LABELS,
   fetchCustomer,
+  fetchCustomerCredit,
+  fetchCustomerPayments,
   syncCustomerToQuickBooks,
+  type AccountPayment,
+  type CustomerCredit,
   type ManagedCustomer,
 } from '@/lib/customers-api';
 import { Permission } from '@/lib/permissions';
@@ -34,6 +41,10 @@ export default function CustomerDetailPage() {
   const [syncError, setSyncError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
+  const [credit, setCredit] = React.useState<CustomerCredit | null>(null);
+  const [payments, setPayments] = React.useState<AccountPayment[]>([]);
+  const [payOpen, setPayOpen] = React.useState(false);
+  const canRecordPayment = hasPermission(Permission.PAYMENT_CREATE);
 
   React.useEffect(() => {
     if (!session || !id) return;
@@ -46,6 +57,14 @@ export default function CustomerDetailPage() {
           !cancelled && setError(err instanceof Error ? err.message : 'Could not load customer'),
       )
       .finally(() => !cancelled && setLoading(false));
+    // Best-effort: the credit position and its history are extra detail, and a
+    // failure to read them must not blank a page that otherwise loaded.
+    fetchCustomerCredit(session, id)
+      .then((c) => !cancelled && setCredit(c))
+      .catch(() => !cancelled && setCredit(null));
+    fetchCustomerPayments(session, id)
+      .then((p) => !cancelled && setPayments(p))
+      .catch(() => !cancelled && setPayments([]));
     return () => {
       cancelled = true;
     };
@@ -113,6 +132,12 @@ export default function CustomerDetailPage() {
               Sync to QuickBooks
             </Button>
           ) : null}
+          {canRecordPayment && credit && credit.outstanding > 0 ? (
+            <Button onClick={() => setPayOpen(true)} disabled={busy}>
+              <HandCoins className="h-4 w-4" />
+              Record payment
+            </Button>
+          ) : null}
           {canManage ? (
             <Link href={`/customers/${customer.id}/edit`} className={buttonVariants()}>
               <Pencil className="h-4 w-4" />
@@ -174,6 +199,15 @@ export default function CustomerDetailPage() {
                   : '—'
               }
             />
+            {credit ? (
+              <>
+                <Detail label="Outstanding on account" value={formatMoney(credit.outstanding)} />
+                <Detail
+                  label="Available credit"
+                  value={credit.available != null ? formatMoney(Math.max(0, credit.available)) : '—'}
+                />
+              </>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -219,8 +253,84 @@ export default function CustomerDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Credit history — full width, because this is a ledger to read across.
+          Credit is settled per account, so these payments belong to the customer
+          rather than to any one invoice. */}
+      <Card className="overflow-hidden">
+        <CardHeader>
+          <CardTitle>Credit history</CardTitle>
+        </CardHeader>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
+                <th className="px-4 py-3 font-medium">Date &amp; time</th>
+                <th className="px-4 py-3 font-medium">Method</th>
+                <th className="px-4 py-3 font-medium">Reference</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 text-right font-medium">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payments.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                    {credit && credit.outstanding > 0
+                      ? `Nothing received yet against ${formatMoney(credit.outstanding)} outstanding.`
+                      : 'No account payments recorded.'}
+                  </td>
+                </tr>
+              ) : (
+                payments.map((p) => (
+                  <tr key={p.id} className="border-b border-border last:border-0">
+                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                      {formatDateTime(p.createdAt)}
+                    </td>
+                    <td className="px-4 py-3">{paymentMethodLabel(p.method)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{p.reference ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      {/* "Cleared" is the payment that closed a balance, together
+                          with everything that had been building toward it. */}
+                      <Badge variant={p.settledAt ? 'success' : 'warning'}>
+                        {p.settledAt ? 'Cleared the balance' : 'Against open balance'}
+                      </Badge>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
+                      {formatMoney(p.amount)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {session && credit ? (
+        <RecordPaymentDialog
+          session={session}
+          customerId={customer.id}
+          customerName={customer.name}
+          outstanding={credit.outstanding}
+          open={payOpen}
+          onClose={() => setPayOpen(false)}
+          onRecorded={() => setReloadKey((k) => k + 1)}
+        />
+      ) : null}
     </div>
   );
+}
+
+/** Date and time both: two payments on one day are told apart only by the time. */
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-LK', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function Detail({ label, value }: { label: string; value: string }) {

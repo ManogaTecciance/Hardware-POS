@@ -10,35 +10,39 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import type { Session } from '@/lib/auth';
-import { recordPayment, type PaymentMethodCode } from '@/lib/sales';
+import { recordAccountPayment } from '@/lib/customers-api';
+import type { PaymentMethodCode } from '@/lib/sales';
 import { formatMoney } from '@/lib/utils';
 
 const METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethodCode[];
 
 /**
- * Capture a payment received against a credit sale.
+ * Capture a payment received against a customer's credit account.
  *
- * Opens with the full outstanding balance already filled in, since settling in
- * full is the common case, but the amount stays editable so a customer paying
- * part of what they owe is a single edit rather than a workaround. Each
- * submission is its own payment record — the dialog never merges instalments.
+ * Opens with the full account balance already filled in, since settling up is
+ * the common case, but the amount stays editable so a customer paying part of
+ * what they owe is a single edit rather than a workaround.
+ *
+ * The money is not applied to any one invoice: while anything is still owed
+ * every credit sale stays outstanding, and the moment the account reaches zero
+ * they are all covered together.
  */
 export function RecordPaymentDialog({
   session,
-  saleId,
-  saleNumber,
+  customerId,
+  customerName,
   outstanding,
   open,
   onClose,
   onRecorded,
 }: {
   session: Session;
-  saleId: string;
-  saleNumber: string;
+  customerId: string;
+  customerName: string;
   outstanding: number;
   open: boolean;
   onClose: () => void;
-  onRecorded: () => void;
+  onRecorded: (result: { outstanding: number; salesSettled: number }) => void;
 }) {
   const [amount, setAmount] = React.useState('');
   const [method, setMethod] = React.useState<PaymentMethodCode>('CASH');
@@ -64,13 +68,13 @@ export function RecordPaymentDialog({
     setSaving(true);
     setError(null);
     try {
-      await recordPayment(session, {
-        saleId,
+      const result = await recordAccountPayment(session, {
+        customerId,
         method,
         amount: parsed,
         reference: reference.trim() || undefined,
       });
-      onRecorded();
+      onRecorded(result);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not record the payment');
@@ -84,7 +88,7 @@ export function RecordPaymentDialog({
       open={open}
       onClose={onClose}
       title="Record payment"
-      description={`Sale ${saleNumber} · ${formatMoney(outstanding)} outstanding`}
+      description={`${customerName} · ${formatMoney(outstanding)} outstanding on account`}
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={saving}>
@@ -117,7 +121,8 @@ export function RecordPaymentDialog({
             onChange={(e) => setAmount(e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
-            Up to {formatMoney(outstanding)}. Pay less to leave the rest on credit.
+            Up to {formatMoney(outstanding)}. Anything less leaves the account — and every
+            invoice on it — still on credit.
           </p>
         </div>
 

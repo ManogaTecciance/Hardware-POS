@@ -88,16 +88,23 @@ export class SalesRepository {
     const where: Prisma.SaleWhereInput = {
       tenantId,
       ...(filter.syncStatus ? { syncStatus: filter.syncStatus } : {}),
-      // UNPAID means "still owes something", which includes a part-paid sale:
-      // the app shows both as "Credit / Unpaid", so a filter that returned only
-      // the wholly unpaid ones would quietly hide sales the column says are
-      // there. PARTIAL is still accepted on its own for a caller that genuinely
-      // wants just those.
+      // UNPAID means "still on credit": every sale the list shows as Credit, so
+      // both wholly unpaid and part-paid, and never one the customer's account
+      // has since cleared. PAID means the opposite — paid at the till, or covered
+      // by an account settlement. PARTIAL is still accepted on its own for a
+      // caller that genuinely wants just those.
       ...(filter.paymentStatus === 'UNPAID'
-        ? { paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] } }
-        : filter.paymentStatus
-          ? { paymentStatus: filter.paymentStatus }
-          : {}),
+        ? {
+            paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+            creditSettledAt: null,
+          }
+        : filter.paymentStatus === 'PAID'
+          ? {
+              OR: [{ paymentStatus: 'PAID' as PaymentStatus }, { creditSettledAt: { not: null } }],
+            }
+          : filter.paymentStatus
+            ? { paymentStatus: filter.paymentStatus }
+            : {}),
       // Kept in AND so the date clause's OR cannot collide with the search OR.
       ...(businessDate.length ? { AND: businessDate } : {}),
       // Overdue: the due date has passed and money is still owed. A settled sale
@@ -107,6 +114,9 @@ export class SalesRepository {
         ? {
             paymentDueDate: { not: null, lt: filter.overdueAsOf },
             paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+            // An invoice the customer's account has cleared is not overdue,
+            // whatever its own due date says.
+            creditSettledAt: null,
             status: 'COMPLETED' as const,
           }
         : {}),

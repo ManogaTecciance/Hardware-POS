@@ -133,6 +133,12 @@ export interface SaleListItem {
   paymentMethods: PaymentMethodCode[];
   /** When payment is expected. Null on a fully paid sale — the column stays blank. */
   paymentDueDate: string | null;
+  /**
+   * When the customer's credit account was cleared, covering this invoice.
+   * Credit is settled per account, so this — not the invoice's own paidAmount —
+   * is what makes a credit sale read as Paid.
+   */
+  creditSettledAt: string | null;
   /** When the most recent payment was received. Null when none has been. */
   lastPaymentAt: string | null;
   returnStatus: SaleReturnStatusCode;
@@ -218,6 +224,8 @@ export interface SaleDetail {
   paymentStatus: PaymentStatusCode;
   /** When payment is expected. Null on a sale that was settled in full. */
   paymentDueDate: string | null;
+  /** When the customer's credit account was cleared, covering this invoice. */
+  creditSettledAt: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: number;
   quickbooksDocumentType: string | null;
@@ -250,6 +258,7 @@ interface ApiSaleDetail {
   balanceAmount: string | number;
   paymentStatus: PaymentStatusCode;
   paymentDueDate: string | null;
+  creditSettledAt: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: string | number;
   quickbooksDocumentType: string | null;
@@ -363,6 +372,7 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
     balanceAmount: Number(s.balanceAmount),
     paymentStatus: s.paymentStatus,
     paymentDueDate: s.paymentDueDate ?? null,
+    creditSettledAt: s.creditSettledAt ?? null,
     returnStatus: s.returnStatus,
     returnedAmount: Number(s.returnedAmount),
     quickbooksDocumentType: s.quickbooksDocumentType,
@@ -391,27 +401,6 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       createdAt: p.createdAt,
     })),
   };
-}
-
-export interface RecordPaymentPayload {
-  saleId: string;
-  method: PaymentMethodCode;
-  amount: number;
-  reference?: string;
-}
-
-/**
- * Record a payment received against a credit sale.
- *
- * Each call adds its own payment row, so a customer paying in instalments leaves
- * a trail rather than one overwritten figure. The API moves the sale's balance
- * and status in the same transaction.
- */
-export async function recordPayment(
-  session: Session,
-  payload: RecordPaymentPayload,
-): Promise<void> {
-  await api.post('/payments', payload, auth(session));
 }
 
 /** Retry the QuickBooks push for a completed sale. */

@@ -20,7 +20,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
-import { paymentStatusLabel } from '@hardware-pos/shared';
+import { saleStatusLabel } from '@hardware-pos/shared';
 
 import { useAuth } from '@/lib/auth';
 import { reprintCustomerReceipt } from '@/lib/receipt-print';
@@ -65,12 +65,17 @@ function formatDay(iso: string): string {
  * captured, which would otherwise look like counter sales.
  */
 function isCreditSale(s: SaleListItem): boolean {
-  return s.paymentDueDate !== null || s.balanceAmount > 0;
+  return s.paymentDueDate !== null || s.balanceAmount > 0 || s.creditSettledAt !== null;
+}
+
+/** Still owed for: on credit, and the customer's account has not cleared it. */
+function isOwed(s: SaleListItem): boolean {
+  return s.balanceAmount > 0 && s.creditSettledAt === null;
 }
 
 /** Past its due date and still owing — the same rule the API's Overdue filter uses. */
 function isOverdue(s: SaleListItem, now: Date = new Date()): boolean {
-  return s.paymentDueDate !== null && s.balanceAmount > 0 && new Date(s.paymentDueDate) < now;
+  return s.paymentDueDate !== null && isOwed(s) && new Date(s.paymentDueDate) < now;
 }
 
 // A sale that still owes anything reads the same whether part of it was paid or
@@ -82,8 +87,18 @@ const STATUS_VARIANT: Record<PaymentStatusCode, 'success' | 'neutral' | 'danger'
   REFUNDED: 'neutral',
 };
 
-function PaymentStatusBadge({ status }: { status: PaymentStatusCode }) {
-  return <Badge variant={STATUS_VARIANT[status]}>{paymentStatusLabel(status)}</Badge>;
+/**
+ * Credit is settled per customer account, so an invoice reads as Paid once the
+ * customer cleared what they owed — even though nothing was tendered against
+ * that invoice and its own figures still say so.
+ */
+function PaymentStatusBadge({ sale }: { sale: SaleListItem }) {
+  const settled = sale.creditSettledAt !== null;
+  return (
+    <Badge variant={settled ? 'success' : STATUS_VARIANT[sale.paymentStatus]}>
+      {saleStatusLabel(sale.paymentStatus, sale.creditSettledAt)}
+    </Badge>
+  );
 }
 
 export default function SalesPage() {
@@ -256,7 +271,7 @@ export default function SalesPage() {
           <option value="PAID">Paid</option>
           {/* No separate "partially paid" choice: this one covers everything
               still owed, part-paid or not, matching how the column reads. */}
-          <option value="UNPAID">Credit / Unpaid</option>
+          <option value="UNPAID">Credit</option>
           <option value="REFUNDED">Refunded</option>
         </Select>
         <Select
@@ -362,9 +377,9 @@ export default function SalesPage() {
                     <td
                       className={cn(
                         'px-4 py-3 text-right font-medium',
-                        s.balanceAmount > 0 && 'text-danger',
+                        isOwed(s) && 'text-danger',
                       )}
-                      title={s.balanceAmount > 0 ? `${formatMoney(s.balanceAmount)} outstanding` : undefined}
+                      title={isOwed(s) ? `${formatMoney(s.balanceAmount)} outstanding` : undefined}
                     >
                       {formatMoney(s.total)}
                     </td>
@@ -381,7 +396,7 @@ export default function SalesPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1">
-                        <PaymentStatusBadge status={s.paymentStatus} />
+                        <PaymentStatusBadge sale={s} />
                         <SaleReturnStatusBadge status={s.returnStatus} />
                       </div>
                     </td>

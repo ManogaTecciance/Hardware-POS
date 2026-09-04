@@ -58,14 +58,31 @@ export function paymentMethodLabel(method: string): string {
  */
 export const PAYMENT_STATUS_LABELS: Record<string, string> = {
   PAID: 'Paid',
-  PARTIAL: 'Credit / Unpaid',
-  UNPAID: 'Credit / Unpaid',
+  PARTIAL: 'Credit',
+  UNPAID: 'Credit',
   REFUNDED: 'Refunded',
 };
 
 /** A payment status's label, falling back to the raw code for anything unrecognised. */
 export function paymentStatusLabel(status: string): string {
   return PAYMENT_STATUS_LABELS[status] ?? status;
+}
+
+/**
+ * How a sale's payment reads once account-level credit is taken into account.
+ *
+ * Credit is settled per customer account, not per invoice: when a customer
+ * clears what they owe, every invoice outstanding at that moment is covered at
+ * once. `creditSettledAt` records that, and it is what makes those invoices read
+ * as Paid — the invoice's own paidAmount is left alone, because nothing was
+ * tendered against it and the printed bill must not claim otherwise.
+ */
+export function saleStatusLabel(
+  paymentStatus: string,
+  creditSettledAt: Date | string | null | undefined,
+): string {
+  if (creditSettledAt) return paymentStatusLabel('PAID');
+  return paymentStatusLabel(paymentStatus);
 }
 
 /**

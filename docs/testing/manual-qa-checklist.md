@@ -87,9 +87,15 @@ Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · 
 - [ ] The sales list shows the **Due** date for that sale and "—" for a fully paid one.
 - [ ] The **Overdue** filter lists only sales past due that still owe; exporting from the filtered
       view covers the same sales.
-- [ ] Sale detail → **Record payment**: part-pay, then pay the rest. Each payment is listed with its
-      own date and time; status goes PARTIAL → PAID; the balance reaches zero.
-- [ ] Paying **more** than the balance is refused.
+- [ ] Credit is settled on the CUSTOMER, not the invoice: the sale detail has no Record payment
+      button, and the customer page has one.
+- [ ] Customer page → **Record payment**: part-pay an account with two credit sales on it. Both
+      sales still read **Credit** — not even the older one is settled — and the Credit history
+      lists the payment.
+- [ ] Pay the rest. Both sales flip to **Paid** together, and the account reads zero.
+- [ ] Ring up another credit sale for the same customer. It reads Credit; the settled ones stay
+      Paid; the account balance is just the new sale.
+- [ ] Paying **more** than the account owes is refused.
 - [ ] The customer's **Available credit** on /customers rises by what was settled.
 - [ ] The dashboard's **Credit Receivable** card falls by the same amount and, clicked, opens the
       customers list filtered to those who still owe.

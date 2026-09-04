@@ -110,11 +110,14 @@ The POS is authoritative for:
 - **FR-16** Sales history list with per-sale **sync status** (pending / syncing / synced / failed).
 - **FR-17** A **sync log** view showing each sync attempt, its result, and any error.
 - **FR-18** Manual **retry** of a failed sync.
-- **FR-23** **Record a payment received** against a credit sale, capturing the amount, method
-  and an optional reference. Payments accumulate: each is kept as its own record with its own
-  date and time, so instalments read as a history rather than one overwritten figure. The
-  sale moves to PAID when the balance reaches zero, and the customer's available credit is
-  released by the same act.
+- **FR-23** **Record a payment received** against a customer's CREDIT ACCOUNT, from their
+  customer page, capturing the amount, method and an optional reference. Payments accumulate:
+  each is kept as its own record with its own date and time. Credit is settled per account,
+  not per invoice — while the account owes anything every credit sale stays outstanding, and
+  the moment it reaches zero every sale outstanding at that moment is marked paid. A sale rung
+  up afterwards starts the next balance. The customer page carries the credit history.
+- **FR-28** Money paid on account releases the customer's credit headroom, and comes off the
+  shop's receivable, the moment it is taken — even before it settles any invoice.
 - **FR-24** Show on the sales list, per sale: the **due date** (blank when nothing is owed),
   the **last payment received** (blank for a sale that never ran on credit), and offer an
   **overdue** filter — past its due date and still owing. Report exports honour the same filter.

@@ -228,10 +228,12 @@ body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "payme
 GET  /v1/sales?page=1&pageSize=25&syncStatus=FAILED
 200 → paginated sales history (syncStatus per sale)
 # Filters: search, paymentStatus, syncStatus, dateFrom, dateTo, overdue=true.
-#   paymentStatus=UNPAID means "still owes something" and therefore matches PARTIAL
-#   too — the app words both as "Credit / Unpaid", and a filter behind that label
-#   must not hide the part-paid ones. PARTIAL on its own still narrows to exactly
-#   those, for a caller that wants them.
+#   paymentStatus=UNPAID means "still on credit": wholly unpaid or part-paid, and
+#   never one the customer's account has since cleared. PAID means the opposite —
+#   paid at the till, OR covered by an account settlement. PARTIAL on its own still
+#   narrows to exactly those, for a caller that wants them.
+# Each row carries `creditSettledAt`: when set, the sale reads as Paid because the
+#   customer cleared their account, even though nothing was tendered against it.
 #   overdue=true keeps only COMPLETED sales whose paymentDueDate has passed and
 #   which still owe money. GET /v1/sales/report accepts the same filters, so an
 #   export always covers exactly the sales the screen was showing.
@@ -260,33 +262,45 @@ there is no enum member and nothing is stored.
 
 ## Payments received
 
-Recording money received against a credit sale, after the sale itself is closed. Requires
-`payment:create`.
+Credit is an **account** balance, not a per-invoice one. Money received later is recorded
+against the CUSTOMER and is never applied to a single sale. Requires `payment:create`.
 
 ```
 POST /v1/payments
-body: { "saleId", "method", "amount", "reference?" }
-201 → { "data": <the new Payment> }
-400 → amount ≤ 0, amount greater than the outstanding balance, the sale is already
-       fully paid, or the sale is not COMPLETED
-404 → no such sale in this tenant
+body: { "customerId", "method", "amount", "reference?" }
+201 → { "data": { "payment", "outstanding", "salesSettled" } }
+400 → amount <= 0, more than the account owes, or the account owes nothing
+404 → no such customer in this tenant
 
-GET  /v1/payments?saleId={id}          # payments against one sale, oldest first
+GET  /v1/payments?customerId={id}      # the customer's credit history, newest first
+GET  /v1/payments?saleId={id}          # what was tendered at the till for one sale
 GET  /v1/payments/{id}
+# One filter is required — without it this would return every payment in the tenant.
 ```
 
-Each call creates its **own** payment row, so a customer settling in instalments leaves a
-trail rather than one overwritten figure; every row keeps its method, optional reference,
-who took it, and when. The sale's `paidAmount`, `balanceAmount` and `paymentStatus` move in
-the same transaction — `PAID` once the balance reaches zero, `PARTIAL` while any remains —
-and the balance is re-read **inside** that transaction, so two tills settling the same sale
-at once cannot between them overpay it.
+The rule, in one line: **while the account owes anything every credit sale stays outstanding,
+and the moment it reaches zero they are all settled together.** A part payment therefore
+settles no invoice at all — not even the oldest — and a sale rung up after a settlement
+starts the next balance rather than joining the one already closed.
 
-The customer's available credit needs no separate update: it is derived from the balances of
-unsettled sales, so settling one releases the headroom automatically.
+Settlement is recorded on `Sale.creditSettledAt`, NOT by rewriting `paidAmount` /
+`balanceAmount` / `paymentStatus`. Those stay true to what was tendered against that invoice
+at the till, because the printed bill, the refund guard and QuickBooks all read them; a swept
+sale would otherwise claim money it never took. The payments that closed a balance are
+retired with `Payment.settledAt`, so the next cycle starts from zero instead of subtracting
+them forever.
 
-> `TODO(accountant)`: the payment is not yet pushed to QuickBooks against the original
-> invoice, so QuickBooks still shows that invoice unpaid after the customer has settled.
+```
+account outstanding = SUM(balanceAmount over COMPLETED, still-unpaid, unsettled sales)
+                    - SUM(account payments not yet consumed by a settlement)
+```
+
+Recomputed **inside** the write transaction, so two people settling the same account at once
+cannot between them overpay it. Money paid on account reduces the customer's outstanding —
+and the dashboard receivable — the moment it is taken, even though no invoice is settled yet.
+
+> `TODO(accountant)`: account payments are not yet pushed to QuickBooks against the customer's
+> open invoices, so QuickBooks still shows them unpaid after the customer has settled.
 
 ## Receipts & print jobs
 

@@ -16,12 +16,27 @@ export interface CustomerCredit {
 }
 
 /**
- * A sale counts against a customer's credit while it is completed and still
- * owing. A draft has not happened yet, and a settled sale has been paid for.
+ * A sale counts against a customer's credit while it is completed, still owing,
+ * and not yet covered by an account settlement. A draft has not happened yet; a
+ * sale paid at the till owes nothing; and one whose customer has since cleared
+ * their account has been paid for, even though no money was tendered against
+ * that invoice specifically.
  */
 const OWING: Prisma.SaleWhereInput = {
   status: 'COMPLETED',
   paymentStatus: { in: ['UNPAID', 'PARTIAL'] },
+  creditSettledAt: null,
+};
+
+/**
+ * Money received against the account and not yet consumed by a settlement.
+ *
+ * Once a payment has closed a balance it stops counting: leaving it in the sum
+ * forever would drive every later balance negative.
+ */
+const UNSETTLED_ACCOUNT_PAYMENT: Prisma.PaymentWhereInput = {
+  saleId: null,
+  settledAt: null,
 };
 
 /**
@@ -43,6 +58,10 @@ export class CreditService {
   static readonly HAS_OUTSTANDING: Prisma.CustomerWhereInput = {
     sales: { some: { ...OWING, balanceAmount: { gt: 0 } } },
   };
+  // NOTE: this is a cheap "has any uncovered credit sale" test, so a customer who
+  // has part-paid on account still matches. That is the intended reading — they
+  // do still owe — and it stays exact because a fully-settled account has no
+  // uncovered sales left at all.
 
   /** Credit position for one customer, or null when the customer does not exist. */
   async forCustomer(tenantId: string, customerId: string): Promise<CustomerCredit | null> {
@@ -52,13 +71,23 @@ export class CreditService {
     });
     if (!customer) return null;
 
-    const agg = await this.prisma.sale.aggregate({
-      where: { tenantId, customerId, ...OWING },
-      _sum: { balanceAmount: true },
-    });
+    const [agg, paid] = await Promise.all([
+      this.prisma.sale.aggregate({
+        where: { tenantId, customerId, ...OWING },
+        _sum: { balanceAmount: true },
+      }),
+      this.prisma.payment.aggregate({
+        where: { tenantId, customerId, ...UNSETTLED_ACCOUNT_PAYMENT },
+        _sum: { amount: true },
+      }),
+    ]);
 
     const creditLimit = customer.creditLimit != null ? Number(customer.creditLimit) : null;
-    const outstanding = round2(Number(agg._sum.balanceAmount ?? 0));
+    // Invoiced-and-still-owed, less what has been paid on account but has not yet
+    // cleared a balance. Never negative: over-payment is refused at the door.
+    const outstanding = round2(
+      Math.max(0, Number(agg._sum.balanceAmount ?? 0) - Number(paid._sum.amount ?? 0)),
+    );
     return {
       creditAllowed: customer.creditAllowed,
       creditLimit,
@@ -79,15 +108,31 @@ export class CreditService {
     customerIds: string[],
   ): Promise<Map<string, number>> {
     if (customerIds.length === 0) return new Map();
-    const rows = await this.prisma.sale.groupBy({
-      by: ['customerId'],
-      where: { tenantId, customerId: { in: customerIds }, ...OWING },
-      _sum: { balanceAmount: true },
-    });
-    return new Map(
-      rows
+    const [owed, paid] = await Promise.all([
+      this.prisma.sale.groupBy({
+        by: ['customerId'],
+        where: { tenantId, customerId: { in: customerIds }, ...OWING },
+        _sum: { balanceAmount: true },
+      }),
+      this.prisma.payment.groupBy({
+        by: ['customerId'],
+        where: { tenantId, customerId: { in: customerIds }, ...UNSETTLED_ACCOUNT_PAYMENT },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const paidBy = new Map(
+      paid
         .filter((r): r is typeof r & { customerId: string } => r.customerId !== null)
-        .map((r) => [r.customerId, round2(Number(r._sum.balanceAmount ?? 0))]),
+        .map((r) => [r.customerId, Number(r._sum.amount ?? 0)]),
+    );
+    return new Map(
+      owed
+        .filter((r): r is typeof r & { customerId: string } => r.customerId !== null)
+        .map((r) => [
+          r.customerId,
+          round2(Math.max(0, Number(r._sum.balanceAmount ?? 0) - (paidBy.get(r.customerId) ?? 0))),
+        ]),
     );
   }
 
@@ -99,10 +144,30 @@ export class CreditService {
    * figure that quietly omits it would be wrong.
    */
   async totalReceivable(tenantId: string): Promise<number> {
-    const agg = await this.prisma.sale.aggregate({
-      where: { tenantId, ...OWING },
-      _sum: { balanceAmount: true },
-    });
-    return round2(Number(agg._sum.balanceAmount ?? 0));
+    const [agg, paid] = await Promise.all([
+      this.prisma.sale.aggregate({
+        where: { tenantId, ...OWING },
+        _sum: { balanceAmount: true },
+      }),
+      this.prisma.payment.aggregate({
+        where: { tenantId, ...UNSETTLED_ACCOUNT_PAYMENT },
+        _sum: { amount: true },
+      }),
+    ]);
+    // Money paid on account but not yet closing a balance is money the shop has,
+    // so it must come off the receivable the moment it is taken.
+    return round2(
+      Math.max(0, Number(agg._sum.balanceAmount ?? 0) - Number(paid._sum.amount ?? 0)),
+    );
+  }
+
+  /** Filter selecting the sales an account settlement would cover. */
+  static owingSalesFor(tenantId: string, customerId: string): Prisma.SaleWhereInput {
+    return { tenantId, customerId, ...OWING };
+  }
+
+  /** Filter selecting the account payments a settlement would consume. */
+  static unsettledPaymentsFor(tenantId: string, customerId: string): Prisma.PaymentWhereInput {
+    return { tenantId, customerId, ...UNSETTLED_ACCOUNT_PAYMENT };
   }
 }

@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { PaymentMethodCode } from './sales';
 import type { Session } from './auth';
 
 export type CustomerType = 'WALK_IN' | 'RETAIL' | 'CONTRACTOR' | 'CREDIT' | 'DEALER';
@@ -204,6 +205,74 @@ export async function fetchCustomerCredit(
     outstanding: Number(c.outstanding),
     available: c.available == null ? null : Number(c.available),
   };
+}
+
+/** One payment received against a customer's credit account. */
+export interface AccountPayment {
+  id: string;
+  amount: number;
+  method: PaymentMethodCode;
+  reference: string | null;
+  createdAt: string;
+  /** When this payment was consumed by clearing the account; null while it is still working. */
+  settledAt: string | null;
+}
+
+/** A customer's credit history — account payments, newest first. */
+export async function fetchCustomerPayments(
+  session: Session,
+  customerId: string,
+): Promise<AccountPayment[]> {
+  const rows = await api.get<
+    Array<{
+      id: string;
+      amount: string | number;
+      method: PaymentMethodCode;
+      reference: string | null;
+      createdAt: string;
+      settledAt: string | null;
+    }>
+  >(`/payments?customerId=${encodeURIComponent(customerId)}`, auth(session));
+  return rows.map((r) => ({
+    id: r.id,
+    amount: Number(r.amount),
+    method: r.method,
+    reference: r.reference,
+    createdAt: r.createdAt,
+    settledAt: r.settledAt ?? null,
+  }));
+}
+
+/** What recording an account payment did. */
+export interface AccountPaymentResult {
+  /** The account balance after this payment. */
+  outstanding: number;
+  /** How many invoices it cleared — non-zero only when it closed the account. */
+  salesSettled: number;
+}
+
+/**
+ * Record a payment received against a customer's credit account.
+ *
+ * Not against any one invoice: credit is an account balance, so while anything
+ * is still owed every credit sale stays outstanding, and the moment the account
+ * reaches zero the invoices it covered are all marked settled together.
+ */
+export async function recordAccountPayment(
+  session: Session,
+  payload: {
+    customerId: string;
+    method: PaymentMethodCode;
+    amount: number;
+    reference?: string;
+  },
+): Promise<AccountPaymentResult> {
+  const res = await api.post<{ outstanding: string | number; salesSettled: number }>(
+    '/payments',
+    payload,
+    auth(session),
+  );
+  return { outstanding: Number(res.outstanding), salesSettled: res.salesSettled };
 }
 
 export async function createCustomer(

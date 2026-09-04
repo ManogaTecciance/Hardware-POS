@@ -416,6 +416,9 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
     paymentStatus: row.paymentStatus,
     paymentMethods: [...new Set(row.payments.map((p) => p.method))],
     paymentDueDate: row.paymentDueDate,
+    // Set when the customer's account was cleared, covering this invoice. The
+    // list reads it as "Paid" without the invoice's own figures being rewritten.
+    creditSettledAt: row.creditSettledAt,
     // Derived from the payments already joined for the method chips, so the list
     // needs no extra query and no denormalised column to keep in step.
     lastPaymentAt: row.payments.reduce<Date | null>(

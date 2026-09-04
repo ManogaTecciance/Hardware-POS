@@ -96,6 +96,7 @@ One completed (or in-progress) transaction.
 | qboId         | string?       | id of the created QBO SalesReceipt/Invoice — **unique**       |
 | syncStatus    | SyncStatus    | `PENDING` \| `SYNCING` \| `SYNCED` \| `FAILED`                 |
 | completedAt   | datetime?     | Invoice date — user-selectable at completion, defaults to now, never future. Printed on documents, filed in QBO, and the column reports/dashboards filter on. Indexed. |
+| creditSettledAt | datetime?   | When the customer's credit account was cleared, covering this invoice. Credit is settled per ACCOUNT: this records the moment **without** claiming money was tendered against this invoice, so paidAmount/balanceAmount stay true for the printed bill, the refund guard and QuickBooks. |
 | paymentDueDate | datetime?    | When the balance is expected. Required at completion when the sale leaves a balance, forbidden when it does not — so **null means nothing is owed**, which is what lets the sales list leave the Due column blank rather than invent a date. Stored as the end of the chosen day in the shop's timezone; pushed to QBO as the Invoice `DueDate`. |
 | createdAt     | datetime      |                                                                |
 | updatedAt     | datetime      |                                                                |
@@ -135,7 +136,9 @@ One or more payments against a sale.
 | Column    | Type          | Notes                                    |
 | --------- | ------------- | ---------------------------------------- |
 | id        | uuid PK       |                                          |
-| saleId    | uuid FK       | → Sale                                    |
+| saleId    | uuid FK?      | → Sale. Set on money tendered at the till; null on an account payment |
+| customerId | uuid FK?     | → Customer. Set on a payment against the credit ACCOUNT. Exactly one of saleId/customerId is set — a CHECK constraint enforces it |
+| settledAt | datetime?     | when this account payment was consumed by clearing the balance; null while it still works against an open one |
 | method    | enum          | `CASH` \| `CARD`                          |
 | amount    | Decimal(12,2) |                                          |
 | reference | string?       | cheque number, transfer id, receipt no   |

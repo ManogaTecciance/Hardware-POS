@@ -3,144 +3,245 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PaymentsRepository } from './payments.repository';
 
 /**
- * Recording a payment moves money, so these pin the arithmetic and the guards
- * rather than the plumbing: what the sale's balance and status become, and what
- * is refused.
+ * Credit is settled per ACCOUNT, not per invoice, so these pin the two things
+ * that rule turns on: a part payment must leave every invoice on credit, and the
+ * moment the account clears, every invoice outstanding AT THAT MOMENT must be
+ * covered — and no later one.
+ *
+ * The fake below stands in for Prisma and applies the same semantics the real
+ * `where` clauses do: a sale is owing while it is COMPLETED, unpaid or partly
+ * paid, and not yet settled; a payment counts while it is an account payment
+ * that has not been consumed.
  */
-function fakePrisma(sale: Record<string, unknown> | null) {
-  const row = sale ? { ...sale } : null;
-  const created: Record<string, unknown>[] = [];
+interface FakeSale {
+  id: string;
+  status: string;
+  paymentStatus: string;
+  balanceAmount: number;
+  creditSettledAt: Date | null;
+  customerId: string;
+}
+interface FakePayment {
+  id: string;
+  customerId: string | null;
+  saleId: string | null;
+  amount: number;
+  settledAt: Date | null;
+  reference?: string | null;
+}
+
+function fakePrisma(sales: FakeSale[], customerExists = true) {
+  const payments: FakePayment[] = [];
+  const owing = (customerId: string) =>
+    sales.filter(
+      (s) =>
+        s.customerId === customerId &&
+        s.status === 'COMPLETED' &&
+        ['UNPAID', 'PARTIAL'].includes(s.paymentStatus) &&
+        s.creditSettledAt === null,
+    );
+  const unsettled = (customerId: string) =>
+    payments.filter((p) => p.customerId === customerId && p.saleId === null && p.settledAt === null);
+
   const tx = {
+    customer: {
+      findFirst: jest.fn(async () => (customerExists ? { id: 'cus_1' } : null)),
+    },
     sale: {
-      findFirst: jest.fn(async () => row),
-      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        Object.assign(row as object, data);
-        return row;
-      }),
+      aggregate: jest.fn(async ({ where }: { where: { customerId: string } }) => ({
+        _sum: { balanceAmount: owing(where.customerId).reduce((t, s) => t + s.balanceAmount, 0) },
+      })),
+      updateMany: jest.fn(
+        async ({ where, data }: { where: { customerId: string }; data: { creditSettledAt: Date } }) => {
+          const hit = owing(where.customerId);
+          hit.forEach((s) => (s.creditSettledAt = data.creditSettledAt));
+          return { count: hit.length };
+        },
+      ),
     },
     payment: {
+      aggregate: jest.fn(async ({ where }: { where: { customerId: string } }) => ({
+        _sum: { amount: unsettled(where.customerId).reduce((t, p) => t + p.amount, 0) },
+      })),
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        created.push(data);
-        return { id: `pay_${created.length}`, ...data };
+        const row = { id: `pay_${payments.length + 1}`, settledAt: null, ...data } as FakePayment;
+        payments.push(row);
+        return row;
       }),
+      updateMany: jest.fn(
+        async ({ where, data }: { where: { customerId: string }; data: { settledAt: Date } }) => {
+          const hit = unsettled(where.customerId);
+          hit.forEach((p) => (p.settledAt = data.settledAt));
+          return { count: hit.length };
+        },
+      ),
     },
   };
+
   return {
-    row,
-    created,
+    sales,
+    payments,
     tx,
     $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
 }
 
-function makeSale(overrides: Record<string, unknown> = {}) {
-  return { id: 'sale_1', status: 'COMPLETED', total: 1000, paidAmount: 0, ...overrides };
+function sale(id: string, balanceAmount: number, over: Partial<FakeSale> = {}): FakeSale {
+  return {
+    id,
+    status: 'COMPLETED',
+    paymentStatus: 'UNPAID',
+    balanceAmount,
+    creditSettledAt: null,
+    customerId: 'cus_1',
+    ...over,
+  };
 }
 
-const base = { tenantId: 't1', saleId: 'sale_1', receivedByUserId: 'u1', method: 'CASH' as const };
+const base = { tenantId: 't1', customerId: 'cus_1', receivedByUserId: 'u1', method: 'CASH' as const };
 
 function repo(prisma: ReturnType<typeof fakePrisma>) {
   return new PaymentsRepository(prisma as never);
 }
 
-describe('recording a payment', () => {
-  it('reduces the balance and leaves the sale PARTIAL while money is still owed', async () => {
-    const prisma = fakePrisma(makeSale());
-    await repo(prisma).recordAgainstSale({ ...base, amount: 400 });
-    expect(prisma.row).toMatchObject({ paidAmount: 400, balanceAmount: 600, paymentStatus: 'PARTIAL' });
+describe('recording a payment against a credit account', () => {
+  it('leaves every invoice on credit while the account still owes', async () => {
+    const prisma = fakePrisma([sale('s1', 400), sale('s2', 600)]);
+    const res = await repo(prisma).recordForCustomer({ ...base, amount: 400 });
+    expect(res.outstanding).toBe(600);
+    expect(res.salesSettled).toBe(0);
+    // The oldest invoice is NOT settled: part payment buys no invoice outright.
+    expect(prisma.sales.every((s) => s.creditSettledAt === null)).toBe(true);
   });
 
-  it('marks the sale PAID once the balance reaches zero', async () => {
-    const prisma = fakePrisma(makeSale({ paidAmount: 600 }));
-    await repo(prisma).recordAgainstSale({ ...base, amount: 400 });
-    expect(prisma.row).toMatchObject({ paidAmount: 1000, balanceAmount: 0, paymentStatus: 'PAID' });
-  });
-
-  it('accumulates across instalments', async () => {
-    const prisma = fakePrisma(makeSale());
+  it('covers every outstanding invoice at once when the account clears', async () => {
+    const prisma = fakePrisma([sale('s1', 400), sale('s2', 600)]);
     const r = repo(prisma);
-    await r.recordAgainstSale({ ...base, amount: 300 });
-    await r.recordAgainstSale({ ...base, amount: 300 });
-    await r.recordAgainstSale({ ...base, amount: 400 });
-    expect(prisma.created).toHaveLength(3);
-    expect(prisma.row).toMatchObject({ paidAmount: 1000, balanceAmount: 0, paymentStatus: 'PAID' });
+    await r.recordForCustomer({ ...base, amount: 400 });
+    const res = await r.recordForCustomer({ ...base, amount: 600 });
+    expect(res.outstanding).toBe(0);
+    expect(res.salesSettled).toBe(2);
+    expect(prisma.sales.every((s) => s.creditSettledAt !== null)).toBe(true);
   });
 
-  it('records the payment as its own row with method and reference', async () => {
-    const prisma = fakePrisma(makeSale());
-    await repo(prisma).recordAgainstSale({
+  it('settles in one payment when it covers the whole account', async () => {
+    const prisma = fakePrisma([sale('s1', 250), sale('s2', 750)]);
+    const res = await repo(prisma).recordForCustomer({ ...base, amount: 1000 });
+    expect(res.salesSettled).toBe(2);
+  });
+
+  it('never rewrites what was tendered against an invoice', async () => {
+    // The invoice keeps its own figures; only the settlement marker is written,
+    // so the printed bill and the refund guard still read what really happened.
+    const prisma = fakePrisma([sale('s1', 1000, { paymentStatus: 'PARTIAL', balanceAmount: 400 })]);
+    await repo(prisma).recordForCustomer({ ...base, amount: 400 });
+    expect(prisma.sales[0].balanceAmount).toBe(400);
+    expect(prisma.sales[0].paymentStatus).toBe('PARTIAL');
+    expect(prisma.sales[0].creditSettledAt).not.toBeNull();
+  });
+
+  it('starts the next balance from zero, not from the money that cleared the last one', async () => {
+    const prisma = fakePrisma([sale('s1', 500)]);
+    const r = repo(prisma);
+    await r.recordForCustomer({ ...base, amount: 500 });
+    // A new credit sale after settlement.
+    prisma.sales.push(sale('s2', 300));
+    const res = await r.recordForCustomer({ ...base, amount: 300 });
+    expect(res.outstanding).toBe(0);
+    // Only the new sale is swept this time; the old one was already covered.
+    expect(res.salesSettled).toBe(1);
+  });
+
+  it('leaves a sale rung up after settlement on credit', async () => {
+    const prisma = fakePrisma([sale('s1', 500)]);
+    const r = repo(prisma);
+    await r.recordForCustomer({ ...base, amount: 500 });
+    prisma.sales.push(sale('s2', 300));
+    expect(prisma.sales.find((s) => s.id === 's2')?.creditSettledAt).toBeNull();
+  });
+
+  it('refuses more than the account owes', async () => {
+    const prisma = fakePrisma([sale('s1', 500)]);
+    await expect(repo(prisma).recordForCustomer({ ...base, amount: 501 })).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(prisma.payments).toHaveLength(0);
+  });
+
+  it('refuses a payment when the account is already clear', async () => {
+    const prisma = fakePrisma([sale('s1', 500)]);
+    const r = repo(prisma);
+    await r.recordForCustomer({ ...base, amount: 500 });
+    await expect(r.recordForCustomer({ ...base, amount: 1 })).rejects.toThrow(
+      /nothing outstanding/i,
+    );
+  });
+
+  it('refuses a payment for a customer that owes nothing at all', async () => {
+    const prisma = fakePrisma([]);
+    await expect(repo(prisma).recordForCustomer({ ...base, amount: 100 })).rejects.toThrow(
+      /nothing outstanding/i,
+    );
+  });
+
+  it('reports a customer that does not belong to this tenant', async () => {
+    const prisma = fakePrisma([sale('s1', 500)], false);
+    await expect(repo(prisma).recordForCustomer({ ...base, amount: 100 })).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('records the payment against the customer and against no sale', async () => {
+    const prisma = fakePrisma([sale('s1', 500)]);
+    await repo(prisma).recordForCustomer({
       ...base,
-      amount: 250,
-      method: 'CARD',
-      reference: 'AUTH-9911',
+      amount: 100,
+      method: 'BANK_TRANSFER',
+      reference: 'TRF-77',
     });
-    expect(prisma.created[0]).toMatchObject({
-      saleId: 'sale_1',
-      amount: 250,
-      method: 'CARD',
-      reference: 'AUTH-9911',
+    expect(prisma.payments[0]).toMatchObject({
+      customerId: 'cus_1',
+      saleId: null,
+      amount: 100,
+      method: 'BANK_TRANSFER',
+      reference: 'TRF-77',
       receivedByUserId: 'u1',
     });
   });
 
   it('stores a null reference rather than undefined when none is given', async () => {
-    const prisma = fakePrisma(makeSale());
-    await repo(prisma).recordAgainstSale({ ...base, amount: 100 });
-    expect(prisma.created[0].reference).toBeNull();
+    const prisma = fakePrisma([sale('s1', 500)]);
+    await repo(prisma).recordForCustomer({ ...base, amount: 100 });
+    expect(prisma.payments[0].reference).toBeNull();
   });
 
-  it('refuses a payment larger than the outstanding balance', async () => {
-    const prisma = fakePrisma(makeSale({ paidAmount: 900 }));
-    await expect(repo(prisma).recordAgainstSale({ ...base, amount: 200 })).rejects.toThrow(
-      BadRequestException,
-    );
-    expect(prisma.created).toHaveLength(0);
-  });
-
-  it('allows a payment that settles the balance exactly', async () => {
-    const prisma = fakePrisma(makeSale({ paidAmount: 900 }));
-    await expect(repo(prisma).recordAgainstSale({ ...base, amount: 100 })).resolves.toBeDefined();
-  });
-
-  it('refuses a payment against an already settled sale', async () => {
-    const prisma = fakePrisma(makeSale({ paidAmount: 1000 }));
-    await expect(repo(prisma).recordAgainstSale({ ...base, amount: 1 })).rejects.toThrow(
-      /already fully paid/i,
-    );
-  });
-
-  it('refuses a payment against a draft', async () => {
-    const prisma = fakePrisma(makeSale({ status: 'DRAFT' }));
-    await expect(repo(prisma).recordAgainstSale({ ...base, amount: 100 })).rejects.toThrow(
-      /completed sale/i,
-    );
-  });
-
-  it('reports a sale that does not exist for this tenant', async () => {
-    const prisma = fakePrisma(null);
-    await expect(repo(prisma).recordAgainstSale({ ...base, amount: 100 })).rejects.toThrow(
-      NotFoundException,
-    );
-  });
-
-  it('re-reads the balance inside the transaction, so it cannot be overpaid by a race', async () => {
-    // The guard must run against the balance as it stands when the transaction
-    // opens, not one the caller read earlier.
-    const prisma = fakePrisma(makeSale());
+  it('recomputes the balance inside the transaction, so a race cannot overpay', async () => {
+    const prisma = fakePrisma([sale('s1', 500)]);
     const r = repo(prisma);
-    await r.recordAgainstSale({ ...base, amount: 1000 });
-    await expect(r.recordAgainstSale({ ...base, amount: 1 })).rejects.toThrow(/already fully paid/i);
+    await r.recordForCustomer({ ...base, amount: 500 });
+    await expect(r.recordForCustomer({ ...base, amount: 1 })).rejects.toThrow(
+      /nothing outstanding/i,
+    );
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps money arithmetic exact to the cent', async () => {
-    const prisma = fakePrisma(makeSale({ total: 100.1, paidAmount: 0 }));
+  it('keeps the arithmetic exact to the cent across instalments', async () => {
+    const prisma = fakePrisma([sale('s1', 100.1)]);
     const r = repo(prisma);
-    await r.recordAgainstSale({ ...base, amount: 33.37 });
-    await r.recordAgainstSale({ ...base, amount: 33.37 });
-    // 0.1 + 33.37 arithmetic in floating point drifts; the balance must not.
-    expect(prisma.row?.balanceAmount).toBe(33.36);
-    await r.recordAgainstSale({ ...base, amount: 33.36 });
-    expect(prisma.row).toMatchObject({ balanceAmount: 0, paymentStatus: 'PAID' });
+    await r.recordForCustomer({ ...base, amount: 33.37 });
+    await r.recordForCustomer({ ...base, amount: 33.37 });
+    // 0.1 + 33.37 drifts in floating point; the account balance must not.
+    const res = await r.recordForCustomer({ ...base, amount: 33.36 });
+    expect(res.outstanding).toBe(0);
+    expect(res.salesSettled).toBe(1);
+  });
+
+  it('ignores till payments when working out what the account owes', async () => {
+    // A sale part-paid at the counter already reduced its own balanceAmount; its
+    // payment row must not be subtracted a second time here.
+    const prisma = fakePrisma([sale('s1', 400, { paymentStatus: 'PARTIAL' })]);
+    prisma.payments.push({ id: 'till', customerId: null, saleId: 's1', amount: 600, settledAt: null });
+    const res = await repo(prisma).recordForCustomer({ ...base, amount: 400 });
+    expect(res.outstanding).toBe(0);
   });
 });
