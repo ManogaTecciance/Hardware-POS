@@ -216,7 +216,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-024 | Due date rejected on a fully paid sale | Complete a fully paid sale carrying a `paymentDueDate` | 400 — nothing is outstanding to fall due | N | Automated |
 | PAY-025 | Due date stored on the sale | Complete on credit with a due date, read the sale | `paymentDueDate` returned as given | P | Automated |
 | PAY-026 | Due date before the invoice date rejected | `paymentDueDate` earlier than `saleDate` | 400 | N | Automated |
-| PAY-027 | Instalments each kept as their own record | Two part payments against one sale | Two Payment rows, each with its own date/time, method and reference | P | Automated |
+| PAY-027 | Instalments each kept as their own record | Two part payments against one account | Two Payment rows with their own date/time, method and reference, neither attached to a sale | P | Automated |
 | PAY-034 | Credit warning appears as the order grows | Credit customer, raise a quantity in the payment page order summary until the total passes their limit | Warning appears live with available vs needed; Complete Payment disables — without pressing it. The credit panel is the ONLY place it is stated; no duplicate in the footer notice | P | Not Run |
 | PAY-035 | Credit warning clears when payment covers it | With the warning showing, switch to Partial and enter enough to bring the balance under the limit | Warning clears; Complete Payment re-enables | P | Not Run |
 | POS-039 | Customer can be chosen on the payment page | Open /pos/payment with no customer, pick one from the dropdown above Amount Due | Selection sticks, the header names them, and the credit panel appears for a credit sale — without going back to the cart | P | Not Run |
@@ -226,7 +226,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-038 | Credit unreadable does not block selling | Break /customers/{id}/credit (offline), take a credit sale | Non-blocking notice; Complete Payment still enabled; server enforces on completion | N | Not Run |
 | PAY-028 | Due date required in the POS | Choose Credit/Partial at checkout, leave the due date blank | Complete Payment stays disabled and names the missing due date | N | Not Run |
 | PAY-029 | Due date field hidden on a fully paid sale | Choose Cash for the full amount | No due-date field shown; none sent | P | Not Run |
-| PAY-030 | Record payment from the sale detail | Sale detail → Record payment, amount/method/reference | New row appears in the Payments received table with its date and time; balance and status update in place, without the page blanking to "Loading sale…" | P | Not Run |
+| PAY-030 | Record payment from the customer page | Customer detail → Record payment, amount/method/reference | New row in the Credit history table with its date and time; the account figures update in place | P | Not Run |
+| PAY-041 | No Record payment on the sale detail | Open a credit sale | No Record payment button — credit is settled on the customer's account | P | Not Run |
 | PAY-039 | Payment history is a full-width table under the items | Open a credit sale that has instalments | "Payments received" table sits below the item table with Date & time / Method / Reference / Amount, one row per instalment, and a Total received row once there is more than one | P | Not Run |
 | PAY-040 | Payment history states an unpaid credit sale | Open a credit sale with nothing received | Table shows "Nothing received yet — this sale is entirely on credit." | P | Not Run |
 | PAY-031 | Payment method printed on the bill | Open the A4 bill for a card sale, then for a credit sale | "Method: Card"; a sale taken on credit reads "Credit"; a part payment reads "Cash, Credit"; the due date is printed | P | Not Run |
@@ -261,10 +262,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE-022 | Settling drops a sale from the overdue filter | Record a full payment on an overdue sale, re-query | No longer returned | P | Automated |
 | SALE-023 | Sales list reports the last payment received | Part-pay a credit sale, read the list row | `lastPaymentAt` set; `paymentDueDate` returned | P | Automated |
 | SALE-024 | Due column blank for a fully paid sale | Cash sale in the sales list | Due column shows "—", not an invented date | P | Not Run |
-| SALE-028 | Credit / Unpaid filter includes part-paid sales | Filter the sales list by Credit / Unpaid with one part-paid, one wholly unpaid and one settled sale | Both owing sales returned; the settled one is not | P | Automated |
+| SALE-028 | Credit filter excludes account-settled sales | Filter by Credit with one owing and one account-settled sale | Only the owing one is returned | P | Automated |
+| SALE-032 | Paid filter includes account-settled sales | Filter by Paid after clearing an account | The covered sales are returned | P | Automated |
+| SALE-033 | Settled sales report when their account cleared them | Read a covered sale from the list | creditSettledAt is set | P | Automated |
 | SALE-029 | PARTIAL still narrows via the API | GET /sales?paymentStatus=PARTIAL | Only the part-paid sale — the enum still discriminates for API callers | P | Automated |
 | SALE-031 | Sales list has no Items column | Open the sales list | Columns are Sale, Date, Customer, Cashier, Total, Due, Payment, Last payment, Sync, Actions — no item count | P | Not Run |
-| SALE-030 | No "Partially paid" anywhere on screen | Part-pay a credit sale; check the sales list, the sale detail badge and the dashboard recent sales | All read Credit / Unpaid (dashboard: "Credit"); the filter dropdown offers no Partially paid option | P | Not Run |
+| SALE-030 | Credit reads as "Credit" everywhere | A sale on credit; check the sales list, the sale detail badge and the dashboard recent sales | All read "Credit" — no "Partially paid", no "Credit / Unpaid" | P | Not Run |
 | SALE-027 | Total is red while a sale is owed for | Sales list with one credit and one cash sale | Credit sale's Total is red; the paid one is not; there is no Balance column | P | Not Run |
 | SALE-025 | Last payment blank for a counter sale | Cash sale in the sales list | Last payment column shows "—" (the sale never ran on credit) | P | Not Run |
 | SALE-026 | Overdue export matches the screen | Apply the Overdue filter, export PDF/XLSX | Export covers exactly the filtered sales and names the filter | P | Not Run |
@@ -345,6 +348,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-023 | No limit reports null available | Same for a customer with creditLimit null | `creditLimit` and `available` are both null, not 0 | P | Automated |
 | CUST-024 | Shown figure equals enforced figure | Sell exactly the available headroom, then one unit more | The exact-headroom sale completes; one more is 400 "Credit limit exceeded" | P | Automated |
 | CUST-025 | Credit refusal visible before the sale | GET credit for a customer with creditAllowed false | `creditAllowed: false` — the till says so up front | P | Automated |
+| CUST-028 | A part payment releases credit at once | Pay half a customer's account | Outstanding and available credit both move immediately, though no invoice is settled | P | Automated |
+| CUST-029 | Credit history lists account payments | Customer page after two payments that clear the account | Both listed newest-first and marked as having cleared the balance | P | Automated |
+| CUST-030 | Payments cannot be listed unfiltered | GET /payments with no saleId or customerId | 400 — never the whole tenant's payments | N | Automated |
+| CUST-031 | Whole customer row opens the customer | Click anywhere in a row — a blank cell, the type, the phone | Customer detail opens | P | Not Run |
+| CUST-032 | Row click respects what it lands on | Click the name link, the Edit link, and the credit info icon | Each does its own thing; no double navigation | P | Not Run |
+| CUST-033 | Selecting text in a row is not a click | Drag to select a phone number, release | Nothing navigates; the text stays selected | N | Not Run |
+| CUST-034 | Modifier-click opens a new tab | Ctrl/Cmd-click or middle-click a row | Customer opens in a new tab; the list stays put | P | Not Run |
 | CUST-027 | Available credit explains itself on hover | Hover (or focus) the info icon beside Available credit | Tooltip reads "<used> of <limit> used · <left> left"; for a customer with no limit it reads "<used> used · no limit set" | P | Not Run |
 | CUST-026 | Credit column shows a figure or nothing | Customers list with three rows: credit + limit, credit + no limit, credit not allowed | Only the first shows an amount; the other two are blank — the words "No limit" appear nowhere in the table | P | Not Run |
 | CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
@@ -548,18 +558,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 30 |
+| AUTH | 15 | CUST | 34 |
 | PERM | 15 | CIMP | 10 |
 | DASH | 24 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
-| POS | 40 | SET | 19 |
-| PAY | 44 | DOC | 11 |
+| POS | 40 | SET | 26 |
+| PAY | 41 | DOC | 16 |
 | SALE | 33 | ADM | 14 |
 | RET | 18 | UI | 16 |
 | QUO | 20 | SEC | 12 |
 
-**Total: 415 test cases** (≈60% positive / 40% negative).
+**Total: 428 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
