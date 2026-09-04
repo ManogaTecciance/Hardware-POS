@@ -34,6 +34,23 @@ const VALID_DAYS = new Set(['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']);
  * accepts exactly its three and nothing else, unchanged.
  */
 
+/**
+ * `"HH:MM"` → minutes since midnight, or null when it is not that shape.
+ *
+ * Mirrors the evaluator's own reading deliberately: a guard that parsed times
+ * differently from the code it is guarding would pass shapes the evaluator then
+ * treats as empty. Null (unparseable) is left for the DTO's format validation
+ * to report — this guard only answers "is this window empty".
+ */
+function toMinutesOfDay(value: string): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!m) return null;
+  const hours = Number(m[1]);
+  const minutes = Number(m[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
 /** Shape returned to controllers (JSON-friendly — Decimals stringified). */
 export interface PromotionView {
   id: string;
@@ -430,6 +447,35 @@ export class PromotionsService {
       throw new BadRequestException(
         'startTime and endTime must both be provided or both omitted.',
       );
+    }
+
+    /*
+     * The window must be able to contain a moment.
+     *
+     * `isPromotionActive` reads the pair as the half-open interval
+     * [start, end): `minutesNow < start || minutesNow >= end` is out. So
+     * `start === end` is empty and `start > end` is empty too — the evaluator
+     * has no overnight wrap. Either shape saves a promotion that is switched on,
+     * looks on in the list, and can NEVER fire on any day.
+     *
+     * Found the hard way: an operator saved 18:00–09:00 expecting an evening
+     * offer and got silence. Rejected at write time so nobody has to work that
+     * out from a cart that simply refuses to discount.
+     *
+     * An overnight window is a real thing to want; it is just not something
+     * this evaluator can express, so promising it here would be a lie. Two
+     * promotions (18:00–23:59 and 00:00–09:00) express it today.
+     */
+    if (timeGiven(dto.startTime) && timeGiven(dto.endTime)) {
+      const start = toMinutesOfDay(dto.startTime as string);
+      const end = toMinutesOfDay(dto.endTime as string);
+      if (start !== null && end !== null && start >= end) {
+        throw new BadRequestException(
+          start === end
+            ? `startTime and endTime are both '${dto.startTime}', so the promotion could never be active. Widen the window, or clear both for all day.`
+            : `startTime '${dto.startTime}' is not before endTime '${dto.endTime}', so the promotion could never be active. This evaluator has no overnight wrap — use two promotions to cover a window that crosses midnight.`,
+        );
+      }
     }
   }
 

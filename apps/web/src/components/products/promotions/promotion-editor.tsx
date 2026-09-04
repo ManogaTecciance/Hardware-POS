@@ -37,7 +37,9 @@ import {
   type PromotionType,
 } from '@/lib/products/promotions-api';
 import { type ManagedProduct } from '@/lib/products-api';
+import { describeTimeWindow } from '@/lib/products/promotion-schedule';
 import { useEffectiveProfile } from '@/lib/platform-profile';
+import { cn } from '@/lib/utils';
 
 /**
  * Promotion editor (D45 — Promotions admin).
@@ -256,6 +258,11 @@ export function PromotionEditor({
   const patch = React.useCallback((p: Partial<EditorState>) => {
     setState((prev) => ({ ...prev, ...p }));
   }, []);
+
+  const scheduleNotice = React.useMemo(
+    () => describeTimeWindow(state.startTime, state.endTime),
+    [state.startTime, state.endTime],
+  );
 
   const dirty = React.useMemo(
     () => JSON.stringify(state) !== initialSnapshotRef.current,
@@ -720,6 +727,26 @@ export function PromotionEditor({
           </div>
         </div>
 
+        {/*
+          * A window that can never contain a moment, or one so short it is
+          * almost certainly a mis-click. Said here, beside the fields, rather
+          * than as a save error — and the short-window case is a warning, not a
+          * block, because a flash sale is a real thing to want.
+          */}
+        {scheduleNotice ? (
+          <p
+            role={scheduleNotice.level === 'error' ? 'alert' : 'status'}
+            className={cn(
+              'rounded-lg border p-2.5 text-xs',
+              scheduleNotice.level === 'error'
+                ? 'border-danger/40 bg-danger-soft text-danger'
+                : 'border-warning/40 bg-warning-soft text-warning',
+            )}
+          >
+            {scheduleNotice.message}
+          </p>
+        ) : null}
+
         <div>
           <span className="text-sm font-medium">Days of week</span>
           <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Days of week">
@@ -809,9 +836,25 @@ export function PromotionEditor({
             onCheckedChange={(v) => patch({ stackable: v })}
             aria-label="Allow stacking with other promotions"
           />
-          <div className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Stackable</span> — allow this promotion to
-            combine with other applicable promotions on the same order.
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Stackable</span> — allow this promotion
+              to combine with other applicable promotions on the same order.
+            </p>
+            {/*
+              * The old text stopped at the line above, and an operator read it as
+              * "these two offers will both apply". They will not if they share a
+              * product: one line carries one promotion, because `SaleItem` holds a
+              * single `promotionId`. The engine gives the basket to whichever saves
+              * more, so the toggle changes nothing for an overlapping pair — which
+              * looks exactly like a broken switch. Say so here rather than let the
+              * next person work it out from a cart that will not budge.
+              */}
+            <p>
+              Only affects promotions covering <span className="font-medium">different</span>{' '}
+              products. A single item can never carry two promotions — where two overlap, the one
+              that discounts more applies and the other is skipped.
+            </p>
           </div>
         </div>
       </section>

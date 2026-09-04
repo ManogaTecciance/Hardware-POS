@@ -447,3 +447,124 @@ describe('PromotionsService — channels follow the tenant capability (D56)', ()
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+/**
+ * A time window must be able to contain a moment.
+ *
+ * ## What was wrong
+ *
+ * `isPromotionActive` reads `startTime`/`endTime` as the half-open interval
+ * [start, end) and has no overnight wrap, but the only validation was
+ * "both or neither". So two shapes saved cleanly and produced a promotion that
+ * is switched on, reads Active in the list, and can never fire on any day:
+ * `start === end`, and `start > end` — the latter being exactly what an operator
+ * writes meaning "18:00 through 09:00".
+ *
+ * Reported from the field as a bundle that stopped discounting. The window was
+ * 12:56–12:57: a one-minute schedule nobody typed, because Chrome's native
+ * `<input type="time">` inserts the current clock time when its icon is clicked.
+ * That one is legal and stays legal — a flash sale is a real thing to want — and
+ * is warned about in the editor rather than refused here.
+ *
+ * ## What makes these assertions non-vacuous (D30)
+ *
+ * Every rejected window is paired with an accepted one, in the same suite. A
+ * guard that threw on all four would pass every rejection test while making the
+ * ordinary 09:00–17:00 promotion — and the all-day blank pair, which is most of
+ * them — unsaveable. The one-minute window is asserted to SAVE, which is the
+ * assertion that fails if anyone tightens this guard into a duration rule.
+ *
+ * MUTATION PROOF (D30 §5) — three mutations, each actually run:
+ *
+ *   A. Guard removed entirely (the defect as shipped):
+ *        × refuses an empty interval
+ *        × refuses a window that would have to cross midnight
+ *        × guards PATCH as well as create
+ *      3 of 6 fail; the accepted-window cases correctly still pass.
+ *
+ *   B. `>` instead of `>=` — the off-by-one that lets equal times through:
+ *        × refuses an empty interval
+ *      1 of 6. That single test is the only thing standing between an operator
+ *      and a promotion scheduled 12:56–12:56, which is why it is its own case
+ *      rather than folded into the midnight test.
+ *
+ *   C. Over-tightened into a minimum duration (`end - start < 15`) — the
+ *      tempting over-correction, since a one-minute window is what was reported:
+ *        × still SAVES a one-minute window — legal, merely unusual
+ *      1 of 6. This is the direction the fix is most likely to drift, and the
+ *      only test that catches it is the one asserting a permission rather than
+ *      a refusal.
+ */
+describe('PromotionsService — a time window must be able to contain a moment', () => {
+  const withTimes = (startTime: string, endTime: string) =>
+    bundleDto({ startTime, endTime } as Partial<CreatePromotionDto>);
+
+  it('accepts an ordinary window, and all-day', async () => {
+    // POSITIVE, first: the guard must not cost the normal case.
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await svc.create(TENANT, 'usr_1', withTimes('09:00', '17:00'));
+    expect(prisma.promos).toHaveLength(1);
+
+    const prisma2 = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc2 = buildService(prisma2, fakeAudit());
+    await svc2.create(TENANT, 'usr_1', bundleDto());
+    expect(prisma2.promos).toHaveLength(1);
+  });
+
+  it('refuses an empty interval', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await expect(
+      svc.create(TENANT, 'usr_1', withTimes('12:56', '12:56')),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.promos).toHaveLength(0);
+  });
+
+  it('refuses a window that would have to cross midnight, and says what to do', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await expect(svc.create(TENANT, 'usr_1', withTimes('18:00', '09:00'))).rejects.toThrow(
+      'could never be active',
+    );
+    // The message has to name the limitation, not just refuse: an operator who
+    // wants an evening offer needs to know two promotions is the way to get one.
+    await expect(svc.create(TENANT, 'usr_1', withTimes('18:00', '09:00'))).rejects.toThrow(
+      'overnight wrap',
+    );
+    expect(prisma.promos).toHaveLength(0);
+  });
+
+  it('still SAVES a one-minute window — legal, merely unusual', async () => {
+    /*
+     * The exact shape that was reported as a bug. It is not one: a flash sale is
+     * a real thing to want, and the editor warns about it. This assertion is
+     * what fails if the guard is ever tightened into a minimum duration.
+     */
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await svc.create(TENANT, 'usr_1', withTimes('12:56', '12:57'));
+    expect(prisma.promos).toHaveLength(1);
+  });
+
+  it('guards PATCH as well as create', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    const created = await svc.create(TENANT, 'usr_1', withTimes('09:00', '17:00'));
+
+    // The field report arrived via an edit, not a create — a create-only guard
+    // would have left the reported path wide open.
+    await expect(
+      svc.update(TENANT, 'usr_1', created.id, { startTime: '18:00', endTime: '09:00' } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('keeps refusing a half-open pair', async () => {
+    // Pre-existing rule, asserted so the new branch cannot swallow it.
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await expect(
+      svc.create(TENANT, 'usr_1', bundleDto({ startTime: '09:00' } as Partial<CreatePromotionDto>)),
+    ).rejects.toThrow('both be provided or both omitted');
+  });
+});

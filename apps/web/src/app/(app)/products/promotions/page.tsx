@@ -15,6 +15,8 @@ import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
+import { describeTimeWindow } from '@/lib/products/promotion-schedule';
+import { cn } from '@/lib/utils';
 import {
   activatePromotion,
   deactivatePromotion,
@@ -224,6 +226,28 @@ export default function PromotionsPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {summarisePromotionSchedule(p)}
+                      {/*
+                        * The Active badge reports the `isActive` FLAG, not whether
+                        * the promotion can fire. A row reading "Active · All week ·
+                        * 12:56–12:57" is switched on and dead for 1,439 minutes of
+                        * every day, and nothing on this screen said so. Reuses the
+                        * editor's own helper rather than re-deriving the rule here.
+                        */}
+                      {(() => {
+                        const notice = describeTimeWindow(p.startTime ?? '', p.endTime ?? '');
+                        if (!notice) return null;
+                        return (
+                          <div
+                            className={cn(
+                              'mt-1 text-xs',
+                              notice.level === 'error' ? 'text-danger' : 'text-warning',
+                            )}
+                          >
+                            {notice.level === 'error' ? 'Never fires — ' : 'Very short — '}
+                            {notice.message}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-right text-muted-foreground">
                       {p.items.length}
