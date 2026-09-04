@@ -6,6 +6,7 @@ import {
   cartLineKey,
   chooseRewardVariant,
   computeCartLines,
+  planRewardLines,
   computeLine,
   computeTotals,
   lineLabel,
@@ -584,5 +585,106 @@ describe('chooseRewardVariant', () => {
 
   it('returns null for a product with no variants — the caller adds it plain', () => {
     expect(chooseRewardVariant(product({ variants: [] }))).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4.13 — reconciling the reward line, in both directions
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('planRewardLines', () => {
+  const PROMO = 'r_bogo';
+  const ent = (earned: number, held = 0) => [
+    { promotionId: PROMO, promotionName: 'Buy 2 Get 1', productId: 'p_tie', earned, held },
+  ];
+  const none = new Set<string>();
+
+  const shirt = (qty: number) => {
+    const it = newCartItem(product({ id: 'p_shirt', unitPrice: 1000, variants: [] }), null);
+    it.quantity = qty;
+    return it;
+  };
+  const rewardTie = (qty: number) => {
+    const it = newCartItem(product({ id: 'p_tie', unitPrice: 500, variants: [] }), null);
+    it.quantity = qty;
+    it.addedByPromotionId = PROMO;
+    return it;
+  };
+  const scannedTie = (qty: number) => {
+    const it = newCartItem(product({ id: 'p_tie', unitPrice: 500, variants: [] }), null);
+    it.quantity = qty;
+    return it;
+  };
+
+  it('adds the reward when the basket earns one and has none', () => {
+    expect(planRewardLines([shirt(2)], ent(1), none)).toEqual([
+      { kind: 'add', promotionId: PROMO, productId: 'p_tie', quantity: 1 },
+    ]);
+  });
+
+  it('TOPS UP when four shirts earn two ties — the reported case', () => {
+    /*
+     * 4.11 could only add, so once the tie line existed nothing happened and
+     * four shirts stayed at one tie.
+     */
+    const items = [shirt(4), rewardTie(1)];
+
+    expect(planRewardLines(items, ent(2, 1), none)).toEqual([
+      { kind: 'setQuantity', lineKey: items[1]!.lineKey, quantity: 2 },
+    ]);
+  });
+
+  it('WITHDRAWS when the basket stops earning — the reported case', () => {
+    /*
+     * The serious half: dropping to one shirt left the tie in the basket, no
+     * longer discounted and therefore CHARGED. A customer paying for something
+     * the till put in their basket is worse than the offer never firing.
+     */
+    const items = [shirt(1), rewardTie(1)];
+
+    expect(planRewardLines(items, ent(0, 1), none)).toEqual([
+      { kind: 'remove', lineKey: items[1]!.lineKey },
+    ]);
+  });
+
+  it('does NOTHING when the basket already matches — the loop guard', () => {
+    // An empty plan is what stops the effect re-triggering itself. 4.11 rebuilt
+    // the items array every pass and exhausted React's update depth.
+    expect(planRewardLines([shirt(2), rewardTie(1)], ent(1, 1), none)).toEqual([]);
+  });
+
+  it('never re-adds a reward the cashier removed', () => {
+    // POSITIVE CONTROL first: without the decline it would be added.
+    expect(planRewardLines([shirt(2)], ent(1), none)).toHaveLength(1);
+    // NEGATIVE: declined stays declined, or the trash button does nothing.
+    expect(planRewardLines([shirt(2)], ent(1), new Set([PROMO]))).toEqual([]);
+  });
+
+  it('counts a tie the cashier scanned, and adds nothing on top', () => {
+    // The customer chose their own tie. The promotion prices it; the till must
+    // not add a second one beside it.
+    expect(planRewardLines([shirt(2), scannedTie(1)], ent(1, 1), none)).toEqual([]);
+  });
+
+  it('never rewrites or removes a line the cashier scanned', () => {
+    /*
+     * Only `addedByPromotionId` lines are managed. A tie the cashier put in the
+     * basket is theirs even when the promotion lapses — taking it back out
+     * would be the till overruling a person.
+     */
+    const items = [shirt(1), scannedTie(2)];
+
+    expect(planRewardLines(items, ent(0, 2), none)).toEqual([]);
+  });
+
+  it('withdraws a reward whose promotion is no longer eligible at all', () => {
+    // Schedule lapsed mid-sale, or the rule was deactivated: the entitlement
+    // disappears entirely rather than reporting zero. Without this the line sits
+    // at full price wearing a promo badge.
+    const items = [shirt(2), rewardTie(1)];
+
+    expect(planRewardLines(items, [], none)).toEqual([
+      { kind: 'remove', lineKey: items[1]!.lineKey },
+    ]);
   });
 });

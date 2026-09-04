@@ -369,44 +369,63 @@ export function buyXGetYOutcome(
   return { earned, held };
 }
 
-/** One reward a basket has earned but is not holding (4.11). */
-export interface PendingReward {
+/** What a basket is entitled to under one reward promotion (4.13). */
+export interface RewardEntitlement {
   promotionId: string;
   promotionName: string;
-  /** The GET product to add. */
+  /** The GET product the reward is drawn from. */
   productId: string;
-  /** How many units short the basket is. */
-  quantity: number;
+  /** Reward units the basket has EARNED — the target, not a shortfall. */
+  earned: number;
+  /** Reward units already in the basket. */
+  held: number;
 }
 
 /**
- * Rewards the basket has EARNED but does not hold.
+ * What each reward promotion entitles this basket to, right now (4.13).
  *
- * The till uses this to add the free item itself, so a cashier does not have to
- * know an offer exists. It reads the same `buyXGetYOutcome` the discount does,
- * so a line it adds is always a line the applier will discount — never one that
- * appears and then gets charged for.
+ * Reports the TARGET rather than a shortfall, because the till has to reconcile
+ * in both directions. 4.11 returned "how many are missing", which could only
+ * ever add: four shirts never became two ties, and dropping to one shirt left
+ * the free tie in the basket — now charged for, which is worse than never
+ * adding it.
+ *
+ * `earned` is what the basket qualifies for; `held` is what it already has. A
+ * caller tops up, trims, or removes to match. An entitlement of zero is REPORTED
+ * rather than omitted, so a till can withdraw a reward it previously added —
+ * omitting it is what made withdrawal impossible before.
+ *
+ * Reads the same `buyXGetYOutcome` the discount does, so a line added to satisfy
+ * this is always a line the applier will price to zero.
  *
  * Only the FIRST GET product of a rule is offered: a promotion naming two
  * possible rewards is a choice for the customer, not for the till.
  */
-export function pendingRewards(context: PromotionContext): PendingReward[] {
+export function rewardEntitlements(context: PromotionContext): RewardEntitlement[] {
   const eligibleLines = context.lines.filter((l) => l.manualDiscountAmount <= 0);
-  const out: PendingReward[] = [];
+  const out: RewardEntitlement[] = [];
 
   for (const rule of context.promotions) {
-    const outcome = buyXGetYOutcome(eligibleLines, rule);
-    if (!outcome || outcome.earned < 1) continue;
-    const short = outcome.earned - outcome.held.length;
-    if (short < 1) continue;
-
     const first = rule.items.find((it) => it.role === 'GET');
     if (!first) continue;
+
+    const outcome = buyXGetYOutcome(eligibleLines, rule);
+    if (!outcome) continue;
+
+    /*
+     * A same-product BOGO draws its reward from the pool it counts, so the
+     * customer is always already holding it. Reporting an entitlement would ask
+     * the till to add a unit that earns nothing and gets charged for.
+     */
+    const buyIds = new Set(requiredByProduct(rule, 'BUY').keys());
+    if ([...requiredByProduct(rule, 'GET').keys()].some((id) => buyIds.has(id))) continue;
+
     out.push({
       promotionId: rule.id,
       promotionName: rule.name,
       productId: first.productId,
-      quantity: short,
+      earned: outcome.earned,
+      held: outcome.held.length,
     });
   }
 

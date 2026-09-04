@@ -40,6 +40,7 @@ import { useAuth } from '@/lib/auth';
 import {
   chooseRewardVariant,
   computeCartLines,
+  planRewardLines,
   computeLine,
   computeTotals,
   linePrice,
@@ -56,7 +57,7 @@ import {
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
-import { pendingRewards } from '@hardware-pos/shared';
+import { rewardEntitlements } from '@hardware-pos/shared';
 
 import { stockCap, usePosCart } from '@/lib/pos-cart';
 import { resolveScan, type ScanHit } from '@/lib/scan-resolver';
@@ -349,44 +350,61 @@ export function PosRetailCheckout() {
   React.useEffect(() => {
     if (data.promotionRules.length === 0) return;
 
-    const pending = pendingRewards({
-      lines: cart.items.map((it) => ({
-        id: it.lineKey,
-        productId: it.product.id,
-        unitPrice: linePrice(it),
-        quantity: it.quantity,
-        lineSubtotal: computeLine(it).lineSubtotal,
-        manualDiscountAmount: computeLine(it).discountAmount,
-      })),
+    const entitlements = rewardEntitlements({
+      lines: cart.items.map((it) => {
+        const line = computeLine(it);
+        return {
+          id: it.lineKey,
+          productId: it.product.id,
+          unitPrice: linePrice(it),
+          quantity: it.quantity,
+          lineSubtotal: line.lineSubtotal,
+          manualDiscountAmount: line.discountAmount,
+        };
+      }),
       promotions: data.promotionRules,
     });
 
+    const actions = planRewardLines(cart.items, entitlements, declinedRewards);
     let hint: string | null = null;
-    for (const reward of pending) {
-      if (declinedRewards.has(reward.promotionId)) continue;
 
-      const product = data.products.find((p) => p.id === reward.productId);
+    for (const action of actions) {
+      if (action.kind === 'remove') {
+        // Withdrawn because the basket no longer earns it. NOT a decline — the
+        // cashier did not choose this, so the reward returns if they scan the
+        // qualifying items again.
+        cart.removeItem(action.lineKey);
+        continue;
+      }
+      if (action.kind === 'setQuantity') {
+        cart.setQty(action.lineKey, action.quantity);
+        continue;
+      }
+
+      const product = data.products.find((p) => p.id === action.productId);
       if (!product) continue;
 
       let variant: ClientVariant | null = null;
       if (product.variants.length > 0) {
-        // 4.12 — `isDefault` when a shop set one, cheapest in-stock otherwise.
-        // Requiring a default meant refusing on almost every real catalogue:
-        // only 3 of 48 variants carry the flag.
         variant = chooseRewardVariant(product);
         if (!variant) {
-          hint = `${reward.promotionName}: ${product.name} is out of stock.`;
+          hint = `${product.name} is out of stock, so the free item could not be added.`;
           continue;
         }
       }
-      cart.addRewardToCart(product, variant, reward.quantity, reward.promotionId);
+      cart.addRewardToCart(product, variant, action.quantity, action.promotionId);
     }
+
     setRewardHint(hint);
-    // `cart` is a stable context value; the cart's ITEMS are what this reacts to.
+    // Reacts to the cart's ITEMS; `cart` itself is a stable context value.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cart.items, data.promotionRules, data.products, declinedRewards]);
 
-  /** Removing an auto-added line is a decision, not an accident. */
+  /**
+   * Removing a reward line is a DECISION: the cashier does not want it, so it
+   * must not reappear. Withdrawal by `planRewardLines` goes through
+   * `cart.removeItem` directly and is deliberately not recorded here.
+   */
   const removeLine = (lineKey: CartLineKey) => {
     const item = cart.items.find((it) => it.lineKey === lineKey);
     if (item?.addedByPromotionId) {
@@ -548,12 +566,19 @@ export function PosRetailCheckout() {
                     <div className="line-clamp-2 text-sm font-medium leading-tight">
                       {item.product.name}
                     </div>
-                    {/* D45 (4.11) — say WHY this line appeared. A row the
-                        cashier did not scan, priced at 0.00, reads as a bug
-                        unless the till names it. */}
-                    {item.addedByPromotionId ? (
-                      <span className="mt-1 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                        Promo item
+                    {/*
+                      D45 (4.13) — badge what the PROMOTION PRICED, not what the
+                      till added. A row at 0.00 reads as a bug unless it is
+                      named, and a cashier who swaps the red tie for a black one
+                      must still see it: their line is discounted by the same
+                      rule, so it carries the same badge.
+                    */}
+                    {line.promotionName ? (
+                      <span
+                        className="mt-1 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
+                        title={line.promotionName}
+                      >
+                        {line.promotionName}
                       </span>
                     ) : null}
                     <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">

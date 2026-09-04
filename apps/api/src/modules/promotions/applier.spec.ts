@@ -21,7 +21,7 @@
 import {
   applyPromotions,
   distributeByLargestRemainder,
-  pendingRewards,
+  rewardEntitlements,
   type PromotionCartLine,
   type PromotionRule,
 } from '@hardware-pos/shared';
@@ -662,7 +662,7 @@ describe('stackable', () => {
 // pendingRewards — what the till adds for the customer (4.11)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('pendingRewards', () => {
+describe('rewardEntitlements', () => {
   const bogo = (over: Partial<PromotionRule> = {}) =>
     rule({
       id: 'r_bogo',
@@ -683,17 +683,18 @@ describe('pendingRewards', () => {
     // the applier discounts a reward the customer HOLDS.
     const lines = [item('l_shirt', 'p_shirt', 1000, 2)];
 
-    expect(pendingRewards({ lines, promotions: [bogo()] })).toEqual([
+    expect(rewardEntitlements({ lines, promotions: [bogo()] })).toEqual([
       {
         promotionId: 'r_bogo',
         promotionName: 'Buy 2 shirts, tie free',
         productId: 'p_tie',
-        quantity: 1,
+        earned: 1,
+        held: 0,
       },
     ]);
   });
 
-  it('asks for NOTHING once the reward is in the basket — the loop guard', () => {
+  it('reports the reward as HELD once it is in the basket — the loop guard', () => {
     /*
      * The property that makes auto-add terminate. The till adds the tie, this
      * runs again on the new basket, and finds nothing outstanding. Without it
@@ -701,20 +702,40 @@ describe('pendingRewards', () => {
      */
     const lines = [item('l_shirt', 'p_shirt', 1000, 2), item('l_tie', 'p_tie', 500, 1)];
 
-    expect(pendingRewards({ lines, promotions: [bogo()] })).toEqual([]);
+    // earned === held, so a caller has nothing to do and the effect settles.
+    expect(rewardEntitlements({ lines, promotions: [bogo()] })[0]).toMatchObject({
+      earned: 1,
+      held: 1,
+    });
   });
 
-  it('asks for the SHORTFALL only, not the whole entitlement', () => {
-    // Four shirts earn two ties; one is already held.
+  it('FOUR shirts earn TWO ties — the reported case', () => {
+    /*
+     * 4.11 reported a shortfall and could only add, so once a tie line existed
+     * nothing happened: four shirts stayed at one tie. Reporting the target
+     * lets the caller top the line up.
+     */
     const lines = [item('l_shirt', 'p_shirt', 1000, 4), item('l_tie', 'p_tie', 500, 1)];
 
-    expect(pendingRewards({ lines, promotions: [bogo()] })[0]!.quantity).toBe(1);
+    expect(rewardEntitlements({ lines, promotions: [bogo()] })[0]).toMatchObject({
+      earned: 2,
+      held: 1,
+    });
   });
 
-  it('asks for nothing below the threshold', () => {
-    const lines = [item('l_shirt', 'p_shirt', 1000, 1)];
+  it('reports ZERO below the threshold rather than staying silent', () => {
+    /*
+     * The other half of the reported case: dropping from two shirts to one must
+     * WITHDRAW the tie. 4.11 omitted un-earned promotions entirely, so the
+     * caller never learned to take it back and the customer was charged 500 for
+     * a tie the till had put in their basket.
+     */
+    const lines = [item('l_shirt', 'p_shirt', 1000, 1), item('l_tie', 'p_tie', 500, 1)];
 
-    expect(pendingRewards({ lines, promotions: [bogo()] })).toEqual([]);
+    expect(rewardEntitlements({ lines, promotions: [bogo()] })[0]).toMatchObject({
+      earned: 0,
+      held: 1,
+    });
   });
 
   it('a manually discounted BUY line cannot earn a reward', () => {
@@ -723,10 +744,12 @@ describe('pendingRewards', () => {
     // an item the applier would then charge for.
     const lines = [item('l_shirt', 'p_shirt', 1000, 2, 50)];
 
-    expect(pendingRewards({ lines, promotions: [bogo()] })).toEqual([]);
+    // Reported as earning ZERO rather than omitted, so a reward the till had
+    // already added is withdrawn when a cashier discounts the buy side.
+    expect(rewardEntitlements({ lines, promotions: [bogo()] })[0]).toMatchObject({ earned: 0 });
   });
 
-  it('same-product BOGO asks for nothing — the reward is already the pool', () => {
+  it('same-product BOGO reports nothing — the reward IS the pool', () => {
     /*
      * "Buy 2 get 1 free" on ONE product: the customer must hold X + Y units for
      * an application, so by the time it earns anything it already holds the
@@ -744,7 +767,7 @@ describe('pendingRewards', () => {
       ],
     });
 
-    expect(pendingRewards({ lines: [item('l1', 'p', 100, 3)], promotions: [samePool] })).toEqual([]);
+    expect(rewardEntitlements({ lines: [item('l1', 'p', 100, 3)], promotions: [samePool] })).toEqual([]);
   });
 
   it('what it asks for is what the applier discounts — the agreement', () => {
@@ -752,10 +775,10 @@ describe('pendingRewards', () => {
     // the applier prices it to zero. A line that appeared and was then charged
     // for would be worse than the offer never firing.
     const before = [item('l_shirt', 'p_shirt', 1000, 2)];
-    const [ask] = pendingRewards({ lines: before, promotions: [bogo()] });
+    const [ask] = rewardEntitlements({ lines: before, promotions: [bogo()] });
     expect(ask).toBeDefined();
 
-    const after = [...before, item('l_tie', ask!.productId, 500, ask!.quantity)];
+    const after = [...before, item('l_tie', ask!.productId, 500, ask!.earned - ask!.held)];
     const result = applyPromotions({ lines: after, promotions: [bogo()] });
 
     expect(byLine(result)).toEqual({ l_tie: 500 });
@@ -769,7 +792,7 @@ describe('pendingRewards', () => {
       items: [{ productId: 'p_shirt', role: 'BUNDLE', quantity: 1 }],
     });
 
-    expect(pendingRewards({ lines: [item('l1', 'p_shirt', 1000, 5)], promotions: [pct] })).toEqual(
+    expect(rewardEntitlements({ lines: [item('l1', 'p_shirt', 1000, 5)], promotions: [pct] })).toEqual(
       [],
     );
   });

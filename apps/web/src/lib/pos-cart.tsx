@@ -168,15 +168,28 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
           const key = cartLineKey(product.id, variant?.id ?? null);
           const cap = stockCap(product, variant);
           const wanted = cap != null ? Math.min(quantity, cap) : quantity;
-          if (wanted < 1) return s;
-
           const found = s.items.find((it) => it.lineKey === key);
+
+          /*
+           * RETURN THE SAME STATE when nothing changes (4.13).
+           *
+           * The effect that calls this re-runs on every cart change, so a
+           * mutator that rebuilds the items array unconditionally re-triggers
+           * it forever — which is exactly what exhausted React's update depth
+           * in 4.11. Identity is the loop guard.
+           */
+          if (wanted < 1) return s;
+          if (found && found.quantity === wanted && found.addedByPromotionId === promotionId) {
+            return s;
+          }
+
           if (found) {
-            // The cashier already scanned it — mark it, do not stack another.
             return {
               ...s,
               items: s.items.map((it) =>
-                it.lineKey === key ? { ...it, addedByPromotionId: promotionId } : it,
+                it.lineKey === key
+                  ? { ...it, quantity: wanted, addedByPromotionId: promotionId }
+                  : it,
               ),
             };
           }
