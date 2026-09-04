@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import * as React from 'react';
-import { Printer, ReceiptText, RefreshCw, Search } from 'lucide-react';
+import { Printer, ReceiptText, RefreshCw, Search, X } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
@@ -78,9 +78,11 @@ export default function SalesPage() {
   const [reloadKey, setReloadKey] = React.useState(0);
   const [exporting, setExporting] = React.useState<ReportFormat | null>(null);
 
-  // Debounce the search box so we don't refetch on every keystroke.
+  // Debounce the search box so we don't refetch on every keystroke. Collapse
+  // internal whitespace runs too: the API matches with a literal `contains`,
+  // so "x  x" would otherwise miss "x x".
   React.useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    const t = window.setTimeout(() => setDebouncedSearch(search.replace(/\s+/g, ' ').trim()), 300);
     return () => window.clearTimeout(t);
   }, [search]);
 
@@ -185,8 +187,18 @@ export default function SalesPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search sale number or customer…"
-            className="pl-10"
+            className="pl-10 pr-9"
           />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
         <DateRangeFilter value={dateRange} onChange={setDateRange} />
         <Select
@@ -346,49 +358,54 @@ export default function SalesPage() {
         </div>
       </Card>
 
-      {/* Pagination */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span>Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="w-auto"
-          >
-            {PAGE_SIZES.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-muted-foreground">
-            {total === 0
-              ? '0'
-              : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)}`}{' '}
-            of {total}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+      {/* Pager chrome only when it can do something (same rules as the
+          customers list): the footer needs more rows than the smallest page
+          size — gating on the CURRENT size would make the selector vanish
+          right after picking a larger one — and the buttons need a second
+          page to go to. */}
+      {total > Math.min(...PAGE_SIZES) ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <span>Rows per page</span>
+            <Select
+              value={String(pageSize)}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="w-auto"
             >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
+              {PAGE_SIZES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-muted-foreground">
+              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+            </span>
+            {totalPages > 1 ? (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
