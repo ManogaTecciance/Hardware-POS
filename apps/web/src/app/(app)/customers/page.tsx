@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import * as React from 'react';
 import { FileUp, Info, Search, UserPlus, X } from 'lucide-react';
 
@@ -47,6 +47,7 @@ export default function CustomersPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.CUSTOMER_MANAGE);
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   // Seeded from the URL so the dashboard's receivable card can deep-link
   // straight to the customers who owe it. Only the initial value comes from the
@@ -108,6 +109,38 @@ export default function CustomersPage() {
       cancelled = true;
     };
   }, [session, page, pageSize, debouncedSearch, customerType, active, owingOnly, reloadKey]);
+
+  /**
+   * Open a customer from anywhere in their row.
+   *
+   * The row is a mouse convenience over the name link, which stays as the
+   * keyboard and screen-reader path — making the row itself focusable would add
+   * a second tab stop to the same destination and announce the whole row as a
+   * link.
+   *
+   * Three clicks are deliberately not a same-tab navigation: one that lands on
+   * something interactive (the name link, the Edit link, the credit info icon),
+   * which owns its own behaviour; one that ends a text selection, because
+   * reading a phone number off the table is a copy and not a click; and a
+   * right-click, which belongs to the context menu. A middle- or modifier-click
+   * still opens the customer, in the new tab the user asked for.
+   */
+  const handleOpen = (event: React.MouseEvent<HTMLTableRowElement>, id: string) => {
+    // Right-click belongs to the context menu; onAuxClick fires for it too.
+    if (event.button === 2) return;
+    if (
+      (event.target as HTMLElement).closest('a, button, input, select, textarea, [role="button"]')
+    ) {
+      return;
+    }
+    if (window.getSelection()?.toString().trim()) return;
+    const href = `/customers/${id}`;
+    if (event.button === 1 || event.metaKey || event.ctrlKey || event.shiftKey) {
+      window.open(href, '_blank', 'noopener');
+      return;
+    }
+    router.push(href);
+  };
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -204,7 +237,12 @@ export default function CustomersPage() {
                 </tr>
               ) : (
                 rows.map((c) => (
-                  <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                  <tr
+                    key={c.id}
+                    onClick={(e) => handleOpen(e, c.id)}
+                    onAuxClick={(e) => handleOpen(e, c.id)}
+                    className="cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-muted/30"
+                  >
                     <td className="px-4 py-3">
                       <Link
                         href={`/customers/${c.id}`}
