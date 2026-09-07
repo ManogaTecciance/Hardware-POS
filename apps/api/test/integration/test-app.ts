@@ -25,6 +25,7 @@ import { BusinessProfileService } from '../../src/modules/platform/business-prof
 import { ProductsModule } from '../../src/modules/products/products.module';
 import { ProductsService } from '../../src/modules/products/products.service';
 import { SyncQueueService } from '../../src/modules/sync/queue/sync-queue.service';
+import { DocumentsModule } from '../../src/modules/documents/documents.module';
 import { ExchangesModule } from '../../src/modules/exchanges/exchanges.module';
 import { ExchangesService } from '../../src/modules/exchanges/exchanges.service';
 import { ReturnsModule } from '../../src/modules/returns/returns.module';
@@ -76,6 +77,8 @@ export async function createIntegrationApp(): Promise<IntegrationApp> {
       SalesModule,
       ReturnsModule,
       ExchangesModule,
+      // 7.3 — the exchange note is rendered from real data here.
+      DocumentsModule,
       ProductsModule,
     ],
   }).compile();

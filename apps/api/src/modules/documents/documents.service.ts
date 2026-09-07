@@ -54,6 +54,13 @@ const returnForDoc = {
 
 type ReturnForDocRow = Prisma.ReturnGetPayload<{ include: typeof returnForDoc }>;
 
+/** D107 (`7.3`) — everything the exchange note needs, in one read. */
+const exchangeForDoc = {
+  return: { include: { items: true } },
+  replacementSale: { include: { items: true } },
+  tenant: { select: { name: true } },
+} satisfies Prisma.ExchangeInclude;
+
 /** A returned or replacement line for the Exchange A4 template. */
 export interface ExchangeLine {
   name: string;
@@ -61,6 +68,28 @@ export interface ExchangeLine {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  /**
+   * `7.3` — the tax this line actually carried.
+   *
+   * Optional so the Settings sample preview, which has no tax to show, keeps
+   * working unchanged. It was hardcoded to 0 for every line until Phase 7:
+   * written before Phase 3 made tax per-line with snapshots, so an exchange
+   * note showed no tax at all and did not tie to the money that moved.
+   */
+  taxAmount?: number;
+}
+
+/**
+ * `7.3` — the real money either leg moved, when the caller knows it.
+ *
+ * Without this the note's net is a sum of DISPLAY lines, which is a
+ * reconstruction of the money rather than the money. `Return.refundTotal` and
+ * `Sale.total` are what the customer was actually handed and actually paid, so
+ * a note built from them cannot disagree with the till.
+ */
+export interface ExchangeTotals {
+  returnedTotal: number;
+  replacementTotal: number;
 }
 
 /** Document types the Settings preview can render with sample data. */
@@ -478,6 +507,7 @@ export class DocumentsService {
     exchangeNumber: string,
     returned: ExchangeLine[],
     replacements: ExchangeLine[],
+    totals?: ExchangeTotals,
   ): A4Document {
     const docs = this.settings.getSettings(tenantId).documents;
     const toDoc = (l: ExchangeLine, i: number, sign: number): DocLine => ({
@@ -489,11 +519,22 @@ export class DocumentsService {
       unitType: null,
       unitPrice: l.unitPrice,
       discountAmount: 0,
-      taxAmount: 0,
+      // `7.3` — the real tax, as a MAGNITUDE. Hardcoded 0 until Phase 7.
+      //
+      // Not negated on the returning side, unlike the line total: the shared
+      // row builder renders any non-positive tax as an em dash, so a negative
+      // would erase the figure rather than show it as a credit. The direction
+      // of the line is already unambiguous from its negative total and the
+      // "Return:" prefix on its name.
+      taxAmount: l.taxAmount ?? 0,
       lineTotal: sign * l.lineTotal,
     });
-    const returnedTotal = returned.reduce((a, l) => a + l.lineTotal, 0);
-    const replacementTotal = replacements.reduce((a, l) => a + l.lineTotal, 0);
+    // Prefer the money that actually moved. Falling back to a sum of display
+    // lines keeps the Settings sample preview working, where there is no
+    // transaction to read totals from.
+    const returnedTotal = totals?.returnedTotal ?? returned.reduce((a, l) => a + l.lineTotal, 0);
+    const replacementTotal =
+      totals?.replacementTotal ?? replacements.reduce((a, l) => a + l.lineTotal, 0);
     const net = Math.round((replacementTotal - returnedTotal) * 100) / 100;
 
     const lines = [
@@ -515,13 +556,83 @@ export class DocumentsService {
       title: 'Exchange',
       number: exchangeNumber,
       meta: [{ label: 'Date', value: this.date(new Date().toISOString()) }],
-      columns: this.columns({ ...docs, showTaxColumn: false, showDiscountColumn: false }),
-      rows: this.rows(lines, { ...docs, showTaxColumn: false, showDiscountColumn: false }),
+      // `7.3` — the TAX column now follows the tenant's setting, exactly as the
+      // sale and return notes do. Forcing it off predates Phase 3 and hid the
+      // one figure that makes the note tie to the money. The DISCOUNT column
+      // stays off: an exchange line carries no per-line discount of its own,
+      // because the price it is valued at already has one applied.
+      columns: this.columns({ ...docs, showDiscountColumn: false }),
+      rows: this.rows(lines, { ...docs, showDiscountColumn: false }),
       summary,
       footerText: docs.footerText,
       signatures: docs.signatureFields,
       ...this.layout(docs),
     };
+  }
+
+  // ── Exchange A4 from REAL data (D107, `7.3`) ─────────────────────────────
+
+  /**
+   * Render the note for a real exchange.
+   *
+   * Until Phase 7 the only caller of `buildExchangeDocument` was the Settings
+   * sample preview — D2's "a renderer with no transaction behind it". This is
+   * the transaction behind it.
+   *
+   * The totals come from `Return.refundTotal` and `Sale.total`: what the
+   * customer was actually handed and actually paid. A note built from a sum of
+   * display lines would be a reconstruction of the money, not the money.
+   */
+  async exchangeHtml(tenantId: string, exchangeId: string): Promise<string> {
+    const row = await this.prisma.exchange.findFirst({
+      where: { id: exchangeId, tenantId },
+      include: exchangeForDoc,
+    });
+    if (!row) throw new NotFoundException('Exchange not found');
+
+    const num = (v: Prisma.Decimal | number | null) => (v == null ? 0 : Number(v));
+
+    const returned: ExchangeLine[] = row.return.items.map((it) => ({
+      // 2.12 — the size has to survive onto every document, not most of them.
+      name: saleLineLabel(it.productNameSnapshot, it.variantNameSnapshot),
+      sku: it.variantSkuSnapshot ?? it.skuSnapshot,
+      quantity: num(it.returnQuantity),
+      unitPrice: num(it.originalUnitPrice),
+      lineTotal: num(it.refundableAmount),
+      // 3.11 — the tax this line actually paid, from its snapshot, rather than
+      // a rate recomputed today.
+      taxAmount: num(it.taxAdjustment),
+    }));
+
+    // An exchange whose replacement leg never completed still prints: the
+    // customer has been refunded and is entitled to a note saying so. D107 —
+    // unresolved is its own state, and refusing to render would leave the
+    // operator with nothing to hand over.
+    const replacements: ExchangeLine[] = (row.replacementSale?.items ?? []).map((it) => ({
+      // A SaleItem names its product directly; only the VARIANT is snapshotted
+      // (D44). The return side uses productNameSnapshot because a ReturnItem
+      // snapshots both.
+      name: saleLineLabel(it.productName, it.variantNameSnapshot),
+      sku: it.variantSkuSnapshot ?? it.sku,
+      quantity: num(it.quantity),
+      unitPrice: num(it.unitPrice),
+      lineTotal: num(it.lineTotal),
+      taxAmount: num(it.taxAmount),
+    }));
+
+    return renderA4Document(
+      this.buildExchangeDocument(
+        tenantId,
+        row.tenant.name,
+        row.exchangeNumber,
+        returned,
+        replacements,
+        {
+          returnedTotal: num(row.return.refundTotal),
+          replacementTotal: num(row.replacementSale?.total ?? 0),
+        },
+      ),
+    );
   }
 
   // ── Template preview (sample data, for Settings → Documents) ──────────────

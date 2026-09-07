@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 295
-- Module-guarded routes: 199
+- Total routes: 296
+- Module-guarded routes: 200
 - Ungated routes: 96
 
 ## How to read the Guard column
@@ -247,6 +247,12 @@ returns cause a refund through the side door.
 | POST | `/exchanges` | EXCHANGES | ENFORCED | return:create + sale:create |
 | GET | `/exchanges` | EXCHANGES | ENFORCED | return:read |
 | GET | `/exchanges/:id` | EXCHANGES | ENFORCED | return:read |
+
+The A4 note lives on `DocumentsController` with the other documents:
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/documents/exchanges/:exchangeId` | EXCHANGES | ENFORCED | return:read |
 
 ### AttributeLibraryController
 

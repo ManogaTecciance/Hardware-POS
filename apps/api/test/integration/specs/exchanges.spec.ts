@@ -43,9 +43,11 @@ import { createIntegrationApp, type IntegrationApp } from '../test-app';
 import type { AuthenticatedUser } from '../../../src/modules/auth/auth.types';
 import { ApproveReturnDto } from '../../../src/modules/returns/dto/approve-return.dto';
 import type { SaleWithRelations } from '../../../src/modules/sales/sales.repository';
+import { DocumentsService } from '../../../src/modules/documents/documents.service';
 
 let prisma: PrismaClient;
 let app: IntegrationApp;
+let documents: DocumentsService;
 let tenant: SeededTenant;
 let owner: AuthenticatedUser;
 
@@ -56,6 +58,7 @@ let largeId: string;
 beforeAll(async () => {
   prisma = await connectTestPrisma();
   app = await createIntegrationApp();
+  documents = app.module.get(DocumentsService);
 });
 
 afterAll(async () => {
@@ -494,5 +497,80 @@ describe('scoping', () => {
     await expect(app.exchangesService.getById('some-other-tenant', exchange.id)).rejects.toThrow(
       /not found/i,
     );
+  });
+});
+
+// ── 7.3 — the A4 note, from real data ───────────────────────────────────────
+
+describe('the exchange note', () => {
+  it('ties to the money that actually moved, and names both sizes', async () => {
+    await seedVariants(1000, 1500);
+    const sale = await soldOneMedium();
+
+    const exchange = await app.exchangesService.complete(
+      tenant.tenantId,
+      owner,
+      {
+        originalSaleId: sale.id,
+        branchId: tenant.branchId,
+        registerId: tenant.registerId,
+        returnItems: [returnLine(sale)],
+        approvalToken: await managerApproval(sale.id, Number(sale.total)),
+        replacementItems: [
+          { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
+        ],
+        payments: [{ method: 'CASH' as const, amount: 1500 }],
+      },
+      null,
+    );
+
+    const html = await documents.exchangeHtml(tenant.tenantId, exchange.id);
+
+    // The number identifies it, and both legs appear.
+    expect(html).toContain(exchange.exchangeNumber);
+    expect(html).toContain('Return:');
+    expect(html).toContain('New:');
+
+    // The figure a customer is asked for. 1500 charged less 1000 refunded — and
+    // this is read from `Return.refundTotal` and `Sale.total`, not summed from
+    // display rows, so it cannot drift from what the till took.
+    expect(html).toContain('Balance due from customer');
+    expect(html).toMatch(/500\.00/);
+  });
+
+  it('renders an exchange whose replacement never completed', async () => {
+    // D107 — unresolved is its own state. The customer has been refunded and is
+    // entitled to a note saying so; refusing to render would leave the operator
+    // with nothing to hand over.
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    await expect(
+      app.exchangesService.complete(
+        tenant.tenantId,
+        owner,
+        {
+          originalSaleId: sale.id,
+          branchId: tenant.branchId,
+          registerId: tenant.registerId,
+          returnItems: [returnLine(sale)],
+          approvalToken: await managerApproval(sale.id, Number(sale.total)),
+          replacementItems: [
+            { productId: tenant.productAId, productVariantId: 'not-a-real-variant', quantity: 1 },
+          ],
+          payments: [{ method: 'CASH' as const, amount: 1000 }],
+        },
+        null,
+      ),
+    ).rejects.toBeDefined();
+
+    const open = await prisma.exchange.findFirstOrThrow({ where: { tenantId: tenant.tenantId } });
+    const html = await documents.exchangeHtml(tenant.tenantId, open.id);
+
+    expect(html).toContain(open.exchangeNumber);
+    expect(html).toContain('Return:');
+    // Nothing went out, so the whole returned value is owed back to the
+    // customer — which the note states rather than leaving blank.
+    expect(html).toContain('Refund to customer');
   });
 });
