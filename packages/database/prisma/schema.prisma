@@ -374,6 +374,7 @@ model Tenant {
   inventoryReceipts            InventoryReceipt[]
   inventoryReceiptLines        InventoryReceiptLine[]
   promotions                   Promotion[]
+  exchanges                    Exchange[]
   kitchenPrinters              KitchenPrinter[]
   kitchenTickets               KitchenTicket[]
   kitchenTicketItems           KitchenTicketItem[]
@@ -480,6 +481,7 @@ model Branch {
   branchAccess          BranchAccess[]
   sales                 Sale[]
   returns               Return[]
+  exchanges             Exchange[]
   quotations            Quotation[]
   restaurantConfig      RestaurantBranchConfig?
   openingHours          BranchOpeningHours[]
@@ -1014,6 +1016,10 @@ model Sale {
   receipt    Receipt?
   printJobs  PrintJob[]
   returns    Return[]
+  /// D107 — exchanges taken against this sale, and exchanges that issued it.
+  /// Two relations to the same model, so both are named.
+  exchangesAgainst   Exchange[] @relation("ExchangeOriginalSale")
+  exchangesIssuing   Exchange[] @relation("ExchangeReplacementSale")
   quotation  Quotation?  @relation("QuotationConvertedSale")
   billSplits BillSplit[]
 
@@ -1443,6 +1449,9 @@ model Return {
   refundPayments RefundPayment[]
   printJobs      PrintJob[]
 
+  /// D107 — the exchange this return is the returning leg of, if any.
+  exchange Exchange?
+
   @@unique([tenantId, returnNumber])
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId])
@@ -1453,6 +1462,69 @@ model Return {
   @@index([status])
   @@index([syncStatus])
   @@index([createdAt])
+}
+
+/// D107 — an exchange is a LINK between a return and a sale, not a third money
+/// path.
+///
+///     1. Return the Medium   -> refundMethod = STORE_CREDIT, value R
+///     2. Sell the Large      -> tender STORE_CREDIT for R, plus (P - R)
+///     3. If P < R            -> the balance is refunded on the return leg
+///
+/// `ExchangeService` orchestrates and records. It computes no prices, moves no
+/// stock, touches no tax and writes no payment of its own — every one of those
+/// rules is already correct in the Return and Sale paths (D102, 3.11, 1a.20,
+/// 1c.6), and a second copy is where they drift.
+///
+/// Composed rather than atomic: `ReturnsRepository` and `SalesRepository` each
+/// own their `$transaction`, and refactoring the money paths the restaurant and
+/// hardware modules share is the largest blast radius on this branch.
+model Exchange {
+  id             String @id @default(cuid())
+  tenantId       String
+  branchId       String
+  exchangeNumber String
+
+  /// The completed sale the customer is exchanging against.
+  originalSaleId String
+  /// The returning leg. Always present: the return commits first.
+  returnId       String
+  /// The replacement leg. NULLABLE, deliberately — the return commits first, so
+  /// there is a real interval where an exchange has no replacement yet. A
+  /// required column would make the row unwritable until both legs succeeded,
+  /// which destroys the recoverable state D107 chose: if the sale fails, the
+  /// customer holds store credit worth what they handed back and the operator
+  /// retries. Unresolved is its own state (D28/D31).
+  ///
+  /// This nullability is also the exchange's status. A `status` enum would
+  /// encode the same fact twice and be the copy nobody keeps in step.
+  replacementSaleId String?
+
+  createdByUserId String
+  /// A replayed request returns the existing exchange rather than refunding
+  /// twice. This matters more here than elsewhere: an exchange moves money in
+  /// two directions, and a duplicate would refund a customer for goods they kept.
+  idempotencyKey  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant          Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch  @relation(fields: [branchId], references: [id])
+  originalSale    Sale    @relation("ExchangeOriginalSale", fields: [originalSaleId], references: [id])
+  return          Return  @relation(fields: [returnId], references: [id])
+  replacementSale Sale?   @relation("ExchangeReplacementSale", fields: [replacementSaleId], references: [id])
+
+  @@unique([tenantId, exchangeNumber])
+  @@unique([tenantId, idempotencyKey])
+  /// One exchange per return: the returning leg is what makes this exchange
+  /// exist, so two exchanges sharing it would mean the same goods came back
+  /// twice.
+  @@unique([returnId])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([originalSaleId])
+  @@index([replacementSaleId])
 }
 
 model ReturnItem {

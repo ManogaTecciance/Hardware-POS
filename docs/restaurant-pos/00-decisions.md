@@ -4749,3 +4749,115 @@ fail loudly at migrate time, which is the cheapest place to find it.
   the reissue pass and `barcodeSource`. Those stand unaltered.
 - The measured finding that **18 of 20 pilot barcodes are invalid**. Still true,
   still the reason `5.9` exists.
+
+---
+
+## D107 — an exchange is a link between a return and a sale, not a third money path
+
+**Status:** accepted, 2026-09-07. Covers Phase 7 (`7.1a`–`7.5`). Carries the
+migration mandate for the `Exchange` model.
+
+### The problem
+
+`ModuleKey.EXCHANGES` has been a reserved key with an A4 document renderer and no
+workflow since the Phase 0 audit recorded it in **D2**. It is already present in
+`RETAIL_MODULES`, so a retail tenant can reach an exchange document today for a
+transaction that cannot happen.
+
+Everything an exchange needs already exists: the return path allocates promotions
+per line and refunds the tax each line actually paid (D102, `3.11`), the sale path
+prices and charges, stock has moved at variant grain in both directions since
+Phase 1 (`1a.20`, `1c.6`), `payments` is an array and the till offers Split
+Payment, and `STORE_CREDIT` is both a tender and a refund method that QuickBooks
+already maps to a credit memo.
+
+What is missing is the thing that joins them.
+
+### The decision
+
+**An exchange is a RETURN followed by a SALE, settled through store credit.**
+
+```
+1. Return the Medium   → refundMethod = STORE_CREDIT, value R
+2. Sell the Large      → tender STORE_CREDIT for R, plus (P − R) by any method
+3. If P < R            → the balance is refunded on the return leg instead
+```
+
+`ExchangeService` orchestrates and records. It computes no prices, moves no stock,
+touches no tax and writes no payment of its own.
+
+### Why it is composed rather than atomic
+
+`ReturnsRepository` and `SalesRepository` each open their **own** `$transaction`
+and neither service accepts an external one. Making an exchange atomic would mean
+refactoring the two money paths that the restaurant and hardware modules both
+depend on — the largest blast radius available on this branch, spent on a rare
+edge.
+
+**The failure mode is recoverable, and it is what the money already means.** If
+the replacement sale fails after the return has committed, the customer holds
+store credit worth exactly what they handed back. Nothing is lost, nothing is
+double-counted, and the operator retries the replacement. That is also how a shop
+would handle it at the counter.
+
+**Composition is what makes it correct, not merely cheap.** A bespoke exchange
+transaction would have to re-implement promotion allocation, tax snapshots, stock
+movement and QuickBooks document typing — four rules that are right today. The
+second copy is where they drift, which is the lesson `2.12` and `4.15` each taught
+at a cost.
+
+### The model, and why each field is shaped as it is
+
+    Exchange
+      tenantId, branchId          ownership, matching Return and Sale
+      exchangeNumber              `X-000042`, from DocumentSequence 'EXCHANGE'
+      originalSaleId              the sale being exchanged against
+      returnId                    the return leg — REQUIRED
+      replacementSaleId           the sale leg — NULLABLE
+      createdByUserId
+      idempotencyKey              nullable, unique per tenant
+
+**`replacementSaleId` is nullable, deliberately.** The return commits first, so
+there is a real interval in which an exchange exists with no replacement. A
+required column would make the row unwritable until both legs succeeded, which
+destroys the recoverable state this record just chose. Unresolved is its own
+state (D28/D31), and here it is the state the operator retries from.
+
+**No `status` enum.** The nullable `replacementSaleId` already answers the only
+question anyone asks — is the replacement done? A second field encoding the same
+fact is a second thing to keep in step. Added later if a real third state appears.
+
+**No line table.** An exchange owns no lines. The returned lines belong to the
+`Return`, the replacement lines belong to the `Sale`, and both already snapshot
+what they need. A line table here would be a third copy of facts that are already
+recorded twice, and it would be the copy nobody updates.
+
+**`DocumentSequence` with docType `EXCHANGE`**, `X-` prefix, matching `R-` and
+`S-`. Same mechanism as SKU and BARCODE in Phase 5, and the same accepted
+consequence: the collision-free allocation is worth the occasional gap (D104b).
+
+### Idempotency
+
+`@@unique([tenantId, idempotencyKey])`, the shape `Sale` and `Return` already use.
+A replayed request returns the existing exchange rather than refunding twice.
+This matters more here than elsewhere: an exchange moves money in two directions,
+and a duplicate would refund a customer for goods they kept.
+
+### What this does not change
+
+- **Nothing in Returns, Sales, Payments, Stock, Tax, Promotions or QuickBooks.**
+  The orchestration calls the existing services and reacts to their results.
+- **Return approval rules apply unchanged.** No exchange-specific bypass: a
+  non-good-condition or over-limit return still requires approval, because the
+  goods coming back are the same goods either way.
+- **The replacement is priced at today's terms** — current promotions, current
+  tax rate — while the returned line keeps its frozen snapshot. This falls out of
+  composition rather than being chosen. A customer swapping M→L may therefore pay
+  more or less than they originally did; the PO confirmed this reading.
+
+### What this does change, outside the new model
+
+`DocumentsService.buildExchangeDocument` hardcodes `taxAmount: 0` and passes
+`showTaxColumn: false`. It was written before Phase 3 made tax per-line with
+snapshots, so an exchange note would show no tax and **would not tie to the money
+that actually moved**. Corrected in `7.3`, narrowly.

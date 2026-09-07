@@ -29,7 +29,11 @@ export type DocumentType =
   // sequence, not shared with SKU: the two are different identifiers with
   // different widths, and a shared counter would waste barcode range every time
   // a SKU was allocated.
-  | 'BARCODE';
+  | 'BARCODE'
+  // D107 (Phase 7, 7.1a) — exchange numbering, `X-000042`, matching `R-` and
+  // `S-`. Its own sequence so an exchange number never collides with the sale
+  // or return it links.
+  | 'EXCHANGE';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;
