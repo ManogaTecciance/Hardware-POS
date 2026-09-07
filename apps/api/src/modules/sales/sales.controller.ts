@@ -103,6 +103,18 @@ export class SalesController {
     return this.retailReports.salesByVariant(tenantId, toReportRange(query));
   }
 
+  /**
+   * `8.4` — how much tax was charged at each rate.
+   *
+   * Same gate and the same tenant-wide reading as `by-variant` above.
+   */
+  @Get('reports/tax-by-rate')
+  @RequireModule(ModuleKey.REPORTING)
+  @RequirePermissions(Permission.REPORT_READ)
+  taxByRate(@TenantId() tenantId: string, @Query() query: QueryRetailReportDto) {
+    return this.retailReports.taxByRate(tenantId, toReportRange(query));
+  }
+
   @Get(':id')
   @RequirePermissions(Permission.SALE_READ)
   getById(@TenantId() tenantId: string, @Param('id') id: string): Promise<SaleWithRelations> {

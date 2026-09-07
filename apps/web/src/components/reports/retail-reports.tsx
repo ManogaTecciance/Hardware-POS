@@ -24,6 +24,8 @@ import {
   formatReportMoney,
   formatReportQuantity,
   salesByVariant,
+  taxByRate,
+  type TaxByRateReport,
   type VariantSalesReport,
 } from '@/lib/reports';
 
@@ -121,6 +123,7 @@ function RetailReportSections({ session, range }: { session: Session; range: Rep
   return (
     <div className="space-y-4">
       <SalesByVariantSection session={session} range={range} />
+      <TaxByRateSection session={session} range={range} />
     </div>
   );
 }
@@ -280,6 +283,81 @@ function SalesByVariantSection({ session, range }: { session: Session; range: Re
                 </tr>
               </tfoot>
             </table>
+          </div>
+        )
+      }
+    </SectionShell>
+  );
+}
+
+/**
+ * `8.4` — how much tax was charged at each rate.
+ *
+ * What a multi-rate shop files its return from, and what a single-rate shop
+ * reconciles against its ledger. The figures are the server's allocation of each
+ * sale's recorded tax, proven identical to the split printed on a customer's
+ * receipt — so a manager holding both can tie them out.
+ */
+function TaxByRateSection({ session, range }: { session: Session; range: ReportRange }) {
+  const state = useReport<TaxByRateReport>(
+    () => taxByRate(session, range),
+    [session, range.from, range.to],
+  );
+
+  return (
+    <SectionShell
+      title="Tax by rate"
+      description="What was charged at each rate, and the net sales it was charged on."
+      state={state}
+      empty="No tax recorded in this range."
+    >
+      {(report) =>
+        report.rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No tax recorded in this range.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="pb-1 text-left">Rate</th>
+                    <th className="pb-1 text-right">Net sales</th>
+                    <th className="pb-1 text-right">Tax</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.rows.map((row) => (
+                    <tr key={row.ratePercent ?? 'unattributed'} className="border-t border-border">
+                      <td className="py-1.5">{row.rateLabel}</td>
+                      <td className="py-1.5 text-right">{formatReportMoney(row.taxable)}</td>
+                      <td className="py-1.5 text-right">{formatReportMoney(row.tax)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border font-medium">
+                    <td className="py-2">Total</td>
+                    <td className="py-2 text-right">{formatReportMoney(report.totals.taxable)}</td>
+                    <td className="py-2 text-right">{formatReportMoney(report.totals.tax)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            {report.hasUnattributed ? (
+              /*
+                Said out loud, not buried in a row nobody reads twice. A tax
+                figure with a silent hole in it is worse than no figure: the
+                manager filing a return has to know which part of it cannot be
+                substantiated from the sale.
+              */
+              <p className="text-xs text-muted-foreground">
+                Some sales in this range were taken before the till recorded a tax rate on each
+                line. Their tax is real and included in the total, but cannot be attributed to a
+                rate — it is shown as <span className="font-medium">Rate not recorded</span>.
+              </p>
+            ) : null}
           </div>
         )
       }

@@ -56,6 +56,32 @@ export function salesByVariant(
   return api.get<VariantSalesReport>(`/sales/reports/by-variant?${q}`, auth(session));
 }
 
+export interface TaxRateRow {
+  /** `"18.00"`, or `null` for tax that could not be attributed to a rate. */
+  ratePercent: string | null;
+  /** `"18%"`, or the reason there is no rate. */
+  rateLabel: string;
+  taxable: string;
+  tax: string;
+}
+
+export interface TaxByRateReport {
+  from: string;
+  to: string;
+  rows: TaxRateRow[];
+  totals: { taxable: string; tax: string };
+  /** At least one sale in the range predates per-line rates. */
+  hasUnattributed: boolean;
+}
+
+export function taxByRate(
+  session: Session,
+  range: RetailReportRange,
+): Promise<TaxByRateReport> {
+  const q = new URLSearchParams({ from: range.from, to: range.to });
+  return api.get<TaxByRateReport>(`/sales/reports/tax-by-rate?${q}`, auth(session));
+}
+
 /**
  * Group the integer part of an exact decimal string, e.g. `"12345.60"` →
  * `"Rs. 12,345.60"`.

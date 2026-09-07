@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
+import { taxRateLabel } from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { allocateSaleTax } from './report-tax-allocation';
 
 /** A closed date range, inclusive of both ends in the tenant's local reading. */
 export interface ReportRange {
@@ -20,7 +22,7 @@ export interface VariantSalesRow {
   quantitySold: string;
   /** What the customer paid for these lines, after discounts, before tax. */
   revenue: string;
-  /** Tax charged on those lines. */
+  /** This line's share of the tax its sale charged. See `report-tax-allocation`. */
   tax: string;
   /** Line discounts plus allocated promotion, so a buyer can see what was given away. */
   discount: string;
@@ -33,16 +35,77 @@ export interface VariantSalesReport {
   totals: { quantitySold: string; revenue: string; tax: string; discount: string };
 }
 
+export interface TaxRateRow {
+  /** `"18.00"`, or `null` for tax that could not be attributed to a rate. */
+  ratePercent: string | null;
+  /** `"18%"`, or the reason there is no rate. */
+  rateLabel: string;
+  /** Net sales charged at this rate, after every discount that reduced the base. */
+  taxable: string;
+  /** Tax charged at this rate. Rows sum to the tax the sales actually recorded. */
+  tax: string;
+}
+
+export interface TaxByRateReport {
+  from: string;
+  to: string;
+  rows: TaxRateRow[];
+  totals: { taxable: string; tax: string };
+  /**
+   * True when at least one sale in the range could not be attributed to a rate.
+   * The screen says so out loud — a tax figure with a silent hole in it is worse
+   * than no figure.
+   */
+  hasUnattributed: boolean;
+}
+
+/** What a rate row is keyed by when the sale predates per-line rates (3.8). */
+const UNATTRIBUTED = 'unattributed';
+
+/** One sale and its lines, in the only shape these reports need. */
+type SaleForReport = Prisma.SaleGetPayload<{
+  select: {
+    subtotal: true;
+    totalDiscount: true;
+    orderDiscountAmount: true;
+    taxAmount: true;
+    items: {
+      select: {
+        productId: true;
+        productVariantId: true;
+        quantity: true;
+        lineTotal: true;
+        taxRatePercent: true;
+        discountAmount: true;
+        promotionDiscountAmount: true;
+      };
+    };
+  };
+}>;
+
 /**
  * Phase 8 retail reporting.
  *
  * ## Money never becomes a number here (D108)
  *
- * Every total is summed by Postgres through Prisma's `_sum`, which returns
- * `Prisma.Decimal`, and is emitted with `Decimal.toFixed()`. Nothing is
- * accumulated in JavaScript. That is not stylistic: audit item **A8** is exactly
- * this defect in the restaurant reports, and `report-money.spec.ts` fails the
- * branch if it reappears on the retail side.
+ * Every figure is `Prisma.Decimal` from the column to the response, and is
+ * emitted with `Decimal.toFixed()`. Nothing is accumulated in JavaScript. That is
+ * not stylistic: audit item **A8** is exactly this defect in the restaurant
+ * reports, and `report-money.spec.ts` fails the branch if it reappears here.
+ *
+ * ## Why these load rows instead of using `groupBy`
+ *
+ * `8.3` originally summed `SaleItem.taxAmount` in SQL, which was fast, elegant
+ * and always `0.00`: `sales.service` writes that column as zero on purpose, tax
+ * being computed once per sale and parked at line level with grocery (D101).
+ * Tax has to be allocated down from `Sale.taxAmount` before it can be grouped by
+ * anything, and an allocation is per-sale arithmetic that SQL aggregation cannot
+ * express. The rows are therefore loaded and folded in `Decimal`.
+ *
+ * The cost is real and bounded: one query per report over one date range,
+ * selecting seven columns. For the ranges a shop reports on — a day, a week, a
+ * month — that is thousands of rows, not millions. A shop large enough to feel
+ * it needs a materialised daily rollup, which is a different piece of work.
  *
  * ## What counts as a sale
  *
@@ -67,74 +130,189 @@ export class RetailReportsService {
    * read it.
    */
   async salesByVariant(tenantId: string, range: ReportRange): Promise<VariantSalesReport> {
-    assertRange(range);
+    const sales = await this.load(tenantId, range);
 
-    const grouped = await this.prisma.saleItem.groupBy({
-      by: ['productId', 'productVariantId'],
-      where: {
-        sale: {
-          tenantId,
-          status: 'COMPLETED',
-          completedAt: { gte: range.from, lte: range.to },
-        },
-      },
-      _sum: {
-        quantity: true,
-        lineTotal: true,
-        taxAmount: true,
-        discountAmount: true,
-        promotionDiscountAmount: true,
-      },
-    });
+    interface Bucket {
+      productId: string | null;
+      productVariantId: string | null;
+      quantity: Prisma.Decimal;
+      revenue: Prisma.Decimal;
+      tax: Prisma.Decimal;
+      discount: Prisma.Decimal;
+    }
+    const buckets = new Map<string, Bucket>();
+
+    for (const sale of sales) {
+      const allocated = allocateSaleTax(sale.items, sale);
+      sale.items.forEach((item, i) => {
+        const key = `${item.productId ?? ''}|${item.productVariantId ?? ''}`;
+        const bucket =
+          buckets.get(key) ??
+          {
+            productId: item.productId,
+            productVariantId: item.productVariantId,
+            quantity: ZERO,
+            revenue: ZERO,
+            tax: ZERO,
+            discount: ZERO,
+          };
+        bucket.quantity = bucket.quantity.plus(item.quantity);
+        bucket.revenue = bucket.revenue.plus(item.lineTotal);
+        bucket.tax = bucket.tax.plus(allocated[i]!.tax);
+        bucket.discount = bucket.discount
+          .plus(item.discountAmount)
+          .plus(item.promotionDiscountAmount);
+        buckets.set(key, bucket);
+      });
+    }
 
     // Names come from the CURRENT product and variant, not the line snapshot.
     // A snapshot is right for a document — it must show what was sold, at the
     // name it was sold under (D44). A report is the opposite: a manager asking
     // "which sizes sold" knows the product by what it is called today, and
     // grouping by snapshot would split one product into two rows after a rename.
-    const names = await this.resolveNames(tenantId, grouped);
+    const names = await this.resolveNames(tenantId, [...buckets.values()]);
 
-    const rows: VariantSalesRow[] = grouped
-      .map((g) => {
-        const key = `${g.productId ?? ''}|${g.productVariantId ?? ''}`;
-        const named = names.get(key);
-        const discount = dec(g._sum.discountAmount).plus(dec(g._sum.promotionDiscountAmount));
+    const rows: VariantSalesRow[] = [...buckets.values()]
+      .map((b) => {
+        const named = names.get(`${b.productId ?? ''}|${b.productVariantId ?? ''}`);
         return {
-          productId: g.productId,
+          productId: b.productId,
           productName: named?.productName ?? 'Unknown product',
-          productVariantId: g.productVariantId,
+          productVariantId: b.productVariantId,
           variantName: named?.variantName ?? null,
           sku: named?.sku ?? null,
-          quantitySold: dec(g._sum.quantity).toFixed(3),
-          revenue: dec(g._sum.lineTotal).toFixed(2),
-          tax: dec(g._sum.taxAmount).toFixed(2),
-          discount: discount.toFixed(2),
+          quantitySold: b.quantity.toFixed(3),
+          revenue: b.revenue.toFixed(2),
+          tax: b.tax.toFixed(2),
+          discount: b.discount.toFixed(2),
         };
       })
       // Best sellers first, which is the order a buyer reads it in. Ties break
       // on name so the report is stable between runs over the same data.
       .sort(
         (a, b) =>
-          Number(b.quantitySold) - Number(a.quantitySold) ||
+          new Prisma.Decimal(b.quantitySold).comparedTo(new Prisma.Decimal(a.quantitySold)) ||
           a.productName.localeCompare(b.productName) ||
           (a.variantName ?? '').localeCompare(b.variantName ?? ''),
       );
 
+    const all = [...buckets.values()];
     return {
       from: range.from.toISOString(),
       to: range.to.toISOString(),
       rows,
       totals: {
-        quantitySold: sum(grouped.map((g) => dec(g._sum.quantity))).toFixed(3),
-        revenue: sum(grouped.map((g) => dec(g._sum.lineTotal))).toFixed(2),
-        tax: sum(grouped.map((g) => dec(g._sum.taxAmount))).toFixed(2),
-        discount: sum(
-          grouped.map((g) =>
-            dec(g._sum.discountAmount).plus(dec(g._sum.promotionDiscountAmount)),
-          ),
-        ).toFixed(2),
+        quantitySold: sum(all.map((b) => b.quantity)).toFixed(3),
+        revenue: sum(all.map((b) => b.revenue)).toFixed(2),
+        tax: sum(all.map((b) => b.tax)).toFixed(2),
+        discount: sum(all.map((b) => b.discount)).toFixed(2),
       },
     };
+  }
+
+  /**
+   * `8.4` — how much tax was charged at each rate.
+   *
+   * What a multi-rate shop files its return from, and what a single-rate shop
+   * reconciles against its ledger. The allocation rule is the printed document's
+   * rule, proven identical to it in `report-tax-allocation.spec.ts`, so a row
+   * here and a customer's receipt can never disagree.
+   */
+  async taxByRate(tenantId: string, range: ReportRange): Promise<TaxByRateReport> {
+    const sales = await this.load(tenantId, range);
+
+    const buckets = new Map<string, { rate: Prisma.Decimal | null; taxable: Prisma.Decimal; tax: Prisma.Decimal }>();
+    const add = (key: string, rate: Prisma.Decimal | null, taxable: Prisma.Decimal, tax: Prisma.Decimal) => {
+      const b = buckets.get(key) ?? { rate, taxable: ZERO, tax: ZERO };
+      b.taxable = b.taxable.plus(taxable);
+      b.tax = b.tax.plus(tax);
+      buckets.set(key, b);
+    };
+
+    for (const sale of sales) {
+      const allocated = allocateSaleTax(sale.items, sale);
+      const unattributed = allocated.some((a) => a.ratePercent === null);
+
+      for (const line of allocated) {
+        if (unattributed) {
+          // The sale predates per-line rates. Its taxable amounts are known and
+          // its tax is real; only the ATTRIBUTION is missing, so both go to a
+          // row that says so rather than into the standard rate.
+          add(UNATTRIBUTED, null, line.taxable, ZERO);
+        } else {
+          add(line.ratePercent!.toFixed(2), line.ratePercent, line.taxable, line.tax);
+        }
+      }
+      if (unattributed) {
+        // Added once for the sale, not once per line: the tax is a sale-level
+        // figure and the allocator refused to divide it.
+        add(UNATTRIBUTED, null, ZERO, new Prisma.Decimal(sale.taxAmount));
+      }
+    }
+
+    const rows: TaxRateRow[] = [...buckets.entries()]
+      .map(([key, b]) => ({
+        ratePercent: b.rate ? b.rate.toFixed(2) : null,
+        rateLabel: b.rate ? taxRateLabel(b.rate.toNumber()) : 'Rate not recorded',
+        taxable: b.taxable.toFixed(2),
+        tax: b.tax.toFixed(2),
+        key,
+      }))
+      // Highest rate first — the standard rate is what a reader checks — and the
+      // unattributed row last, where it reads as a footnote rather than a rate.
+      .sort((a, b) => {
+        if (a.ratePercent === null) return 1;
+        if (b.ratePercent === null) return -1;
+        return new Prisma.Decimal(b.ratePercent).comparedTo(new Prisma.Decimal(a.ratePercent));
+      })
+      .map(({ key: _key, ...row }) => row);
+
+    const all = [...buckets.values()];
+    return {
+      from: range.from.toISOString(),
+      to: range.to.toISOString(),
+      rows,
+      totals: {
+        taxable: sum(all.map((b) => b.taxable)).toFixed(2),
+        tax: sum(all.map((b) => b.tax)).toFixed(2),
+      },
+      hasUnattributed: buckets.has(UNATTRIBUTED),
+    };
+  }
+
+  /**
+   * Every completed sale in the range, with the columns the reports fold.
+   *
+   * One query, shared: `8.3` and `8.4` read the same rows for different
+   * questions, and both need the sale-level figures the allocation divides.
+   */
+  private load(tenantId: string, range: ReportRange): Promise<SaleForReport[]> {
+    assertRange(range);
+    return this.prisma.sale.findMany({
+      where: {
+        tenantId,
+        status: 'COMPLETED',
+        completedAt: { gte: range.from, lte: range.to },
+      },
+      select: {
+        subtotal: true,
+        totalDiscount: true,
+        orderDiscountAmount: true,
+        taxAmount: true,
+        items: {
+          select: {
+            productId: true,
+            productVariantId: true,
+            quantity: true,
+            lineTotal: true,
+            taxRatePercent: true,
+            discountAmount: true,
+            promotionDiscountAmount: true,
+          },
+        },
+      },
+    });
   }
 
   /** Current names for each (product, variant) pair the grouping produced. */
@@ -195,13 +373,10 @@ export class RetailReportsService {
   }
 }
 
-/** `null` sums to zero — an empty group is 0.00, not a missing figure. */
-function dec(value: Prisma.Decimal | null): Prisma.Decimal {
-  return value ?? new Prisma.Decimal(0);
-}
+const ZERO = new Prisma.Decimal(0);
 
 function sum(values: Prisma.Decimal[]): Prisma.Decimal {
-  return values.reduce((a, v) => a.plus(v), new Prisma.Decimal(0));
+  return values.reduce((a, v) => a.plus(v), ZERO);
 }
 
 function isString(v: string | null): v is string {
