@@ -111,6 +111,49 @@ export interface MarginReport {
   unknownCost: { rows: number; revenue: string };
 }
 
+/** What an ageing row's age is measured from. Reported, never assumed. */
+export type AgeBasis =
+  /** Days since it last sold. The question a buyer is actually asking. */
+  | 'LAST_SALE'
+  /** Never sold. Days since the first stock of it arrived. */
+  | 'FIRST_RECEIPT'
+  /** Never sold and no stock-in on record. Age unknown; the row still shows. */
+  | 'UNKNOWN';
+
+export interface AgeingRow {
+  productId: string;
+  productName: string;
+  productVariantId: string | null;
+  variantName: string | null;
+  sku: string | null;
+  /** Summed across every branch, 3dp. */
+  quantityOnHand: string;
+  lastSoldAt: string | null;
+  firstReceivedAt: string | null;
+  ageBasis: AgeBasis;
+  /** Whole days, by `ageBasis`. `null` only when the basis is UNKNOWN. */
+  ageDays: number | null;
+  /** Quantity × unit cost, or `null` when the cost is unknown (D110). */
+  stockValue: string | null;
+  costSource: CostSource;
+}
+
+export interface AgeingReport {
+  asOf: string;
+  thresholdDays: number;
+  rows: AgeingRow[];
+  totals: { rows: number; quantityOnHand: string; stockValue: string };
+  /** Slow rows whose cost is unknown, so excluded from `totals.stockValue`. */
+  unknownCost: { rows: number };
+  /**
+   * False when this tenant keeps no per-branch stock ledger at all — inventory
+   * is disabled, or held by an external system. An empty report then means
+   * "nothing to read", NOT "nothing is sitting still", and the screen has to
+   * say which. A false all-clear is the worst answer this report could give.
+   */
+  hasStockLedger: boolean;
+}
+
 /** What a rate row is keyed by when the sale predates per-line rates (3.8). */
 const UNATTRIBUTED = 'unattributed';
 
@@ -472,6 +515,158 @@ export class RetailReportsService {
   }
 
   /**
+   * `8.6` — what is sitting on the shelf and not moving.
+   *
+   * The report that pays for itself: stock that has not sold in three months is
+   * money on a shelf, and a clothing shop's whole season can turn on catching it
+   * in week ten rather than week twenty.
+   *
+   * ## What "ageing" means here
+   *
+   * **Days since it last sold**, not days since it arrived. A line that arrived
+   * a year ago and sold yesterday is not slow; one that arrived last month and
+   * has never moved might be. Only a thing that has NEVER sold is measured from
+   * its first stock-in — there is nothing else to measure it from — and the row
+   * says which basis it used rather than presenting two different questions'
+   * answers in one column.
+   *
+   * ## The boundary is inclusive
+   *
+   * `ageDays >= thresholdDays`. Ninety days means ninety, not ninety-one. Both
+   * sides of that are tested, because an off-by-one here silently drops the
+   * oldest row from every report a shop runs.
+   *
+   * ## Stock comes from the branch ledger
+   *
+   * `BranchInventory`, summed across branches, which is where LOCAL mode keeps
+   * per-variant stock. A tenant with no ledger rows at all gets
+   * `hasStockLedger: false` rather than an empty list that reads like an
+   * all-clear.
+   */
+  async ageing(
+    tenantId: string,
+    opts: { asOf?: Date; thresholdDays?: number } = {},
+  ): Promise<AgeingReport> {
+    const asOf = opts.asOf ?? new Date();
+    const thresholdDays = opts.thresholdDays ?? DEFAULT_AGEING_DAYS;
+    if (Number.isNaN(asOf.getTime())) {
+      throw new BadRequestException('asOf must be a valid date');
+    }
+    if (!Number.isInteger(thresholdDays) || thresholdDays < 0) {
+      throw new BadRequestException('thresholdDays must be a whole number of days');
+    }
+
+    const [stock, lastSales, firstReceipts] = await Promise.all([
+      this.prisma.branchInventory.groupBy({
+        by: ['productId', 'productVariantId'],
+        where: { tenantId },
+        _sum: { quantityOnHand: true },
+      }),
+      // MAX over a column of the JOINED table, which `groupBy` cannot express:
+      // the date a sale COMPLETED lives on `Sale`, and `SaleItem.createdAt` is
+      // when the line was written — different figures for a basket held
+      // overnight (`8.8`), which is precisely the case this must not fudge.
+      this.prisma.$queryRaw<{ productId: string; productVariantId: string | null; lastSoldAt: Date }[]>(
+        Prisma.sql`
+          SELECT si."productId", si."productVariantId", MAX(s."completedAt") AS "lastSoldAt"
+          FROM "SaleItem" si
+          JOIN "Sale" s ON s.id = si."saleId"
+          WHERE s."tenantId" = ${tenantId}
+            AND s.status = 'COMPLETED'
+            AND s."completedAt" IS NOT NULL
+            AND si."productId" IS NOT NULL
+          GROUP BY 1, 2
+        `,
+      ),
+      // Any movement that ADDED stock: a receipt, an opening balance, an
+      // import, a transfer in. Filtering on reason would need the list kept in
+      // step with the enum forever; `delta > 0` is the property that matters.
+      this.prisma.$queryRaw<{ productId: string; productVariantId: string | null; firstInAt: Date }[]>(
+        Prisma.sql`
+          SELECT "productId", "productVariantId", MIN("createdAt") AS "firstInAt"
+          FROM "StockMovement"
+          WHERE "tenantId" = ${tenantId} AND delta > 0
+          GROUP BY 1, 2
+        `,
+      ),
+    ]);
+
+    const key = (p: string | null, v: string | null) => `${p ?? ''}|${v ?? ''}`;
+    const soldAt = new Map(lastSales.map((r) => [key(r.productId, r.productVariantId), r.lastSoldAt]));
+    const inAt = new Map(firstReceipts.map((r) => [key(r.productId, r.productVariantId), r.firstInAt]));
+
+    // Only what is actually on the shelf. A variant at zero is not slow-moving,
+    // it is sold out — the opposite problem, and a different report.
+    const inStock = stock.filter((s) => dec(s._sum.quantityOnHand).greaterThan(0));
+    const info = await this.resolveNames(tenantId, inStock);
+
+    let totalQuantity = ZERO;
+    let totalValue = ZERO;
+    let unknownRows = 0;
+
+    const rows: AgeingRow[] = [];
+    for (const s of inStock) {
+      const k = key(s.productId, s.productVariantId);
+      const lastSoldAt = soldAt.get(k) ?? null;
+      const firstReceivedAt = inAt.get(k) ?? null;
+
+      const basis: AgeBasis = lastSoldAt
+        ? 'LAST_SALE'
+        : firstReceivedAt
+          ? 'FIRST_RECEIPT'
+          : 'UNKNOWN';
+      const from = lastSoldAt ?? firstReceivedAt;
+      const ageDays = from === null ? null : wholeDaysBetween(from, asOf);
+
+      // Unknown age still counts as slow: it has stock, it has never sold, and
+      // there is no record of it arriving. Hiding it would hide the worst case.
+      if (ageDays !== null && ageDays < thresholdDays) continue;
+
+      const named = info.get(k);
+      const quantity = dec(s._sum.quantityOnHand);
+      const unitCost = named?.unitCost ?? null;
+      const stockValue = unitCost === null ? null : quantity.mul(unitCost).toDecimalPlaces(2);
+      if (stockValue === null) unknownRows += 1;
+      else totalValue = totalValue.plus(stockValue);
+      totalQuantity = totalQuantity.plus(quantity);
+
+      rows.push({
+        productId: s.productId,
+        productName: named?.productName ?? 'Unknown product',
+        productVariantId: s.productVariantId,
+        variantName: named?.variantName ?? null,
+        sku: named?.sku ?? null,
+        quantityOnHand: quantity.toFixed(3),
+        lastSoldAt: lastSoldAt?.toISOString() ?? null,
+        firstReceivedAt: firstReceivedAt?.toISOString() ?? null,
+        ageBasis: basis,
+        ageDays,
+        stockValue: stockValue?.toFixed(2) ?? null,
+        costSource: named?.costSource ?? 'UNKNOWN',
+      });
+    }
+
+    // Oldest first — the money that has been still longest. An unknown age
+    // sorts to the top, not the bottom: it is the least accounted-for stock in
+    // the shop, and burying it under rows with real dates would be the wrong
+    // way round.
+    rows.sort((a, b) => (b.ageDays ?? Number.MAX_SAFE_INTEGER) - (a.ageDays ?? Number.MAX_SAFE_INTEGER));
+
+    return {
+      asOf: asOf.toISOString(),
+      thresholdDays,
+      rows,
+      totals: {
+        rows: rows.length,
+        quantityOnHand: totalQuantity.toFixed(3),
+        stockValue: totalValue.toFixed(2),
+      },
+      unknownCost: { rows: unknownRows },
+      hasStockLedger: stock.length > 0,
+    };
+  }
+
+  /**
    * Every completed sale in the range, with the columns the reports fold.
    *
    * One query, shared: `8.3` and `8.4` read the same rows for different
@@ -573,6 +768,29 @@ export class RetailReportsService {
 }
 
 const ZERO = new Prisma.Decimal(0);
+
+/** Ninety days. Long enough to be a season, short enough to still act on. */
+const DEFAULT_AGEING_DAYS = 90;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Whole days from `from` to `to`, floored, never negative.
+ *
+ * Floored rather than rounded: something sold 89.9 days ago has not been
+ * sitting for 90 days, and a report that rounded up would call it slow a few
+ * hours early. Negative would mean a sale dated in the future, which is a data
+ * problem rather than a negative age.
+ */
+function wholeDaysBetween(from: Date, to: Date): number {
+  const days = Math.floor((to.getTime() - from.getTime()) / MS_PER_DAY);
+  return days > 0 ? days : 0;
+}
+
+/** `null` sums to zero — an empty group is 0, not a missing figure. */
+function dec(value: Prisma.Decimal | null): Prisma.Decimal {
+  return value ?? ZERO;
+}
 
 interface ResolvedRow {
   productName: string;

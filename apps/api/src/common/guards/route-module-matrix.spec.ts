@@ -452,6 +452,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // `8.3`. ENFORCED rather than shared-core, unlike the sale reads above: this
   // is a report, and reports are gated on REPORTING everywhere else in the app.
   'GET /sales/reports/by-variant': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /sales/reports/ageing': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /sales/reports/margin': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /sales/reports/tax-by-rate': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },

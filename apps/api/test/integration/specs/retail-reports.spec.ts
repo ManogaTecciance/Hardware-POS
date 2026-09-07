@@ -1,6 +1,6 @@
 /**
  * Phase 8 retail reporting — `8.3` sales by variant, `8.4` tax by rate,
- * `8.5` margin.
+ * `8.5` margin, `8.6` ageing.
  *
  * ## What can only be proven here
  *
@@ -798,5 +798,226 @@ describe('8.5 — margin', () => {
     ]);
     expect(byMargin.rows[0]!.quantitySold).toBe(byVariant.rows[0]!.quantitySold);
     expect(byMargin.rows[0]!.revenue).toBe(byVariant.rows[0]!.revenue);
+  });
+});
+
+/**
+ * `8.6` fixtures.
+ *
+ * The clock is PINNED. Ageing is arithmetic on dates, and a test that computed
+ * its expectations from `Date.now()` would be asserting the same formula the
+ * implementation uses — green whatever either of them did. Everything below is
+ * measured back from one fixed instant.
+ */
+const AS_OF = new Date('2026-06-01T12:00:00.000Z');
+const daysBefore = (n: number): Date => new Date(AS_OF.getTime() - n * 24 * 60 * 60 * 1000);
+
+async function putOnShelf(variantId: string | null, quantity: number): Promise<void> {
+  await prisma.branchInventory.create({
+    data: {
+      tenantId: shop.tenantId,
+      branchId: shop.branchId,
+      productId: shop.productAId,
+      productVariantId: variantId,
+      quantityOnHand: quantity,
+    },
+  });
+}
+
+async function stockIn(variantId: string | null, at: Date, quantity = 10): Promise<void> {
+  await prisma.stockMovement.create({
+    data: {
+      tenantId: shop.tenantId,
+      branchId: shop.branchId,
+      productId: shop.productAId,
+      productVariantId: variantId,
+      delta: quantity,
+      balanceAfter: quantity,
+      reason: 'RECEIPT',
+      createdAt: at,
+    },
+  });
+}
+
+describe('8.6 — ageing / slow movers', () => {
+  beforeEach(async () => {
+    // The shared `beforeEach` seeds stock for the 8.3 sale test; 8.6 reads the
+    // stock ledger directly and needs to start from a known shelf.
+    await prisma.branchInventory.deleteMany({ where: { tenantId: shop.tenantId } });
+  });
+
+  it('the 90-day boundary is inclusive — both sides', async () => {
+    // The assertion this whole report turns on. 90 days is slow; 89 is not.
+    await putOnShelf(mediumId, 5);
+    await putOnShelf(largeId, 5);
+    await completedSale(daysBefore(90), [
+      { variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 0 },
+    ]);
+    await completedSale(daysBefore(89), [
+      { variantId: largeId, quantity: 1, lineTotal: 1000, rate: 0 },
+    ]);
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+
+    // POSITIVE: exactly 90 days is in.
+    expect(report.rows.map((r) => r.productVariantId)).toEqual([mediumId]);
+    expect(report.rows[0]!.ageDays).toBe(90);
+    expect(report.rows[0]!.ageBasis).toBe('LAST_SALE');
+    // NEGATIVE: 89 is out. Both sides, or the assertion above would pass for an
+    // implementation that returned everything.
+    expect(report.rows.map((r) => r.productVariantId)).not.toContain(largeId);
+  });
+
+  it('ages from the LAST SALE, not from when the stock arrived', async () => {
+    // Arrived a year ago, sold yesterday. Not slow. An implementation measuring
+    // from the receipt would call this the oldest thing in the shop.
+    await putOnShelf(mediumId, 5);
+    await stockIn(mediumId, daysBefore(365));
+    await completedSale(daysBefore(1), [
+      { variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 0 },
+    ]);
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+    expect(report.rows).toEqual([]);
+    // And the ledger IS there, so this empty answer means "nothing is slow"
+    // rather than "nothing to read".
+    expect(report.hasStockLedger).toBe(true);
+  });
+
+  it('measures a never-sold line from its first stock-in, and says so', async () => {
+    await putOnShelf(mediumId, 4);
+    await stockIn(mediumId, daysBefore(120));
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+    expect(report.rows).toHaveLength(1);
+    expect(report.rows[0]!.ageBasis).toBe('FIRST_RECEIPT');
+    expect(report.rows[0]!.ageDays).toBe(120);
+    expect(report.rows[0]!.lastSoldAt).toBeNull();
+    expect(report.rows[0]!.firstReceivedAt).toBe(daysBefore(120).toISOString());
+  });
+
+  it('takes the FIRST stock-in, not the most recent one', async () => {
+    // Restocked last week; it still has not sold since it first arrived.
+    await putOnShelf(mediumId, 9);
+    await stockIn(mediumId, daysBefore(200));
+    await stockIn(mediumId, daysBefore(7));
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+    expect(report.rows[0]!.ageDays).toBe(200);
+  });
+
+  it('keeps a line whose age cannot be established at all, at the top', async () => {
+    // Stock with no sale and no movement: the least accounted-for thing in the
+    // shop. Dropping it would hide the worst case behind a null check.
+    await putOnShelf(mediumId, 3);
+    await putOnShelf(largeId, 3);
+    await stockIn(largeId, daysBefore(100));
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+    expect(report.rows).toHaveLength(2);
+    expect(report.rows[0]!.productVariantId).toBe(mediumId);
+    expect(report.rows[0]!.ageBasis).toBe('UNKNOWN');
+    expect(report.rows[0]!.ageDays).toBeNull();
+    expect(report.rows[1]!.ageDays).toBe(100);
+  });
+
+  it('ignores a variant with no stock — sold out is not slow-moving', async () => {
+    await putOnShelf(mediumId, 0);
+    await stockIn(mediumId, daysBefore(300));
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+    expect(report.rows).toEqual([]);
+    // The row exists in the ledger; it is the QUANTITY that excluded it.
+    expect(report.hasStockLedger).toBe(true);
+  });
+
+  it('sums stock across branches', async () => {
+    const second = await prisma.branch.create({
+      data: { tenantId: shop.tenantId, name: 'Second Branch', code: 'BR2' },
+    });
+    await putOnShelf(mediumId, 4);
+    await prisma.branchInventory.create({
+      data: {
+        tenantId: shop.tenantId,
+        branchId: second.id,
+        productId: shop.productAId,
+        productVariantId: mediumId,
+        quantityOnHand: 6,
+      },
+    });
+    await stockIn(mediumId, daysBefore(150));
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+    expect(report.rows[0]!.quantityOnHand).toBe('10.000');
+  });
+
+  it('values the sitting stock, and separates what it cannot value (D110)', async () => {
+    await setVariantCost(mediumId, 600);
+    await putOnShelf(mediumId, 5);
+    await putOnShelf(largeId, 2);
+    await stockIn(mediumId, daysBefore(120));
+    await stockIn(largeId, daysBefore(120));
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+
+    const valued = report.rows.find((r) => r.productVariantId === mediumId)!;
+    expect(valued.stockValue).toBe('3000.00');
+    expect(valued.costSource).toBe('VARIANT_AVERAGE');
+
+    const unvalued = report.rows.find((r) => r.productVariantId === largeId)!;
+    expect(unvalued.stockValue).toBeNull();
+    expect(unvalued.costSource).toBe('UNKNOWN');
+
+    // The total is over what could be valued, and says how many rows it left out.
+    expect(report.totals.stockValue).toBe('3000.00');
+    expect(report.totals.quantityOnHand).toBe('7.000');
+    expect(report.unknownCost).toEqual({ rows: 1 });
+  });
+
+  it('distinguishes "no stock ledger" from "nothing is slow"', async () => {
+    // A tenant with no BranchInventory rows at all. An empty list here means
+    // there was nothing to read, and a screen that said "all clear" would be
+    // giving a false assurance about a shop it cannot see.
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 90 });
+    expect(report.rows).toEqual([]);
+    expect(report.hasStockLedger).toBe(false);
+  });
+
+  it('honours a threshold other than 90, at its own boundary', async () => {
+    await putOnShelf(mediumId, 5);
+    await putOnShelf(largeId, 5);
+    await stockIn(mediumId, daysBefore(30));
+    await stockIn(largeId, daysBefore(29));
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 30 });
+    expect(report.thresholdDays).toBe(30);
+    expect(report.rows.map((r) => r.productVariantId)).toEqual([mediumId]);
+  });
+
+  it('defaults to 90 days when no threshold is given', async () => {
+    await putOnShelf(mediumId, 5);
+    await stockIn(mediumId, daysBefore(95));
+
+    const report = await reports.ageing(shop.tenantId, { asOf: AS_OF });
+    expect(report.thresholdDays).toBe(90);
+    expect(report.rows).toHaveLength(1);
+  });
+
+  it('refuses a threshold that is not a whole number of days', async () => {
+    await expect(
+      reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: -1 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      reports.ageing(shop.tenantId, { asOf: AS_OF, thresholdDays: 1.5 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('is scoped to the tenant', async () => {
+    await putOnShelf(mediumId, 5);
+    await stockIn(mediumId, daysBefore(200));
+
+    const other = await reports.ageing('some-other-tenant', { asOf: AS_OF });
+    expect(other.rows).toEqual([]);
+    expect(other.hasStockLedger).toBe(false);
   });
 });

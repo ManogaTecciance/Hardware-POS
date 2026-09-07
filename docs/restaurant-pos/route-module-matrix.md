@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 299
-- Module-guarded routes: 203
+- Total routes: 300
+- Module-guarded routes: 204
 - Ungated routes: 96
 
 ## How to read the Guard column
@@ -605,6 +605,7 @@ administrator role, or builds its own, keeps working.
 | POST | `/sales/complete` | RETAIL_POS | ENFORCED | sale:create |
 | POST | `/sales/draft` | RETAIL_POS | ENFORCED | sale:create |
 | GET | `/sales/report` | SHARED_CORE | shared-core | sale:read |
+| GET | `/sales/reports/ageing` | REPORTING | ENFORCED | report:read |
 | GET | `/sales/reports/by-variant` | REPORTING | ENFORCED | report:read |
 | GET | `/sales/reports/margin` | REPORTING | ENFORCED | report:read |
 | GET | `/sales/reports/tax-by-rate` | REPORTING | ENFORCED | report:read |

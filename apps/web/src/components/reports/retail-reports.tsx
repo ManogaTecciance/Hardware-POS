@@ -21,12 +21,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Session } from '@/lib/auth';
 import {
+  AGE_BASIS_LABELS,
   COST_SOURCE_LABELS,
+  ageing,
   formatReportMoney,
   formatReportQuantity,
   margin,
   salesByVariant,
   taxByRate,
+  type AgeingReport,
   type MarginReport,
   type TaxByRateReport,
   type VariantSalesReport,
@@ -128,6 +131,12 @@ function RetailReportSections({ session, range }: { session: Session; range: Rep
       <SalesByVariantSection session={session} range={range} />
       <MarginSection session={session} range={range} />
       <TaxByRateSection session={session} range={range} />
+      {/*
+        Outside the date range on purpose: ageing asks about the shelf as it
+        stands, looking backwards. Feeding it the range picker would answer a
+        question nobody asked and quietly change with it.
+      */}
+      <AgeingSection session={session} />
     </div>
   );
 }
@@ -485,5 +494,130 @@ function MarginSection({ session, range }: { session: Session; range: ReportRang
         )
       }
     </SectionShell>
+  );
+}
+
+const AGEING_THRESHOLDS = [30, 60, 90, 180] as const;
+
+/**
+ * `8.6` — what is sitting on the shelf and not moving.
+ *
+ * Oldest first, and an age with no basis at the very top: stock with no sale and
+ * no receipt on record is the least accounted-for thing in the shop.
+ *
+ * The empty state is TWO different messages. "Nothing has been still that long"
+ * is good news; "this tenant keeps no stock ledger" is not news at all, and
+ * showing the first when the second is true would be a false all-clear.
+ */
+function AgeingSection({ session }: { session: Session }) {
+  const [thresholdDays, setThresholdDays] = React.useState<number>(90);
+  const state = useReport<AgeingReport>(
+    () => ageing(session, thresholdDays),
+    [session, thresholdDays],
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Slow movers</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Stock that has not sold recently, oldest first. Money sitting on a shelf.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">Still for at least</span>
+          {AGEING_THRESHOLDS.map((days) => (
+            <Button
+              key={days}
+              size="sm"
+              variant={days === thresholdDays ? 'primary' : 'outline'}
+              onClick={() => setThresholdDays(days)}
+            >
+              {days} days
+            </Button>
+          ))}
+        </div>
+
+        {state.loading ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : state.error ? (
+          <p className="py-6 text-center text-sm text-destructive">{state.error}</p>
+        ) : !state.data ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Nothing to show.</p>
+        ) : !state.data.hasStockLedger ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            This shop keeps no per-branch stock ledger, so there is nothing to age. Turn on local
+            inventory, or receive stock, and this report fills itself in.
+          </p>
+        ) : state.data.rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            Nothing has been still for {state.data.thresholdDays} days. Everything on the shelf has
+            moved more recently than that.
+          </p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="pb-1 text-left">Product</th>
+                    <th className="pb-1 text-left">Variant</th>
+                    <th className="pb-1 text-right">On hand</th>
+                    <th className="pb-1 text-right">Days still</th>
+                    <th className="pb-1 text-left">Counted from</th>
+                    <th className="pb-1 text-right">Stock value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.data.rows.map((row) => (
+                    <tr
+                      key={`${row.productId}|${row.productVariantId ?? '-'}`}
+                      className="border-t border-border"
+                    >
+                      <td className="py-1.5">{row.productName}</td>
+                      <td className="py-1.5">{row.variantName ?? '—'}</td>
+                      <td className="py-1.5 text-right">
+                        {formatReportQuantity(row.quantityOnHand)}
+                      </td>
+                      <td className="py-1.5 text-right">{row.ageDays ?? '—'}</td>
+                      <td className="py-1.5 text-xs text-muted-foreground">
+                        {AGE_BASIS_LABELS[row.ageBasis]}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        {row.stockValue === null ? '—' : formatReportMoney(row.stockValue)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border font-medium">
+                    <td className="py-2" colSpan={2}>
+                      {state.data.totals.rows}{' '}
+                      {state.data.totals.rows === 1 ? 'line' : 'lines'}
+                    </td>
+                    <td className="py-2 text-right">
+                      {formatReportQuantity(state.data.totals.quantityOnHand)}
+                    </td>
+                    <td className="py-2" colSpan={2} />
+                    <td className="py-2 text-right">
+                      {formatReportMoney(state.data.totals.stockValue)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            {state.data.unknownCost.rows > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {state.data.unknownCost.rows}{' '}
+                {state.data.unknownCost.rows === 1 ? 'line has' : 'lines have'} no recorded cost, so
+                nothing is counted for {state.data.unknownCost.rows === 1 ? 'it' : 'them'} in the
+                stock value above.
+              </p>
+            ) : null}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

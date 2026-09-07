@@ -17,6 +17,7 @@ import { QuerySalesReportDto } from './dto/query-sales-report.dto';
 import { SalesReportService } from './sales-report.service';
 import { RetailReportsService } from './retail-reports.service';
 import { QueryRetailReportDto, toReportRange } from './dto/query-retail-report.dto';
+import { QueryAgeingReportDto } from './dto/query-ageing-report.dto';
 import { SaleWithRelations } from './sales.repository';
 import { SalesService } from './sales.service';
 import { SaleListItem } from './sales.types';
@@ -128,6 +129,22 @@ export class SalesController {
   @RequirePermissions(Permission.REPORT_READ)
   margin(@TenantId() tenantId: string, @Query() query: QueryRetailReportDto) {
     return this.retailReports.margin(tenantId, toReportRange(query));
+  }
+
+  /**
+   * `8.6` — what is sitting on the shelf and not moving.
+   *
+   * Not a date range: an age, measured back from a moment. Ninety days by
+   * default, inclusive of the boundary.
+   */
+  @Get('reports/ageing')
+  @RequireModule(ModuleKey.REPORTING)
+  @RequirePermissions(Permission.REPORT_READ)
+  ageing(@TenantId() tenantId: string, @Query() query: QueryAgeingReportDto) {
+    return this.retailReports.ageing(tenantId, {
+      thresholdDays: query.thresholdDays,
+      asOf: query.asOf ? new Date(query.asOf) : undefined,
+    });
   }
 
   @Get(':id')

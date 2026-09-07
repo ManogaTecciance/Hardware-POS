@@ -152,3 +152,43 @@ export const COST_SOURCE_LABELS: Record<CostSource, string> = {
   LATEST_PURCHASE: 'Last purchase',
   UNKNOWN: 'Never received',
 };
+
+/** What an ageing row's age is measured from. */
+export type AgeBasis = 'LAST_SALE' | 'FIRST_RECEIPT' | 'UNKNOWN';
+
+export interface AgeingRow {
+  productId: string;
+  productName: string;
+  productVariantId: string | null;
+  variantName: string | null;
+  sku: string | null;
+  quantityOnHand: string;
+  lastSoldAt: string | null;
+  firstReceivedAt: string | null;
+  ageBasis: AgeBasis;
+  ageDays: number | null;
+  stockValue: string | null;
+  costSource: CostSource;
+}
+
+export interface AgeingReport {
+  asOf: string;
+  thresholdDays: number;
+  rows: AgeingRow[];
+  totals: { rows: number; quantityOnHand: string; stockValue: string };
+  unknownCost: { rows: number };
+  /** False when the tenant keeps no per-branch stock ledger at all. */
+  hasStockLedger: boolean;
+}
+
+export function ageing(session: Session, thresholdDays: number): Promise<AgeingReport> {
+  const q = new URLSearchParams({ thresholdDays: String(thresholdDays) });
+  return api.get<AgeingReport>(`/sales/reports/ageing?${q}`, auth(session));
+}
+
+/** What the age on a row is counted from, in words. */
+export const AGE_BASIS_LABELS: Record<AgeBasis, string> = {
+  LAST_SALE: 'Since last sale',
+  FIRST_RECEIPT: 'Never sold — since it arrived',
+  UNKNOWN: 'No sale or receipt on record',
+};
