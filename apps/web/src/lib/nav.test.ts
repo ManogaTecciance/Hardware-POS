@@ -103,7 +103,7 @@ const hrefs = (groups: NavGroup[]): string[] => groups.flatMap((g) => g.items.ma
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Tile Shop navigation is behaviourally identical to before Slice 8', () => {
-  it('renders the pre-Slice-8 list, in order, plus Phase 8 Reports', () => {
+  it('renders the pre-Slice-8 list, in order, plus the Phase 8 additions', () => {
     // The literal list that shipped before this slice. An exact sequence, not a
     // set: a reordered sidebar is a visible change to an existing screen.
     //
@@ -118,6 +118,10 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
       'Quotations',
       'Returns',
       'Products',
+      // `8.7` (D111) — a stock count is a Catalog action, next to the products
+      // it counts. INVENTORY-gated, unlike Products itself: the catalogue is
+      // shared core, but counting a shelf is meaningless without stock tracking.
+      'Stock count',
       'Suppliers',
       'Customers',
       'QuickBooks',
@@ -932,6 +936,12 @@ describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
       ['/quotations', Permission.QUOTATION_READ],
       ['/returns', Permission.RETURN_READ],
       ['/products', Permission.PRODUCT_READ],
+      // `8.7` (D111) — writing a stock quantity, not reading a catalogue, so it
+      // takes the WRITE permission its neighbours' read permissions do not
+      // imply. `product:manage` rather than a new `inventory:count`: it is what
+      // already authorises the bulk import to write stock, and D111 records why
+      // no new vocabulary was minted.
+      ['/stock-takes', Permission.PRODUCT_MANAGE],
       ['/suppliers', Permission.SUPPLIER_READ],
       ['/customers', Permission.CUSTOMER_READ],
       ['/settings', Permission.SETTINGS_MANAGE],

@@ -455,6 +455,11 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /sales/reports/ageing': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /sales/reports/margin': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /sales/reports/tax-by-rate': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  // D111 (`8.7`) — a count is an INVENTORY operation; the POST is of one
+  // branch's shelf, the reads span the tenant's count history.
+  'POST /stock-takes': { module: 'INVENTORY', guard: 'ENFORCED', scope: B },
+  'GET /stock-takes': { module: 'INVENTORY', guard: 'ENFORCED', scope: T },
+  'GET /stock-takes/:id': { module: 'INVENTORY', guard: 'ENFORCED', scope: T },
   'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'PUT /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'DELETE /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },

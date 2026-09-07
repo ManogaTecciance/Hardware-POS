@@ -23,6 +23,7 @@ export const NAV_ICON_NAMES = [
   'BarChart3',
   'CalendarDays',
   'ChefHat',
+  'ClipboardCheck',
   'FileText',
   'LayoutDashboard',
   'Link2',
@@ -144,6 +145,17 @@ export const RETAIL_NAVIGATION: readonly NavGroupSpec[] = [
       // gating the catalogue on it would hide products from a tenant that owns
       // them.
       { href: '/products', label: 'Products', icon: 'Package', permission: Permission.PRODUCT_READ },
+      // Phase 8 (`8.7`, D111) — stock counts. Gated on INVENTORY, unlike
+      // Products above: the catalogue is shared core, but counting a shelf is
+      // meaningless for a tenant whose stock is not tracked here, and the
+      // server refuses it for exactly that reason.
+      {
+        href: '/stock-takes',
+        label: 'Stock count',
+        icon: 'ClipboardCheck',
+        permission: Permission.PRODUCT_MANAGE,
+        module: 'INVENTORY',
+      },
       {
         href: '/suppliers',
         label: 'Suppliers',

@@ -105,6 +105,31 @@ export interface StockAdjustment {
   trackInventory: boolean;
 }
 
+/**
+ * D111 (`8.7`) — one counted line of a stock take.
+ *
+ * `countedQuantity` is an ASSERTION, not a delta: it is what the operator
+ * says is physically on the shelf. The provider works out the variance.
+ */
+export interface StockCountLine {
+  productId: string;
+  productVariantId: string | null;
+  /** For the error message when a product cannot be counted. */
+  productName: string;
+  countedQuantity: number;
+}
+
+/** What the count found, per line, in input order. */
+export interface StockCountOutcome {
+  productId: string;
+  productVariantId: string | null;
+  /** What the books said at the moment of the count. */
+  expectedQuantity: number;
+  countedQuantity: number;
+  /** `counted - expected`. Negative is shrinkage. */
+  variance: number;
+}
+
 /** What a provider knows about one product's availability. */
 export interface ProductAvailability {
   productId: string;

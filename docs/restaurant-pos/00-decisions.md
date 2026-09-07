@@ -5254,3 +5254,102 @@ every part of it were equally solid.
   `inventory-receipts.service`, exactly as before.
 - The restaurant and hardware modules. This is a new read on a gated retail
   report route.
+
+---
+
+## D111 — a stock take states reality; it is not a guarded movement
+
+**Status:** accepted, 2026-09-07. **Migration:** yes — `StockTake`,
+`StockTakeLine`. Introduced by `8.7`.
+
+### The question
+
+Every shop counts its stock. Until now this system had no way to record that a
+shelf holds four when the books say six: the only stock writes were a sale
+(guarded), a return, a receipt, and a bulk-import adjustment.
+
+### The decision, in one line
+
+**A count is an assertion of reality by an operator, and the system records it
+rather than arguing with it.**
+
+Concretely:
+
+1. It **sets** the branch's quantity to the counted figure. It does not decrement
+   and it is not refused for going down. Refusing a count because it disagrees
+   with the books would leave the books wrong and the shelf uncounted.
+2. It **writes a `StockMovement`** for every line whose count differed, reason
+   `ADJUSTMENT`, so the correction is as auditable as a sale.
+3. It **never touches the oversell guard.** `reduceStock`'s conditional
+   `updateMany({ where: { quantityOnHand: { gte } } })` is untouched, and no
+   count path passes through it. Two things that look similar — "change the
+   stock number" — are kept apart because only one of them is a race.
+
+### Why a new provider method, not a service writing stock
+
+`InventoryProvider.adjustStock` already exists and is documented for exactly this
+("a stocktake correction is an assertion of reality by an operator"). It could
+not be used as it stands: `LocalInventoryProvider.adjustStock` writes
+`Product.quantityOnHand` only — no branch, no variant, no `StockMovement`. It is
+the legacy bulk-import path, and widening it would change what the product import
+does to every existing tenant.
+
+Writing the stock directly from a new service was the other option, and it is
+forbidden: *"stock movement lives in exactly one layer — the providers, and
+nowhere else"* is an architectural tripwire with an exact file set, and D28/D31
+put the routing decision in a provider rather than in conditionals inside a
+service.
+
+So `8.7` adds **`applyStockCount`** to the provider interface, exactly as D44
+added `receiveStock`:
+
+- `LocalInventoryProvider` implements it.
+- `QuickBooksInventoryProvider` and `NoInventoryProvider` **throw**
+  `ProviderOperationUnavailableError`. A silent no-op would look like a
+  successful count that never moved anything — the same "document with no ledger
+  effect" state D44 refused for receipts. QuickBooks stock is a cache of an
+  upstream system whose ledger is not ours to write; `NONE` has no stock to
+  count.
+
+### Why the document is immutable and has no status
+
+A `StockTake` row is a count that HAPPENED. There is no `DRAFT`, no `POSTED`, no
+`status` column at all — a counting session that can be saved and resumed is a
+different feature, and a status field with one legal value is the "reserved key
+with nothing behind it" shape D2 recorded and Phase 7 spent a step undoing.
+Adding a status later is a migration; adding it now is a promise.
+
+The same reasoning gives the line its snapshots: `productNameSnapshot` and
+`variantNameSnapshot` are frozen at count time (D44), so a rename cannot rewrite
+what was counted.
+
+### What a variance is worth
+
+Each line carries `unitCost` and `varianceValue`, both nullable, resolved by the
+same rule as D110 — the variant's own average, then its latest purchase, and for
+a variant-less line the product's. **Null, not zero, when nothing has ever been
+received**: a shrinkage report that valued unknown stock at zero would say a
+missing item cost the shop nothing.
+
+### Authorisation
+
+`INVENTORY` module, and **`product:manage`** — no new permission was minted.
+
+`product:manage` is the permission that already authorises writing stock
+quantities: the bulk product import does exactly that today. It is held by Owner,
+Admin and Manager, which is the set a count needs, and a cashier does not hold
+it.
+
+D44 minted `inventory:receive` rather than reusing `product:manage`, and the
+argument it made — a floor manager who receives stock need not also be able to
+edit the catalogue — applies equally to counting. It is not being acted on now
+because no tenant has asked for that split, and vocabulary added in advance of a
+need is vocabulary nobody can remove. **`inventory:count` is the natural next
+step** the first time a client wants a counter who is not a catalogue editor.
+
+### What this does not change
+
+- The sale path, the return path, the receipt path: byte for byte.
+- `adjustStock`, which the product import still calls, unchanged.
+- Restaurant and hardware tenants. `applyStockCount` is reachable only through a
+  new `INVENTORY`-gated route, and the restaurant module has no caller.

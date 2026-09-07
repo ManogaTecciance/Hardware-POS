@@ -15,6 +15,8 @@ import {
   ReceiveStockLine,
   ReceiveStockLineOutcome,
   StockAdjustment,
+  StockCountLine,
+  StockCountOutcome,
   StockLine,
   StockMovementMetadata,
   VariantAvailability,
@@ -331,6 +333,143 @@ export class LocalInventoryProvider implements InventoryProvider {
    * movements, where cost is authoritative. A sale or return has no purchase cost
    * to record, and inventing one would corrupt a future FIFO walk.
    */
+  /**
+   * D111 (`8.7`) — apply a stock count.
+   *
+   * ## What is authoritative for "expected"
+   *
+   * The same row the SALE path will read, so a count fixes the number that
+   * actually constrains selling:
+   *
+   *  - **A variant line** is answered by the `(branch, variant)` `BranchInventory`
+   *    cell. Missing cell means zero on that shelf, and the count creates it.
+   *  - **A product-level line** is answered by `Product.quantityOnHand`, which is
+   *    what `reduceStock` guards for a variant-less sale. That column has no
+   *    branch dimension, so this path takes the same multi-branch refusal the
+   *    sale path takes — setting one global number from one branch's shelf would
+   *    quietly destroy another branch's stock. The `BranchInventory` cell is
+   *    written too, so both readers agree afterwards.
+   *
+   * ## Setting, not decrementing
+   *
+   * `quantityOnHand: counted`. No `gte` predicate, no row-count check, no
+   * refusal for going down: the shelf is the authority and the books are what is
+   * wrong. This is the whole point of D111, and it is why the count does not
+   * reuse `reduceStock` — whose conditional write exists to lose a race safely,
+   * a property a count must not have.
+   *
+   * A movement is written for every line that actually changed. A line counted
+   * at exactly what the books said is not a movement, and recording it as one
+   * would fill the ledger with zero-delta rows that say nothing.
+   */
+  async applyStockCount(
+    tx: Prisma.TransactionClient,
+    ctx: ProviderContext,
+    lines: StockCountLine[],
+    metadata: { stockTakeId: string; countedByUserId: string },
+  ): Promise<StockCountOutcome[]> {
+    if (ctx.branchId === null) {
+      throw new InvalidBranchContextError('applyStockCount requires an explicit branchId');
+    }
+    const branchId = ctx.branchId;
+    if (lines.some((l) => l.productVariantId === null)) {
+      // Only for the product-level half; a variant count is branch-scoped and
+      // safe for a multi-branch tenant.
+      await this.assertSingleBranch(tx, ctx);
+    }
+
+    const outcomes: StockCountOutcome[] = [];
+
+    for (const line of lines) {
+      if (line.countedQuantity < 0) {
+        throw new Error(`Counted quantity for ${line.productName} cannot be negative`);
+      }
+      const counted = new Prisma.Decimal(line.countedQuantity);
+
+      const cell = await tx.branchInventory.findFirst({
+        where: {
+          tenantId: ctx.tenantId,
+          branchId,
+          productId: line.productId,
+          productVariantId: line.productVariantId,
+        },
+        select: { id: true, quantityOnHand: true },
+      });
+
+      let expected: Prisma.Decimal;
+      if (line.productVariantId === null) {
+        const product = await tx.product.findFirst({
+          where: { id: line.productId, tenantId: ctx.tenantId },
+          select: { quantityOnHand: true },
+        });
+        if (!product) {
+          // A product id from another tenant matches nothing here, exactly as it
+          // matches no rows in every other write on this provider.
+          throw new Error(`Cannot count ${line.productName}: product not found`);
+        }
+        expected = product.quantityOnHand;
+      } else {
+        expected = cell?.quantityOnHand ?? new Prisma.Decimal(0);
+      }
+
+      const variance = counted.minus(expected);
+
+      if (cell) {
+        await tx.branchInventory.update({
+          where: { id: cell.id },
+          data: { quantityOnHand: counted, version: { increment: 1 } },
+        });
+      } else {
+        await tx.branchInventory.create({
+          data: {
+            tenantId: ctx.tenantId,
+            branchId,
+            productId: line.productId,
+            productVariantId: line.productVariantId,
+            quantityOnHand: counted,
+          },
+        });
+      }
+
+      if (line.productVariantId === null) {
+        // The legacy rollup mirror (D10), and for a variant-less line the column
+        // the sale guard reads. Set, not incremented: it IS the counted shelf,
+        // and the multi-branch refusal above is what makes that safe.
+        await tx.product.updateMany({
+          where: { id: line.productId, tenantId: ctx.tenantId },
+          data: { quantityOnHand: counted },
+        });
+      }
+
+      if (!variance.isZero()) {
+        await tx.stockMovement.create({
+          data: {
+            tenantId: ctx.tenantId,
+            branchId,
+            productId: line.productId,
+            productVariantId: line.productVariantId,
+            delta: variance,
+            balanceAfter: counted,
+            reason: StockMovementReason.ADJUSTMENT,
+            refType: 'STOCK_TAKE',
+            refId: metadata.stockTakeId,
+            createdByUserId: metadata.countedByUserId,
+          },
+        });
+      }
+
+      outcomes.push({
+        productId: line.productId,
+        productVariantId: line.productVariantId,
+        expectedQuantity: expected.toNumber(),
+        countedQuantity: counted.toNumber(),
+        variance: variance.toNumber(),
+      });
+    }
+
+    return outcomes;
+  }
+
   private async recordMovement(
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,

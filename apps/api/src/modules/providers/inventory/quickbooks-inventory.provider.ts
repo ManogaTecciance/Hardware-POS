@@ -12,6 +12,8 @@ import {
   ProviderContext,
   ProviderSyncOutcome,
   ReceiveStockLine,
+  StockCountLine,
+  StockCountOutcome,
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
@@ -161,6 +163,23 @@ export class QuickBooksInventoryProvider implements InventoryProvider {
     return Promise.reject(
       new ProviderOperationUnavailableError(this.name, 'receiveStock'),
     );
+  }
+
+  /**
+   * D111 — refused, loudly.
+   *
+   * QuickBooks owns the stock. `quantityOnHand` here is a CACHE of an upstream
+   * figure, so writing a counted quantity into it would be overwritten by the
+   * next pull and would never reach the system of record. The correction belongs
+   * in QuickBooks; saying so is more useful than silently doing nothing.
+   */
+  applyStockCount(
+    _tx: Prisma.TransactionClient,
+    _ctx: ProviderContext,
+    _lines: StockCountLine[],
+    _metadata: { stockTakeId: string; countedByUserId: string },
+  ): Promise<StockCountOutcome[]> {
+    return Promise.reject(new ProviderOperationUnavailableError(this.name, 'applyStockCount'));
   }
 
   /**

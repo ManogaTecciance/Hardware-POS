@@ -52,6 +52,7 @@ import { RestaurantReportsModule } from './modules/restaurant-reports/restaurant
 import { DeliveryHubModule } from './modules/delivery-hub/delivery-hub.module';
 import { RestaurantOrdersModule } from './modules/restaurant-orders/restaurant-orders.module';
 import { InventoryReceiptsModule } from './modules/inventory-receipts/inventory-receipts.module';
+import { StockTakesModule } from './modules/stock-takes/stock-takes.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 
 @Module({
@@ -107,6 +108,7 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     // (via ProvidersModule) so weighted-average cost has one implementation
     // shared with the product-variant wizard's opening-stock path.
     InventoryReceiptsModule,
+    StockTakesModule,
     // D45 — Scheduled auto-apply promotions (Bundle / BOGO / % / $). Peer of
     // DiscountsModule; DiscountsModule stays authoritative for operator-applied
     // retail line/order discounts at sale time. RestaurantModule re-imports

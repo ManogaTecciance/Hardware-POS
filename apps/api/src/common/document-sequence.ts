@@ -33,7 +33,11 @@ export type DocumentType =
   // D107 (Phase 7, 7.1a) — exchange numbering, `X-000042`, matching `R-` and
   // `S-`. Its own sequence so an exchange number never collides with the sale
   // or return it links.
-  | 'EXCHANGE';
+  | 'EXCHANGE'
+  // D111 (Phase 8, `8.7`) — stock counts, `SC-000042`. Its own sequence for
+  // the same reason as every other: a count number is quoted out loud on the
+  // floor ("the variance on SC-12") and must not collide with a receipt.
+  | 'STOCK_TAKE';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;

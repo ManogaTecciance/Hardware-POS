@@ -373,6 +373,8 @@ model Tenant {
   attributeOptions             AttributeOption[]
   inventoryReceipts            InventoryReceipt[]
   inventoryReceiptLines        InventoryReceiptLine[]
+  stockTakes                   StockTake[]
+  stockTakeLines               StockTakeLine[]
   promotions                   Promotion[]
   exchanges                    Exchange[]
   kitchenPrinters              KitchenPrinter[]
@@ -496,6 +498,7 @@ model Branch {
   branchInventory       BranchInventory[]
   stockMovements        StockMovement[]
   inventoryReceipts     InventoryReceipt[]
+  stockTakes            StockTake[]
   kitchenPrinters       KitchenPrinter[]
   kitchenTickets        KitchenTicket[]
   deliveryPlatforms     DeliveryPlatform[]
@@ -592,6 +595,8 @@ model User {
   createdRestaurantTables  RestaurantTable[]   @relation("RestaurantTableCreator")
   createdTableReservations TableReservation[]  @relation("TableReservationCreator")
   createdInventoryReceipts InventoryReceipt[]  @relation("InventoryReceiptCreator")
+  /// D111 (`8.7`) — stock counts this user submitted.
+  countedStockTakes        StockTake[]         @relation("StockTakeCounter")
 
   /// D68 — kitchen tickets this user marked done on the board.
   completedKitchenTickets KitchenTicket[] @relation("KitchenTicketCompletedBy")
@@ -812,6 +817,7 @@ model Product {
   variants             ProductVariant[]
   variationDimensions  ProductVariationDimension[]
   receiptLines         InventoryReceiptLine[]
+  stockTakeLines       StockTakeLine[]
   modifierGroups       ProductModifierGroup[]
   stationLinks         ProductStationLink[]
   promotionItems       PromotionItem[]
@@ -3610,6 +3616,7 @@ model ProductVariant {
   branchInventory      BranchInventory[]
   stockMovements       StockMovement[]
   receiptLines         InventoryReceiptLine[]
+  stockTakeLines       StockTakeLine[]
   restaurantOrderItems RestaurantOrderItem[]
   catalogueEntries     CatalogueEntry[]
 
@@ -3713,6 +3720,76 @@ model InventoryReceiptLine {
   @@index([productId])
   @@index([productVariantId])
   @@index([productId, productVariantId, createdAt])
+}
+
+/// D111 (`8.7`) — one stock count, on one branch, at one moment.
+///
+/// Immutable once written, like `InventoryReceipt`: a count is something that
+/// HAPPENED. There is deliberately no `status` column — a counting session that
+/// can be saved and resumed is a different feature, and a status with one legal
+/// value is a promise the system has not made.
+model StockTake {
+  id              String   @id @default(cuid())
+  tenantId        String
+  branchId        String
+  /// `SC-000001`, per tenant, allocated the same way a receipt number is.
+  countNumber     String
+  countedAt       DateTime @default(now())
+  note            String?
+  countedByUserId String
+  /// A double-submitted count form must not post the correction twice.
+  idempotencyKey  String?
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch    Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  countedBy User   @relation("StockTakeCounter", fields: [countedByUserId], references: [id])
+
+  lines StockTakeLine[]
+
+  @@unique([tenantId, countNumber])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([countedAt])
+}
+
+/// One counted line. `expectedQuantity` is what the books said at the moment of
+/// the count, frozen here so the variance can still be read after later movements.
+model StockTakeLine {
+  id               String  @id @default(cuid())
+  tenantId         String
+  stockTakeId      String
+  productId        String
+  productVariantId String?
+
+  /// D44 — frozen at count time, so a rename cannot rewrite what was counted.
+  productNameSnapshot String
+  variantNameSnapshot String?
+
+  expectedQuantity Decimal @db.Decimal(12, 3)
+  countedQuantity  Decimal @db.Decimal(12, 3)
+  /// `counted - expected`. Negative is shrinkage, positive is a found item.
+  variance         Decimal @db.Decimal(12, 3)
+
+  /// The unit cost the variance was valued at, and its value. Both NULL when
+  /// nothing has ever been received — unknown, never zero (D110).
+  unitCost      Decimal? @db.Decimal(12, 4)
+  varianceValue Decimal? @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stockTake StockTake       @relation(fields: [stockTakeId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id])
+  variant   ProductVariant? @relation(fields: [productVariantId], references: [id])
+
+  @@unique([stockTakeId, productId, productVariantId])
+  @@index([tenantId])
+  @@index([stockTakeId])
+  @@index([productId])
+  @@index([productVariantId])
 }
 
 // ─────────────────────────────────────────────────────────────

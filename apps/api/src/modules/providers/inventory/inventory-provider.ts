@@ -8,6 +8,8 @@ import {
   ReceiveStockLine,
   ReceiveStockLineOutcome,
   StockAdjustment,
+  StockCountLine,
+  StockCountOutcome,
   StockLine,
   StockMovementMetadata,
   VariantAvailabilityMap,
@@ -182,6 +184,39 @@ export interface InventoryProvider {
     lines: ReceiveStockLine[],
     metadata: { receiptId: string; createdByUserId: string },
   ): Promise<ReceiveStockLineOutcome[]>;
+
+  /**
+   * D111 (`8.7`) — apply a stock COUNT, inside the caller's transaction.
+   *
+   * A count is not an adjustment and not a movement: it is an assertion by an
+   * operator about what is physically on a shelf. So it **sets** the quantity
+   * rather than incrementing it, and it is never refused for going down. The
+   * oversell guard in `reduceStock` is untouched and no count passes through
+   * it — two things that both "change the stock number" are kept apart
+   * because only one of them is a race.
+   *
+   * Distinct from `adjustStock`, which takes a signed delta, writes only
+   * `Product.quantityOnHand`, records no movement, and exists for the bulk
+   * product import. Widening that to serve counts would change what the
+   * import does for every existing tenant.
+   *
+   * Providers that cannot own a count — QuickBooks, where stock is a cache of
+   * an upstream ledger that is not ours to write, and NONE, which has no
+   * stock — **must throw** `ProviderOperationUnavailableError`. A silent
+   * no-op would look like a successful count that moved nothing, leaving a
+   * `StockTake` document with no ledger effect: the state D44 refused for
+   * receipts, for the same reason.
+   *
+   * Returns one outcome per input line, in order, so the caller can write its
+   * `StockTakeLine` rows from what actually happened rather than from what it
+   * asked for.
+   */
+  applyStockCount(
+    tx: Prisma.TransactionClient,
+    ctx: ProviderContext,
+    lines: StockCountLine[],
+    metadata: { stockTakeId: string; countedByUserId: string },
+  ): Promise<StockCountOutcome[]>;
 
   /**
    * Ask the provider to reconcile with its upstream system.
