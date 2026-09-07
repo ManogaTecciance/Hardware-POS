@@ -216,7 +216,7 @@ export default function CustomersPage() {
                 <th className="px-4 py-3 font-medium">Customer</th>
                 <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">Phone</th>
-                <th className="px-4 py-3 font-medium">Credit</th>
+                <th className="px-4 py-3 font-medium">Credit limit</th>
                 <th className="px-4 py-3 font-medium">Available credit</th>
                 <th className="px-4 py-3 font-medium">Sync</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>

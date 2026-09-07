@@ -379,7 +379,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-033 | Selecting text in a row is not a click | Drag to select a phone number, release | Nothing navigates; the text stays selected | N | Not Run |
 | CUST-034 | Modifier-click opens a new tab | Ctrl/Cmd-click or middle-click a row | Customer opens in a new tab; the list stays put | P | Not Run |
 | CUST-027 | Available credit explains itself on hover | Hover (or focus) the info icon beside Available credit | Tooltip reads "<used> of <limit> used · <left> left"; for a customer with no limit it reads "<used> used · no limit set" | P | Not Run |
-| CUST-026 | Credit column shows a figure or nothing | Customers list with three rows: credit + limit, credit + no limit, credit not allowed | Only the first shows an amount; the other two are blank — the words "No limit" appear nowhere in the table | P | Not Run |
+| CUST-026 | Credit limit column shows a figure or nothing | Customers list with three rows: credit + limit, credit + no limit, credit not allowed | Column is headed "Credit limit"; only the first shows an amount, the other two are blank — the words "No limit" appear nowhere in the table | P | Not Run |
 | CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
 
 ## CIMP — Customer Bulk Import
