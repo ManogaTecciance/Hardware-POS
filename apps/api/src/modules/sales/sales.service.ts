@@ -151,6 +151,35 @@ export class SalesService {
   }
 
   /**
+   * `8.8` — the baskets currently on hold.
+   *
+   * A hold IS a draft. `SaleStatus.DRAFT` and `createDraft` have existed since
+   * Phase 1 with no flow on top of them: nothing listed drafts, nothing
+   * discarded one, and `complete({ saleId })` — the resume — had no caller.
+   * `8.8` is those three, not a new concept.
+   */
+  listHeld(tenantId: string, branchId?: string): Promise<SaleWithRelations[]> {
+    return this.salesRepository.findHeldSales(tenantId, branchId);
+  }
+
+  /**
+   * Discard a held basket.
+   *
+   * Refuses anything that is not a DRAFT — including a completed sale whose id
+   * someone pasted — by finding no row rather than by checking first and
+   * deleting second, which two simultaneous requests could both pass.
+   */
+  async discardHeld(tenantId: string, id: string): Promise<void> {
+    const discarded = await this.salesRepository.discardHeldSale(tenantId, id);
+    if (!discarded) {
+      // One message for "no such sale" and "that sale is completed": telling
+      // them apart would confirm the existence of a sale to someone who only
+      // guessed its id.
+      throw new NotFoundException(`No held sale ${id}`);
+    }
+  }
+
+  /**
    * Complete a sale (12-step pipeline): validate cart & prices, check stock,
    * compute totals/discounts/tax, then persist the sale, items, payments, and an
    * outbound QuickBooks sync job. Works one-shot (cart in body) or by finishing a

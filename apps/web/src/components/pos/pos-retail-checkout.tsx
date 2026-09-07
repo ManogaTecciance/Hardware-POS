@@ -59,6 +59,7 @@ import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permiss
 import { outstandingRewards } from '@hardware-pos/shared';
 
 import { stockCap, usePosCart } from '@/lib/pos-cart';
+import { HeldSalesButton, HoldCartButton } from '@/components/pos/held-sales';
 import { resolveScan, type ScanHit } from '@/lib/scan-resolver';
 import { useBarcodeScanner } from '@/lib/use-barcode-scanner';
 import { cn, formatMoney, round2 } from '@/lib/utils';
@@ -475,6 +476,28 @@ export function PosRetailCheckout() {
           ) : null}
         </div>
         <div className="flex items-center gap-1">
+          {/*
+            `8.8` — hold and resume. A hold is a DRAFT sale: the basket is put
+            down, the stock stays on the shelf, and the existing completion path
+            finishes it later by `saleId`. `Held` shows even with an empty cart —
+            that is precisely when a cashier goes looking for one.
+          */}
+          {!cartEmpty ? (
+            <HoldCartButton
+              session={session!}
+              branchId={session?.branchId ?? null}
+              products={data.products}
+              items={cart.items}
+              customerId={cart.customerId}
+            />
+          ) : null}
+          <HeldSalesButton
+            session={session!}
+            branchId={session?.branchId ?? null}
+            products={data.products}
+            items={cart.items}
+            customerId={cart.customerId}
+          />
           {!cartEmpty ? (
             <Button
               variant="ghost"

@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ModuleKey } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 import type { Response } from 'express';
@@ -145,6 +156,35 @@ export class SalesController {
       thresholdDays: query.thresholdDays,
       asOf: query.asOf ? new Date(query.asOf) : undefined,
     });
+  }
+
+  /**
+   * `8.8` — the baskets currently on hold.
+   *
+   * Declared before `:id`, like the reports above, or `held` is captured as a
+   * sale id.
+   *
+   * `RETAIL_POS`-gated, unlike the sale READS beside it: holding a basket is
+   * part of taking a sale, not part of looking one up, and a tenant without
+   * the retail till has no baskets to hold.
+   */
+  @Get('held')
+  @RequireModule(ModuleKey.RETAIL_POS)
+  @RequirePermissions(Permission.SALE_READ)
+  listHeld(
+    @TenantId() tenantId: string,
+    @Query('branchId') branchId?: string,
+  ): Promise<SaleWithRelations[]> {
+    return this.salesService.listHeld(tenantId, branchId);
+  }
+
+  /** `8.8` — discard a held basket. A draft moved no stock, so nothing unwinds. */
+  @Delete('held/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireModule(ModuleKey.RETAIL_POS)
+  @RequirePermissions(Permission.SALE_CREATE)
+  discardHeld(@TenantId() tenantId: string, @Param('id') id: string): Promise<void> {
+    return this.salesService.discardHeld(tenantId, id);
   }
 
   @Get(':id')

@@ -182,6 +182,44 @@ export class SalesRepository {
     return this.prisma.sale.findFirst({ where: { id, tenantId }, include: saleInclude });
   }
 
+  /**
+   * `8.8` — every basket currently on hold.
+   *
+   * Newest first: a cashier holding three fitting-room baskets in a row wants
+   * the one they just put down at the top.
+   *
+   * Branch-filtered when a branch is given. A held basket belongs to the till
+   * it was put down at — resuming one from another shop would hand a customer
+   * stock that is not on this shelf.
+   */
+  findHeldSales(tenantId: string, branchId?: string): Promise<SaleWithRelations[]> {
+    return this.prisma.sale.findMany({
+      where: { tenantId, status: 'DRAFT', ...(branchId ? { branchId } : {}) },
+      include: saleInclude,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
+  /**
+   * Discard a held basket.
+   *
+   * `status: 'DRAFT'` in the predicate is the whole safety property: a
+   * completed sale matches zero rows and is not deleted, whatever id is
+   * passed. `deleteMany` rather than `delete` so a miss is a count of zero
+   * the caller can report, not an exception to interpret.
+   *
+   * A draft moves no stock (`createDraft` writes no movement), so there is
+   * nothing to reverse — which is exactly why discarding one can be a delete
+   * rather than a void.
+   */
+  async discardHeldSale(tenantId: string, id: string): Promise<boolean> {
+    const { count } = await this.prisma.sale.deleteMany({
+      where: { id, tenantId, status: 'DRAFT' },
+    });
+    return count > 0;
+  }
+
   findDraftWithItems(tenantId: string, id: string): Promise<SaleWithRelations | null> {
     return this.prisma.sale.findFirst({
       where: { id, tenantId, status: 'DRAFT' },
