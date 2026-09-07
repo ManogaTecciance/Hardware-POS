@@ -1,4 +1,4 @@
-import { DiscountType } from '@hardware-pos/database';
+import { DiscountBasis, DiscountType } from '@hardware-pos/database';
 import { IsEnum, IsNumber, IsOptional, IsString, Length, Matches, IsPositive } from 'class-validator';
 
 export class ApproveDiscountRequestDto {
@@ -16,6 +16,11 @@ export class ApproveDiscountRequestDto {
   @IsNumber()
   @IsPositive()
   discountValue!: number;
+
+  /** Whether the amount is per unit or for the line; bound into the token. */
+  @IsEnum(DiscountBasis)
+  @IsOptional()
+  discountBasis?: DiscountBasis;
 
   @IsString()
   @IsOptional()

@@ -196,6 +196,7 @@ POST /v1/sales/draft                   # build a DRAFT sale (totals computed, no
 body: { "branchId", "registerId?", "customerId?",
         "items": [ { "productId", "quantity", "unitPrice?",
                      "discountType?": "PERCENTAGE|FIXED", "discountValue?",
+                     "discountBasis?": "LINE|UNIT",
                      "discountReason?", "approvalToken?" } ] }
 200 → { "data": <sale with items, status DRAFT, syncStatus NOT_SYNCED> }
 
@@ -216,6 +217,14 @@ body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "payme
 # Completion pipeline: resolve the sale date → validate items → validate prices vs cache → check stock →
 #   subtotal → product-wise discounts → tax (if rate > 0) → total → save sale,
 #   items, payments → enqueue an outbound QuickBooks sync job.
+# discountBasis: what a FIXED line discount is measured against. LINE (the default,
+#   and the meaning of every sale before this) takes the amount off once; UNIT takes
+#   it off every unit — value × quantity. Rejected on a PERCENTAGE, which is already
+#   the same figure per unit and per line. The amount is always clamped to the line,
+#   so a per-unit discount larger than the unit price floors the line at zero.
+#   Order-level discounts have no units and are always whole-cart.
+#   The basis is bound into the discount-approval token: an approval for an amount
+#   off the line cannot be spent on the same amount off every unit.
 # Transaction type: paidAmount >= total → SALES_RECEIPT; otherwise INVOICE (customer required).
 # Payments: full, partial, or none (full credit) are all supported.
 # paymentDueDate: when the balance is expected, as a YYYY-MM-DD calendar date.

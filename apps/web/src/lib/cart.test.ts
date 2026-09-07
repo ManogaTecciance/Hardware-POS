@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeLine, computeTotals, stockCap, type CartItem } from './cart';
+import { computeDiscount, computeLine, computeTotals, stockCap, type CartItem } from './cart';
 import type { ClientProduct } from './catalog';
 
 /**
@@ -108,5 +108,93 @@ describe('the cart-wide stock gate behind the Pay button', () => {
 
   it('is clear for an empty cart', () => {
     expect(totals([]).hasStockIssue).toBe(false);
+  });
+});
+
+
+/**
+ * A fixed discount can come off each unit or off the line as a whole. The two
+ * are indistinguishable at quantity 1 and diverge the moment the cashier taps
+ * the tile again, so the basis has to travel with the discount rather than be
+ * inferred.
+ */
+describe('a fixed discount per unit vs per line', () => {
+  const threeAtAThousand = (basis?: 'LINE' | 'UNIT'): CartItem => ({
+    product: product({ unitPrice: 1000 }),
+    quantity: 3,
+    discount: { type: 'FIXED', value: 100, ...(basis ? { basis } : {}) },
+  });
+
+  it('takes the amount once for a whole-line discount', () => {
+    const line = computeLine(threeAtAThousand('LINE'));
+    expect(line.discountAmount).toBe(100);
+    expect(line.lineTotal).toBe(2900);
+  });
+
+  it('takes the amount from every unit for a per-unit discount', () => {
+    const line = computeLine(threeAtAThousand('UNIT'));
+    expect(line.discountAmount).toBe(300);
+    expect(line.lineTotal).toBe(2700);
+  });
+
+  it('reads a discount with no basis as whole-line', () => {
+    // A cart restored from an older session has no basis on its discounts and
+    // must keep the meaning it was rung up with.
+    expect(computeLine(threeAtAThousand()).discountAmount).toBe(100);
+  });
+
+  it('floors the line at zero rather than going negative', () => {
+    // A negative line would pay money out through the proportional reversal a
+    // return performs.
+    const line = computeLine({
+      product: product({ unitPrice: 1000 }),
+      quantity: 3,
+      discount: { type: 'FIXED', value: 2000, basis: 'UNIT' },
+    });
+    expect(line.discountAmount).toBe(3000);
+    expect(line.lineTotal).toBe(0);
+  });
+
+  it('ignores the basis on a percentage', () => {
+    // A percentage is already the same figure per unit and per line.
+    const line = computeLine({
+      product: product({ unitPrice: 1000 }),
+      quantity: 3,
+      discount: { type: 'PERCENTAGE', value: 10, basis: 'UNIT' },
+    });
+    expect(line.discountAmount).toBe(300);
+  });
+
+  it('is the same either way at a quantity of one', () => {
+    const one = (basis: 'LINE' | 'UNIT') =>
+      computeLine({
+        product: product({ unitPrice: 1000 }),
+        quantity: 1,
+        discount: { type: 'FIXED', value: 100, basis },
+      }).discountAmount;
+    expect(one('LINE')).toBe(one('UNIT'));
+  });
+
+  it('multiplies before rounding, as the server does', () => {
+    // round2(33.333 * 3) = 100.00, but round2(33.333) * 3 = 99.99. A cent of
+    // disagreement with the server makes the sale complete as part-paid.
+    const line = computeLine({
+      product: product({ unitPrice: 1000 }),
+      quantity: 3,
+      discount: { type: 'FIXED', value: 33.333, basis: 'UNIT' },
+    });
+    expect(line.discountAmount).toBe(100);
+  });
+
+  it('leaves the whole-cart discount alone, which has no units', () => {
+    // computeDiscount is shared with the order discount; its caller passes no
+    // quantity and a fixed cart discount must stay the amount it says.
+    expect(computeDiscount(5000, { type: 'FIXED', value: 100 })).toBe(100);
+  });
+
+  it('feeds the per-unit amount into the cart totals', () => {
+    const totals = computeTotals([threeAtAThousand('UNIT')], 0);
+    expect(totals.totalDiscount).toBe(300);
+    expect(totals.total).toBe(2700);
   });
 });

@@ -309,6 +309,10 @@ export default function PaymentPage() {
           productId: it.product.id,
           quantity: it.quantity,
           discountType: it.discount?.type,
+          // Hand-written map: a field left out here is dropped with no type
+          // error, and the server would then recompute a whole-line amount while
+          // the cashier was shown the per-unit one.
+          discountBasis: it.discount?.basis,
           discountValue: it.discount?.value,
           discountReason: it.discount?.reason,
           approvalToken: it.approvalToken,

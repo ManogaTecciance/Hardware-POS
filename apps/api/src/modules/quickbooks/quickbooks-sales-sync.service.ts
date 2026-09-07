@@ -222,6 +222,8 @@ export class QuickBooksSalesSyncService {
       // TODO(accountant): if discounts must appear as itemised discount lines or a
       // document-level DiscountLineDetail (which needs a discount income account and
       // tax-treatment decision), confirm the mapping before switching to that model.
+      // Note a per-unit discount must be expanded to value × quantity first —
+      // QuickBooks' discount line is an amount or a percent, with no per-unit form.
       const detail: QboSalesLine['SalesItemLineDetail'] = { Qty: quantity };
       if (itemRef) detail.ItemRef = itemRef;
       if (discountAmount === 0) detail.UnitPrice = unitPrice; // exact; avoids Amount mismatch
@@ -243,10 +245,14 @@ export class QuickBooksSalesSyncService {
   ): string | undefined {
     const parts: string[] = [item.productName];
     if (discountAmount > 0) {
+      // A per-unit amount says so, or the accountant reconciling this against
+      // the POS sees a figure that does not multiply out.
       const label =
         item.discountType === 'PERCENTAGE'
           ? `${Number(item.discountValue ?? 0)}%`
-          : `${Number(item.discountValue ?? 0)}`;
+          : item.discountBasis === 'UNIT'
+            ? `${Number(item.discountValue ?? 0)}/unit`
+            : `${Number(item.discountValue ?? 0)}`;
       const reason = item.discountReason ? ` – ${item.discountReason}` : '';
       parts.push(`(discount ${label}: -${discountAmount.toFixed(2)}${reason})`);
     }

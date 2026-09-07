@@ -60,6 +60,20 @@ enum DiscountType {
   FIXED
 }
 
+/// What a FIXED discount amount is measured against on a sale line.
+///
+/// A separate field rather than a third `DiscountType`, because an ORDER-level
+/// discount has no units — the whole-cart discount reuses `DiscountType`, and a
+/// `FIXED_PER_UNIT` member there would validate and persist while meaning
+/// nothing. PERCENTAGE ignores this entirely: a percentage is already the same
+/// per unit and per line.
+enum DiscountBasis {
+  /// The amount comes off the line once.
+  LINE
+  /// The amount comes off every unit — `value × quantity`.
+  UNIT
+}
+
 enum CustomerType {
   WALK_IN
   RETAIL
@@ -625,6 +639,10 @@ model SaleItem {
   discountId       String?
   discountType     DiscountType?
   discountValue    Decimal?         @db.Decimal(12, 2)
+  /// Whether `discountValue` was per unit or for the line. Only meaningful with
+  /// a FIXED discount. `discountAmount` remains the money actually taken off —
+  /// this records how it was arrived at, so a bill can justify it.
+  discountBasis    DiscountBasis    @default(LINE)
   discountAmount   Decimal          @default(0) @db.Decimal(12, 2)
   discountReason   String?
   approvedByUserId String?

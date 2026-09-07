@@ -413,6 +413,7 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
     unitPrice: line.unitPrice,
     quantity: line.quantity,
     discountType: line.discountType,
+    discountBasis: line.discountBasis,
     discountValue: line.discountValue,
     discountAmount: line.discountAmount,
     discountReason: line.discountReason,

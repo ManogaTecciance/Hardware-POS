@@ -3,9 +3,18 @@ import { round2 } from './utils';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
 
+/** What a FIXED amount is measured against. Absent means the line as a whole. */
+export type DiscountBasis = 'LINE' | 'UNIT';
+
 export interface LineDiscount {
   type: DiscountType;
   value: number;
+  /**
+   * Only meaningful on a FIXED discount: whether `value` comes off each unit or
+   * the line as a whole. Absent reads as LINE, so a cart restored from an older
+   * session keeps the meaning it was rung up with.
+   */
+  basis?: DiscountBasis;
   reason?: string;
 }
 
@@ -27,12 +36,27 @@ export interface LineTotals {
   outOfStock: boolean;
 }
 
-export function computeDiscount(lineSubtotal: number, discount?: LineDiscount): number {
+/**
+ * Money off, for a line or for the whole cart.
+ *
+ * `quantity` defaults to 1 and only matters to a FIXED discount on a UNIT basis;
+ * the order discount has no units and leaves it alone. Must stay arithmetically
+ * identical to the server's copy in sales.service.ts — multiply first, round
+ * once — or the two disagree by a cent and the sale completes as part-paid.
+ */
+export function computeDiscount(
+  lineSubtotal: number,
+  discount?: LineDiscount | OrderDiscount,
+  quantity = 1,
+): number {
   if (!discount || discount.value <= 0) return 0;
   if (discount.type === 'PERCENTAGE') {
     return Math.min(lineSubtotal, round2((lineSubtotal * discount.value) / 100));
   }
-  return Math.min(lineSubtotal, round2(discount.value));
+  const units = 'basis' in discount && discount.basis === 'UNIT' ? quantity : 1;
+  // Clamped: a per-unit amount larger than the unit price floors the line at
+  // zero rather than turning it negative.
+  return Math.min(lineSubtotal, round2(discount.value * units));
 }
 
 /**
@@ -50,7 +74,7 @@ export function stockCap(product: ClientProduct): number | null {
 
 export function computeLine(item: CartItem): LineTotals {
   const lineSubtotal = round2(item.product.unitPrice * item.quantity);
-  const discountAmount = computeDiscount(lineSubtotal, item.discount);
+  const discountAmount = computeDiscount(lineSubtotal, item.discount, item.quantity);
   const cap = stockCap(item.product);
   return {
     lineSubtotal,

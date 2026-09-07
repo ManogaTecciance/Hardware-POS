@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DiscountType, PaymentStatus, QuickBooksDocumentType } from '@hardware-pos/database';
+import {
+  DiscountBasis,
+  DiscountType,
+  PaymentStatus,
+  QuickBooksDocumentType,
+} from '@hardware-pos/database';
 import { CURRENCY_SYMBOL, type Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
@@ -101,6 +106,7 @@ export class SalesService {
         productId: it.productId,
         quantity: Number(it.quantity),
         discountType: it.discountType,
+        discountBasis: it.discountBasis,
         discountValue: it.discountValue != null ? Number(it.discountValue) : null,
         discountReason: it.discountReason,
         approvedByUserId: it.approvedByUserId,
@@ -238,8 +244,18 @@ export class SalesService {
           );
         }
 
+        if (item.discountBasis === 'UNIT' && item.discountType !== 'FIXED') {
+          // A percentage is already the same figure per unit and per line, so a
+          // per-unit percentage means nothing — refuse it rather than store a
+          // flag that silently does nothing and confuses the bill.
+          throw new BadRequestException('A per-unit discount must be a fixed amount');
+        }
+
         const lineSubtotal = round2(cachedPrice * quantity);
-        const discountAmount = computeDiscount(lineSubtotal, item.discountType, item.discountValue);
+        const discountAmount = computeDiscount(lineSubtotal, item.discountType, item.discountValue, {
+          basis: item.discountBasis,
+          quantity,
+        });
         const effectivePercent = lineSubtotal > 0 ? (discountAmount / lineSubtotal) * 100 : 0;
 
         // Enforce the role-based discount limit; over-limit lines need a covering
@@ -251,6 +267,7 @@ export class SalesService {
                 actorRole: actor.role,
                 productId: product.id,
                 discountType: item.discountType,
+                discountBasis: item.discountBasis ?? 'LINE',
                 discountValue: item.discountValue,
                 effectivePercent,
                 approvalToken: item.approvalToken,
@@ -266,6 +283,7 @@ export class SalesService {
           unitPrice: cachedPrice,
           quantity,
           discountType: item.discountType ?? null,
+          discountBasis: item.discountBasis ?? 'LINE',
           discountValue: item.discountValue ?? null,
           discountAmount,
           discountReason: item.discountReason ?? null,
@@ -328,6 +346,8 @@ export class SalesService {
       return { type: null, value: null, amount: 0, reason: null, approvedById: null };
     }
 
+    // No quantity: an order discount applies to the cart as a whole, so a FIXED
+    // amount here is the amount, never multiplied by anything.
     const amount = computeDiscount(base, type, value);
     const effectivePercent = base > 0 ? (amount / base) * 100 : 0;
     const approvedById = await this.discountsService.resolveApproval({
@@ -335,6 +355,8 @@ export class SalesService {
       actorRole: actor.role,
       productId: ORDER_DISCOUNT_KEY,
       discountType: type,
+      // A cart-level discount has no units to be "per".
+      discountBasis: 'LINE',
       discountValue: value,
       effectivePercent,
       approvalToken: input?.approvalToken,
@@ -438,16 +460,29 @@ function toCartItem(dto: SaleItemInputDto): CartItemInput {
     quantity: dto.quantity,
     unitPrice: dto.unitPrice,
     discountType: dto.discountType,
+    discountBasis: dto.discountBasis,
     discountValue: dto.discountValue,
     discountReason: dto.discountReason,
     approvalToken: dto.approvalToken,
   };
 }
 
-function computeDiscount(
+/**
+ * Money off, for a line or for the whole cart.
+ *
+ * `quantity` defaults to 1 and only matters to a FIXED discount with a UNIT
+ * basis: a cart-level discount has no units, so its caller leaves it alone and
+ * keeps the whole-cart meaning it has always had.
+ *
+ * The clamp is load-bearing. A Rs. 2,000-per-unit discount on a Rs. 1,000 item
+ * must floor the line at zero rather than go negative — a negative line would
+ * pay money out through the proportional reversal in the returns calculation.
+ */
+export function computeDiscount(
   lineSubtotal: number,
   type: DiscountType | null | undefined,
   value: number | null | undefined,
+  opts: { basis?: DiscountBasis | null; quantity?: number } = {},
 ): number {
   if (!type || value == null || value <= 0) {
     return 0;
@@ -455,5 +490,8 @@ function computeDiscount(
   if (type === 'PERCENTAGE') {
     return Math.min(lineSubtotal, round2((lineSubtotal * value) / 100));
   }
-  return Math.min(lineSubtotal, round2(value));
+  // Multiply first, round once — the same shape as the percentage branch, and
+  // it has to match the client's copy to the cent or the sale lands PARTIAL.
+  const units = opts.basis === 'UNIT' ? (opts.quantity ?? 1) : 1;
+  return Math.min(lineSubtotal, round2(value * units));
 }

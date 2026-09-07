@@ -1,4 +1,5 @@
 import {
+  DiscountBasis,
   DiscountType,
   PaymentMethod,
   PaymentStatus,
@@ -56,6 +57,8 @@ export interface CartItemInput {
   quantity: number;
   unitPrice?: number;
   discountType?: DiscountType | null;
+  /** Whether a FIXED amount is per unit or for the line. Absent = LINE. */
+  discountBasis?: DiscountBasis | null;
   discountValue?: number | null;
   discountReason?: string | null;
   /** Fresh approval token (one-shot completion). */
@@ -75,6 +78,8 @@ export interface ComputedLine {
   unitPrice: number;
   quantity: number;
   discountType: DiscountType | null;
+  /** Whether the FIXED amount was per unit or for the line. */
+  discountBasis: DiscountBasis;
   discountValue: number | null;
   discountAmount: number;
   discountReason: string | null;

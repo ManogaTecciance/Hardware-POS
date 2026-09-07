@@ -124,6 +124,7 @@ A cart line. Discounts are **product-wise** and captured here.
 | quantity        | Decimal(12,3) |                                                           |
 | discountType    | enum?         | `PERCENT` \| `FIXED` (null = no discount)                 |
 | discountValue   | Decimal(12,2) | percent or amount                                         |
+| discountBasis   | enum          | `LINE` (default) \| `UNIT` — whether a FIXED amount was per line or per unit. `discountAmount` stays the money actually taken; this records how it was reached, so a bill can justify it |
 | discountApprovedBy | uuid FK?   | → User (manager) when discount exceeded threshold         |
 | lineTotal       | Decimal(12,2) | `(unitPrice * quantity) - discount`                       |
 

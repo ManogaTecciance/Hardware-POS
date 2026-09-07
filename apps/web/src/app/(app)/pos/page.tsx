@@ -213,6 +213,9 @@ export default function PosPage() {
       managerPin,
       productId,
       discountType: discount.type,
+      // The manager is approving THIS scope: an approval for an amount off the
+      // line is not an approval for the same amount off every unit.
+      discountBasis: discount.basis,
       discountValue: discount.value,
       reason: note || discount.reason,
     });
@@ -739,6 +742,12 @@ export default function PosPage() {
                         <span className="absolute right-1.5 top-1.5 rounded-md bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold text-warning">
                           Low Stock
                         </span>
+                      ) : stockCap(p) === null ? (
+                        // Neutral, not a warning: these sell freely. The badge is
+                        // here to explain the blank quantity below, not to alarm.
+                        <span className="absolute right-1.5 top-1.5 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                          {p.type === 'Service' ? 'Service' : 'Not tracked'}
+                        </span>
                       ) : null}
                     </button>
                     <div className="flex flex-1 flex-col p-2.5">
@@ -748,7 +757,9 @@ export default function PosPage() {
                       <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                         {p.sku ?? ''}
                       </div>
-                      <div className="mt-1.5 flex items-end justify-between gap-1">
+                      {/* Wraps: "Not tracked" beside a five-figure price overflows a
+                          9rem tile, and a truncated price is worse than a wrapped label. */}
+                      <div className="mt-1.5 flex flex-wrap items-end justify-between gap-1">
                         <span className="text-sm font-semibold text-primary">
                           {formatMoney(p.unitPrice, currency)}
                         </span>
@@ -758,10 +769,8 @@ export default function PosPage() {
                             outOfStock ? 'font-medium text-danger' : 'text-muted-foreground',
                           )}
                         >
-                          {p.type !== 'Inventory'
-                            ? p.type === 'Service'
-                              ? 'Service'
-                              : '—'
+                          {stockCap(p) === null
+                            ? 'Not tracked'
                             : outOfStock
                               ? 'Out'
                               : p.quantityOnHand.toLocaleString()}
@@ -969,8 +978,14 @@ function Row({ label, value, accent }: { label: string; value: string; accent?: 
   );
 }
 
+/**
+ * How a discount reads on the cart line and in the manager-approval dialog.
+ *
+ * A per-unit amount says so: the manager is being asked to approve the money
+ * actually coming off, not the figure that was typed.
+ */
 function formatDiscountLabel(discount: LineDiscount | OrderDiscount, currency: string): string {
-  return discount.type === 'PERCENTAGE'
-    ? `${discount.value}% off`
-    : `${formatMoney(discount.value, currency)} off`;
+  if (discount.type === 'PERCENTAGE') return `${discount.value}% off`;
+  const amount = formatMoney(discount.value, currency);
+  return 'basis' in discount && discount.basis === 'UNIT' ? `${amount} off each unit` : `${amount} off`;
 }

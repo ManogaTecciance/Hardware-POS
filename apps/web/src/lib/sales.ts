@@ -36,6 +36,8 @@ export interface SaleItemPayload {
   quantity: number;
   unitPrice?: number;
   discountType?: DiscountType;
+  /** Whether a FIXED amount is per unit or for the line. Absent = the line. */
+  discountBasis?: 'LINE' | 'UNIT';
   discountValue?: number;
   discountReason?: string;
   approvalToken?: string;

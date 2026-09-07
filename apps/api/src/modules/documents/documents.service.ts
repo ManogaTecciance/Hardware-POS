@@ -42,6 +42,8 @@ interface DocLine {
   unitType: string | null;
   unitPrice: number;
   discountAmount: number;
+  /** How a per-unit discount was arrived at, e.g. "Rs. 100.00 × 3". Null otherwise. */
+  discountNote: string | null;
   taxAmount: number;
   lineTotal: number;
 }
@@ -133,6 +135,7 @@ export class DocumentsService {
       unitType: it.unitType,
       unitPrice: it.unitPrice,
       discountAmount: it.discountAmount,
+      discountNote: null,
       taxAmount: it.taxAmount,
       lineTotal: it.lineTotal,
     }));
@@ -215,6 +218,12 @@ export class DocumentsService {
       unitType: null,
       unitPrice: num(it.unitPrice),
       discountAmount: num(it.discountAmount),
+      // Carried so the bill can show HOW a discount was arrived at; the amount
+      // itself is already correct without it.
+      discountNote:
+        it.discountBasis === 'UNIT' && it.discountValue != null
+          ? `${formatCurrency(num(it.discountValue))} × ${num(it.quantity)}`
+          : null,
       taxAmount: num(it.taxAmount),
       lineTotal: num(it.lineTotal),
     }));
@@ -314,6 +323,7 @@ export class DocumentsService {
         unitType: null,
         unitPrice: num(it.originalUnitPrice),
         discountAmount: 0,
+        discountNote: null,
         taxAmount: num(it.taxAdjustment),
         lineTotal: num(it.refundableAmount),
       };
@@ -405,6 +415,7 @@ export class DocumentsService {
       unitType: null,
       unitPrice: l.unitPrice,
       discountAmount: 0,
+      discountNote: null,
       taxAmount: 0,
       lineTotal: sign * l.lineTotal,
     });
@@ -492,6 +503,7 @@ export class DocumentsService {
         unitType: s.unit,
         unitPrice: s.unitPrice,
         discountAmount,
+        discountNote: null,
         taxAmount,
         lineTotal: round2(lineSub - discountAmount + taxAmount),
       };
@@ -653,7 +665,15 @@ export class DocumentsService {
       cells.push(this.qty(l.quantity));
       cells.push(esc(l.unitType ?? '—'));
       cells.push(formatCurrency(l.unitPrice));
-      if (docs.showDiscountColumn) cells.push(l.discountAmount > 0 ? `- ${formatCurrency(l.discountAmount)}` : '—');
+      if (docs.showDiscountColumn) {
+        // The whole-line string is left exactly as it was: every past invoice is
+        // reprintable from here, and changing it would rewrite their appearance.
+        cells.push(
+          l.discountAmount > 0
+            ? `- ${formatCurrency(l.discountAmount)}${l.discountNote ? ` (${l.discountNote})` : ''}`
+            : '—',
+        );
+      }
       if (docs.showTaxColumn) cells.push(l.taxAmount > 0 ? formatCurrency(l.taxAmount) : '—');
       cells.push(formatCurrency(l.lineTotal));
       return { cells };

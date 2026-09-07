@@ -91,6 +91,12 @@ The POS is authoritative for:
   invoice date — a backdated sale may therefore be recorded already overdue.
 - **FR-22** Send the payment due date to QuickBooks as the Invoice `DueDate`, and print it on
   the bill alongside the payment method(s) used.
+- **FR-29** Let a fixed item discount be taken **off each unit** or **off the line as a whole**,
+  chosen at the moment it is applied and shown with its arithmetic before it is committed. A
+  percentage offers no such choice, being the same figure either way. The whole-cart discount is
+  always whole-cart.
+- **FR-30** Mark products that do not track stock (Service, Non-Inventory) on the POS product
+  card, so a cashier can see why a card shows no quantity.
 - **FR-27** Show the customer's credit position on the POS payment screen while the order is
   being built — available credit, what this sale needs, and a clear warning when it would
   breach the limit — so the cashier learns of it as quantities change rather than when they

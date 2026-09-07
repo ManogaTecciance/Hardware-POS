@@ -14,7 +14,8 @@ has a stable ID for traceability into automated Playwright specs.
 Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [DASH](#dash--dashboards) · [PROD](#prod--products--categories) ·
 [PIMP](#pimp--product-bulk-import) · [POS](#pos--point-of-sale) ·
-[PAY](#pay--payments--credit) · [SALE](#sale--sales-history) ·
+[PAY](#pay--payments--credit) · [DISC](#disc--discount-basis) ·
+[SALE](#sale--sales-history) ·
 [RET](#ret--returns--refunds) · [QUO](#quo--quotations) ·
 [CUST](#cust--customers) · [CIMP](#cimp--customer-bulk-import) ·
 [SUP](#sup--suppliers-vendors) · [SIMP](#simp--vendor-bulk-import) ·
@@ -219,6 +220,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-027 | Instalments each kept as their own record | Two part payments against one account | Two Payment rows with their own date/time, method and reference, neither attached to a sale | P | Automated |
 | PAY-034 | Credit warning appears as the order grows | Credit customer, raise a quantity in the payment page order summary until the total passes their limit | Warning appears live with available vs needed; Complete Payment disables — without pressing it. The credit panel is the ONLY place it is stated; no duplicate in the footer notice | P | Not Run |
 | PAY-035 | Credit warning clears when payment covers it | With the warning showing, switch to Partial and enter enough to bring the balance under the limit | Warning clears; Complete Payment re-enables | P | Not Run |
+| POS-046 | Non-stock-tracked products are marked on the card | Browse the POS grid | Service / Non-Inventory cards carry a neutral "Service" / "Not tracked" badge and caption, not a red Out of Stock | P | Not Run |
+| POS-047 | Per-unit fixed discount toggle | Item discount dialog, pick Fixed amount | An "Off the line" / "Off each unit" toggle appears; picking Percentage hides it | P | Not Run |
+| POS-048 | Per-unit preview shows the arithmetic | 3 × Rs. 1,000, Rs. 100 off each unit | Preview reads "(Rs. 100.00 × 3)" and -Rs. 300.00 before Apply | P | Not Run |
+| POS-049 | Reopening keeps the basis | Apply a per-unit discount, reopen the dialog | Still on "Off each unit" with the same amount | P | Not Run |
+| POS-050 | Per-unit crosses the approval limit sooner | Cashier applies an amount that is within limit whole-line but over it per unit | Button changes to "Request approval"; the manager dialog names the per-unit amount | N | Not Run |
 | POS-041 | Non-stock-tracked products are sellable | Add a NonInventory or Service product (e.g. POL-1976) to the cart | No "Only 0 in stock" warning, no cart-wide stock banner, and Proceed to Payment is enabled | P | Not Run |
 | POS-042 | One untracked item does not block a mixed cart | Cart with an in-stock Inventory item and a NonInventory item | Checkout proceeds; the untracked line raises no warning | P | Not Run |
 | POS-043 | Sold-out Inventory is still blocked | Add an Inventory product at 0 on hand | "Only 0 in stock", cart banner shown, Payment blocked | N | Not Run |
@@ -238,6 +244,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-031 | Payment method printed on the bill | Open the A4 bill for a card sale, then for a credit sale | "Method: Card"; a sale taken on credit reads "Credit"; a part payment reads "Cash, Credit"; the due date is printed | P | Not Run |
 | PAY-032 | Bill updates to the real method once settled | Record a bank transfer settling a credit sale, reprint the A4 bill | Method now reads "Bank transfer" — Credit is gone | P | Not Run |
 | PAY-033 | Thermal receipt states credit too | Print the thermal receipt for a part-paid credit sale | Payment lines read "Cash <paid>" and "Credit <balance>", labelled not raw codes | P | Not Run |
+
+## DISC — Discount basis
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| DISC-010 | Whole-line fixed discount | 3 × Rs. 1,000, Rs. 100 off the line | Rs. 100 off; line Rs. 2,900 | P | Automated |
+| DISC-011 | Per-unit fixed discount | Same with basis UNIT | Rs. 300 off; line Rs. 2,700; basis stored | P | Automated |
+| DISC-012 | Omitted basis stays whole-line | Complete with no discountBasis | Treated as LINE — every pre-existing sale keeps its meaning | P | Automated |
+| DISC-013 | Per-unit percentage refused | PERCENTAGE with basis UNIT | 400 "must be a fixed amount" | N | Automated |
+| DISC-014 | Per-unit cannot drive a line negative | Rs. 5,000/unit off a Rs. 1,000 item | Line floors at 0; never negative | N | Automated |
+| DISC-015 | Order discount unaffected | Per-unit line discount plus a fixed cart discount | Cart discount taken once, not multiplied | P | Automated |
+| DISC-016 | Approval cannot be re-scoped | Approve Rs. 100 off the line, then submit it as per-unit | Refused — the token is bound to the basis | N | Not Run |
 
 ## SALE — Sales History
 
@@ -568,13 +586,14 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DASH | 24 | SUP | 15 |
 | PROD | 27 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
-| POS | 45 | SET | 26 |
+| POS | 50 | SET | 26 |
 | PAY | 41 | DOC | 16 |
-| SALE | 33 | ADM | 14 |
-| RET | 18 | UI | 16 |
-| QUO | 20 | SEC | 12 |
+| DISC | 7 | ADM | 14 |
+| SALE | 33 | UI | 16 |
+| RET | 18 | SEC | 12 |
+| QUO | 20 |  |  |
 
-**Total: 433 test cases** (≈60% positive / 40% negative).
+**Total: 445 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
