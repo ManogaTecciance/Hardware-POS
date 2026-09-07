@@ -43,6 +43,11 @@ export class QuerySalesDto extends PaginationQueryDto {
   @IsOptional()
   dateFrom?: Date;
 
+  /** Only this customer's sales. */
+  @IsString()
+  @IsOptional()
+  customerId?: string;
+
   /** Only sales past their payment due date that still owe money. */
   @IsIn(['true'])
   @IsOptional()

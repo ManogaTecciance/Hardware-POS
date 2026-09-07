@@ -251,6 +251,20 @@ GET  /v1/sales?page=1&pageSize=25&syncStatus=FAILED
 # Each row carries `paymentDueDate` (null when nothing is owed) and
 #   `lastPaymentAt` (when money was last received against the sale, null if never).
 
+POST /v1/sales/{id}/marked-paid        # payment:create
+body: { "marked": true | false }
+200 → the sale
+400 → not completed, no customer, already paid, or it is the LAST uncovered invoice
+       on an account that still owes
+# Ticking a credit invoice off is BOOKKEEPING: it records who accounted for it and
+#   when (`markedPaidAt`, `markedPaidByName`) and moves no money — balanceAmount,
+#   paymentStatus and the credit aggregation are untouched, and the customer still
+#   owes what the account says. Marking every invoice is what would make an account
+#   read as dealt with, so the final tick must be earned by recorded payments; those
+#   payments settle it anyway, via creditSettledAt, without anyone clicking.
+
+GET  /v1/sales?customerId={id}        # a customer's invoices, for their page
+
 GET  /v1/sales/{id}
 200 → full sale with items, payments, customer
 

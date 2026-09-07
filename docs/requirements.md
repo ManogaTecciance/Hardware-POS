@@ -127,6 +127,12 @@ The POS is authoritative for:
   not per invoice — while the account owes anything every credit sale stays outstanding, and
   the moment it reaches zero every sale outstanding at that moment is marked paid. A sale rung
   up afterwards starts the next balance. The customer page carries the credit history.
+- **FR-33** Show a customer's own invoices on their page, with the same figures the sales
+  list shows, and let a user tick each credit invoice off as accounted for — recording who did
+  it and when. Ticking is bookkeeping and moves no money.
+- **FR-34** Refuse the tick on the last uncovered invoice of an account that still owes:
+  ticking every invoice is what would make an account read as dealt with, so the final one is
+  left to recorded payments, which settle it regardless.
 - **FR-28** Money paid on account releases the customer's credit headroom, and comes off the
   shop's receivable, the moment it is taken — even before it settles any invoice.
 - **FR-24** Show on the sales list, per sale: the **due date** (blank when nothing is owed),

@@ -32,6 +32,9 @@ export interface SaleListItem {
   paymentDueDate: Date | null;
   /** When an account settlement covered this invoice; null while it is on credit. */
   creditSettledAt: Date | null;
+  /** When a user ticked this invoice off as paid, and who. Moves no money. */
+  markedPaidAt: Date | null;
+  markedPaidByName: string | null;
   /** When the most recent payment was received. Null when none has been. */
   lastPaymentAt: Date | null;
   returnStatus: SaleReturnStatus;
@@ -49,6 +52,8 @@ export interface SalesListFilter {
   dateTo?: Date;
   /** Only sales past their due date that still owe money. */
   overdueAsOf?: Date;
+  /** Only this customer's sales — the customer page's invoice list. */
+  customerId?: string;
 }
 
 /** Normalized cart line coming into the compute pipeline. */

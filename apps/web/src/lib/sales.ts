@@ -141,6 +141,9 @@ export interface SaleListItem {
    * is what makes a credit sale read as Paid.
    */
   creditSettledAt: string | null;
+  /** When a user ticked this invoice off as paid, and who. Moves no money. */
+  markedPaidAt: string | null;
+  markedPaidByName: string | null;
   /** When the most recent payment was received. Null when none has been. */
   lastPaymentAt: string | null;
   returnStatus: SaleReturnStatusCode;
@@ -164,6 +167,8 @@ export interface SalesQuery {
   syncStatus?: SyncStatusCode;
   dateFrom?: string;
   dateTo?: string;
+  /** Only this customer's invoices. */
+  customerId?: string;
   /** Only sales past their due date that still owe money. */
   overdue?: 'true';
 }
@@ -300,6 +305,7 @@ function buildQuery(q: SalesQuery): string {
   if (q.dateFrom) params.set('dateFrom', q.dateFrom);
   if (q.dateTo) params.set('dateTo', q.dateTo);
   if (q.overdue) params.set('overdue', q.overdue);
+  if (q.customerId) params.set('customerId', q.customerId);
   return params.toString();
 }
 
@@ -403,6 +409,20 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       createdAt: p.createdAt,
     })),
   };
+}
+
+/**
+ * Tick a credit invoice off as paid, or clear the tick.
+ *
+ * A bookkeeping note: it records who and when, and moves no money. The API
+ * refuses the last uncovered invoice on an account while the account still owes.
+ */
+export async function setSaleMarkedPaid(
+  session: Session,
+  id: string,
+  marked: boolean,
+): Promise<void> {
+  await api.post(`/sales/${id}/marked-paid`, { marked }, auth(session));
 }
 
 /** Retry the QuickBooks push for a completed sale. */

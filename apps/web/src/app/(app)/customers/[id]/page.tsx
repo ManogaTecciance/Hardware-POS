@@ -7,6 +7,7 @@ import { ArrowLeft, HandCoins, Pencil, RefreshCw } from 'lucide-react';
 
 import { paymentMethodLabel } from '@hardware-pos/shared';
 
+import { CustomerInvoices } from '@/components/customers/customer-invoices';
 import { RecordPaymentDialog } from '@/components/customers/record-payment-dialog';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
@@ -253,6 +254,16 @@ export default function CustomerDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {session ? (
+        <CustomerInvoices
+          session={session}
+          customerId={customer.id}
+          outstanding={credit?.outstanding ?? 0}
+          canMark={canRecordPayment}
+          onChanged={() => setReloadKey((k) => k + 1)}
+        />
+      ) : null}
 
       {/* Credit history — full width, because this is a ledger to read across.
           Credit is settled per account, so these payments belong to the customer

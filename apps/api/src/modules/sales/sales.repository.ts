@@ -23,6 +23,7 @@ export type SaleListRow = Prisma.SaleGetPayload<{
     customer: { select: { name: true } };
     cashier: { select: { name: true } };
     payments: { select: { method: true; createdAt: true } };
+    markedPaidBy: { select: { name: true } };
     _count: { select: { items: true } };
   };
 }>;
@@ -40,6 +41,7 @@ const saleListInclude = {
   customer: { select: { name: true } },
   cashier: { select: { name: true } },
   payments: { select: { method: true, createdAt: true } },
+  markedPaidBy: { select: { name: true } },
   _count: { select: { items: true } },
 } satisfies Prisma.SaleInclude;
 
@@ -93,6 +95,7 @@ export class SalesRepository {
       // has since cleared. PAID means the opposite — paid at the till, or covered
       // by an account settlement. PARTIAL is still accepted on its own for a
       // caller that genuinely wants just those.
+      ...(filter.customerId ? { customerId: filter.customerId } : {}),
       ...(filter.paymentStatus === 'UNPAID'
         ? {
             paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
@@ -178,6 +181,40 @@ export class SalesRepository {
     });
   }
 
+
+  /**
+   * How many OTHER invoices on this customer's account are still uncovered and
+   * unticked — i.e. would remain visible as owed if `exceptSaleId` were ticked.
+   */
+  countUnmarkedCredit(tenantId: string, customerId: string, exceptSaleId: string): Promise<number> {
+    return this.prisma.sale.count({
+      where: {
+        tenantId,
+        customerId,
+        id: { not: exceptSaleId },
+        status: 'COMPLETED',
+        paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+        creditSettledAt: null,
+        markedPaidAt: null,
+      },
+    });
+  }
+
+  /** Tick an invoice off, or clear the tick. Touches no money. */
+  setMarkedPaid(
+    tenantId: string,
+    saleId: string,
+    mark: { at: Date; byUserId: string } | null,
+  ): Promise<SaleWithRelations> {
+    return this.prisma.sale.update({
+      where: { id: saleId },
+      data: {
+        markedPaidAt: mark?.at ?? null,
+        markedPaidByUserId: mark?.byUserId ?? null,
+      },
+      include: saleInclude,
+    });
+  }
 
   // ── writes ─────────────────────────────────────────────────────────────────
 

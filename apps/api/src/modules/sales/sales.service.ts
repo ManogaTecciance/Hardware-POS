@@ -48,6 +48,7 @@ export class SalesService {
         // "Past due" means the shop's day has moved on from the due date. The
         // due date itself sits at end of day, so today's dues are not yet late.
         overdueAsOf: query.overdue === 'true' ? new Date() : undefined,
+        customerId: query.customerId,
       },
       query.skip,
       query.take,
@@ -389,6 +390,69 @@ export class SalesService {
    * existing outstanding balance plus this sale must not exceed it. A null
    * limit with credit allowed means unlimited.
    */
+  /**
+   * Tick a credit invoice off, or untick it, on the customer's page.
+   *
+   * A bookkeeping note and nothing more: no money moves, `balanceAmount` and
+   * `paymentStatus` are untouched, and the customer still owes exactly what they
+   * owed. What it buys is a record of who accounted for which invoice, and when.
+   *
+   * The one rule: the LAST uncovered invoice on an account cannot be ticked off
+   * while the account still owes anything. Marking every invoice is what would
+   * make an account read as fully dealt with, so that final tick is the one that
+   * has to be earned by recorded payments — and when those payments land, the
+   * settlement covers the invoice anyway, without anyone clicking.
+   */
+  async setMarkedPaid(
+    tenantId: string,
+    actor: AuthenticatedUser,
+    saleId: string,
+    marked: boolean,
+  ): Promise<SaleWithRelations> {
+    const sale = await this.salesRepository.findByIdForTenant(tenantId, saleId);
+    if (!sale) {
+      throw new NotFoundException(`Sale ${saleId} not found`);
+    }
+    if (sale.status !== 'COMPLETED') {
+      throw new BadRequestException('Only a completed sale can be marked');
+    }
+
+    if (marked) {
+      if (sale.markedPaidAt) return sale;
+      if (!sale.customerId) {
+        throw new BadRequestException('Only a sale on a customer account can be marked');
+      }
+      if (sale.creditSettledAt || sale.paymentStatus === 'PAID') {
+        throw new BadRequestException('This sale is already paid — there is nothing to mark');
+      }
+
+      // "Last" means: no other invoice on this account is still both uncovered
+      // and unticked. Ticking this one would leave nothing outstanding on screen,
+      // so the account balance has to actually be clear.
+      const othersLeft = await this.salesRepository.countUnmarkedCredit(
+        tenantId,
+        sale.customerId,
+        saleId,
+      );
+      if (othersLeft === 0) {
+        const credit = await this.credit.forCustomer(tenantId, sale.customerId);
+        if (credit && credit.outstanding > 0) {
+          throw new BadRequestException(
+            `This is the last invoice on the account. Record payments covering the ` +
+              `${CURRENCY_SYMBOL} ${credit.outstanding.toFixed(2)} still outstanding, ` +
+              `which settles it without marking.`,
+          );
+        }
+      }
+    }
+
+    return this.salesRepository.setMarkedPaid(
+      tenantId,
+      saleId,
+      marked ? { at: new Date(), byUserId: actor.id } : null,
+    );
+  }
+
   private async assertWithinCreditLimit(
     tenantId: string,
     customerId: string,
@@ -441,6 +505,8 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
     // Set when the customer's account was cleared, covering this invoice. The
     // list reads it as "Paid" without the invoice's own figures being rewritten.
     creditSettledAt: row.creditSettledAt,
+    markedPaidAt: row.markedPaidAt,
+    markedPaidByName: row.markedPaidBy?.name ?? null,
     // Derived from the payments already joined for the method chips, so the list
     // needs no extra query and no denormalised column to keep in step.
     lastPaymentAt: row.payments.reduce<Date | null>(

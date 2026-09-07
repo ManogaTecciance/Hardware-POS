@@ -326,6 +326,7 @@ model User {
   branch             Branch?             @relation(fields: [branchId], references: [id])
   customRole         Role?               @relation(fields: [roleId], references: [id])
   sales              Sale[]
+  salesMarkedPaid    Sale[]               @relation("SaleMarkedPaidBy")
   payments           Payment[]
   approvedDiscounts  SaleItem[]          @relation("DiscountApprover")
   auditLogs          AuditLog[]
@@ -587,6 +588,14 @@ model Sale {
   /// paidAmount and balanceAmount stay true to what actually happened at the till,
   /// which is what the printed bill, the refund guard and QuickBooks read.
   creditSettledAt           DateTime?
+  /// When a user ticked this invoice off as paid on the customer's page, and who
+  /// did. A bookkeeping note only: it moves no money and does not change what the
+  /// customer owes — `balanceAmount` and the credit aggregation are untouched.
+  /// The last uncovered invoice on an account cannot be ticked off while the
+  /// account still owes, so the books can never be made to read clear without the
+  /// payments to back it.
+  markedPaidAt              DateTime?
+  markedPaidByUserId        String?
   returnStatus              SaleReturnStatus        @default(NOT_RETURNED)
   returnedAmount            Decimal                 @default(0) @db.Decimal(12, 2)
   quickbooksDocumentType    QuickBooksDocumentType?
@@ -601,6 +610,7 @@ model Sale {
   branch    Branch     @relation(fields: [branchId], references: [id])
   register  Register?  @relation(fields: [registerId], references: [id])
   cashier   User       @relation(fields: [cashierId], references: [id])
+  markedPaidBy User?   @relation("SaleMarkedPaidBy", fields: [markedPaidByUserId], references: [id])
   customer  Customer?  @relation(fields: [customerId], references: [id])
   items     SaleItem[]
   payments  Payment[]
@@ -626,6 +636,7 @@ model Sale {
   // "What does this customer still owe" is a tenant+customer scan over the
   // sales credit has not yet cleared.
   @@index([tenantId, customerId, creditSettledAt])
+  @@index([tenantId, customerId, completedAt])
 }
 
 model SaleItem {

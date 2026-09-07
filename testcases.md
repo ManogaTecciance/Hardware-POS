@@ -15,6 +15,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [DASH](#dash--dashboards) · [PROD](#prod--products--categories) ·
 [PIMP](#pimp--product-bulk-import) · [POS](#pos--point-of-sale) ·
 [PAY](#pay--payments--credit) · [DISC](#disc--discount-basis) ·
+[MARK](#mark--accounting-for-a-credit-invoice) ·
 [SALE](#sale--sales-history) ·
 [RET](#ret--returns--refunds) · [QUO](#quo--quotations) ·
 [CUST](#cust--customers) · [CIMP](#cimp--customer-bulk-import) ·
@@ -262,6 +263,20 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC-021 | Cart and bill say which kind | Apply each kind in the POS, print the bill | Cart chip reads "off each unit" / "off the line"; the bill shows "(Rs. 100.00 × 3)" only for per-unit | P | Not Run |
 | DISC-022 | Quotation document says which kind | Print a quotation with a per-unit line | Discount cell shows "- Rs. 300.00 (Rs. 100.00 × 3)" | P | Not Run |
 | DISC-016 | Approval cannot be re-scoped | Approve Rs. 100 off the line, then submit it as per-unit | Refused — the token is bound to the basis | N | Not Run |
+
+## MARK — Accounting for a credit invoice
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| MARK-001 | Ticking records who and when | Customer page → Invoices → Mark paid on one of two credit invoices | Row shows the timestamp and the user's name | P | Automated |
+| MARK-002 | Ticking moves no money | Same, then re-read the account | Outstanding, the sale's balance and its payment status are all unchanged | P | Automated |
+| MARK-003 | Last uncovered invoice is blocked | Tick the first of two, then try the second | 400 naming the last invoice; the button is disabled with the reason on hover | N | Automated |
+| MARK-004 | A lone credit invoice cannot be ticked | Customer with exactly one credit invoice | Refused — it is both first and last | N | Automated |
+| MARK-005 | Paying settles what was left | Clear the account after ticking one of two | Both invoices are settled; no second tick needed | P | Automated |
+| MARK-006 | A tick can be undone | Undo on a ticked invoice | markedPaidAt cleared | P | Automated |
+| MARK-007 | A till-paid sale cannot be ticked | Mark a fully paid cash sale | 400 — nothing to account for | N | Automated |
+| MARK-008 | The list is scoped to the customer | Two customers with credit invoices | Each page shows only its own | P | Automated |
+| MARK-009 | Invoices table matches the sales page | Compare a customer's rows with /sales filtered to them | Same sales, same totals, same payment badges | P | Not Run |
 
 ## SALE — Sales History
 
@@ -588,19 +603,19 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 34 |
-| PERM | 15 | CIMP | 10 |
-| DASH | 24 | SUP | 15 |
-| PROD | 27 | SIMP | 8 |
-| PIMP | 13 | QB | 31 |
-| POS | 50 | SET | 26 |
-| PAY | 41 | DOC | 16 |
-| DISC | 13 | ADM | 14 |
+| AUTH | 15 | QUO | 21 |
+| PERM | 15 | CUST | 34 |
+| DASH | 24 | CIMP | 10 |
+| PROD | 27 | SUP | 15 |
+| PIMP | 13 | SIMP | 8 |
+| POS | 50 | QB | 31 |
+| PAY | 41 | SET | 26 |
+| DISC | 13 | DOC | 16 |
+| MARK | 9 | ADM | 14 |
 | SALE | 33 | UI | 16 |
 | RET | 18 | SEC | 12 |
-| QUO | 21 |  |  |
 
-**Total: 452 test cases** (≈60% positive / 40% negative).
+**Total: 461 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
