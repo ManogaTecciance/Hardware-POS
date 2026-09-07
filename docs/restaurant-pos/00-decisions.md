@@ -5651,3 +5651,203 @@ Both directions, or the assertion is worth nothing:
 3. A **whole** product in the same basket still wins its bundle, so the filter
    removes the measured line and not the promotion.
 4. The till's preview and the server's charge agree on the same basket.
+
+---
+
+## D113b — the measured-product contract: unit, switching, and entry bounds
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Closes
+`6.1-Q1`, `Q3` and `Q4` from the Phase 6 plan, and records the approved scope
+(`Q5`, `Q7`). Extends [D113](#d113); no migration of its own beyond the column in
+§1.
+
+### 1. A measured product names its unit *(Q1 — yes)*
+
+```prisma
+model Product {
+  quantityType   QuantityType @default(WHOLE)   // D113
+  unitOfMeasure  String?                        // D113b
+}
+```
+
+**Same migration as `quantityType`.** Adding it later would mean a second
+migration *and* re-editing every measured product a shop had already set up.
+
+**Free text — `kg`, `g`, `L`, `m`, `ft`.** Nothing computes on it; it is printed,
+exactly like `material` in the clothing attribute schema. A controlled list would
+be a guess about a market nobody in this project has met, which is the mistake
+`2.6` refused to make about UK-versus-EU footwear scales.
+
+It is what lets the numpad ask *"How many kg?"* rather than *"How many?"*, the
+receipt print `0.750 kg`, and a shelf label read `Rs 200/kg`.
+
+**Nullable at the column**, because a `WHOLE` product has no unit and a required
+column would demand one for every shirt in every tenant.
+
+> **New sub-question this creates — `6.1-Q2`.** Should `unitOfMeasure` be
+> **required when `quantityType` is `DECIMAL`**? A measured product without one
+> prints `0.750` and asks *"How many?"*, which is the state the field exists to
+> prevent.
+>
+> **Recommendation: enforce it in the service, not in the column.** The database
+> cannot express "required only when another column has a particular value"
+> without a check constraint Prisma will not model, and the same rule then has to
+> exist in the API anyway. One rule, in the place that can state it.
+
+### 2. Switching `WHOLE` ⇄ `DECIMAL` is allowed, and warns *(Q3)*
+
+**Allowed.** A shop that flags something wrongly on its first day must be able to
+correct it, and blocking the change would trap them.
+
+**Warned, because stored quantities are NOT converted.** `quantityOnHand: 100`
+meant a hundred pieces yesterday; after the switch it means a hundred kilograms.
+Historical sale lines keep whatever integer quantity they were sold at. Nothing is
+corrupted and nothing is migrated — the *meaning* of stored numbers changes, and
+only a person can say whether that is right.
+
+**The warning must be specific and must name the counts**, on the screen where
+the change is made:
+
+> *"This product has **100** on hand and **14** recorded sales. Changing how it is
+> measured does not convert them — 100 will now read as 100 kg."*
+
+**No conversion factor is applied, ever.** Converting would require knowing how
+much one piece weighed, which nobody can supply and the system has never
+recorded.
+
+### 3. Entry bounds at the numpad *(Q4)*
+
+| Bound | Rule | Why |
+|---|---|---|
+| **Decimals** | **Maximum 3** | The column is `Decimal(12,3)`. A fourth place is silently truncated by the database, so it must be refused where the operator can still see it |
+| **Minimum** | **None beyond "greater than zero"** | 5 g of saffron is a real sale. `@IsPositive()` already refuses `0` server-side; the numpad refuses it sooner |
+| **Maximum** | **Existing stock, via `stockCap`** | Already decimal-safe and already the rule for every other line. No invented ceiling |
+
+### 4. Approved scope *(Q5, Q7)*
+
+**Track A only.** Steps `6.1`–`6.6`. Weighed goods, end to end.
+
+**Track B — per-category tax — is deferred again**, and this is the record of why
+it is safe to defer:
+
+> **Zero-rated staples beside standard-rated goods already work today**, per
+> product, end to end: `Product.taxable` (exposed in the wizard, `3.13`), the
+> tenant rate (`3.15`), `taxableBase` removing exempt lines and their share of the
+> order discount (`3.10`), the per-line snapshot of `0` (`3.9`), returns reading
+> that snapshot (`3.11`) and the receipt breaking it down (`3.12`).
+>
+> The only capability Track B genuinely adds is **two different non-zero rates**
+> in one basket. No customer has asked for it, and building it would edit
+> `computeDocumentTotals` — the one money engine the restaurant module shares,
+> which no phase in this plan has touched in eight phases.
+
+**Track C — the grocery attribute schema — is deferred with the sprint**, but its
+approach is now settled: see **D114**.
+
+---
+
+## D114 — a tenant picks its catalogue attribute pack
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Migration
+required when built (`TenantBusinessProfile.cataloguePack`). Answers `Q6`;
+implements Phase 6 step `6.10`.
+
+### The problem
+
+`ProductAttributesService.schemaForTenant` resolves **one schema per business
+type**:
+
+```ts
+const profile = await this.profiles.getEffectiveProfile(tenantId);
+return domainFor(profile.businessType).catalogue.attributeSchema;
+```
+
+The `RETAIL` descriptor declares one list, and it is the clothing one —
+`material`, `fit`, `careInstructions`, `gender`, `season`. Clothing and grocery
+are both `RETAIL`, and **Q12 resolved: do not split `RETAIL`**.
+
+So a grocer is asked for **Fit** and **Season**, and `validateAttributes` refuses
+`allergens` as an unknown key. Not a missing feature — an actively wrong one.
+
+### The decision
+
+**A domain may declare named attribute packs; a tenant selects one.**
+
+```ts
+readonly catalogue: {
+  /** Used when a tenant has selected nothing. Unchanged for every domain today. */
+  readonly attributeSchema: readonly AttributeField[];
+  /** Named alternatives. Absent for a domain with only one. */
+  readonly attributePacks?: Readonly<Record<string, readonly AttributeField[]>>;
+};
+```
+
+`RETAIL` declares `attributeSchema` as the clothing list **byte for byte as it is
+now**, plus `attributePacks: { clothing, grocery }`.
+
+Stored as **one nullable column**, `TenantBusinessProfile.cataloguePack String?`.
+
+**Nullable is the safety property.** `NULL` means "use the default", so every
+existing tenant — clothing, hardware, restaurant, every domain — resolves exactly
+as it does today with no backfill. Only a tenant that explicitly selects a pack
+sees anything different.
+
+The resolver becomes:
+
+```ts
+const domain = domainFor(profile.businessType);
+return (profile.cataloguePack && domain.catalogue.attributePacks?.[profile.cataloguePack])
+    ?? domain.catalogue.attributeSchema;
+```
+
+The pack is chosen at workspace creation — the console already asks which
+template — or later in Settings.
+
+### Why not split the business type
+
+Because `businessType` drives far more than catalogue fields, and clothing and
+grocery are identical in all of it:
+
+| What `businessType` decides | Clothing vs grocery |
+|---|---|
+| Modules enabled | same |
+| Navigation | same |
+| Capabilities | same |
+| Role templates | same |
+| POS workspace | same |
+| Console template card | same |
+| **Catalogue attribute fields** | **different** |
+
+Splitting duplicates six identical things to vary the seventh, costs an enum
+migration and D99a's two-migration dance, and re-opens a decision the PO has
+already made (Q12). The pack targets the one row that differs.
+
+### Why not merge the two lists
+
+A clothing shop would be asked for **Allergens** and a grocer for **Fit**. It is
+the cheapest option and therefore the one that will look tempting under sprint
+pressure; it is recorded here as rejected so it does not get re-proposed.
+
+### Two traps, both required in the build
+
+**1. Switching a tenant's pack strands their stored attributes.**
+`validateAttributes` refuses unknown keys, so a product holding `fit: 'Slim'`
+fails its next full write once the tenant moves to the grocery pack. Same
+mechanism D64 documents for removing a field, new trigger. **The build must
+either refuse the switch once products carry attributes, or make it an explicit
+operation with a warning naming the count** — the same shape D113b requires for
+switching a product's measurement.
+
+**2. A pack is a commitment, not a sketch.** Removing a field later strands
+whatever tenants stored under it. D64 says this of the schema and it is equally
+true of a pack.
+
+### What this does NOT decide
+
+**The grocery pack's field list.** `04-format-packs.md` §4 drafts
+`countryOfOrigin · allergens · storageInstructions · nutritionPer100g`, and that
+draft needs a real grocer before it is committed to — for exactly the reason
+`2.5` was parked.
+
+**Brand is not in it.** `04` listed brand as a grocery attribute; **D112** made it
+an entity, so it is a column with a filter and a report, not a text field.
