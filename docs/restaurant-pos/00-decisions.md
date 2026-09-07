@@ -5851,3 +5851,76 @@ draft needs a real grocer before it is committed to — for exactly the reason
 
 **Brand is not in it.** `04` listed brand as a grocery attribute; **D112** made it
 an entity, so it is a column with a filter and a report, not a text field.
+
+---
+
+## D113c — a measured product must name its unit, enforced in the service
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Closes
+`6.1-Q2`, the sub-question [D113b §1](#d113b) opened. No migration; no change to
+the column.
+
+### The decision
+
+**A product whose `quantityType` is `DECIMAL` must carry a non-empty
+`unitOfMeasure`. The rule lives in `ProductsService`, not in the column.**
+
+`Product.unitOfMeasure` stays `String?` — nullable — exactly as D113b §1
+declared it.
+
+### Why not the column
+
+The requirement is **conditional**: mandatory for a `DECIMAL` product, meaningless
+for a `WHOLE` one. A `NOT NULL` column would demand a unit of measure for every
+shirt, every service line and every restaurant menu item in every tenant.
+
+Postgres could express it as a `CHECK` constraint, but Prisma will not model one,
+so it would live only in raw migration SQL — invisible to the schema, invisible to
+the client, and reported to a user as a constraint-violation string rather than a
+sentence. And the API would still need its own check to produce a usable 400, so
+the rule would exist twice with only one of the two readable.
+
+**One rule, in the place that can state it.**
+
+### Where it goes
+
+`ProductsService.create` and `ProductsService.update`, beside
+`assertValidDocument` (D64 attributes) and `resolveBrand` (D112) — the service
+already owns exactly this kind of cross-field validation.
+
+**It must be checked against the RESULTING state, not the payload.** `update` is
+partial (D112 relies on that: absent leaves a brand alone, `''` clears it), so
+both of these must be refused:
+
+| Request | Existing row | Result |
+|---|---|---|
+| `{ quantityType: 'DECIMAL' }` | `unitOfMeasure: null` | **refused** — turning a product into a measured one without saying in what |
+| `{ unitOfMeasure: '' }` | `quantityType: DECIMAL` | **refused** — removing the unit from a measured product |
+| `{ name: 'Rice' }` | `DECIMAL`, `'kg'` | allowed — a partial update that touches neither |
+| `{ quantityType: 'WHOLE' }` | `unitOfMeasure: null` | allowed — a whole product needs no unit |
+
+A check against the payload alone passes the first two, which are the only cases
+worth guarding.
+
+### The message matters
+
+`"A product sold by weight or measure needs a unit — for example kg, g or L."`
+
+Not `"unitOfMeasure is required"`. The person reading it is a shopkeeper adding
+rice, and `4.19` cost two hours on a promotion that behaved correctly and
+explained nothing.
+
+### The client asks too, and is not the authority
+
+The product wizard should require the field once `DECIMAL` is chosen, so the
+operator is never allowed to reach a refusal they could have been shown. That is
+usability; the server's refusal is what makes it true. **Frontend hiding is
+usability only** — the standing rule in `CLAUDE.md`.
+
+### What must be tested (D30 — both directions)
+
+1. **Negative:** creating a `DECIMAL` product with no unit is refused.
+2. **Negative:** clearing the unit on an existing `DECIMAL` product is refused.
+3. **Positive:** creating a `WHOLE` product with no unit **succeeds** — otherwise
+   the rule would pass for an implementation that demanded a unit from everyone.
+4. **Positive:** a partial update that mentions neither field leaves both alone.
