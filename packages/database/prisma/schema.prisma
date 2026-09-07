@@ -1107,6 +1107,10 @@ model QuotationItem {
   unitPrice           Decimal       @db.Decimal(12, 2)
   discountType        DiscountType?
   discountValue       Decimal?      @db.Decimal(12, 2)
+  /// Whether `discountValue` was per unit or for the line. Only meaningful with a
+  /// FIXED discount. Carried into the sale on conversion, so a quotation is not
+  /// re-priced by becoming an invoice.
+  discountBasis       DiscountBasis @default(LINE)
   discountAmount      Decimal       @default(0) @db.Decimal(12, 2)
   taxAmount           Decimal       @default(0) @db.Decimal(12, 2)
   lineSubtotal        Decimal       @db.Decimal(12, 2)

@@ -135,7 +135,13 @@ export class DocumentsService {
       unitType: it.unitType,
       unitPrice: it.unitPrice,
       discountAmount: it.discountAmount,
-      discountNote: null,
+      // Same treatment as the sale bill: a per-unit discount shows its
+      // arithmetic, so the customer can check a figure that is larger than the
+      // amount they were quoted per item.
+      discountNote:
+        it.discountBasis === 'UNIT' && it.discountValue != null
+          ? `${formatCurrency(it.discountValue)} × ${it.quantity}`
+          : null,
       taxAmount: it.taxAmount,
       lineTotal: it.lineTotal,
     }));

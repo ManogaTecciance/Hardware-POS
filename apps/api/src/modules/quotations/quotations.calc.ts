@@ -5,7 +5,8 @@ import { round2, sum2 } from '../../common/money';
  * converts to a sale with identical numbers:
  *
  *   lineSubtotal        = unitPrice × quantity
- *   discountAmount      = per-line discount (% of lineSubtotal, or fixed)
+ *   discountAmount      = per-line discount (% of lineSubtotal, a fixed amount off
+ *                         the line, or a fixed amount off every unit)
  *   lineTotal           = lineSubtotal − discountAmount           (pre order-discount, pre-tax)
  *   subtotal            = Σ lineSubtotal
  *   productDiscountTotal= Σ discountAmount
@@ -21,11 +22,20 @@ import { round2, sum2 } from '../../common/money';
 
 export type DiscountTypeCode = 'PERCENTAGE' | 'FIXED';
 
+/**
+ * What a FIXED amount is measured against. String literals rather than the
+ * Prisma enum, so this module stays free of Prisma and unit-testable — the same
+ * reason DiscountTypeCode is declared here.
+ */
+export type DiscountBasisCode = 'LINE' | 'UNIT';
+
 export interface QuotationLineInput {
   unitPrice: number;
   quantity: number;
   discountType?: DiscountTypeCode | null;
   discountValue?: number | null;
+  /** Absent reads as LINE — what every quotation before this meant. */
+  discountBasis?: DiscountBasisCode | null;
 }
 
 export interface ComputedQuotationLine {
@@ -34,6 +44,7 @@ export interface ComputedQuotationLine {
   lineSubtotal: number;
   discountType: DiscountTypeCode | null;
   discountValue: number | null;
+  discountBasis: DiscountBasisCode;
   discountAmount: number;
   lineTotal: number;
   /** Per-line share of the order tax, allocated by lineTotal (display column). */
@@ -56,11 +67,27 @@ export interface QuotationTotals {
   grandTotal: number;
 }
 
-/** A discount amount can never exceed the base it applies to. */
-function discountAmount(base: number, type: DiscountTypeCode | null, value: number | null): number {
+/**
+ * A discount amount, which can never exceed the base it applies to.
+ *
+ * `opts` only matters to a FIXED amount on a UNIT basis; the whole-quotation
+ * discount calls this without it and keeps the meaning it has always had.
+ *
+ * Multiply first, round once — `round2(value * units)`, never
+ * `round2(value) * units`. The sibling copy in the sale pipeline
+ * (apps/api/src/modules/sales/sales.service.ts, `computeDiscount`) does the
+ * same, and a quotation that converts to a sale must land on the same cent.
+ */
+function discountAmount(
+  base: number,
+  type: DiscountTypeCode | null,
+  value: number | null,
+  opts: { basis?: DiscountBasisCode | null; quantity?: number } = {},
+): number {
   if (!type || value == null || value <= 0) return 0;
   if (type === 'PERCENTAGE') return Math.min(base, round2((base * value) / 100));
-  return Math.min(base, round2(value));
+  const units = opts.basis === 'UNIT' ? (opts.quantity ?? 1) : 1;
+  return Math.min(base, round2(value * units));
 }
 
 export function computeQuotationLine(input: QuotationLineInput): ComputedQuotationLine {
@@ -68,13 +95,18 @@ export function computeQuotationLine(input: QuotationLineInput): ComputedQuotati
   const lineSubtotal = round2(unitPrice * input.quantity);
   const type = input.discountType ?? null;
   const value = input.discountValue ?? null;
-  const lineDiscount = discountAmount(lineSubtotal, type, value);
+  const basis = input.discountBasis ?? 'LINE';
+  const lineDiscount = discountAmount(lineSubtotal, type, value, {
+    basis,
+    quantity: input.quantity,
+  });
   return {
     unitPrice,
     quantity: input.quantity,
     lineSubtotal,
     discountType: type,
     discountValue: value,
+    discountBasis: basis,
     discountAmount: lineDiscount,
     lineTotal: round2(lineSubtotal - lineDiscount),
     taxAmount: 0,
@@ -94,6 +126,7 @@ export function computeQuotationTotals(
 
   const qType = orderDiscount?.type ?? null;
   const qValue = orderDiscount?.value ?? null;
+  // No quantity: a whole-quotation discount has no units to be "per".
   const quotationDiscountAmount = discountAmount(discountedSubtotal, qType, qValue);
 
   const taxable = round2(discountedSubtotal - quotationDiscountAmount);

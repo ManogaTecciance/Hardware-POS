@@ -223,6 +223,8 @@ body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "payme
 #   the same figure per unit and per line. The amount is always clamped to the line,
 #   so a per-unit discount larger than the unit price floors the line at zero.
 #   Order-level discounts have no units and are always whole-cart.
+#   Quotation lines carry the same field, and it is carried into the sale on
+#   conversion — a quotation is never re-priced by becoming an invoice.
 #   The basis is bound into the discount-approval token: an approval for an amount
 #   off the line cannot be spent on the same amount off every unit.
 # Transaction type: paidAmount >= total → SALES_RECEIPT; otherwise INVOICE (customer required).

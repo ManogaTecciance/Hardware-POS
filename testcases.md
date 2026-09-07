@@ -255,6 +255,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC-013 | Per-unit percentage refused | PERCENTAGE with basis UNIT | 400 "must be a fixed amount" | N | Automated |
 | DISC-014 | Per-unit cannot drive a line negative | Rs. 5,000/unit off a Rs. 1,000 item | Line floors at 0; never negative | N | Automated |
 | DISC-015 | Order discount unaffected | Per-unit line discount plus a fixed cart discount | Cart discount taken once, not multiplied | P | Automated |
+| DISC-017 | Quotation honours a per-unit line discount | Quote 3 × Rs. 1,000 with Rs. 100 off each unit | Rs. 300 off; line Rs. 2,700; basis stored on the revision | P | Automated |
+| DISC-018 | Conversion charges what was quoted | Convert a per-unit quotation to a sale | Sale total equals the quoted grand total; the sale line keeps basis UNIT | P | Automated |
+| DISC-019 | Per-unit percentage refused on a quotation | PERCENTAGE with basis UNIT | 400 | N | Automated |
+| DISC-020 | Basis survives a revision | Revise a per-unit quotation without touching its lines | The revision keeps per-unit and the same grand total | P | Not Run |
+| DISC-021 | Cart and bill say which kind | Apply each kind in the POS, print the bill | Cart chip reads "off each unit" / "off the line"; the bill shows "(Rs. 100.00 × 3)" only for per-unit | P | Not Run |
+| DISC-022 | Quotation document says which kind | Print a quotation with a per-unit line | Discount cell shows "- Rs. 300.00 (Rs. 100.00 × 3)" | P | Not Run |
 | DISC-016 | Approval cannot be re-scoped | Approve Rs. 100 off the line, then submit it as per-unit | Refused — the token is bound to the basis | N | Not Run |
 
 ## SALE — Sales History
@@ -322,6 +328,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
+| QUO-021 | Per-unit discount toggle in the builder | New quotation, set a line discount to Rs. | An "Off the line" / "Off each unit" pair appears; the line total and its hint follow the choice | P | Not Run |
 | QUO-001 | Build quotation | Add products, set customer, save draft | Draft created with server-computed totals | P | Not Run |
 | QUO-002 | Unit price read-only after add | Inspect line editor | Price displayed as text, not editable | P | Not Run |
 | QUO-003 | Line total = qty × price − discount | Set qty 3 + 10% discount | Line "Total (3 × Rs. x)" matches server preview | P | Not Run |
@@ -588,12 +595,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PIMP | 13 | QB | 31 |
 | POS | 50 | SET | 26 |
 | PAY | 41 | DOC | 16 |
-| DISC | 7 | ADM | 14 |
+| DISC | 13 | ADM | 14 |
 | SALE | 33 | UI | 16 |
 | RET | 18 | SEC | 12 |
-| QUO | 20 |  |  |
+| QUO | 21 |  |  |
 
-**Total: 445 test cases** (≈60% positive / 40% negative).
+**Total: 452 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

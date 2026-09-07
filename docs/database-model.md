@@ -216,3 +216,12 @@ happens to be.
 
 `UserRole`, `PaymentMethod`, `PaymentStatus`, `SyncStatus`, `DiscountType`,
 `QuickBooksDocumentType`, `SaleStatus` — mirrored in `packages/shared` where the app needs them.
+
+
+### QuotationItem — discount basis
+
+`QuotationItem.discountBasis` mirrors `SaleItem.discountBasis` (`LINE` default, `UNIT` for a
+fixed amount off every unit). Every revision owns its own item rows, so each keeps the basis it
+was quoted at and an older revision reprints unchanged. The field is carried into the sale by
+`convertToSale`, which is the one hand-written map on that path and has no compile-time backstop
+— `apps/api/src/modules/quotations/quotations.service.spec.ts` guards it instead.

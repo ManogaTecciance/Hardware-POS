@@ -92,9 +92,14 @@ The POS is authoritative for:
 - **FR-22** Send the payment due date to QuickBooks as the Invoice `DueDate`, and print it on
   the bill alongside the payment method(s) used.
 - **FR-29** Let a fixed item discount be taken **off each unit** or **off the line as a whole**,
-  chosen at the moment it is applied and shown with its arithmetic before it is committed. A
-  percentage offers no such choice, being the same figure either way. The whole-cart discount is
-  always whole-cart.
+  chosen at the moment it is applied and shown with its arithmetic before it is committed, in the
+  POS cart **and** when building a quotation. A percentage offers no such choice, being the same
+  figure either way. The whole-cart discount is always whole-cart.
+- **FR-31** Make the two kinds tellable apart wherever a discount is shown — the cart line, the
+  quotation builder and detail, and the printed bill and quotation, which spell out
+  `value × quantity` for a per-unit amount so the figure can be checked.
+- **FR-32** Carry the basis through quotation revisions and through conversion to a sale: a
+  quotation must be invoiced at the price it was quoted.
 - **FR-30** Mark products that do not track stock (Service, Non-Inventory) on the POS product
   card, so a cashier can see why a card shows no quantity.
 - **FR-27** Show the customer's credit position on the POS payment screen while the order is

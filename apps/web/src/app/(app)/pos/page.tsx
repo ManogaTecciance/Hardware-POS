@@ -994,5 +994,9 @@ function Row({ label, value, accent }: { label: string; value: string; accent?: 
 function formatDiscountLabel(discount: LineDiscount | OrderDiscount, currency: string): string {
   if (discount.type === 'PERCENTAGE') return `${discount.value}% off`;
   const amount = formatMoney(discount.value, currency);
-  return 'basis' in discount && discount.basis === 'UNIT' ? `${amount} off each unit` : `${amount} off`;
+  // Only a line discount has a basis; the cart-level one has no units. Both
+  // kinds say which they are, so a chip is never ambiguous about how much is
+  // actually coming off.
+  if (!('basis' in discount)) return `${amount} off`;
+  return discount.basis === 'UNIT' ? `${amount} off each unit` : `${amount} off the line`;
 }
