@@ -19,7 +19,12 @@ export type DocumentType =
   // D47 — table reservations ("Reservation RSV-000047" over the phone).
   | 'RESERVATION'
   // D49 — auto-assigned codes for open tables ("OPEN-3" on the floor).
-  | 'OPEN_TABLE';
+  | 'OPEN_TABLE'
+  // D104 (Phase 5, 5.3) — per-tenant SKU numbering. Reuses this mechanism
+  // rather than inventing a second one: it is already the repository's proven
+  // answer to concurrent allocation. Gaps are accepted — a rolled-back product
+  // creation burns a number, and a SKU is an identifier, not an audit trail.
+  | 'SKU';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;

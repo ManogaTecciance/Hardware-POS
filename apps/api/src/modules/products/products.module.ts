@@ -2,6 +2,7 @@ import { MenuModule } from '../menu/menu.module';
 import { AttributeLibraryController } from './attribute-library/attribute-library.controller';
 import { AttributeLibraryRepository } from './attribute-library/attribute-library.repository';
 import { AttributeLibraryService } from './attribute-library/attribute-library.service';
+import { SkuGeneratorService } from './identifiers/sku-generator.service';
 import { ProductAttributeSchemaController } from './product-attribute-schema.controller';
 import { ProductComponentsController } from './product-components.controller';
 import { ProductComponentsService } from './product-components.service';
@@ -82,6 +83,7 @@ import { ProductVariantsService } from './variants/product-variants.service';
     ProductAttributesService,
     AttributeLibraryService,
     AttributeLibraryRepository,
+    SkuGeneratorService,
     ProductComponentsService,
     SellableService,
   ],

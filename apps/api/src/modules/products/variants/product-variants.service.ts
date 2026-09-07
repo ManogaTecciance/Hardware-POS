@@ -6,11 +6,14 @@ import {
 } from '@nestjs/common';
 import { InventoryMode, Prisma } from '@hardware-pos/database';
 
+import { resolveOptionCode, type OptionCodeSource } from '@hardware-pos/shared';
+
 import { nextDocumentNumber, padSequence } from '../../../common/document-sequence';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { StorageService } from '../../../common/storage/storage.service';
 import { BusinessProfileService } from '../../platform/business-profile.service';
 import { InventoryProviderFactory } from '../../providers/inventory/inventory-provider.factory';
+import { SkuGeneratorService, type SkuRequest } from '../identifiers/sku-generator.service';
 import { ProductVariantsRepository } from './product-variants.repository';
 import {
   CreateVariantBatchDto,
@@ -62,6 +65,13 @@ export interface VariationDimensionView {
     position: number;
     /** D104 — the library option this option is mapped to, if any. */
     attributeOptionId: string | null;
+    /**
+     * `5.2` — the segment this option contributes to a generated SKU, and
+     * where it came from. `null` when the name yields nothing usable and no
+     * library option is mapped.
+     */
+    code: string | null;
+    codeSource: OptionCodeSource | null;
   }[];
 }
 
@@ -105,6 +115,7 @@ export class ProductVariantsService {
     private readonly storage: StorageService,
     private readonly businessProfile: BusinessProfileService,
     private readonly inventoryProviders: InventoryProviderFactory,
+    private readonly skus: SkuGeneratorService,
   ) {}
 
   // ── Variations (dimensions + options) ──────────────────────────────────────
@@ -120,12 +131,20 @@ export class ProductVariantsService {
         name: d.name,
         position: d.position,
         attributeDefinitionId: d.attributeDefinitionId,
-        options: d.options.map((o) => ({
-          id: o.id,
-          name: o.name,
-          position: o.position,
-          attributeOptionId: o.attributeOptionId,
-        })),
+        options: d.options.map((o) => {
+          const resolved = resolveOptionCode({
+            name: o.name,
+            libraryCode: o.attributeOption?.code ?? null,
+          });
+          return {
+            id: o.id,
+            name: o.name,
+            position: o.position,
+            attributeOptionId: o.attributeOptionId,
+            code: resolved?.code ?? null,
+            codeSource: resolved?.source ?? null,
+          };
+        }),
       })),
     };
   }
@@ -368,32 +387,37 @@ export class ProductVariantsService {
     for (const d of dimensions) {
       validOptionByDimension.set(d.id, new Set(d.options.map((o) => o.id)));
     }
-    for (const v of dto.variants) {
+    for (const [vIndex, v] of dto.variants.entries()) {
+      // `5.3` — sku is optional now, so a message built from it would read
+      // "Variant undefined ..." for exactly the rows a wizard did not name.
+      // A supplied sku still produces the identical string it always did.
+      const label = v.sku ?? `#${vIndex + 1}`;
+
       // Every dimension must be covered exactly once — otherwise the variant's
       // identity is under-specified and future sales cannot map back to it.
       const seen = new Set<string>();
       for (const ov of v.optionValues) {
         if (seen.has(ov.dimensionId)) {
           throw new BadRequestException(
-            `Variant ${v.sku} lists dimension ${ov.dimensionId} twice`,
+            `Variant ${label} lists dimension ${ov.dimensionId} twice`,
           );
         }
         seen.add(ov.dimensionId);
         const options = validOptionByDimension.get(ov.dimensionId);
         if (!options) {
           throw new BadRequestException(
-            `Variant ${v.sku} references unknown dimension ${ov.dimensionId} for product ${productId}`,
+            `Variant ${label} references unknown dimension ${ov.dimensionId} for product ${productId}`,
           );
         }
         if (!options.has(ov.optionId)) {
           throw new BadRequestException(
-            `Variant ${v.sku} references option ${ov.optionId} that does not belong to dimension ${ov.dimensionId}`,
+            `Variant ${label} references option ${ov.optionId} that does not belong to dimension ${ov.dimensionId}`,
           );
         }
       }
       if (dimensions.length > 0 && seen.size !== dimensions.length) {
         throw new BadRequestException(
-          `Variant ${v.sku} must specify one option per dimension (${dimensions.length} expected, got ${seen.size})`,
+          `Variant ${label} must specify one option per dimension (${dimensions.length} expected, got ${seen.size})`,
         );
       }
     }
@@ -402,11 +426,58 @@ export class ProductVariantsService {
       ? await this.inventoryProviders.forTenant(tenantId)
       : null;
 
+    // `5.3` — everything generation needs, resolved once outside the loop.
+    const needsSku = dto.variants.some((v) => !v.sku);
+    const categoryName = needsSku ? await this.repo.findCategoryName(productId) : null;
+    const optionLookup = new Map<string, { name: string; libraryCode: string | null }>();
+    const dimensionPosition = new Map<string, number>();
+    for (const d of dimensions) {
+      dimensionPosition.set(d.id, d.position);
+      for (const o of d.options) {
+        optionLookup.set(o.id, { name: o.name, libraryCode: o.attributeOption?.code ?? null });
+      }
+    }
+
     const createdIds = await this.prisma.$transaction(async (tx) => {
       const ids: string[] = [];
+
+      // Allocated INSIDE the transaction, so a rolled-back batch burns the
+      // numbers rather than leaving a half-used sequence behind (D104: gaps
+      // are accepted, reuse is not).
+      const generated = new Map<number, string>();
+      if (needsSku) {
+        const targets: Array<{ index: number; request: SkuRequest }> = [];
+        for (const [index, v] of dto.variants.entries()) {
+          if (v.sku) continue;
+          const ordered = [...v.optionValues].sort(
+            (a, b) =>
+              (dimensionPosition.get(a.dimensionId) ?? 0) -
+              (dimensionPosition.get(b.dimensionId) ?? 0),
+          );
+          targets.push({
+            index,
+            request: {
+              options: ordered.map((ov) => optionLookup.get(ov.optionId) ?? { name: '', libraryCode: null }),
+            },
+          });
+        }
+        const results = await this.skus.generateMany(
+          tx,
+          tenantId,
+          categoryName,
+          targets.map((t) => t.request),
+        );
+        targets.forEach((target, i) => generated.set(target.index, results[i].sku));
+      }
       const openingReceiptInputs: {
         variantId: string;
         variant: CreateVariantInputDto;
+        /**
+         * The sku as actually written. `5.3` made `variant.sku` optional, and
+         * the receipt line labels itself with the identifier, so it has to read
+         * the value the row carries rather than the one the request asked for.
+         */
+        sku: string;
       }[] = [];
 
       for (const [index, v] of dto.variants.entries()) {
@@ -415,7 +486,7 @@ export class ProductVariantsService {
             data: {
               tenantId,
               productId,
-              sku: v.sku,
+              sku: v.sku ?? generated.get(index)!,
               barcode: v.barcode ?? null,
               unitPrice: v.unitPrice,
               costPrice: v.costPrice ?? null,
@@ -442,7 +513,7 @@ export class ProductVariantsService {
           }
 
           if ((v.openingQuantity ?? 0) > 0) {
-            openingReceiptInputs.push({ variantId: created.id, variant: v });
+            openingReceiptInputs.push({ variantId: created.id, variant: v, sku: created.sku });
           }
         } catch (err) {
           throw mapWriteError(err);
@@ -482,7 +553,7 @@ export class ProductVariantsService {
           receiptLineId: string;
         }[];
 
-        for (const { variantId, variant } of openingReceiptInputs) {
+        for (const { variantId, variant, sku } of openingReceiptInputs) {
           const line = await tx.inventoryReceiptLine.create({
             data: {
               tenantId,
@@ -500,8 +571,8 @@ export class ProductVariantsService {
           lines.push({
             productId,
             productVariantId: variantId,
-            productName: variant.sku,
-            variantSku: variant.sku,
+            productName: sku,
+            variantSku: sku,
             quantity: Number(variant.openingQuantity),
             unitCost: Number(variant.costPrice ?? 0),
             receiptLineId: line.id,

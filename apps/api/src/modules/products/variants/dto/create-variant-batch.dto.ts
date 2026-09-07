@@ -36,10 +36,20 @@ export class VariantOptionValueInputDto {
 }
 
 export class CreateVariantInputDto {
+  /**
+   * D104 (`5.3`) — OMIT to have one generated, send a value to override it.
+   *
+   * Optional here and only here. The general rule from Phase 4 is that a field
+   * crossing a wire should be required, because an optional one can be dropped
+   * by a mapper without the compiler noticing. This field is different in kind:
+   * its absence is a REQUEST ("generate one for me"), not a missing value, and
+   * a dropped `sku` produces a generated identifier rather than a silent blank.
+   */
   @IsString()
   @IsNotEmpty()
   @MaxLength(80)
-  sku!: string;
+  @IsOptional()
+  sku?: string;
 
   @IsString()
   @IsOptional()
