@@ -261,6 +261,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC-019 | Per-unit percentage refused on a quotation | PERCENTAGE with basis UNIT | 400 | N | Automated |
 | DISC-020 | Basis survives a revision | Revise a per-unit quotation without touching its lines | The revision keeps per-unit and the same grand total | P | Not Run |
 | DISC-021 | Cart and bill say which kind | Apply each kind in the POS, print the bill | Cart chip reads "off each unit" / "off the line"; the bill shows "(Rs. 100.00 × 3)" only for per-unit | P | Not Run |
+| DISC-023 | Printed A4 invoice says which kind | Print the A4 bill (/print/sales/{id}) for a per-unit discounted sale | Discount cell reads "- Rs. 300.00 (Rs. 100.00 × 3)"; a whole-line discount reads just the amount | P | Not Run |
+| DISC-024 | Thermal receipt says which kind | Print the thermal receipt for the same sale | Discount cell reads "-Rs. 300.00 (Rs. 100.00/u)" | P | Not Run |
 | DISC-022 | Quotation document says which kind | Print a quotation with a per-unit line | Discount cell shows "- Rs. 300.00 (Rs. 100.00 × 3)" | P | Not Run |
 | DISC-016 | Approval cannot be re-scoped | Approve Rs. 100 off the line, then submit it as per-unit | Refused — the token is bound to the basis | N | Not Run |
 
@@ -625,12 +627,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PIMP | 13 | SIMP | 8 |
 | POS | 50 | QB | 31 |
 | PAY | 41 | SET | 26 |
-| DISC | 13 | DOC | 16 |
+| DISC | 15 | DOC | 16 |
 | MARK | 17 | ADM | 14 |
 | SALE | 33 | UI | 23 |
 | RET | 18 | SEC | 12 |
 
-**Total: 476 test cases** (≈60% positive / 40% negative).
+**Total: 478 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

@@ -182,6 +182,8 @@ export interface SaleDetailItem {
   quantity: number;
   discountType: DiscountType | null;
   discountValue: number | null;
+  /** Whether a FIXED amount came off each unit or the line as a whole. */
+  discountBasis: 'LINE' | 'UNIT';
   discountAmount: number;
   discountReason: string | null;
   lineSubtotal: number;
@@ -280,6 +282,7 @@ interface ApiSaleDetail {
     quantity: string | number;
     discountType: DiscountType | null;
     discountValue: string | number | null;
+    discountBasis: 'LINE' | 'UNIT';
     discountAmount: string | number;
     discountReason: string | null;
     lineSubtotal: string | number;
@@ -395,6 +398,7 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       quantity: Number(it.quantity),
       discountType: it.discountType,
       discountValue: it.discountValue != null ? Number(it.discountValue) : null,
+      discountBasis: it.discountBasis ?? 'LINE',
       discountAmount: Number(it.discountAmount),
       discountReason: it.discountReason,
       lineSubtotal: Number(it.lineSubtotal),

@@ -131,6 +131,8 @@ export class ReceiptsService {
         quantity: Number(it.quantity),
         unitPrice: Number(it.unitPrice),
         discountAmount: Number(it.discountAmount),
+        discountBasis: it.discountBasis,
+        discountValue: it.discountValue != null ? Number(it.discountValue) : null,
         lineTotal: Number(it.lineTotal),
       })),
       subtotal: Number(sale.subtotal),
