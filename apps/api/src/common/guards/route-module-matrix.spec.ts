@@ -417,6 +417,12 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /restaurant/modifier-groups': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/modifier-groups/:groupId': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/modifier-groups/:groupId': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  // D107 (Phase 7) — the transaction behind the EXCHANGES key D2 reserved.
+  // Module-gated like RETURNS, and tenant-scoped for the same reason: the
+  // branch is carried on the sale and the return, not on the route.
+  'POST /exchanges': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
+  'GET /exchanges': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
+  'GET /exchanges/:id': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
   'GET /returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
   'POST /returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
   'GET /returns/:id': { module: 'RETURNS', guard: 'ENFORCED', scope: T },

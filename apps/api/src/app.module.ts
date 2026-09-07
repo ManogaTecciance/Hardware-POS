@@ -24,6 +24,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { ExchangesModule } from './modules/exchanges/exchanges.module';
 import { ReturnsModule } from './modules/returns/returns.module';
 import { QuotationsModule } from './modules/quotations/quotations.module';
 import { DiscountsModule } from './modules/discounts/discounts.module';
@@ -76,6 +77,8 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     SuppliersModule,
     SalesModule,
     ReturnsModule,
+    // D107 (Phase 7) — composes ReturnsModule and SalesModule; owns no money path.
+    ExchangesModule,
     QuotationsModule,
     DiscountsModule,
     PaymentsModule,

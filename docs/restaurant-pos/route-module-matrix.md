@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 292
-- Module-guarded routes: 196
+- Total routes: 295
+- Module-guarded routes: 199
 - Ungated routes: 96
 
 ## How to read the Guard column
@@ -230,6 +230,23 @@ drives the wizard's generic attributes step and the server-side validator.
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
 | GET | `/products/attribute-schema` | SHARED_CORE | shared-core | product:read |
+
+### ExchangesController
+
+D107 (Phase 7): return one variant, issue another, settle the difference. The
+transaction behind the `EXCHANGES` key **D2** reserved in the Phase 0 audit —
+until now a module key with an A4 renderer and no workflow.
+
+Gated on `EXCHANGES`, which retail carries and food service deliberately does not
+(D2). Writes require **both** `return:create` and `sale:create`, because an
+exchange really does both: requiring only one would let somebody who may not take
+returns cause a refund through the side door.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| POST | `/exchanges` | EXCHANGES | ENFORCED | return:create + sale:create |
+| GET | `/exchanges` | EXCHANGES | ENFORCED | return:read |
+| GET | `/exchanges/:id` | EXCHANGES | ENFORCED | return:read |
 
 ### AttributeLibraryController
 

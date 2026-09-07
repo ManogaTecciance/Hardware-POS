@@ -30,6 +30,7 @@ import { PaymentsController } from '../../modules/payments/payments.controller';
 import { PlatformController } from '../../modules/platform/platform.controller';
 import { PlatformAdminController } from '../../modules/platform-admin/platform-admin.controller';
 import { AttributeLibraryController } from '../../modules/products/attribute-library/attribute-library.controller';
+import { ExchangesController } from '../../modules/exchanges/exchanges.controller';
 import { BarcodesController } from '../../modules/products/identifiers/barcodes.controller';
 import { LabelsController } from '../../modules/products/identifiers/labels.controller';
 import { ProductAttributeSchemaController } from '../../modules/products/product-attribute-schema.controller';
@@ -156,6 +157,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   // variants benefits from saying "Size" once, and gating it on a business type
   // would be the D56 mistake. Permission-gated, not module-gated.
   AttributeLibraryController,
+  // D107 — Phase 7. The transaction behind the EXCHANGES key D2 reserved.
+  ExchangesController,
   // D104 Part 3 / D106 — Phase 5 barcode audit + reissue, and label printing.
   // Also shared core: a barcode is a catalogue concern, not a vertical one.
   BarcodesController,
@@ -256,4 +259,6 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'attribute-library',
   'barcodes',
   'labels',
+  // D107 — Phase 7.
+  'exchanges',
 ];

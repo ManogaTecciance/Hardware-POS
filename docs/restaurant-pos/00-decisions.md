@@ -4861,3 +4861,90 @@ and a duplicate would refund a customer for goods they kept.
 `showTaxColumn: false`. It was written before Phase 3 made tax per-line with
 snapshots, so an exchange note would show no tax and **would not tie to the money
 that actually moved**. Corrected in `7.3`, narrowly.
+
+---
+
+## D107a — an exchange settles GROSS, not through store credit
+
+**Status:** accepted, 2026-09-07. Supersedes the settlement mechanism in
+[D107](#d107); everything else in that record stands.
+
+### What D107 said
+
+> 1. Return the Medium → refundMethod = STORE_CREDIT, value R
+> 2. Sell the Large → tender STORE_CREDIT for R, plus (P − R) by any method
+
+### Why it cannot work
+
+`ReturnsService.validateRefundMethod` refuses a store-credit refund unless the
+original sale has a **saved, non-walk-in customer**:
+
+```ts
+if (!sale.customerId || sale.customer?.customerType === 'WALK_IN') {
+  throw new BadRequestException(
+    'Store credit requires a saved customer; convert the walk-in customer first');
+}
+```
+
+That rule is correct. Store credit is a liability held against an account, and a
+walk-in has no account to hold it. But **a clothing shop swapping a Medium for a
+Large at the counter is almost always a walk-in**, so D107's settlement would
+have failed for the common case — and only for the common case, which is the
+worst kind of failure to ship.
+
+Found by the `7.1b` tests, all nine of which failed on it. The design read
+plausibly on paper and did not survive contact with an existing rule.
+
+### The decision
+
+**The money moves twice and nets at the drawer.**
+
+```
+1. Return the Medium   → refunded by `refundMethod`, default CASH, value R
+2. Sell the Large      → paid in full by the caller's own tenders, value P
+```
+
+For an even swap the customer is handed R and pays P where R = P, so nothing
+leaves their pocket and the drawer nets to zero. For an upgrade they are out
+(P − R); for a downgrade they are up (R − P). The `Exchange` read model reports
+`netDifference = P − R`, which is exactly what the A4 note prints as *"Balance
+due from customer"* or *"Refund to customer"*.
+
+### Why this over the alternatives
+
+Three options were put to the PO, who chose this one.
+
+**Rejected — exempt store credit created inside an exchange.** A narrow carve-out
+in `validateRefundMethod`, on the argument that credit created and consumed in
+one operation never outlives it and so is not a liability. Defensible, and about
+five lines. Rejected because it changes an existing money-path rule for the sake
+of a mechanism that gross settlement does not need.
+
+**Rejected — require a saved customer for exchanges.** No code change anywhere,
+but it puts a customer-creation step in front of every counter size-swap.
+
+**Chosen — gross settlement.** It needs **no change to any existing money path**,
+which was the hard constraint on this phase. It is also what actually happens
+physically: the shop hands money back and takes money for a different item.
+
+### What follows from it
+
+- `refundMethod` is a caller field defaulting to `CASH`, passed straight to
+  `ReturnsService`. Every one of its rules still applies, including the cap that
+  a cash refund cannot exceed what was paid on the original sale, and store
+  credit remains available for a saved customer who wants it.
+- `payments` must cover the replacement **in full**, exactly as for any other
+  sale. `SalesService` validates them against the total it computed; the
+  exchange service asserts nothing about the money.
+- The recoverable state is unchanged in substance and better in practice: if the
+  replacement fails, the customer has already been refunded and the operator can
+  ring the replacement up as an ordinary sale.
+
+### A consequence worth stating plainly
+
+**A single-line sale exchanged in full always requires manager approval.**
+`Full-sale return` is an existing approval trigger, and a customer who bought one
+shirt and swaps the size is returning the whole sale. D107 chose to leave return
+approval rules unchanged, so this follows from that choice rather than from
+gross settlement — but it is the shape most exchanges will take in a clothing
+shop, and the till has to handle it. Recorded as a Phase 7 limitation.
