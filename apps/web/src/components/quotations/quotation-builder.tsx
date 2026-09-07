@@ -545,8 +545,15 @@ export function QuotationBuilder({ mode, initial, header }: Props) {
                     min={0}
                     step="any"
                     disabled={!l.discountType}
-                    value={l.discountValue}
-                    onChange={(e) => patchLine(l.key, { discountValue: Number(e.target.value) })}
+                    // Empty rather than a literal 0, so the field can be cleared
+                    // and typed into. A numeric 0 bound straight to `value` snaps
+                    // back the instant it is deleted, so the digit you type lands
+                    // after it and reads as "05".
+                    value={l.discountValue === 0 ? '' : l.discountValue}
+                    placeholder="0"
+                    onChange={(e) =>
+                      patchLine(l.key, { discountValue: Number(e.target.value) || 0 })
+                    }
                     className="mt-0.5 h-9"
                   />
                 </label>
