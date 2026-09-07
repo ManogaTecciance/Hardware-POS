@@ -8,6 +8,7 @@ import { QUOTATION_STATUS_LABELS, type QuotationStatusCode } from '@hardware-pos
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -173,24 +174,12 @@ export default function QuotationsPage() {
         </div>
       </Card>
 
-      {pages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            {total} quotation{total === 1 ? '' : 's'}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </Button>
-            <span>
-              Page {page} of {pages}
-            </span>
-            <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

@@ -568,6 +568,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
+| UI-021 | Pagination is numbered everywhere | Open sales, products, customers, quotations, returns, suppliers, the POS grid and both customer-page tables | Every footer shows numbered pages with the current one highlighted — no bare Previous/Next anywhere | P | Not Run |
+| UI-022 | Page numbers collapse on long lists | A list of 40+ pages | Shows 1 … current-1 current current+1 … last; the first and last stay reachable and the row keeps its width | P | Not Run |
+| UI-023 | Rows per page only where it applies | Compare a list page with the quotations and suppliers lists | Rows-per-page appears where the size is adjustable and is absent where it is fixed; the range still shows | P | Not Run |
 | UI-017 | Tooltips are not clipped by their table | Hover a tooltip in the sales, products, customers or invoices table | The bubble shows in full above the row, not trimmed to the cell or the card | P | Not Run |
 | UI-018 | Tooltip follows the page as it scrolls | Hover a tooltip, then scroll the table or the page | It stays with its trigger, or goes away — never stranded mid-screen | P | Not Run |
 | UI-019 | Tooltip on a disabled control | Hover the disabled Mark paid on a customer's last invoice | Reason is shown; the button is still not clickable | P | Not Run |
@@ -621,10 +624,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY | 41 | SET | 26 |
 | DISC | 13 | DOC | 16 |
 | MARK | 14 | ADM | 14 |
-| SALE | 33 | UI | 20 |
+| SALE | 33 | UI | 23 |
 | RET | 18 | SEC | 12 |
 
-**Total: 470 test cases** (≈60% positive / 40% negative).
+**Total: 473 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

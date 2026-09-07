@@ -9,11 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
+import { PAGE_SIZES, Pagination } from '@/components/ui/pagination';
 import type { AccountPayment } from '@/lib/customers-api';
 import { formatMoney } from '@/lib/utils';
-
-const PAGE_SIZES = [10, 20, 50];
 
 /** Date and time both: two payments on one day are told apart only by the time. */
 function formatDateTime(iso: string): string {
@@ -131,48 +129,14 @@ export function CustomerCreditHistory({
           </tbody>
         </table>
       </div>
-      {/* Always shown, like every other table in the app: the range tells you how
-          much there is even when it all fits on one page. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span>Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="w-auto"
-          >
-            {PAGE_SIZES.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-muted-foreground">
-            {filtered.length === 0 ? '0' : `${(page - 1) * pageSize + 1}\u2013${Math.min(page * pageSize, filtered.length)}`} of{' '}
-            {filtered.length}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      </div>
+      <Pagination
+        className="border-t border-border px-4 py-3"
+        page={page}
+        pageSize={pageSize}
+        total={filtered.length}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
     </Card>
   );
 }

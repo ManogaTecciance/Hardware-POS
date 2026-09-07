@@ -11,6 +11,7 @@ import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -25,7 +26,6 @@ import {
 import { Permission } from '@/lib/permissions';
 import { formatMoney } from '@/lib/utils';
 
-const PAGE_SIZES = [20, 30, 40, 50];
 
 /**
  * How much of the limit this customer has already used, and what that leaves.
@@ -336,20 +336,14 @@ export default function CustomersPage() {
       </Card>
 
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span>Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="w-auto"
-          >
-            {PAGE_SIZES.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </Select>
-        </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        disabled={loading}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
         <div className="flex items-center gap-3">
           <span className="text-muted-foreground">
             {total === 0 ? '0' : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)}`} of{' '}

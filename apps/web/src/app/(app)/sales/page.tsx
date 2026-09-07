@@ -17,6 +17,7 @@ import { ExportMenu } from '@/components/sales/export-menu';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -36,7 +37,6 @@ import {
 } from '@/lib/sales';
 import { cn, formatMoney } from '@/lib/utils';
 
-const PAGE_SIZES = [20, 30, 40, 50];
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-LK', {
@@ -438,20 +438,14 @@ export default function SalesPage() {
 
       {/* Pagination */}
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span>Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="w-auto"
-          >
-            {PAGE_SIZES.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </Select>
-        </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        disabled={loading}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
         <div className="flex items-center gap-3">
           <span className="text-muted-foreground">
             {total === 0

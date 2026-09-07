@@ -34,6 +34,8 @@ import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
 import { productTypeLabel } from '@hardware-pos/shared';
 
+import { Pagination } from '@/components/ui/pagination';
+
 import { useAuth } from '@/lib/auth';
 import { computeLine, computeTotals, type LineDiscount, type OrderDiscount } from '@/lib/cart';
 import { useCheckoutData, type ClientProduct } from '@/lib/catalog';
@@ -804,48 +806,15 @@ export default function PosPage() {
 
         {/* Pagination footer — stays pinned below the scroll region */}
         {!data.loading && filtered.length > 0 ? (
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border pt-2.5 text-sm">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="hidden md:inline">
-                Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} of{' '}
-                {filtered.length.toLocaleString()} products
-              </span>
-              <span className="hidden sm:inline md:hidden">Per page</span>
-              <Select
-                value={String(pageSize)}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                className="w-auto"
-                aria-label="Products per page"
-              >
-                {PAGE_SIZES.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                Prev
-              </Button>
-              <span className="px-2 tabular-nums text-muted-foreground">
-                {page} / {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+          <Pagination
+            className="shrink-0 border-t border-border pt-2.5"
+            page={page}
+            pageSize={pageSize}
+            total={filtered.length}
+            pageSizes={PAGE_SIZES}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         ) : null}
       </section>
 
