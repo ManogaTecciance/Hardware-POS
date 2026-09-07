@@ -9,10 +9,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import type { AccountPayment } from '@/lib/customers-api';
 import { formatMoney } from '@/lib/utils';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZES = [10, 20, 50];
 
 /** Date and time both: two payments on one day are told apart only by the time. */
 function formatDateTime(iso: string): string {
@@ -43,8 +44,9 @@ export function CustomerCreditHistory({
 }) {
   const [search, setSearch] = React.useState('');
   const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(PAGE_SIZES[0] as number);
 
-  React.useEffect(() => setPage(1), [search]);
+  React.useEffect(() => setPage(1), [search, pageSize]);
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -64,8 +66,8 @@ export function CustomerCreditHistory({
     );
   }, [payments, search]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const shown = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const shown = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <Card className="overflow-hidden">
@@ -129,10 +131,26 @@ export function CustomerCreditHistory({
           </tbody>
         </table>
       </div>
-      {totalPages > 1 ? (
-        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
+      {/* Always shown, like every other table in the app: the range tells you how
+          much there is even when it all fits on one page. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span>Rows per page</span>
+          <Select
+            value={String(pageSize)}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="w-auto"
+          >
+            {PAGE_SIZES.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex items-center gap-3">
           <span className="text-muted-foreground">
-            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of{' '}
+            {filtered.length === 0 ? '0' : `${(page - 1) * pageSize + 1}\u2013${Math.min(page * pageSize, filtered.length)}`} of{' '}
             {filtered.length}
           </span>
           <div className="flex items-center gap-1">
@@ -154,7 +172,7 @@ export function CustomerCreditHistory({
             </Button>
           </div>
         </div>
-      ) : null}
+      </div>
     </Card>
   );
 }

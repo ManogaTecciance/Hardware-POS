@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
 import type { Session } from '@/lib/auth';
 import {
@@ -21,7 +22,7 @@ import {
 } from '@/lib/sales';
 import { cn, formatMoney } from '@/lib/utils';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZES = [10, 20, 50];
 
 const STATUS_VARIANT: Record<PaymentStatusCode, 'success' | 'neutral' | 'danger'> = {
   PAID: 'success',
@@ -79,6 +80,7 @@ export function CustomerInvoices({
   const [rows, setRows] = React.useState<SaleListItem[]>([]);
   const [total, setTotal] = React.useState(0);
   const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(PAGE_SIZES[0] as number);
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [loading, setLoading] = React.useState(true);
@@ -95,7 +97,7 @@ export function CustomerInvoices({
     return () => window.clearTimeout(t);
   }, [search]);
 
-  React.useEffect(() => setPage(1), [debouncedSearch]);
+  React.useEffect(() => setPage(1), [debouncedSearch, pageSize]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -103,7 +105,7 @@ export function CustomerInvoices({
     fetchSales(session, {
       customerId,
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
       search: debouncedSearch || undefined,
     })
       .then((res) => {
@@ -118,7 +120,7 @@ export function CustomerInvoices({
     return () => {
       cancelled = true;
     };
-  }, [session, customerId, page, debouncedSearch, reloadKey]);
+  }, [session, customerId, page, pageSize, debouncedSearch, reloadKey]);
 
   // Counted unfiltered and unpaged, so a search or a page change cannot make an
   // invoice look like the last one when it is not.
@@ -140,7 +142,7 @@ export function CustomerInvoices({
   const isLastUnmarked = (s: SaleListItem) =>
     unmarkedTotal === 1 && isOwed(s) && s.markedPaidAt === null;
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const markPaid = async (s: SaleListItem) => {
     setBusyId(s.id);
@@ -286,10 +288,27 @@ export function CustomerInvoices({
           </tbody>
         </table>
       </div>
-      {totalPages > 1 ? (
-        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
+      {/* Always shown, like every other table in the app: the range tells you how
+          much there is even when it all fits on one page. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span>Rows per page</span>
+          <Select
+            value={String(pageSize)}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="w-auto"
+          >
+            {PAGE_SIZES.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex items-center gap-3">
           <span className="text-muted-foreground">
-            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+            {total === 0 ? '0' : `${(page - 1) * pageSize + 1}\u2013${Math.min(page * pageSize, total)}`} of{' '}
+            {total}
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -310,8 +329,7 @@ export function CustomerInvoices({
             </Button>
           </div>
         </div>
-      ) : null}
-
+      </div>
     </Card>
   );
 }
