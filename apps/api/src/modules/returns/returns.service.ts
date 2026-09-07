@@ -242,11 +242,20 @@ export class ReturnsService {
 
   // ── complete (create the return atomically) ────────────────────────────────
 
+  /**
+   * D109 — options the SERVER may set, never the client.
+   *
+   * `withinExchange` waives one approval trigger (see `evaluateApproval`).
+   * It is a parameter rather than a `CreateReturnDto` field on purpose: a
+   * field would let any caller of `POST /returns` assert it and skip the
+   * check. Only `ExchangesService` can reach this.
+   */
   async complete(
     tenantId: string,
     actor: AuthenticatedUser,
     dto: CreateReturnDto,
     idempotencyKey: string | null,
+    options: { withinExchange?: boolean } = {},
   ): Promise<ReturnWithRelations> {
     const key = dto.idempotencyKey ?? idempotencyKey;
 
@@ -292,6 +301,7 @@ export class ReturnsService {
       dto.refundMethod,
       settings.returns,
       actor.role,
+      options.withinExchange === true,
     );
     const approvedByUserId = requiresApproval
       ? await this.verifyApprovalToken(tenantId, dto.originalSaleId, refundTotal, dto.approvalToken, reasons)
@@ -695,12 +705,22 @@ export class ReturnsService {
   }
 
   /** Which triggers demand manager approval for this return (spec §6). */
+  /**
+   * Which triggers demand manager approval for this return (spec §6).
+   *
+   * `withinExchange` (D109) waives EXACTLY ONE of them — `Full-sale return`.
+   * Every other trigger still applies: damaged goods, outside the return
+   * period, a cashier over their limit, a credit customer, a refund method
+   * the sale was not paid with. Those are about the goods and the money, and
+   * an exchange changes neither.
+   */
   private evaluateApproval(
     sale: SaleForReturn,
     computed: ComputedReturn,
     refundMethod: PaymentMethod,
     settings: ReturnType<SettingsService['getSettings']>['returns'],
     actorRole: UserRole,
+    withinExchange = false,
   ): { requiresApproval: boolean; reasons: string[] } {
     const reasons: string[] = [];
     const refundTotal = computed.totals.refundTotal;
@@ -726,7 +746,12 @@ export class ReturnsService {
     if (refundMethod === 'CASH' && !originalMethods.has('CASH')) {
       reasons.push('Cash refund requested for a non-cash sale');
     }
-    if (computed.isFullReturn) {
+    // D109 — a full-sale return is a manager's business because the customer
+    // walks out with the whole sale refunded. In an exchange they walk out
+    // with replacement goods instead, and the money largely nets at the
+    // drawer. A one-shirt size swap returns the whole sale by definition, so
+    // leaving this trigger on meant a PIN for EVERY counter exchange.
+    if (computed.isFullReturn && !withinExchange) {
       reasons.push('Full-sale return');
     }
     if (sale.customer?.customerType === 'CREDIT') {

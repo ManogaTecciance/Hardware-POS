@@ -157,13 +157,11 @@ async function onHand(variantId: string): Promise<number> {
 }
 
 /**
- * A manager PIN, because the returning leg needs one.
+ * A manager PIN, for the cases that still need one.
  *
- * D107: existing return-approval rules apply unchanged, and `Full-sale
- * return` is one of the triggers. A customer who bought one shirt and swaps
- * the size is returning the whole sale, so **every single-line exchange
- * needs an approval** — a real consequence of the approved decision, not an
- * artefact of this fixture. Recorded as a Phase 7 limitation.
+ * D109 waives ONE approval trigger inside an exchange — `Full-sale return` —
+ * so the ordinary size swap below needs no token at all. Every other trigger
+ * still applies, which is what the D109 block at the end of this file proves.
  */
 async function managerApproval(saleId: string, refundTotal: number): Promise<string> {
   const result = await app.returnsService.approve(
@@ -191,7 +189,6 @@ describe('an even swap — the common case', () => {
         branchId: tenant.branchId,
         registerId: tenant.registerId,
         returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
         replacementItems: [
           { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
         ],
@@ -238,7 +235,6 @@ describe('an upgrade — the replacement costs more', () => {
         branchId: tenant.branchId,
         registerId: tenant.registerId,
         returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
         replacementItems: [
           { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
         ],
@@ -279,7 +275,6 @@ describe('a downgrade — the replacement costs less', () => {
         branchId: tenant.branchId,
         registerId: tenant.registerId,
         returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
         replacementItems: [
           { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
         ],
@@ -324,7 +319,6 @@ describe('stock moves on both variants, once', () => {
         branchId: tenant.branchId,
         registerId: tenant.registerId,
         returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
         replacementItems: [
           { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
         ],
@@ -347,7 +341,6 @@ describe('stock moves on both variants, once', () => {
       branchId: tenant.branchId,
       registerId: tenant.registerId,
       returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
       replacementItems: [{ productId: tenant.productAId, productVariantId: largeId, quantity: 1 }],
       payments: [{ method: 'CASH' as const, amount: 1000 }],
       idempotencyKey: 'exch-key-1',
@@ -376,7 +369,6 @@ describe('a replayed exchange', () => {
       branchId: tenant.branchId,
       registerId: tenant.registerId,
       returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
       replacementItems: [{ productId: tenant.productAId, productVariantId: largeId, quantity: 1 }],
       payments: [{ method: 'CASH' as const, amount: 1000 }],
       idempotencyKey: 'exch-key-2',
@@ -404,7 +396,6 @@ describe('a replayed exchange', () => {
       branchId: tenant.branchId,
       registerId: tenant.registerId,
       returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
       replacementItems: [{ productId: tenant.productAId, productVariantId: largeId, quantity: 1 }],
       payments: [{ method: 'CASH' as const, amount: 1000 }],
     };
@@ -434,7 +425,6 @@ describe('when the replacement leg fails', () => {
           branchId: tenant.branchId,
           registerId: tenant.registerId,
           returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
           replacementItems: [
             { productId: tenant.productAId, productVariantId: 'not-a-real-variant', quantity: 1 },
           ],
@@ -485,7 +475,6 @@ describe('scoping', () => {
         branchId: tenant.branchId,
         registerId: tenant.registerId,
         returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
         replacementItems: [
           { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
         ],
@@ -515,7 +504,6 @@ describe('the exchange note', () => {
         branchId: tenant.branchId,
         registerId: tenant.registerId,
         returnItems: [returnLine(sale)],
-        approvalToken: await managerApproval(sale.id, Number(sale.total)),
         replacementItems: [
           { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
         ],
@@ -554,8 +542,7 @@ describe('the exchange note', () => {
           branchId: tenant.branchId,
           registerId: tenant.registerId,
           returnItems: [returnLine(sale)],
-          approvalToken: await managerApproval(sale.id, Number(sale.total)),
-          replacementItems: [
+            replacementItems: [
             { productId: tenant.productAId, productVariantId: 'not-a-real-variant', quantity: 1 },
           ],
           payments: [{ method: 'CASH' as const, amount: 1000 }],
@@ -572,5 +559,113 @@ describe('the exchange note', () => {
     // Nothing went out, so the whole returned value is owed back to the
     // customer — which the note states rather than leaving blank.
     expect(html).toContain('Refund to customer');
+  });
+});
+
+// ── D109 — the approval exception, and its edges ────────────────────────────
+
+describe('D109 — a full-sale return inside an exchange needs no manager', () => {
+  it('completes with NO approval token, where a standalone return could not', async () => {
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    const request = {
+      originalSaleId: sale.id,
+      branchId: tenant.branchId,
+      registerId: tenant.registerId,
+      returnItems: [returnLine(sale)],
+      replacementItems: [{ productId: tenant.productAId, productVariantId: largeId, quantity: 1 }],
+      payments: [{ method: 'CASH' as const, amount: 1000 }],
+    };
+
+    // No approvalToken anywhere. This is the whole point of D109.
+    const exchange = await app.exchangesService.complete(tenant.tenantId, owner, request, null);
+    expect(exchange.complete).toBe(true);
+  });
+
+  it('the SAME return outside an exchange still demands a manager — the exception is scoped', async () => {
+    // Without this, "the exchange worked" would also pass for an implementation
+    // that had simply switched the trigger off for everyone.
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    await expect(
+      app.returnsService.complete(
+        tenant.tenantId,
+        owner,
+        {
+          originalSaleId: sale.id,
+          items: [returnLine(sale)],
+          refundMethod: 'CASH',
+        },
+        null,
+      ),
+    ).rejects.toThrow(/approval/i);
+  });
+
+  it('waives ONLY the full-sale trigger — damaged goods still need a manager', async () => {
+    // D109 is narrow by design: the goods coming back are the shop's problem
+    // either way, and an exchange does not change their condition.
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    await expect(
+      app.exchangesService.complete(
+        tenant.tenantId,
+        owner,
+        {
+          originalSaleId: sale.id,
+          branchId: tenant.branchId,
+          registerId: tenant.registerId,
+          returnItems: [
+            // DAMAGED goods cannot go back to normal stock (an older,
+            // separate rule), so the disposition moves with the condition.
+            {
+              ...returnLine(sale),
+              itemCondition: 'DAMAGED' as const,
+              stockDisposition: 'DAMAGED_STOCK' as const,
+            },
+          ],
+          replacementItems: [
+            { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
+          ],
+          payments: [{ method: 'CASH' as const, amount: 1000 }],
+        },
+        null,
+      ),
+    ).rejects.toThrow(/approval/i);
+  });
+
+  it('a damaged-goods exchange completes once a manager approves it', async () => {
+    // The refusal above must be a real gate, not a dead end: the same exchange
+    // succeeds with a token, so the path is open to an authorised operator.
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    const exchange = await app.exchangesService.complete(
+      tenant.tenantId,
+      owner,
+      {
+        originalSaleId: sale.id,
+        branchId: tenant.branchId,
+        registerId: tenant.registerId,
+        returnItems: [
+            // DAMAGED goods cannot go back to normal stock (an older,
+            // separate rule), so the disposition moves with the condition.
+            {
+              ...returnLine(sale),
+              itemCondition: 'DAMAGED' as const,
+              stockDisposition: 'DAMAGED_STOCK' as const,
+            },
+          ],
+        approvalToken: await managerApproval(sale.id, Number(sale.total)),
+        replacementItems: [
+          { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
+        ],
+        payments: [{ method: 'CASH' as const, amount: 1000 }],
+      },
+      null,
+    );
+    expect(exchange.complete).toBe(true);
   });
 });

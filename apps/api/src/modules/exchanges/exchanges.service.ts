@@ -109,6 +109,10 @@ export class ExchangesService {
         idempotencyKey: key ? `${key}:return` : undefined,
       },
       null,
+      // D109 — waives the `Full-sale return` approval trigger, and only that
+      // one. Set here rather than accepted from the request, so a caller of
+      // `POST /returns` cannot claim to be an exchange and skip the check.
+      { withinExchange: true },
     );
 
     const returnedValue = Number(returned.refundTotal);

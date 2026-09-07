@@ -5097,3 +5097,79 @@ assignment we can actually discharge, and it is enforced rather than promised.
   by whom, and on what evidence.
 - **A2, A3 and A7 remain not ours.**
 - Nothing in the restaurant module is modified by this branch.
+
+---
+
+## D109 — an exchange waives the full-sale-return approval, and only that one
+
+**Status:** accepted, 2026-09-07. Supersedes one sentence of [D107](#d107).
+No migration.
+
+### What D107 decided, and why it was wrong in practice
+
+> **Return approval rules apply unchanged.** No exchange-specific bypass: a
+> non-good-condition or over-limit return still requires approval, because the
+> goods coming back are the same goods either way.
+
+Sound reasoning, and the Phase 7 tests then showed what it costs. `Full-sale
+return` is an approval trigger, and **a customer who bought one shirt and swaps
+the size is returning the whole sale**. So every single-line exchange — the
+commonest shape in a clothing shop — demanded a manager PIN. Recorded as a Phase
+7 limitation with the note *"probably not what a shop wants"*; the PO confirmed
+on 2026-09-07 that it is not.
+
+### The decision
+
+**Inside an exchange, the `Full-sale return` trigger does not fire. Every other
+trigger still does.**
+
+The waived trigger exists because a full-sale return means the customer walks out
+with the entire sale refunded and the shop holds the goods. In an exchange they
+walk out with **replacement goods**, and the money largely nets at the drawer.
+The condition the trigger detects is simply not present.
+
+**Still requiring a manager, unchanged:**
+
+| Trigger | Why it survives |
+|---|---|
+| Damaged / opened / defective goods | An exchange does not change what came back |
+| Outside the return period | Nor how old it is |
+| Cashier over their value limit | Nor who is authorised for how much |
+| Refund method differs from the original payment | Money leaving by a different route |
+| Cash refund on a non-cash sale | Same |
+| Credit customer | Their account is still affected |
+| `Other` reason | Still unexplained |
+
+### How it is plumbed, and why not through the DTO
+
+`withinExchange` is an **option on the service method**, not a field on
+`CreateReturnDto`:
+
+```ts
+returns.complete(tenantId, actor, dto, idempotencyKey, { withinExchange: true })
+```
+
+A DTO field would let any caller of `POST /returns` assert it and skip the check
+— an approval bypass reachable from the public API by writing one extra line of
+JSON. Only `ExchangesService` can set this, and it always does.
+
+### What proves it is narrow
+
+Four integration assertions, and the second is the one that matters:
+
+1. An ordinary size swap completes with **no approval token at all**.
+2. **The same return, outside an exchange, still demands a manager.** Without
+   this, *"the exchange worked"* would also pass for an implementation that had
+   simply switched the trigger off for everyone.
+3. A **damaged-goods** exchange is still refused without approval.
+4. That same damaged-goods exchange **completes once approved** — so the refusal
+   is a gate, not a dead end.
+
+### What this does not change
+
+- Every other part of D107 and D107a: composition over atomicity, gross
+  settlement, the nullable `replacementSaleId`, idempotency.
+- Standalone returns, which behave exactly as they did.
+- The restaurant and hardware modules. `RETURNS` is retail-gated, and the flag
+  defaults to `false`, so a caller that does not set it sees the old behaviour
+  byte for byte.
