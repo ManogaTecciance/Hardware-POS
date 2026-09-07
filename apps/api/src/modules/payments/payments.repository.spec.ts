@@ -19,6 +19,8 @@ interface FakeSale {
   paymentStatus: string;
   balanceAmount: number;
   creditSettledAt: Date | null;
+  markedPaidAt: Date | null;
+  markedPaidByUserId: string | null;
   customerId: string;
 }
 interface FakePayment {
@@ -52,9 +54,19 @@ function fakePrisma(sales: FakeSale[], customerExists = true) {
         _sum: { balanceAmount: owing(where.customerId).reduce((t, s) => t + s.balanceAmount, 0) },
       })),
       updateMany: jest.fn(
-        async ({ where, data }: { where: { customerId: string }; data: { creditSettledAt: Date } }) => {
-          const hit = owing(where.customerId);
-          hit.forEach((s) => (s.creditSettledAt = data.creditSettledAt));
+        async ({
+          where,
+          data,
+        }: {
+          where: { customerId: string; markedPaidAt?: null };
+          data: Partial<FakeSale>;
+        }) => {
+          // `markedPaidAt: null` in the where narrows to the invoices nobody has
+          // accounted for yet — the ones the sweep stamps with its own marker.
+          const hit = owing(where.customerId).filter(
+            (s) => where.markedPaidAt === undefined || s.markedPaidAt === null,
+          );
+          hit.forEach((s) => Object.assign(s, data));
           return { count: hit.length };
         },
       ),
@@ -93,6 +105,8 @@ function sale(id: string, balanceAmount: number, over: Partial<FakeSale> = {}): 
     paymentStatus: 'UNPAID',
     balanceAmount,
     creditSettledAt: null,
+    markedPaidAt: null,
+    markedPaidByUserId: null,
     customerId: 'cus_1',
     ...over,
   };
@@ -243,5 +257,61 @@ describe('recording a payment against a credit account', () => {
     prisma.payments.push({ id: 'till', customerId: null, saleId: 's1', amount: 600, settledAt: null });
     const res = await repo(prisma).recordForCustomer({ ...base, amount: 400 });
     expect(res.outstanding).toBe(0);
+  });
+});
+
+
+/**
+ * Clearing an account is itself an act of accounting for every invoice on it.
+ *
+ * The invoices that still had a Mark paid button are stamped with the moment the
+ * account came square and the person who took the money, so the customer page
+ * reads the same whether a user ticked an invoice off or the payment did it.
+ */
+describe('what clearing an account records on its invoices', () => {
+  it('stamps every unaccounted invoice with the payment and its taker', async () => {
+    const prisma = fakePrisma([sale('s1', 400), sale('s2', 600)]);
+    const res = await repo(prisma).recordForCustomer({ ...base, amount: 1000 });
+
+    expect(res.salesSettled).toBe(2);
+    for (const s of prisma.sales) {
+      expect(s.markedPaidAt).toEqual(s.creditSettledAt);
+      expect(s.markedPaidByUserId).toBe('u1');
+    }
+  });
+
+  it('leaves an invoice someone already ticked off in their name', async () => {
+    // They accounted for it; the payment settles it but does not take the credit.
+    const theirs = new Date('2026-01-01T10:00:00Z');
+    const prisma = fakePrisma([
+      sale('s1', 400, { markedPaidAt: theirs, markedPaidByUserId: 'u9' }),
+      sale('s2', 600),
+    ]);
+    await repo(prisma).recordForCustomer({ ...base, amount: 1000 });
+
+    const already = prisma.sales.find((s) => s.id === 's1');
+    expect(already?.markedPaidAt).toBe(theirs);
+    expect(already?.markedPaidByUserId).toBe('u9');
+    // ...and it is still settled by the payment.
+    expect(already?.creditSettledAt).not.toBeNull();
+
+    const swept = prisma.sales.find((s) => s.id === 's2');
+    expect(swept?.markedPaidByUserId).toBe('u1');
+  });
+
+  it('counts both the stamped and the already-ticked invoices as settled', async () => {
+    const prisma = fakePrisma([
+      sale('s1', 300, { markedPaidAt: new Date(), markedPaidByUserId: 'u9' }),
+      sale('s2', 300),
+      sale('s3', 400),
+    ]);
+    const res = await repo(prisma).recordForCustomer({ ...base, amount: 1000 });
+    expect(res.salesSettled).toBe(3);
+  });
+
+  it('does not stamp a part payment that leaves the account short', async () => {
+    const prisma = fakePrisma([sale('s1', 400), sale('s2', 600)]);
+    await repo(prisma).recordForCustomer({ ...base, amount: 400 });
+    expect(prisma.sales.every((s) => s.markedPaidAt === null)).toBe(true);
   });
 });

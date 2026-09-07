@@ -116,16 +116,39 @@ export class PaymentsRepository {
       // payments that did it so the next balance starts from zero rather than
       // carrying this money forward against it.
       const settledAt = new Date();
-      const swept = await tx.sale.updateMany({
-        where: CreditService.owingSalesFor(tenantId, customerId),
+      const owing = CreditService.owingSalesFor(tenantId, customerId);
+
+      // Anything still waiting to be accounted for is accounted for by this
+      // payment: the invoices that had a Mark paid button are stamped with the
+      // moment the account came square and the person who took the money, so the
+      // customer page reads the same whether a user ticked an invoice off or the
+      // payment did it for them.
+      const sweptUnmarked = await tx.sale.updateMany({
+        where: { ...owing, markedPaidAt: null },
+        data: {
+          creditSettledAt: settledAt,
+          markedPaidAt: settledAt,
+          markedPaidByUserId: input.receivedByUserId,
+        },
+      });
+
+      // An invoice someone already ticked off keeps their name and their
+      // timestamp — they accounted for it, and this payment does not rewrite that.
+      const sweptMarked = await tx.sale.updateMany({
+        where: owing,
         data: { creditSettledAt: settledAt },
       });
+
       await tx.payment.updateMany({
         where: CreditService.unsettledPaymentsFor(tenantId, customerId),
         data: { settledAt },
       });
 
-      return { payment, outstanding: 0, salesSettled: swept.count };
+      return {
+        payment,
+        outstanding: 0,
+        salesSettled: sweptUnmarked.count + sweptMarked.count,
+      };
     });
   }
 }

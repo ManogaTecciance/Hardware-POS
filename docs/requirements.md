@@ -130,6 +130,9 @@ The POS is authoritative for:
 - **FR-33** Show a customer's own invoices on their page, with the same figures the sales
   list shows, and let a user tick each credit invoice off as accounted for — recording who did
   it and when. Ticking is bookkeeping and moves no money.
+- **FR-35** When an account is cleared by recorded payments, account for every invoice that
+  still had a tick available — stamping each with the moment the account came square and the
+  person who took the money. An invoice already ticked by hand keeps whoever ticked it.
 - **FR-34** Refuse the tick on the last uncovered invoice of an account that still owes:
   ticking every invoice is what would make an account read as dealt with, so the final one is
   left to recorded payments, which settle it regardless.

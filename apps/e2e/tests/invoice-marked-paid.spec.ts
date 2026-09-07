@@ -101,6 +101,73 @@ test.describe('MARK — accounting for a credit invoice', () => {
     }
   });
 
+  test('MARK-015 clearing the account accounts for every invoice left', async ({ ownerApi }) => {
+    // The invoices that still had a Mark paid button are stamped with the moment
+    // the account came square and the person who took the money.
+    const first = await creditSale(ownerApi);
+    const second = await creditSale(ownerApi, first.customerId);
+
+    const owed = Number((await ownerApi.get(`/customers/${first.customerId}/credit`)).outstanding);
+    await ownerApi.post('/payments', {
+      customerId: first.customerId,
+      method: 'CASH',
+      amount: owed,
+    });
+
+    const page = await ownerApi.get(`/sales?page=1&pageSize=50&customerId=${first.customerId}`);
+    for (const id of [first.sale.id, second.sale.id]) {
+      const row = page.items.find((s: any) => s.id === id);
+      expect(row.markedPaidAt).toBeTruthy();
+      expect(row.markedPaidByName).toBeTruthy();
+      // Stamped with the settlement itself, not some later moment.
+      expect(row.markedPaidAt).toBe(row.creditSettledAt);
+    }
+  });
+
+  test('MARK-016 an invoice already ticked keeps whoever ticked it', async ({
+    ownerApi,
+    managerApi,
+  }) => {
+    // The manager accounted for one; the owner then takes the money. The
+    // settlement must not take credit for the manager's tick.
+    const first = await creditSale(ownerApi);
+    const second = await creditSale(ownerApi, first.customerId);
+    await managerApi.post(`/sales/${first.sale.id}/marked-paid`, { marked: true });
+
+    const before = await ownerApi.get(`/sales/${first.sale.id}`);
+    const owed = Number((await ownerApi.get(`/customers/${first.customerId}/credit`)).outstanding);
+    await ownerApi.post('/payments', {
+      customerId: first.customerId,
+      method: 'CASH',
+      amount: owed,
+    });
+
+    const page = await ownerApi.get(`/sales?page=1&pageSize=50&customerId=${first.customerId}`);
+    const ticked = page.items.find((s: any) => s.id === first.sale.id);
+    const swept = page.items.find((s: any) => s.id === second.sale.id);
+
+    expect(ticked.markedPaidAt).toBe(before.markedPaidAt);
+    expect(ticked.markedPaidByName).toBe(before.markedPaidBy?.name ?? ticked.markedPaidByName);
+    // ...and it is settled by the payment all the same.
+    expect(ticked.creditSettledAt).toBeTruthy();
+    // The one nobody touched is stamped by the settlement.
+    expect(swept.markedPaidAt).toBe(swept.creditSettledAt);
+  });
+
+  test('MARK-017 a part payment accounts for nothing', async ({ ownerApi }) => {
+    const first = await creditSale(ownerApi);
+    await creditSale(ownerApi, first.customerId);
+    const owed = Number((await ownerApi.get(`/customers/${first.customerId}/credit`)).outstanding);
+    await ownerApi.post('/payments', {
+      customerId: first.customerId,
+      method: 'CASH',
+      amount: Math.round((owed / 2) * 100) / 100,
+    });
+
+    const page = await ownerApi.get(`/sales?page=1&pageSize=50&customerId=${first.customerId}`);
+    expect(page.items.every((s: any) => s.markedPaidAt === null)).toBe(true);
+  });
+
   test('MARK-006 a tick can be undone', async ({ ownerApi }) => {
     const first = await creditSale(ownerApi);
     await creditSale(ownerApi, first.customerId);

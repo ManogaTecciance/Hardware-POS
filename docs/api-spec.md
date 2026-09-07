@@ -262,6 +262,11 @@ body: { "marked": true | false }
 #   owes what the account says. Marking every invoice is what would make an account
 #   read as dealt with, so the final tick must be earned by recorded payments; those
 #   payments settle it anyway, via creditSettledAt, without anyone clicking.
+# Clearing an account is itself an act of accounting for it: every invoice that
+#   still had a tick available is stamped with the settlement's own timestamp and
+#   the user who recorded the payment, so the customer page reads the same whether
+#   a person ticked an invoice off or the payment did. An invoice someone already
+#   ticked keeps THEIR name and time — the settlement does not take the credit.
 
 GET  /v1/sales?customerId={id}        # a customer's invoices, for their page
 

@@ -273,6 +273,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | MARK-003 | Last uncovered invoice is blocked | Tick the first of two, then try the second | 400 naming the last invoice; the button is disabled with the reason on hover | N | Automated |
 | MARK-004 | A lone credit invoice cannot be ticked | Customer with exactly one credit invoice | Refused — it is both first and last | N | Automated |
 | MARK-005 | Paying settles what was left | Clear the account after ticking one of two | Both invoices are settled; no second tick needed | P | Automated |
+| MARK-015 | Clearing accounts for every invoice left | Two credit invoices, neither ticked, then clear the account | Both show Accounted for, stamped with the settlement time and the person who took the payment | P | Automated |
+| MARK-016 | An earlier tick keeps its owner | Manager ticks one, owner then clears the account | The ticked one keeps the manager's name and time; the other is stamped with the owner's | P | Automated |
+| MARK-017 | A part payment accounts for nothing | Pay half the account | No invoice gains an Accounted for value | N | Automated |
 | MARK-006 | A tick can be undone | Undo on a ticked invoice | markedPaidAt cleared | P | Automated |
 | MARK-007 | A till-paid sale cannot be ticked | Mark a fully paid cash sale | 400 — nothing to account for | N | Automated |
 | MARK-008 | The list is scoped to the customer | Two customers with credit invoices | Each page shows only its own | P | Automated |
@@ -623,11 +626,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | POS | 50 | QB | 31 |
 | PAY | 41 | SET | 26 |
 | DISC | 13 | DOC | 16 |
-| MARK | 14 | ADM | 14 |
+| MARK | 17 | ADM | 14 |
 | SALE | 33 | UI | 23 |
 | RET | 18 | SEC | 12 |
 
-**Total: 473 test cases** (≈60% positive / 40% negative).
+**Total: 476 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
