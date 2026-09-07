@@ -568,6 +568,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
+| UI-017 | Tooltips are not clipped by their table | Hover a tooltip in the sales, products, customers or invoices table | The bubble shows in full above the row, not trimmed to the cell or the card | P | Not Run |
+| UI-018 | Tooltip follows the page as it scrolls | Hover a tooltip, then scroll the table or the page | It stays with its trigger, or goes away — never stranded mid-screen | P | Not Run |
+| UI-019 | Tooltip on a disabled control | Hover the disabled Mark paid on a customer's last invoice | Reason is shown; the button is still not clickable | P | Not Run |
+| UI-020 | Tooltip near a viewport edge | Hover a tooltip on the first row and on the rightmost column | Flips below at the top; never runs off the side | P | Not Run |
 | UI-001 | Dark mode toggles instantly | Toggle theme | All surfaces/tokens switch (not just scrollbar) | P | Not Run |
 | UI-002 | Theme persists across reload | Set dark, reload | No flash of wrong theme (pre-paint script) | P | Not Run |
 | UI-003 | System theme mode follows OS | Mode=system, flip OS preference | UI follows live | P | Not Run |
@@ -617,10 +621,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY | 41 | SET | 26 |
 | DISC | 13 | DOC | 16 |
 | MARK | 14 | ADM | 14 |
-| SALE | 33 | UI | 16 |
+| SALE | 33 | UI | 20 |
 | RET | 18 | SEC | 12 |
 
-**Total: 466 test cases** (≈60% positive / 40% negative).
+**Total: 470 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
