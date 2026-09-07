@@ -5428,3 +5428,151 @@ what it was, and are filtered out of the pickers where a new choice is made.
 - Every existing product, which keeps `brandId = NULL` and behaves identically.
 - The restaurant and hardware modules: one new table, one nullable column, and a
   `PRODUCT_*`-permissioned route set that no restaurant screen calls.
+
+---
+
+## D113 — weighed goods are a software prompt, not a hardware integration
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Migration
+required when built (`Product.quantityType`). Unblocks the **weighed-goods** part
+of Phase 6; the rest of that phase stays parked (see the end of this record).
+
+### The decision
+
+A product declares how it is measured. A cashier selling a measured product is
+asked for the measurement. Nothing else changes.
+
+```
+Product.quantityType : WHOLE | DECIMAL     default WHOLE
+```
+
+| Scenario | Flag | Behaviour |
+|---|---|---|
+| Cashier taps a shirt | `WHOLE` | Quantity 1 goes straight into the cart. No interruption |
+| Cashier taps "Rice, Rs 200/kg" | `DECIMAL` | The cart addition is intercepted; a numpad asks for the weight. `0.750` is entered, read off an ordinary offline scale |
+
+The line is then a normal line of quantity `0.750`, and every existing rule —
+pricing, tax, stock depletion, returns — applies to it unchanged.
+
+### Why this is the right shape
+
+Digital-scale drivers and variable-measure barcode decoding are both real work
+with real vendor variation, and neither is needed to sell rice. A shop already
+owns a scale; the cashier can already read it. The system's job is to accept the
+number, not to acquire it.
+
+It also fails safe. A tenant that never sets `DECIMAL` on anything is running the
+code that exists today, byte for byte.
+
+### What was verified before accepting this, and what it changes
+
+The premise "the backend foundation already supports this math" was checked
+against the code rather than assumed. **It holds** — and one part of the
+surrounding story does not.
+
+**Confirmed:**
+
+| Claim | Evidence |
+|---|---|
+| Quantities are `Decimal(12,3)` throughout | `SaleItem.quantity`, `BranchInventory.quantityOnHand`, `StockMovement.delta`, `ReturnItem.quantity`, `InventoryReceiptLine.quantityReceived` — all `@db.Decimal(12, 3)`. Three places is grams |
+| The API already accepts a fractional quantity | `SaleItemInputDto.quantity` is `@IsNumber() @IsPositive()` — **not** `@IsInt()`. A `0.750` posted today is accepted and stored |
+| Returns carry no whole-number assumption | No `IsInt` and no flooring in the returns DTOs or `returns.calc` |
+| Nothing collides with the new column | `Product` has no unit-of-measure, weight or scale field to conflict with |
+
+**Corrected — and this is the part worth carrying forward:**
+
+> **Phase 6's weighed-goods work was never blocked by hardware. It is blocked by
+> the till.**
+
+`apps/web/src/lib/pos-cart.tsx` clamps every typed quantity to a whole number:
+
+```ts
+let q = Math.max(1, Math.floor(quantity));   // setQty
+```
+
+and the `+`/`−` stepper moves in units of one (`changeQty(lineKey, ±1)`). A
+cashier who types `0.750` today gets `1`. So the work this decision authorises is
+**frontend work on the cart**, not backend work and not driver work — which is a
+smaller, better-understood job than the plan implied, but it is not nothing, and
+the schema being ready does not make it free.
+
+### The rule that must not be broken when this is built
+
+**The numpad must not compute the price.** It collects a quantity; the line total
+is computed where every other line total is computed.
+
+This branch has paid for that lesson twice: `2.12` (four sale-line renderers, two
+of them fixed, so the same sale printed differently from different endpoints) and
+`3.10` (the till quoted 18% on an item the server then zero-rated). D59 says one
+money engine. A weighed line is the easiest place in the system to grow a second
+one, because `0.750 × 200` looks too simple to be worth centralising.
+
+### Open sub-question — promotions on a measured line
+
+**Not decided here. It needs an answer before this is built.**
+
+`packages/shared/src/promotions/applier.ts` counts in whole units:
+
+```ts
+times  = Math.floor(quantityOf(lines, productId) / perBundle);
+earned = Math.floor(buyPool / buyQty) * getQty;
+req.set(it.productId, (req.get(it.productId) ?? 0) + Math.max(1, it.quantity));
+```
+
+"Buy 2, get 1 free" on 0.75 kg of rice has no defined meaning, and
+`Math.max(1, it.quantity)` quietly rounds a 0.75 kg line **up** to one unit for
+eligibility — so a customer buying 750 g today would count as a whole unit toward
+a bundle. That is not a bug against current data, because no product can be
+fractional yet; it becomes one the day this decision is implemented.
+
+Three readings, in the order I would recommend them:
+
+1. **Quantity-based promotions do not apply to `DECIMAL` products.** Percentage
+   and fixed-amount promotions still do. Simplest, hardest to get subtly wrong,
+   and matches how most grocers actually price ("10% off all rice", not "buy 2 kg
+   get 1 kg").
+2. Quantity promotions apply on whole units only, fractions ignored.
+3. Quantity promotions apply pro-rata.
+
+**Whoever picks needs to say so in a follow-up record**, and the applier needs a
+test either way — a promotion that silently treats 0.75 kg as one unit is exactly
+the kind of thing that ships green.
+
+### Scope — what this does and does not unblock
+
+**Unblocked:** selling by weight or measure. A grocer can price rice per kilo and
+sell 750 g of it.
+
+**Still parked, unchanged:**
+
+- Per-category tax rates (`3.1`–`3.3`) — zero-rated staples beside standard-rated
+  goods. A separate requirement with its own migration.
+- The grocery `attributeSchema` (was `2.5`) — still closed rather than open:
+  Q12 resolved *do not split `RETAIL`*, so a grocery tenant would be shown the
+  clothing schema. Needs a grocery customer to say what a grocer records.
+- Variable-measure barcode decoding (`21`/`22` prefixes) — genuinely a hardware/
+  vendor concern, and **this decision is what makes it optional rather than
+  prerequisite**. A shop can operate with the numpad and adopt scale labels later.
+- Footwear size scales — unrelated, still needs a local retailer.
+
+**Phase 6 is therefore not "unblocked" as a whole.** One of its four parked items
+now has an implementation path that needs no hardware; the other three are
+untouched.
+
+### What must be true of the implementation
+
+Recorded now so the sprint does not re-litigate it:
+
+1. **`quantityType` defaults to `WHOLE`** on the column, so every existing row —
+   restaurant, hardware, retail — reads as it does today with no backfill.
+2. **The flag is read, never inferred.** No component may guess "this looks like
+   rice". Same rule as D56: read a capability, never a business type.
+3. **The server does not trust the client's arithmetic.** It already recomputes
+   every line; a `DECIMAL` line changes no part of that.
+4. **The prompt is cancellable**, and cancelling adds nothing to the cart. A
+   half-added line is worse than no line.
+5. **`0` is refused, not accepted as an empty line.** `@IsPositive()` already
+   refuses it server-side; the numpad should refuse it sooner.
+6. **Stock, returns and reports need no change** — they are already `Decimal`.
+   `8.3`'s `formatReportQuantity` already renders `0.750` as `0.75`, which was
+   written for loose goods before this decision existed.
