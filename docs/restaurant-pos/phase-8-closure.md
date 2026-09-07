@@ -17,7 +17,7 @@ the handover of what remains.
 | ☑ | Every new route classified in `route-module-matrix.spec.ts` **and** its document | 305 → 308 routes, 209 → 211 guarded and ungated as declared |
 | ☑ | Every decision that needed a record has one | `D108`, `D109`, `D110`, `D111`, `D112` |
 | ☑ | No migration without a decision record | `8.7` → `D111`, `8.9` → `D112`; both verified with `migrate diff` before commit |
-| ☑ | Schema and migrations agree | "This is an empty migration", both times |
+| ☑ | Schema and migrations agree | "This is an empty migration", both times — **with the untracked drift folder present, as it is on this machine**. Without it the diff emits one pre-existing D44 foreign-key pair and nothing else; see handover item 5 |
 | ☑ | No restaurant source file edited | Checked, not assumed: `git diff --name-only b703721~1..HEAD` filtered for `restaurant|menu|dining|kitchen|table-session|takeaway|billing|delivery` returns **three files, all documentation** — `docs/restaurant-pos/{00-decisions,route-module-matrix,phase-8-verification}.md`, which live under a folder that happens to be named for Phase 1. **Zero source files** |
 | ☑ | The protected drift folder untouched | `packages/database/prisma/migrations/20260828081727/` still untracked, never staged |
 | ☑ | Test baselines held | API unit 10 failures, web unit 6 — the same pre-existing Windows path-separator failures as before the phase |
@@ -89,7 +89,8 @@ These are things the code does not do, stated so nobody has to re-derive them.
 | 2 | **`RT-01`** — the per-line tax snapshot handover | Restaurant team *(forwarded)* |
 | 3 | **`2.5`** — grocery attribute schema. Closed, not parked: one `RETAIL` business type means a grocery tenant would see the clothing schema. Needs an answer before a grocery client is sold | Whoever sells one |
 | 4 | **The UI pass** | A human with the app open |
-| 5 | **Four architectural analysers fail on Windows** — `collectFiles` returns absolute paths where the specs expect repo-relative ones, so ten exact-set assertions cannot pass on this machine. Pre-existing, unrelated to this branch, and it makes ten tripwires read as failures instead of guarding anything | Whoever owns the testkit |
+| 5 | **The D44 foreign-key drift is still unresolved, and it is what the untracked folder holds.** Measured 2026-09-07: `migrate diff` against the tracked migrations alone emits one `InventoryReceiptLine_productVariantId_fkey` drop/re-add pair and **nothing else**. `20260826000000_add_product_attributes` documents stripping that same pair as "pre-existing D44 drift". So a fresh clone's database disagrees with `schema.prisma` on one FK's `onDelete`. Phase 8's own migrations are clean; this predates the branch | Tech lead, who ruled the folder untouchable |
+| 6 | **Four architectural analysers fail on Windows** — `collectFiles` returns absolute paths where the specs expect repo-relative ones, so ten exact-set assertions cannot pass on this machine. Pre-existing, unrelated to this branch, and it makes ten tripwires read as failures instead of guarding anything | Whoever owns the testkit |
 
 ---
 
