@@ -245,7 +245,16 @@ export default function QuotationDetailPage() {
                       </td>
                       <td className="px-4 py-2.5 text-right">{formatMoney(it.unitPrice)}</td>
                       <td className="px-4 py-2.5 text-right text-muted-foreground">
-                        {it.discountAmount > 0 ? `- ${formatMoney(it.discountAmount)}` : '—'}
+                        {/* A per-unit discount shows its arithmetic: the amount
+                            taken is larger than the figure quoted per item, and
+                            the customer should be able to check it. */}
+                        {it.discountAmount > 0
+                          ? `- ${formatMoney(it.discountAmount)}${
+                              it.discountBasis === 'UNIT' && it.discountValue != null
+                                ? ` (${formatMoney(it.discountValue)} × ${it.quantity})`
+                                : ''
+                            }`
+                          : '—'}
                       </td>
                       <td className="px-4 py-2.5 text-right font-medium">{formatMoney(it.lineTotal)}</td>
                     </tr>

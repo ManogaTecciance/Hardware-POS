@@ -160,6 +160,29 @@ All product/category read routes require `product:read`; every role has it.
 ```
 GET /v1/customers?query=acme
 200 → { "data": { "items": [ { "id", "qboId", "name", "email", "phone" } ], ... } }
+
+GET /v1/customers/{id}/credit          # customer:read — live credit position
+200 → { "creditAllowed", "creditLimit", "outstanding", "available" }
+404 → no such customer in this tenant
+# Served from the same CreditService the sale-completion guard uses, so the figure a
+#   cashier is shown is the figure they are held to. `creditLimit: null` means no limit
+#   is configured, i.e. unlimited — NOT zero. `available` is unclamped and CAN be
+#   negative (a limit lowered after the fact); clamp it at zero for display, as the
+#   server does in its own error message.
+# The POS payment page re-reads this as the order changes, so a cashier sees "over the
+#   credit limit" while adjusting quantities rather than when they press Complete
+#   Payment. It is advisory: the server re-checks on completion and decides.
+
+GET /v1/customers?page=1&pageSize=20&hasOutstandingCredit=true
+200 → paginated customers, each row carrying its credit position:
+      { ..., "creditLimit", "outstandingCredit", "availableCredit" }
+# outstandingCredit: unpaid balance summed across the customer's COMPLETED,
+#   unsettled sales — the same figure the credit-limit guard enforces against.
+# availableCredit: creditLimit − outstandingCredit, or **null** when no limit is
+#   configured. Null is not zero: "no limit set" and "no credit left" are
+#   different answers and clients must not conflate them.
+# hasOutstandingCredit=true: only customers who currently owe something (the
+#   dashboard's receivable card deep-links here).
 ```
 
 ## Sales
@@ -173,16 +196,18 @@ POST /v1/sales/draft                   # build a DRAFT sale (totals computed, no
 body: { "branchId", "registerId?", "customerId?",
         "items": [ { "productId", "quantity", "unitPrice?",
                      "discountType?": "PERCENTAGE|FIXED", "discountValue?",
+                     "discountBasis?": "LINE|UNIT",
                      "discountReason?", "approvalToken?" } ] }
 200 → { "data": <sale with items, status DRAFT, syncStatus NOT_SYNCED> }
 
 POST /v1/sales/complete                # complete a draft (saleId) OR a full cart in one shot
-body (draft):    { "saleId", "customerId?", "saleDate?", "payments": [ { "method", "amount", "reference?" } ] }
-body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "items": [ ... ], "payments": [ ... ] }
+body (draft):    { "saleId", "customerId?", "saleDate?", "paymentDueDate?", "payments": [ { "method", "amount", "reference?" } ] }
+body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "paymentDueDate?", "items": [ ... ], "payments": [ ... ] }
 201 → { "data": <sale status COMPLETED, paymentStatus, quickbooksDocumentType, syncStatus PENDING> }
 400 → validation error (empty cart, price changed, insufficient stock,
        unapproved high discount, credit/partial sale without a customer,
-       or a sale date in the future)
+       a sale date in the future, a missing payment due date on a sale that
+       leaves a balance, or a payment due date on a fully paid sale)
 
 # saleDate: the invoice date, as a YYYY-MM-DD calendar date. Omitted = now. It is
 #   interpreted in the SERVER's timezone and stored as the sale's `completedAt`, which
@@ -192,11 +217,58 @@ body (one-shot): { "branchId", "registerId?", "customerId?", "saleDate?", "items
 # Completion pipeline: resolve the sale date → validate items → validate prices vs cache → check stock →
 #   subtotal → product-wise discounts → tax (if rate > 0) → total → save sale,
 #   items, payments → enqueue an outbound QuickBooks sync job.
+# discountBasis: what a FIXED line discount is measured against. LINE (the default,
+#   and the meaning of every sale before this) takes the amount off once; UNIT takes
+#   it off every unit — value × quantity. Rejected on a PERCENTAGE, which is already
+#   the same figure per unit and per line. The amount is always clamped to the line,
+#   so a per-unit discount larger than the unit price floors the line at zero.
+#   Order-level discounts have no units and are always whole-cart.
+#   Quotation lines carry the same field, and it is carried into the sale on
+#   conversion — a quotation is never re-priced by becoming an invoice.
+#   The basis is bound into the discount-approval token: an approval for an amount
+#   off the line cannot be spent on the same amount off every unit.
 # Transaction type: paidAmount >= total → SALES_RECEIPT; otherwise INVOICE (customer required).
 # Payments: full, partial, or none (full credit) are all supported.
+# paymentDueDate: when the balance is expected, as a YYYY-MM-DD calendar date.
+#   REQUIRED whenever the payments leave a balance, and REJECTED on a fully paid
+#   sale, which owes nothing. It may not fall before the invoice date (a backdated
+#   sale may therefore be recorded already overdue). Interpreted in the shop's
+#   timezone and stored as the end of that day; pushed to QuickBooks as the
+#   Invoice `DueDate`.
 
 GET  /v1/sales?page=1&pageSize=25&syncStatus=FAILED
 200 → paginated sales history (syncStatus per sale)
+# Filters: search, paymentStatus, syncStatus, dateFrom, dateTo, overdue=true.
+#   paymentStatus=UNPAID means "still on credit": wholly unpaid or part-paid, and
+#   never one the customer's account has since cleared. PAID means the opposite —
+#   paid at the till, OR covered by an account settlement. PARTIAL on its own still
+#   narrows to exactly those, for a caller that wants them.
+# Each row carries `creditSettledAt`: when set, the sale reads as Paid because the
+#   customer cleared their account, even though nothing was tendered against it.
+#   overdue=true keeps only COMPLETED sales whose paymentDueDate has passed and
+#   which still owe money. GET /v1/sales/report accepts the same filters, so an
+#   export always covers exactly the sales the screen was showing.
+# Each row carries `paymentDueDate` (null when nothing is owed) and
+#   `lastPaymentAt` (when money was last received against the sale, null if never).
+
+POST /v1/sales/{id}/marked-paid        # payment:create
+body: { "marked": true | false }
+200 → the sale
+400 → not completed, no customer, already paid, or it is the LAST uncovered invoice
+       on an account that still owes
+# Ticking a credit invoice off is BOOKKEEPING: it records who accounted for it and
+#   when (`markedPaidAt`, `markedPaidByName`) and moves no money — balanceAmount,
+#   paymentStatus and the credit aggregation are untouched, and the customer still
+#   owes what the account says. Marking every invoice is what would make an account
+#   read as dealt with, so the final tick must be earned by recorded payments; those
+#   payments settle it anyway, via creditSettledAt, without anyone clicking.
+# Clearing an account is itself an act of accounting for it: every invoice that
+#   still had a tick available is stamped with the settlement's own timestamp and
+#   the user who recorded the payment, so the customer page reads the same whether
+#   a person ticked an invoice off or the payment did. An invoice someone already
+#   ticked keeps THEIR name and time — the settlement does not take the credit.
+
+GET  /v1/sales?customerId={id}        # a customer's invoices, for their page
 
 GET  /v1/sales/{id}
 200 → full sale with items, payments, customer
@@ -206,6 +278,59 @@ POST /v1/sales/{id}/sync               # push the sale to QuickBooks (mock for n
       the sync job closes and a SyncLog entry is written
 400 → sale is not COMPLETED
 ```
+
+### Payment method on a document
+
+A bill, PDF or thermal receipt states its method with the shared rule in
+`documentPaymentMethods` (`packages/shared`): while a balance remains the sale is running
+on credit, so **Credit** is listed — alongside anything already tendered, since a customer
+who paid half in cash did use cash. Once the sale is settled the list is simply what they
+paid with, so a bill reprinted after settlement reads `Bank transfer` rather than `Credit`.
+
+`Credit` is a render-time label, not a `PaymentMethod`: nothing is tendered on credit, so
+there is no enum member and nothing is stored.
+
+## Payments received
+
+Credit is an **account** balance, not a per-invoice one. Money received later is recorded
+against the CUSTOMER and is never applied to a single sale. Requires `payment:create`.
+
+```
+POST /v1/payments
+body: { "customerId", "method", "amount", "reference?" }
+201 → { "data": { "payment", "outstanding", "salesSettled" } }
+400 → amount <= 0, more than the account owes, or the account owes nothing
+404 → no such customer in this tenant
+
+GET  /v1/payments?customerId={id}      # the customer's credit history, newest first
+GET  /v1/payments?saleId={id}          # what was tendered at the till for one sale
+GET  /v1/payments/{id}
+# One filter is required — without it this would return every payment in the tenant.
+```
+
+The rule, in one line: **while the account owes anything every credit sale stays outstanding,
+and the moment it reaches zero they are all settled together.** A part payment therefore
+settles no invoice at all — not even the oldest — and a sale rung up after a settlement
+starts the next balance rather than joining the one already closed.
+
+Settlement is recorded on `Sale.creditSettledAt`, NOT by rewriting `paidAmount` /
+`balanceAmount` / `paymentStatus`. Those stay true to what was tendered against that invoice
+at the till, because the printed bill, the refund guard and QuickBooks all read them; a swept
+sale would otherwise claim money it never took. The payments that closed a balance are
+retired with `Payment.settledAt`, so the next cycle starts from zero instead of subtracting
+them forever.
+
+```
+account outstanding = SUM(balanceAmount over COMPLETED, still-unpaid, unsettled sales)
+                    - SUM(account payments not yet consumed by a settlement)
+```
+
+Recomputed **inside** the write transaction, so two people settling the same account at once
+cannot between them overpay it. Money paid on account reduces the customer's outstanding —
+and the dashboard receivable — the moment it is taken, even though no invoice is settled yet.
+
+> `TODO(accountant)`: account payments are not yet pushed to QuickBooks against the customer's
+> open invoices, so QuickBooks still shows them unpaid after the customer has settled.
 
 ## Receipts & print jobs
 
@@ -311,9 +436,14 @@ POST /v1/quickbooks/sync-products      # quickbooks:manage — requires an activ
 
 Pushes a completed sale to QuickBooks. A **fully paid** sale becomes a **Sales Receipt**; a
 **credit / partial** sale becomes an **Invoice**, and when any amount was paid a **Payment** is
-created and linked to that invoice. Both the document and its linked Payment carry a `TxnDate`
+created and linked to that invoice. The `CustomerRef` on each document is resolved from
+`Customer.quickbooksCustomerId`; a customer not yet in QuickBooks is created there first (or an
+existing one of the same name adopted) and the id stored, so a credit sale for a customer added at
+the till syncs without manual linking. Both the document and its linked Payment carry a `TxnDate`
 equal to the sale's invoice date (a bare `YYYY-MM-DD` in server-local time), so a backdated POS
-sale is filed in QuickBooks on the day it happened rather than the day it was keyed in.
+sale is filed in QuickBooks on the day it happened rather than the day it was keyed in. An
+Invoice additionally carries a `DueDate` taken from the sale's `paymentDueDate`, so the terms
+agreed at the till are the terms QuickBooks ages the receivable against.
 Sale line items reference their `quickbooksItemId` when the
 product has been synced. Product-wise discounts are baked into each line's net amount (QuickBooks
 has no per-line discount field) and noted in the line description — see the `TODO(accountant)`

@@ -2,28 +2,71 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Customer, Prisma } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { round2 } from '../../common/money';
 import { paginate } from '../../common/pagination';
+import { CreditService, type CustomerCredit } from '../credit/credit.service';
+import { QuickBooksCustomersService } from '../quickbooks/quickbooks-customers.service';
 import { CustomersRepository } from './customers.repository';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { QueryCustomersDto } from './dto/query-customers.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
+/** A customer row plus the credit figures the list column needs. */
+export interface CustomerListItem extends Customer {
+  /** Total unpaid balance across this customer's completed, unsettled sales. */
+  outstandingCredit: number;
+  /** `creditLimit - outstandingCredit`; null when no limit is configured. */
+  availableCredit: number | null;
+}
+
 @Injectable()
 export class CustomersService {
-  constructor(private readonly customersRepository: CustomersRepository) {}
+  constructor(
+    private readonly customersRepository: CustomersRepository,
+    private readonly quickbooksCustomers: QuickBooksCustomersService,
+    private readonly credit: CreditService,
+  ) {}
 
-  async list(tenantId: string, query: QueryCustomersDto): Promise<Paginated<Customer>> {
+  async list(tenantId: string, query: QueryCustomersDto): Promise<Paginated<CustomerListItem>> {
     const [items, total] = await this.customersRepository.search(
       tenantId,
       {
         search: query.search,
         customerType: query.customerType,
         isActive: query.isActive === undefined ? undefined : query.isActive === 'true',
+        hasOutstandingCredit: query.hasOutstandingCredit === 'true',
       },
       query.skip,
       query.take,
     );
-    return paginate(items, total, query.page, query.pageSize);
+
+    // One grouped query for the whole page rather than an aggregate per row.
+    const outstandingByCustomer = await this.credit.outstandingByCustomer(
+      tenantId,
+      items.map((c) => c.id),
+    );
+    const withCredit = items.map((customer) => {
+      const outstanding = outstandingByCustomer.get(customer.id) ?? 0;
+      const creditLimit = customer.creditLimit != null ? Number(customer.creditLimit) : null;
+      return {
+        ...customer,
+        outstandingCredit: outstanding,
+        // Null, not zero: "no limit set" and "no credit left" are different
+        // answers and the table must not conflate them.
+        availableCredit: creditLimit != null ? round2(creditLimit - outstanding) : null,
+      };
+    });
+
+    return paginate(withCredit, total, query.page, query.pageSize);
+  }
+
+  /** Live credit position for one customer; 404 when the customer is not theirs. */
+  async creditFor(tenantId: string, id: string): Promise<CustomerCredit> {
+    const credit = await this.credit.forCustomer(tenantId, id);
+    if (!credit) {
+      throw new NotFoundException(`Customer ${id} not found`);
+    }
+    return credit;
   }
 
   async getById(tenantId: string, id: string): Promise<Customer> {
@@ -96,12 +139,30 @@ export class CustomersService {
     return this.customersRepository.update(id, data);
   }
 
-  /** Queue a customer for QuickBooks (stub — real QBO customer writes come later). */
+  /**
+   * Push a locally-created customer to QuickBooks now.
+   *
+   * Previously this only flagged the row PENDING and wrote a log line: no job
+   * type existed for customers, so nothing ever drained it and the customer sat
+   * PENDING forever. It now performs the push, adopting an existing QuickBooks
+   * customer of the same name where there is one.
+   */
   async syncToQuickBooks(tenantId: string, id: string): Promise<Customer> {
     const customer = await this.getById(tenantId, id);
     if (customer.quickbooksCustomerId) {
       throw new BadRequestException('Customer is already linked to QuickBooks');
     }
-    return this.customersRepository.queueQuickBooksSync(tenantId, id);
+    try {
+      // The push writes its own SYNCED sync-log entry and sets the status, so no
+      // PENDING row is queued first — the old stub left one behind permanently,
+      // because nothing ever drained a customer queue that does not exist.
+      await this.quickbooksCustomers.pushCustomer(tenantId, id);
+    } catch (err) {
+      await this.customersRepository.markQuickBooksSyncFailed(tenantId, id, (err as Error).message);
+      throw new BadRequestException(
+        `Could not sync customer to QuickBooks: ${(err as Error).message}`,
+      );
+    }
+    return this.getById(tenantId, id);
   }
 }

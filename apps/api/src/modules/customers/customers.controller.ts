@@ -26,7 +26,8 @@ import {
   type ImportCommitSummary,
   type ParsedCustomerRow,
 } from './customers-import.service';
-import { CustomersService } from './customers.service';
+import { CustomersService, type CustomerListItem } from './customers.service';
+import type { CustomerCredit } from '../credit/credit.service';
 import { CommitCustomerImportDto } from './dto/commit-import.dto';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { QueryCustomersDto } from './dto/query-customers.dto';
@@ -46,7 +47,10 @@ export class CustomersController {
 
   @Get()
   @RequirePermissions(Permission.CUSTOMER_READ)
-  list(@TenantId() tenantId: string, @Query() query: QueryCustomersDto): Promise<Paginated<Customer>> {
+  list(
+    @TenantId() tenantId: string,
+    @Query() query: QueryCustomersDto,
+  ): Promise<Paginated<CustomerListItem>> {
     return this.customersService.list(tenantId, query);
   }
 
@@ -102,6 +106,21 @@ export class CustomersController {
   @RequirePermissions(Permission.CUSTOMER_READ)
   getById(@TenantId() tenantId: string, @Param('id') id: string): Promise<Customer> {
     return this.customersService.getById(tenantId, id);
+  }
+
+  /**
+   * What this customer owes and how much credit that leaves them.
+   *
+   * Its own route rather than fields on the customer, because it is a live
+   * figure aggregated from sales — the till asks for it again as an order grows,
+   * and callers who just want the customer record should not pay for the
+   * aggregate. Served from the same CreditService the sale-completion guard
+   * uses, so the number the cashier is shown is the number they are held to.
+   */
+  @Get(':id/credit')
+  @RequirePermissions(Permission.CUSTOMER_READ)
+  credit(@TenantId() tenantId: string, @Param('id') id: string): Promise<CustomerCredit> {
+    return this.customersService.creditFor(tenantId, id);
   }
 
   @Patch(':id')

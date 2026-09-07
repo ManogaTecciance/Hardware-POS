@@ -28,6 +28,7 @@ import {
   createRevision,
   updateQuotation,
   previewQuotation,
+  type DiscountBasis,
   type DiscountType,
   type QuotationDetail,
   type QuotationItemInput,
@@ -46,6 +47,7 @@ interface Line {
   unitPrice: number;
   discountType: DiscountType | '';
   discountValue: number;
+  discountBasis: DiscountBasis;
   itemNote: string;
 }
 
@@ -75,6 +77,7 @@ function lineFromProduct(p: ManagedProduct): Line {
     unitPrice: p.unitPrice,
     discountType: '',
     discountValue: 0,
+    discountBasis: 'LINE',
     itemNote: '',
   };
 }
@@ -106,6 +109,9 @@ export function QuotationBuilder({ mode, initial, header }: Props) {
           unitPrice: it.unitPrice,
           discountType: it.discountType ?? '',
           discountValue: it.discountValue ?? 0,
+          // Re-seeded when editing or revising: dropping it here would not go
+          // stale, it would reprice the quotation on the next save.
+          discountBasis: it.discountBasis ?? 'LINE',
           itemNote: it.itemNote ?? '',
         }))
       : [],
@@ -154,6 +160,9 @@ export function QuotationBuilder({ mode, initial, header }: Props) {
         unitPrice: l.unitPrice,
         discountType: l.discountType || undefined,
         discountValue: l.discountType ? l.discountValue : undefined,
+        // FIXED only — the API refuses a per-unit percentage, and this memo feeds
+        // the debounced preview as well as every save path.
+        discountBasis: l.discountType === 'FIXED' ? l.discountBasis : undefined,
         itemNote: l.itemNote || undefined,
       })),
     [lines],
@@ -227,7 +236,10 @@ export function QuotationBuilder({ mode, initial, header }: Props) {
       l.discountType === 'PERCENTAGE'
         ? (subtotal * l.discountValue) / 100
         : l.discountType === 'FIXED'
-          ? Math.min(l.discountValue, subtotal)
+          ? Math.min(
+              subtotal,
+              l.discountValue * (l.discountBasis === 'UNIT' ? l.quantity : 1),
+            )
           : 0;
     return Math.round((subtotal - discount) * 100) / 100;
   }
@@ -523,18 +535,56 @@ export function QuotationBuilder({ mode, initial, header }: Props) {
                   </Select>
                 </label>
                 <label className="text-[11px] text-muted-foreground">
-                  Value
+                  {l.discountType === 'FIXED'
+                    ? l.discountBasis === 'UNIT'
+                      ? 'Off each unit'
+                      : 'Off the line'
+                    : 'Value'}
                   <Input
                     type="number"
                     min={0}
                     step="any"
                     disabled={!l.discountType}
-                    value={l.discountValue}
-                    onChange={(e) => patchLine(l.key, { discountValue: Number(e.target.value) })}
+                    // Empty rather than a literal 0, so the field can be cleared
+                    // and typed into. A numeric 0 bound straight to `value` snaps
+                    // back the instant it is deleted, so the digit you type lands
+                    // after it and reads as "05".
+                    value={l.discountValue === 0 ? '' : l.discountValue}
+                    placeholder="0"
+                    onChange={(e) =>
+                      patchLine(l.key, { discountValue: Number(e.target.value) || 0 })
+                    }
                     className="mt-0.5 h-9"
                   />
                 </label>
               </div>
+
+              {/* A fixed amount can come off the line once or off every unit. A
+                  percentage offers no such choice, being the same either way. */}
+              {l.discountType === 'FIXED' ? (
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      ['LINE', 'Off the line'],
+                      ['UNIT', 'Off each unit'],
+                    ] as const
+                  ).map(([b, label]) => (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => patchLine(l.key, { discountBasis: b })}
+                      className={cn(
+                        'rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors',
+                        l.discountBasis === b
+                          ? 'border-primary bg-brand-50 text-brand-700'
+                          : 'border-border text-muted-foreground hover:bg-muted',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <Input
                 value={l.itemNote}
                 onChange={(e) => patchLine(l.key, { itemNote: e.target.value })}
@@ -545,6 +595,9 @@ export function QuotationBuilder({ mode, initial, header }: Props) {
               <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-sm">
                 <span className="text-[11px] text-muted-foreground">
                   Total{l.quantity > 1 ? ` (${l.quantity} × ${formatMoney(l.unitPrice)})` : ''}
+                  {l.discountType === 'FIXED' && l.discountBasis === 'UNIT' && l.discountValue > 0
+                    ? ` less ${formatMoney(l.discountValue)} × ${l.quantity}`
+                    : ''}
                 </span>
                 <span className="font-semibold tabular-nums text-primary">
                   {formatMoney(lineTotal(l, index))}

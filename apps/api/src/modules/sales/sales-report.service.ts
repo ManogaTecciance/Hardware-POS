@@ -104,6 +104,10 @@ export class SalesReportService {
         search: query.search?.trim() || undefined,
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        // Exported from a filtered screen, the report must cover the same sales
+        // the screen was showing — an overdue export that quietly widened to
+        // every sale would be worse than no export.
+        overdueAsOf: query.overdue === 'true' ? new Date() : undefined,
       },
       0,
       MAX_REPORT_ROWS,
@@ -126,6 +130,7 @@ export class SalesReportService {
     if (query.paymentStatus) filters.push(`Payment: ${query.paymentStatus}`);
     if (query.syncStatus) filters.push(`Sync: ${query.syncStatus}`);
     if (query.search?.trim()) filters.push(`Search: "${query.search.trim()}"`);
+    if (query.overdue === 'true') filters.push('Overdue payments only');
 
     return {
       rows,

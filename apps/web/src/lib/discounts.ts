@@ -12,6 +12,8 @@ export interface ApprovalRequest {
   managerPin: string;
   productId: string;
   discountType: DiscountType;
+  /** Bound into the approval token, so an approval cannot be re-scoped after the fact. */
+  discountBasis?: 'LINE' | 'UNIT';
   discountValue: number;
   reason?: string;
 }

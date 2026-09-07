@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import * as React from 'react';
-import { FileUp, Search, UserPlus } from 'lucide-react';
+import { FileUp, Info, Search, UserPlus, X } from 'lucide-react';
 
 import { ImportCustomersDialog } from '@/components/customers/import-customers-dialog';
 import { PageHeader } from '@/components/page-header';
@@ -10,6 +11,8 @@ import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
+import { Tooltip } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth';
@@ -23,12 +26,35 @@ import {
 import { Permission } from '@/lib/permissions';
 import { formatMoney } from '@/lib/utils';
 
-const PAGE_SIZES = [20, 30, 40, 50];
+
+/**
+ * How much of the limit this customer has already used, and what that leaves.
+ *
+ * Spelled out rather than shown as three columns: the breakdown is what you want
+ * at the moment you are deciding on one customer, not while scanning the table.
+ */
+function creditBreakdown(c: ManagedCustomer): string {
+  const used = c.outstandingCredit ?? 0;
+  const limit = c.creditLimit;
+  if (limit == null) return `${formatMoney(used)} used · no limit set`;
+  return `${formatMoney(used)} of ${formatMoney(limit)} used · ${formatMoney(
+    Math.max(0, limit - used),
+  )} left`;
+}
 const TYPE_OPTIONS = Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[];
 
 export default function CustomersPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.CUSTOMER_MANAGE);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Seeded from the URL so the dashboard's receivable card can deep-link
+  // straight to the customers who owe it. Only the initial value comes from the
+  // URL — after that the filter is the user's to clear.
+  const [owingOnly, setOwingOnly] = React.useState(
+    () => searchParams.get('hasOutstandingCredit') === 'true',
+  );
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -51,7 +77,7 @@ export default function CustomersPage() {
 
   React.useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, customerType, active, pageSize]);
+  }, [debouncedSearch, customerType, active, owingOnly, pageSize]);
 
   React.useEffect(() => {
     if (!session) return;
@@ -64,6 +90,7 @@ export default function CustomersPage() {
       search: debouncedSearch || undefined,
       customerType: customerType || undefined,
       isActive: active || undefined,
+      hasOutstandingCredit: owingOnly ? 'true' : undefined,
     };
     fetchCustomers(session, query)
       .then((res) => {
@@ -81,7 +108,39 @@ export default function CustomersPage() {
     return () => {
       cancelled = true;
     };
-  }, [session, page, pageSize, debouncedSearch, customerType, active, reloadKey]);
+  }, [session, page, pageSize, debouncedSearch, customerType, active, owingOnly, reloadKey]);
+
+  /**
+   * Open a customer from anywhere in their row.
+   *
+   * The row is a mouse convenience over the name link, which stays as the
+   * keyboard and screen-reader path — making the row itself focusable would add
+   * a second tab stop to the same destination and announce the whole row as a
+   * link.
+   *
+   * Three clicks are deliberately not a same-tab navigation: one that lands on
+   * something interactive (the name link, the Edit link, the credit info icon),
+   * which owns its own behaviour; one that ends a text selection, because
+   * reading a phone number off the table is a copy and not a click; and a
+   * right-click, which belongs to the context menu. A middle- or modifier-click
+   * still opens the customer, in the new tab the user asked for.
+   */
+  const handleOpen = (event: React.MouseEvent<HTMLTableRowElement>, id: string) => {
+    // Right-click belongs to the context menu; onAuxClick fires for it too.
+    if (event.button === 2) return;
+    if (
+      (event.target as HTMLElement).closest('a, button, input, select, textarea, [role="button"]')
+    ) {
+      return;
+    }
+    if (window.getSelection()?.toString().trim()) return;
+    const href = `/customers/${id}`;
+    if (event.button === 1 || event.metaKey || event.ctrlKey || event.shiftKey) {
+      window.open(href, '_blank', 'noopener');
+      return;
+    }
+    router.push(href);
+  };
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -137,6 +196,14 @@ export default function CustomersPage() {
           <option value="false">Inactive</option>
           <option value="">All</option>
         </Select>
+        <Button
+          variant={owingOnly ? 'primary' : 'outline'}
+          onClick={() => setOwingOnly((v) => !v)}
+          aria-pressed={owingOnly}
+        >
+          Credit outstanding
+          {owingOnly ? <X className="h-4 w-4" aria-label="Clear filter" /> : null}
+        </Button>
       </div>
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -149,7 +216,8 @@ export default function CustomersPage() {
                 <th className="px-4 py-3 font-medium">Customer</th>
                 <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">Phone</th>
-                <th className="px-4 py-3 font-medium">Credit</th>
+                <th className="px-4 py-3 font-medium">Credit limit</th>
+                <th className="px-4 py-3 font-medium">Available credit</th>
                 <th className="px-4 py-3 font-medium">Sync</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
@@ -157,19 +225,24 @@ export default function CustomersPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
                     Loading customers…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
                     No customers found.
                   </td>
                 </tr>
               ) : (
                 rows.map((c) => (
-                  <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                  <tr
+                    key={c.id}
+                    onClick={(e) => handleOpen(e, c.id)}
+                    onAuxClick={(e) => handleOpen(e, c.id)}
+                    className="cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-muted/30"
+                  >
                     <td className="px-4 py-3">
                       <Link
                         href={`/customers/${c.id}`}
@@ -191,11 +264,42 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{c.phone ?? '—'}</td>
                     <td className="px-4 py-3">
-                      {c.creditAllowed ? (
-                        <span className="text-muted-foreground">
-                          {c.creditLimit != null ? formatMoney(c.creditLimit) : 'No limit'}
+                      {/* Only a figure earns a place here. A customer with no limit
+                          configured has no number to show, so the cell stays empty
+                          rather than carrying wording the column cannot explain —
+                          the detail page states it in full, next to whether credit
+                          is allowed at all. */}
+                      <span className="text-muted-foreground">
+                        {c.creditAllowed && c.creditLimit != null ? formatMoney(c.creditLimit) : '—'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {c.availableCredit != null ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span
+                            className={
+                              c.availableCredit < 0 ? 'text-danger' : 'text-muted-foreground'
+                            }
+                          >
+                            {formatMoney(c.availableCredit)}
+                          </span>
+                          {/* The figure alone does not say what it was counted down
+                              from, and that is the question anyone about to approve
+                              a sale actually has. */}
+                          <Tooltip label={creditBreakdown(c)}>
+                            <span
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`Credit breakdown: ${creditBreakdown(c)}`}
+                              className="cursor-help rounded text-muted-foreground/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              <Info className="h-3.5 w-3.5" />
+                            </span>
+                          </Tooltip>
                         </span>
                       ) : (
+                        // No limit set means there is nothing to count down from —
+                        // showing zero here would read as "no credit left".
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
@@ -231,46 +335,14 @@ export default function CustomersPage() {
         </div>
       </Card>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span>Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="w-auto"
-          >
-            {PAGE_SIZES.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-muted-foreground">
-            {total === 0 ? '0' : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)}`} of{' '}
-            {total}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        disabled={loading}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       {session ? (
         <ImportCustomersDialog

@@ -27,6 +27,7 @@ function service() {
     null as never,
     null as never,
     settingsStub,
+    null as never, // customers service — unused by the date-building path
   );
 }
 

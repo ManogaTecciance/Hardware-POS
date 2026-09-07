@@ -140,6 +140,39 @@ Unit: payment-status derivation in `SalesService.complete`.
 | U-10-3 | Invoice needs customer | INVOICE without `customerId` → `BadRequestException`. |
 | U-10-4 | Split payments | Multiple payment lines sum correctly to `paidAmount`. |
 
+## 10a. Payment due date
+
+Unit: `resolvePaymentDueDate` (`apps/api/src/modules/sales/sale-date.ts`), covered by
+`sale-date.spec.ts`.
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| U-10a-1 | Balance left, date given | Returns the end of that day in the shop's timezone. |
+| U-10a-2 | Balance left, no date | `BadRequestException` — a credit sale must say when it is due. |
+| U-10a-3 | Fully paid, date given | `BadRequestException` — nothing is outstanding to be due. |
+| U-10a-4 | Fully paid, no date | `null`. |
+| U-10a-5 | Malformed date | `BadRequestException` (must be `YYYY-MM-DD`). |
+| U-10a-6 | Due before the invoice date | Rejected; compared as calendar days in the shop's zone. |
+| U-10a-7 | Due **on** the invoice date | Allowed — payment may fall due the same day. |
+| U-10a-8 | Backdated sale, past due date | Allowed; the sale is simply already overdue. |
+
+## 10b. Recording a payment received
+
+Unit: `PaymentsRepository.recordAgainstSale`, covered by `payments.repository.spec.ts`.
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| U-10b-1 | Part payment | Balance reduces; `paymentStatus=PARTIAL`; a new Payment row. |
+| U-10b-2 | Final payment | Balance 0; `PAID`. |
+| U-10b-3 | Instalments | Three payments accumulate; three rows kept, none overwritten. |
+| U-10b-4 | Over the balance | `BadRequestException`; no payment row created. |
+| U-10b-5 | Exactly the balance | Allowed. |
+| U-10b-6 | Already settled sale | `BadRequestException`. |
+| U-10b-7 | Draft sale | `BadRequestException` — payments need a completed sale. |
+| U-10b-8 | Unknown sale for this tenant | `NotFoundException`. |
+| U-10b-9 | Concurrent settlement | Balance re-read **inside** the transaction, so two tills cannot overpay. |
+| U-10b-10 | Cent-exact arithmetic | Repeated instalments leave no floating-point drift. |
+
 ## 11. Receipt generation
 
 Units: receipt HTML builder + warehouse-pickup detection.
@@ -171,10 +204,10 @@ Unit: `QuickBooksSalesSyncService.buildLines` / `buildDocumentBody` for a fully-
 | ID | Case | Expected |
 | --- | --- | --- |
 | U-13-1 | Routing | Credit/partial builds an `invoice` body. |
-| U-13-2 | CustomerRef from mapping | Uses `QuickBooksMapping` (`CUSTOMER`) when present. |
+| U-13-2 | CustomerRef from the customer record | Resolved from `Customer.quickbooksCustomerId` (mirroring `Product.quickbooksItemId`); `QuickBooksMapping` is never consulted. A customer with no link is created in QuickBooks first, or an existing one of the same name adopted. Covered by `apps/api/src/modules/quickbooks/quickbooks-customers.service.spec.ts`. |
 | U-13-3 | Payment created when paid>0 | A `payment` body with `TotalAmt=paidAmount`, `LinkedTxn → invoice`. |
 | U-13-4 | Pure credit (paid=0) | Invoice only, no payment. |
-| U-13-5 | Paid>0 but no customer mapping | Fails with a clear message (payment needs CustomerRef). |
+| U-13-5 | Invoice with no resolvable customer | Fails with a clear POS-worded message before calling QuickBooks, rather than surfacing QBO's raw `CustomerRef is required` (6560). |
 | U-13-6 | Payment date | The linked Payment carries the same `TxnDate` as its invoice, so it is never dated ahead of the sale it settles. |
 
 ## 14. Sync queue & retry logic

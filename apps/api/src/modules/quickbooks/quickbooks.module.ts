@@ -4,6 +4,8 @@ import { SettingsModule } from '../settings/settings.module';
 import { QuickBooksConfig } from './quickbooks.config';
 import { QuickBooksController } from './quickbooks.controller';
 import { QuickBooksRepository } from './quickbooks.repository';
+import { QuickBooksCustomersService } from './quickbooks-customers.service';
+import { QuickBooksRefundTenderService } from './quickbooks-refund-tender.service';
 import { QuickBooksService } from './quickbooks.service';
 import { QuickBooksSyncService } from './quickbooks-sync.service';
 import { QuickBooksSalesSyncService } from './quickbooks-sales-sync.service';
@@ -27,6 +29,8 @@ import { QuickBooksVendorsService } from './quickbooks-vendors.service';
     QuickBooksPartiesSyncService,
     QuickBooksRepository,
     QuickBooksConfig,
+    QuickBooksCustomersService,
+    QuickBooksRefundTenderService,
   ],
   exports: [
     QuickBooksService,
@@ -35,6 +39,8 @@ import { QuickBooksVendorsService } from './quickbooks-vendors.service';
     QuickBooksReturnsSyncService,
     QuickBooksProductSyncService,
     QuickBooksVendorsService,
+    QuickBooksCustomersService,
+    QuickBooksRefundTenderService,
   ],
 })
 export class QuickBooksModule {}

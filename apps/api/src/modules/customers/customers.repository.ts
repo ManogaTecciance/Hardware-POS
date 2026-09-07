@@ -2,11 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Customer, CustomerType, Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreditService } from '../credit/credit.service';
 
 export interface CustomerListFilters {
   search?: string;
   customerType?: CustomerType;
   isActive?: boolean;
+  /** Narrow to customers with at least one completed, unsettled sale. */
+  hasOutstandingCredit?: boolean;
 }
 
 @Injectable()
@@ -34,6 +37,9 @@ export class CustomersRepository {
         : {}),
       ...(filters.customerType ? { customerType: filters.customerType } : {}),
       ...(filters.isActive !== undefined ? { isActive: filters.isActive } : {}),
+      // A relational `some` rather than an aggregate: "owes anything at all" is a
+      // question about the existence of an unsettled sale, not about a total.
+      ...(filters.hasOutstandingCredit ? CreditService.HAS_OUTSTANDING : {}),
     };
 
     return this.prisma.$transaction([
@@ -54,21 +60,23 @@ export class CustomersRepository {
     return this.prisma.customer.update({ where: { id }, data });
   }
 
-  /** Queue a locally-created customer for a QuickBooks push (stub until real QBO writes). */
-  async queueQuickBooksSync(tenantId: string, id: string): Promise<Customer> {
-    return this.prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.update({ where: { id }, data: { syncStatus: 'PENDING' } });
+  /**
+   * Record a failed QuickBooks push so the customer does not read as synced and
+   * the reason is visible in the Sync log rather than only in the API response.
+   */
+  async markQuickBooksSyncFailed(tenantId: string, id: string, reason: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.customer.update({ where: { id }, data: { syncStatus: 'FAILED' } });
       await tx.syncLog.create({
         data: {
           tenantId,
           entityType: 'CUSTOMER',
           entityId: id,
           direction: 'OUTBOUND',
-          status: 'PENDING',
-          message: `Customer "${customer.name}" queued for QuickBooks sync`,
+          status: 'FAILED',
+          message: `QuickBooks customer push failed: ${reason}`,
         },
       });
-      return customer;
     });
   }
 }

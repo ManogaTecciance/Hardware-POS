@@ -5,7 +5,11 @@ import * as React from 'react';
 import type { DocumentProfile, SaleDocumentMeta } from '@/lib/document-template-service';
 import { resolveImageUrl } from '@/lib/products-api';
 import type { SaleDetail } from '@/lib/sales';
-import { formatDateTimeInTimeZone } from '@hardware-pos/shared';
+import {
+  documentPaymentMethods,
+  formatDateInTimeZone,
+  formatDateTimeInTimeZone,
+} from '@hardware-pos/shared';
 
 import { formatMoney } from '@/lib/utils';
 
@@ -24,16 +28,6 @@ const MARGIN_PADDING: Record<DocumentProfile['marginStyle'], string> = {
 };
 const LOGO_HEIGHT: Record<DocumentProfile['logoSize'], number> = { SMALL: 40, MEDIUM: 56, LARGE: 78 };
 
-const PAYMENT_LABELS: Record<string, string> = {
-  CASH: 'Cash',
-  CARD: 'Card',
-  BANK_TRANSFER: 'Bank Transfer',
-  QR_PAYMENT: 'QR Payment',
-  CHECK: 'Cheque',
-  STORE_CREDIT: 'Store Credit',
-  OTHER: 'Other',
-};
-
 /**
  * Dates on this invoice are stated in the SHOP's timezone, not the viewer's.
  * The stored value is a UTC instant; rendering it in whatever zone the printer
@@ -43,6 +37,11 @@ const PAYMENT_LABELS: Record<string, string> = {
 function formatDateTime(iso: string | null, tz: string): string {
   if (!iso) return '—';
   return formatDateTimeInTimeZone(new Date(iso), tz);
+}
+
+/** A due date is a day; the end-of-day instant it is stored as is not news. */
+function formatDate(iso: string, tz: string): string {
+  return formatDateInTimeZone(new Date(iso), tz);
 }
 
 export function SaleA4Document({
@@ -72,7 +71,9 @@ export function SaleA4Document({
     profile.taxNumber ? `Tax/VAT: ${profile.taxNumber}` : null,
   ].filter(Boolean) as string[];
 
-  const paymentMethods = sale.payments.map((p) => PAYMENT_LABELS[p.method] ?? p.method).join(', ');
+  // "Credit" while a balance remains; the real method(s) once it is settled —
+  // the same rule the thermal receipt and the server-rendered PDF follow.
+  const paymentMethods = documentPaymentMethods(sale.payments, sale.balanceAmount);
   const paymentRefs = sale.payments.map((p) => p.reference).filter(Boolean).join(', ');
 
   return (
@@ -129,6 +130,12 @@ export function SaleA4Document({
               <span className="a4-k">Cashier</span>
               {meta.cashierName}
             </div>
+            {sale.paymentDueDate ? (
+              <div>
+                <span className="a4-k">Payment due</span>
+                {formatDate(sale.paymentDueDate, profile.timezone)}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -183,7 +190,7 @@ export function SaleA4Document({
           <div className="a4-block">
             <h4>Payment</h4>
             <p>
-              Method: {paymentMethods || '—'}
+              Method: {paymentMethods}
               {paymentRefs ? ` · Ref: ${paymentRefs}` : ''} · Status: {sale.paymentStatus}
             </p>
           </div>

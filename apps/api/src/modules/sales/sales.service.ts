@@ -1,17 +1,23 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DiscountType, PaymentStatus, QuickBooksDocumentType } from '@hardware-pos/database';
+import {
+  DiscountBasis,
+  DiscountType,
+  PaymentStatus,
+  QuickBooksDocumentType,
+} from '@hardware-pos/database';
 import { CURRENCY_SYMBOL, type Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { DiscountsService, ORDER_DISCOUNT_KEY } from '../discounts/discounts.service';
+import { CreditService } from '../credit/credit.service';
 import { SettingsService } from '../settings/settings.service';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { CompleteSaleDto } from './dto/complete-sale.dto';
 import { QuerySalesDto } from './dto/query-sales.dto';
 import { SaleItemInputDto } from './dto/sale-item.dto';
-import { resolveSaleDate } from './sale-date';
+import { resolvePaymentDueDate, resolveSaleDate } from './sale-date';
 import { SaleListRow, SaleWithRelations, SalesRepository } from './sales.repository';
 import {
   CartItemInput,
@@ -27,6 +33,7 @@ export class SalesService {
     private readonly salesRepository: SalesRepository,
     private readonly settingsService: SettingsService,
     private readonly discountsService: DiscountsService,
+    private readonly credit: CreditService,
   ) {}
 
   async list(tenantId: string, query: QuerySalesDto): Promise<Paginated<SaleListItem>> {
@@ -38,6 +45,10 @@ export class SalesService {
         search: query.search?.trim() || undefined,
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        // "Past due" means the shop's day has moved on from the due date. The
+        // due date itself sits at end of day, so today's dues are not yet late.
+        overdueAsOf: query.overdue === 'true' ? new Date() : undefined,
+        customerId: query.customerId,
       },
       query.skip,
       query.take,
@@ -96,6 +107,7 @@ export class SalesService {
         productId: it.productId,
         quantity: Number(it.quantity),
         discountType: it.discountType,
+        discountBasis: it.discountBasis,
         discountValue: it.discountValue != null ? Number(it.discountValue) : null,
         discountReason: it.discountReason,
         approvedByUserId: it.approvedByUserId,
@@ -139,6 +151,16 @@ export class SalesService {
       throw new BadRequestException('A customer is required for a credit/partial sale (Invoice)');
     }
 
+    // After the customer check, so a credit sale with no customer is told the
+    // more fundamental thing first. Resolved once the balance is known: whether
+    // a due date is required, and whether one is even allowed, both depend on
+    // the sale leaving money owed.
+    const paymentDueDate = resolvePaymentDueDate(dto.paymentDueDate, {
+      leavesBalance: balanceAmount > 0,
+      saleDate,
+      tz: this.settingsService.getSettings(tenantId).timezone,
+    });
+
     // A sale that leaves a balance is credit — the customer must be allowed
     // credit and stay within their limit (including what they already owe).
     if (balanceAmount > 0 && customerId) {
@@ -152,6 +174,7 @@ export class SalesService {
       registerId,
       customerId,
       saleDate,
+      paymentDueDate,
       computed,
       payments: dto.payments.map((p) => ({
         method: p.method,
@@ -222,8 +245,18 @@ export class SalesService {
           );
         }
 
+        if (item.discountBasis === 'UNIT' && item.discountType !== 'FIXED') {
+          // A percentage is already the same figure per unit and per line, so a
+          // per-unit percentage means nothing — refuse it rather than store a
+          // flag that silently does nothing and confuses the bill.
+          throw new BadRequestException('A per-unit discount must be a fixed amount');
+        }
+
         const lineSubtotal = round2(cachedPrice * quantity);
-        const discountAmount = computeDiscount(lineSubtotal, item.discountType, item.discountValue);
+        const discountAmount = computeDiscount(lineSubtotal, item.discountType, item.discountValue, {
+          basis: item.discountBasis,
+          quantity,
+        });
         const effectivePercent = lineSubtotal > 0 ? (discountAmount / lineSubtotal) * 100 : 0;
 
         // Enforce the role-based discount limit; over-limit lines need a covering
@@ -235,6 +268,7 @@ export class SalesService {
                 actorRole: actor.role,
                 productId: product.id,
                 discountType: item.discountType,
+                discountBasis: item.discountBasis ?? 'LINE',
                 discountValue: item.discountValue,
                 effectivePercent,
                 approvalToken: item.approvalToken,
@@ -250,6 +284,7 @@ export class SalesService {
           unitPrice: cachedPrice,
           quantity,
           discountType: item.discountType ?? null,
+          discountBasis: item.discountBasis ?? 'LINE',
           discountValue: item.discountValue ?? null,
           discountAmount,
           discountReason: item.discountReason ?? null,
@@ -312,6 +347,8 @@ export class SalesService {
       return { type: null, value: null, amount: 0, reason: null, approvedById: null };
     }
 
+    // No quantity: an order discount applies to the cart as a whole, so a FIXED
+    // amount here is the amount, never multiplied by anything.
     const amount = computeDiscount(base, type, value);
     const effectivePercent = base > 0 ? (amount / base) * 100 : 0;
     const approvedById = await this.discountsService.resolveApproval({
@@ -319,6 +356,8 @@ export class SalesService {
       actorRole: actor.role,
       productId: ORDER_DISCOUNT_KEY,
       discountType: type,
+      // A cart-level discount has no units to be "per".
+      discountBasis: 'LINE',
       discountValue: value,
       effectivePercent,
       approvalToken: input?.approvalToken,
@@ -351,12 +390,75 @@ export class SalesService {
    * existing outstanding balance plus this sale must not exceed it. A null
    * limit with credit allowed means unlimited.
    */
+  /**
+   * Tick a credit invoice off, or untick it, on the customer's page.
+   *
+   * A bookkeeping note and nothing more: no money moves, `balanceAmount` and
+   * `paymentStatus` are untouched, and the customer still owes exactly what they
+   * owed. What it buys is a record of who accounted for which invoice, and when.
+   *
+   * The one rule: the LAST uncovered invoice on an account cannot be ticked off
+   * while the account still owes anything. Marking every invoice is what would
+   * make an account read as fully dealt with, so that final tick is the one that
+   * has to be earned by recorded payments — and when those payments land, the
+   * settlement covers the invoice anyway, without anyone clicking.
+   */
+  async setMarkedPaid(
+    tenantId: string,
+    actor: AuthenticatedUser,
+    saleId: string,
+    marked: boolean,
+  ): Promise<SaleWithRelations> {
+    const sale = await this.salesRepository.findByIdForTenant(tenantId, saleId);
+    if (!sale) {
+      throw new NotFoundException(`Sale ${saleId} not found`);
+    }
+    if (sale.status !== 'COMPLETED') {
+      throw new BadRequestException('Only a completed sale can be marked');
+    }
+
+    if (marked) {
+      if (sale.markedPaidAt) return sale;
+      if (!sale.customerId) {
+        throw new BadRequestException('Only a sale on a customer account can be marked');
+      }
+      if (sale.creditSettledAt || sale.paymentStatus === 'PAID') {
+        throw new BadRequestException('This sale is already paid — there is nothing to mark');
+      }
+
+      // "Last" means: no other invoice on this account is still both uncovered
+      // and unticked. Ticking this one would leave nothing outstanding on screen,
+      // so the account balance has to actually be clear.
+      const othersLeft = await this.salesRepository.countUnmarkedCredit(
+        tenantId,
+        sale.customerId,
+        saleId,
+      );
+      if (othersLeft === 0) {
+        const credit = await this.credit.forCustomer(tenantId, sale.customerId);
+        if (credit && credit.outstanding > 0) {
+          throw new BadRequestException(
+            `This is the last invoice on the account. Record payments covering the ` +
+              `${CURRENCY_SYMBOL} ${credit.outstanding.toFixed(2)} still outstanding, ` +
+              `which settles it without marking.`,
+          );
+        }
+      }
+    }
+
+    return this.salesRepository.setMarkedPaid(
+      tenantId,
+      saleId,
+      marked ? { at: new Date(), byUserId: actor.id } : null,
+    );
+  }
+
   private async assertWithinCreditLimit(
     tenantId: string,
     customerId: string,
     newBalance: number,
   ): Promise<void> {
-    const credit = await this.salesRepository.getCustomerCredit(tenantId, customerId);
+    const credit = await this.credit.forCustomer(tenantId, customerId);
     if (!credit) return; // existence already validated by assertLocations
 
     if (!credit.creditAllowed) {
@@ -368,7 +470,7 @@ export class SalesService {
     if (credit.creditLimit != null) {
       const projected = round2(credit.outstanding + newBalance);
       if (projected > credit.creditLimit) {
-        const available = round2(Math.max(0, credit.creditLimit - credit.outstanding));
+        const available = Math.max(0, credit.available ?? 0);
         throw new BadRequestException(
           `Credit limit exceeded. Limit ${CURRENCY_SYMBOL} ${credit.creditLimit.toFixed(2)}, ` +
             `already outstanding ${CURRENCY_SYMBOL} ${credit.outstanding.toFixed(2)}, ` +
@@ -399,6 +501,18 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
     balanceAmount: Number(row.balanceAmount),
     paymentStatus: row.paymentStatus,
     paymentMethods: [...new Set(row.payments.map((p) => p.method))],
+    paymentDueDate: row.paymentDueDate,
+    // Set when the customer's account was cleared, covering this invoice. The
+    // list reads it as "Paid" without the invoice's own figures being rewritten.
+    creditSettledAt: row.creditSettledAt,
+    markedPaidAt: row.markedPaidAt,
+    markedPaidByName: row.markedPaidBy?.name ?? null,
+    // Derived from the payments already joined for the method chips, so the list
+    // needs no extra query and no denormalised column to keep in step.
+    lastPaymentAt: row.payments.reduce<Date | null>(
+      (latest, p) => (latest === null || p.createdAt > latest ? p.createdAt : latest),
+      null,
+    ),
     returnStatus: row.returnStatus,
     returnedAmount: Number(row.returnedAmount),
     quickbooksDocumentType: row.quickbooksDocumentType,
@@ -412,16 +526,29 @@ function toCartItem(dto: SaleItemInputDto): CartItemInput {
     quantity: dto.quantity,
     unitPrice: dto.unitPrice,
     discountType: dto.discountType,
+    discountBasis: dto.discountBasis,
     discountValue: dto.discountValue,
     discountReason: dto.discountReason,
     approvalToken: dto.approvalToken,
   };
 }
 
-function computeDiscount(
+/**
+ * Money off, for a line or for the whole cart.
+ *
+ * `quantity` defaults to 1 and only matters to a FIXED discount with a UNIT
+ * basis: a cart-level discount has no units, so its caller leaves it alone and
+ * keeps the whole-cart meaning it has always had.
+ *
+ * The clamp is load-bearing. A Rs. 2,000-per-unit discount on a Rs. 1,000 item
+ * must floor the line at zero rather than go negative — a negative line would
+ * pay money out through the proportional reversal in the returns calculation.
+ */
+export function computeDiscount(
   lineSubtotal: number,
   type: DiscountType | null | undefined,
   value: number | null | undefined,
+  opts: { basis?: DiscountBasis | null; quantity?: number } = {},
 ): number {
   if (!type || value == null || value <= 0) {
     return 0;
@@ -429,5 +556,8 @@ function computeDiscount(
   if (type === 'PERCENTAGE') {
     return Math.min(lineSubtotal, round2((lineSubtotal * value) / 100));
   }
-  return Math.min(lineSubtotal, round2(value));
+  // Multiply first, round once — the same shape as the percentage branch, and
+  // it has to match the client's copy to the cent or the sale lands PARTIAL.
+  const units = opts.basis === 'UNIT' ? (opts.quantity ?? 1) : 1;
+  return Math.min(lineSubtotal, round2(value * units));
 }

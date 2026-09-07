@@ -30,6 +30,40 @@ export class IsIanaTimeZone implements ValidatorConstraintInterface {
   }
 }
 
+/** The tenders a refund can be paid in, as accepted map keys. */
+const REFUND_TENDERS = [
+  'CASH',
+  'CARD',
+  'BANK_TRANSFER',
+  'QR_PAYMENT',
+  'CHECK',
+  'STORE_CREDIT',
+  'OTHER',
+] as const;
+
+/**
+ * A `PaymentMethod` → QuickBooks account id map. Keys are rejected rather than
+ * ignored: a typo'd tender would otherwise be stored, look configured in the
+ * settings payload, and never be consulted by the sync.
+ */
+@ValidatorConstraint({ name: 'isRefundDepositAccountMap', async: false })
+export class IsRefundDepositAccountMap implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    return Object.entries(value).every(
+      ([key, id]) =>
+        (REFUND_TENDERS as readonly string[]).includes(key) &&
+        typeof id === 'string' &&
+        id.trim().length > 0 &&
+        id.length <= 100,
+    );
+  }
+
+  defaultMessage(): string {
+    return `quickbooksRefundDepositAccountRefs must map ${REFUND_TENDERS.join(' / ')} to a non-empty QuickBooks account id`;
+  }
+}
+
 export class UpdateReturnSettingsDto {
   @IsInt()
   @Min(0)
@@ -62,6 +96,10 @@ export class UpdateReturnSettingsDto {
   @IsString()
   @IsOptional()
   quickbooksRefundReceiptDepositAccountRef?: string;
+
+  @Validate(IsRefundDepositAccountMap)
+  @IsOptional()
+  quickbooksRefundDepositAccountRefs?: Record<string, string>;
 }
 
 export class UpdateQuotationSettingsDto {

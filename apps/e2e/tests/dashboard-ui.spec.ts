@@ -6,7 +6,12 @@ test.describe('DASH / UI — browser', () => {
 
   test('DASH-001 admin KPI band shows the five cards', async ({ page }) => {
     await page.goto('/dashboard');
-    for (const label of ['Net Sales', 'Transactions', 'Total Inventory Value', 'Open Quotations']) {
+    for (const label of [
+      'Net Sales',
+      'Credit Receivable',
+      'Total Inventory Value',
+      'Open Quotations',
+    ]) {
       await expect(page.getByText(label, { exact: false }).first()).toBeVisible();
     }
   });
@@ -15,7 +20,7 @@ test.describe('DASH / UI — browser', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/dashboard');
     // Anchor on the KPI grid (the grid whose FIRST card is "Net Sales") and
-    // measure only its direct children — labels like "Transactions" also appear
+    // measure only its direct children — labels like "Net Sales" also appear
     // in lower section cards, so a page-wide hasText match is ambiguous.
     const kpiCard = page.locator('main div.dash-enter', { hasText: 'Net Sales' }).first();
     await kpiCard.waitFor();

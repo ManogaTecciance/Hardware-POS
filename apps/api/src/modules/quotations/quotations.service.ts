@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DiscountType, QuotationStatus } from '@hardware-pos/database';
+import { DiscountBasis, DiscountType, QuotationStatus } from '@hardware-pos/database';
 import {
   parseDay,
   safeTimeZone,
@@ -68,6 +68,7 @@ interface ResolvedLine {
   unitPrice: number;
   discountType: DiscountType | null;
   discountValue: number | null;
+  discountBasis: DiscountBasis;
   itemNote: string | null;
   availabilityStatus: string | null;
 }
@@ -424,6 +425,11 @@ export class QuotationsService {
         unitPrice: this.num(it.unitPrice),
         discountType: (it.discountType as DiscountType | null) ?? undefined,
         discountValue: it.discountValue != null ? this.num(it.discountValue) : undefined,
+        // The line with no compiler backstop: SaleItemInputDto.discountBasis is
+        // optional and the sale defaults it to LINE, so dropping it here would
+        // convert a per-unit quotation into a sale priced at the whole-line
+        // amount — quoted at one number, invoiced at another, silently.
+        discountBasis: it.discountBasis,
       })),
       payments,
       orderDiscountType: (row.quotationDiscountType as DiscountType | null) ?? undefined,
@@ -526,6 +532,7 @@ export class QuotationsService {
           unitPrice,
           discountType: (item.discountType as DiscountType | undefined) ?? null,
           discountValue: item.discountValue ?? null,
+          discountBasis: this.resolveDiscountBasis(item),
           itemNote: item.itemNote ?? null,
           availabilityStatus,
         };
@@ -551,6 +558,7 @@ export class QuotationsService {
         unitPrice: item.unitPrice,
         discountType: (item.discountType as DiscountType | undefined) ?? null,
         discountValue: item.discountValue ?? null,
+        discountBasis: this.resolveDiscountBasis(item),
         itemNote: item.itemNote ?? null,
         availabilityStatus: null,
       };
@@ -572,6 +580,9 @@ export class QuotationsService {
       unitPrice: this.num(it.unitPrice),
       discountType: it.discountType,
       discountValue: it.discountValue != null ? this.num(it.discountValue) : null,
+      // Revisions and duplicates recreate their rows from scratch, so a dropped
+      // basis here would not go stale — it would silently reprice the quotation.
+      discountBasis: it.discountBasis,
       itemNote: it.itemNote,
       availabilityStatus: it.availabilityStatus,
     }));
@@ -588,6 +599,7 @@ export class QuotationsService {
         quantity: r.quantity,
         discountType: r.discountType,
         discountValue: r.discountValue,
+        discountBasis: r.discountBasis,
       })),
       orderDiscount,
       taxRatePercent,
@@ -605,6 +617,7 @@ export class QuotationsService {
       unitPrice: totals.lines[i].unitPrice,
       discountType: totals.lines[i].discountType as DiscountType | null,
       discountValue: totals.lines[i].discountValue,
+      discountBasis: totals.lines[i].discountBasis,
       discountAmount: totals.lines[i].discountAmount,
       taxAmount: totals.lines[i].taxAmount,
       lineSubtotal: totals.lines[i].lineSubtotal,
@@ -734,6 +747,23 @@ export class QuotationsService {
     };
   }
 
+  /**
+   * A per-unit amount only means something as a fixed amount — a percentage is
+   * already the same figure per unit and per line. Refused rather than ignored,
+   * so a quotation cannot carry a flag that silently does nothing and then
+   * converts into a sale the API would reject.
+   */
+  private resolveDiscountBasis(item: {
+    discountType?: string | null;
+    discountBasis?: string | null;
+  }): DiscountBasis {
+    if (item.discountBasis !== 'UNIT') return 'LINE';
+    if (item.discountType !== 'FIXED') {
+      throw new BadRequestException('A per-unit discount must be a fixed amount');
+    }
+    return 'UNIT';
+  }
+
   private itemRowToView(it: QuotationRevisionRow['items'][number]): QuotationItemView {
     return {
       id: it.id,
@@ -749,6 +779,7 @@ export class QuotationsService {
       unitPrice: this.num(it.unitPrice),
       discountType: it.discountType,
       discountValue: it.discountValue != null ? this.num(it.discountValue) : null,
+      discountBasis: it.discountBasis,
       discountAmount: this.num(it.discountAmount),
       taxAmount: this.num(it.taxAmount),
       lineSubtotal: this.num(it.lineSubtotal),
@@ -773,6 +804,7 @@ export class QuotationsService {
       unitPrice: line.unitPrice,
       discountType: line.discountType,
       discountValue: line.discountValue,
+      discountBasis: line.discountBasis,
       discountAmount: line.discountAmount,
       taxAmount: line.taxAmount,
       lineSubtotal: line.lineSubtotal,

@@ -1,5 +1,8 @@
 import { test, expect } from '../src/fixtures';
-import { uniq } from '../src/api';
+import { Api, uniq } from '../src/api';
+
+/** Any credit sale needs a due date; these tests are not about which one. */
+const DUE = Api.daysAhead(30);
 
 test.describe('PAY — Payments, Credit & Stock', () => {
   test('PAY-013 stock decremented once on completion', async ({ ownerApi }) => {
@@ -15,7 +18,7 @@ test.describe('PAY — Payments, Credit & Stock', () => {
     const res = await ownerApi.postRaw('/sales/complete', {
       branchId: 'brn_dev', registerId: 'reg_dev', customerId: cust.id,
       items: [{ productId: p.id, quantity: 1 }],
-      payments: [],
+      payments: [], paymentDueDate: DUE,
     });
     expect(res.status()).toBe(400);
   });
@@ -26,10 +29,25 @@ test.describe('PAY — Payments, Credit & Stock', () => {
     const sale = await ownerApi.post('/sales/complete', {
       branchId: 'brn_dev', registerId: 'reg_dev', customerId: cust.id,
       items: [{ productId: p.id, quantity: 1 }],
-      payments: [],
+      payments: [], paymentDueDate: DUE,
     });
     expect(sale.status).toBe('COMPLETED');
     expect(['UNPAID', 'PARTIAL']).toContain(sale.paymentStatus);
+  });
+
+  test('PAY-008 credit without a customer names the customer, not the due date', async ({
+    ownerApi,
+  }) => {
+    const p = await ownerApi.createProduct({ quantityOnHand: 10, unitPrice: 1000 });
+    const res = await ownerApi.postRaw('/sales/complete', {
+      branchId: 'brn_dev', registerId: 'reg_dev',
+      items: [{ productId: p.id, quantity: 1 }],
+      payments: [],
+    });
+    expect(res.status()).toBe(400);
+    // Both rules are broken here; the missing customer is the more fundamental
+    // one, so that is what the cashier must be told first.
+    expect(await res.text()).toContain('customer is required');
   });
 
   test('PAY-009 credit limit enforced', async ({ ownerApi }) => {
@@ -39,7 +57,7 @@ test.describe('PAY — Payments, Credit & Stock', () => {
     const res = await ownerApi.postRaw('/sales/complete', {
       branchId: 'brn_dev', registerId: 'reg_dev', customerId: cust.id,
       items: [{ productId: p.id, quantity: 5 }],
-      payments: [],
+      payments: [], paymentDueDate: DUE,
     });
     expect(res.status()).toBe(400);
   });
@@ -51,7 +69,7 @@ test.describe('PAY — Payments, Credit & Stock', () => {
     const sale = await ownerApi.post('/sales/complete', {
       branchId: 'brn_dev', registerId: 'reg_dev', customerId: cust.id,
       items: [{ productId: p.id, quantity: 5 }],
-      payments: [],
+      payments: [], paymentDueDate: DUE,
     });
     expect(sale.status).toBe('COMPLETED');
   });
@@ -62,7 +80,7 @@ test.describe('PAY — Payments, Credit & Stock', () => {
     const sale = await ownerApi.post('/sales/complete', {
       branchId: 'brn_dev', registerId: 'reg_dev', customerId: cust.id,
       items: [{ productId: p.id, quantity: 10 }],
-      payments: [],
+      payments: [], paymentDueDate: DUE,
     });
     expect(sale.status).toBe('COMPLETED');
   });
@@ -73,12 +91,12 @@ test.describe('PAY — Payments, Credit & Stock', () => {
     const cust = await ownerApi.createCustomer({ creditAllowed: true, creditLimit: one * 1.5 });
     await ownerApi.post('/sales/complete', {
       branchId: 'brn_dev', registerId: 'reg_dev', customerId: cust.id,
-      items: [{ productId: p.id, quantity: 1 }], payments: [],
+      items: [{ productId: p.id, quantity: 1 }], payments: [], paymentDueDate: DUE,
     });
     // Second credit sale would push total outstanding over 1.5×.
     const res = await ownerApi.postRaw('/sales/complete', {
       branchId: 'brn_dev', registerId: 'reg_dev', customerId: cust.id,
-      items: [{ productId: p.id, quantity: 1 }], payments: [],
+      items: [{ productId: p.id, quantity: 1 }], payments: [], paymentDueDate: DUE,
     });
     expect(res.status()).toBe(400);
   });

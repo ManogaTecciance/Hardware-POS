@@ -3,6 +3,7 @@ import { Prisma } from '@hardware-pos/database';
 
 import { lastNDaysInTimeZone } from '@hardware-pos/shared';
 
+import { CreditService } from '../credit/credit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStats } from './dashboard.types';
 
@@ -10,7 +11,10 @@ const COMPLETED = 'COMPLETED' as const;
 
 @Injectable()
 export class DashboardRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly credit: CreditService,
+  ) {}
 
   /** Net sales + transaction count for a completed-sales window. */
   async rangeTotals(
@@ -191,7 +195,7 @@ export class DashboardRepository {
     // trades, not where the server happens to run.
     const { from: startOfToday, to: endOfToday } = lastNDaysInTimeZone(1, tz);
 
-    const [todayAgg, productsCached, pendingSyncs, inventoryRows] = await Promise.all([
+    const [todayAgg, productsCached, pendingSyncs, receivable, inventoryRows] = await Promise.all([
       this.prisma.sale.aggregate({
         where: {
           tenantId,
@@ -205,6 +209,14 @@ export class DashboardRepository {
       this.prisma.sale.count({
         where: { tenantId, status: 'COMPLETED', syncStatus: { not: 'SYNCED' } },
       }),
+      // Receivable is a running balance, deliberately unbounded by the day
+      // window above: money owed does not stop being owed at midnight.
+      //
+      // Asked of CreditService rather than aggregated here, so the dashboard tile,
+      // the customers list and the credit-limit guard cannot drift apart — this
+      // query used to be a second copy of the rule and missed account payments
+      // entirely the moment credit moved to the customer.
+      this.credit.totalReceivable(tenantId),
       // Column-by-column product of qty × cost needs raw SQL (no aggregate for it).
       // Items without a cost price contribute nothing rather than a fake value.
       this.prisma.$queryRaw<Array<{ value: number; stocked: number }>>`
@@ -220,6 +232,7 @@ export class DashboardRepository {
       todayTransactions: todayAgg._count._all,
       productsCached,
       pendingSyncs,
+      outstandingReceivable: receivable,
       inventoryValue: Number(inventoryRows[0]?.value ?? 0),
       stockedProducts: Number(inventoryRows[0]?.stocked ?? 0),
     };

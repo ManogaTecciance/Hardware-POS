@@ -1,4 +1,4 @@
-import { DiscountType } from '@hardware-pos/database';
+import { DiscountBasis, DiscountType } from '@hardware-pos/database';
 import { IsEnum, IsNumber, IsOptional, IsPositive, IsString, MaxLength, Min } from 'class-validator';
 
 /**
@@ -49,6 +49,15 @@ export class QuotationItemInputDto {
   @Min(0)
   @IsOptional()
   discountValue?: number;
+
+  /**
+   * Whether a FIXED amount comes off each unit or the line as a whole. Absent
+   * means the line, which is what every quotation before this meant. Rejected on
+   * a PERCENTAGE, which is already the same figure either way.
+   */
+  @IsEnum(DiscountBasis)
+  @IsOptional()
+  discountBasis?: DiscountBasis;
 
   @IsString()
   @IsOptional()

@@ -38,6 +38,7 @@ export type QbLogType =
   | 'SALE_PUSH'
   | 'RETURN_PUSH'
   | 'CUSTOMER_PULL'
+  | 'CUSTOMER_PUSH'
   | 'VENDOR_PULL'
   | 'CONNECTION';
 
@@ -119,14 +120,29 @@ interface SyncLogRow {
   createdAt: string;
 }
 
-const LOG_TYPE_BY_ENTITY: Record<string, QbLogType> = {
-  PRODUCT: 'PRODUCT_PULL',
-  SALE: 'SALE_PUSH',
-  RETURN: 'RETURN_PUSH',
-  CUSTOMER: 'CUSTOMER_PULL',
-  SUPPLIER: 'VENDOR_PULL',
-  CONNECTION: 'CONNECTION',
-};
+/**
+ * Entity → label, split by direction where both exist. Customers travel both
+ * ways: the reconciliation pull brings QuickBooks customers in, and a sale for a
+ * POS-created customer pushes one out. Keying on entity alone labelled every
+ * push as a "pull", which is exactly the sort of thing that sends someone
+ * hunting in the wrong direction when a sync fails.
+ */
+function logType(entityType: string, direction: 'INBOUND' | 'OUTBOUND'): QbLogType {
+  switch (entityType) {
+    case 'PRODUCT':
+      return 'PRODUCT_PULL';
+    case 'SALE':
+      return 'SALE_PUSH';
+    case 'RETURN':
+      return 'RETURN_PUSH';
+    case 'CUSTOMER':
+      return direction === 'OUTBOUND' ? 'CUSTOMER_PUSH' : 'CUSTOMER_PULL';
+    case 'SUPPLIER':
+      return 'VENDOR_PULL';
+    default:
+      return 'CONNECTION';
+  }
+}
 
 function auth(session: Session): { token: string; tenantId: string } {
   return { token: session.token, tenantId: session.user.tenantId };
@@ -149,14 +165,17 @@ function buildState(
     return DISCONNECTED_STATE;
   }
 
-  const log: QbLogEntry[] = logs.map((row) => ({
-    id: row.id,
-    tsISO: row.createdAt,
-    type: LOG_TYPE_BY_ENTITY[row.entityType] ?? 'CONNECTION',
-    direction: row.direction === 'OUTBOUND' ? 'OUTBOUND' : 'INBOUND',
-    status: row.status,
-    message: row.message ?? '',
-  }));
+  const log: QbLogEntry[] = logs.map((row) => {
+    const direction = row.direction === 'OUTBOUND' ? ('OUTBOUND' as const) : ('INBOUND' as const);
+    return {
+      id: row.id,
+      tsISO: row.createdAt,
+      type: logType(row.entityType, direction),
+      direction,
+      status: row.status,
+      message: row.message ?? '',
+    };
+  });
 
   const lastProductPull = log.find((l) => l.type === 'PRODUCT_PULL');
   const productSyncStatus: SyncState =
@@ -355,7 +374,16 @@ export function QuickBooksProvider({ children }: { children: React.ReactNode }) 
           vendorSync: { ...state.vendorSync, status: 'SYNCING' as SyncState },
         }
       : state;
-    return { state: visibleState, loading, error, refresh, connect, disconnect, syncProducts, syncAll };
+    return {
+      state: visibleState,
+      loading,
+      error,
+      refresh,
+      connect,
+      disconnect,
+      syncProducts,
+      syncAll,
+    };
   }, [state, syncing, loading, error, refresh, connect, disconnect, syncProducts, syncAll]);
 
   return <QuickBooksContext.Provider value={value}>{children}</QuickBooksContext.Provider>;

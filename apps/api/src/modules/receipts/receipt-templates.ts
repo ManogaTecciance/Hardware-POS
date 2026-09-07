@@ -2,7 +2,12 @@
  * Printable HTML templates. Each returns a complete standalone document with
  * inline print CSS and a screen-only Print button (browser print for v1).
  */
-import { formatCurrency, formatDateTimeInTimeZone } from '@hardware-pos/shared';
+import {
+  CREDIT_METHOD_LABEL,
+  formatCurrency,
+  formatDateTimeInTimeZone,
+  paymentMethodLabel,
+} from '@hardware-pos/shared';
 
 export interface ReceiptLine {
   name: string;
@@ -74,8 +79,20 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
     )
     .join('');
 
-  const payments = d.payments
-    .map((p) => `<div class="row"><span>${esc(p.method)}</span><span>${money(p.amount, d.currency)}</span></div>`)
+  // Labelled, not the raw enum — a customer receipt should not read "BANK_TRANSFER".
+  // A remaining balance is listed as its own "Credit" line, so a credit sale says
+  // how it was settled instead of printing no payment line at all; once the sale
+  // is paid off, a reprint shows only the methods actually used.
+  const payments = [
+    ...d.payments.map((p) => ({ label: paymentMethodLabel(p.method), amount: p.amount })),
+    ...(d.balanceAmount > 0
+      ? [{ label: CREDIT_METHOD_LABEL, amount: d.balanceAmount }]
+      : []),
+  ]
+    .map(
+      (p) =>
+        `<div class="row"><span>${esc(p.label)}</span><span>${money(p.amount, d.currency)}</span></div>`,
+    )
     .join('');
 
   return `<!doctype html>

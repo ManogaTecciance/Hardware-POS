@@ -1,4 +1,4 @@
-import { DiscountType } from '@hardware-pos/database';
+import { DiscountBasis, DiscountType } from '@hardware-pos/database';
 import { IsEnum, IsNumber, IsOptional, IsPositive, IsString, Min } from 'class-validator';
 
 export class SaleItemInputDto {
@@ -23,6 +23,17 @@ export class SaleItemInputDto {
   @Min(0)
   @IsOptional()
   discountValue?: number;
+
+  /**
+   * Whether `discountValue` comes off each unit or the line as a whole. Absent
+   * means the line as a whole, which is what every sale before this meant.
+   *
+   * Only meaningful with a FIXED discount; pairing UNIT with a PERCENTAGE is
+   * rejected at completion, where the discount is computed.
+   */
+  @IsEnum(DiscountBasis)
+  @IsOptional()
+  discountBasis?: DiscountBasis;
 
   @IsString()
   @IsOptional()

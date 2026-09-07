@@ -26,11 +26,25 @@ const SETTINGS = {
 };
 
 const CASHIER: AuthenticatedUser = { id: 'u1', tenantId: 't1', role: 'CASHIER' };
+const OWNER: AuthenticatedUser = { id: 'u2', tenantId: 't1', role: 'OWNER' };
 
 function makeService(repo: Partial<QuotationsRepository>) {
   const settings = { getSettings: () => SETTINGS } as unknown as SettingsService;
   const audit = { record: jest.fn() } as unknown as AuditLogService;
   const sales = { complete: jest.fn() } as unknown as SalesService;
+  const documents = { quotationHtml: jest.fn(), pdfAvailable: true } as unknown as DocumentsService;
+  const sharing = { recordDelivery: jest.fn() } as unknown as SharingService;
+  return new QuotationsService(repo as QuotationsRepository, settings, audit, sales, documents, sharing);
+}
+
+/** As makeService, but with a SalesService whose complete() can be inspected. */
+function makeServiceWithSales(
+  repo: Partial<QuotationsRepository>,
+  complete: jest.Mock,
+) {
+  const settings = { getSettings: () => SETTINGS } as unknown as SettingsService;
+  const audit = { record: jest.fn() } as unknown as AuditLogService;
+  const sales = { complete } as unknown as SalesService;
   const documents = { quotationHtml: jest.fn(), pdfAvailable: true } as unknown as DocumentsService;
   const sharing = { recordDelivery: jest.fn() } as unknown as SharingService;
   return new QuotationsService(repo as QuotationsRepository, settings, audit, sales, documents, sharing);
@@ -53,7 +67,14 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     revisions: [
       {
         items: [
-          { productId: 'p1', quantity: 2, unitPrice: 100, discountType: null, discountValue: null },
+          {
+            productId: 'p1',
+            quantity: 2,
+            unitPrice: 100,
+            discountType: null,
+            discountValue: null,
+            discountBasis: 'LINE',
+          },
         ],
       },
     ],
@@ -135,5 +156,67 @@ describe('QuotationsService guards', () => {
     await expect(service.convertToSale('t1', CASHIER, 'q1', {})).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+});
+
+
+/**
+ * Converting a quotation must charge what was quoted.
+ *
+ * SaleItemInputDto.discountBasis is optional and the sale defaults it to LINE,
+ * so nothing in the type system stops the basis being dropped on this hand-map —
+ * this test is the only guard. Without it, Rs. 100 off each of 20 units converts
+ * into a sale Rs. 1,900 dearer than the customer was quoted.
+ */
+describe('QuotationsService.convertToSale carries the discount basis', () => {
+  const perUnitRow = () =>
+    makeRow({
+      status: 'SENT',
+      revisions: [
+        {
+          items: [
+            {
+              productId: 'p1',
+              quantity: 20,
+              unitPrice: 500,
+              discountType: 'FIXED',
+              discountValue: 100,
+              discountBasis: 'UNIT',
+            },
+          ],
+        },
+      ],
+    });
+
+  it('sends the basis through to the sale', async () => {
+    const complete = jest.fn().mockResolvedValue({ id: 's1', saleNumber: 'S-1' });
+    const service = makeServiceWithSales(
+      {
+        findDetail: jest.fn().mockResolvedValue(perUnitRow()),
+        linkConvertedSale: jest.fn().mockResolvedValue(undefined),
+      },
+      complete,
+    );
+
+    await service.convertToSale('t1', OWNER, 'q1', { branchId: 'brn1' });
+
+    const dto = complete.mock.calls[0][2] as { items: Array<{ discountBasis?: string }> };
+    expect(dto.items[0].discountBasis).toBe('UNIT');
+  });
+
+  it('sends LINE for a whole-line quotation', async () => {
+    const complete = jest.fn().mockResolvedValue({ id: 's1', saleNumber: 'S-1' });
+    const service = makeServiceWithSales(
+      {
+        findDetail: jest.fn().mockResolvedValue(makeRow({ status: 'SENT' })),
+        linkConvertedSale: jest.fn().mockResolvedValue(undefined),
+      },
+      complete,
+    );
+
+    await service.convertToSale('t1', OWNER, 'q1', { branchId: 'brn1' });
+
+    const dto = complete.mock.calls[0][2] as { items: Array<{ discountBasis?: string }> };
+    expect(dto.items[0].discountBasis).toBe('LINE');
   });
 });

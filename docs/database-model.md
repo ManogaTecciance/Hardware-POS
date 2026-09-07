@@ -96,11 +96,19 @@ One completed (or in-progress) transaction.
 | qboId         | string?       | id of the created QBO SalesReceipt/Invoice — **unique**       |
 | syncStatus    | SyncStatus    | `PENDING` \| `SYNCING` \| `SYNCED` \| `FAILED`                 |
 | completedAt   | datetime?     | Invoice date — user-selectable at completion, defaults to now, never future. Printed on documents, filed in QBO, and the column reports/dashboards filter on. Indexed. |
+| creditSettledAt | datetime?   | When the customer's credit account was cleared, covering this invoice. Credit is settled per ACCOUNT: this records the moment **without** claiming money was tendered against this invoice, so paidAmount/balanceAmount stay true for the printed bill, the refund guard and QuickBooks. |
+| paymentDueDate | datetime?    | When the balance is expected. Required at completion when the sale leaves a balance, forbidden when it does not — so **null means nothing is owed**, which is what lets the sales list leave the Due column blank rather than invent a date. Stored as the end of the chosen day in the shop's timezone; pushed to QBO as the Invoice `DueDate`. |
 | createdAt     | datetime      |                                                                |
 | updatedAt     | datetime      |                                                                |
 
 Indexes: `@unique(number)`, `@unique(qboId)`, `@index(syncStatus)`, `@index(cashierId)`,
-`@index(createdAt)`.
+`@index(createdAt)`, `@index(tenantId, paymentDueDate)` — the overdue filter asks for "due
+before today and still owing", which is a tenant-scoped range scan over the due date.
+
+There is no stored "amount outstanding per customer": it is derived on read by summing
+`balanceAmount` over the customer's COMPLETED, unsettled sales. One source of truth means the
+credit-limit guard, the customers list's available-credit column, and the dashboard's
+receivable total cannot drift apart, and recording a payment updates all three at once.
 
 ### SaleItem
 
@@ -116,6 +124,7 @@ A cart line. Discounts are **product-wise** and captured here.
 | quantity        | Decimal(12,3) |                                                           |
 | discountType    | enum?         | `PERCENT` \| `FIXED` (null = no discount)                 |
 | discountValue   | Decimal(12,2) | percent or amount                                         |
+| discountBasis   | enum          | `LINE` (default) \| `UNIT` — whether a FIXED amount was per line or per unit. `discountAmount` stays the money actually taken; this records how it was reached, so a bill can justify it |
 | discountApprovedBy | uuid FK?   | → User (manager) when discount exceeded threshold         |
 | lineTotal       | Decimal(12,2) | `(unitPrice * quantity) - discount`                       |
 
@@ -128,11 +137,15 @@ One or more payments against a sale.
 | Column    | Type          | Notes                                    |
 | --------- | ------------- | ---------------------------------------- |
 | id        | uuid PK       |                                          |
-| saleId    | uuid FK       | → Sale                                    |
+| saleId    | uuid FK?      | → Sale. Set on money tendered at the till; null on an account payment |
+| customerId | uuid FK?     | → Customer. Set on a payment against the credit ACCOUNT. Exactly one of saleId/customerId is set — a CHECK constraint enforces it |
+| settledAt | datetime?     | when this account payment was consumed by clearing the balance; null while it still works against an open one |
 | method    | enum          | `CASH` \| `CARD`                          |
 | amount    | Decimal(12,2) |                                          |
+| reference | string?       | cheque number, transfer id, receipt no   |
+| receivedByUserId | uuid FK | → User who took the money                |
 | qboId     | string?       | QBO Payment id (for INVOICE sales)       |
-| createdAt | datetime      |                                          |
+| createdAt | datetime      | when the money came in — a settlement recorded weeks after the sale keeps its own timestamp, which is what the sale detail and the "last payment" column report |
 
 Index: `@index(saleId)`.
 
@@ -181,7 +194,7 @@ the core tables above. Field-level detail lives in `packages/database/prisma/sch
 | `Receipt`              | Printed-receipt record per sale (number, print count, content).         |
 | `SyncJob`              | A unit of sync work (type, direction, attempts, status) with `SyncLog`s.|
 | `QuickBooksConnection` | Per-tenant OAuth tokens, realm id, and environment.                     |
-| `QuickBooksMapping`    | Correlates local entity ids with their QuickBooks ids.                  |
+| `QuickBooksMapping`    | **Unused / legacy — never written.** Entity linkage lives on the entities themselves: `Product.quickbooksItemId`, `Customer.quickbooksCustomerId`, `Supplier.quickbooksVendorId`. |
 | `AuditLog`             | Append-only record of user/system actions.                              |
 
 ### Dates and times
@@ -203,3 +216,12 @@ happens to be.
 
 `UserRole`, `PaymentMethod`, `PaymentStatus`, `SyncStatus`, `DiscountType`,
 `QuickBooksDocumentType`, `SaleStatus` — mirrored in `packages/shared` where the app needs them.
+
+
+### QuotationItem — discount basis
+
+`QuotationItem.discountBasis` mirrors `SaleItem.discountBasis` (`LINE` default, `UNIT` for a
+fixed amount off every unit). Every revision owns its own item rows, so each keeps the basis it
+was quoted at and an older revision reprints unchanged. The field is carried into the sale by
+`convertToSale`, which is the one hand-written map on that path and has no compile-time backstop
+— `apps/api/src/modules/quotations/quotations.service.spec.ts` guards it instead.

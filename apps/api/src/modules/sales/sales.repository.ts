@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, Product } from '@hardware-pos/database';
+import { PaymentStatus, Prisma, Product } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
@@ -22,7 +22,8 @@ export type SaleListRow = Prisma.SaleGetPayload<{
   include: {
     customer: { select: { name: true } };
     cashier: { select: { name: true } };
-    payments: { select: { method: true } };
+    payments: { select: { method: true; createdAt: true } };
+    markedPaidBy: { select: { name: true } };
     _count: { select: { items: true } };
   };
 }>;
@@ -39,7 +40,8 @@ const saleInclude = {
 const saleListInclude = {
   customer: { select: { name: true } },
   cashier: { select: { name: true } },
-  payments: { select: { method: true } },
+  payments: { select: { method: true, createdAt: true } },
+  markedPaidBy: { select: { name: true } },
   _count: { select: { items: true } },
 } satisfies Prisma.SaleInclude;
 
@@ -88,9 +90,39 @@ export class SalesRepository {
     const where: Prisma.SaleWhereInput = {
       tenantId,
       ...(filter.syncStatus ? { syncStatus: filter.syncStatus } : {}),
-      ...(filter.paymentStatus ? { paymentStatus: filter.paymentStatus } : {}),
+      // UNPAID means "still on credit": every sale the list shows as Credit, so
+      // both wholly unpaid and part-paid, and never one the customer's account
+      // has since cleared. PAID means the opposite — paid at the till, or covered
+      // by an account settlement. PARTIAL is still accepted on its own for a
+      // caller that genuinely wants just those.
+      ...(filter.customerId ? { customerId: filter.customerId } : {}),
+      ...(filter.paymentStatus === 'UNPAID'
+        ? {
+            paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+            creditSettledAt: null,
+          }
+        : filter.paymentStatus === 'PAID'
+          ? {
+              OR: [{ paymentStatus: 'PAID' as PaymentStatus }, { creditSettledAt: { not: null } }],
+            }
+          : filter.paymentStatus
+            ? { paymentStatus: filter.paymentStatus }
+            : {}),
       // Kept in AND so the date clause's OR cannot collide with the search OR.
       ...(businessDate.length ? { AND: businessDate } : {}),
+      // Overdue: the due date has passed and money is still owed. A settled sale
+      // is never overdue whatever its date, and one with no due date — a sale
+      // paid in full at the till — is not owed at all, so it cannot be late.
+      ...(filter.overdueAsOf
+        ? {
+            paymentDueDate: { not: null, lt: filter.overdueAsOf },
+            paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+            // An invoice the customer's account has cleared is not overdue,
+            // whatever its own due date says.
+            creditSettledAt: null,
+            status: 'COMPLETED' as const,
+          }
+        : {}),
       ...(filter.search
         ? {
             OR: [
@@ -149,36 +181,39 @@ export class SalesRepository {
     });
   }
 
-  /**
-   * A customer's credit terms plus how much they currently owe (sum of unpaid
-   * balances on their completed sales). Used to enforce the credit limit before
-   * a new credit/partial sale is accepted.
-   */
-  async getCustomerCredit(
-    tenantId: string,
-    customerId: string,
-  ): Promise<{ creditAllowed: boolean; creditLimit: number | null; outstanding: number } | null> {
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: customerId, tenantId },
-      select: { creditAllowed: true, creditLimit: true },
-    });
-    if (!customer) return null;
 
-    const agg = await this.prisma.sale.aggregate({
+  /**
+   * How many OTHER invoices on this customer's account are still uncovered and
+   * unticked — i.e. would remain visible as owed if `exceptSaleId` were ticked.
+   */
+  countUnmarkedCredit(tenantId: string, customerId: string, exceptSaleId: string): Promise<number> {
+    return this.prisma.sale.count({
       where: {
         tenantId,
         customerId,
+        id: { not: exceptSaleId },
         status: 'COMPLETED',
-        paymentStatus: { in: ['UNPAID', 'PARTIAL'] },
+        paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+        creditSettledAt: null,
+        markedPaidAt: null,
       },
-      _sum: { balanceAmount: true },
     });
+  }
 
-    return {
-      creditAllowed: customer.creditAllowed,
-      creditLimit: customer.creditLimit != null ? Number(customer.creditLimit) : null,
-      outstanding: agg._sum.balanceAmount != null ? Number(agg._sum.balanceAmount) : 0,
-    };
+  /** Tick an invoice off, or clear the tick. Touches no money. */
+  setMarkedPaid(
+    tenantId: string,
+    saleId: string,
+    mark: { at: Date; byUserId: string } | null,
+  ): Promise<SaleWithRelations> {
+    return this.prisma.sale.update({
+      where: { id: saleId },
+      data: {
+        markedPaidAt: mark?.at ?? null,
+        markedPaidByUserId: mark?.byUserId ?? null,
+      },
+      include: saleInclude,
+    });
   }
 
   // ── writes ─────────────────────────────────────────────────────────────────
@@ -236,6 +271,7 @@ export class SalesRepository {
           saleNumber,
           status: 'COMPLETED',
           completedAt: input.saleDate,
+          paymentDueDate: input.paymentDueDate,
           subtotal: input.computed.subtotal,
           totalDiscount: input.computed.totalDiscount,
           ...orderDiscountData(input.computed),
@@ -278,6 +314,7 @@ export class SalesRepository {
         data: {
           status: 'COMPLETED',
           completedAt: input.saleDate,
+          paymentDueDate: input.paymentDueDate,
           customerId: input.customerId ?? null,
           subtotal: input.computed.subtotal,
           totalDiscount: input.computed.totalDiscount,
@@ -413,6 +450,7 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
     unitPrice: line.unitPrice,
     quantity: line.quantity,
     discountType: line.discountType,
+    discountBasis: line.discountBasis,
     discountValue: line.discountValue,
     discountAmount: line.discountAmount,
     discountReason: line.discountReason,

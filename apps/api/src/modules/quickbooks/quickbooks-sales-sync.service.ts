@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { toQuickBooksTxnDate } from '../sales/sale-date';
 import { QuickBooksConfig } from './quickbooks.config';
 import { QuickBooksRepository } from './quickbooks.repository';
+import { QuickBooksCustomersService } from './quickbooks-customers.service';
 import { QuickBooksService } from './quickbooks.service';
 import { SettingsService } from '../settings/settings.service';
 import {
@@ -42,6 +43,7 @@ export class QuickBooksSalesSyncService {
     private readonly connections: QuickBooksRepository,
     private readonly config: QuickBooksConfig,
     private readonly settings: SettingsService,
+    private readonly customers: QuickBooksCustomersService,
   ) {}
 
   /**
@@ -86,10 +88,17 @@ export class QuickBooksSalesSyncService {
       const { apiBase } = this.config.resolve();
       const request = { apiBase, realmId: connection.realmId, accessToken };
 
-      const customerRef = await this.resolveCustomerRef(tenantId, sale.customerId);
+      const customerRef = await this.customers.resolveCustomerRef(
+        tenantId,
+        sale.customerId,
+        request,
+      );
       const lines = await this.buildLines(tenantId, sale);
       const txnDate = this.txnDate(tenantId, sale);
-      const docBody = this.buildDocumentBody(sale, lines, customerRef, txnDate);
+      const dueDate = sale.paymentDueDate
+        ? toQuickBooksTxnDate(sale.paymentDueDate, this.settings.getSettings(tenantId).timezone)
+        : undefined;
+      const docBody = this.buildDocumentBody(sale, lines, customerRef, txnDate, dueDate);
 
       let documentId: string;
       let quickbooksPaymentId: string | null = null;
@@ -98,7 +107,13 @@ export class QuickBooksSalesSyncService {
         const receipt = await createSalesReceipt(request, docBody);
         documentId = receipt.Id;
       } else {
-        // Credit / partial sale → Invoice.
+        // Credit / partial sale → Invoice, which QuickBooks refuses without a
+        // customer (error 6560). Say so here rather than round-tripping to QBO
+        // for a fault the sale itself already guarantees cannot be legitimate:
+        // SalesService requires a customer before it will book a credit sale.
+        if (!customerRef) {
+          throw new Error('Cannot create invoice: the sale has no customer linked to QuickBooks');
+        }
         const invoice = await createInvoice(request, docBody);
         documentId = invoice.Id;
 
@@ -106,14 +121,6 @@ export class QuickBooksSalesSyncService {
         // Payment linked back to the invoice.
         const paidAmount = Number(sale.paidAmount);
         if (paidAmount > 0) {
-          if (!customerRef) {
-            // A QBO Payment requires a CustomerRef; without a synced customer we
-            // cannot link it. TODO(accountant): enable customer sync so partial
-            // payments on invoices can be recorded in QuickBooks.
-            throw new Error(
-              'Cannot record invoice payment: customer is not linked to QuickBooks',
-            );
-          }
           const payment = await createPayment(request, {
             CustomerRef: customerRef,
             TotalAmt: paidAmount,
@@ -151,10 +158,7 @@ export class QuickBooksSalesSyncService {
    * deterministic mock QBO ids and marks the sale + payments synced, mirroring the
    * real success path so the Sales UI and sync log look identical.
    */
-  private async mockSync(
-    sale: SaleWithSyncRelations,
-    attempt: number,
-  ): Promise<SaleSyncResult> {
+  private async mockSync(sale: SaleWithSyncRelations, attempt: number): Promise<SaleSyncResult> {
     const prefix = sale.quickbooksDocumentType === 'SALES_RECEIPT' ? 'SR' : 'INV';
     const documentId = sale.quickbooksDocumentId ?? `QBO-${prefix}-${sale.saleNumber}`;
     const quickbooksPaymentId =
@@ -192,10 +196,7 @@ export class QuickBooksSalesSyncService {
 
   // ── document building ──────────────────────────────────────────────────────
 
-  private async buildLines(
-    tenantId: string,
-    sale: SaleWithSyncRelations,
-  ): Promise<QboSalesLine[]> {
+  private async buildLines(tenantId: string, sale: SaleWithSyncRelations): Promise<QboSalesLine[]> {
     const productIds = [...new Set(sale.items.map((it) => it.productId))];
     const products = await this.prisma.product.findMany({
       where: { tenantId, id: { in: productIds } },
@@ -221,6 +222,8 @@ export class QuickBooksSalesSyncService {
       // TODO(accountant): if discounts must appear as itemised discount lines or a
       // document-level DiscountLineDetail (which needs a discount income account and
       // tax-treatment decision), confirm the mapping before switching to that model.
+      // Note a per-unit discount must be expanded to value × quantity first —
+      // QuickBooks' discount line is an amount or a percent, with no per-unit form.
       const detail: QboSalesLine['SalesItemLineDetail'] = { Qty: quantity };
       if (itemRef) detail.ItemRef = itemRef;
       if (discountAmount === 0) detail.UnitPrice = unitPrice; // exact; avoids Amount mismatch
@@ -242,10 +245,14 @@ export class QuickBooksSalesSyncService {
   ): string | undefined {
     const parts: string[] = [item.productName];
     if (discountAmount > 0) {
+      // A per-unit amount says so, or the accountant reconciling this against
+      // the POS sees a figure that does not multiply out.
       const label =
         item.discountType === 'PERCENTAGE'
           ? `${Number(item.discountValue ?? 0)}%`
-          : `${Number(item.discountValue ?? 0)}`;
+          : item.discountBasis === 'UNIT'
+            ? `${Number(item.discountValue ?? 0)}/unit`
+            : `${Number(item.discountValue ?? 0)}`;
       const reason = item.discountReason ? ` – ${item.discountReason}` : '';
       parts.push(`(discount ${label}: -${discountAmount.toFixed(2)}${reason})`);
     }
@@ -265,6 +272,7 @@ export class QuickBooksSalesSyncService {
     lines: QboSalesLine[],
     customerRef: QboRef | null,
     txnDate: string,
+    dueDate?: string,
   ): QboSalesDocumentInput {
     const body: QboSalesDocumentInput = {
       DocNumber: sale.saleNumber,
@@ -272,6 +280,9 @@ export class QuickBooksSalesSyncService {
       // File the document under the POS invoice date, so a backdated sale lands
       // in the right QuickBooks period instead of defaulting to today.
       TxnDate: txnDate,
+      // Only meaningful on an Invoice; a Sales Receipt is already paid. Sent as
+      // the shop's calendar day, like TxnDate, so the books and the paper agree.
+      ...(dueDate ? { DueDate: dueDate } : {}),
       Line: lines,
     };
     if (customerRef) body.CustomerRef = customerRef;
@@ -284,25 +295,6 @@ export class QuickBooksSalesSyncService {
     if (taxAmount > 0) body.TxnTaxDetail = { TotalTax: taxAmount };
 
     return body;
-  }
-
-  /**
-   * Resolve a QuickBooks CustomerRef from a stored customer mapping, if one exists.
-   * Local customers are not automatically created in QuickBooks yet.
-   * TODO(accountant): add customer sync so invoices/payments always carry a
-   * CustomerRef instead of relying on a pre-existing mapping.
-   */
-  private async resolveCustomerRef(
-    tenantId: string,
-    customerId: string | null,
-  ): Promise<QboRef | null> {
-    if (!customerId) return null;
-    const mapping = await this.prisma.quickBooksMapping.findUnique({
-      where: {
-        tenantId_entityType_localId: { tenantId, entityType: 'CUSTOMER', localId: customerId },
-      },
-    });
-    return mapping ? { value: mapping.quickbooksId } : null;
   }
 
   // ── persistence ────────────────────────────────────────────────────────────

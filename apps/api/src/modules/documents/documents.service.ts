@@ -1,13 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
 import {
-  formatCurrency,
-  formatDateInTimeZone,
-  formatDateTimeInTimeZone,
   ITEM_CONDITION_LABELS,
   QUOTATION_STATUS_LABELS,
   QuotationStatusCode,
   RETURN_REASON_LABELS,
+  formatCurrency,
+  formatDateInTimeZone,
+  formatDateTimeInTimeZone,
+  documentPaymentMethods,
+  paymentMethodLabel,
   safeTimeZone,
   type ItemConditionCode,
   type ReturnReasonCode,
@@ -40,6 +42,8 @@ interface DocLine {
   unitType: string | null;
   unitPrice: number;
   discountAmount: number;
+  /** How a per-unit discount was arrived at, e.g. "Rs. 100.00 × 3". Null otherwise. */
+  discountNote: string | null;
   taxAmount: number;
   lineTotal: number;
 }
@@ -131,6 +135,13 @@ export class DocumentsService {
       unitType: it.unitType,
       unitPrice: it.unitPrice,
       discountAmount: it.discountAmount,
+      // Same treatment as the sale bill: a per-unit discount shows its
+      // arithmetic, so the customer can check a figure that is larger than the
+      // amount they were quoted per item.
+      discountNote:
+        it.discountBasis === 'UNIT' && it.discountValue != null
+          ? `${formatCurrency(it.discountValue)} × ${it.quantity}`
+          : null,
       taxAmount: it.taxAmount,
       lineTotal: it.lineTotal,
     }));
@@ -213,6 +224,12 @@ export class DocumentsService {
       unitType: null,
       unitPrice: num(it.unitPrice),
       discountAmount: num(it.discountAmount),
+      // Carried so the bill can show HOW a discount was arrived at; the amount
+      // itself is already correct without it.
+      discountNote:
+        it.discountBasis === 'UNIT' && it.discountValue != null
+          ? `${formatCurrency(num(it.discountValue))} × ${num(it.quantity)}`
+          : null,
       taxAmount: num(it.taxAmount),
       lineTotal: num(it.lineTotal),
     }));
@@ -229,11 +246,15 @@ export class DocumentsService {
     summary.push({ label: 'Paid', value: formatCurrency(paid) });
     if (balance > 0) summary.push({ label: 'Balance due', value: formatCurrency(balance) });
 
-    const paymentMethods = sale.payments.map((p) => p.method).join(', ');
+    // "Credit" while a balance remains, the real method(s) once it is settled.
+    const paymentMethods = documentPaymentMethods(sale.payments, balance);
     const meta = [
       { label: 'Date', value: this.date((sale.completedAt ?? sale.createdAt).toISOString(), this.tz(tenantId)) },
       { label: 'Payment', value: sale.paymentStatus },
-      ...(paymentMethods ? [{ label: 'Method', value: paymentMethods }] : []),
+      { label: 'Method', value: paymentMethods },
+      ...(sale.paymentDueDate
+        ? [{ label: 'Payment due', value: this.date(sale.paymentDueDate.toISOString(), this.tz(tenantId)) }]
+        : []),
     ];
 
     return {
@@ -308,6 +329,7 @@ export class DocumentsService {
         unitType: null,
         unitPrice: num(it.originalUnitPrice),
         discountAmount: 0,
+        discountNote: null,
         taxAmount: num(it.taxAdjustment),
         lineTotal: num(it.refundableAmount),
       };
@@ -321,7 +343,10 @@ export class DocumentsService {
     if (num(ret.taxAdjustment) > 0)
       summary.push({ label: 'Tax reversed', value: formatCurrency(num(ret.taxAdjustment)) });
     summary.push({ label: 'Total refund', value: formatCurrency(num(ret.refundTotal)), strong: true });
-    if (ret.refundMethod) summary.push({ label: 'Refund method', value: ret.refundMethod });
+    // Labelled, not the raw enum: the return note was printing "BANK_TRANSFER"
+    // at a customer while the invoice beside it said "Bank transfer".
+    if (ret.refundMethod)
+      summary.push({ label: 'Refund method', value: paymentMethodLabel(ret.refundMethod) });
     summary.push({ label: 'Refund status', value: ret.refundStatus });
 
     const meta = [
@@ -396,6 +421,7 @@ export class DocumentsService {
       unitType: null,
       unitPrice: l.unitPrice,
       discountAmount: 0,
+      discountNote: null,
       taxAmount: 0,
       lineTotal: sign * l.lineTotal,
     });
@@ -483,6 +509,7 @@ export class DocumentsService {
         unitType: s.unit,
         unitPrice: s.unitPrice,
         discountAmount,
+        discountNote: null,
         taxAmount,
         lineTotal: round2(lineSub - discountAmount + taxAmount),
       };
@@ -644,7 +671,15 @@ export class DocumentsService {
       cells.push(this.qty(l.quantity));
       cells.push(esc(l.unitType ?? '—'));
       cells.push(formatCurrency(l.unitPrice));
-      if (docs.showDiscountColumn) cells.push(l.discountAmount > 0 ? `- ${formatCurrency(l.discountAmount)}` : '—');
+      if (docs.showDiscountColumn) {
+        // The whole-line string is left exactly as it was: every past invoice is
+        // reprintable from here, and changing it would rewrite their appearance.
+        cells.push(
+          l.discountAmount > 0
+            ? `- ${formatCurrency(l.discountAmount)}${l.discountNote ? ` (${l.discountNote})` : ''}`
+            : '—',
+        );
+      }
       if (docs.showTaxColumn) cells.push(l.taxAmount > 0 ? formatCurrency(l.taxAmount) : '—');
       cells.push(formatCurrency(l.lineTotal));
       return { cells };

@@ -79,6 +79,30 @@ Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · 
 - [ ] Sale is recorded as **credit/partial** (Invoice type); balance visible in `/sales`.
 - [ ] Attempt a partial/credit sale **without** a customer → blocked with a clear message.
 
+## 10a. Payment due date & settlement
+- [ ] Choosing **Credit** or **Partial** reveals a required **Payment due date**; Complete Payment
+      stays disabled until it is set, and says so.
+- [ ] Switching back to a **full** payment hides the field, and the sale completes without one.
+- [ ] A due date **earlier than the invoice date** is refused (try it on a backdated sale).
+- [ ] The sales list shows the **Due** date for that sale and "—" for a fully paid one.
+- [ ] The **Overdue** filter lists only sales past due that still owe; exporting from the filtered
+      view covers the same sales.
+- [ ] Credit is settled on the CUSTOMER, not the invoice: the sale detail has no Record payment
+      button, and the customer page has one.
+- [ ] Customer page → **Record payment**: part-pay an account with two credit sales on it. Both
+      sales still read **Credit** — not even the older one is settled — and the Credit history
+      lists the payment.
+- [ ] Pay the rest. Both sales flip to **Paid** together, and the account reads zero.
+- [ ] Ring up another credit sale for the same customer. It reads Credit; the settled ones stay
+      Paid; the account balance is just the new sale.
+- [ ] Paying **more** than the account owes is refused.
+- [ ] The customer's **Available credit** on /customers rises by what was settled.
+- [ ] The dashboard's **Credit Receivable** card falls by the same amount and, clicked, opens the
+      customers list filtered to those who still owe.
+- [ ] The A4 bill shows the **payment method**: "Credit" while a balance remains, "Cash, Credit"
+      for a part payment, and the real method(s) once settled — plus the **Payment due** date.
+      Check the bill printed from the app (`/print/sales/{id}`), not only the API's PDF.
+
 ## 11. Receipt print
 - [ ] Customer receipt renders with lines, discounts, totals, paid/balance; browser **Print** works.
 - [ ] A sale containing a **warehouse-pickup** product also produces a **warehouse picking copy** (pickup items only).

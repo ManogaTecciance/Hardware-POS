@@ -1,6 +1,15 @@
 import { PaymentStatus, SyncStatus } from '@hardware-pos/database';
 import { Type } from 'class-transformer';
-import { IsDate, IsEnum, IsOptional, IsString, MaxDate, MaxLength, MinDate } from 'class-validator';
+import {
+  IsDate,
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxDate,
+  MaxLength,
+  MinDate,
+} from 'class-validator';
 
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
@@ -33,6 +42,16 @@ export class QuerySalesDto extends PaginationQueryDto {
   @MaxDate(MAX_FILTER_DATE)
   @IsOptional()
   dateFrom?: Date;
+
+  /** Only this customer's sales. */
+  @IsString()
+  @IsOptional()
+  customerId?: string;
+
+  /** Only sales past their payment due date that still owe money. */
+  @IsIn(['true'])
+  @IsOptional()
+  overdue?: string;
 
   /** Inclusive upper bound on the sale/invoice date (ISO string). */
   @Type(() => Date)
