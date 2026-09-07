@@ -4453,3 +4453,78 @@ asks of it.
 - **Label rendering** (step 5) — a new `PrintJobType` on the existing queue. Blocked
   on Part 3 being done first, for the reason above.
 - **Whether `Colour` or `Color` wins.** An operator's call, made in the UI.
+
+---
+
+## D104a — two nullable columns D104 did not model: `categoryId` and `swatchHex`
+
+**Status:** accepted, 2026-09-07. Extends [D104](#d104), supersedes nothing.
+Ships with the `5.1` migration.
+
+D104 modelled `AttributeDefinition (tenantId, name)` and
+`AttributeOption (definitionId, code, name, position)`. Two requirements that
+are already written down elsewhere have no home in that shape, and both cost
+nothing today and a migration over live variant data later.
+
+### 1. `AttributeDefinition.categoryId String?` — bind a scale to a category
+
+`04-format-packs.md` §3 is explicit: *"Bind scales to categories so Footwear
+offers 24–46 and Apparel offers XS–XXXL. This is the one idea worth taking from
+Simply POS, and it is what makes a 400-product catalogue tractable."*
+`PROGRESS.md` carries it into the step itself — `5.1` reads *"tenant-level
+attribute/option library, **category-bound**"*. D104's model has no category,
+so the requirement had nowhere to be written.
+
+**Nullable, and a BINDING HINT rather than identity.** An unbound definition
+(`Colour`) applies to every category; a bound one (`Size — footwear`) is what
+the picker offers under Footwear. The hint narrows what a screen suggests; it
+never decides what is legal, so a product may still adopt any definition.
+
+**`categoryId` is deliberately NOT in the unique key.** `@@unique([tenantId,
+name])` stands exactly as D104 wrote it. Adding the category would look more
+correct and would be wrong: Postgres treats NULLs as distinct in a unique
+index, so `(tenantId, NULL, 'Size')` is insertable twice and the library
+silently re-acquires the duplication it exists to remove. Two scales therefore
+carry two names — which is how `04-format-packs` §3 already writes them, in the
+same table that asked for the binding.
+
+**`ON DELETE SET NULL`.** Deleting a category unbinds its scales; it does not
+delete a library other categories may also be using. Cascade here would let a
+routine category tidy-up destroy the `Size` scale every apparel product points
+at.
+
+### 2. `AttributeOption.swatchHex String?` — the colour picker's swatch
+
+`04-format-packs.md` §3 asks for it by name: *"Colour — named values with a
+swatch. `swatchHex` for the picker."*
+
+**Nullable, because only a colour scale has one** — `Size :: XL` has no colour —
+and because a colour with no swatch yet is still a usable option. `#RRGGBB`,
+validated at the DTO against a shared pure function so the server's rule and
+the form's live preview cannot drift apart, which is the `4.15` / `4.21` /
+`4.22` failure this phase is explicitly guarding against.
+
+**A hex string, not a named palette.** A palette would be a third table to
+seed, migrate and localise, and it would still have to answer "what if the
+shop's teal is not our teal". The picker needs a colour to draw; the shop
+already knows which one.
+
+### Why both now rather than when they are consumed
+
+Neither field has a consumer in `5.1`. Both are added anyway, because the
+alternative is a second migration over `AttributeOption` rows that products,
+variants and generated SKUs will by then depend on. Two nullable columns in a
+table that is empty on the day it ships cost one line of SQL each; the same two
+columns after `5.3` cost a coordinated deploy. This is the same reasoning D102
+used to ship `4.1`'s four columns inert, three steps before anything wrote to
+them.
+
+### What this does not change
+
+- **D104 stands unamended.** The additive shape, the nullable links, the
+  `DocumentSequence` decision for SKUs, and all three barcode findings are
+  untouched. D104a adds two columns to the tables D104 defined.
+- **Whether `Colour` or `Color` wins** is still an operator's call in the UI.
+- **Category binding is not enforcement.** Nothing refuses a product that
+  adopts a scale bound to another category; `5.1` ships the column and the
+  picker hint, not a rule.

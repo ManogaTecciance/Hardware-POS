@@ -366,6 +366,8 @@ model Tenant {
   productVariationDimensions   ProductVariationDimension[]
   productVariationOptions      ProductVariationOption[]
   productVariantOptionValues   ProductVariantOptionValue[]
+  attributeDefinitions         AttributeDefinition[]
+  attributeOptions             AttributeOption[]
   inventoryReceipts            InventoryReceipt[]
   inventoryReceiptLines        InventoryReceiptLine[]
   promotions                   Promotion[]
@@ -679,6 +681,10 @@ model ProductCategory {
   children      ProductCategory[]    @relation("CategoryTree")
   subcategories ProductSubcategory[]
   products      Product[]
+  // D104a -- option scales bound to this category ("Footwear offers 24-46").
+  // The FK is ON DELETE SET NULL, so removing a category unbinds its scales
+  // rather than deleting a library that other categories may also be using.
+  attributeDefinitions AttributeDefinition[]
 
   @@index([tenantId])
   @@index([parentId])
@@ -3316,6 +3322,89 @@ model WebhookDeliveryLog {
 //   • Selling price is never touched by a receipt (D44). Cost changes are
 //     surfaced to the operator, who explicitly decides whether to reprice.
 
+/// D104 / D104a — the TENANT-level option library.
+///
+/// `ProductVariationDimension` below is keyed `@@unique([productId, name])`, so
+/// a dimension belongs to exactly ONE product. Measured against the pilot
+/// database on 2026-09-04, at six products: `Colour` defined separately by four
+/// products, `Color` by one, `Size` by six over five different option sets.
+/// `Colour :: Black/Blue/Red` and `Color :: Black/Blue/Red` are the same set
+/// spelled two ways and nothing in the model can see it, so nothing can group
+/// by colour, filter by size, or generate a stable SKU segment (`5.3`).
+///
+/// ADDITIVE, deliberately — not a promotion of the per-product tables. The link
+/// columns below are nullable and stay that way: a product that never adopts
+/// the library behaves exactly as it does today, and an unmapped dimension is a
+/// real state rather than a defect (D28/D31). Mapping the existing rows is an
+/// operator's job in the UI, not a SQL backfill — whether `Colour` or `Color`
+/// wins is a judgement nobody should make in a migration script.
+model AttributeDefinition {
+  id       String @id @default(cuid())
+  tenantId String
+
+  name     String
+  position Int    @default(0)
+
+  /// D104a — a BINDING HINT, not part of this definition's identity.
+  /// "Bind scales to categories" (04-format-packs §3) so Footwear offers 24-46
+  /// while Apparel offers XS-XXXL. Nullable: an unbound definition (`Colour`)
+  /// applies everywhere. Deliberately absent from the unique key — see below.
+  categoryId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  options           AttributeOption[]
+  productDimensions ProductVariationDimension[]
+
+  // `categoryId` is NOT part of this key. Postgres treats NULLs as distinct in
+  // a unique index, so `(tenantId, NULL, 'Size')` would be insertable twice and
+  // the library would quietly re-acquire the duplication it exists to remove.
+  // Two scales therefore carry two names -- "Size - apparel", "Size - footwear"
+  // -- which is how 04-format-packs section 3 already writes them.
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([categoryId])
+}
+
+/// One option inside a library definition ("XL", "Black", "34").
+model AttributeOption {
+  id           String @id @default(cuid())
+  tenantId     String
+  definitionId String
+
+  /// What SKU generation consumes (`5.3`): `BLK`, `XL`, `34`. This field is the
+  /// reason the library exists at all — `Colour/Black` and `Color/Black` cannot
+  /// produce one SKU segment while they are two unrelated rows. Populated in
+  /// `5.2`; nothing reads it before `5.3`.
+  code     String
+  name     String
+  position Int    @default(0)
+
+  /// D104a — the colour picker's swatch (04-format-packs §3). `#RRGGBB`,
+  /// validated at the DTO. Nullable: only a colour scale has one, and a colour
+  /// with no swatch yet is still a usable option.
+  swatchHex String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  definition AttributeDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  productOptions ProductVariationOption[]
+
+  // Unique on BOTH `code` and `name`: two options that generate the same SKU
+  // segment are as broken as two that read identically in the picker.
+  @@unique([definitionId, code])
+  @@unique([definitionId, name])
+  @@index([tenantId])
+  @@index([definitionId])
+}
+
 /// One variation axis on a Product ("Size", "Packaging", "Color", …). A
 /// Product may have zero or many. Order is captured by `position`.
 model ProductVariationDimension {
@@ -3326,11 +3415,18 @@ model ProductVariationDimension {
   name     String
   position Int    @default(0)
 
+  /// D104 — optional link into the tenant option library. Nullable forever:
+  /// "this dimension has not been mapped yet" is a state the system must be
+  /// able to hold, not an error to default away. SET NULL on delete, so
+  /// retiring a library definition never destroys a product's own dimension.
+  attributeDefinitionId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product             Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attributeDefinition AttributeDefinition? @relation(fields: [attributeDefinitionId], references: [id], onDelete: SetNull)
 
   options       ProductVariationOption[]
   variantValues ProductVariantOptionValue[]
@@ -3338,6 +3434,7 @@ model ProductVariationDimension {
   @@unique([productId, name])
   @@index([tenantId])
   @@index([productId])
+  @@index([attributeDefinitionId])
 }
 
 /// One option within a variation dimension ("200ml", "Glass Bottle", "Red").
@@ -3349,17 +3446,23 @@ model ProductVariationOption {
   name     String
   position Int    @default(0)
 
+  /// D104 — optional link into the tenant option library, same contract as
+  /// `ProductVariationDimension.attributeDefinitionId` above.
+  attributeOptionId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant    Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  dimension ProductVariationDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dimension       ProductVariationDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  attributeOption AttributeOption?          @relation(fields: [attributeOptionId], references: [id], onDelete: SetNull)
 
   variantValues ProductVariantOptionValue[]
 
   @@unique([dimensionId, name])
   @@index([tenantId])
   @@index([dimensionId])
+  @@index([attributeOptionId])
 }
 
 /// A sellable variant of a Product — its own SKU, barcode, selling price,
