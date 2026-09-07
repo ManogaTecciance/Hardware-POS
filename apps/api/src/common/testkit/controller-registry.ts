@@ -74,6 +74,7 @@ import { ProductImagesController } from '../../modules/products/product-images.c
 import { ProductVariantsController } from '../../modules/products/variants/product-variants.controller';
 import { InventoryReceiptsController } from '../../modules/inventory-receipts/inventory-receipts.controller';
 import { StockTakesController } from '../../modules/stock-takes/stock-takes.controller';
+import { BrandsController } from '../../modules/brands/brands.controller';
 // D45 — Restaurant Product wizard merge + Promotions.
 import { ProductModifiersController } from '../../modules/products/product-modifiers.controller';
 import { ProductStationsController } from '../../modules/products/product-stations.controller';
@@ -146,6 +147,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   ProductVariantsController,
   InventoryReceiptsController,
   StockTakesController,
+  BrandsController,
   // D45 — Restaurant Product wizard merge + Promotions.
   ProductModifiersController,
   ProductStationsController,
@@ -245,6 +247,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'inventory-receipts',
   // D111 (`8.7`) — stock takes / cycle counts.
   'stock-takes',
+  // D112 (`8.9`) — brand as an entity.
+  'brands',
   'product-images',
   'product-variants',
   // D45 — Restaurant Product wizard merge + Promotions.

@@ -60,6 +60,17 @@ export class CreateProductDto {
   @IsOptional()
   subcategoryId?: string;
 
+  /**
+   * D112 (`8.9`) — the brand this product carries.
+   *
+   * Optional forever. Most hardware and grocery products have no brand
+   * worth recording, and requiring one would make every existing product
+   * un-editable until somebody invented a brand for it.
+   */
+  @IsString()
+  @IsOptional()
+  brandId?: string;
+
   /** Sales price/rate. */
   @IsNumber()
   @Min(0)

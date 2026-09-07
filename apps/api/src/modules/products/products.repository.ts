@@ -22,6 +22,8 @@ export interface ProductListFilters {
   search?: string;
   categoryId?: string;
   subcategoryId?: string;
+  /** D112 (`8.9`) — everything carrying one label. */
+  brandId?: string;
   isActive?: boolean;
   type?: string;
   syncStatus?: Prisma.ProductWhereInput['syncStatus'];
@@ -160,6 +162,10 @@ export class ProductsRepository {
         : {}),
       ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
       ...(filters.subcategoryId ? { subcategoryId: filters.subcategoryId } : {}),
+      // D112 (`8.9`) — brand as a filter, beside the category filters it sits
+      // with in the UI. Indexed on `Product.brandId`, declared explicitly
+      // because PostgreSQL does not index a foreign key on its own.
+      ...(filters.brandId ? { brandId: filters.brandId } : {}),
       ...(filters.isActive !== undefined ? { isActive: filters.isActive } : {}),
       ...(filters.type ? { type: filters.type } : {}),
       ...(filters.syncStatus ? { syncStatus: filters.syncStatus } : {}),

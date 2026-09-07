@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 305
+- Total routes: 308
 - Module-guarded routes: 209
-- Ungated routes: 96
+- Ungated routes: 99
 
 ## How to read the Guard column
 
@@ -611,6 +611,14 @@ administrator role, or builds its own, keeps working.
 | GET | `/sales/reports/by-variant` | REPORTING | ENFORCED | report:read |
 | GET | `/sales/reports/margin` | REPORTING | ENFORCED | report:read |
 | GET | `/sales/reports/tax-by-rate` | REPORTING | ENFORCED | report:read |
+
+### BrandsController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/brands` | SHARED_CORE | shared-core | product:read |
+| POST | `/brands` | SHARED_CORE | shared-core | product:manage |
+| PATCH | `/brands/:id` | SHARED_CORE | shared-core | product:manage |
 
 ### StockTakesController
 

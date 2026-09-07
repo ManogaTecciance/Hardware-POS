@@ -36,6 +36,7 @@ import {
   type ProductSyncStatus,
   type ReportFormat,
 } from '@/lib/products-api';
+import { fetchBrands, type Brand } from '@/lib/products/brands-api';
 import {
   variantPriceLabel,
   variantSkuLabel,
@@ -84,6 +85,9 @@ export default function ProductsPage() {
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [categoryId, setCategoryId] = React.useState('');
+  // D112 (`8.9`) — brand as a filter, beside category. A clothing buyer's
+  // first question about a catalogue is "show me everything by this label".
+  const [brandId, setBrandId] = React.useState('');
   const [subcategoryId, setSubcategoryId] = React.useState('');
   const [stockStatus, setStockStatus] = React.useState<'' | 'IN' | 'OUT' | 'LOW'>('');
   const [active, setActive] = React.useState<'' | 'true' | 'false'>('true');
@@ -111,6 +115,7 @@ export default function ProductsPage() {
   const [pageSize, setPageSize] = React.useState(20);
 
   const [categories, setCategories] = React.useState<CategoryNode[]>([]);
+  const [brands, setBrands] = React.useState<Brand[]>([]);
   const [rows, setRows] = React.useState<ManagedProduct[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
@@ -126,7 +131,7 @@ export default function ProductsPage() {
 
   React.useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, categoryId, subcategoryId, stockStatus, active, syncStatus, pageSize]);
+  }, [debouncedSearch, categoryId, brandId, subcategoryId, stockStatus, active, syncStatus, pageSize]);
 
   /**
    * Drop filters the tenant's mode does not have, including ones a deep link set.
@@ -144,6 +149,10 @@ export default function ProductsPage() {
   React.useEffect(() => {
     if (!session) return;
     fetchCategoryTree(session).then(setCategories).catch(() => setCategories([]));
+    // Archived brands are deliberately absent: this picker is where a NEW
+    // choice is made, and a retired label is not one. The products that still
+    // carry it keep showing it (D112).
+    fetchBrands(session).then(setBrands).catch(() => setBrands([]));
   }, [session]);
 
   React.useEffect(() => {
@@ -156,6 +165,7 @@ export default function ProductsPage() {
       pageSize,
       search: debouncedSearch || undefined,
       categoryId: categoryId || undefined,
+      brandId: brandId || undefined,
       subcategoryId: subcategoryId || undefined,
       stockStatus: stockStatus || undefined,
       isActive: active || undefined,
@@ -177,7 +187,7 @@ export default function ProductsPage() {
     return () => {
       cancelled = true;
     };
-  }, [session, page, pageSize, debouncedSearch, categoryId, subcategoryId, stockStatus, active, syncStatus, reloadKey]);
+  }, [session, page, pageSize, debouncedSearch, categoryId, brandId, subcategoryId, stockStatus, active, syncStatus, reloadKey]);
 
   const toggleActive = async (p: ManagedProduct) => {
     if (!session) return;
@@ -203,6 +213,7 @@ export default function ProductsPage() {
         {
           search: debouncedSearch || undefined,
           categoryId: categoryId || undefined,
+          brandId: brandId || undefined,
           subcategoryId: subcategoryId || undefined,
           stockStatus: stockStatus || undefined,
           isActive: active || undefined,
@@ -292,6 +303,27 @@ export default function ProductsPage() {
             })),
           ]}
         />
+        {/*
+          D112 (`8.9`). Hidden entirely when the tenant has no brands rather than
+          shown empty: a shop that does not track brands should not carry a
+          permanently useless control, and an empty picker teaches nothing.
+        */}
+        {brands.length > 0 ? (
+          <SearchSelect
+            ariaLabel="Filter by brand"
+            searchPlaceholder="Search brands…"
+            value={brandId}
+            onChange={setBrandId}
+            options={[
+              { value: '', label: 'All brands' },
+              ...brands.map((b) => ({
+                value: b.id,
+                label: b.name,
+                hint: b.productCount > 0 ? String(b.productCount) : undefined,
+              })),
+            ]}
+          />
+        ) : null}
         {subcategoryOptions.length > 0 ? (
           <Select
             value={subcategoryId}

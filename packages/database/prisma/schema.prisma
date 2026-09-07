@@ -375,6 +375,7 @@ model Tenant {
   inventoryReceiptLines        InventoryReceiptLine[]
   stockTakes                   StockTake[]
   stockTakeLines               StockTakeLine[]
+  brands                       Brand[]
   promotions                   Promotion[]
   exchanges                    Exchange[]
   kitchenPrinters              KitchenPrinter[]
@@ -744,6 +745,10 @@ model Product {
   categoryId            String?
   subcategoryId         String?
   unitPrice             Decimal       @default(0) @db.Decimal(12, 2)
+  /// D112 (`8.9`) — brand as an ENTITY, not a string. Nullable forever:
+  /// most hardware and grocery products carry no brand worth recording, and
+  /// "unbranded" is the absence of a brand rather than a brand called that.
+  brandId               String?
   /// QBO income account name (auto-resolved on sync; read-only in the UI).
   incomeAccount         String?
   /// Purchase description — what vendors see on purchase forms.
@@ -818,6 +823,8 @@ model Product {
   variationDimensions  ProductVariationDimension[]
   receiptLines         InventoryReceiptLine[]
   stockTakeLines       StockTakeLine[]
+  /// D112 (`8.9`) — the label this product carries, or NULL for none.
+  brand                Brand?                      @relation(fields: [brandId], references: [id], onDelete: SetNull)
   modifierGroups       ProductModifierGroup[]
   stationLinks         ProductStationLink[]
   promotionItems       PromotionItem[]
@@ -834,6 +841,10 @@ model Product {
   @@index([tenantId, name])
   @@index([categoryId])
   @@index([subcategoryId])
+  /// D112 (`8.9`) — declared explicitly. PostgreSQL does not index a foreign key
+  /// on its own, and "every product of this brand" is the query the entity exists
+  /// for; the sibling category indexes above are here for exactly that reason.
+  @@index([brandId])
   @@index([attributes], type: Gin)
 }
 
@@ -3790,6 +3801,33 @@ model StockTakeLine {
   @@index([stockTakeId])
   @@index([productId])
   @@index([productVariantId])
+}
+
+/// D112 (`8.9`) — a brand a tenant stocks.
+///
+/// Per TENANT, not per domain: brands are data a shop owns, and an enum in the
+/// domain's attribute schema would make every shop share one list and every new
+/// brand a deployment. D64 predicted this row and left `brand` out of the
+/// clothing attribute schema so that no tenant would have a stored string to
+/// migrate into it.
+///
+/// Archived (`isActive: false`), never deleted. Deleting one would silently
+/// unlink every product that used it, and the products are the records that
+/// matter; `Product.brandId` is `SetNull` for the same reason.
+model Brand {
+  id       String  @id @default(cuid())
+  tenantId String
+  name     String
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 // ─────────────────────────────────────────────────────────────

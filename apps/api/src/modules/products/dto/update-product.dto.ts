@@ -50,6 +50,17 @@ export class UpdateProductDto {
   @IsOptional()
   subcategoryId?: string;
 
+  /**
+   * D112 (`8.9`) — the brand this product carries.
+   *
+   * Three states, all meaningful: absent leaves the stored brand alone, `''`
+   * clears it, and an id sets it. A DTO that could only set or clear would make
+   * every partial update from a wizard step wipe the brand.
+   */
+  @IsString()
+  @IsOptional()
+  brandId?: string;
+
   /** Sales price/rate. */
   @IsNumber()
   @Min(0)

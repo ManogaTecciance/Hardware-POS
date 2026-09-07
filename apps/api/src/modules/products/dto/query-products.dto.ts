@@ -19,6 +19,11 @@ export class QueryProductsDto extends PaginationQueryDto {
   @IsOptional()
   subcategoryId?: string;
 
+  /** D112 (`8.9`) — "show me everything by this label". */
+  @IsString()
+  @IsOptional()
+  brandId?: string;
+
   /**
    * Filter by active/inactive as a string ('true' | 'false'); omit to include
    * both. Kept as a string so the global implicit-conversion pipe can't mangle it.

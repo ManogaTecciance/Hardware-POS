@@ -52,6 +52,7 @@ export class ProductsService {
         search: query.search,
         categoryId: query.categoryId,
         subcategoryId: query.subcategoryId,
+        brandId: query.brandId,
         isActive: query.isActive === undefined ? undefined : query.isActive === 'true',
         type: query.type,
         syncStatus: query.syncStatus,
@@ -130,6 +131,9 @@ export class ProductsService {
       description: dto.description ?? null,
       categoryId: link.categoryId ?? null,
       subcategoryId: link.subcategoryId ?? null,
+      // D112 — validated against this tenant, so another tenant's brand id
+      // is refused rather than silently stored as a dangling reference.
+      brandId: await this.resolveBrand(tenantId, dto.brandId),
       unitPrice: dto.unitPrice,
       purchaseDescription: dto.purchaseDescription ?? null,
       costPrice: dto.costPrice ?? null,
@@ -220,6 +224,12 @@ export class ProductsService {
       description: dto.description,
       categoryId: link.categoryId,
       subcategoryId: link.subcategoryId,
+      // D112 — `undefined` leaves the stored brand alone, an empty string clears
+      // it, and a real id is validated against this tenant. Three different
+      // intentions; a single `?? null` would collapse the first two.
+      ...(dto.brandId !== undefined
+        ? { brandId: dto.brandId ? await this.resolveBrand(tenantId, dto.brandId) : null }
+        : {}),
       unitPrice: dto.unitPrice,
       purchaseDescription: dto.purchaseDescription,
       costPrice: dto.costPrice,
@@ -384,6 +394,25 @@ export class ProductsService {
    * the web form sends `field || null` and @IsOptional lets null through.
    * Returns only the fields that should be written.
    */
+  /**
+   * D112 (`8.9`) — a brand id, checked to belong to this tenant.
+   *
+   * `tenantId` in the predicate is what makes another tenant's brand id a
+   * refusal rather than a dangling reference stored on a product. Same shape as
+   * every other cross-entity check on this service.
+   */
+  private async resolveBrand(tenantId: string, brandId?: string): Promise<string | null> {
+    if (!brandId) return null;
+    const brand = await this.prisma.brand.findFirst({
+      where: { id: brandId, tenantId },
+      select: { id: true },
+    });
+    if (!brand) {
+      throw new BadRequestException(`Brand ${brandId} does not belong to this tenant`);
+    }
+    return brand.id;
+  }
+
   private async resolveCategoryLink(
     tenantId: string,
     categoryInput: string | null | undefined,

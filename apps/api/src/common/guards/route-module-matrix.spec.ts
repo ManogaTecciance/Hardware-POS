@@ -465,6 +465,13 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /stock-takes': { module: 'INVENTORY', guard: 'ENFORCED', scope: B },
   'GET /stock-takes': { module: 'INVENTORY', guard: 'ENFORCED', scope: T },
   'GET /stock-takes/:id': { module: 'INVENTORY', guard: 'ENFORCED', scope: T },
+  // D112 (`8.9`) — brands are catalogue data, and the catalogue is shared
+  // core. Gating them on INVENTORY would hide a tenant's own labels from them
+  // because they do not track stock — the mistake the Products nav entry
+  // already documents.
+  'GET /brands': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /brands': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /brands/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'PUT /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'DELETE /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },

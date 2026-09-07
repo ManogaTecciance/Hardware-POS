@@ -14,6 +14,13 @@ export interface ReportRange {
 export interface VariantSalesRow {
   productId: string | null;
   productName: string;
+  /**
+   * D112 (`8.9`) — the brand as it stands TODAY, or `null` for an unbranded
+   * product. Resolved from the product rather than snapshotted onto the sale
+   * line, the same choice `productName` makes here and for the same reason: a
+   * buyer asking "how did this label do" means the label it carries now.
+   */
+  brandName: string | null;
   productVariantId: string | null;
   /** "Medium / Black", or `null` for a product with no variants. */
   variantName: string | null;
@@ -279,6 +286,7 @@ export class RetailReportsService {
           productVariantId: b.productVariantId,
           variantName: named?.variantName ?? null,
           sku: named?.sku ?? null,
+          brandName: named?.brandName ?? null,
           quantitySold: b.quantity.toFixed(3),
           revenue: b.revenue.toFixed(2),
           tax: b.tax.toFixed(2),
@@ -719,7 +727,16 @@ export class RetailReportsService {
       productIds.length
         ? this.prisma.product.findMany({
             where: { tenantId, id: { in: productIds } },
-            select: { id: true, name: true, sku: true, averageCost: true, costPrice: true },
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              averageCost: true,
+              costPrice: true,
+              // D112 — one join, not a second query: the brand name is wanted on
+              // every row this map already answers for.
+              brand: { select: { name: true } },
+            },
           })
         : [],
       variantIds.length
@@ -757,6 +774,7 @@ export class RetailReportsService {
       const cost = costOf(variant ?? null, product ?? null);
       out.set(`${g.productId ?? ''}|${g.productVariantId ?? ''}`, {
         productName: product?.name ?? 'Unknown product',
+        brandName: product?.brand?.name ?? null,
         variantName,
         sku: variant?.sku ?? product?.sku ?? null,
         unitCost: cost.unitCost,
@@ -794,6 +812,8 @@ function dec(value: Prisma.Decimal | null): Prisma.Decimal {
 
 interface ResolvedRow {
   productName: string;
+  /** D112 — `null` for an unbranded product, which most hardware stock is. */
+  brandName: string | null;
   variantName: string | null;
   sku: string | null;
   unitCost: Prisma.Decimal | null;

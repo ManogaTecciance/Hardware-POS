@@ -5353,3 +5353,78 @@ step** the first time a client wants a counter who is not a catalogue editor.
 - `adjustStock`, which the product import still calls, unchanged.
 - Restaurant and hardware tenants. `applyStockCount` is reachable only through a
   new `INVENTORY`-gated route, and the restaurant module has no caller.
+
+---
+
+## D112 — brand is an entity, not a string on a product
+
+**Status:** accepted, 2026-09-07. **Migration:** yes — `Brand`, plus a nullable
+`Product.brandId`. Introduced by `8.9`.
+
+### The question was settled in advance
+
+D64 (`2.4`) chose the clothing attribute schema and deliberately left brand out
+of it, recording why:
+
+> **Why `brand` is absent.** It is a **column eventually** (Phase 8 — "brand as
+> an entity"): filtered and reported on, and free text will not survive real
+> data. Declaring it here now would mean migrating tenants' stored strings into
+> an entity later. Leaving it out costs nothing today.
+
+`8.9` is that entity. The prediction has been paid off rather than revisited, and
+no tenant has a stored brand string to migrate — which is exactly the outcome
+D64 was buying.
+
+### Why an entity rather than a validated string
+
+The test D64 states for attribute-vs-dimension does not apply here, because brand
+is neither. The test that does apply is **what happens to the data over a year**:
+
+- A free-text brand gives `Nike`, `nike`, `NIKE ` and `Nkie` as four brands. A
+  buyer's "how did Nike do this season" then answers three quarters of the
+  question, and nothing in the system can tell them so.
+- An enum in the attribute schema would be worse: `attributeSchema` is a
+  per-DOMAIN list in code, and brands are per-TENANT data. Every shop would
+  share one list, and adding a brand would be a deployment.
+
+So: a row per tenant per brand, referenced by id.
+
+### The link is nullable, and stays nullable
+
+`Product.brandId` is `String?` with `onDelete: SetNull`.
+
+**Nullable** because most products in a hardware or grocery catalogue have no
+brand worth recording, and a required link would make every existing product
+un-editable until someone invented a brand for it. "Unbranded" is not a brand; it
+is the absence of one, and null is how the schema says that (D28/D31 —
+*unresolved is its own state*).
+
+**`SetNull`** because retiring a brand must never delete a product. A shop that
+stops stocking a label still sold those garments, and the sale lines that
+reference them are history.
+
+### Archived, not deleted
+
+A brand is deactivated (`isActive: false`) rather than removed. Deleting one
+would silently unlink every product that used it, and the products are the
+records that matter. Archived brands stay readable so an old product still shows
+what it was, and are filtered out of the pickers where a new choice is made.
+
+### What `8.9` does NOT do
+
+- **No markdown pricing.** Open question 6, answered by the PO on 2026-09-07:
+  *"absolutely still no"*. Scheduled percentage promotions (Phase 4) already
+  cover the selling behaviour; what is given up is the *was / now* pair on a
+  shelf label and a "how much did we lose to markdowns" report. Deferred, not
+  rejected. **`8.9` carries its migration alone**, exactly as the phase plan
+  says.
+- **No brand on a sale line.** A sale line snapshots the product NAME (D44); it
+  does not snapshot a brand id, and reporting resolves the brand from the product
+  as it stands today — the same choice, for the same reason, that `8.3` makes
+  about product names.
+
+### What this does not change
+
+- Every existing product, which keeps `brandId = NULL` and behaves identically.
+- The restaurant and hardware modules: one new table, one nullable column, and a
+  `PRODUCT_*`-permissioned route set that no restaurant screen calls.

@@ -261,6 +261,11 @@ describe('8.3 — sales by variant', () => {
     expect(report.rows[0]).toEqual({
       productId: shop.productAId,
       productName: 'Fixture Product A',
+      // D112 (`8.9`) — null because this fixture product carries no brand.
+      // Asserted rather than omitted: an exact-shape assertion is what
+      // catches a field appearing, and `brandName` appearing is what 8.9
+      // did to this row.
+      brandName: null,
       productVariantId: mediumId,
       variantName: 'Medium',
       sku: 'A-M',
@@ -283,6 +288,31 @@ describe('8.3 — sales by variant', () => {
       tax: '1080.00',
       discount: '350.00',
     });
+  });
+
+  it('names the brand a product carries, and null when it carries none', async () => {
+    // D112 (`8.9`) — "reports by brand" is what the entity was for. Resolved
+    // from the product as it stands today, like the product name beside it.
+    const brand = await prisma.brand.create({
+      data: { tenantId: shop.tenantId, name: 'Fixture Label' },
+    });
+    await prisma.product.update({
+      where: { id: shop.productAId },
+      data: { brandId: brand.id },
+    });
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      { variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 0 },
+    ]);
+
+    const branded = await reports.salesByVariant(shop.tenantId, RANGE);
+    expect(branded.rows[0]!.brandName).toBe('Fixture Label');
+
+    // NEGATIVE: unlink it and the same row reports null rather than a stale
+    // name. Without this the assertion above would pass for a field that was
+    // hard-coded or cached.
+    await prisma.product.update({ where: { id: shop.productAId }, data: { brandId: null } });
+    const unbranded = await reports.salesByVariant(shop.tenantId, RANGE);
+    expect(unbranded.rows[0]!.brandName).toBeNull();
   });
 
   it('reports the tax of a sale the real SalesService completed', async () => {

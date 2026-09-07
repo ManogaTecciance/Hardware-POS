@@ -92,6 +92,8 @@ export interface ProductsQuery {
   pageSize?: number;
   search?: string;
   categoryId?: string;
+  /** D112 (`8.9`) — everything carrying one label. */
+  brandId?: string;
   subcategoryId?: string;
   isActive?: 'true' | 'false';
   type?: ProductItemType;
@@ -257,6 +259,10 @@ function buildQuery(q: ProductsQuery): string {
   params.set('pageSize', String(q.pageSize ?? 25));
   if (q.search) params.set('search', q.search);
   if (q.categoryId) params.set('categoryId', q.categoryId);
+  // D112 (`8.9`). This builder names every field explicitly, so a new one that
+  // is not listed here is dropped in silence and the filter looks broken rather
+  // than absent — which is exactly what happened on the first pass.
+  if (q.brandId) params.set('brandId', q.brandId);
   if (q.subcategoryId) params.set('subcategoryId', q.subcategoryId);
   if (q.isActive) params.set('isActive', q.isActive);
   if (q.type) params.set('type', q.type);
@@ -387,6 +393,7 @@ export async function downloadProductsReport(
   params.set('format', format);
   if (query.search) params.set('search', query.search);
   if (query.categoryId) params.set('categoryId', query.categoryId);
+  if (query.brandId) params.set('brandId', query.brandId);
   if (query.subcategoryId) params.set('subcategoryId', query.subcategoryId);
   if (query.isActive) params.set('isActive', query.isActive);
   if (query.type) params.set('type', query.type);
