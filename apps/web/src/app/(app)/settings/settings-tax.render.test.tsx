@@ -105,6 +105,27 @@ const settingsRecord = (taxRatePercent: number): AppSettings => ({
   quotation: {},
   documents,
   sharing: {},
+  // Phase 5 `5.4`/`5.8` — required on AppSettings. `barcodePrefix: null` is the
+  // real default: unconfigured, and allocation refuses while it holds.
+  catalogue: {
+    barcodePrefix: null,
+    barcodePrefixByCategoryId: {},
+    label: {
+      widthMm: 38,
+      heightMm: 21,
+      columns: 5,
+      rows: 13,
+      marginTopMm: 10,
+      marginLeftMm: 5,
+      gapXMm: 2,
+      gapYMm: 0,
+      showProductName: true,
+      showVariantOptions: true,
+      showPrice: true,
+      showSku: false,
+      symbology: 'EAN13',
+    },
+  },
 });
 
 const updateSettings = vi.fn(async (_s: unknown, input: { taxRatePercent?: number }) =>
