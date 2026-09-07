@@ -69,9 +69,11 @@ export function CustomerCreditHistory({
 
   return (
     <Card className="overflow-hidden">
-      <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0">
         <CardTitle>Credit history</CardTitle>
-        <div className="relative w-full max-w-[220px]">
+        {/* Wide enough for the placeholder to read in full: the search icon
+            takes 36px of the field before any text starts. */}
+        <div className="relative w-full min-w-[240px] max-w-[300px]">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
