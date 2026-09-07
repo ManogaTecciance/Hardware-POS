@@ -21,10 +21,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Session } from '@/lib/auth';
 import {
+  COST_SOURCE_LABELS,
   formatReportMoney,
   formatReportQuantity,
+  margin,
   salesByVariant,
   taxByRate,
+  type MarginReport,
   type TaxByRateReport,
   type VariantSalesReport,
 } from '@/lib/reports';
@@ -123,6 +126,7 @@ function RetailReportSections({ session, range }: { session: Session; range: Rep
   return (
     <div className="space-y-4">
       <SalesByVariantSection session={session} range={range} />
+      <MarginSection session={session} range={range} />
       <TaxByRateSection session={session} range={range} />
     </div>
   );
@@ -356,6 +360,125 @@ function TaxByRateSection({ session, range }: { session: Session; range: ReportR
                 Some sales in this range were taken before the till recorded a tax rate on each
                 line. Their tax is real and included in the total, but cannot be attributed to a
                 rate — it is shown as <span className="font-medium">Rate not recorded</span>.
+              </p>
+            ) : null}
+          </div>
+        )
+      }
+    </SectionShell>
+  );
+}
+
+/**
+ * `8.5` — what the goods that sold actually earned.
+ *
+ * Thinnest margin first: the row a buyer needs to look at is the one barely
+ * earning, not the one earning most.
+ *
+ * Two things are said out loud rather than left for the reader to infer, because
+ * both change how much weight the figures can carry (D110): the cost is TODAY'S,
+ * not the cost on the day of the sale; and any row whose cost is unknown is
+ * outside the totals rather than counted as pure profit.
+ */
+function MarginSection({ session, range }: { session: Session; range: ReportRange }) {
+  const state = useReport<MarginReport>(
+    () => margin(session, range),
+    [session, range.from, range.to],
+  );
+
+  return (
+    <SectionShell
+      title="Margin"
+      description="Revenue less cost, per variant. Thinnest margin first."
+      state={state}
+      empty="Nothing sold in this range."
+    >
+      {(report) =>
+        report.rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            Nothing sold in this range.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="pb-1 text-left">Product</th>
+                    <th className="pb-1 text-left">Variant</th>
+                    <th className="pb-1 text-right">Qty</th>
+                    <th className="pb-1 text-right">Revenue</th>
+                    <th className="pb-1 text-right">Cost</th>
+                    <th className="pb-1 text-right">Margin</th>
+                    <th className="pb-1 text-right">%</th>
+                    <th className="pb-1 text-left">Cost from</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.rows.map((row) => (
+                    <tr
+                      key={`${row.productId ?? '-'}|${row.productVariantId ?? '-'}`}
+                      className="border-t border-border"
+                    >
+                      <td className="py-1.5">{row.productName}</td>
+                      <td className="py-1.5">{row.variantName ?? '—'}</td>
+                      <td className="py-1.5 text-right">{formatReportQuantity(row.quantitySold)}</td>
+                      <td className="py-1.5 text-right">{formatReportMoney(row.revenue)}</td>
+                      {/* An em dash, never "Rs. 0.00": an unknown cost is not a
+                          cost of nothing, and the difference is a 100% margin. */}
+                      <td className="py-1.5 text-right">
+                        {row.cost === null ? '—' : formatReportMoney(row.cost)}
+                      </td>
+                      <td
+                        className={
+                          row.margin !== null && row.margin.startsWith('-')
+                            ? 'py-1.5 text-right text-destructive'
+                            : 'py-1.5 text-right'
+                        }
+                      >
+                        {row.margin === null ? '—' : formatReportMoney(row.margin)}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        {row.marginPercent === null ? '—' : `${row.marginPercent}%`}
+                      </td>
+                      <td className="py-1.5 text-xs text-muted-foreground">
+                        {COST_SOURCE_LABELS[row.costSource]}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border font-medium">
+                    <td className="py-2" colSpan={3}>
+                      Total
+                    </td>
+                    <td className="py-2 text-right">{formatReportMoney(report.totals.revenue)}</td>
+                    <td className="py-2 text-right">{formatReportMoney(report.totals.cost)}</td>
+                    <td className="py-2 text-right">{formatReportMoney(report.totals.margin)}</td>
+                    <td className="py-2 text-right">
+                      {report.totals.marginPercent === null
+                        ? '—'
+                        : `${report.totals.marginPercent}%`}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Cost is the weighted average <span className="font-medium">as it stands today</span>,
+              not the cost on the day of the sale. For a shop whose buying prices are steady the
+              two are the same; after a price change, older sales read against the newer cost.
+            </p>
+            {report.unknownCost.rows > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {report.unknownCost.rows}{' '}
+                {report.unknownCost.rows === 1 ? 'line has' : 'lines have'} no recorded cost —
+                nothing has ever been received against them — so{' '}
+                {formatReportMoney(report.unknownCost.revenue)} of revenue is{' '}
+                <span className="font-medium">not included</span> in the totals above. Receive
+                stock against them to bring them in.
               </p>
             ) : null}
           </div>

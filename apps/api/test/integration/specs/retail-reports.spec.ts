@@ -1,5 +1,6 @@
 /**
- * Phase 8 retail reporting — `8.3` sales by variant, `8.4` tax by rate.
+ * Phase 8 retail reporting — `8.3` sales by variant, `8.4` tax by rate,
+ * `8.5` margin.
  *
  * ## What can only be proven here
  *
@@ -314,6 +315,26 @@ describe('8.3 — sales by variant', () => {
     expect(report.totals.tax).toBe('360.00');
   });
 
+  it('takes the order discount off the line it belongs to', async () => {
+    // Revenue is what the shop RECEIVED. A 200 discount on a 2000 basket is
+    // money nobody paid, and it belongs to no single line, so each 1000 line
+    // carries 100 of it. Reporting 1000 here would overstate every row in
+    // every report that shares this definition — `8.5` costs its margin
+    // against exactly this figure.
+    await completedSale(
+      new Date('2026-03-10T10:00:00.000Z'),
+      [
+        { variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 18 },
+        { variantId: largeId, quantity: 1, lineTotal: 1000, rate: 18 },
+      ],
+      { tax: 324, orderDiscount: 200 },
+    );
+
+    const report = await reports.salesByVariant(shop.tenantId, RANGE);
+    expect(report.rows.map((r) => r.revenue)).toEqual(['900.00', '900.00']);
+    expect(report.totals.revenue).toBe('1800.00');
+  });
+
   it('sums the same variant across several sales', async () => {
     await completedSale(
       new Date('2026-03-02T09:00:00.000Z'),
@@ -570,5 +591,212 @@ describe('8.4 — tax by rate', () => {
     ]);
     expect(byVariant.totals.tax).toBe(byRate.totals.tax);
     expect(byRate.totals.tax).toBe('420.00');
+  });
+});
+
+/** Give a variant a weighted-average cost the way a goods receipt would. */
+async function setVariantCost(
+  variantId: string,
+  averageCost: number | null,
+  costPrice: number | null = null,
+): Promise<void> {
+  await prisma.productVariant.update({
+    where: { id: variantId },
+    data: { averageCost, costPrice },
+  });
+}
+
+describe('8.5 — margin', () => {
+  it('costs what sold at the variant average, and states which cost it used', async () => {
+    await setVariantCost(mediumId, 600);
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      { variantId: mediumId, quantity: 3, lineTotal: 3000, rate: 0 },
+    ]);
+
+    const report = await reports.margin(shop.tenantId, RANGE);
+
+    expect(report.rows).toHaveLength(1);
+    expect(report.rows[0]).toEqual({
+      productId: shop.productAId,
+      productName: 'Fixture Product A',
+      productVariantId: mediumId,
+      variantName: 'Medium',
+      sku: 'A-M',
+      quantitySold: '3.000',
+      revenue: '3000.00',
+      cost: '1800.00',
+      margin: '1200.00',
+      marginPercent: '40.00',
+      costSource: 'VARIANT_AVERAGE',
+    });
+    expect(report.totals).toEqual({
+      revenue: '3000.00',
+      cost: '1800.00',
+      margin: '1200.00',
+      marginPercent: '40.00',
+    });
+    expect(report.unknownCost).toEqual({ rows: 0, revenue: '0.00' });
+  });
+
+  it('reports an unknown cost as unknown, never as a 100% margin', async () => {
+    // The defect this assertion exists to prevent: a variant nothing has ever
+    // been received against has `averageCost = NULL`. Costing it at zero would
+    // report the whole sale as profit.
+    await setVariantCost(mediumId, 600);
+    await setVariantCost(largeId, null, null);
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      { variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 0 },
+      { variantId: largeId, quantity: 1, lineTotal: 1500, rate: 0 },
+    ]);
+
+    const report = await reports.margin(shop.tenantId, RANGE);
+
+    const unknown = report.rows.find((r) => r.productVariantId === largeId)!;
+    expect(unknown.cost).toBeNull();
+    expect(unknown.margin).toBeNull();
+    expect(unknown.marginPercent).toBeNull();
+    expect(unknown.costSource).toBe('UNKNOWN');
+    // Its revenue is still known, and reported — separately, so the reader can
+    // see how much of the period the totals do NOT cover.
+    expect(unknown.revenue).toBe('1500.00');
+    expect(report.unknownCost).toEqual({ rows: 1, revenue: '1500.00' });
+
+    // POSITIVE: the totals are over the KNOWN row only. 1000 - 600 = 400.
+    expect(report.totals).toEqual({
+      revenue: '1000.00',
+      cost: '600.00',
+      margin: '400.00',
+      marginPercent: '40.00',
+    });
+    // NEGATIVE: the unknown row's 1500 did not leak into them, which is what a
+    // zero-cost fallback would have done.
+    expect(report.totals.revenue).not.toBe('2500.00');
+    expect(report.totals.margin).not.toBe('1900.00');
+  });
+
+  it('falls back to the variant latest purchase, and to the product only without a variant', async () => {
+    // No average, but a real purchase cost on the VARIANT: better than nothing,
+    // and the row reports WHICH so a reader can weigh it. It never reaches past
+    // the variant to the parent — see `costOf`, and D44 for the price-side
+    // version of that mistake.
+    await setVariantCost(mediumId, null, 550);
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      { variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 0 },
+    ]);
+
+    let report = await reports.margin(shop.tenantId, RANGE);
+    expect(report.rows[0]!.costSource).toBe('LATEST_PURCHASE');
+    expect(report.rows[0]!.cost).toBe('550.00');
+
+    // A line sold with NO variant is the only case that reads the product's
+    // own average — there is no variant to answer for it.
+    await resetDatabase(prisma);
+    shop = await seedTileShopWithQuickBooks(prisma);
+    await prisma.product.update({
+      where: { id: shop.productAId },
+      data: { averageCost: 700 },
+    });
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      { variantId: null, quantity: 2, lineTotal: 2000, rate: 0 },
+    ]);
+    report = await reports.margin(shop.tenantId, RANGE);
+    expect(report.rows[0]!.costSource).toBe('PRODUCT_AVERAGE');
+    expect(report.rows[0]!.cost).toBe('1400.00');
+  });
+
+  it('keeps the four decimal places of a unit cost until the line is totalled', async () => {
+    // averageCost is Decimal(12,4). Rounding 12.3456 to 12.35 first and then
+    // multiplying by 1000 units loses 4.40; multiplying first loses nothing.
+    await setVariantCost(mediumId, 12.3456);
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      { variantId: mediumId, quantity: 1000, lineTotal: 20000, rate: 0 },
+    ]);
+
+    const report = await reports.margin(shop.tenantId, RANGE);
+    expect(report.rows[0]!.cost).toBe('12345.60');
+    expect(report.rows[0]!.cost).not.toBe('12350.00');
+    expect(report.rows[0]!.margin).toBe('7654.40');
+  });
+
+  it('costs the margin against revenue net of the order discount', async () => {
+    // 1000 sold with 100 off the order, cost 600. The margin is 300, not 400 —
+    // the discount came out of the shop's pocket, not the customer's.
+    await setVariantCost(mediumId, 600);
+    await completedSale(
+      new Date('2026-03-10T10:00:00.000Z'),
+      [{ variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 0 }],
+      { orderDiscount: 100 },
+    );
+
+    const report = await reports.margin(shop.tenantId, RANGE);
+    expect(report.rows[0]!.revenue).toBe('900.00');
+    expect(report.rows[0]!.margin).toBe('300.00');
+    expect(report.rows[0]!.marginPercent).toBe('33.33');
+  });
+
+  it('shows a loss as a loss', async () => {
+    // Sold below cost. A report that could only show a profit would hide the
+    // one thing a buyer most needs to see.
+    await setVariantCost(mediumId, 1200);
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      { variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 0 },
+    ]);
+
+    const report = await reports.margin(shop.tenantId, RANGE);
+    expect(report.rows[0]!.margin).toBe('-200.00');
+    expect(report.rows[0]!.marginPercent).toBe('-20.00');
+    expect(report.totals.margin).toBe('-200.00');
+  });
+
+  it('puts the thinnest margin first, and the unknown rows last', async () => {
+    await setVariantCost(mediumId, 950);
+    await setVariantCost(largeId, null);
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      // Thin: 50.
+      { variantId: mediumId, quantity: 1, lineTotal: 1000, rate: 0 },
+      // Unknown.
+      { variantId: largeId, quantity: 1, lineTotal: 1500, rate: 0 },
+    ]);
+    await prisma.product.update({ where: { id: shop.productAId }, data: { averageCost: 100 } });
+    await completedSale(new Date('2026-03-11T10:00:00.000Z'), [
+      // Fat: 900.
+      { variantId: null, quantity: 1, lineTotal: 1000, rate: 0 },
+    ]);
+
+    const report = await reports.margin(shop.tenantId, RANGE);
+    expect(report.rows.map((r) => r.margin)).toEqual(['50.00', '900.00', null]);
+  });
+
+  it('says nothing rather than 0% for a period with no sales', async () => {
+    const report = await reports.margin(shop.tenantId, RANGE);
+    expect(report.rows).toEqual([]);
+    expect(report.totals).toEqual({
+      revenue: '0.00',
+      cost: '0.00',
+      margin: '0.00',
+      // A percentage of nothing is undefined. "0.00%" would be a claim.
+      marginPercent: null,
+    });
+    expect(report.unknownCost).toEqual({ rows: 0, revenue: '0.00' });
+  });
+
+  it('refuses a reversed range', async () => {
+    await expect(
+      reports.margin(shop.tenantId, { from: RANGE.to, to: RANGE.from }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('agrees with 8.3 about what was sold', async () => {
+    await setVariantCost(mediumId, 600);
+    await completedSale(new Date('2026-03-10T10:00:00.000Z'), [
+      { variantId: mediumId, quantity: 4, lineTotal: 4000, rate: 0 },
+    ]);
+
+    const [byVariant, byMargin] = await Promise.all([
+      reports.salesByVariant(shop.tenantId, RANGE),
+      reports.margin(shop.tenantId, RANGE),
+    ]);
+    expect(byMargin.rows[0]!.quantitySold).toBe(byVariant.rows[0]!.quantitySold);
+    expect(byMargin.rows[0]!.revenue).toBe(byVariant.rows[0]!.revenue);
   });
 });

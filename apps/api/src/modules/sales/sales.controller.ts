@@ -115,6 +115,21 @@ export class SalesController {
     return this.retailReports.taxByRate(tenantId, toReportRange(query));
   }
 
+  /**
+   * `8.5` — what the goods that sold actually earned.
+   *
+   * Costed at TODAY'S weighted average, which is an approximation for a
+   * historical sale — D110. The response says which cost each row used and
+   * which rows have no cost at all, rather than presenting one figure as if
+   * every part of it were equally solid.
+   */
+  @Get('reports/margin')
+  @RequireModule(ModuleKey.REPORTING)
+  @RequirePermissions(Permission.REPORT_READ)
+  margin(@TenantId() tenantId: string, @Query() query: QueryRetailReportDto) {
+    return this.retailReports.margin(tenantId, toReportRange(query));
+  }
+
   @Get(':id')
   @RequirePermissions(Permission.SALE_READ)
   getById(@TenantId() tenantId: string, @Param('id') id: string): Promise<SaleWithRelations> {

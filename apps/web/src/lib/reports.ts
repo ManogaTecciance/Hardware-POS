@@ -112,3 +112,43 @@ export function formatReportQuantity(value: string): string {
   if (!value.includes('.')) return value;
   return value.replace(/0+$/, '').replace(/\.$/, '');
 }
+
+/** Where a margin row's unit cost came from. */
+export type CostSource = 'VARIANT_AVERAGE' | 'PRODUCT_AVERAGE' | 'LATEST_PURCHASE' | 'UNKNOWN';
+
+export interface MarginRow {
+  productId: string | null;
+  productName: string;
+  productVariantId: string | null;
+  variantName: string | null;
+  sku: string | null;
+  quantitySold: string;
+  revenue: string;
+  /** `null` when nothing has ever been received — unknown, not zero. */
+  cost: string | null;
+  margin: string | null;
+  marginPercent: string | null;
+  costSource: CostSource;
+}
+
+export interface MarginReport {
+  from: string;
+  to: string;
+  rows: MarginRow[];
+  /** Over the rows whose cost is known. */
+  totals: { revenue: string; cost: string; margin: string; marginPercent: string | null };
+  unknownCost: { rows: number; revenue: string };
+}
+
+export function margin(session: Session, range: RetailReportRange): Promise<MarginReport> {
+  const q = new URLSearchParams({ from: range.from, to: range.to });
+  return api.get<MarginReport>(`/sales/reports/margin?${q}`, auth(session));
+}
+
+/** How a row's cost was arrived at, in words a shopkeeper reads. */
+export const COST_SOURCE_LABELS: Record<CostSource, string> = {
+  VARIANT_AVERAGE: 'Average cost',
+  PRODUCT_AVERAGE: 'Average cost (product)',
+  LATEST_PURCHASE: 'Last purchase',
+  UNKNOWN: 'Never received',
+};

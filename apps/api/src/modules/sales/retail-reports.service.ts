@@ -20,7 +20,16 @@ export interface VariantSalesRow {
   sku: string | null;
   /** 3dp, matching `SaleItem.quantity`. */
   quantitySold: string;
-  /** What the customer paid for these lines, after discounts, before tax. */
+  /**
+   * What the shop actually received for these lines, before tax: line net,
+   * less the line's proportional share of any order-level discount.
+   *
+   * The share matters. An order discount is money the shop did not receive,
+   * and it belongs to no single line, so leaving it out would overstate every
+   * row. This is the same quantity the tax base uses and the same one `8.5`
+   * takes its margin from — one definition of "what this line earned",
+   * used by every report that needs it.
+   */
   revenue: string;
   /** This line's share of the tax its sale charged. See `report-tax-allocation`. */
   tax: string;
@@ -57,6 +66,49 @@ export interface TaxByRateReport {
    * than no figure.
    */
   hasUnattributed: boolean;
+}
+
+/** Where a row's unit cost came from. Reported, not inferred by the reader. */
+export type CostSource =
+  /** `ProductVariant.averageCost` — weighted average across every branch. */
+  | 'VARIANT_AVERAGE'
+  /** `Product.averageCost`, for a line sold without a variant. */
+  | 'PRODUCT_AVERAGE'
+  /** `costPrice` — the most recent purchase, used when no average exists. */
+  | 'LATEST_PURCHASE'
+  /** Nothing has ever been received. Margin is unknown, not zero. */
+  | 'UNKNOWN';
+
+export interface MarginRow {
+  productId: string | null;
+  productName: string;
+  productVariantId: string | null;
+  variantName: string | null;
+  sku: string | null;
+  quantitySold: string;
+  /** Net of the order discount, as `VariantSalesRow.revenue`. */
+  revenue: string;
+  /** Quantity × unit cost, or `null` when the cost is unknown. */
+  cost: string | null;
+  /** Revenue less cost, or `null`. Never 0 as a stand-in for "unknown". */
+  margin: string | null;
+  /** Margin as a percentage of revenue, 2dp. `null` when either is unknown. */
+  marginPercent: string | null;
+  costSource: CostSource;
+}
+
+export interface MarginReport {
+  from: string;
+  to: string;
+  rows: MarginRow[];
+  /**
+   * Totals over the rows whose cost IS known. A total that silently treated
+   * an unknown cost as zero would report a margin of 100% on it — the most
+   * flattering possible lie.
+   */
+  totals: { revenue: string; cost: string; margin: string; marginPercent: string | null };
+  /** Rows excluded from those totals, and what they were worth. */
+  unknownCost: { rows: number; revenue: string };
 }
 
 /** What a rate row is keyed by when the sale predates per-line rates (3.8). */
@@ -157,7 +209,9 @@ export class RetailReportsService {
             discount: ZERO,
           };
         bucket.quantity = bucket.quantity.plus(item.quantity);
-        bucket.revenue = bucket.revenue.plus(item.lineTotal);
+        // `taxable` is line net less its share of the order discount — see
+        // `VariantSalesRow.revenue`. The allocator already derived it.
+        bucket.revenue = bucket.revenue.plus(allocated[i]!.taxable);
         bucket.tax = bucket.tax.plus(allocated[i]!.tax);
         bucket.discount = bucket.discount
           .plus(item.discountAmount)
@@ -282,6 +336,142 @@ export class RetailReportsService {
   }
 
   /**
+   * `8.5` — what the goods that sold actually earned.
+   *
+   * `ProductVariant.averageCost` is maintained by every goods receipt and, until
+   * now, read by no report: a shop could see what it sold and never what it
+   * made on it.
+   *
+   * ## The cost is today's, not the day's — stated, not hidden
+   *
+   * `averageCost` is a MOVING weighted average. A sale from March is costed at
+   * the average as it stands now, which is only the same number if nothing has
+   * been received since. Costing a historical sale exactly would mean freezing
+   * the unit cost onto `SaleItem` at sale time — a schema change, a migration
+   * and a decision record, and it could not answer for sales already taken.
+   *
+   * So this report is an approximation, and D110 records it as one. The screen
+   * says so in words rather than printing a figure that looks exact. For a shop
+   * whose costs are stable it is very nearly right; for one buying a falling
+   * market it flatters recent history, and a reader has to know that.
+   *
+   * ## An unknown cost is not a zero cost
+   *
+   * A variant that has never been received has `averageCost = NULL`. Its margin
+   * is `null` and it is excluded from the totals, with its revenue reported
+   * separately. Treating NULL as 0 would report 100% margin on it, which is the
+   * most flattering possible lie and the easiest one to ship by accident.
+   */
+  async margin(tenantId: string, range: ReportRange): Promise<MarginReport> {
+    const sales = await this.load(tenantId, range);
+
+    interface Bucket {
+      productId: string | null;
+      productVariantId: string | null;
+      quantity: Prisma.Decimal;
+      revenue: Prisma.Decimal;
+    }
+    const buckets = new Map<string, Bucket>();
+    for (const sale of sales) {
+      const allocated = allocateSaleTax(sale.items, sale);
+      sale.items.forEach((item, i) => {
+        const key = `${item.productId ?? ''}|${item.productVariantId ?? ''}`;
+        const bucket =
+          buckets.get(key) ??
+          {
+            productId: item.productId,
+            productVariantId: item.productVariantId,
+            quantity: ZERO,
+            revenue: ZERO,
+          };
+        bucket.quantity = bucket.quantity.plus(item.quantity);
+        bucket.revenue = bucket.revenue.plus(allocated[i]!.taxable);
+        buckets.set(key, bucket);
+      });
+    }
+
+    const info = await this.resolveNames(tenantId, [...buckets.values()]);
+
+    let knownRevenue = ZERO;
+    let knownCost = ZERO;
+    let unknownRows = 0;
+    let unknownRevenue = ZERO;
+
+    const rows: MarginRow[] = [...buckets.values()].map((b) => {
+      const named = info.get(`${b.productId ?? ''}|${b.productVariantId ?? ''}`);
+      const unitCost = named?.unitCost ?? null;
+      const revenue = b.revenue.toDecimalPlaces(2);
+
+      if (unitCost === null) {
+        unknownRows += 1;
+        unknownRevenue = unknownRevenue.plus(revenue);
+        return {
+          productId: b.productId,
+          productName: named?.productName ?? 'Unknown product',
+          productVariantId: b.productVariantId,
+          variantName: named?.variantName ?? null,
+          sku: named?.sku ?? null,
+          quantitySold: b.quantity.toFixed(3),
+          revenue: revenue.toFixed(2),
+          cost: null,
+          margin: null,
+          marginPercent: null,
+          costSource: 'UNKNOWN' as const,
+        };
+      }
+
+      // Cost is Decimal(12,4) per unit; the product is rounded to cents once,
+      // here, rather than per sale — rounding a unit cost first would lose a
+      // fifth of a cent on every unit sold.
+      const cost = b.quantity.mul(unitCost).toDecimalPlaces(2);
+      const margin = revenue.minus(cost);
+      knownRevenue = knownRevenue.plus(revenue);
+      knownCost = knownCost.plus(cost);
+
+      return {
+        productId: b.productId,
+        productName: named?.productName ?? 'Unknown product',
+        productVariantId: b.productVariantId,
+        variantName: named?.variantName ?? null,
+        sku: named?.sku ?? null,
+        quantitySold: b.quantity.toFixed(3),
+        revenue: revenue.toFixed(2),
+        cost: cost.toFixed(2),
+        margin: margin.toFixed(2),
+        marginPercent: percentOf(margin, revenue),
+        costSource: named!.costSource,
+      };
+    });
+
+    // Thinnest margin first: the row a buyer needs to look at is the one
+    // barely earning, not the one earning most. Unknown-cost rows sort last —
+    // they are a data problem, not a pricing one.
+    rows.sort((a, b) => {
+      if (a.margin === null && b.margin === null) return 0;
+      if (a.margin === null) return 1;
+      if (b.margin === null) return -1;
+      return (
+        new Prisma.Decimal(a.margin).comparedTo(new Prisma.Decimal(b.margin)) ||
+        a.productName.localeCompare(b.productName)
+      );
+    });
+
+    const totalMargin = knownRevenue.minus(knownCost);
+    return {
+      from: range.from.toISOString(),
+      to: range.to.toISOString(),
+      rows,
+      totals: {
+        revenue: knownRevenue.toFixed(2),
+        cost: knownCost.toFixed(2),
+        margin: totalMargin.toFixed(2),
+        marginPercent: percentOf(totalMargin, knownRevenue),
+      },
+      unknownCost: { rows: unknownRows, revenue: unknownRevenue.toFixed(2) },
+    };
+  }
+
+  /**
    * Every completed sale in the range, with the columns the reports fold.
    *
    * One query, shared: `8.3` and `8.4` read the same rows for different
@@ -315,11 +505,18 @@ export class RetailReportsService {
     });
   }
 
-  /** Current names for each (product, variant) pair the grouping produced. */
+  /**
+   * Current name, SKU and unit cost for each (product, variant) pair.
+   *
+   * Cost preference: the variant's weighted average, then the variant's latest
+   * purchase, then the same two on the product. Each is a real cost somebody
+   * paid; the order runs from the most representative to the least, and the
+   * row reports WHICH was used rather than leaving a reader to guess.
+   */
   private async resolveNames(
     tenantId: string,
     grouped: { productId: string | null; productVariantId: string | null }[],
-  ): Promise<Map<string, { productName: string; variantName: string | null; sku: string | null }>> {
+  ): Promise<Map<string, ResolvedRow>> {
     const productIds = [...new Set(grouped.map((g) => g.productId).filter(isString))];
     const variantIds = [...new Set(grouped.map((g) => g.productVariantId).filter(isString))];
 
@@ -327,7 +524,7 @@ export class RetailReportsService {
       productIds.length
         ? this.prisma.product.findMany({
             where: { tenantId, id: { in: productIds } },
-            select: { id: true, name: true, sku: true },
+            select: { id: true, name: true, sku: true, averageCost: true, costPrice: true },
           })
         : [],
       variantIds.length
@@ -336,6 +533,8 @@ export class RetailReportsService {
             select: {
               id: true,
               sku: true,
+              averageCost: true,
+              costPrice: true,
               optionValues: {
                 select: {
                   option: { select: { name: true } },
@@ -350,10 +549,7 @@ export class RetailReportsService {
     const productById = new Map(products.map((p) => [p.id, p]));
     const variantById = new Map(variants.map((v) => [v.id, v]));
 
-    const out = new Map<
-      string,
-      { productName: string; variantName: string | null; sku: string | null }
-    >();
+    const out = new Map<string, ResolvedRow>();
     for (const g of grouped) {
       const product = g.productId ? productById.get(g.productId) : undefined;
       const variant = g.productVariantId ? variantById.get(g.productVariantId) : undefined;
@@ -363,10 +559,13 @@ export class RetailReportsService {
             .map((ov) => ov.option.name)
             .join(' / ') || null
         : null;
+      const cost = costOf(variant ?? null, product ?? null);
       out.set(`${g.productId ?? ''}|${g.productVariantId ?? ''}`, {
         productName: product?.name ?? 'Unknown product',
         variantName,
         sku: variant?.sku ?? product?.sku ?? null,
+        unitCost: cost.unitCost,
+        costSource: cost.costSource,
       });
     }
     return out;
@@ -374,6 +573,62 @@ export class RetailReportsService {
 }
 
 const ZERO = new Prisma.Decimal(0);
+
+interface ResolvedRow {
+  productName: string;
+  variantName: string | null;
+  sku: string | null;
+  unitCost: Prisma.Decimal | null;
+  costSource: CostSource;
+}
+
+type CostBearing = { averageCost: Prisma.Decimal | null; costPrice: Prisma.Decimal | null };
+
+/**
+ * The unit cost to charge this line against, and where it came from.
+ *
+ * **A variant line never falls back to its parent product.** That was the first
+ * shape of this function and it is wrong: once `hasVariants` is true the
+ * parent's `unitPrice`, `costPrice` and `averageCost` are legacy columns the
+ * schema says are not read, and they hold whatever they held before the product
+ * gained variants. D44 is the record of exactly that mistake on the PRICE side —
+ * the products list showed `Rs 0.00` for every variant product because it read
+ * the parent. Reading a stale parent cost would be the same defect, one column
+ * over, and it would produce a plausible margin rather than an obvious zero.
+ *
+ * So: a variant answers for itself, a variant-less line answers from its
+ * product, and a thing nothing has ever been received against is `null` —
+ * unknown, not free.
+ */
+function costOf(
+  variant: CostBearing | null,
+  product: CostBearing | null,
+): { unitCost: Prisma.Decimal | null; costSource: CostSource } {
+  if (variant) {
+    if (variant.averageCost != null) {
+      return { unitCost: variant.averageCost, costSource: 'VARIANT_AVERAGE' };
+    }
+    if (variant.costPrice != null) {
+      return { unitCost: variant.costPrice, costSource: 'LATEST_PURCHASE' };
+    }
+    return { unitCost: null, costSource: 'UNKNOWN' };
+  }
+  if (product?.averageCost != null) {
+    return { unitCost: product.averageCost, costSource: 'PRODUCT_AVERAGE' };
+  }
+  if (product?.costPrice != null) {
+    return { unitCost: product.costPrice, costSource: 'LATEST_PURCHASE' };
+  }
+  return { unitCost: null, costSource: 'UNKNOWN' };
+}
+
+/** `margin / revenue` as a 2dp percentage string, or `null` on a zero base. */
+function percentOf(part: Prisma.Decimal, whole: Prisma.Decimal): string | null {
+  // A percentage of nothing is not 0%, it is undefined — and a report that
+  // prints "0.00%" for a period with no sales has said something false.
+  if (whole.isZero()) return null;
+  return part.mul(100).div(whole).toDecimalPlaces(2).toFixed(2);
+}
 
 function sum(values: Prisma.Decimal[]): Prisma.Decimal {
   return values.reduce((a, v) => a.plus(v), ZERO);

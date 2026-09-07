@@ -5173,3 +5173,84 @@ Four integration assertions, and the second is the one that matters:
 - The restaurant and hardware modules. `RETURNS` is retail-gated, and the flag
   defaults to `false`, so a caller that does not set it sees the old behaviour
   byte for byte.
+
+---
+
+## D110 — margin is costed at today's average, and the report says so
+
+**Status:** accepted, 2026-09-07. No migration. Introduced by `8.5`.
+
+### The question
+
+`ProductVariant.averageCost` is maintained by every goods receipt — a weighted
+average across every branch, refreshed on each receive — and until `8.5` no
+report read it. A shop could see what it sold and never what it made on it.
+
+The question `8.5` had to answer is not "how do we compute margin", it is **which
+cost a historical sale is costed at**.
+
+### What was decided
+
+**Margin is `revenue − (quantity × the unit cost as it stands TODAY)`, and every
+surface that shows it says that in words.**
+
+`averageCost` moves. A sale from March costed today is only right if nothing has
+been received since; a shop buying into a falling market will see its March
+margin flattered, and one buying into a rising market will see it understated.
+That is a real limitation, not a rounding detail.
+
+### The alternative, and why it is not this phase
+
+Costing a historical sale exactly means **freezing the unit cost onto `SaleItem`
+at sale time** — a new column, a migration, a decision record, and a change to
+the sale write path that every existing tenant runs through. It is the right
+long-term answer and it is deliberately not being done here, for three reasons:
+
+1. It could not answer for sales already taken. Every sale in the pilot database
+   would still have to be costed at today's average, so the report needs this
+   behaviour regardless.
+2. `8.5`'s scope is "read the cost that already exists". Changing how sales are
+   written is a different piece of work with a different blast radius, and the
+   standing constraint is not to disturb paths that hardware and restaurant
+   tenants run through.
+3. The approximation is close to exact for the shops this template targets,
+   whose costs move slowly.
+
+**Revisit when** a client reports margins that do not match their own books, or
+when stock valuation (a related, larger piece) is picked up.
+
+### An unknown cost is not a zero cost
+
+A variant nothing has ever been received against has `averageCost = NULL`. The
+row's cost, margin and margin percentage are all `null`; the row is excluded from
+the totals; and the excluded rows are counted and their revenue reported
+separately, so a reader can see how much of the period the totals do not cover.
+
+Costing NULL as zero would report a **100% margin** on that row — the most
+flattering possible number, arrived at by accident. This is the same principle as
+D28/D31's *unresolved is its own state*, applied to money.
+
+### A variant never reads its parent's cost
+
+Once `hasVariants` is true, `Product.unitPrice`, `Product.costPrice` and
+`Product.averageCost` are legacy columns the schema states are not read, holding
+whatever they held before the product gained variants. **D44** is the record of
+what happens when a screen reads them anyway: the products list priced every
+variant product at `Rs 0.00`.
+
+A margin report reading a stale parent cost would be the same defect one column
+over, and worse — it produces a *plausible* margin instead of an obvious zero. So
+a variant line is costed from the variant or not at all; only a line sold without
+a variant reads the product.
+
+Each row reports which cost it used — `VARIANT_AVERAGE`, `LATEST_PURCHASE`,
+`PRODUCT_AVERAGE` or `UNKNOWN` — rather than presenting one figure as though
+every part of it were equally solid.
+
+### What this does not change
+
+- No column, table or migration.
+- The receipt path. `averageCost` is still written only by
+  `inventory-receipts.service`, exactly as before.
+- The restaurant and hardware modules. This is a new read on a gated retail
+  report route.
