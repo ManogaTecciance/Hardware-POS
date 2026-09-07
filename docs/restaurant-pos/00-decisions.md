@@ -4657,3 +4657,95 @@ vindicate the old wording.
 - The `DocumentSequence` decision itself, its concurrency argument, or the
   `SKU` / `BARCODE` doc types.
 - Anything in D104 Parts 1 or 3.
+
+---
+
+## D104c — the barcode unique constraint already existed, and `IF NOT EXISTS` hid it
+
+**Status:** accepted, 2026-09-07. Corrects [D104](#d104) Part 3. Found by a
+`pnpm db:migrate` that failed against the developer database.
+
+### What D104 Part 3 said
+
+> So `@@unique([tenantId, barcode])` can be added **cleanly, with no remediation
+> step and no backfill**. That was the open question blocking this record, and
+> the answer is that there is nothing to clean up.
+
+The investigation measured duplicates — correctly, and found none. It never
+asked the prior question: **is the constraint already there?**
+
+### What is actually true
+
+It has been there since **D44**, 12 August. `20260812000000_add_product_variants_and_purchase_receipts`
+creates it:
+
+```sql
+CREATE UNIQUE INDEX "ProductVariant_tenantId_barcode_key"
+    ON "ProductVariant"("tenantId", "barcode")
+    WHERE "barcode" IS NOT NULL;
+```
+
+A **partial** unique index. Prisma cannot express a partial index, which is
+precisely why it is not declared in `schema.prisma` — the same situation as
+`ProductVariant.isDefault`, whose own comment says so in as many words.
+
+### The failure this caused
+
+Two mistakes compounded.
+
+**1. `@@unique([tenantId, barcode])` in the schema created permanent drift.**
+Prisma models that as a FULL unique index. It sees the partial one, decides the
+full one is missing, and generates a corrective migration — **on every
+`migrate dev`, forever**. That is what happened: Prisma wrote a new migration
+containing one `CREATE UNIQUE INDEX` and it died with `42P07 relation already
+exists`, leaving a failed row in `_prisma_migrations` that blocked all further
+migrations on the developer database.
+
+**2. `CREATE UNIQUE INDEX IF NOT EXISTS` in the `5.6` migration was a silent
+no-op.** `IF NOT EXISTS` keys on the NAME. The name was taken, so the statement
+did nothing — and reported success. The migration appeared to work on every
+database it ran against, including a from-scratch replay, because the D44
+migration had already created the index the tests then observed.
+
+**This is the hazard of `IF NOT EXISTS` on a named object:** it protects against
+re-running the same statement, and it silently accepts a *different* object that
+happens to share the name. It converts "this already exists differently" —
+which should be loud — into "fine".
+
+### The decision
+
+1. **`@@unique([tenantId, barcode])` is NOT declared in `schema.prisma`**, with
+   a comment recording that D44's partial index is the real constraint and why
+   Prisma cannot model it. Verified: `migrate diff --from-migrations
+   --to-schema-datamodel` now reports *"This is an empty migration."*
+2. **The `5.6` migration is left exactly as it is.** It is already applied on
+   two databases and its checksum is recorded; editing it would fail every
+   future `migrate deploy` with a modified-migration error. Its index statement
+   is a harmless no-op on any database, because D44 always runs first.
+3. **No data or index changes.** The two forms are behaviourally identical here:
+   Postgres treats NULLs as distinct in a plain unique index too, so the 28
+   variants with no barcode are unaffected either way. There is nothing to
+   migrate.
+4. **The test now proves WHICH index does the work** — it asserts the
+   `indexdef`, including the `WHERE (barcode IS NOT NULL)` predicate, and the
+   raw `P2002` from the database rather than only the service's friendly 409.
+   The previous assertion was `rejects.toBeDefined()`, which would have passed
+   for any error at all and is why this was not caught earlier.
+
+### The rule this leaves behind
+
+**Before adding a constraint, check whether it exists — in the migrations, not
+only in the data.** D104's investigation was thorough about the rows and silent
+about the schema, and the two mistakes above are both downstream of that one
+missing question.
+
+**Prefer a plain `CREATE UNIQUE INDEX` in a migration over `IF NOT EXISTS`**,
+unless the statement genuinely needs to be re-runnable. A name collision should
+fail loudly at migrate time, which is the cheapest place to find it.
+
+### What this does not change
+
+- D104 Parts 1 and 2, D104a, D104b, and everything in Part 3 about check digits,
+  the reissue pass and `barcodeSource`. Those stand unaltered.
+- The measured finding that **18 of 20 pilot barcodes are invalid**. Still true,
+  still the reason `5.9` exists.

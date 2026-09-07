@@ -24,7 +24,7 @@
 
 import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   AccountingProviderKind,
   BarcodeSource,
@@ -232,9 +232,68 @@ describe('allocation', () => {
     ).toBe(false);
   });
 
-  it('enforces barcode uniqueness within a tenant', async () => {
+  /**
+   * The constraint is a PARTIAL unique index created by the D44 migration:
+   *
+   *     CREATE UNIQUE INDEX "ProductVariant_tenantId_barcode_key"
+   *       ON "ProductVariant"("tenantId","barcode") WHERE "barcode" IS NOT NULL;
+   *
+   * Prisma cannot express a partial index, so it is NOT declared in
+   * `schema.prisma` — declaring `@@unique([tenantId, barcode])` made Prisma
+   * demand a full index it could model and generate a corrective migration on
+   * every `migrate dev`. This asserts the real constraint by its behaviour and
+   * by name, so a future migration that drops or replaces it fails here rather
+   * than in a shop.
+   */
+  it('enforces barcode uniqueness within a tenant, by the partial index D44 created', async () => {
     await createVariant({ sku: 'FIRST', barcode: '5901234123457' });
-    await expect(createVariant({ sku: 'SECOND', barcode: '5901234123457' })).rejects.toBeDefined();
+
+    // Asserted at BOTH levels. A bare `rejects.toBeDefined()` would pass for a
+    // validation failure, a typo in the fixture, or no constraint at all.
+    //
+    // Through the service: a 409, not some other error. (`mapWriteError` names
+    // only the SKU case specifically, so a barcode clash reads "value" — vague,
+    // pre-existing, and not this phase's to change.)
+    await expect(createVariant({ sku: 'SECOND', barcode: '5901234123457' })).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+
+    // And at the database, where the raw error names the constraint. This is
+    // the assertion that would have caught the redundant `@@unique` in the
+    // schema: it proves WHICH index is doing the work.
+    await expect(
+      prisma.productVariant.create({
+        data: {
+          tenantId: shop.tenantId,
+          productId: shop.productAId,
+          sku: 'THIRD',
+          unitPrice: 1,
+          barcode: '5901234123457',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+
+    const [index] = await prisma.$queryRaw<Array<{ indexdef: string }>>`
+      SELECT indexdef FROM pg_indexes
+      WHERE tablename = 'ProductVariant'
+        AND indexname = 'ProductVariant_tenantId_barcode_key'
+    `;
+    expect(index).toBeDefined();
+    expect(index!.indexdef).toMatch(/UNIQUE/i);
+    expect(index!.indexdef).toMatch(/WHERE \(barcode IS NOT NULL\)/i);
+  });
+
+  it('allows many variants with NO barcode — the partial index excludes them', async () => {
+    // The behaviour that makes the partial index equivalent to a plain unique
+    // one here, and the reason 28 of the pilot's 48 variants are unaffected.
+    await createVariant({ sku: 'NONE-1' });
+    await createVariant({ sku: 'NONE-2' });
+    await createVariant({ sku: 'NONE-3' });
+
+    const withoutBarcode = await prisma.productVariant.count({
+      where: { tenantId: shop.tenantId, barcode: null },
+    });
+    expect(withoutBarcode).toBe(3);
   });
 });
 

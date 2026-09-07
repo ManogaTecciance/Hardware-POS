@@ -3542,11 +3542,19 @@ model ProductVariant {
   catalogueEntries     CatalogueEntry[]
 
   @@unique([tenantId, sku])
-  /// D104 Part 3 — measured before adding: zero duplicates within a tenant and
-  /// zero across tenants, so this goes on with no remediation and no backfill.
-  /// Postgres treats NULLs as distinct, so the 28 variants with no barcode are
-  /// unaffected.
-  @@unique([tenantId, barcode])
+  // D104 Part 3 asked for `@@unique([tenantId, barcode])`. It is NOT declared
+  // here, because the constraint has existed since D44: the
+  // add_product_variants migration creates
+  //
+  //     CREATE UNIQUE INDEX "ProductVariant_tenantId_barcode_key"
+  //       ON "ProductVariant"("tenantId", "barcode") WHERE "barcode" IS NOT NULL;
+  //
+  // a PARTIAL unique index, which Prisma cannot express — the same situation as
+  // `isDefault` above. Declaring `@@unique` here would make Prisma demand a
+  // full index it can model, see the partial one, and generate a corrective
+  // migration on every `migrate dev` forever. The two are behaviourally
+  // identical: Postgres treats NULLs as distinct in a plain unique index too,
+  // so the variants with no barcode are unaffected either way.
   @@index([tenantId])
   @@index([productId])
   @@index([isActive])
