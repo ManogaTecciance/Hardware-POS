@@ -16,6 +16,8 @@ import { Input } from '@/components/ui/input';
 import { SearchSelect } from '@/components/ui/search-select';
 import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
+import { productTypeLabel } from '@hardware-pos/shared';
+
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import {
@@ -328,7 +330,7 @@ export default function ProductsPage() {
                             {p.name}
                           </Link>
                           <div className="text-xs text-muted-foreground">
-                            {p.type === 'NonInventory' ? 'Non-Inventory' : p.type}
+                            {productTypeLabel(p.type)}
                           </div>
                         </div>
                       </div>

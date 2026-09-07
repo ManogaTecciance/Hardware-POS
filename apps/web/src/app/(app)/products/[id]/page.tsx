@@ -11,6 +11,8 @@ import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { productTypeLabel } from '@hardware-pos/shared';
+
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import {
@@ -126,7 +128,7 @@ export default function ProductDetailPage() {
             <CardTitle>Details</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-            <Detail label="Item type" value={product.type === 'NonInventory' ? 'Non-Inventory' : product.type} />
+            <Detail label="Item type" value={productTypeLabel(product.type)} />
             <Detail label="SKU" value={product.sku ?? '—'} />
             <Detail label="Sales price/rate" value={formatMoney(product.unitPrice)} />
             <Detail label="Purchase cost" value={product.costPrice != null ? formatMoney(product.costPrice) : '—'} />

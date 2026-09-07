@@ -86,6 +86,23 @@ export function saleStatusLabel(
 }
 
 /**
+ * How a product's type reads to a user.
+ *
+ * Only `NonInventory` needs saying differently — the enum runs the two words
+ * together, and a shop reading it on a shelf label should not have to.
+ */
+export const PRODUCT_TYPE_LABELS: Record<string, string> = {
+  Inventory: 'Inventory',
+  NonInventory: 'Non-Inventory',
+  Service: 'Service',
+};
+
+/** A product type's label, falling back to the raw value for anything unrecognised. */
+export function productTypeLabel(type: string): string {
+  return PRODUCT_TYPE_LABELS[type] ?? type;
+}
+
+/**
  * How an unpaid balance reads where a payment method is expected. Not a
  * `PaymentMethod` — nothing is tendered on credit, which is the whole point —
  * so it exists only at render time.

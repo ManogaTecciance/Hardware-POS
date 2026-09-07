@@ -32,6 +32,8 @@ import { ChipRow } from '@/components/ui/chip-row';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
+import { productTypeLabel } from '@hardware-pos/shared';
+
 import { useAuth } from '@/lib/auth';
 import { computeLine, computeTotals, type LineDiscount, type OrderDiscount } from '@/lib/cart';
 import { useCheckoutData, type ClientProduct } from '@/lib/catalog';
@@ -743,10 +745,12 @@ export default function PosPage() {
                           Low Stock
                         </span>
                       ) : stockCap(p) === null ? (
-                        // Neutral, not a warning: these sell freely. The badge is
-                        // here to explain the blank quantity below, not to alarm.
+                        // Names the item type, which is the actual reason there is
+                        // no quantity — the same wording the products list and the
+                        // product page use. Neutral, not a warning: these sell
+                        // freely, and the badge is here to explain, not to alarm.
                         <span className="absolute right-1.5 top-1.5 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                          {p.type === 'Service' ? 'Service' : 'Not tracked'}
+                          {productTypeLabel(p.type)}
                         </span>
                       ) : null}
                     </button>
@@ -770,7 +774,7 @@ export default function PosPage() {
                           )}
                         >
                           {stockCap(p) === null
-                            ? 'Not tracked'
+                            ? productTypeLabel(p.type)
                             : outOfStock
                               ? 'Out'
                               : p.quantityOnHand.toLocaleString()}
