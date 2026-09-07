@@ -449,6 +449,9 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /sales/complete': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: B },
   'POST /sales/draft': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: B },
   'GET /sales/report': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // `8.3`. ENFORCED rather than shared-core, unlike the sale reads above: this
+  // is a report, and reports are gated on REPORTING everywhere else in the app.
+  'GET /sales/reports/by-variant': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
   'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'PUT /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'DELETE /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
