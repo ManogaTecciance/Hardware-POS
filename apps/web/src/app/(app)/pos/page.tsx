@@ -773,8 +773,11 @@ export default function PosPage() {
                             outOfStock ? 'font-medium text-danger' : 'text-muted-foreground',
                           )}
                         >
+                          {/* Nothing here for an untracked item — the badge on the
+                              image already names the type, and saying it twice on
+                              one card is noise. */}
                           {stockCap(p) === null
-                            ? productTypeLabel(p.type)
+                            ? null
                             : outOfStock
                               ? 'Out'
                               : p.quantityOnHand.toLocaleString()}
