@@ -135,8 +135,23 @@ export interface ReturnSettings {
   /** Require manager approval when any returned line uses the "Other" reason. */
   requireApprovalForOtherReason: boolean;
   /**
-   * QuickBooks account a Refund Receipt deposits from (DepositToAccountRef). Left
-   * null uses the QuickBooks company default. TODO(accountant): confirm mapping.
+   * QuickBooks account a Refund Receipt is paid back from
+   * (`DepositToAccountRef`), used for any tender without its own entry in
+   * {@link ReturnSettings.quickbooksRefundDepositAccountRefs}.
+   *
+   * QuickBooks REQUIRES this on a Refund Receipt — unlike a Sales Receipt it has
+   * no company default to fall back on, and omitting it fails the create with
+   * validation fault 2020. Left null, the sync infers an account from the
+   * company's chart of accounts and records the choice in the sync log; see
+   * `QuickBooksRefundTenderService`.
    */
   quickbooksRefundReceiptDepositAccountRef: string | null;
+  /**
+   * Per-tender override: `PaymentMethod` name (`CASH`, `CARD`, …) → QuickBooks
+   * account id. Cash leaves the drawer while a card refund reverses through the
+   * bank, so a single account for every tender is only ever an approximation.
+   * Falls back to {@link ReturnSettings.quickbooksRefundReceiptDepositAccountRef}
+   * for any tender not listed.
+   */
+  quickbooksRefundDepositAccountRefs: Record<string, string>;
 }

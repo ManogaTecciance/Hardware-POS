@@ -148,6 +148,7 @@ export class SettingsService implements OnModuleInit {
         requireApprovalForNonGoodCondition: true,
         requireApprovalForOtherReason: false,
         quickbooksRefundReceiptDepositAccountRef: null,
+        quickbooksRefundDepositAccountRefs: {},
       },
       quotation: {
         defaultValidityDays: 14,

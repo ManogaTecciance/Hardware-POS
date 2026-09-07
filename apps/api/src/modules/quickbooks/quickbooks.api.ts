@@ -30,6 +30,17 @@ export interface QboAccount {
   AccountSubType?: string;
 }
 
+/**
+ * A QuickBooks payment method (Cash, Visa, Check, …). `Type` is QuickBooks' own
+ * two-way split — the card networks are CREDIT_CARD, everything else is not.
+ */
+export interface QboPaymentMethod {
+  Id: string;
+  Name: string;
+  Type?: 'CREDIT_CARD' | 'NON_CREDIT_CARD';
+  Active?: boolean;
+}
+
 interface QueryResponse {
   QueryResponse?: { Item?: QboItem[] };
 }
@@ -303,6 +314,20 @@ export async function queryAccounts(params: RequestParams): Promise<QboAccount[]
     'select Id, Name, AccountType, AccountSubType from Account maxresults 1000',
   );
   return json.QueryResponse?.Account ?? [];
+}
+
+/**
+ * List the company's active payment methods, for naming the tender a refund was
+ * paid back in (`PaymentMethodRef`). Inactive methods are excluded: QuickBooks
+ * rejects a reference to one, and a shop that retired a tender does not want new
+ * documents filed under it.
+ */
+export async function queryPaymentMethods(params: RequestParams): Promise<QboPaymentMethod[]> {
+  const json = await runQuery<{ QueryResponse?: { PaymentMethod?: QboPaymentMethod[] } }>(
+    params,
+    'select Id, Name, Type, Active from PaymentMethod where Active = true maxresults 1000',
+  );
+  return json.QueryResponse?.PaymentMethod ?? [];
 }
 
 /** Create a QuickBooks Item (product/service). */

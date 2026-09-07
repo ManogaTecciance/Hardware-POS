@@ -3,10 +3,13 @@ import { Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { round2 } from '../../common/money';
-import { SettingsService } from '../settings/settings.service';
 import { QuickBooksConfig } from './quickbooks.config';
 import { QuickBooksRepository } from './quickbooks.repository';
 import { QuickBooksCustomersService } from './quickbooks-customers.service';
+import {
+  QuickBooksRefundTenderService,
+  type ResolvedRefundTender,
+} from './quickbooks-refund-tender.service';
 import { QuickBooksService } from './quickbooks.service';
 import {
   createCreditMemo,
@@ -61,8 +64,8 @@ export class QuickBooksReturnsSyncService {
     private readonly oauth: QuickBooksService,
     private readonly connections: QuickBooksRepository,
     private readonly config: QuickBooksConfig,
-    private readonly settings: SettingsService,
     private readonly customers: QuickBooksCustomersService,
+    private readonly tender: QuickBooksRefundTenderService,
   ) {}
 
   async syncReturn(tenantId: string, returnId: string): Promise<ReturnSyncResult> {
@@ -101,7 +104,16 @@ export class QuickBooksReturnsSyncService {
         request,
       );
       const lines = await this.buildLines(tenantId, ret);
-      const docBody = this.buildDocumentBody(tenantId, ret, lines, customerRef);
+      // Only a Refund Receipt carries a deposit account and tender; a Credit Memo
+      // takes neither, and asking for them would cost a lookup for nothing.
+      const tender =
+        ret.quickbooksDocumentType === 'REFUND_RECEIPT'
+          ? await this.tender.resolve(tenantId, ret.refundMethod, request, {
+              returnId: ret.id,
+              returnNumber: ret.returnNumber,
+            })
+          : null;
+      const docBody = this.buildDocumentBody(ret, lines, customerRef, tender);
 
       let documentId: string;
       if (ret.quickbooksDocumentType === 'CREDIT_MEMO') {
@@ -203,10 +215,10 @@ export class QuickBooksReturnsSyncService {
   }
 
   private buildDocumentBody(
-    tenantId: string,
     ret: ReturnWithSyncRelations,
     lines: QboSalesLine[],
     customerRef: QboRef | null,
+    tender: ResolvedRefundTender | null,
   ): QboReturnDocumentInput {
     const body: QboReturnDocumentInput = {
       DocNumber: ret.returnNumber,
@@ -218,12 +230,13 @@ export class QuickBooksReturnsSyncService {
     const taxAdjustment = Number(ret.taxAdjustment);
     if (taxAdjustment > 0) body.TxnTaxDetail = { TotalTax: taxAdjustment };
 
-    // TODO(accountant): a Refund Receipt normally names the account the money is
-    // paid back from (DepositToAccountRef) and, optionally, a PaymentMethodRef.
-    const depositRef =
-      this.settings.getSettings(tenantId).returns.quickbooksRefundReceiptDepositAccountRef;
-    if (ret.quickbooksDocumentType === 'REFUND_RECEIPT' && depositRef) {
-      body.DepositToAccountRef = { value: depositRef };
+    // A Refund Receipt must name the account the money is paid back from;
+    // QuickBooks has no default for it and rejects the create otherwise (fault
+    // 2020). PaymentMethodRef is optional and simply omitted when the company
+    // has no method matching the POS tender.
+    if (tender) {
+      body.DepositToAccountRef = tender.depositToAccountRef;
+      if (tender.paymentMethodRef) body.PaymentMethodRef = tender.paymentMethodRef;
     }
     return body;
   }
