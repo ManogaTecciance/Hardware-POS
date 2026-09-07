@@ -113,12 +113,18 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
    * the field. A shop that never records fabric composition should not be unable
    * to add a product; a shop that does gets a validated place to put it.
    *
-   * ## Why `brand` is absent
+   * ## Why `brand` is absent — and it now IS an entity
    *
-   * It is a **column eventually** (Phase 8 step 8.8 — "brand as an entity"):
-   * filtered and reported on, and free text will not survive real data.
-   * Declaring it here now would mean migrating tenants' stored strings into an
-   * entity later. Leaving it out costs nothing today.
+   * This list said brand was "a column eventually (Phase 8 — brand as an
+   * entity): filtered and reported on, and free text will not survive real
+   * data. Declaring it here now would mean migrating tenants' stored strings
+   * into an entity later."
+   *
+   * **`8.9` built it (D112)**, and the prediction paid off exactly: because
+   * `brand` was never an attribute, no tenant had a stored string to migrate.
+   * It is `Brand` — a per-tenant row — with a nullable `Product.brandId`. It
+   * stays out of this list permanently: an attribute is validated and printed,
+   * and a brand is joined to and filtered on.
    *
    * ## Why grocery is absent
    *
