@@ -60,7 +60,7 @@ function fullRow(status: 'QUEUED' | 'COMPLETED') {
   };
 }
 
-function makeService(ticketRow: { id: string; status: string } | null) {
+function makeService(ticketRow: { id: string; status: string; roundId?: string } | null) {
   const update = jest.fn().mockResolvedValue(undefined);
   const tx = {
     kitchenTicket: {
@@ -68,6 +68,11 @@ function makeService(ticketRow: { id: string; status: string } | null) {
       update,
       findFirstOrThrow: jest.fn().mockResolvedValue(fullRow('QUEUED')),
     },
+    // D106 — the recall now restates round/takeaway state. A null round makes
+    // that a no-op HERE on purpose: this spec pins the reopen WRITE, and the
+    // ripple is pinned where it can be real — the D106 integration tests in
+    // kitchen-board.spec.ts, against actual rows.
+    orderRound: { findUnique: jest.fn().mockResolvedValue(null) },
   };
   const prisma = {
     $transaction: (fn: (tx: unknown) => unknown) => fn(tx),

@@ -3934,6 +3934,163 @@ a stock item keeps them.
 
 ---
 
+### D104 — the kitchen board rings for tickets it has not seen
+
+PO, 2026-09-04: "i created new order but in restaurant view or cashier
+kitchen view not sounding." The orders queue had a chime since it was
+built; the kitchen board — the screen a kitchen is NOT staring at between
+tickets — had none. Every mainstream KDS beeps on ticket arrival; a
+silent wall-mounted board is a dish nobody starts.
+
+The board now rings the same synthesised two-note chime the orders queue
+uses (`lib/restaurant/new-order-chime.ts` — built for "live queue
+screens", now finally plural), on the same baseline discipline: the first
+load never rings, a filter switch re-baselines instead of ringing for
+cards that merely became visible, and audio stays best-effort (a blocked
+autoplay drops the ding rather than queueing a burst).
+
+Two deliberate differences from the queue's rule:
+
+**Ids, not a total.** The queue compares `total` because its list is
+paged and ids shift between pages. The board is unpaged, so the baseline
+is the id SET, and a poll rings when an unseen id appears — including
+when one ticket is bumped in the same poll another arrives, where a count
+stays flat through exactly the arrival the pass must hear.
+
+**Only "To make" rings.** A new id on the Done tab is someone bumping,
+not work arriving. A ticket appearing on To make because ANOTHER screen
+recalled it does ring: to this pass it is new work regardless of why.
+
+Deliberately NOT gated on `KITCHEN_STATUS_UPDATE`: D94 gives the till
+`KOT_VIEW` alone precisely so a read-only board can hang where food is
+made; a chime keyed to the write permission would silence the one
+mounting that needs it most. Sound follows the screen, not the role —
+the same reason the orders queue rings for whoever watches it.
+
+Paired per D30 in `kitchen-board.render.test.tsx`: silent first load
+with tickets rendered (positive control), ring on an unseen id, silence
+on an unchanged poll, ring on bump+arrival with the count flat, and
+silence across a filter switch and Done-tab growth. Verified live on the
+dev stack: oscillator instrumentation shows 0 notes opening either
+screen and exactly one two-note chime on the poll after a takeaway order
+lands, on both `/kitchen` and `/orders`.
+
+---
+
+### D105 — the floor hears the bump: a food-ready bell on the tables screen
+
+PO, 2026-09-04, closing the loop D104 opened: sounds now travel TO the
+kitchen (order chime) but not back FROM it. Every mainstream expo flow
+has the return signal — the kitchen bumps, the runner is paged, the food
+does not die under the lamp. The waiter-facing half did not exist here.
+
+**The signal path is open-sessions, not the kitchen board.** The waiter
+template deliberately lacks `KOT_VIEW` ("a waiter has no business on the
+kitchen display") and this record does not weaken that: instead
+`GET /open-sessions` — the route that already answers "my tables", D70
+scope and all — now carries `readyTicketIds` per session: the ids of its
+COMPLETED kitchen tickets, resolved by one extra query walking ticket →
+round → order → session. Ids rather than a count or a flag, so the
+client can ring exactly once per NEW bump, and so a recalled ticket
+takes its acknowledgement with it when it leaves the list — a re-bump
+is fresh news and rings again. Asserted through the real routes in
+`kitchen-board.spec.ts`: empty before the bump, the id after, empty
+again after recall.
+
+**The floor plan gets its first live loop.** `/tables` loaded once and
+went stale; it now refreshes SESSIONS every 8 s (visible-tab gated,
+catch-up on return — the orders queue's cadence and manners; 5 s is the
+kitchen's urgency, not the floor's). The furniture (areas, tables) keeps
+its explicit loads: admin-cadence data has no business on a poll.
+
+**A bell, not the chime.** Two taps on one note (E6·E6) against the
+order chime's rise (A5→D6) — distinguishable across a room, which is the
+entire job of a second sound. Same synth module, same autoplay manners
+(first load never rings, blocked audio drops the ding).
+
+**The badge and its acknowledgement.** The ring points at a card:
+"Food ready" with a concierge bell on the table (joined open tables
+included). There is no "served" verb to clear it server-side — carrying
+the plate IS the acknowledgement — so opening the order (View order)
+answers the bell per device, persisted in sessionStorage exactly like
+the POS cart. Another tablet's bell keeps ringing until ITS holder
+looks: serving is whoever carried the plate.
+
+Paired per D30 in `table-floor.ready.render.test.tsx`: first-load
+silence WITH a standing badge (the positive control that separates
+"state to read" from "arrival to announce"), ring+badge on a new bump,
+silence on repeat, ack clearing without reviving, and the
+recall-then-rebump second ring. Verified live: floor open on M5 =
+0 notes; ticket bumped through the kitchen route = one E6·E6 bell
+(instrumented frequencies 1319/1319) and one Food-ready badge inside
+the 8 s window.
+
+Housekeeping under this record: `global-setup.ts` of the integration
+suite spawns `pnpm.cmd` through a shell on win32 — before that, ENOENT
+killed every integration spec on a Windows dev machine before the first
+test.
+
+---
+
+### D106 — the board gets a Preparing state, and the queue follows the kitchen
+
+PO, 2026-09-04: "in kitchen view there is only option as mark done. but
+in there add option to preparing, then done, so when that happen need to
+update orders page according to status change. please do like industry
+pos system handle." Which is exactly the mainstream KDS bump bar: a
+ticket is NEW, someone taps it and it is COOKING, they tap again and it
+is BUMPED — and the order status the rest of the house sees is driven by
+those taps, not by anyone re-typing it.
+
+**One enum value is the whole schema change.** `KitchenTicketStatus`
+gains `IN_PROGRESS` (migration `20260908000000_…`, ALTER TYPE ADD VALUE
+IF NOT EXISTS — additive, no rows, no defaults). The board's OUTSTANDING
+filter already means "not COMPLETED", so a started ticket stays exactly
+where outstanding work belongs. D104's chime baseline diffs ids, not
+statuses, so starting rings nothing.
+
+**The derivation was already waiting.** The Orders queue's
+`unifiedStatusForRestaurantOrder` has mapped round IN_PROGRESS/READY
+since the queue was built — dead branches, because nothing ever moved a
+round. `syncKitchenProgress` now RESTATES the ticket set onto the round
+after every kitchen verb (any started/bumped → IN_PROGRESS, all bumped →
+READY, recall recomputes honestly — DELIVERED and CANCELLED are floor
+verdicts the kitchen never touches), and the queue lights up with no
+change to the queue itself. The unit spec pins the once-dead branches.
+
+**Takeaway advances with the kitchen, forward only.** The profile is
+what the customer was told, so the kitchen moves it
+PLACED → IN_KITCHEN → READY as it works, never backward past that — with
+one exception: a recall retracts READY to IN_KITCHEN, because "your food
+is ready" has stopped being true. It retracts to IN_KITCHEN even if
+nothing is cooking at that moment, never to PLACED. HANDED_OVER stays
+the cashier's alone (it settles the Sale); the manual stepper keeps
+working and the kitchen never overrides a cashier who stepped ahead.
+
+**On the board: one verb per state.** Start preparing (chef hat) on a
+queued card, Mark done on a started one — never both stacked; two 48px
+buttons would halve the tickets a pass can see, and the taps are
+adjacent in time anyway. Starting swaps the card IN PLACE (verb flips,
+a warning-tone Preparing badge joins the age timer, which keeps
+counting from creation); only the bump still drops the card. Start is
+idempotent and a stale start never un-completes a bumped ticket —
+Recall stays the only path down, and recall still lands on QUEUED
+(D100 unchanged): the cook taps Start again if the pan is already on.
+
+WS-408's till contrast now matches "any write verb" (`start preparing|
+mark done`) — the claim was always "the till cannot work the board",
+not the absence of one label. Paired per D30: board render tests pin
+one-verb-per-state both ways plus the in-place flip; a new
+`unified-status.spec.ts` pins the derivation branch by branch;
+integration proves the whole ripple through the real routes (ticket →
+round → unified feed → takeaway profile, up on start/bump and back
+down on recall). Verified live: tapping Start preparing on /kitchen
+flipped the card, /orders showed "Preparing" and then "Ready" on its
+own poll after the bump, and the takeaway profile advanced
+PLACED → IN_KITCHEN → READY untouched by hand.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

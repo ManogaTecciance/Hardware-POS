@@ -491,3 +491,148 @@ describe('D70 — session visibility is scoped to the waiter', () => {
     ).toBe(200);
   });
 });
+
+/*
+ * D106 — Preparing, and everything it moves.
+ *
+ * One flow, every direction asserted through the REAL routes: the start
+ * puts the ticket on IN_PROGRESS (still outstanding — starting is not
+ * bumping), the round follows, and the unified Orders feed says
+ * IN_PROGRESS; the bump makes all three READY; the recall pulls all three
+ * back down. The takeaway test proves the customer-facing profile advances
+ * with the kitchen (PLACED → IN_KITCHEN → READY), retreats only from READY
+ * on a recall, and never reaches HANDED_OVER without the cashier.
+ */
+describe('D106 — start/preparing ripples to the round and the Orders queue', () => {
+  const unifiedFor = async (id: string) => {
+    const res = await http.request<{ items: { id: string; unifiedStatus: string }[] }>(
+      'GET',
+      `/restaurant/branches/${branchId}/orders`,
+      { token: ownerToken() },
+    );
+    return res.data.items.find((o) => o.id === id)?.unifiedStatus;
+  };
+  const verb = (ticketId: string, action: 'start' | 'complete' | 'reopen') =>
+    http.request<TicketView & { status: string }>(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/${action}`,
+      { token: kitchenToken() },
+    );
+
+  it('start → IN_PROGRESS everywhere; bump → READY; recall → back to PENDING', async () => {
+    await sendRound();
+    const ticketId = (await board()).data[0]!.id;
+    expect(await unifiedFor(orderId)).toBe('PENDING');
+
+    const started = await verb(ticketId, 'start');
+    expect(started.data.status).toBe('IN_PROGRESS');
+    // Starting is not bumping: the ticket is still outstanding work…
+    expect((await board('?status=OUTSTANDING')).data.map((t) => t.id)).toEqual([ticketId]);
+    // …and the queue already says the kitchen is on it.
+    expect(await unifiedFor(orderId)).toBe('IN_PROGRESS');
+
+    await verb(ticketId, 'complete');
+    expect(await unifiedFor(orderId)).toBe('READY');
+
+    // Recall recomputes honestly: the only ticket is queued again, so the
+    // order is plain pending — not stuck on a state the kitchen retracted.
+    await verb(ticketId, 'reopen');
+    expect(await unifiedFor(orderId)).toBe('PENDING');
+  });
+
+  it('start is idempotent, and a stale start never un-completes a bumped ticket', async () => {
+    await sendRound();
+    const ticketId = (await board()).data[0]!.id;
+
+    await verb(ticketId, 'start');
+    const again = await verb(ticketId, 'start');
+    expect(again.data.status).toBe('IN_PROGRESS');
+
+    await verb(ticketId, 'complete');
+    const stale = await verb(ticketId, 'start');
+    expect(stale.data.status).toBe('COMPLETED');
+  });
+
+  it('a takeaway order advances with the kitchen, and handover stays the cashier\'s', async () => {
+    const created = await http.request<{ id: string; orderNumber: string; status: string }>(
+      'POST',
+      `/restaurant/takeaway`,
+      {
+        token: ownerToken(),
+        body: {
+          branchId,
+          customerName: 'Pickup Fixture',
+          idempotencyKey: 'd106-takeaway',
+          items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+        },
+      },
+    );
+    expect(created.data.status).toBe('PLACED');
+    const takeawayTicket = (await board('?status=OUTSTANDING')).data.find(
+      (t) => t.orderNumber === created.data.orderNumber,
+    )!;
+
+    const profileStatus = async () => {
+      const res = await http.request<{ id: string; status: string }[]>(
+        'GET',
+        `/restaurant/takeaway?branchId=${branchId}`,
+        { token: ownerToken() },
+      );
+      return res.data.find((p) => p.id === created.data.id)?.status;
+    };
+
+    await verb(takeawayTicket.id, 'start');
+    expect(await profileStatus()).toBe('IN_KITCHEN');
+
+    await verb(takeawayTicket.id, 'complete');
+    expect(await profileStatus()).toBe('READY');
+
+    // The recall retracts READY — "your food is ready" stopped being true —
+    // but only down to IN_KITCHEN, never past what the customer was told.
+    await verb(takeawayTicket.id, 'reopen');
+    expect(await profileStatus()).toBe('IN_KITCHEN');
+  });
+});
+
+/*
+ * D105 — "food ready" reaches the floor through open-sessions, not KOT_VIEW.
+ * The bump and the recall are exercised through the real kitchen routes so
+ * the field tracks the ticket's actual lifecycle, and both directions are
+ * asserted: silence before the bump, the id after it, silence again after
+ * the recall — a field that always echoed every ticket id would fail twice.
+ */
+describe('D105 — open-sessions carries the session\'s bumped tickets', () => {
+  const openSessions = () =>
+    http.request<{ id: string; readyTicketIds: string[] }[]>(
+      'GET',
+      `/restaurant/branches/${branchId}/open-sessions`,
+      { token: ownerToken() },
+    );
+
+  it('readyTicketIds is empty before the bump, the ticket id after, empty again on recall', async () => {
+    await sendRound();
+    const ticketId = (await board()).data[0]!.id;
+
+    // NEGATIVE — queued food is not ready food.
+    const before = (await openSessions()).data.find((s) => s.id === sessionId);
+    expect(before?.readyTicketIds).toEqual([]);
+
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`,
+      { token: kitchenToken() },
+    );
+    // POSITIVE — the bump surfaces exactly this ticket on exactly this session.
+    const after = (await openSessions()).data.find((s) => s.id === sessionId);
+    expect(after?.readyTicketIds).toEqual([ticketId]);
+
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/reopen`,
+      { token: kitchenToken() },
+    );
+    // NEGATIVE again — a recalled dish is work to do, not food to run.
+    const recalled = (await openSessions()).data.find((s) => s.id === sessionId);
+    expect(recalled?.readyTicketIds).toEqual([]);
+  });
+});

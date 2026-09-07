@@ -247,23 +247,27 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
   test('WS-408 the till watches the kitchen board but cannot work it', async ({ page }) => {
     /*
      * D94 (PO): the cashier gets the board. KOT_VIEW and nothing more — the
-     * Mark done control is gated on KITCHEN_STATUS_UPDATE, which stays with
-     * the people who cooked the food (D68).
+     * write controls are gated on KITCHEN_STATUS_UPDATE, which stays with
+     * the people who cooked the food (D68). Since D106 the outstanding
+     * board's verb depends on ticket state (Start preparing → Mark done),
+     * so BOTH names are matched: the contrast is "no write verb at all",
+     * not the absence of one particular label.
      *
      * Asserted as a CONTRAST against kitchen staff on the same board, because
-     * "the till has no Mark done button" is also what an empty board, a failed
+     * "the till has no write button" is also what an empty board, a failed
      * request and a broken selector all look like. The Details count is the
      * positive control: same tickets, same page, one control missing.
      */
+    const WRITE_VERB = /start preparing|mark done/i;
     await signIn(page, RESTAURANT_SEED.cashier);
     await page.goto('/kitchen');
     await page.waitForLoadState('networkidle');
     await expect(page.getByRole('heading', { name: 'Kitchen' })).toBeVisible({ timeout: 20_000 });
 
     const tillDetails = await page.getByRole('button', { name: /details/i }).count();
-    const tillMarkDone = await page.getByRole('button', { name: /mark done/i }).count();
+    const tillWriteVerbs = await page.getByRole('button', { name: WRITE_VERB }).count();
     expect(tillDetails, 'the till should see tickets on the board').toBeGreaterThan(0);
-    expect(tillMarkDone, 'the till must not be able to mark food done').toBe(0);
+    expect(tillWriteVerbs, 'the till must not be able to work the board').toBe(0);
 
     /*
      * Kitchen staff in a SECOND context rather than a second sign-in on the same
@@ -284,8 +288,8 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
       // The control EXISTS on the same board — so the zero above is about the
       // permission, not about an empty board or a selector matching nothing.
       expect(
-        await kitchenPage.getByRole('button', { name: /mark done/i }).count(),
-        'kitchen staff must still be able to mark food done',
+        await kitchenPage.getByRole('button', { name: WRITE_VERB }).count(),
+        'kitchen staff must still be able to work the board',
       ).toBeGreaterThan(0);
       expect(await kitchenPage.getByRole('button', { name: /details/i }).count()).toBe(tillDetails);
     } finally {

@@ -3,6 +3,7 @@ import {
   Prisma,
   RestaurantOrderChannel,
   RestaurantOrderStatus,
+  KitchenTicketStatus,
   OrderRoundStatus,
   RestaurantOrderItemStatus,
   RestaurantTableStatus,
@@ -81,6 +82,17 @@ export interface RoundView {
  */
 export interface OpenSessionSummary extends TableSessionView {
   activeOrderId: string | null;
+  /**
+   * D105 — ids of this session's COMPLETED (bumped) kitchen tickets. This is
+   * how "food ready" reaches the floor plan WITHOUT `KOT_VIEW`: the waiter
+   * has no business on the kitchen display (their template documents that),
+   * but "your table's food is up" is exactly their business, and this route
+   * is already scoped to the sessions they may see (D70). Ids, not a count,
+   * so the client can ring once per NEW bump and stay silent on re-polls —
+   * and a recalled-then-rebumped ticket rings again, because its id leaves
+   * and re-enters the list.
+   */
+  readyTicketIds: string[];
 }
 
 /**
@@ -346,9 +358,28 @@ export class TableSessionsService {
       },
       orderBy: { openedAt: 'asc' },
     });
+    // D105 — one query for every listed session's bumped tickets, walked back
+    // to its session id. Kept out of the include above: the ticket hangs off
+    // round → order, not off the one most-recent order that include selects.
+    const readyBySession = new Map<string, string[]>();
+    if (rows.length > 0) {
+      const tickets = await this.prisma.kitchenTicket.findMany({
+        where: {
+          tenantId,
+          status: KitchenTicketStatus.COMPLETED,
+          round: { order: { sessionId: { in: rows.map((r) => r.id) } } },
+        },
+        select: { id: true, round: { select: { order: { select: { sessionId: true } } } } },
+      });
+      for (const t of tickets) {
+        const sid = t.round.order.sessionId;
+        readyBySession.set(sid, [...(readyBySession.get(sid) ?? []), t.id]);
+      }
+    }
     return rows.map((row) => ({
       ...this.sessionToView(row),
       activeOrderId: row.orders[0]?.id ?? null,
+      readyTicketIds: readyBySession.get(row.id) ?? [],
     }));
   }
 

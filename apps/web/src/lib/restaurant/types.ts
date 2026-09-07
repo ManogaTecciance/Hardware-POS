@@ -50,11 +50,13 @@ export type RestaurantOrderChannel = 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
 
 // D68 — PRINTED/REPRINTED/FAILED are retired: no code path produces them,
 // but pre-D68 rows still carry them and the board must render those.
+// D106 — IN_PROGRESS is the board's Preparing state (start → done).
 export type KitchenTicketStatus =
   | 'QUEUED'
   | 'PRINTED'
   | 'REPRINTED'
   | 'FAILED'
+  | 'IN_PROGRESS'
   | 'COMPLETED';
 
 export type KitchenPrintAttemptStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED';
@@ -366,6 +368,17 @@ export interface TableSessionView {
   closedAt: string | null;
   finalSaleId: string | null;
   version: number;
+}
+
+/**
+ * One row of `GET /open-sessions` — the session plus the floor plan's
+ * extras. `readyTicketIds` (D105) are the session's bumped kitchen tickets:
+ * the waiter-safe "food ready" signal (no KOT_VIEW involved; the route is
+ * D70-scoped to the sessions the caller may see).
+ */
+export interface OpenSessionView extends TableSessionView {
+  activeOrderId: string | null;
+  readyTicketIds: string[];
 }
 
 export interface OrderView {

@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   KitchenTicketStatus,
+  OrderRoundStatus,
   Prisma,
   RestaurantOrderItemStatus,
+  TakeawayOrderStatus,
 } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -395,6 +397,47 @@ export class KitchenService {
   }
 
   /**
+   * D106 — the cook takes a ticket: QUEUED (or a retired print status) →
+   * IN_PROGRESS, the KDS "Preparing" state every mainstream board has
+   * between "new" and "bumped".
+   *
+   * Idempotent both ways, in the D68/D100 house style: starting a ticket
+   * already in progress returns it unchanged, and starting a COMPLETED
+   * ticket is a stale tap on a card that moved — also returned unchanged,
+   * never un-completed (Recall is the verb for that, deliberately).
+   */
+  async startTicket(
+    tenantId: string,
+    branchId: string,
+    ticketId: string,
+  ): Promise<KitchenTicketView> {
+    return this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.kitchenTicket.findFirst({
+        where: { id: ticketId, tenantId, branchId },
+        select: { id: true, status: true, roundId: true },
+      });
+      if (!ticket) throw new KitchenTicketNotFoundError();
+
+      if (
+        ticket.status !== KitchenTicketStatus.COMPLETED &&
+        ticket.status !== KitchenTicketStatus.IN_PROGRESS
+      ) {
+        await tx.kitchenTicket.update({
+          where: { id: ticket.id },
+          data: { status: KitchenTicketStatus.IN_PROGRESS },
+        });
+        await this.syncKitchenProgress(tx, ticket.roundId);
+      }
+
+      const full = await tx.kitchenTicket.findFirstOrThrow({
+        where: { id: ticketId, tenantId },
+        include: TICKET_INCLUDE,
+      });
+      return toView(full, await this.waiterNames([full]));
+    });
+  }
+
+  /**
    * D68 — kitchen staff marking the food done.
    *
    * Idempotent: completing an already-completed ticket returns it unchanged
@@ -410,7 +453,7 @@ export class KitchenService {
     return this.prisma.$transaction(async (tx) => {
       const ticket = await tx.kitchenTicket.findFirst({
         where: { id: ticketId, tenantId, branchId },
-        select: { id: true, status: true },
+        select: { id: true, status: true, roundId: true },
       });
       if (!ticket) throw new KitchenTicketNotFoundError();
 
@@ -423,6 +466,7 @@ export class KitchenService {
             completedByUserId: actorUserId,
           },
         });
+        await this.syncKitchenProgress(tx, ticket.roundId);
       }
 
       const full = await tx.kitchenTicket.findFirstOrThrow({
@@ -452,7 +496,7 @@ export class KitchenService {
     return this.prisma.$transaction(async (tx) => {
       const ticket = await tx.kitchenTicket.findFirst({
         where: { id: ticketId, tenantId, branchId },
-        select: { id: true, status: true },
+        select: { id: true, status: true, roundId: true },
       });
       if (!ticket) throw new KitchenTicketNotFoundError();
 
@@ -465,6 +509,7 @@ export class KitchenService {
             completedByUserId: null,
           },
         });
+        await this.syncKitchenProgress(tx, ticket.roundId);
       }
 
       const full = await tx.kitchenTicket.findFirstOrThrow({
@@ -473,6 +518,100 @@ export class KitchenService {
       });
       return toView(full, await this.waiterNames([full]));
     });
+  }
+
+  /**
+   * D106 — after any ticket status change, restate what the tickets now say
+   * onto the round and (for takeaway) the customer-facing profile, so the
+   * Orders queue and the takeaway board move the moment the kitchen does —
+   * the way mainstream KDS products drive order status from the bump bar.
+   *
+   * Both derivations are RESTATEMENTS, not steps: computed from the full
+   * ticket set every time, so start/complete/recall in any order land on the
+   * truth. The round moves freely among SUBMITTED/IN_PROGRESS/READY (a
+   * recall genuinely un-readies it) but DELIVERED and CANCELLED are floor
+   * verdicts the kitchen must not touch. The takeaway profile only moves
+   * FORWARD along PLACED→IN_KITCHEN→READY — never backward past what the
+   * cashier already told the customer — with ONE exception: READY falls back
+   * to IN_KITCHEN when the kitchen recalls a dish, because "your food is
+   * ready" has stopped being true. HANDED_OVER and CANCELLED are money/
+   * cashier states and are never touched (handover settles the Sale).
+   */
+  private async syncKitchenProgress(tx: Prisma.TransactionClient, roundId: string): Promise<void> {
+    const round = await tx.orderRound.findUnique({
+      where: { id: roundId },
+      select: {
+        id: true,
+        status: true,
+        orderId: true,
+        order: { select: { takeawayProfile: { select: { id: true, status: true } } } },
+      },
+    });
+    if (!round) return; // ticket without a live round: nothing to restate
+
+    const KITCHEN_OWNED: OrderRoundStatus[] = [
+      OrderRoundStatus.SUBMITTED,
+      OrderRoundStatus.IN_PROGRESS,
+      OrderRoundStatus.READY,
+    ];
+    if (KITCHEN_OWNED.includes(round.status)) {
+      const statuses = (
+        await tx.kitchenTicket.findMany({ where: { roundId }, select: { status: true } })
+      ).map((t) => t.status);
+      const next =
+        statuses.length > 0 && statuses.every((s) => s === KitchenTicketStatus.COMPLETED)
+          ? OrderRoundStatus.READY
+          : statuses.some(
+                (s) => s === KitchenTicketStatus.IN_PROGRESS || s === KitchenTicketStatus.COMPLETED,
+              )
+            ? OrderRoundStatus.IN_PROGRESS
+            : OrderRoundStatus.SUBMITTED;
+      if (next !== round.status) {
+        await tx.orderRound.update({ where: { id: round.id }, data: { status: next } });
+      }
+    }
+
+    const profile = round.order.takeawayProfile;
+    if (
+      profile &&
+      (profile.status === TakeawayOrderStatus.PLACED ||
+        profile.status === TakeawayOrderStatus.IN_KITCHEN ||
+        profile.status === TakeawayOrderStatus.READY)
+    ) {
+      // The profile reflects the ORDER's whole kitchen state, not one round's.
+      const orderStatuses = (
+        await tx.kitchenTicket.findMany({
+          where: { round: { orderId: round.orderId } },
+          select: { status: true },
+        })
+      ).map((t) => t.status);
+      const derived =
+        orderStatuses.length > 0 &&
+        orderStatuses.every((s) => s === KitchenTicketStatus.COMPLETED)
+          ? TakeawayOrderStatus.READY
+          : orderStatuses.some(
+                (s) => s === KitchenTicketStatus.IN_PROGRESS || s === KitchenTicketStatus.COMPLETED,
+              )
+            ? TakeawayOrderStatus.IN_KITCHEN
+            : TakeawayOrderStatus.PLACED;
+      const rank: Record<'PLACED' | 'IN_KITCHEN' | 'READY', number> = {
+        PLACED: 0,
+        IN_KITCHEN: 1,
+        READY: 2,
+      };
+      const forward = rank[derived] > rank[profile.status as 'PLACED' | 'IN_KITCHEN' | 'READY'];
+      const readyRetracted =
+        profile.status === TakeawayOrderStatus.READY && derived !== TakeawayOrderStatus.READY;
+      if (forward || readyRetracted) {
+        await tx.takeawayOrderProfile.update({
+          where: { id: profile.id },
+          // A retracted READY lands on IN_KITCHEN even if nothing has started
+          // again yet — the customer was told "being prepared", and PLACED
+          // would read as the order going backwards past what was said.
+          data: { status: readyRetracted ? TakeawayOrderStatus.IN_KITCHEN : derived },
+        });
+      }
+    }
   }
 }
 

@@ -150,6 +150,8 @@ export const KITCHEN_TICKET_STATUS_LABELS: Record<KitchenTicketStatus, string> =
   PRINTED: 'To make',
   REPRINTED: 'To make',
   FAILED: 'To make',
+  // D106 — the started ticket; same word the rounds and the Orders queue use.
+  IN_PROGRESS: 'Preparing',
   COMPLETED: 'Done',
 };
 
@@ -158,6 +160,7 @@ export const KITCHEN_TICKET_STATUS_TONES: Record<KitchenTicketStatus, BadgeTone>
   PRINTED: 'info',
   REPRINTED: 'info',
   FAILED: 'info',
+  IN_PROGRESS: 'warning',
   COMPLETED: 'positive',
 };
 

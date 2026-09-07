@@ -40,6 +40,7 @@ import type {
   SalesSummaryView,
   SectionView,
   SessionDetail,
+  OpenSessionView,
   TableSessionView,
   TakeawayOrderStatus,
   TakeawayView,
@@ -643,7 +644,7 @@ export const tableSessions = {
     );
   },
   listOpen(session: Session, branchId: string) {
-    return api.get<(TableSessionView & { activeOrderId: string | null })[]>(
+    return api.get<OpenSessionView[]>(
       `/restaurant/branches/${branchId}/open-sessions`,
       auth(session),
     );
@@ -721,6 +722,14 @@ export const kitchen = {
     );
   },
   /** D68 — kitchen staff saying the food is done. */
+  /** D106 — first tap of the bump bar: QUEUED → Preparing. */
+  start(session: Session, branchId: string, ticketId: string) {
+    return api.post<KitchenTicketView>(
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/start`,
+      undefined,
+      auth(session),
+    );
+  },
   complete(session: Session, branchId: string, ticketId: string) {
     return api.post<KitchenTicketView>(
       `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`,

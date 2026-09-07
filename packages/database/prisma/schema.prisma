@@ -2856,6 +2856,10 @@ enum KitchenTicketStatus {
   PRINTED
   REPRINTED
   FAILED
+  /// D106 — the cook has started this ticket (KDS "Preparing"). Sits between
+  /// the queued family and COMPLETED; OUTSTANDING ("not COMPLETED") already
+  /// covers it, so pre-D106 reads need no change.
+  IN_PROGRESS
   COMPLETED
 }
 

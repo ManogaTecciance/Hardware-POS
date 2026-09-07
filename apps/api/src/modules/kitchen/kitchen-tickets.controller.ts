@@ -61,6 +61,36 @@ export class KitchenTicketsController {
     }
   }
 
+  /**
+   * D106 — the cook takes the ticket: Preparing. Same permission as
+   * complete; starting is the same kind of claim about the food, one step
+   * earlier. The round and any takeaway profile move with it (service-side),
+   * which is what puts "Preparing" on the Orders queue.
+   */
+  @Post(':ticketId/start')
+  @RequirePermissions(Permission.KITCHEN_STATUS_UPDATE)
+  async start(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('branchId') branchId: string,
+    @Param('ticketId') ticketId: string,
+  ): Promise<KitchenTicketView> {
+    try {
+      const updated = await this.service.startTicket(tenantId, branchId, ticketId);
+      await this.audit.record(tenantId, {
+        userId: actor.id,
+        action: 'KITCHEN_TICKET_STARTED',
+        entityType: 'KitchenTicket',
+        entityId: ticketId,
+        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
+      });
+      return updated;
+    } catch (err) {
+      if (err instanceof KitchenTicketNotFoundError) throw new NotFoundException(err.message);
+      throw err;
+    }
+  }
+
   @Post(':ticketId/complete')
   @RequirePermissions(Permission.KITCHEN_STATUS_UPDATE)
   async complete(

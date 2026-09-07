@@ -655,6 +655,12 @@ async function seedRestaurant(passwordHash: string) {
       foodType: m.food,
       prepMinutes: m.prep ?? null,
       dietaryTags: m.tags ?? [],
+      // D65/D101 — a food-typed row with no Track-stock answer is a prepared
+      // item: availability is the 86 switch, never the count (which nothing
+      // maintains — restaurant orders move no stock). Without this the column
+      // default (STOCK_ITEM) applies and qty 0 renders the whole menu "Out of
+      // stock". In `update` too, so re-seeding heals a pre-fix database.
+      sellableKind: 'COMPOSED_ITEM' as const,
     };
     await prisma.product.upsert({
       where: { id: m.id },

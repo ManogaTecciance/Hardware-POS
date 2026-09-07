@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Clock, ListTree, RotateCcw, UtensilsCrossed } from 'lucide-react';
+import { Check, ChefHat, Clock, ListTree, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import * as React from 'react';
 
 import { StatusBadge } from '@/components/restaurant/status-badge';
@@ -11,6 +11,7 @@ import { ChipRow } from '@/components/ui/chip-row';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import { kitchen } from '@/lib/restaurant/api';
+import { playNewOrderChime } from '@/lib/restaurant/new-order-chime';
 import {
   KITCHEN_TICKET_STATUS_LABELS,
   KITCHEN_TICKET_STATUS_TONES,
@@ -74,14 +75,19 @@ const URGENCY_TIMER_CLASS: Record<Urgency, string> = {
  * cannot plate a dish it can see but cannot place, so each ticket names its
  * table, its order and its round the way a printed KOT used to.
  *
- * Kitchen staff mark a ticket done when the food is up, and recall it when
- * the bump was wrong (D100). That is the whole write surface; the floor is
- * not theirs and neither is the money.
+ * Kitchen staff start a ticket when they take it (D106 — Preparing), mark
+ * it done when the food is up, and recall it when the bump was wrong
+ * (D100). That is the whole write surface; the floor is not theirs and
+ * neither is the money. Start/done ripple to the round and any takeaway
+ * profile server-side, which is what moves the Orders queue.
  *
  * Polls every 5 s. Shorter cadences read as jitter on a wall-mounted screen;
  * longer ones leave a dish sitting unseen while a table waits. The poll
  * doubles as the age-escalation tick: every refresh re-renders the cards,
- * which is where the timers and colours advance.
+ * which is where the timers and colours advance — and as the chime's watch:
+ * a poll that brings an unseen ticket onto "To make" rings the same
+ * new-order chime the orders queue uses, because a wall-mounted board is
+ * not being stared at between tickets (mainstream KDS units beep).
  */
 export function KitchenBoard({ session, branchId }: Props) {
   const { hasPermission } = useAuth();
@@ -97,10 +103,34 @@ export function KitchenBoard({ session, branchId }: Props) {
   /** D83 — the ticket whose whole order is being read. */
   const [detailFor, setDetailFor] = React.useState<KitchenTicketView | null>(null);
 
+  /*
+   * Ticket ids seen on the last poll, per filter — the chime's memory (same
+   * rule as the orders queue: null until the first response lands, so opening
+   * the board never dings, and a filter switch re-baselines instead of
+   * ringing for cards that merely became visible). Unlike the queue this
+   * compares IDS, not a total: the list is unpaged so ids are exact, and a
+   * count would stay flat when one ticket is bumped in the same poll that
+   * another arrives — exactly the arrival the pass must hear.
+   */
+  const chimeBaseline = React.useRef<{ key: Filter; ids: Set<string> } | null>(null);
+
   const load = React.useCallback(async () => {
     try {
-      setTickets(await kitchen.listTickets(session, branchId, filter));
+      const next = await kitchen.listTickets(session, branchId, filter);
+      setTickets(next);
       setStatus('ready');
+      const prev = chimeBaseline.current;
+      // Only "To make" rings: a ticket appearing on the Done tab is someone
+      // bumping, not work arriving. A recall by ANOTHER screen does ring —
+      // it lands on this tab as a ticket the pass has not seen.
+      if (
+        filter === 'OUTSTANDING' &&
+        prev?.key === filter &&
+        next.some((t) => !prev.ids.has(t.id))
+      ) {
+        playNewOrderChime();
+      }
+      chimeBaseline.current = { key: filter, ids: new Set(next.map((t) => t.id)) };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load kitchen tickets');
       setStatus('error');
@@ -160,6 +190,30 @@ export function KitchenBoard({ session, branchId }: Props) {
       () => kitchen.reopen(session, branchId, ticket.id),
       'Could not recall this ticket',
     );
+
+  /**
+   * D106 — the first tap: the card STAYS on "To make" (unlike both verbs
+   * above), so instead of the optimistic drop it swaps in the server's
+   * updated ticket — the verb flips to Mark done and the Preparing badge
+   * appears without waiting a poll.
+   */
+  const start = async (ticket: KitchenTicketView) => {
+    setPending((cur) => new Set(cur).add(ticket.id));
+    setError(null);
+    try {
+      const updated = await kitchen.start(session, branchId, ticket.id);
+      setTickets((cur) => cur.map((t) => (t.id === ticket.id ? updated : t)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start this ticket');
+      await load();
+    } finally {
+      setPending((cur) => {
+        const next = new Set(cur);
+        next.delete(ticket.id);
+        return next;
+      });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -230,6 +284,7 @@ export function KitchenBoard({ session, branchId }: Props) {
               ticket={t}
               canUpdate={canUpdate}
               pending={pending.has(t.id)}
+              onStart={() => void start(t)}
               onComplete={() => void complete(t)}
               onRecall={() => void recall(t)}
               onDetails={() => setDetailFor(t)}
@@ -383,6 +438,7 @@ function TicketCard({
   ticket,
   canUpdate,
   pending,
+  onStart,
   onComplete,
   onRecall,
   onDetails,
@@ -390,11 +446,14 @@ function TicketCard({
   ticket: KitchenTicketView;
   canUpdate: boolean;
   pending: boolean;
+  onStart: () => void;
   onComplete: () => void;
   onRecall: () => void;
   onDetails: () => void;
 }) {
   const done = ticket.status === 'COMPLETED';
+  /** D106 — started but not bumped: the card carries a Preparing badge. */
+  const preparing = ticket.status === 'IN_PROGRESS';
   // Completed tickets stop ageing: the colour answers "how long has this
   // dish been waiting?", which a done dish no longer is.
   const urgency: Urgency = done ? 'fresh' : urgencyOf(ticket.createdAt, new Date());
@@ -423,12 +482,22 @@ function TicketCard({
           ) : (
             // The timer sits where a status badge would, because on the
             // outstanding tab the age IS the status — every badge there read
-            // "To make", which the tab already says.
-            <span
-              className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
-            >
-              {formatElapsed(ticket.createdAt)}
-            </span>
+            // "To make", which the tab already says. D106's Preparing is the
+            // one outstanding state worth a badge, so it rides beside the
+            // timer rather than displacing it: the dish still ages.
+            <div className="flex shrink-0 items-center gap-2">
+              {preparing ? (
+                <StatusBadge
+                  tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
+                  label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
+                />
+              ) : null}
+              <span
+                className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
+              >
+                {formatElapsed(ticket.createdAt)}
+              </span>
+            </div>
           )}
         </div>
 
@@ -485,6 +554,11 @@ function TicketCard({
            * the finger pressing it is wet, gloved, or holding a plate. Recall
            * is deliberately quieter than the bump (outline, not filled): it
            * is the undo, not the job.
+           *
+           * D106 — ONE verb per state, industry bump-bar style: a queued
+           * ticket offers Start preparing, a started one offers Mark done.
+           * Two stacked 48px buttons would halve how many tickets the pass
+           * can see, and the two taps are adjacent in time anyway.
            */}
           {canUpdate ? (
             done ? (
@@ -497,7 +571,7 @@ function TicketCard({
               >
                 Recall
               </Button>
-            ) : (
+            ) : preparing ? (
               <Button
                 className="h-12 w-full text-base"
                 leftIcon={<UtensilsCrossed className="h-5 w-5" />}
@@ -505,6 +579,15 @@ function TicketCard({
                 onClick={onComplete}
               >
                 Mark done
+              </Button>
+            ) : (
+              <Button
+                className="h-12 w-full text-base"
+                leftIcon={<ChefHat className="h-5 w-5" />}
+                isLoading={pending}
+                onClick={onStart}
+              >
+                Start preparing
               </Button>
             )
           ) : null}

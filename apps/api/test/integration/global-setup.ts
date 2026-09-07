@@ -36,10 +36,14 @@ export default function globalSetup(): void {
   console.log(`[integration] Target database: ${database} (verified disposable)`);
   console.log('[integration] Applying migrations (prisma migrate deploy)...');
 
-  execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
+  // On Windows the binary is `pnpm.cmd`, and Node (post CVE-2024-27980)
+  // refuses to spawn a .cmd without a shell — without both of these the suite
+  // dies in ENOENT before a single test on any Windows dev machine.
+  execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
     cwd: DATABASE_PACKAGE,
     stdio: 'inherit',
     env: process.env,
+    ...(process.platform === 'win32' ? { shell: true } : {}),
   });
 
   console.log('[integration] Schema ready.');
