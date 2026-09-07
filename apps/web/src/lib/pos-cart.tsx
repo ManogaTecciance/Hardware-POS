@@ -4,7 +4,13 @@ import * as React from 'react';
 
 import { DEFAULT_TIME_ZONE, safeTimeZone, todayInTimeZone } from '@hardware-pos/shared';
 
-import { newCartItem, type CartItem, type LineDiscount, type OrderDiscount } from './cart';
+import {
+  newCartItem,
+  stockCap,
+  type CartItem,
+  type LineDiscount,
+  type OrderDiscount,
+} from './cart';
 import { isValidYmd } from './dates';
 import type { ClientCustomer, ClientProduct } from './catalog';
 
@@ -33,14 +39,9 @@ interface PosCartState {
 
 const EMPTY: PosCartState = { items: [], customerId: '', addedCustomers: [], saleDate: '' };
 
-/**
- * Maximum sellable quantity for a product: its on-hand stock for Inventory
- * items, or null (no cap) for Service / Non-Inventory items, which aren't
- * stock-tracked and can always be sold.
- */
-export function stockCap(product: ClientProduct): number | null {
-  return product.type === 'Inventory' ? product.quantityOnHand : null;
-}
+// Defined in ./cart alongside computeLine, which has to agree with it; re-exported
+// here because the POS screens have always imported it from the cart provider.
+export { stockCap };
 
 interface PosCartValue extends PosCartState {
   /** True once sessionStorage has been read (avoids empty-cart flash on route load). */
@@ -219,10 +220,17 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
               if (it.product.id !== productId) return it;
               // Typed quantity: whole number, minimum 1 (removal is via the
               // trash button), capped at remaining stock for Inventory items.
+              //
+              // The floor is applied LAST, on purpose. Capping second let a
+              // cap of 0 — an Inventory line another register had just sold out
+              // — drive the quantity to 0, which read as "not over stock", so
+              // the warning cleared, the Pay button came alive, and a
+              // zero-quantity line reached the API to be refused there instead.
+              // Staying at 1 keeps the line visibly short, which is the truth.
               const cap = stockCap(it.product);
-              let q = Math.max(1, Math.floor(quantity));
+              let q = Math.floor(quantity);
               if (cap != null) q = Math.min(q, cap);
-              return { ...it, quantity: q };
+              return { ...it, quantity: Math.max(1, q) };
             }),
           };
         }),

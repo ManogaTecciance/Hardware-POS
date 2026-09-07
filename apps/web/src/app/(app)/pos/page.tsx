@@ -121,9 +121,22 @@ export default function PosPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageProducts = filtered.slice((page - 1) * pageSize, page * pageSize);
 
+  /**
+   * Add a product, or say why it cannot be added.
+   *
+   * The one place the "can this be sold" question is answered for every add
+   * path — tile, scanner and the search box's Enter key. It used to be written
+   * out separately per caller, and Enter had simply been missed, so a product
+   * the tile refused could still be added by typing its SKU and pressing return.
+   */
   const addToCart = (product: ClientProduct) => {
+    if (stockCap(product) === 0) {
+      showToast(`${product.name} is out of stock`, 'warning');
+      return false;
+    }
     cart.addToCart(product);
     showToast(`${product.name} added`);
+    return true;
   };
 
   /**
@@ -153,13 +166,7 @@ export default function PosPage() {
         showToast(`No product found for "${code}"`, 'danger');
         return;
       }
-      if (product.type === 'Inventory' && product.quantityOnHand <= 0) {
-        showToast(`${product.name} is out of stock`, 'warning');
-        return;
-      }
-      cart.addToCart(product);
-      showToast(`${product.name} added`);
-      setQuery('');
+      if (addToCart(product)) setQuery('');
     },
     // showToast/cart are stable enough for this handler's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -181,10 +188,7 @@ export default function PosPage() {
     if (e.key !== 'Enter') return;
     const exact = findBySku(q);
     const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
-    if (target) {
-      addToCart(target);
-      setQuery('');
-    }
+    if (target && addToCart(target)) setQuery('');
   };
 
   // ── discounts ──────────────────────────────────────────────────────────────
@@ -700,7 +704,7 @@ export default function PosPage() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2.5">
               {pageProducts.map((p) => {
-                const outOfStock = p.type === 'Inventory' && p.quantityOnHand <= 0;
+                const outOfStock = stockCap(p) === 0;
                 // Low stock only when a reorder point is set and stock is at/below
                 // it — the same rule the products table and dashboard alert use.
                 const lowStock =
