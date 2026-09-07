@@ -103,13 +103,18 @@ const hrefs = (groups: NavGroup[]): string[] => groups.flatMap((g) => g.items.ma
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Tile Shop navigation is behaviourally identical to before Slice 8', () => {
-  it('renders exactly the pre-Slice-8 list, in the pre-Slice-8 order', () => {
+  it('renders the pre-Slice-8 list, in order, plus Phase 8 Reports', () => {
     // The literal list that shipped before this slice. An exact sequence, not a
     // set: a reordered sidebar is a visible change to an existing screen.
+    //
+    // `Reports` was added by `8.2`, deliberately, and sits beside Sales because
+    // both answer "what happened". Everything else keeps its position — the
+    // point of an exact sequence is that an accidental reorder still fails.
     expect(labels(nav('HARDWARE', LEGACY_MODULES))).toEqual([
       'Dashboard',
       'POS',
       'Sales',
+      'Reports',
       'Quotations',
       'Returns',
       'Products',
@@ -347,15 +352,23 @@ describe('module and permission are both required', () => {
     expect(groups).toContain('Operations');
   });
 
-  it('Operations survives on sale history alone', () => {
+  it('Operations survives on sale history and reporting alone', () => {
     // The consequence of the shared-core classification, stated positively: with
-    // every retail module revoked the section still carries exactly one entry.
+    // every RETAIL module revoked the section still carries the two entries whose
+    // modules are shared core — sale history (no module at all) and Reports
+    // (REPORTING, in SHARED_CORE since before this branch).
     const noRetail = LEGACY_MODULES.filter(
       (m) => !['RETAIL_POS', 'QUOTATIONS', 'RETURNS'].includes(m),
     );
     const operations = nav('HARDWARE', noRetail).find((g) => g.label === 'Operations');
 
-    expect(operations?.items.map((i) => i.label)).toEqual(['Sales']);
+    expect(operations?.items.map((i) => i.label)).toEqual(['Sales', 'Reports']);
+
+    // And revoking REPORTING really does remove it — otherwise the line above
+    // would pass for an entry that ignores its module gate.
+    const alsoNoReporting = noRetail.filter((m) => m !== 'REPORTING');
+    const stripped = nav('HARDWARE', alsoNoReporting).find((g) => g.label === 'Operations');
+    expect(stripped?.items.map((i) => i.label)).toEqual(['Sales']);
   });
 });
 
@@ -915,6 +928,7 @@ describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
       ['/dashboard', null],
       ['/pos', Permission.SALE_CREATE],
       ['/sales', Permission.SALE_READ],
+      ['/reports', Permission.REPORT_READ],
       ['/quotations', Permission.QUOTATION_READ],
       ['/returns', Permission.RETURN_READ],
       ['/products', Permission.PRODUCT_READ],
@@ -949,24 +963,34 @@ describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
     }
   });
 
-  it('deliberately omits /reports — that screen is restaurant analytics', () => {
-    // Checked during the 2.8 audit and nearly "fixed" into a bug. A Retail
-    // Owner holds REPORT_READ and the REPORTING module is in SHARED_CORE, so the
-    // gate would pass — but `/reports` renders `<RestaurantReports>` and is
-    // described as "waiter performance, voids and channels". A door that opens
-    // onto the wrong room is worse than no door.
+  it('now CARRIES /reports — 8.2 put a retail screen behind it', () => {
+    // The inverse of the 2.8 assertion this replaces, and the successor that
+    // assertion named. It read "deliberately omits /reports — that screen is
+    // restaurant analytics", because `/reports` rendered `<RestaurantReports>`
+    // and a door onto the wrong room is worse than no door. Its own comment
+    // said the entry "belongs in Phase 8, with a screen behind it".
     //
-    // Retail reporting is Phase 8 (8.2 sales by variant, 8.4 margin, 8.6 tax by
-    // rate). The entry belongs there, with a screen behind it.
+    // `8.2` built that screen and made the route dispatch on the fulfilment
+    // capability, so the door now opens onto the right room. The gate was never
+    // the problem — REPORT_READ and REPORTING were both already held, which is
+    // re-asserted below because it is still what makes this a decision.
     const hrefs = nav('RETAIL', RETAIL_MODULES_ALL)
       .flatMap((g) => g.items)
       .map((i) => i.href);
 
-    expect(hrefs).not.toContain('/reports');
-    // The gate really would have passed — this is what makes the omission a
-    // decision rather than an accident of permissions.
+    expect(hrefs).toContain('/reports');
     expect(ROLE_PERMISSIONS.OWNER).toContain(Permission.REPORT_READ);
     expect(SHARED_CORE).toContain('REPORTING');
+
+    // Still module-gated: revoke REPORTING and the entry goes, so this is a
+    // real gate rather than an entry that renders unconditionally.
+    const withoutReporting = nav(
+      'RETAIL',
+      RETAIL_MODULES_ALL.filter((m) => m !== 'REPORTING'),
+    )
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+    expect(withoutReporting).not.toContain('/reports');
   });
 
   it('a Cashier sees the till and its history, and nothing administrative', () => {

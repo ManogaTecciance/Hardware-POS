@@ -110,6 +110,16 @@ export const RETAIL_NAVIGATION: readonly NavGroupSpec[] = [
       // module either. `RETAIL_POS` governs *taking* a sale, which is a retail
       // workflow.
       { href: '/sales', label: 'Sales', icon: 'ReceiptText', permission: Permission.SALE_READ },
+      // Phase 8 (`8.2`) — retail has carried the REPORTING module since it was
+      // put in SHARED_CORE_MODULES, but had no entry to reach it: `/reports`
+      // existed only on the food-service rail. The module was never the gap.
+      {
+        href: '/reports',
+        label: 'Reports',
+        icon: 'BarChart3',
+        permission: Permission.REPORT_READ,
+        module: 'REPORTING',
+      },
       {
         href: '/quotations',
         label: 'Quotations',
