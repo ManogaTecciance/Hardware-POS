@@ -109,9 +109,38 @@ const G = BranchScopeKind.GLOBAL_PLATFORM;
 /** Every route the API serves, classified. 245 entries after D45 — 233 pre-D45
  *  plus 12 new endpoints: 4 SHARED_CORE product-side attachments
  *  (`modifier-groups`, `kitchen-stations`), 7 PROMOTIONS-gated promotions
- *  endpoints, and 1 RETAIL_POS-gated Restaurant POS Catalogue read. */
+ *  endpoints, and 1 RETAIL_POS-gated Restaurant POS Catalogue read.
+ *
+ *  Phase 5 adds 9 more, all SHARED_CORE: the tenant option library (D104), the
+ *  barcode audit and reissue pass (D104 Part 3) and label printing (D106). None
+ *  is module-gated, deliberately — any business that sells variants benefits
+ *  from saying "Size" once, and a barcode is a catalogue concern rather than a
+ *  vertical one. Gating them on a business type would be the D56 mistake. They
+ *  are permission-gated instead: PRODUCT_READ to look, PRODUCT_MANAGE to write. */
 const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /audit-logs': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // D104 / D104a — the tenant option library (Phase 5, 5.1 / 5.2).
+  'GET /attribute-library': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /attribute-library/:definitionId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /attribute-library': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /attribute-library/:definitionId': {
+    module: 'SHARED_CORE',
+    guard: 'shared-core',
+    scope: T,
+  },
+  'DELETE /attribute-library/:definitionId': {
+    module: 'SHARED_CORE',
+    guard: 'shared-core',
+    scope: T,
+  },
+  // D104 Part 3 — the barcode audit and reissue pass (5.9).
+  'GET /barcodes/audit': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /barcodes/reissue': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // D106 — label rendering and queueing (5.7). Tenant-scoped: the label sheet
+  // is drawn from the catalogue, which is tenant-wide, and the print job the
+  // queue already owns carries its own branch routing.
+  'POST /labels/preview': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /labels/print': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /auth/active-branch': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /auth/accessible-branches': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /auth/login': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },

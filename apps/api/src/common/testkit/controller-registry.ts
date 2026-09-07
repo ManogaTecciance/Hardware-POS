@@ -29,6 +29,9 @@ import { DocumentsController } from '../../modules/documents/documents.controlle
 import { PaymentsController } from '../../modules/payments/payments.controller';
 import { PlatformController } from '../../modules/platform/platform.controller';
 import { PlatformAdminController } from '../../modules/platform-admin/platform-admin.controller';
+import { AttributeLibraryController } from '../../modules/products/attribute-library/attribute-library.controller';
+import { BarcodesController } from '../../modules/products/identifiers/barcodes.controller';
+import { LabelsController } from '../../modules/products/identifiers/labels.controller';
 import { ProductAttributeSchemaController } from '../../modules/products/product-attribute-schema.controller';
 import { ProductComponentsController } from '../../modules/products/product-components.controller';
 import { ProductsController } from '../../modules/products/products.controller';
@@ -149,6 +152,14 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   SellableController,
   // D64 — Phase 7 attribute schema read.
   ProductAttributeSchemaController,
+  // D104 / D104a — Phase 5 option library. SHARED CORE: any business selling
+  // variants benefits from saying "Size" once, and gating it on a business type
+  // would be the D56 mistake. Permission-gated, not module-gated.
+  AttributeLibraryController,
+  // D104 Part 3 / D106 — Phase 5 barcode audit + reissue, and label printing.
+  // Also shared core: a barcode is a catalogue concern, not a vertical one.
+  BarcodesController,
+  LabelsController,
   // D65 — Phase 8 recipe junction.
   ProductComponentsController,
   ProductModifierGroupsController,
@@ -241,4 +252,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'collection',
   'collection-sections',
   'catalogue-entries',
+  // D104 / D104a / D106 — Phase 5 option library, barcode audit, labels.
+  'attribute-library',
+  'barcodes',
+  'labels',
 ];

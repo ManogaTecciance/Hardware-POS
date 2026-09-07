@@ -4594,3 +4594,66 @@ is the check that makes this a safe widening rather than a hopeful one.
 - **Whether a label job is branch-scoped.** It inherits whatever the queue
   already does. If shelf labels turn out to need a branch the queue does not
   carry, that is a separate change with its own evidence.
+
+---
+
+## D104b — a correction to D104 Part 2: a rollback does not burn a sequence number
+
+**Status:** accepted, 2026-09-07. Corrects one factual claim in
+[D104](#d104) Part 2. **The decision D104 made is unchanged**; only its stated
+reason was wrong.
+
+### What D104 said
+
+> **Gaps are accepted.** `nextDocumentNumber` increments inside the transaction,
+> so a rolled-back product creation burns a number.
+
+### What is actually true
+
+Measured during `5.3`, against a real Postgres, in
+`sku-generation.spec.ts`:
+
+A rolled-back batch burns **nothing**. `nextDocumentNumber` is an
+`INSERT … ON CONFLICT DO UPDATE … RETURNING` executed inside the caller's
+transaction, so it rolls back exactly like every other statement in it. In the
+observed case the `DocumentSequence` row did not even survive at zero — it was
+never committed, so the next allocation started again at 1.
+
+The reasoning in D104 confused "increments inside the transaction" with
+"increments outside the caller's control". The first is true and is precisely
+why a rollback undoes it.
+
+### Where the gaps really come from
+
+**The collision retry.** Generation allocates a number, composes the SKU, and
+finds the composed string already taken by a hand-typed one. It abandons that
+number and allocates the next. The abandoned number is gone for good, and that
+write commits — so this is a real, permanent gap. Asserted directly: after one
+such retry the sequence sits at 2 with a single generated variant.
+
+The same is true of `BARCODE` allocation (`5.5`), which uses the identical
+mechanism.
+
+### Why the decision stands anyway
+
+D104 accepted gaps in order to avoid holding a lock across a whole product
+creation. That trade-off is unaffected: the retry still must not reuse an
+abandoned number, because a reused barcode would eventually reissue an
+identifier already on a printed label. A SKU is an identifier, not an audit
+trail, and nobody reconciles them.
+
+### Why this is recorded rather than quietly fixed
+
+The claim is load-bearing for anyone reasoning about whether these sequences can
+be made gap-free. Someone reading D104 would conclude that gaps are unavoidable
+because of rollbacks and stop there; the truth is that rollbacks are clean and
+the retry is the only source, which is a much smaller and more tractable
+surface. Both behaviours are now pinned by tests, so a future change to
+`nextDocumentNumber` that made rollbacks leaky would fail rather than silently
+vindicate the old wording.
+
+### What this does not change
+
+- The `DocumentSequence` decision itself, its concurrency argument, or the
+  `SKU` / `BARCODE` doc types.
+- Anything in D104 Parts 1 or 3.

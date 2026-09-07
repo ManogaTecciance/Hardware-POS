@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 283
+- Total routes: 292
 - Module-guarded routes: 196
-- Ungated routes: 87
+- Ungated routes: 96
 
 ## How to read the Guard column
 
@@ -230,6 +230,52 @@ drives the wizard's generic attributes step and the server-side validator.
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
 | GET | `/products/attribute-schema` | SHARED_CORE | shared-core | product:read |
+
+### AttributeLibraryController
+
+D104 / D104a (Phase 5, `5.1` / `5.2`): the tenant option library — Size and
+colour scales defined once and shared by every product that adopts them.
+
+**Shared core, deliberately.** Any business selling variants benefits from
+saying "Size" once, and gating it on a business type would be the D56 mistake —
+read a capability, never a business type. A tenant that never creates a
+definition sees an empty list, which is a real answer rather than a denial.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/attribute-library` | SHARED_CORE | shared-core | product:read |
+| GET | `/attribute-library/:definitionId` | SHARED_CORE | shared-core | product:read |
+| POST | `/attribute-library` | SHARED_CORE | shared-core | product:manage |
+| PATCH | `/attribute-library/:definitionId` | SHARED_CORE | shared-core | product:manage |
+| DELETE | `/attribute-library/:definitionId` | SHARED_CORE | shared-core | product:manage |
+
+### BarcodesController
+
+D104 Part 3 (Phase 5, `5.9`): the barcode audit and reissue pass. Sequenced
+before label rendering, because an EAN-13 symbol cannot be produced from a
+payload with a wrong check digit — 18 of the pilot's 20 codes.
+
+The read is `product:read`: anyone who can browse the catalogue may see that it
+has a problem. The reissue is `product:manage`, because it rewrites identifiers.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/barcodes/audit` | SHARED_CORE | shared-core | product:read |
+| POST | `/barcodes/reissue` | SHARED_CORE | shared-core | product:manage |
+
+### LabelsController
+
+D106 (Phase 5, `5.7`): render and queue a sheet of product labels as a
+`PRODUCT_LABEL` print job — the only job type with no sale behind it.
+
+Two endpoints rather than one: `preview` returns the HTML to look at, `print`
+queues it. Printing is the irreversible half, so it is a deliberate second
+action. Both report which variants could not be drawn rather than omitting them.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| POST | `/labels/preview` | SHARED_CORE | shared-core | product:manage |
+| POST | `/labels/print` | SHARED_CORE | shared-core | product:manage |
 
 ### ProductComponentsController
 
