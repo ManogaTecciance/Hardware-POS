@@ -1,13 +1,18 @@
 /**
  * CHARACTERISATION — the Exchange A4 document renderer, as it behaves TODAY.
  *
- * Context (see docs/restaurant-pos/00-decisions.md, decision D2): the repository
- * contains an Exchange *document renderer* but no Exchange *transaction* — no
- * Prisma model, migration, API module, route, or permission key. The renderer's
- * own comment says as much.
+ * Context: when this spec was written the repository contained an Exchange
+ * *document renderer* but no Exchange *transaction* — no Prisma model,
+ * migration, API module, route or permission key (decision D2).
  *
- * Decision D2 requires that this renderer, and its current rendering output, be
- * preserved. `documents.preview.spec.ts` already covers the signature chain and
+ * **That changed in Phase 7.** D107 built the transaction, and `7.3` connected
+ * this renderer to it. Two things follow: the rendering output is no longer
+ * merely "preserved" but load-bearing for a real document a customer is handed,
+ * and the tax column now follows the tenant's setting rather than being forced
+ * off — see the note on those tests below.
+ *
+ * D2's requirement that the existing output be preserved still holds for every
+ * assertion NOT explicitly changed by `7.3`. `documents.preview.spec.ts` already covers the signature chain and
  * the invoice-note exclusion for the `'exchange'` preview type; it does NOT cover
  * `buildExchangeDocument` itself. This spec closes that gap so testcases.md rows
  * EXC-D-001…EXC-D-003 are honestly backed by automated coverage rather than

@@ -497,9 +497,10 @@ export class DocumentsService {
 
   // ── Exchange A4 (returned + replacement lines → net difference) ──────────────
   //
-  // Exchanges are not yet a first-class transaction in the POS. This renderer is
-  // ready for that feature: pass the returned lines and the replacement lines and
-  // it produces a combined A4 note showing the net amount due / to refund.
+  // `7.4` — exchanges ARE a first-class transaction as of Phase 7 (D107). This
+  // comment used to say they were not, and that the renderer was "ready for"
+  // the feature; `exchangeHtml` below is the feature, and the Settings sample
+  // preview is now the secondary caller rather than the only one.
 
   buildExchangeDocument(
     tenantId: string,

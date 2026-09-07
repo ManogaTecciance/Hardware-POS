@@ -3707,6 +3707,9 @@ renderer and no transaction. The retail template builds that transaction; until 
 lands, D2's instruction stands and exchange behaviour must not be represented as
 implemented.
 
+> **Superseded 2026-09-07 by [D107b](#d107b).** The transaction landed in Phase 7.
+> The caveat is lifted; read D107b for what "implemented" does and does not mean.
+
 ---
 
 ## 2026-08-31 — Stock authority for a product with variants
@@ -4948,3 +4951,52 @@ shirt and swaps the size is returning the whole sale. D107 chose to leave return
 approval rules unchanged, so this follows from that choice rather than from
 gross settlement — but it is the shape most exchanges will take in a clothing
 shop, and the till has to handle it. Recorded as a Phase 7 limitation.
+
+---
+
+## D107b — D2's "exchanges are not implemented" caveat is lifted
+
+**Status:** accepted, 2026-09-07. Phase 7 step `7.4`. A status change, not a new
+decision.
+
+### What stood until now
+
+The Phase 0 audit (**D2**) recorded `ModuleKey.EXCHANGES` as a reserved key with
+an A4 document renderer and no transaction, and this log carried the instruction:
+
+> `ModuleKey.EXCHANGES` remains as D2 left it — a reserved key with an A4
+> document renderer and no transaction. The retail template builds that
+> transaction; **until it lands, D2's instruction stands and exchange behaviour
+> must not be represented as implemented.**
+
+### It has landed
+
+- `Exchange` model and migration — **D107**, `7.1a`
+- `ExchangesService` / `ExchangesController`, `POST /exchanges` — `7.1b`
+- Stock proven to move on both variants, once — `7.2`
+- The A4 note rendered from a real exchange, carrying real tax — `7.3`
+
+So the caveat is lifted, and the three places that repeated it are corrected:
+the renderer's own comment, the characterisation spec's premise, and this entry.
+
+### What "implemented" does and does not mean here
+
+Stated precisely, because the caveat existed to stop exchanges being oversold.
+
+**It does mean:** a completed sale can be exchanged for a different variant, the
+money moves both ways and nets at the drawer, both stock figures move exactly
+once, a replay cannot double-refund, and the customer can be handed a note whose
+Balance Due is the figure the till actually took.
+
+**It does not mean:**
+
+- **Anything has been verified by hand.** The supervisor deferred manual UI
+  verification to a single pass after all phases. Every Phase 4 defect that
+  reached a screen was found by using the app, not by a green suite.
+- **Multi-line, cross-branch, or cross-sale exchanges.** Out of scope for the
+  thin slice by agreement; none is load-bearing for the phase gate.
+- **That a single-line exchange is frictionless.** `Full-sale return` is an
+  existing approval trigger, so a customer who bought one shirt and swaps the
+  size needs a manager PIN every time. That follows from D107's choice to leave
+  return-approval rules unchanged. It is the commonest shape of clothing
+  exchange, and the PO may want it revisited — see D107a.
