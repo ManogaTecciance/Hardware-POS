@@ -4528,3 +4528,69 @@ them.
 - **Category binding is not enforcement.** Nothing refuses a product that
   adopts a scale bound to another category; `5.1` ships the column and the
   picker hint, not a rule.
+
+---
+
+## D106 — a label print job has no sale, so `PrintJob.saleId` becomes nullable
+
+**Status:** accepted, 2026-09-07. Required by Phase 5 step `5.7`. Touches a
+table the restaurant and hardware modules both write to, which is why it gets a
+record rather than riding along inside the step.
+
+### The problem
+
+The Phase 5 plan says label rendering is *"a new `PrintJobType` on the existing
+queue, reusing the existing print-job queue and print agents"*. That reuse is
+right — the queue, the agent polling, the `PENDING → PRINTED → FAILED`
+lifecycle and the retry behaviour all already exist and are in production use.
+
+But `PrintJob.saleId` is `String`, **required**, with a cascading FK to `Sale`.
+Every job the system has ever created belongs to a sale: a customer receipt, a
+warehouse picking slip, a return receipt. A sheet of shelf labels belongs to no
+sale at all — it is printed from the catalogue, often for stock that has not
+been sold and may never be.
+
+### What was rejected
+
+**A separate `LabelPrintJob` table.** It would duplicate the status lifecycle,
+the agent's polling query, the retry logic and the print-agent registration —
+four things that are correct today and would then exist twice. The second copy
+is where they drift. This is the same argument D103 made for `PROMOTIONS` and
+the same one D104 Part 2 made for reusing `DocumentSequence`.
+
+**A synthetic sale.** Inventing a `Sale` row so a label job has something to
+point at would put fictional rows in the table every report, every Z-reading and
+every tax reconciliation reads. Not seriously considered, recorded so nobody
+proposes it later.
+
+### The decision
+
+1. **`PrintJob.saleId` becomes `String?`**, FK `ON DELETE CASCADE` unchanged for
+   the rows that have one.
+2. **`PrintJobType` gains `PRODUCT_LABEL`.**
+3. **No existing row changes.** Every current job keeps its `saleId`; the column
+   simply stops being mandatory for new kinds of job.
+
+### Why this is safe for the restaurant and hardware modules
+
+Measured against the code, not assumed:
+
+- Every existing writer — `receipts.service`, `returns.service` — passes a
+  `saleId` and continues to. Nothing about their behaviour changes.
+- Every existing reader filters by `saleId` **optionally**
+  (`QueryPrintJobsDto.saleId?`), so a job without one is simply not returned by
+  a sale-scoped query. That is the correct answer, not a gap.
+- Widening a column from `NOT NULL` to nullable cannot fail on existing data and
+  cannot lose any.
+
+The one real risk is a consumer that reads `job.saleId` and assumes a string.
+The compiler names every such site the moment the client is regenerated, which
+is the check that makes this a safe widening rather than a hopeful one.
+
+### What this does not decide
+
+- **Label geometry** — `5.8`, and it needs no migration: the settings blob is
+  JSON and already scoped `(tenantId, branchId)`.
+- **Whether a label job is branch-scoped.** It inherits whatever the queue
+  already does. If shelf labels turn out to need a branch the queue does not
+  carry, that is a separate change with its own evidence.

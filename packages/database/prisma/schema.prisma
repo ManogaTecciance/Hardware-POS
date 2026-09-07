@@ -108,6 +108,9 @@ enum PrintJobType {
   CUSTOMER_RECEIPT
   WAREHOUSE_PICKING
   RETURN_RECEIPT
+  /// D106 (Phase 5, 5.7) — a sheet of shelf/product labels. The only job type
+  /// with no sale behind it; see `PrintJob.saleId`.
+  PRODUCT_LABEL
 }
 
 enum PrintJobStatus {
@@ -1204,7 +1207,12 @@ model Receipt {
 model PrintJob {
   id              String         @id @default(cuid())
   tenantId        String
-  saleId          String
+  /// D106 — nullable since Phase 5. Every receipt, picking slip and return
+  /// document belongs to a sale and still carries one; a PRODUCT_LABEL sheet is
+  /// printed from the catalogue and belongs to none. Widened rather than given
+  /// a second table, because the queue, the agent polling, the status lifecycle
+  /// and the retry behaviour are correct today and would otherwise exist twice.
+  saleId          String?
   returnId        String?
   receiptId       String?
   type            PrintJobType
@@ -1217,7 +1225,7 @@ model PrintJob {
   updatedAt       DateTime       @updatedAt
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  sale    Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale    Sale?    @relation(fields: [saleId], references: [id], onDelete: Cascade)
   return  Return?  @relation(fields: [returnId], references: [id], onDelete: Cascade)
   receipt Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
 
@@ -3465,6 +3473,21 @@ model ProductVariationOption {
   @@index([attributeOptionId])
 }
 
+/// D104 Part 3 (`5.6`) — where a variant's barcode came from.
+///
+/// Provenance, not a second column. A variant carries ONE barcode; this answers
+/// the only question the system actually asks of it: "may I regenerate this?"
+///
+/// NULL means unknown, and that is a real state — the twenty pilot barcodes
+/// predate this flag and nothing in the database records who issued them. A
+/// default of INTERNAL would be a guess that authorises overwriting a
+/// supplier's code, so the column stays nullable and `5.9` sets it explicitly
+/// for the rows it can prove are shop-generated.
+enum BarcodeSource {
+  SUPPLIER
+  INTERNAL
+}
+
 /// A sellable variant of a Product — its own SKU, barcode, selling price,
 /// cost history, per-branch stock and reorder point.
 ///
@@ -3479,6 +3502,8 @@ model ProductVariant {
   productId    String
   sku          String
   barcode      String?
+  /// D104 Part 3 — see `BarcodeSource`. NULL until something can prove it.
+  barcodeSource BarcodeSource?
   unitPrice    Decimal  @default(0) @db.Decimal(12, 2)
   /// Latest purchase cost captured on the most recent receipt (mirror of the
   /// max-receivedAt line's unitCost, refreshed on receive). Legacy-style;
@@ -3517,6 +3542,11 @@ model ProductVariant {
   catalogueEntries     CatalogueEntry[]
 
   @@unique([tenantId, sku])
+  /// D104 Part 3 — measured before adding: zero duplicates within a tenant and
+  /// zero across tenants, so this goes on with no remediation and no backfill.
+  /// Postgres treats NULLs as distinct, so the 28 variants with no barcode are
+  /// unaffected.
+  @@unique([tenantId, barcode])
   @@index([tenantId])
   @@index([productId])
   @@index([isActive])

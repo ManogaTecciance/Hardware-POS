@@ -62,6 +62,15 @@ export class ProductVariantsRepository {
     return row?.category?.name ?? null;
   }
 
+  /** The product's category id, for a per-category barcode prefix (`5.4`). */
+  async findCategoryId(productId: string): Promise<string | null> {
+    const row = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { categoryId: true },
+    });
+    return row?.categoryId ?? null;
+  }
+
   /** Fetch every variant on a product with its option snapshot. */
   listVariants(productId: string) {
     return this.prisma.productVariant.findMany({

@@ -1,7 +1,13 @@
 import { MenuModule } from '../menu/menu.module';
+import { SettingsModule } from '../settings/settings.module';
 import { AttributeLibraryController } from './attribute-library/attribute-library.controller';
 import { AttributeLibraryRepository } from './attribute-library/attribute-library.repository';
 import { AttributeLibraryService } from './attribute-library/attribute-library.service';
+import { BarcodeAuditService } from './identifiers/barcode-audit.service';
+import { BarcodeGeneratorService } from './identifiers/barcode-generator.service';
+import { BarcodesController } from './identifiers/barcodes.controller';
+import { LabelPrintService } from './identifiers/label-print.service';
+import { LabelsController } from './identifiers/labels.controller';
 import { SkuGeneratorService } from './identifiers/sku-generator.service';
 import { ProductAttributeSchemaController } from './product-attribute-schema.controller';
 import { ProductComponentsController } from './product-components.controller';
@@ -49,7 +55,17 @@ import { ProductVariantsService } from './variants/product-variants.service';
   // AuditLogModule is imported for D45: the Product ↔ ModifierGroup and
   // Product ↔ KitchenStation attachment endpoints record a mutation audit
   // event so the wizard's changes are traceable per-tenant.
-  imports: [ProvidersModule, AuditLogModule, PromotionsModule, PlatformModule, MenuModule],
+  // SettingsModule (D104 Part 3): the barcode prefix map lives in the settings
+  // blob, and allocation reads it FRESH rather than from the 30-second cache —
+  // a stale prefix would issue codes under the wrong range.
+  imports: [
+    ProvidersModule,
+    AuditLogModule,
+    PromotionsModule,
+    PlatformModule,
+    MenuModule,
+    SettingsModule,
+  ],
   controllers: [
     // Static /products/* routes FIRST: they must register before
     // ProductsController's GET /products/:id, or ':id' captures the segment
@@ -59,6 +75,10 @@ import { ProductVariantsService } from './variants/product-variants.service';
     // D104 — the tenant option library. Its own root path, so it does not
     // compete with ProductsController's GET /products/:id.
     AttributeLibraryController,
+    // D104 Part 3 / D106 — barcode audit + reissue (5.9) and label printing
+    // (5.7). Their own root paths, so no /products/:id capture.
+    BarcodesController,
+    LabelsController,
     ProductsController,
     ProductImagesController,
     ProductVariantsController,
@@ -84,6 +104,9 @@ import { ProductVariantsService } from './variants/product-variants.service';
     AttributeLibraryService,
     AttributeLibraryRepository,
     SkuGeneratorService,
+    BarcodeGeneratorService,
+    BarcodeAuditService,
+    LabelPrintService,
     ProductComponentsService,
     SellableService,
   ],

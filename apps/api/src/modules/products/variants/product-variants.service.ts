@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InventoryMode, Prisma } from '@hardware-pos/database';
+import { BarcodeSource, InventoryMode, Prisma } from '@hardware-pos/database';
 
 import { resolveOptionCode, type OptionCodeSource } from '@hardware-pos/shared';
 
@@ -13,6 +13,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { StorageService } from '../../../common/storage/storage.service';
 import { BusinessProfileService } from '../../platform/business-profile.service';
 import { InventoryProviderFactory } from '../../providers/inventory/inventory-provider.factory';
+import { BarcodeGeneratorService } from '../identifiers/barcode-generator.service';
 import { SkuGeneratorService, type SkuRequest } from '../identifiers/sku-generator.service';
 import { ProductVariantsRepository } from './product-variants.repository';
 import {
@@ -36,6 +37,9 @@ export interface VariantView {
   productId: string;
   sku: string;
   barcode: string | null;
+  /** D104 Part 3 (`5.6`) — provenance. NULL means unknown, and unknown is not
+   *  the system's to overwrite. */
+  barcodeSource: BarcodeSource | null;
   unitPrice: string;
   costPrice: string | null;
   averageCost: string | null;
@@ -116,6 +120,7 @@ export class ProductVariantsService {
     private readonly businessProfile: BusinessProfileService,
     private readonly inventoryProviders: InventoryProviderFactory,
     private readonly skus: SkuGeneratorService,
+    private readonly barcodes: BarcodeGeneratorService,
   ) {}
 
   // ── Variations (dimensions + options) ──────────────────────────────────────
@@ -426,9 +431,25 @@ export class ProductVariantsService {
       ? await this.inventoryProviders.forTenant(tenantId)
       : null;
 
+    // `5.6` — a typed barcode is validated by SHAPE, so a supplier's CODE128
+    // alphanumeric passes untouched while a 13-digit claim must carry the right
+    // check digit. Refused here, before anything is written.
+    for (const v of dto.variants) {
+      if (v.barcode) this.barcodes.assertTypedBarcode(v.barcode);
+    }
+
     // `5.3` — everything generation needs, resolved once outside the loop.
     const needsSku = dto.variants.some((v) => !v.sku);
     const categoryName = needsSku ? await this.repo.findCategoryName(productId) : null;
+
+    // `5.4` — the prefix is resolved BEFORE the transaction, so an
+    // unconfigured workspace is a clean refusal rather than a rolled-back
+    // batch. Only when generation was actually asked for: a tenant that types
+    // its own barcodes never has to configure a prefix.
+    const needsBarcode = dto.variants.some((v) => v.generateBarcode === true && !v.barcode);
+    const barcodePrefix = needsBarcode
+      ? await this.barcodes.prefixFor(tenantId, await this.repo.findCategoryId(productId))
+      : null;
     const optionLookup = new Map<string, { name: string; libraryCode: string | null }>();
     const dimensionPosition = new Map<string, number>();
     for (const d of dimensions) {
@@ -469,6 +490,23 @@ export class ProductVariantsService {
         );
         targets.forEach((target, i) => generated.set(target.index, results[i].sku));
       }
+
+      // `5.5` — allocated inside the transaction for the same reason as the
+      // SKU: a rolled-back batch must not leave the sequence advanced.
+      const allocatedBarcodes = new Map<number, string>();
+      if (barcodePrefix) {
+        const indices = dto.variants
+          .map((v, index) => ({ v, index }))
+          .filter(({ v }) => v.generateBarcode === true && !v.barcode)
+          .map(({ index }) => index);
+        const codes = await this.barcodes.allocateMany(
+          tx,
+          tenantId,
+          barcodePrefix,
+          indices.length,
+        );
+        indices.forEach((index, i) => allocatedBarcodes.set(index, codes[i].barcode));
+      }
       const openingReceiptInputs: {
         variantId: string;
         variant: CreateVariantInputDto;
@@ -487,7 +525,15 @@ export class ProductVariantsService {
               tenantId,
               productId,
               sku: v.sku ?? generated.get(index)!,
-              barcode: v.barcode ?? null,
+              barcode: v.barcode ?? allocatedBarcodes.get(index) ?? null,
+              // A typed barcode is the supplier's until someone says otherwise;
+              // an allocated one is ours and may be regenerated. Neither is
+              // guessed: a row with no barcode has no source either.
+              barcodeSource: v.barcode
+                ? BarcodeSource.SUPPLIER
+                : allocatedBarcodes.has(index)
+                  ? BarcodeSource.INTERNAL
+                  : null,
               unitPrice: v.unitPrice,
               costPrice: v.costPrice ?? null,
               reorderLevel: v.reorderLevel ?? null,
@@ -831,6 +877,7 @@ type VariantRow = {
   productId: string;
   sku: string;
   barcode: string | null;
+  barcodeSource: BarcodeSource | null;
   unitPrice: Prisma.Decimal;
   costPrice: Prisma.Decimal | null;
   averageCost: Prisma.Decimal | null;
@@ -853,6 +900,7 @@ function toVariantView(row: VariantRow): VariantView {
     productId: row.productId,
     sku: row.sku,
     barcode: row.barcode,
+    barcodeSource: row.barcodeSource,
     unitPrice: row.unitPrice.toString(),
     costPrice: row.costPrice?.toString() ?? null,
     averageCost: row.averageCost?.toString() ?? null,

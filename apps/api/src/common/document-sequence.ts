@@ -24,7 +24,12 @@ export type DocumentType =
   // rather than inventing a second one: it is already the repository's proven
   // answer to concurrent allocation. Gaps are accepted — a rolled-back product
   // creation burns a number, and a SKU is an identifier, not an audit trail.
-  | 'SKU';
+  | 'SKU'
+  // D104 Part 3 (Phase 5, 5.5) — per-tenant in-store EAN-13 numbering. Its own
+  // sequence, not shared with SKU: the two are different identifiers with
+  // different widths, and a shared counter would waste barcode range every time
+  // a SKU was allocated.
+  | 'BARCODE';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;
