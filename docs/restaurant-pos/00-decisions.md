@@ -5000,3 +5000,100 @@ Balance Due is the figure the till actually took.
   size needs a manager PIN every time. That follows from D107's choice to leave
   return-approval rules unchanged. It is the commonest shape of clothing
   exchange, and the PO may want it revisited — see D107a.
+
+---
+
+## D108 — A8 is handed to the restaurant team; retail adopts the rule instead
+
+**Status:** accepted, 2026-09-07. Phase 8 step `8.1`. Amends the scope recorded
+in **D99** and in `05-testing-and-governance.md` §7, which both claim A8 for the
+retail template.
+
+### What the plan assumed
+
+The PO settled the billing audit on 2026-08-28: *"we own A4 and A8"*, and the
+governance document drew a conclusion from it —
+
+> Excluding [A2, A3, A7] means **no phase in this plan edits a restaurant file.**
+
+**That conclusion is false for A8**, and nobody noticed because nobody opened the
+file until Phase 8's pre-work.
+
+### What is actually there
+
+| Report service | Float-money sites |
+|---|---|
+| `sales/sales-report.service.ts` | 0 |
+| `products/products-report.service.ts` | 0 |
+| `dashboard/dashboard.service.ts` | 0 |
+| `restaurant-reports/restaurant-reports.service.ts` | **15** |
+
+**A8 exists only in the restaurant module.** Every retail report is already
+`Decimal`-clean, so there is nothing on our side to fix.
+
+### The decision
+
+1. **A8 is handed to the restaurant team**, documented in
+   `Docs/Implementation/RT-02-report-money-handover.md`.
+2. **Retail adopts the rule A8 stands for**, as a tripwire over its own report
+   services: no retail report may coerce a money `Decimal` to a JavaScript
+   number. Mutation-proven, so a future report that reintroduces the pattern
+   fails on the branch.
+3. **The audit row stays OPEN.** It is not fixed, and marking it otherwise would
+   be false. It has changed owner, not state.
+
+### Why not simply fix it
+
+Three standing constraints, any one of which is sufficient:
+
+- The PO's *"do not touch the restaurant module"*, restated repeatedly.
+- The developer's own constraint about parallel work in other repositories —
+  and `fix/issues-restaurant` has commits from today.
+- The governance guarantee above, which the retail branch has honoured through
+  seven phases and which is worth more than one mechanical refactor.
+
+The counter-argument — that the PO explicitly assigned A8 — is real, and is why
+this is a record rather than a silent omission. The assignment was made from an
+audit row, not from the file. Given the file, the assignment cannot be executed
+without breaking three other commitments.
+
+### A correction to the audit, which changes the urgency
+
+The audit's impact reads *"Report totals will not tie out to the payment
+ledger."* **Measured on 2026-09-07: they do tie out.**
+
+| Test | Samples | Disagreements |
+|---|---|---|
+| Sum 2dp money, round to 2dp | 400,000 | 0 |
+| Sum 3dp quantities, round to 3dp | 600,000 | 0 |
+| Accumulate `0.01` ten million times | 1 | 0 |
+
+IEEE-754 doubles carry ~15–16 significant decimal digits; summing 2dp values and
+emitting a 2dp figure is exact far beyond any realistic report. The file also
+contains **no division**, and D59 already permits a number boundary *"where every
+engine output is a 2dp figure"*.
+
+**Where it does break is division**, and that was measured too — an average over
+`183.17, 145.76` is `164.47` exactly and `164.46` in float; three orders of
+`0.615` average to `0.62` exactly and `0.61` in float. The obvious next
+restaurant reports — average order value, margin percentage — are divisions.
+
+So A8 is a **consistency defect with a real future failure mode**, not a current
+mis-statement. Recorded here because handing over an overstated claim would have
+cost the restaurant team an afternoon disproving it and, reasonably, some trust
+in everything else we send them.
+
+### Why the tripwire is the honest half
+
+The PO asked retail to own A8. Retail cannot fix the file, but it can guarantee
+the defect does not spread into the nine reports Phase 8 is about to write —
+which is where new float money would otherwise appear. That is the part of the
+assignment we can actually discharge, and it is enforced rather than promised.
+
+### What this does not change
+
+- **D99 stands unamended.** It claimed A4 and A8 and said why the other three
+  were absent. A4 shipped in Phase 4. This record amends only where A8 is done,
+  by whom, and on what evidence.
+- **A2, A3 and A7 remain not ours.**
+- Nothing in the restaurant module is modified by this branch.
