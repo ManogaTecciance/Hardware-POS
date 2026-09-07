@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import * as React from 'react';
-import { Check, Undo2 } from 'lucide-react';
+import { Check, Search } from 'lucide-react';
 
 import { saleStatusLabel } from '@hardware-pos/shared';
 
@@ -10,6 +10,8 @@ import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Tooltip } from '@/components/ui/tooltip';
 import type { Session } from '@/lib/auth';
 import {
   fetchSales,
@@ -18,6 +20,8 @@ import {
   type SaleListItem,
 } from '@/lib/sales';
 import { cn, formatMoney } from '@/lib/utils';
+
+const PAGE_SIZE = 10;
 
 const STATUS_VARIANT: Record<PaymentStatusCode, 'success' | 'neutral' | 'danger'> = {
   PAID: 'success',
@@ -73,16 +77,40 @@ export function CustomerInvoices({
   onChanged: () => void;
 }) {
   const [rows, setRows] = React.useState<SaleListItem[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [page, setPage] = React.useState(1);
+  const [search, setSearch] = React.useState('');
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
+  // How many invoices are still to be accounted for across the WHOLE account,
+  // not just this page — the last-invoice rule is about the account, and paging
+  // away from a row must not change what the button says.
+  const [unmarkedTotal, setUnmarkedTotal] = React.useState(0);
+
+  React.useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  React.useEffect(() => setPage(1), [debouncedSearch]);
 
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchSales(session, { customerId, page: 1, pageSize: 100 })
-      .then((res) => !cancelled && setRows(res.items))
+    fetchSales(session, {
+      customerId,
+      page,
+      pageSize: PAGE_SIZE,
+      search: debouncedSearch || undefined,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setRows(res.items);
+        setTotal(res.total);
+      })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load invoices');
       })
@@ -90,19 +118,35 @@ export function CustomerInvoices({
     return () => {
       cancelled = true;
     };
+  }, [session, customerId, page, debouncedSearch, reloadKey]);
+
+  // Counted unfiltered and unpaged, so a search or a page change cannot make an
+  // invoice look like the last one when it is not.
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchSales(session, { customerId, page: 1, pageSize: 200, paymentStatus: 'UNPAID' })
+      .then((res) => {
+        if (cancelled) return;
+        setUnmarkedTotal(res.items.filter((s) => isOwed(s) && s.markedPaidAt === null).length);
+      })
+      .catch(() => !cancelled && setUnmarkedTotal(0));
+    return () => {
+      cancelled = true;
+    };
   }, [session, customerId, reloadKey]);
 
   // The rule the API enforces, mirrored so the button can explain itself before
   // it is pressed rather than only after.
-  const unmarkedCredit = rows.filter((s) => isOwed(s) && s.markedPaidAt === null);
   const isLastUnmarked = (s: SaleListItem) =>
-    unmarkedCredit.length === 1 && unmarkedCredit[0]?.id === s.id;
+    unmarkedTotal === 1 && isOwed(s) && s.markedPaidAt === null;
 
-  const toggle = async (s: SaleListItem) => {
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const markPaid = async (s: SaleListItem) => {
     setBusyId(s.id);
     setError(null);
     try {
-      await setSaleMarkedPaid(session, s.id, s.markedPaidAt === null);
+      await setSaleMarkedPaid(session, s.id, true);
       setReloadKey((k) => k + 1);
       onChanged();
     } catch (err) {
@@ -114,8 +158,17 @@ export function CustomerInvoices({
 
   return (
     <Card className="overflow-hidden">
-      <CardHeader>
+      <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
         <CardTitle>Invoices</CardTitle>
+        <div className="relative w-full max-w-[220px]">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search invoice no…"
+            className="h-9 pl-9"
+          />
+        </div>
       </CardHeader>
       {error ? <p className="px-6 pb-3 text-sm text-danger">{error}</p> : null}
       <div className="overflow-x-auto">
@@ -142,7 +195,7 @@ export function CustomerInvoices({
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
-                  No invoices for this customer yet.
+                  {debouncedSearch ? 'No invoices match that search.' : 'No invoices for this customer yet.'}
                 </td>
               </tr>
             ) : (
@@ -195,36 +248,32 @@ export function CustomerInvoices({
                     </td>
                     {canMark ? (
                       <td className="px-4 py-3 text-right">
-                        {!owed && !s.markedPaidAt ? (
+                        {!owed || s.markedPaidAt ? (
                           // Nothing to account for — it was paid at the till or
                           // covered when the account cleared.
                           <span className="text-xs text-muted-foreground">—</span>
                         ) : (
-                          <Button
-                            variant={s.markedPaidAt ? 'ghost' : 'outline'}
-                            size="sm"
-                            disabled={busyId === s.id || blocked}
-                            title={
+                          // A disabled button swallows the native `title`, so the
+                          // reason rides on a wrapper that still receives hover.
+                          <Tooltip
+                            label={
                               blocked
-                                ? `The last invoice on the account: record payments covering the ${formatMoney(
+                                ? `Last invoice on the account — record payments covering the ${formatMoney(
                                     outstanding,
-                                  )} still outstanding, which settles it without marking.`
-                                : undefined
+                                  )} still outstanding, which settles it without marking`
+                                : 'Account this invoice as paid'
                             }
-                            onClick={() => void toggle(s)}
                           >
-                            {s.markedPaidAt ? (
-                              <>
-                                <Undo2 className="h-4 w-4" />
-                                Undo
-                              </>
-                            ) : (
-                              <>
-                                <Check className="h-4 w-4" />
-                                Mark paid
-                              </>
-                            )}
-                          </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busyId === s.id || blocked}
+                              onClick={() => void markPaid(s)}
+                            >
+                              <Check className="h-4 w-4" />
+                              Mark paid
+                            </Button>
+                          </Tooltip>
                         )}
                       </td>
                     ) : null}
@@ -235,13 +284,32 @@ export function CustomerInvoices({
           </tbody>
         </table>
       </div>
-      {!loading && unmarkedCredit.length === 1 && outstanding > 0 ? (
-        <p className="border-t border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-          One invoice is left to account for. It can only be ticked off once the{' '}
-          {formatMoney(outstanding)} outstanding is covered by recorded payments — which settles it
-          anyway, so the books can never read clear without the money.
-        </p>
+      {totalPages > 1 ? (
+        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
+          <span className="text-muted-foreground">
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
       ) : null}
+
     </Card>
   );
 }

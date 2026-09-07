@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
-import { AlarmClock, Printer, ReceiptText, RefreshCw, Search } from 'lucide-react';
+import { Printer, ReceiptText, RefreshCw, Search } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
@@ -110,7 +110,6 @@ export default function SalesPage() {
   const [dateRange, setDateRange] = React.useState<DateRangeValue>({ preset: 'ALL' });
   const [paymentStatus, setPaymentStatus] = React.useState<PaymentStatusCode | ''>('');
   const [syncStatus, setSyncStatus] = React.useState<SyncStatusCode | ''>('');
-  const [overdueOnly, setOverdueOnly] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
 
@@ -131,7 +130,7 @@ export default function SalesPage() {
   // Reset to page 1 whenever a filter changes.
   React.useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, dateRange, paymentStatus, syncStatus, overdueOnly, pageSize]);
+  }, [debouncedSearch, dateRange, paymentStatus, syncStatus, pageSize]);
 
   /** The filters currently applied to the table (report exports reuse these). */
   const filterQuery = React.useMemo<Omit<SalesQuery, 'page' | 'pageSize'>>(
@@ -139,10 +138,9 @@ export default function SalesPage() {
       search: debouncedSearch || undefined,
       paymentStatus: paymentStatus || undefined,
       syncStatus: syncStatus || undefined,
-      overdue: overdueOnly ? ('true' as const) : undefined,
       ...resolveDateRange(dateRange),
     }),
-    [debouncedSearch, paymentStatus, syncStatus, overdueOnly, dateRange],
+    [debouncedSearch, paymentStatus, syncStatus, dateRange],
   );
 
   React.useEffect(() => {
@@ -285,14 +283,6 @@ export default function SalesPage() {
           <option value="FAILED">Failed</option>
           <option value="NOT_SYNCED">Not synced</option>
         </Select>
-        <Button
-          variant={overdueOnly ? 'primary' : 'outline'}
-          onClick={() => setOverdueOnly((v) => !v)}
-          aria-pressed={overdueOnly}
-        >
-          <AlarmClock className="h-4 w-4" />
-          Overdue
-        </Button>
 
         {/* Report export — covers every sale matching the current filters. */}
         <div className="ml-auto">

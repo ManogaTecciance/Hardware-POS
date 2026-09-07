@@ -5,8 +5,7 @@ import { useParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft, HandCoins, Pencil, RefreshCw } from 'lucide-react';
 
-import { paymentMethodLabel } from '@hardware-pos/shared';
-
+import { CustomerCreditHistory } from '@/components/customers/customer-credit-history';
 import { CustomerInvoices } from '@/components/customers/customer-invoices';
 import { RecordPaymentDialog } from '@/components/customers/record-payment-dialog';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
@@ -265,58 +264,7 @@ export default function CustomerDetailPage() {
         />
       ) : null}
 
-      {/* Credit history — full width, because this is a ledger to read across.
-          Credit is settled per account, so these payments belong to the customer
-          rather than to any one invoice. */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle>Credit history</CardTitle>
-        </CardHeader>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
-                <th className="px-4 py-3 font-medium">Date &amp; time</th>
-                <th className="px-4 py-3 font-medium">Method</th>
-                <th className="px-4 py-3 font-medium">Reference</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 text-right font-medium">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payments.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
-                    {credit && credit.outstanding > 0
-                      ? `Nothing received yet against ${formatMoney(credit.outstanding)} outstanding.`
-                      : 'No account payments recorded.'}
-                  </td>
-                </tr>
-              ) : (
-                payments.map((p) => (
-                  <tr key={p.id} className="border-b border-border last:border-0">
-                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                      {formatDateTime(p.createdAt)}
-                    </td>
-                    <td className="px-4 py-3">{paymentMethodLabel(p.method)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{p.reference ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      {/* "Cleared" is the payment that closed a balance, together
-                          with everything that had been building toward it. */}
-                      <Badge variant={p.settledAt ? 'success' : 'warning'}>
-                        {p.settledAt ? 'Cleared the balance' : 'Against open balance'}
-                      </Badge>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
-                      {formatMoney(p.amount)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      <CustomerCreditHistory payments={payments} outstanding={credit?.outstanding ?? 0} />
 
       {session && credit ? (
         <RecordPaymentDialog
@@ -333,16 +281,6 @@ export default function CustomerDetailPage() {
   );
 }
 
-/** Date and time both: two payments on one day are told apart only by the time. */
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-LK', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (

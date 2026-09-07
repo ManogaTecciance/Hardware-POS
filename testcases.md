@@ -276,6 +276,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | MARK-006 | A tick can be undone | Undo on a ticked invoice | markedPaidAt cleared | P | Automated |
 | MARK-007 | A till-paid sale cannot be ticked | Mark a fully paid cash sale | 400 — nothing to account for | N | Automated |
 | MARK-008 | The list is scoped to the customer | Two customers with credit invoices | Each page shows only its own | P | Automated |
+| MARK-010 | Blocked button explains itself on hover | Hover the disabled Mark paid on the last invoice | Tooltip names the outstanding amount and why it is blocked | P | Not Run |
+| MARK-011 | No undo once accounted for | Mark an invoice paid | The action column shows no button afterwards; the tick stands | P | Not Run |
+| MARK-012 | Invoices table pages and searches | Customer with more than 10 invoices; search an invoice number | Pages of 10 with Previous/Next; search narrows to matching invoices | P | Not Run |
+| MARK-013 | Last-invoice rule survives paging | Customer whose only unaccounted invoice is on page 2 | The rule still applies to it — the count is taken across the account, not the page | N | Not Run |
+| MARK-014 | Credit history pages and searches | Customer with more than 10 payments; search a method or reference | Pages of 10; search matches date, method, reference and amount | P | Not Run |
 | MARK-009 | Invoices table matches the sales page | Compare a customer's rows with /sales filtered to them | Same sales, same totals, same payment badges | P | Not Run |
 
 ## SALE — Sales History
@@ -314,7 +319,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE-030 | Credit reads as "Credit" everywhere | A sale on credit; check the sales list, the sale detail badge and the dashboard recent sales | All read "Credit" — no "Partially paid", no "Credit / Unpaid" | P | Not Run |
 | SALE-027 | Total is red while a sale is owed for | Sales list with one credit and one cash sale | Credit sale's Total is red; the paid one is not; there is no Balance column | P | Not Run |
 | SALE-025 | Last payment blank for a counter sale | Cash sale in the sales list | Last payment column shows "—" (the sale never ran on credit) | P | Not Run |
-| SALE-026 | Overdue export matches the screen | Apply the Overdue filter, export PDF/XLSX | Export covers exactly the filtered sales and names the filter | P | Not Run |
+| SALE-026 | Overdue export matches an overdue query | Request the report with overdue=true | Export covers exactly those sales and names the filter. NOTE: the sales page no longer offers an Overdue control; the API filter remains for reports and callers | P | Not Run |
 
 ## RET — Returns & Refunds
 
@@ -611,11 +616,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | POS | 50 | QB | 31 |
 | PAY | 41 | SET | 26 |
 | DISC | 13 | DOC | 16 |
-| MARK | 9 | ADM | 14 |
+| MARK | 14 | ADM | 14 |
 | SALE | 33 | UI | 16 |
 | RET | 18 | SEC | 12 |
 
-**Total: 461 test cases** (≈60% positive / 40% negative).
+**Total: 466 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
