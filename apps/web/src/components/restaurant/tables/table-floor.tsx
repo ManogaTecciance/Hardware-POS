@@ -25,7 +25,6 @@ import {
   TABLE_STATUS_TONES,
   formatElapsed,
 } from '@/lib/restaurant/labels';
-import { playFoodReadyChime } from '@/lib/restaurant/new-order-chime';
 import type {
   DiningAreaView,
   OpenSessionView,
@@ -150,25 +149,20 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   }, [state.snapshot.openTables]);
 
   /*
-   * D105 — the chime's memory: every ready ticket id seen on the LAST
-   * open-sessions response. Null until one lands, so mounting the floor never
-   * rings — the same first-load discipline as the orders queue and the
-   * kitchen board. Acked ids are state (they gate badges, so they must
-   * re-render) seeded from sessionStorage.
+   * D105 — "food ready" state per session; D111 (PO) removed the bell that
+   * once rang here — the waiter's signal is now the VISUAL badge alone
+   * (sound lives in the kitchen only). Acked ids are state (they gate
+   * badges, so they must re-render) seeded from sessionStorage.
    */
-  const readyBaseline = React.useRef<Set<string> | null>(null);
   const [ackedReady, setAckedReady] = React.useState<Set<string>>(() =>
     typeof window === 'undefined' ? new Set() : readAckedIds(),
   );
 
   const absorbOpenSessions = React.useCallback((rows: OpenSessionView[]) => {
     const allReady = new Set(rows.flatMap((r) => r.readyTicketIds));
-    const prev = readyBaseline.current;
-    if (prev && [...allReady].some((id) => !prev.has(id))) playFoodReadyChime();
-    readyBaseline.current = allReady;
     // Prune acks the server no longer lists: a closed session's tickets are
-    // gone for good, and a RECALLED ticket must ring and badge again when the
-    // kitchen re-bumps it — its id leaves this set, taking the ack with it.
+    // gone for good, and a RECALLED ticket must badge again when the kitchen
+    // re-bumps it — its id leaves this set, taking the ack with it.
     setAckedReady((cur) => {
       const next = new Set([...cur].filter((id) => allReady.has(id)));
       if (next.size === cur.size) return cur;
@@ -177,7 +171,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
     });
   }, []);
 
-  /** The waiter tapped into the table: its bell is answered on this device. */
+  /** The waiter tapped into the table: its badge is answered on this device. */
   const ackReady = React.useCallback((s: OpenSessionView) => {
     if (s.readyTicketIds.length === 0) return;
     setAckedReady((cur) => {
@@ -191,9 +185,9 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   const load = React.useCallback(async () => {
     try {
       const [areas, openSessionsRaw, liveOpenTables] = await Promise.all([
-        // null, not []: a failed sessions read must skip the chime baseline —
-        // resetting it to "no ready tickets" would make the next good poll
-        // re-ring every bell the waiter already heard.
+        // null, not []: a failed sessions read must not be mistaken for
+        // "no ready tickets" — absorbing an empty list would prune every
+        // acknowledgement and resurrect badges the waiter already answered.
         diningAreas.list(session, branchId, false),
         tableSessions.listOpen(session, branchId).catch(() => null),
         openTables.list(session, branchId).catch(() => []),
@@ -241,7 +235,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
    * explicit loads, but "whose food is up" is worthless stale. 8 s like the
    * orders queue (5 s is the kitchen's urgency, not the floor's), gated to a
    * visible tab, with an immediate catch-up on return — a waiter pulling the
-   * tablet out of an apron pocket hears the bells that landed meanwhile.
+   * tablet out of an apron pocket sees the badges that landed meanwhile.
    */
   const refreshSessions = React.useCallback(async () => {
     try {
@@ -649,7 +643,7 @@ function TableCard({
   session: OpenSessionView | null;
   /** D105 — bumped tickets this device has not answered; >0 shows the bell. */
   readyCount: number;
-  /** Tapping View order answers the bell for this session on this device. */
+  /** Tapping View order answers the badge for this session on this device. */
   onViewOrder: () => void;
   canOpen: boolean;
   onOpenClick: () => void;
@@ -716,9 +710,10 @@ function TableCard({
           <span>Held by {heldBy.map((o) => o.label ?? o.code).join(', ')}</span>
         </p>
       ) : null}
-      {/* D105 — the bell the food-ready chime points at. Cleared per device
-          by opening the order, not by any server state: serving has no verb
-          here, carrying the plate is the acknowledgement. */}
+      {/* D105 — the food-ready badge (D111: visual only — sound lives in
+          the kitchen). Cleared per device by opening the order, not by any
+          server state: serving has no verb here, carrying the plate is the
+          acknowledgement. */}
       {readyCount > 0 ? (
         <p className="flex items-center gap-1 text-xs font-semibold text-success">
           <ConciergeBell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

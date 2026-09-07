@@ -10,11 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { normalizeSearchTerm } from '@/lib/search-term';
 import { type Session } from '@/lib/auth';
 import { restaurantOrders } from '@/lib/restaurant/api';
 import { formatElapsed, formatMoney } from '@/lib/restaurant/labels';
-import { playNewOrderChime } from '@/lib/restaurant/new-order-chime';
 import type {
   UnifiedChannel,
   UnifiedOrderStatus,
@@ -32,18 +32,31 @@ import {
   UNIFIED_STATUS_TONES,
 } from './orders-labels';
 
+type PaymentFilter = 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | 'ALL';
+
+/** yyyy-mm-dd or nothing — the shape `<input type="date">` emits. */
+function parseDateParam(v: string | null): string {
+  return v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '';
+}
+
 interface Props {
   session: Session;
   branchId: string;
 }
 
+/*
+ * D110 (PO): no Completed tab. COMPLETED is the dine-in shell's closed
+ * state — those rows still exist under All Orders (and the server still
+ * accepts ?status=COMPLETED from an old bookmark); the strip shows the
+ * lifecycle the counter actually works: Pending → Preparing → Ready →
+ * Handed over, plus Cancelled.
+ */
 const STATUS_TABS: Array<{ key: UnifiedOrderStatus | 'ALL'; label: string }> = [
   { key: 'ALL', label: 'All Orders' },
   { key: 'PENDING', label: 'Pending' },
   { key: 'IN_PROGRESS', label: 'Preparing' },
   { key: 'READY', label: 'Ready' },
   { key: 'HANDED_OVER', label: 'Handed over' },
-  { key: 'COMPLETED', label: 'Completed' },
   { key: 'CANCELLED', label: 'Cancelled' },
 ];
 
@@ -58,8 +71,13 @@ const CHANNEL_CHIPS: Array<{ key: UnifiedChannel | 'ALL'; label: string }> = [
  * The unified Orders screen. Filters live in the URL so a manager can
  * bookmark "Takeaway Ready" and share it. The page polls the unified
  * `/restaurant/branches/:b/orders` endpoint every 8 s while the tab is
- * visible (a hidden tab stops polling and catches up on return), and rings
- * a chime when a poll brings new orders into the filter being watched.
+ * visible (a hidden tab stops polling and catches up on return).
+ *
+ * D111 (PO): this screen makes NO sound. It once rang a new-order chime and
+ * (D107) a food-ready bell; the PO wants audio in the kitchen alone, so the
+ * queue informs visually — status chips, tab counts, the Ready tab. The
+ * server still tallies `readyHandoverCount` in the envelope (tested,
+ * harmless) should the bell ever be invited back.
  */
 /**
  * Rows per page for this screen.
@@ -70,6 +88,12 @@ const CHANNEL_CHIPS: Array<{ key: UnifiedChannel | 'ALL'; label: string }> = [
  * arithmetic below reads the size it echoed back rather than this constant.
  */
 const ORDERS_PAGE_SIZE = 25;
+/**
+ * The Rows-per-page choices (PO request) — the customers-list pattern on the
+ * queue. Bounded by the server's clamp (1..100), defaulting to the size this
+ * screen has always used; the default stays out of the URL like page 1.
+ */
+const PAGE_SIZES = [25, 50, 75, 100] as const;
 
 export function OrdersPage({ session, branchId }: Props) {
   const router = useRouter();
@@ -79,7 +103,23 @@ export function OrdersPage({ session, branchId }: Props) {
   const status = (params.get('status') ?? 'ALL') as UnifiedOrderStatus | 'ALL';
   const partner = params.get('partner') ?? 'ALL';
   const search = params.get('search') ?? '';
+  // Guarded like the server guards it: a mangled shared link degrades to
+  // "All" rather than sending a value the API would coerce anyway.
+  const paymentRaw = params.get('payment');
+  const payment: PaymentFilter =
+    paymentRaw === 'UNPAID' || paymentRaw === 'PARTIAL' || paymentRaw === 'PAID' || paymentRaw === 'REFUNDED'
+      ? paymentRaw
+      : 'ALL';
+  // yyyy-mm-dd from the date inputs; anything else is treated as unset.
+  const from = parseDateParam(params.get('from'));
+  const to = parseDateParam(params.get('to'));
   const page = Math.max(Number(params.get('page') ?? '1') || 1, 1);
+  // Guarded to the offered sizes: a mangled ?size degrades to the default
+  // rather than sending the server something it would clamp anyway.
+  const sizeRaw = Number(params.get('size'));
+  const requestedSize = (PAGE_SIZES as readonly number[]).includes(sizeRaw)
+    ? sizeRaw
+    : ORDERS_PAGE_SIZE;
   const openId = params.get('open');
 
   const [rows, setRows] = React.useState<UnifiedOrderView[]>([]);
@@ -102,14 +142,10 @@ export function OrdersPage({ session, branchId }: Props) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = React.useState<Date | null>(null);
-  const [showMore, setShowMore] = React.useState(false);
+  // Opens itself when a shared link arrives carrying one of its filters —
+  // hiding an ACTIVE filter behind a closed panel reads as a broken list.
+  const [showMore, setShowMore] = React.useState(payment !== 'ALL' || !!from || !!to);
   const [localSearch, setLocalSearch] = React.useState(search);
-
-  /*
-   * Last total seen per filter set — the chime's memory. Null until the first
-   * response lands, which is why opening the page never dings (see `load`).
-   */
-  const chimeBaseline = React.useRef<{ key: string; total: number } | null>(null);
 
   // Debounce URL writes for search so every keystroke doesn't push a new
   // history entry.
@@ -131,11 +167,20 @@ export function OrdersPage({ session, branchId }: Props) {
       if (applied === search) return;
       // No `page`: a new term must start at page 1, or the reader lands on
       // page 4 of a result set that may only have one page.
-      const q = buildQuery({ channel, status, partner, search: applied });
+      const q = buildQuery({
+        channel,
+        status,
+        partner,
+        payment,
+        from,
+        to,
+        size: requestedSize,
+        search: applied,
+      });
       router.replace(`/orders${q}`);
     }, 250);
     return () => clearTimeout(t);
-  }, [localSearch, channel, status, partner, search, router]);
+  }, [localSearch, channel, status, partner, payment, from, to, requestedSize, search, router]);
 
   const load = React.useCallback(() => {
     setLoading(true);
@@ -143,9 +188,19 @@ export function OrdersPage({ session, branchId }: Props) {
       .list(session, branchId, {
         channel,
         status,
+        paymentStatus: payment,
         search: search || undefined,
+        /*
+         * The inputs give calendar DATES; the API compares instants. `from`
+         * means "from the start of that day" and `to` means "through the END
+         * of it" — sending midnight for both would silently drop everything
+         * ordered after 00:00 on the `to` day, which is the whole day. Local
+         * time on purpose: the operator's "today" is the till's day, not UTC's.
+         */
+        from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined,
+        to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined,
         page,
-        pageSize: ORDERS_PAGE_SIZE,
+        pageSize: requestedSize,
       })
       .then((res) => {
         setRows(res.items);
@@ -155,23 +210,10 @@ export function OrdersPage({ session, branchId }: Props) {
         setPageSize(res.pageSize);
         setRefreshedAt(new Date());
         setError(null);
-        /*
-         * Chime on `total` growth, not on unseen row ids: ids shift between
-         * pages as orders land, so page 2 would ding for orders that merely
-         * moved. The key re-baselines whenever the filter set changes —
-         * switching "Pending" → "All" multiplies the total without a single
-         * order arriving. `page` stays out of the key because paging never
-         * changes `total`. A growing total under an unchanged filter means an
-         * order entered this view — exactly what the operator is watching for.
-         */
-        const key = `${channel}|${status}|${search}`;
-        const prev = chimeBaseline.current;
-        if (prev && prev.key === key && res.total > prev.total) playNewOrderChime();
-        chimeBaseline.current = { key, total: res.total };
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load orders'))
       .finally(() => setLoading(false));
-  }, [session, branchId, channel, status, search, page]);
+  }, [session, branchId, channel, status, payment, from, to, search, page, requestedSize]);
 
   React.useEffect(() => {
     load();
@@ -228,24 +270,42 @@ export function OrdersPage({ session, branchId }: Props) {
     channel: UnifiedChannel | 'ALL';
     status: UnifiedOrderStatus | 'ALL';
     partner: string;
+    payment: PaymentFilter;
+    from: string;
+    to: string;
+    size: number;
     search: string;
     page: number;
     open: string | null;
   }>) => {
     /*
-     * Narrowing the list resets to page 1. Staying on page 4 while switching to
-     * a status that has one page shows an empty grid over a full tab count,
-     * which reads as "the orders vanished". Opening a drawer is not a filter,
-     * so it leaves the page alone.
+     * Narrowing the list resets to page 1 — and so does resizing it: page 3
+     * of 25-row pages names different orders at 100 rows, so keeping the
+     * number would land the reader somewhere new while claiming continuity.
+     * Staying on page 4 while switching to a status that has one page shows
+     * an empty grid over a full tab count, which reads as "the orders
+     * vanished". Opening a drawer is not a filter, so it leaves the page
+     * alone.
      */
     const narrows =
-      'channel' in next || 'status' in next || 'partner' in next || 'search' in next;
+      'channel' in next ||
+      'status' in next ||
+      'partner' in next ||
+      'payment' in next ||
+      'from' in next ||
+      'to' in next ||
+      'size' in next ||
+      'search' in next;
     const nextPage = 'page' in next ? next.page : narrows ? 1 : page;
     router.replace(
       `/orders${buildQuery({
         channel: next.channel ?? channel,
         status: next.status ?? status,
         partner: next.partner ?? partner,
+        payment: next.payment ?? payment,
+        from: next.from ?? from,
+        to: next.to ?? to,
+        size: next.size ?? requestedSize,
         search: next.search ?? search,
         page: nextPage,
         open: 'open' in next ? next.open : openId,
@@ -446,19 +506,92 @@ export function OrdersPage({ session, branchId }: Props) {
             </div>
             <Button
               size="sm"
-              variant="outline"
+              variant={payment !== 'ALL' || from || to ? 'secondary' : 'outline'}
               onClick={() => setShowMore((v) => !v)}
               leftIcon={<Filter className="h-4 w-4" />}
             >
               Filters
+              {(payment !== 'ALL' ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0) > 0
+                ? ` (${(payment !== 'ALL' ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0)})`
+                : ''}
             </Button>
           </div>
 
           {showMore ? (
-            <p className="border-t border-dashed border-border pt-2 text-xs text-muted-foreground">
-              Date range and payment-status filters are stubbed for the pilot — coming in a
-              follow-up slice.
-            </p>
+            <div className="space-y-3 border-t border-dashed border-border pt-3">
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Payment
+                </span>
+                <ChipRow
+                  ariaLabel="Filter by payment status"
+                  activeKey={payment}
+                  className="min-w-0 flex-1"
+                >
+                  {(['ALL', 'UNPAID', 'PARTIAL', 'PAID', 'REFUNDED'] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => patch({ payment: p })}
+                      data-active={p === payment}
+                      className={`inline-flex h-11 shrink-0 items-center rounded-full px-4 text-sm font-medium transition-colors ${
+                        p === payment
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-foreground hover:bg-border'
+                      }`}
+                    >
+                      {p === 'ALL' ? 'Any payment' : PAYMENT_LABELS[p]}
+                    </button>
+                  ))}
+                </ChipRow>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Placed
+                </span>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  from
+                  <Input
+                    type="date"
+                    aria-label="From date"
+                    value={from}
+                    // A `to` earlier than the new `from` cannot match anything;
+                    // dragging it along keeps the range sane instead of showing
+                    // an empty list the operator has to diagnose.
+                    onChange={(e) =>
+                      patch({
+                        from: e.target.value,
+                        ...(to && e.target.value && to < e.target.value
+                          ? { to: e.target.value }
+                          : {}),
+                      })
+                    }
+                    max={to || undefined}
+                    className="h-10 w-40"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  to
+                  <Input
+                    type="date"
+                    aria-label="To date"
+                    value={to}
+                    min={from || undefined}
+                    onChange={(e) => patch({ to: e.target.value })}
+                    className="h-10 w-40"
+                  />
+                </label>
+                {payment !== 'ALL' || from || to ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => patch({ payment: 'ALL', from: '', to: '' })}
+                  >
+                    Clear filters
+                  </Button>
+                ) : null}
+              </div>
+            </div>
           ) : null}
         </CardContent>
       </Card>
@@ -550,34 +683,55 @@ export function OrdersPage({ session, branchId }: Props) {
       {/*
         Numbered paging rather than infinite scroll: this list is read against a
         docket in hand, and "I was on page 3" has to survive a refresh — which
-        is why the page lives in the URL beside the filters.
+        is why the page (and the chosen size) live in the URL beside the
+        filters. Gated on the MINIMUM size, not the current one — the
+        customers-list rule — so picking a larger size never makes the
+        selector itself vanish; the Prev/Next pair still only shows when a
+        second page exists.
       */}
-      {total > pageSize ? (
+      {total > PAGE_SIZES[0] ? (
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-          <p className="text-xs text-muted-foreground" role="status">
-            Showing {firstOnPage}–{lastOnPage} of {total} order{total === 1 ? '' : 's'}
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => patch({ page: page - 1 })}
-              disabled={page <= 1 || loading}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Rows per page</span>
+            <Select
+              value={String(requestedSize)}
+              onChange={(e) => patch({ size: Number(e.target.value) })}
+              className="w-auto"
+              aria-label="Rows per page"
             >
-              Previous
-            </Button>
-            <span className="text-xs tabular-nums text-muted-foreground">
-              Page {page} of {pageCount}
+              {PAGE_SIZES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </Select>
+            <span role="status">
+              Showing {firstOnPage}–{lastOnPage} of {total} order{total === 1 ? '' : 's'}
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => patch({ page: page + 1 })}
-              disabled={page >= pageCount || loading}
-            >
-              Next
-            </Button>
           </div>
+          {pageCount > 1 ? (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => patch({ page: page - 1 })}
+                disabled={page <= 1 || loading}
+              >
+                Previous
+              </Button>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                Page {page} of {pageCount}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => patch({ page: page + 1 })}
+                disabled={page >= pageCount || loading}
+              >
+                Next
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -592,6 +746,7 @@ export function OrdersPage({ session, branchId }: Props) {
           order={openRow}
           branchId={branchId}
           onClose={() => patch({ open: null })}
+          onMutated={load}
         />
       ) : null}
     </div>
@@ -638,6 +793,10 @@ function buildQuery(f: {
   channel: UnifiedChannel | 'ALL';
   status: UnifiedOrderStatus | 'ALL';
   partner: string;
+  payment: PaymentFilter;
+  from: string;
+  to: string;
+  size: number;
   search: string;
   page?: number;
   open?: string | null;
@@ -646,6 +805,11 @@ function buildQuery(f: {
   if (f.channel !== 'ALL') params.set('channel', f.channel);
   if (f.status !== 'ALL') params.set('status', f.status);
   if (f.partner !== 'ALL') params.set('partner', f.partner);
+  if (f.payment !== 'ALL') params.set('payment', f.payment);
+  if (f.from) params.set('from', f.from);
+  if (f.to) params.set('to', f.to);
+  // The default size stays out of the URL, like page 1 below.
+  if (f.size !== ORDERS_PAGE_SIZE) params.set('size', String(f.size));
   if (f.search) params.set('search', f.search);
   // Page 1 is the default, so it stays out of the URL — a shared link to the
   // first page looks like a plain filter link.

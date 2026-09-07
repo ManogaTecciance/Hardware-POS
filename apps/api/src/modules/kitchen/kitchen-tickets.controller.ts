@@ -40,6 +40,9 @@ export class KitchenTicketsController {
     return this.service.listTicketsForBranch(tenantId, branchId, parseFilter(status));
   }
 
+  // (D108: `?status=CANCELLED` is a pseudo-filter like OUTSTANDING — see
+  // parseFilter below; cancellation is order-side state, not a ticket status.)
+
   /**
    * D83 — the whole order behind a ticket, for the board's Details view.
    *
@@ -145,12 +148,15 @@ export class KitchenTicketsController {
 }
 
 /**
- * `?status=` accepts a real ticket status or the board's `OUTSTANDING`
- * pseudo-filter. Anything unrecognised means "no filter" rather than an
- * error: a stale bookmark should show the whole board, not a 400.
+ * `?status=` accepts a real ticket status or a board pseudo-filter —
+ * `OUTSTANDING` (D68) and `CANCELLED` (D108, order-side cancellation).
+ * Anything unrecognised means "no filter" rather than an error: a stale
+ * bookmark should show the whole board, not a 400.
  */
-function parseFilter(status?: string): KitchenTicketStatus | 'OUTSTANDING' | undefined {
+function parseFilter(
+  status?: string,
+): KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | undefined {
   if (!status) return undefined;
-  if (status === 'OUTSTANDING') return 'OUTSTANDING';
+  if (status === 'OUTSTANDING' || status === 'CANCELLED') return status;
   return status in KitchenTicketStatus ? (status as KitchenTicketStatus) : undefined;
 }

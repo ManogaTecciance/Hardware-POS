@@ -1,14 +1,14 @@
 /**
- * The audible chimes for live restaurant screens.
+ * The kitchen board's new-ticket chime — a RISING two-note ding (A5→D6),
+ * the shape mainstream KDS products use for "something arrived".
  *
- * Synthesised with Web Audio rather than shipped as assets: short sine tones
- * need no file to bundle and no network fetch on a POS terminal. Two sounds,
- * deliberately distinct so staff can tell them apart across a room:
+ * D111 (PO): the KITCHEN is the only screen that makes sound. The orders
+ * queue's arrival chime and the D105/D107 food-ready bell were removed —
+ * those screens inform visually (badges, tabs, counts). This module stays
+ * the single home for POS audio should any of it be invited back.
  *
- * - "New order" — a RISING two-note ding (A5→D6), the shape mainstream
- *   POS/KDS products use for "something arrived".
- * - "Food ready" (D105) — two taps on the SAME note (E6), the counter
- *   service-bell everyone already understands as "order up".
+ * Synthesised with Web Audio rather than shipped as an asset: short sine
+ * tones need no file to bundle and no network fetch on a POS terminal.
  *
  * Browsers block audio until the user has interacted with the page. On a
  * terminal that is being worked this is already satisfied; on a freshly
@@ -50,11 +50,6 @@ export function playNewOrderChime(): void {
   play(ring);
 }
 
-/** D105 — the waiter's "order up" bell. */
-export function playFoodReadyChime(): void {
-  play(bell);
-}
-
 function note(c: AudioContext, freq: number, at: number): void {
   const t0 = c.currentTime;
   const osc = c.createOscillator();
@@ -71,14 +66,8 @@ function note(c: AudioContext, freq: number, at: number): void {
   osc.stop(t0 + at + 0.4);
 }
 
-/** Two ascending sine notes, ~0.55 s total — well inside the 8 s poll. */
+/** Two ascending sine notes, ~0.55 s total — well inside the 5 s poll. */
 function ring(c: AudioContext): void {
   note(c, 880, 0); // A5
   note(c, 1174.66, 0.18); // D6 — the rise is what reads as "incoming"
-}
-
-/** Two taps on one note, ~0.6 s — the flat repeat is what reads as a bell. */
-function bell(c: AudioContext): void {
-  note(c, 1318.51, 0); // E6
-  note(c, 1318.51, 0.22);
 }

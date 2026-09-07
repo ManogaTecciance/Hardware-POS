@@ -11,7 +11,7 @@
  * real information — because a fix that simply deleted the row would pass
  * the takeaway case alone.
  */
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import * as React from 'react';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,13 +41,18 @@ const SESSION = {
   registerName: 'R1',
 } as unknown as Session;
 
-vi.mock('@/lib/auth', () => ({ useAuth: () => ({ session: SESSION }) }));
+let canTakeaway = true;
+vi.mock('@/lib/auth', () => ({
+  useAuth: () => ({ session: SESSION, hasPermission: () => canTakeaway }),
+}));
 vi.mock('@/lib/use-viewport', () => ({ useOrientation: () => 'landscape' }));
 vi.mock('@/components/restaurant/billing/bill-dialog', () => ({ BillDialog: () => null }));
 
 const detailFn = vi.fn();
+const updateStatusFn = vi.fn();
 vi.mock('@/lib/restaurant/api', () => ({
   restaurantOrders: { detail: (...args: unknown[]) => detailFn(...args) },
+  takeaway: { updateStatus: (...args: unknown[]) => updateStatusFn(...args) },
 }));
 
 const { OrderDetailDrawer } = await import('./order-detail-drawer');
@@ -106,11 +111,15 @@ const DETAIL: UnifiedOrderDetail = {
     { at: '2026-09-03T10:51:00.000Z', status: 'PENDING' },
     { at: '2026-09-03T10:56:00.000Z', status: 'HANDED_OVER' },
   ],
+  takeawayProfileId: 'tap_1',
 };
 
 beforeEach(() => {
+  canTakeaway = true;
   detailFn.mockReset();
+  updateStatusFn.mockReset();
   detailFn.mockResolvedValue(DETAIL);
+  updateStatusFn.mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -219,5 +228,139 @@ describe('degradation', () => {
     // sections simply never appear — no error state over data we have.
     expect(screen.getByText('1× Garden Salad')).toBeTruthy();
     expect(screen.queryByText('Subtotal')).toBeNull();
+  });
+});
+
+/*
+ * D109 — Cancel order lives on the queue, not the kitchen. Eligibility is
+ * pinned from both sides (a live takeaway offers it; a handed-over one, a
+ * dine-in row, and an unpermitted viewer do not), and the confirm flow is
+ * asserted to the API call it makes — the status machine the takeaway
+ * workspace already uses, addressed by the detail's profile id.
+ */
+describe('Cancel order (D109)', () => {
+  const liveTakeaway: UnifiedOrderView = { ...ROW, unifiedStatus: 'PENDING' };
+
+  it('offers Cancel on a live takeaway once the detail brings the profile id', async () => {
+    render(<OrderDetailDrawer order={liveTakeaway} branchId="brn_1" onClose={() => undefined} />);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /cancel order/i })).toBeTruthy(),
+    );
+  });
+
+  it('offers no Cancel on a handed-over takeaway, a dine-in row, or without the permission', async () => {
+    const { unmount: u1 } = render(
+      <OrderDetailDrawer order={ROW} branchId="brn_1" onClose={() => undefined} />,
+    );
+    await waitFor(() => expect(detailFn).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /cancel order/i })).toBeNull();
+    u1();
+
+    const dineIn: UnifiedOrderView = {
+      ...liveTakeaway,
+      channel: 'DINE_IN',
+      contextLabel: 'T2 · Main',
+    };
+    const { unmount: u2 } = render(
+      <OrderDetailDrawer order={dineIn} branchId="brn_1" onClose={() => undefined} />,
+    );
+    await waitFor(() => expect(detailFn).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: /cancel order/i })).toBeNull();
+    u2();
+
+    canTakeaway = false;
+    render(<OrderDetailDrawer order={liveTakeaway} branchId="brn_1" onClose={() => undefined} />);
+    await waitFor(() => expect(detailFn).toHaveBeenCalledTimes(3));
+    expect(screen.queryByRole('button', { name: /cancel order/i })).toBeNull();
+  });
+
+  it('confirming drives the takeaway status machine and refreshes the queue', async () => {
+    const onClose = vi.fn();
+    const onMutated = vi.fn();
+    render(
+      <OrderDetailDrawer
+        order={liveTakeaway}
+        branchId="brn_1"
+        onClose={onClose}
+        onMutated={onMutated}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /cancel order/i }));
+    // The confirm dialog names the order and offers a way out.
+    expect(screen.getByText(/Cancel RO-000028\?/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /keep order/i })).toBeTruthy();
+
+    fireEvent.click(
+      screen
+        .getAllByRole('button', { name: /cancel order/i })
+        .at(-1) as HTMLElement,
+    );
+
+    await waitFor(() =>
+      expect(updateStatusFn).toHaveBeenCalledWith(SESSION, 'tap_1', { status: 'CANCELLED' }),
+    );
+    await waitFor(() => expect(onMutated).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('keeps the order when the operator backs out', async () => {
+    render(<OrderDetailDrawer order={liveTakeaway} branchId="brn_1" onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: /cancel order/i }));
+    fireEvent.click(screen.getByRole('button', { name: /keep order/i }));
+
+    expect(updateStatusFn).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * D110 — handover is a button now that payment stopped implying it. Same
+ * eligibility as Cancel (both halves inherited and re-pinned here), and the
+ * tap is asserted to the exact status call — HANDED_OVER, nothing else —
+ * with the queue refreshed and the drawer closed after.
+ */
+describe('Mark handed over (D110)', () => {
+  const liveTakeaway: UnifiedOrderView = { ...ROW, unifiedStatus: 'READY' };
+
+  it('hands a live takeaway over in one tap and refreshes the queue', async () => {
+    const onClose = vi.fn();
+    const onMutated = vi.fn();
+    render(
+      <OrderDetailDrawer
+        order={liveTakeaway}
+        branchId="brn_1"
+        onClose={onClose}
+        onMutated={onMutated}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /mark handed over/i }));
+
+    await waitFor(() =>
+      expect(updateStatusFn).toHaveBeenCalledWith(SESSION, 'tap_1', { status: 'HANDED_OVER' }),
+    );
+    await waitFor(() => expect(onMutated).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('offers no handover on a row that already crossed the counter', async () => {
+    render(<OrderDetailDrawer order={ROW} branchId="brn_1" onClose={() => undefined} />);
+    await waitFor(() => expect(detailFn).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /mark handed over/i })).toBeNull();
+  });
+
+  it('offers no handover BEFORE the kitchen says ready (PO: only after Ready)', async () => {
+    for (const unifiedStatus of ['PENDING', 'IN_PROGRESS'] as const) {
+      const { unmount } = render(
+        <OrderDetailDrawer
+          order={{ ...ROW, unifiedStatus }}
+          branchId="brn_1"
+          onClose={() => undefined}
+        />,
+      );
+      // Cancel still offered on the same row — the positive control proving
+      // the actions area rendered and only handover is withheld.
+      await screen.findByRole('button', { name: /cancel order/i });
+      expect(screen.queryByRole('button', { name: /mark handed over/i })).toBeNull();
+      unmount();
+    }
   });
 });

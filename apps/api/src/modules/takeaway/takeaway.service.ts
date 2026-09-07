@@ -219,120 +219,175 @@ export class TakeawayService {
       });
       let finalSaleId: string | null = null;
       // On handover, close the underlying session into a Sale (D1 junction).
+      // D110: the close lives in settleSessionIntoSale — the counter settles
+      // at PAYMENT time now, so by handover the session is usually already
+      // CLOSED and this is a no-op returning the existing Sale.
       if (nextStatus === 'HANDED_OVER' && updated.order.sessionId) {
-        const session = await tx.tableSession.findUniqueOrThrow({
-          where: { id: updated.order.sessionId },
-          include: {
-            orders: {
-              include: {
-                // Subtotal only — the provider queries its own rows for the
-                // projection (see the dine-in close for why).
-                items: { where: { status: { not: 'VOIDED' } } },
-              },
-            },
-          },
-        });
-        finalSaleId = session.finalSaleId;
-        if (session.status !== 'CLOSED') {
-          let subtotal = new Prisma.Decimal(0);
-          for (const order of session.orders) {
-            for (const item of order.items) {
-              subtotal = subtotal.plus(item.unitPrice.plus(item.modifierTotal).mul(item.quantity));
-            }
-          }
-          // D52: deterministic register, and the authenticated actor as the
-          // cashier — this used to pick "first active user in the tenant",
-          // which was not branch-scoped.
-          const register = await tx.register.findFirst({
-            where: { branchId: session.branchId, isActive: true },
-            orderBy: { code: 'asc' },
-            select: { id: true },
-          });
-          if (!register) throw new NotFoundException('No active register on this branch');
-          const cashier = session.waiterUserId ?? actorUserId;
-
-          // D52: the same calculator dine-in uses. Takeaway previously wrote
-          // `total: subtotal` — no service charge, no packaging, no tax.
-          const branchConfig = await tx.restaurantBranchConfig.findUnique({
-            where: { branchId: session.branchId },
-            select: {
-              serviceChargePercent: true,
-              serviceChargeChannels: true,
-              serviceChargeTaxable: true,
-              packagingChargeAmount: true,
-              taxRatePercent: true,
-            },
-          });
-          const appSettings = this.settings.getSettings(tenantId);
-          const totals = computeRestaurantTotals(subtotal, RestaurantOrderChannel.TAKEAWAY, {
-            serviceChargePercent: branchConfig?.serviceChargePercent ?? new Prisma.Decimal(0),
-            serviceChargeChannels: branchConfig?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
-            serviceChargeTaxable: branchConfig?.serviceChargeTaxable ?? true,
-            packagingChargeAmount: branchConfig?.packagingChargeAmount ?? new Prisma.Decimal(0),
-            // D59/Q5: branch override wins when set; NULL inherits.
-            taxRatePercent:
-              branchConfig?.taxRatePercent != null
-                ? branchConfig.taxRatePercent.toNumber()
-                : appSettings.taxRatePercent,
-          });
-
-          // D58/D61: collection via the fulfilment provider — the same
-          // projection and sum invariant the dine-in close uses, from an
-          // independent query over the same rows.
-          const projected = await this.fulfilment.collectSettlementLines(tx, tenantId, {
-            kind: 'TABLE_SESSION',
-            sessionId: session.id,
-          });
-          assertProjectionMatchesSubtotal(projected, subtotal);
-          const sale = await tx.sale.create({
-            data: {
-              tenantId,
-              branchId: session.branchId,
-              registerId: register.id,
-              cashierId: cashier,
-              saleNumber: `S-${padSequence(await nextDocumentNumber(tx, tenantId, 'SALE'))}`,
-              subtotal,
-              serviceChargeAmount: totals.serviceChargeAmount,
-              packagingCharge: totals.packagingCharge,
-              taxAmount: totals.taxAmount,
-              total: totals.total,
-              balanceAmount: totals.total,
-              paymentStatus: 'UNPAID',
-              status: 'COMPLETED',
-              completedAt: new Date(),
-              fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
-              channel: OrderChannel.TAKEAWAY,
-              sourceRefKind: 'TABLE_SESSION',
-              sourceRefId: session.id,
-              // Who served: the waiter who owns the session when there is one,
-              // else the operator handing the order over.
-              servedByUserId: session.waiterUserId ?? actorUserId,
-            },
-          });
-          for (const line of projected) {
-            const { modifiers, ...data } = line;
-            const saleItem = await tx.saleItem.create({ data: { saleId: sale.id, ...data } });
-            if (modifiers.length > 0) {
-              await tx.saleItemModifier.createMany({
-                data: modifiers.map((m) => ({ tenantId, saleItemId: saleItem.id, ...m })),
-              });
-            }
-          }
-          await tx.tableSession.update({
-            where: { id: session.id },
-            data: { status: 'CLOSED', closedAt: new Date(), finalSaleId: sale.id },
-          });
-          // D61: release via the provider (a takeaway session sits on the
-          // synthetic walk-in table; the provider frees whatever kind it is).
-          await this.fulfilment.releaseResources(tx, tenantId, {
-            kind: 'TABLE_SESSION',
-            sessionId: session.id,
-          });
-          finalSaleId = sale.id;
-        }
+        finalSaleId = await this.settleSessionIntoSale(
+          tx,
+          tenantId,
+          updated.order.sessionId,
+          actorUserId,
+        );
       }
       return this.toView(updated, updated.order.orderNumber, finalSaleId);
     });
+  }
+
+  /**
+   * D110 — money and handover are different instants. The counter takes
+   * payment the moment the order is placed, but the food has not been cooked
+   * yet — marking HANDED_OVER at payment (the old popup flow) told the queue
+   * a lie for the whole cook time and put the order beyond D106's
+   * kitchen-driven statuses. Settling closes the session into a Sale (so
+   * payment has something to land on and the receipt can print) while the
+   * profile stays exactly where its lifecycle is; HANDED_OVER remains the
+   * separate human act of passing the bag.
+   *
+   * Idempotent: an already-CLOSED session returns its existing Sale.
+   */
+  async settle(tenantId: string, profileId: string, actorUserId: string): Promise<TakeawayView> {
+    const existing = await this.prisma.takeawayOrderProfile.findFirst({
+      where: { id: profileId, tenantId },
+      include: { order: { select: { orderNumber: true, sessionId: true, branchId: true } } },
+    });
+    if (!existing) throw new NotFoundException('Takeaway order not found');
+    if (existing.status === 'CANCELLED') {
+      throw new BadRequestException('A cancelled order cannot be settled');
+    }
+    if (!existing.order.sessionId) {
+      throw new BadRequestException('This order has no session to settle');
+    }
+    const sessionId = existing.order.sessionId;
+    return this.prisma.$transaction(async (tx) => {
+      const finalSaleId = await this.settleSessionIntoSale(tx, tenantId, sessionId, actorUserId);
+      return this.toView(existing, existing.order.orderNumber, finalSaleId);
+    });
+  }
+
+  /**
+   * Close a takeaway-backed session into a Sale (D1 junction): totals via the
+   * shared calculator (D52), lines via the fulfilment provider's projection
+   * (D58/D61), resources released, session CLOSED. Returns the Sale id —
+   * the existing one when the session is already closed.
+   */
+  private async settleSessionIntoSale(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+  ): Promise<string | null> {
+    const session = await tx.tableSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      include: {
+        orders: {
+          include: {
+            // Subtotal only — the provider queries its own rows for the
+            // projection (see the dine-in close for why).
+            items: { where: { status: { not: 'VOIDED' } } },
+          },
+        },
+      },
+    });
+    let finalSaleId = session.finalSaleId;
+    if (session.status !== 'CLOSED') {
+    let subtotal = new Prisma.Decimal(0);
+    for (const order of session.orders) {
+      for (const item of order.items) {
+        subtotal = subtotal.plus(item.unitPrice.plus(item.modifierTotal).mul(item.quantity));
+      }
+    }
+    // D52: deterministic register, and the authenticated actor as the
+    // cashier — this used to pick "first active user in the tenant",
+    // which was not branch-scoped.
+    const register = await tx.register.findFirst({
+      where: { branchId: session.branchId, isActive: true },
+      orderBy: { code: 'asc' },
+      select: { id: true },
+    });
+    if (!register) throw new NotFoundException('No active register on this branch');
+    const cashier = session.waiterUserId ?? actorUserId;
+
+    // D52: the same calculator dine-in uses. Takeaway previously wrote
+    // `total: subtotal` — no service charge, no packaging, no tax.
+    const branchConfig = await tx.restaurantBranchConfig.findUnique({
+      where: { branchId: session.branchId },
+      select: {
+        serviceChargePercent: true,
+        serviceChargeChannels: true,
+        serviceChargeTaxable: true,
+        packagingChargeAmount: true,
+        taxRatePercent: true,
+      },
+    });
+    const appSettings = this.settings.getSettings(tenantId);
+    const totals = computeRestaurantTotals(subtotal, RestaurantOrderChannel.TAKEAWAY, {
+      serviceChargePercent: branchConfig?.serviceChargePercent ?? new Prisma.Decimal(0),
+      serviceChargeChannels: branchConfig?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
+      serviceChargeTaxable: branchConfig?.serviceChargeTaxable ?? true,
+      packagingChargeAmount: branchConfig?.packagingChargeAmount ?? new Prisma.Decimal(0),
+      // D59/Q5: branch override wins when set; NULL inherits.
+      taxRatePercent:
+        branchConfig?.taxRatePercent != null
+          ? branchConfig.taxRatePercent.toNumber()
+          : appSettings.taxRatePercent,
+    });
+
+    // D58/D61: collection via the fulfilment provider — the same
+    // projection and sum invariant the dine-in close uses, from an
+    // independent query over the same rows.
+    const projected = await this.fulfilment.collectSettlementLines(tx, tenantId, {
+      kind: 'TABLE_SESSION',
+      sessionId: session.id,
+    });
+    assertProjectionMatchesSubtotal(projected, subtotal);
+    const sale = await tx.sale.create({
+      data: {
+        tenantId,
+        branchId: session.branchId,
+        registerId: register.id,
+        cashierId: cashier,
+        saleNumber: `S-${padSequence(await nextDocumentNumber(tx, tenantId, 'SALE'))}`,
+        subtotal,
+        serviceChargeAmount: totals.serviceChargeAmount,
+        packagingCharge: totals.packagingCharge,
+        taxAmount: totals.taxAmount,
+        total: totals.total,
+        balanceAmount: totals.total,
+        paymentStatus: 'UNPAID',
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
+        channel: OrderChannel.TAKEAWAY,
+        sourceRefKind: 'TABLE_SESSION',
+        sourceRefId: session.id,
+        // Who served: the waiter who owns the session when there is one,
+        // else the operator handing the order over.
+        servedByUserId: session.waiterUserId ?? actorUserId,
+      },
+    });
+    for (const line of projected) {
+      const { modifiers, ...data } = line;
+      const saleItem = await tx.saleItem.create({ data: { saleId: sale.id, ...data } });
+      if (modifiers.length > 0) {
+        await tx.saleItemModifier.createMany({
+          data: modifiers.map((m) => ({ tenantId, saleItemId: saleItem.id, ...m })),
+        });
+      }
+    }
+    await tx.tableSession.update({
+      where: { id: session.id },
+      data: { status: 'CLOSED', closedAt: new Date(), finalSaleId: sale.id },
+    });
+      // D61: release via the provider (a takeaway session sits on the
+      // synthetic walk-in table; the provider frees whatever kind it is).
+      await this.fulfilment.releaseResources(tx, tenantId, {
+        kind: 'TABLE_SESSION',
+        sessionId: session.id,
+      });
+      finalSaleId = sale.id;
+    }
+    return finalSaleId;
   }
 
   private async ensureWalkInTable(

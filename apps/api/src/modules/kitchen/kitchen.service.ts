@@ -247,22 +247,70 @@ export class KitchenService {
    * "not COMPLETED", so a ticket left on one of the retired print statuses by
    * a pre-D68 round still shows as work to do rather than silently
    * disappearing from the pass.
+   *
+   * D108 — cancellation lives on the ORDER side (a cancelled takeaway
+   * profile, or a round/order cancelled outright — tickets themselves have
+   * no such status), and until now it never reached this read: the kitchen
+   * kept cooking food nobody was coming for. `OUTSTANDING` and `COMPLETED`
+   * now exclude cancelled work, and the `CANCELLED` pseudo-filter collects
+   * it (any ticket status, newest first) so the pass can SEE what was
+   * called off rather than having it vanish mid-cook.
    */
   async listTicketsForBranch(
     tenantId: string,
     branchId: string,
-    filter?: KitchenTicketStatus | 'OUTSTANDING',
+    filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED',
   ): Promise<KitchenTicketView[]> {
+    /*
+     * "This ticket's work was called off", spelled from the ticket's point
+     * of view. Only the takeaway path writes a cancellation today; the
+     * round/order clauses are the same claim at the levels a future cancel
+     * verb will write, so this read will not need to change again.
+     */
+    const cancelledWork: Prisma.KitchenTicketWhereInput = {
+      OR: [
+        { round: { status: OrderRoundStatus.CANCELLED } },
+        { round: { order: { status: 'CANCELLED' } } },
+        { round: { order: { takeawayProfile: { status: TakeawayOrderStatus.CANCELLED } } } },
+      ],
+    };
+    const notCancelled: Prisma.KitchenTicketWhereInput = {
+      round: {
+        status: { not: OrderRoundStatus.CANCELLED },
+        order: {
+          status: { not: 'CANCELLED' },
+          OR: [
+            { takeawayProfile: null },
+            { takeawayProfile: { status: { not: TakeawayOrderStatus.CANCELLED } } },
+          ],
+        },
+      },
+    };
+
     const where: Prisma.KitchenTicketWhereInput =
       filter === 'OUTSTANDING'
-        ? { tenantId, branchId, status: { not: KitchenTicketStatus.COMPLETED } }
-        : { tenantId, branchId, ...(filter ? { status: filter } : {}) };
+        ? {
+            tenantId,
+            branchId,
+            status: { not: KitchenTicketStatus.COMPLETED },
+            ...notCancelled,
+          }
+        : filter === 'CANCELLED'
+          ? { tenantId, branchId, ...cancelledWork }
+          : filter === KitchenTicketStatus.COMPLETED
+            ? { tenantId, branchId, status: filter, ...notCancelled }
+            : { tenantId, branchId, ...(filter ? { status: filter } : {}) };
 
     const rows = await this.prisma.kitchenTicket.findMany({
       where,
       // Oldest first while outstanding: a kitchen works a queue, and the
       // dish that has been waiting longest is the one that goes next.
-      orderBy: { createdAt: filter === KitchenTicketStatus.COMPLETED ? 'desc' : 'asc' },
+      // Done and Cancelled read newest first — they answer "what just
+      // happened", not "what is next".
+      orderBy: {
+        createdAt:
+          filter === KitchenTicketStatus.COMPLETED || filter === 'CANCELLED' ? 'desc' : 'asc',
+      },
       include: TICKET_INCLUDE,
     });
     const waiters = await this.waiterNames(rows);

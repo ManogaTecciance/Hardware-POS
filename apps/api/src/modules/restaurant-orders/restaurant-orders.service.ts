@@ -116,6 +116,13 @@ export interface OrderDetailView extends OrderView {
    * differ in how much history they can show.
    */
   timeline: { at: string; status: UnifiedOrderStatus }[];
+  /**
+   * D109 — the takeaway profile behind this row, when there is one. The
+   * queue's Cancel action drives the EXISTING takeaway status machine
+   * (`PATCH /restaurant/takeaway/:profileId/status`) rather than growing a
+   * parallel cancel route, and that machine is addressed by profile id.
+   */
+  takeawayProfileId: string | null;
 }
 
 export interface OrdersQuery {
@@ -154,6 +161,15 @@ export interface OrdersPage {
    * "on this page", and would read as the total.
    */
   statusCounts: Record<UnifiedOrderStatus, number>;
+  /**
+   * D107 — READY rows whose handover belongs to the COUNTER: takeaway and
+   * third-party. Dine-in readiness is deliberately excluded — that alert is
+   * the floor's (D105), and a till that dings for every plated table is
+   * noise. Tallied beside statusCounts (before the status filter, after
+   * channel/search), so the queue's ready bell can ring whichever tab is
+   * open and re-baseline on the same filter changes that move the counts.
+   */
+  readyHandoverCount: number;
 }
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -302,7 +318,12 @@ export class RestaurantOrdersService {
     // Tallied on `base` — every filter EXCEPT status — so selecting one tab
     // does not zero the others.
     const statusCounts = emptyStatusCounts();
-    for (const r of base) statusCounts[r.unifiedStatus] += 1;
+    let readyHandoverCount = 0;
+    for (const r of base) {
+      statusCounts[r.unifiedStatus] += 1;
+      // D107 — see the field's doc: counter-owned readiness only.
+      if (r.unifiedStatus === 'READY' && r.channel !== 'DINE_IN') readyHandoverCount += 1;
+    }
 
     const filtered = status === 'ALL' ? base : base.filter((r) => r.unifiedStatus === status);
 
@@ -328,6 +349,7 @@ export class RestaurantOrdersService {
       pageSize,
       truncated,
       statusCounts,
+      readyHandoverCount,
     };
   }
 
@@ -426,6 +448,7 @@ export class RestaurantOrdersService {
           at: p.createdAt.toISOString(),
         })),
         timeline,
+        takeawayProfileId: o.takeawayProfile?.id ?? null,
       };
     }
 
@@ -448,6 +471,8 @@ export class RestaurantOrdersService {
         at: ev.createdAt.toISOString(),
         status: unifiedStatusForExternalOrder(ev.toStatus),
       })),
+      // A 3rd-party order's lifecycle belongs to the platform that sent it.
+      takeawayProfileId: null,
     };
   }
 }

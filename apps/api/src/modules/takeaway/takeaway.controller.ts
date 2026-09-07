@@ -51,6 +51,31 @@ export class TakeawayController {
     return created;
   }
 
+  /**
+   * D110 — settle the money without handing over: closes the session into a
+   * Sale (idempotent) while the profile keeps its lifecycle status, so a
+   * counter order can be PAID up front and still flow
+   * Pending → Preparing → Ready on the queue. Same permission as the status
+   * verb: whoever can advance a takeaway can settle one.
+   */
+  @Post(':profileId/settle')
+  @RequirePermissions(Permission.TAKEAWAY_CREATE)
+  async settle(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('profileId') profileId: string,
+  ): Promise<TakeawayView> {
+    const settled = await this.service.settle(tenantId, profileId, actor.id);
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'TAKEAWAY_ORDER_SETTLED',
+      entityType: 'TakeawayOrderProfile',
+      entityId: profileId,
+      metadata: { finalSaleId: settled.finalSaleId },
+    });
+    return settled;
+  }
+
   @Patch(':profileId/status')
   @RequirePermissions(Permission.TAKEAWAY_CREATE)
   async updateStatus(

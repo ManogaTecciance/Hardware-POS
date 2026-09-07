@@ -658,6 +658,12 @@ export interface UnifiedOrderDetail extends UnifiedOrderView {
   } | null;
   payments: { method: PaymentMethod; amount: string; reference: string | null; at: string }[];
   timeline: { at: string; status: UnifiedOrderStatus }[];
+  /**
+   * D109 — the takeaway profile behind this row (null for dine-in and
+   * 3rd-party). The queue's Cancel action drives the existing takeaway
+   * status machine, which is addressed by this id.
+   */
+  takeawayProfileId: string | null;
 }
 
 // ── Reports ─────────────────────────────────────────────────────────────────

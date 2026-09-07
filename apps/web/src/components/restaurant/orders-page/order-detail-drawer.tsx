@@ -1,15 +1,17 @@
 'use client';
 
-import { Receipt, X } from 'lucide-react';
+import { Ban, PackageCheck, Receipt, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
 import { BillDialog } from '@/components/restaurant/billing/bill-dialog';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
 import { Sheet } from '@/components/ui/sheet';
 import { useAuth } from '@/lib/auth';
-import { restaurantOrders } from '@/lib/restaurant/api';
+import { Permission } from '@/lib/permissions';
+import { restaurantOrders, takeaway } from '@/lib/restaurant/api';
 import { formatElapsed, formatMoney, formatTime } from '@/lib/restaurant/labels';
 import type { UnifiedOrderDetail, UnifiedOrderView } from '@/lib/restaurant/types';
 import { useOrientation } from '@/lib/use-viewport';
@@ -36,11 +38,11 @@ import {
  * one-handed hold. On landscape and desktop we keep the drawer so the
  * operator can keep an eye on the queue while inspecting a row.
  *
- * Actions surface only endpoints that already exist on the backend today.
- * Advance / cancel / reprint flows for takeaway and 3rd-party live in
- * Slice E's follow-up wiring — for now this panel is a read-only inspector
- * with navigation shortcuts to the full-page workflows (bill, order-entry,
- * POS).
+ * Actions surface only endpoints that already exist on the backend today:
+ * navigation shortcuts to the full-page workflows (bill, order-entry, POS)
+ * and, D109, Cancel order for takeaway rows — the queue is where the
+ * counter decides an order's fate; the kitchen board only ever decides
+ * doneness. Advance / reprint flows for 3rd-party remain follow-up wiring.
  *
  * The queue row is rendered instantly; the full record (line prices, money
  * breakdown, payments, delivery destination, timeline) arrives from the
@@ -52,10 +54,13 @@ export function OrderDetailDrawer({
   order,
   branchId,
   onClose,
+  onMutated,
 }: {
   order: UnifiedOrderView;
   branchId: string;
   onClose: () => void;
+  /** D109 — an action changed the order; the queue should refetch now, not on its next poll. */
+  onMutated?: () => void;
 }) {
   const orientation = useOrientation();
   const isPortrait = orientation === 'portrait';
@@ -92,7 +97,7 @@ export function OrderDetailDrawer({
   if (isPortrait) {
     return (
       <Sheet open onClose={onClose} height="full" title={`#${order.orderNumber}`}>
-        <OrderDetailBody order={order} detail={detail} onClose={onClose} />
+        <OrderDetailBody order={order} detail={detail} onClose={onClose} onMutated={onMutated} />
       </Sheet>
     );
   }
@@ -143,7 +148,7 @@ export function OrderDetailDrawer({
         </div>
 
         <div className="flex flex-wrap gap-2 border-t border-border p-3">
-          <OrderDetailActions order={order} />
+          <OrderDetailActions order={order} detail={detail} onDone={onClose} onMutated={onMutated} />
         </div>
       </div>
     </div>
@@ -161,10 +166,12 @@ function OrderDetailBody({
   order,
   detail,
   onClose,
+  onMutated,
 }: {
   order: UnifiedOrderView;
   detail: UnifiedOrderDetail | null;
   onClose: () => void;
+  onMutated?: () => void;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -188,7 +195,7 @@ function OrderDetailBody({
         <OrderDetailSections order={order} detail={detail} />
       </div>
       <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-        <OrderDetailActions order={order} onDone={onClose} />
+        <OrderDetailActions order={order} detail={detail} onDone={onClose} onMutated={onMutated} />
       </div>
     </div>
   );
@@ -361,17 +368,91 @@ function OrderDetailSections({
 
 function OrderDetailActions({
   order,
+  detail,
   onDone,
+  onMutated,
 }: {
   order: UnifiedOrderView;
+  detail: UnifiedOrderDetail | null;
   onDone?: () => void;
+  onMutated?: () => void;
 }) {
   const router = useRouter();
-  const { session } = useAuth();
+  const { session, hasPermission } = useAuth();
   const [billFor, setBillFor] = React.useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = React.useState(false);
+  const [cancelling, setCancelling] = React.useState(false);
+  const [cancelError, setCancelError] = React.useState<string | null>(null);
   const go = (href: string) => {
     router.push(href);
     onDone?.();
+  };
+
+  /*
+   * D109 — cancelling belongs HERE, not on the kitchen board: the counter
+   * decides whether an order still exists, the kitchen only whether it is
+   * done. Offered for takeaway rows that are still in play — not handed
+   * over (the Sale exists after that; that is refund territory), not
+   * already cancelled or completed — and only once the detail has arrived
+   * with the profile id the takeaway status machine is addressed by.
+   * Dine-in has no queue-side cancel on purpose (its items are voided at
+   * the table, where the bill lives); a 3rd-party order's lifecycle
+   * belongs to the platform that sent it.
+   */
+  const canCancel =
+    order.channel === 'TAKEAWAY' &&
+    !['HANDED_OVER', 'COMPLETED', 'CANCELLED'].includes(order.unifiedStatus) &&
+    hasPermission(Permission.TAKEAWAY_CREATE) &&
+    Boolean(detail?.takeawayProfileId);
+
+  /*
+   * D110 — the handover verb, now that payment no longer implies it: the
+   * counter settles the money at placement and presses THIS when the bag
+   * actually crosses the counter. PO (same day): offered ONLY on READY —
+   * food that the kitchen has not called up cannot be handed to anyone,
+   * and a button that lets the counter skip the kitchen invites exactly
+   * the premature "Handed over" this record exists to kill. The takeaway
+   * workspace's manual stepper remains the deliberate escape hatch for a
+   * shift where the kitchen forgot to bump.
+   */
+  const [handingOver, setHandingOver] = React.useState(false);
+  const [handOverError, setHandOverError] = React.useState<string | null>(null);
+  const canHandOver =
+    order.channel === 'TAKEAWAY' &&
+    order.unifiedStatus === 'READY' &&
+    hasPermission(Permission.TAKEAWAY_CREATE) &&
+    Boolean(detail?.takeawayProfileId);
+  const handOver = async () => {
+    if (!session || !detail?.takeawayProfileId || handingOver) return;
+    setHandingOver(true);
+    setHandOverError(null);
+    try {
+      await takeaway.updateStatus(session, detail.takeawayProfileId, { status: 'HANDED_OVER' });
+      onMutated?.();
+      onDone?.();
+    } catch (err) {
+      setHandOverError(err instanceof Error ? err.message : 'Could not mark this handed over');
+    } finally {
+      setHandingOver(false);
+    }
+  };
+
+  const cancelOrder = async () => {
+    if (!session || !detail?.takeawayProfileId) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await takeaway.updateStatus(session, detail.takeawayProfileId, { status: 'CANCELLED' });
+      // The kitchen's ticket leaves the board on its next poll (D108's
+      // read); the queue refetches NOW so the row says Cancelled at once.
+      onMutated?.();
+      setConfirmCancel(false);
+      onDone?.();
+    } catch (err) {
+      setCancelError(err instanceof Error ? err.message : 'Could not cancel this order');
+    } finally {
+      setCancelling(false);
+    }
   };
   return (
     <>
@@ -429,6 +510,58 @@ function OrderDetailActions({
         >
           View bill
         </Button>
+      ) : null}
+      {/* Absent rather than disabled when it does not apply — same rule as
+          View bill above. */}
+      {canHandOver ? (
+        <Button
+          size="sm"
+          leftIcon={<PackageCheck className="h-4 w-4" />}
+          isLoading={handingOver}
+          onClick={() => void handOver()}
+        >
+          Mark handed over
+        </Button>
+      ) : null}
+      {canCancel ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="text-danger"
+          leftIcon={<Ban className="h-4 w-4" />}
+          onClick={() => {
+            setCancelError(null);
+            setConfirmCancel(true);
+          }}
+        >
+          Cancel order
+        </Button>
+      ) : null}
+      {handOverError ? <p className="w-full text-xs text-danger">{handOverError}</p> : null}
+      {confirmCancel ? (
+        <Dialog
+          open
+          onClose={() => setConfirmCancel(false)}
+          title={`Cancel ${order.orderNumber}?`}
+          description="The kitchen stops making it and the order is marked Cancelled."
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmCancel(false)} disabled={cancelling}>
+                Keep order
+              </Button>
+              <Button variant="destructive" isLoading={cancelling} onClick={() => void cancelOrder()}>
+                Cancel order
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            {order.customerName ? `${order.customerName}'s order` : 'This order'} (
+            {order.itemCount} item{order.itemCount === 1 ? '' : 's'}) will not be prepared or
+            handed over. This cannot be undone from the queue.
+          </p>
+          {cancelError ? <p className="mt-2 text-sm text-danger">{cancelError}</p> : null}
+        </Dialog>
       ) : null}
     </>
   );

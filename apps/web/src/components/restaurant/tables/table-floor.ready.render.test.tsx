@@ -1,13 +1,12 @@
 /**
- * D105 — the waiter's "food ready" bell, pinned in pairs like every other
- * chime suite: each ring case has a silent twin, because a bell wired to
- * "any response" passes the ring half alone.
+ * D105 — the waiter's "Food ready" BADGE (D111: visual only — the bell that
+ * once rang here was removed; sound lives in the kitchen alone, and one
+ * tripwire below re-runs the poll that used to ring and asserts silence).
  *
- * The bell's memory has two layers with different lifetimes and both are
- * asserted here: the CHIME baseline (per mount — first load never rings),
- * and the ACK set (per device via sessionStorage — a badge answered by
- * opening the order stays answered, until the ticket id leaves the server
- * list, which is how a recalled-then-rebumped dish earns a second ring).
+ * The badge's memory is the ACK set (per device via sessionStorage): a badge
+ * answered by opening the order stays answered, until the ticket id leaves
+ * the server list — which is how a recalled-then-rebumped dish earns its
+ * badge back.
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import * as React from 'react';
@@ -135,20 +134,16 @@ afterEach(() => {
   cleanup();
 });
 
-describe('the food-ready bell (D105)', () => {
-  it('never rings on first load, but a standing bump still shows its badge', async () => {
+describe('the food-ready badge (D105/D111)', () => {
+  it('a standing bump shows its badge on first load', async () => {
     listOpen.mockResolvedValue([openSession(['kt_1'])]);
     render(<TableFloor session={session} branchId="brn_1" canManage />);
     await settle();
 
-    // Positive control: the floor rendered the session's badge…
     await waitFor(() => expect(screen.getByText('Food ready')).toBeTruthy());
-    // …and stayed silent: food bumped before this screen opened is state to
-    // read, not an arrival to announce.
-    expect(foodReady).not.toHaveBeenCalled();
   });
 
-  it('rings once, and badges the table, when a poll brings a new bump', async () => {
+  it('a poll bringing a new bump badges the table — and makes NO sound (D111)', async () => {
     render(<TableFloor session={session} branchId="brn_1" canManage />);
     await settle();
     expect(screen.queryByText('Food ready')).toBeNull();
@@ -156,22 +151,12 @@ describe('the food-ready bell (D105)', () => {
     listOpen.mockResolvedValue([openSession(['kt_1'])]);
     await tickPoll();
 
-    await waitFor(() => expect(foodReady).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('Food ready')).toBeTruthy();
-  });
-
-  it('stays silent when the poll repeats the same bumped tickets', async () => {
-    listOpen.mockResolvedValue([openSession(['kt_1'])]);
-    render(<TableFloor session={session} branchId="brn_1" canManage />);
-    await settle();
-
-    await tickPoll();
-
-    await waitFor(() => expect(listOpen.mock.calls.length).toBeGreaterThanOrEqual(2));
+    // The poll that used to ring: badge yes, speaker no.
+    await waitFor(() => expect(screen.getByText('Food ready')).toBeTruthy());
     expect(foodReady).not.toHaveBeenCalled();
   });
 
-  it('opening the order answers the bell — badge gone, and the next poll does not revive it', async () => {
+  it('opening the order answers the badge, and the next poll does not revive it', async () => {
     listOpen.mockResolvedValue([openSession(['kt_1'])]);
     render(<TableFloor session={session} branchId="brn_1" canManage />);
     await settle();
@@ -183,10 +168,9 @@ describe('the food-ready bell (D105)', () => {
     await tickPoll();
     await waitFor(() => expect(listOpen.mock.calls.length).toBeGreaterThanOrEqual(2));
     expect(screen.queryByText('Food ready')).toBeNull();
-    expect(foodReady).not.toHaveBeenCalled();
   });
 
-  it('a recalled-then-rebumped ticket rings and badges again despite the old ack', async () => {
+  it('a recalled-then-rebumped ticket badges again despite the old ack', async () => {
     listOpen.mockResolvedValue([openSession(['kt_1'])]);
     render(<TableFloor session={session} branchId="brn_1" canManage />);
     await settle();
@@ -194,16 +178,15 @@ describe('the food-ready bell (D105)', () => {
     expect(screen.queryByText('Food ready')).toBeNull();
 
     // The kitchen recalls the bump: the id leaves the list, taking the ack
-    // with it (the ONE poll where silence is right — nothing arrived).
+    // with it.
     listOpen.mockResolvedValue([openSession([])]);
     await tickPoll();
-    expect(foodReady).not.toHaveBeenCalled();
 
     // …and bumps it again: to the floor this is fresh news.
     listOpen.mockResolvedValue([openSession(['kt_1'])]);
     await tickPoll();
 
-    await waitFor(() => expect(foodReady).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('Food ready')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('Food ready')).toBeTruthy());
+    expect(foodReady).not.toHaveBeenCalled();
   });
 });

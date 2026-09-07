@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 287
-- Module-guarded routes: 199
+- Total routes: 288
+- Module-guarded routes: 200
 - Ungated routes: 88
 
 ## How to read the Guard column
@@ -379,6 +379,7 @@ and the per-row detail the drawer fetches.
 |---|---|---|---|---|
 | GET | `/restaurant/takeaway` | TAKEAWAY | ENFORCED | takeaway:view |
 | POST | `/restaurant/takeaway` | TAKEAWAY | ENFORCED | takeaway:create |
+| POST | `/restaurant/takeaway/:profileId/settle` | TAKEAWAY | ENFORCED | takeaway:create |
 | PATCH | `/restaurant/takeaway/:profileId/status` | TAKEAWAY | ENFORCED | takeaway:create |
 
 ### KdsController

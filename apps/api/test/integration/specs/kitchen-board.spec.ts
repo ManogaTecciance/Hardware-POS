@@ -512,6 +512,15 @@ describe('D106 — start/preparing ripples to the round and the Orders queue', (
     );
     return res.data.items.find((o) => o.id === id)?.unifiedStatus;
   };
+  /** D107 — the counter-owned READY tally the queue's bell rings on. */
+  const readyHandover = async () => {
+    const res = await http.request<{ readyHandoverCount: number }>(
+      'GET',
+      `/restaurant/branches/${branchId}/orders`,
+      { token: ownerToken() },
+    );
+    return res.data.readyHandoverCount;
+  };
   const verb = (ticketId: string, action: 'start' | 'complete' | 'reopen') =>
     http.request<TicketView & { status: string }>(
       'POST',
@@ -533,6 +542,9 @@ describe('D106 — start/preparing ripples to the round and the Orders queue', (
 
     await verb(ticketId, 'complete');
     expect(await unifiedFor(orderId)).toBe('READY');
+    // D107's paired NEGATIVE: this is a DINE-IN order — ready, but the
+    // counter's bell tally must not count it. The floor's bell owns it.
+    expect(await readyHandover()).toBe(0);
 
     // Recall recomputes honestly: the only ticket is queued again, so the
     // order is plain pending — not stuck on a state the kitchen retracted.
@@ -583,14 +595,178 @@ describe('D106 — start/preparing ripples to the round and the Orders queue', (
 
     await verb(takeawayTicket.id, 'start');
     expect(await profileStatus()).toBe('IN_KITCHEN');
+    expect(await readyHandover()).toBe(0);
 
     await verb(takeawayTicket.id, 'complete');
     expect(await profileStatus()).toBe('READY');
+    // D107's POSITIVE: a takeaway up on the pass is the counter's to hear.
+    expect(await readyHandover()).toBe(1);
 
     // The recall retracts READY — "your food is ready" stopped being true —
     // but only down to IN_KITCHEN, never past what the customer was told.
     await verb(takeawayTicket.id, 'reopen');
     expect(await profileStatus()).toBe('IN_KITCHEN');
+    expect(await readyHandover()).toBe(0);
+  });
+});
+
+/*
+ * D108 — cancellation reaches the pass. A cancelled takeaway used to keep
+ * its ticket on the board and the kitchen kept cooking it; now the ticket
+ * leaves the working lanes and turns up under the CANCELLED pseudo-filter.
+ * Both directions at every step: present where it must be, absent where it
+ * must not, with the pre-cancel reads as the positive controls.
+ */
+describe('D108 — cancelled work leaves the board and lands in its own lane', () => {
+  const boardAs = (query: string) =>
+    http.request<TicketView[]>(
+      'GET',
+      `/restaurant/branches/${branchId}/kitchen-tickets${query}`,
+      { token: kitchenToken() },
+    );
+
+  const createTakeaway = async (key: string) => {
+    const created = await http.request<{ id: string; orderNumber: string }>(
+      'POST',
+      `/restaurant/takeaway`,
+      {
+        token: ownerToken(),
+        body: {
+          branchId,
+          idempotencyKey: key,
+          items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+        },
+      },
+    );
+    const t = (await boardAs('?status=OUTSTANDING')).data.find(
+      (x) => x.orderNumber === created.data.orderNumber,
+    )!;
+    return { profileId: created.data.id, ticketId: t.id };
+  };
+
+  const cancel = (profileId: string) =>
+    http.request('PATCH', `/restaurant/takeaway/${profileId}/status`, {
+      token: ownerToken(),
+      body: { status: 'CANCELLED' },
+    });
+
+  it('an outstanding ticket disappears from To make and appears under Cancelled', async () => {
+    const { profileId, ticketId } = await createTakeaway('d108-a');
+    // Positive control — on the board before the cancel, in no Cancelled lane.
+    expect((await boardAs('?status=OUTSTANDING')).data.map((t) => t.id)).toContain(ticketId);
+    expect((await boardAs('?status=CANCELLED')).data).toHaveLength(0);
+
+    await cancel(profileId);
+
+    expect((await boardAs('?status=OUTSTANDING')).data.map((t) => t.id)).not.toContain(ticketId);
+    expect((await boardAs('?status=CANCELLED')).data.map((t) => t.id)).toEqual([ticketId]);
+  });
+
+  it('a completed ticket of a cancelled order leaves Done for Cancelled too', async () => {
+    const { profileId, ticketId } = await createTakeaway('d108-b');
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`,
+      { token: kitchenToken() },
+    );
+    expect((await boardAs('?status=COMPLETED')).data.map((t) => t.id)).toContain(ticketId);
+
+    await cancel(profileId);
+
+    expect((await boardAs('?status=COMPLETED')).data.map((t) => t.id)).not.toContain(ticketId);
+    expect((await boardAs('?status=CANCELLED')).data.map((t) => t.id)).toContain(ticketId);
+  });
+});
+
+/*
+ * D110 — money and handover are different instants. The counter settles at
+ * payment time; the order must keep flowing the kitchen lifecycle and the
+ * later handover must REUSE the settled Sale, never mint a second one.
+ * Every step asserts the status the queue derives from, because the bug
+ * this fixes was precisely a fresh order reading "Handed over".
+ */
+describe('D110 — settle creates the Sale without handing over', () => {
+  it('settled order stays in the lifecycle; handover later reuses the same Sale', async () => {
+    const created = await http.request<{ id: string; orderNumber: string; status: string }>(
+      'POST',
+      `/restaurant/takeaway`,
+      {
+        token: ownerToken(),
+        body: {
+          branchId,
+          idempotencyKey: 'd110-settle',
+          items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+        },
+      },
+    );
+    expect(created.data.status).toBe('PLACED');
+
+    const settled = await http.request<{ status: string; finalSaleId: string | null }>(
+      'POST',
+      `/restaurant/takeaway/${created.data.id}/settle`,
+      { token: ownerToken() },
+    );
+    // The money exists…
+    expect(settled.data.finalSaleId).not.toBeNull();
+    // …and the lifecycle was NOT touched: the queue still says Pending.
+    expect(settled.data.status).toBe('PLACED');
+
+    // Idempotent: settling again returns the SAME Sale, not a second one.
+    const again = await http.request<{ finalSaleId: string | null }>(
+      'POST',
+      `/restaurant/takeaway/${created.data.id}/settle`,
+      { token: ownerToken() },
+    );
+    expect(again.data.finalSaleId).toBe(settled.data.finalSaleId);
+
+    // The kitchen still drives a settled order: start → IN_KITCHEN, bump → READY.
+    const t = (await board('?status=OUTSTANDING')).data.find(
+      (x) => x.orderNumber === created.data.orderNumber,
+    )!;
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${t.id}/start`,
+      { token: kitchenToken() },
+    );
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${t.id}/complete`,
+      { token: kitchenToken() },
+    );
+    const rows = await http.request<{ id: string; status: string }[]>(
+      'GET',
+      `/restaurant/takeaway?branchId=${branchId}`,
+      { token: ownerToken() },
+    );
+    expect(rows.data.find((r) => r.id === created.data.id)?.status).toBe('READY');
+
+    // Handover is its own act — and it reuses the settled Sale.
+    const handed = await http.request<{ status: string; finalSaleId: string | null }>(
+      'PATCH',
+      `/restaurant/takeaway/${created.data.id}/status`,
+      { token: ownerToken(), body: { status: 'HANDED_OVER' } },
+    );
+    expect(handed.data.status).toBe('HANDED_OVER');
+    expect(handed.data.finalSaleId).toBe(settled.data.finalSaleId);
+  });
+
+  it('a cancelled order refuses to settle', async () => {
+    const created = await http.request<{ id: string }>('POST', `/restaurant/takeaway`, {
+      token: ownerToken(),
+      body: {
+        branchId,
+        idempotencyKey: 'd110-cancelled',
+        items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+      },
+    });
+    await http.request('PATCH', `/restaurant/takeaway/${created.data.id}/status`, {
+      token: ownerToken(),
+      body: { status: 'CANCELLED' },
+    });
+    const res = await http.request('POST', `/restaurant/takeaway/${created.data.id}/settle`, {
+      token: ownerToken(),
+    });
+    expect(res.status).toBe(400);
   });
 });
 

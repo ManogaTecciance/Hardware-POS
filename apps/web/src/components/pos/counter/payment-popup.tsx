@@ -52,16 +52,22 @@ interface MethodOption {
  * Payment + finalize + auto-KOT orchestration for the counter POS.
  *
  * Backend today already generates the KOT inside `takeaway.create`, so
- * "auto-KOT after payment" is really "kick the create call, then close
- * out to a Sale, then collect the payment". Three server calls in
+ * "auto-KOT after payment" is really "kick the create call, then settle
+ * to a Sale, then collect the payment". Three server calls in
  * sequence, orchestrated here:
  *
  *   1. `takeaway.create` — writes the RestaurantOrder + Items and
  *      generates the kitchen tickets.
- *   2. For Dine-In counter and Takeaway: `updateStatus(HANDED_OVER)` to
- *      close the session into a Sale (UNPAID) — the existing endpoint
- *      already does this atomically. Delivery skips this step and stays
- *      PLACED so the rider can advance the state.
+ *   2. For Dine-In counter and Takeaway: `takeaway.settle` closes the
+ *      session into a Sale (UNPAID) WITHOUT touching the lifecycle —
+ *      D110: this used to be `updateStatus(HANDED_OVER)`, which told the
+ *      queue the bag had crossed the counter before the kitchen had even
+ *      seen the ticket, and parked the order beyond D106's
+ *      kitchen-driven statuses for its whole cook time. The order now
+ *      stays PLACED (queue: Pending) and flows Preparing → Ready as the
+ *      kitchen works; handover is pressed when the food actually leaves
+ *      (queue drawer / takeaway workspace). Delivery skips this step and
+ *      stays PLACED so the rider can advance the state.
  *   3. For non-Delivery: `billing.collectPayment` to record the payment
  *      on the newly created Sale.
  *
@@ -188,13 +194,12 @@ export function PaymentPopup(props: Props) {
       let receiptPrinted = false;
 
       if (!isDelivery) {
-        // Step 2: hand over → creates a Sale (UNPAID). The updated
-        // TakeawayView now carries `finalSaleId` directly (Pilot Change 3
-        // additive backend), so we can go straight to payment.
-        const handedOver = await takeaway.updateStatus(session, takeawayRow.id, {
-          status: 'HANDED_OVER',
-        });
-        saleId = handedOver.finalSaleId;
+        // Step 2 (D110): settle → creates the Sale (UNPAID) while the order
+        // stays PLACED for the kitchen lifecycle. TakeawayView carries
+        // `finalSaleId` directly (Pilot Change 3), so we go straight to
+        // payment.
+        const settled = await takeaway.settle(session, takeawayRow.id);
+        saleId = settled.finalSaleId;
 
         if (saleId) {
           // Step 3: collect payment. The billing endpoint reconciles

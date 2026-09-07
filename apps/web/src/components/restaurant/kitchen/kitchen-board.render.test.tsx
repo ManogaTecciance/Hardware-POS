@@ -155,25 +155,29 @@ describe('age escalation (D100)', () => {
 });
 
 describe('the write gate (WS-408 mirrored)', () => {
-  it('shows a full-width verb to the kitchen — Start on a queued ticket, Mark done on a started one', async () => {
+  it('shows a full-width verb to the kitchen — Start on the To make lane, Mark done on Preparing', async () => {
     outstandingRows = [
       ticket({ id: 'tk_1' }),
       ticket({ id: 'tk_2', placeLabel: 'T2', status: 'IN_PROGRESS' }),
     ];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
-    // D106 — one verb per state, and never both on one card.
+    // D106/D108 — one verb per state, one lane per ticket.
     await waitFor(() =>
       expect(screen.getAllByRole('button', { name: /start preparing/i })).toHaveLength(1),
     );
-    expect(screen.getAllByRole('button', { name: /mark done/i })).toHaveLength(1);
-    // The verb is the whole bottom of the card, not a footer-sized button.
-    for (const name of [/start preparing/i, /mark done/i]) {
-      expect(screen.getByRole('button', { name }).className).toContain('w-full');
-    }
+    expect(screen.queryByRole('button', { name: /mark done/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /start preparing/i }).className).toContain('w-full');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /mark done/i })).toHaveLength(1),
+    );
+    expect(screen.queryByRole('button', { name: /start preparing/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /mark done/i }).className).toContain('w-full');
   });
 
-  it('shows the till no verbs at all, while Details still counts the tickets', async () => {
+  it('shows the till no verbs on either lane, while Details still counts the tickets', async () => {
     canUpdate = false;
     outstandingRows = [
       ticket({ id: 'tk_1' }),
@@ -182,9 +186,13 @@ describe('the write gate (WS-408 mirrored)', () => {
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
     await waitFor(() =>
-      expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(2),
+      expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1),
     );
     expect(screen.queryByRole('button', { name: /start preparing/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
+    expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /mark done/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /recall/i })).toBeNull();
   });
@@ -195,6 +203,7 @@ describe('the bump', () => {
     outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T7', status: 'IN_PROGRESS' })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
     await waitFor(() => expect(screen.getByText('T7')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /mark done/i }));
 
@@ -204,29 +213,55 @@ describe('the bump', () => {
 });
 
 /*
- * D106 — Start preparing, pinned in pairs: the queued card carries Start and
- * NOT Mark done (and no Preparing badge), and the tap flips verb + badge in
- * place WITHOUT dropping the card — a started dish is still work on the pass.
+ * D106/D108 — Start preparing moves the card one lane along: it leaves
+ * To make the moment it is tapped and turns up under Preparing with the
+ * badge and the next verb — the bump-bar lane flow, pinned from both lanes
+ * so a card that vanished entirely would fail the second half.
  */
 describe('start preparing (D106)', () => {
-  it('starting flips the card to Preparing + Mark done, and keeps it on the tab', async () => {
+  it('starting moves the card from To make to the Preparing lane', async () => {
     outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T7' })];
-    startFn.mockResolvedValue(ticket({ id: 'tk_1', placeLabel: 'T7', status: 'IN_PROGRESS' }));
+    startFn.mockImplementation(() => {
+      const started = ticket({ id: 'tk_1', placeLabel: 'T7', status: 'IN_PROGRESS' });
+      outstandingRows = [started];
+      return Promise.resolve(started);
+    });
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
     await waitFor(() => expect(screen.getByText('T7')).toBeTruthy());
-    expect(screen.queryByText('Preparing')).toBeNull();
-    expect(screen.queryByRole('button', { name: /mark done/i })).toBeNull();
+    expect(screen.queryByText('Preparing', { selector: 'span' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /start preparing/i }));
 
     await waitFor(() => expect(startFn).toHaveBeenCalledWith(SESSION, 'brn_1', 'tk_1'));
-    await waitFor(() => expect(screen.getByText('Preparing')).toBeTruthy());
-    // Still on the board (unlike the bump's optimistic drop)…
-    expect(screen.getByText('T7')).toBeTruthy();
-    // …with the verb advanced and the old one gone.
+    // Gone from To make…
+    await waitFor(() => expect(screen.queryByText('T7')).toBeNull());
+    // …and waiting under Preparing, verb advanced, badge on.
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await waitFor(() => expect(screen.getByText('T7')).toBeTruthy());
     expect(screen.getByRole('button', { name: /mark done/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /start preparing/i })).toBeNull();
+  });
+});
+
+/*
+ * D109 — the board has NO Cancelled lane: cancellation is the Orders
+ * queue's business, and cancelled work simply never reaches this screen
+ * (the server read excludes it — pinned in the integration suite). The tab
+ * strip is asserted as the exact set, because a lane quietly added back
+ * would pass any absence-only check the moment it was renamed.
+ */
+describe('the lane strip (D109)', () => {
+  it('offers exactly To make, Preparing and Done', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T1 · Main')).toBeTruthy());
+
+    const strip = screen.getByRole('group', { name: /filter kitchen tickets/i });
+    const labels = Array.from(strip.querySelectorAll('button')).map((b) =>
+      (b.textContent ?? '').replace(/\d+$/, '').trim(),
+    );
+    expect(labels).toEqual(['To make', 'Preparing', 'Done']);
   });
 });
 

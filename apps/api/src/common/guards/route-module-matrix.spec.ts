@@ -350,6 +350,8 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'POST /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
+  // D110 — money without handover: close the session into a Sale, status untouched.
+  'POST /restaurant/takeaway/:profileId/settle': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/takeaway/:profileId/status': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'GET /restaurant/bills/:saleId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/bills/:saleId/payments': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
