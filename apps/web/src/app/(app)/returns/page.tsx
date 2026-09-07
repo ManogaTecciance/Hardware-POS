@@ -207,7 +207,6 @@ export default function ReturnsPage() {
         </div>
       </Card>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
       <Pagination
         page={page}
         pageSize={pageSize}
@@ -215,23 +214,6 @@ export default function ReturnsPage() {
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
       />
-        <div className="flex items-center gap-3">
-          <span>
-            {from}–{to} of {total}
-          </span>
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            Prev
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

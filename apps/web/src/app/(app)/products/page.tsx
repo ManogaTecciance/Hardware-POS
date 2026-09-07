@@ -413,7 +413,6 @@ export default function ProductsPage() {
       </Card>
 
       {/* Pagination */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
       <Pagination
         page={page}
         pageSize={pageSize}
@@ -422,31 +421,6 @@ export default function ProductsPage() {
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
       />
-        <div className="flex items-center gap-3">
-          <span className="text-muted-foreground">
-            {total === 0 ? '0' : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)}`} of{' '}
-            {total}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      </div>
       {session ? (
         <ImportProductsDialog
           session={session}
