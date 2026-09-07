@@ -1,4 +1,7 @@
 import { MenuModule } from '../menu/menu.module';
+import { AttributeLibraryController } from './attribute-library/attribute-library.controller';
+import { AttributeLibraryRepository } from './attribute-library/attribute-library.repository';
+import { AttributeLibraryService } from './attribute-library/attribute-library.service';
 import { ProductAttributeSchemaController } from './product-attribute-schema.controller';
 import { ProductComponentsController } from './product-components.controller';
 import { ProductComponentsService } from './product-components.service';
@@ -52,6 +55,9 @@ import { ProductVariantsService } from './variants/product-variants.service';
     // ('sellable', 'attribute-schema').
     SellableController,
     ProductAttributeSchemaController,
+    // D104 — the tenant option library. Its own root path, so it does not
+    // compete with ProductsController's GET /products/:id.
+    AttributeLibraryController,
     ProductsController,
     ProductImagesController,
     ProductVariantsController,
@@ -74,6 +80,8 @@ import { ProductVariantsService } from './variants/product-variants.service';
     ProductModifiersService,
     ProductStationsService,
     ProductAttributesService,
+    AttributeLibraryService,
+    AttributeLibraryRepository,
     ProductComponentsService,
     SellableService,
   ],

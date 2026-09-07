@@ -54,7 +54,15 @@ export interface VariationDimensionView {
   id: string;
   name: string;
   position: number;
-  options: { id: string; name: string; position: number }[];
+  /** D104 — the library definition this dimension is mapped to, if any. */
+  attributeDefinitionId: string | null;
+  options: {
+    id: string;
+    name: string;
+    position: number;
+    /** D104 — the library option this option is mapped to, if any. */
+    attributeOptionId: string | null;
+  }[];
 }
 
 /** JSON-friendly shape for a per-branch inventory row. */
@@ -111,7 +119,13 @@ export class ProductVariantsService {
         id: d.id,
         name: d.name,
         position: d.position,
-        options: d.options.map((o) => ({ id: o.id, name: o.name, position: o.position })),
+        attributeDefinitionId: d.attributeDefinitionId,
+        options: d.options.map((o) => ({
+          id: o.id,
+          name: o.name,
+          position: o.position,
+          attributeOptionId: o.attributeOptionId,
+        })),
       })),
     };
   }
@@ -133,6 +147,10 @@ export class ProductVariantsService {
     // Empty-name / empty-option guards live in DTO decorators; the service is
     // free to trust the shape.
     const requestedDimensionNames = new Set(dto.dimensions.map((d) => d.name));
+
+    // D104 — validate every library link BEFORE opening the transaction, so an
+    // id from another tenant is a clean 400 rather than a half-applied write.
+    await this.assertLibraryLinks(tenantId, dto);
 
     await this.prisma.$transaction(async (tx) => {
       const existingDims = await tx.productVariationDimension.findMany({
@@ -160,6 +178,14 @@ export class ProductVariantsService {
 
       // 2. Upsert dimensions and their options in-order.
       for (const [dIndex, dimReq] of dto.dimensions.entries()) {
+        // `undefined` leaves an existing mapping alone; `null` clears it. A
+        // client that predates the library sends neither and cannot unmap a
+        // product an operator mapped by hand.
+        const dimensionLink =
+          dimReq.attributeDefinitionId === undefined
+            ? {}
+            : { attributeDefinitionId: dimReq.attributeDefinitionId };
+
         const dimension = await tx.productVariationDimension.upsert({
           where: { productId_name: { productId, name: dimReq.name } },
           create: {
@@ -167,8 +193,9 @@ export class ProductVariantsService {
             productId,
             name: dimReq.name,
             position: dimReq.position ?? dIndex,
+            ...dimensionLink,
           },
-          update: { position: dimReq.position ?? dIndex },
+          update: { position: dimReq.position ?? dIndex, ...dimensionLink },
           include: { options: true },
         });
 
@@ -188,6 +215,11 @@ export class ProductVariantsService {
         }
 
         for (const [oIndex, optReq] of dimReq.options.entries()) {
+          const optionLink =
+            optReq.attributeOptionId === undefined
+              ? {}
+              : { attributeOptionId: optReq.attributeOptionId };
+
           await tx.productVariationOption.upsert({
             where: {
               dimensionId_name: { dimensionId: dimension.id, name: optReq.name },
@@ -197,14 +229,92 @@ export class ProductVariantsService {
               dimensionId: dimension.id,
               name: optReq.name,
               position: optReq.position ?? oIndex,
+              ...optionLink,
             },
-            update: { position: optReq.position ?? oIndex },
+            update: { position: optReq.position ?? oIndex, ...optionLink },
           });
         }
       }
     });
 
     return this.listVariations(tenantId, productId);
+  }
+
+  /**
+   * D104 — refuse a library link that does not make sense.
+   *
+   * Three ways it can be wrong, and all three are silent if unchecked because
+   * the columns are nullable and the FKs are `SET NULL`:
+   *
+   *   1. The definition or option belongs to another tenant.
+   *   2. The option belongs to a different definition than the dimension is
+   *      mapped to — "Size / Black", which would generate a nonsense SKU.
+   *   3. An option is mapped while its dimension is not, so nothing says which
+   *      vocabulary the option is speaking.
+   */
+  private async assertLibraryLinks(
+    tenantId: string,
+    dto: ReplaceVariationsDto,
+  ): Promise<void> {
+    const definitionIds = new Set<string>();
+    const optionIds = new Set<string>();
+    for (const dim of dto.dimensions) {
+      if (dim.attributeDefinitionId) definitionIds.add(dim.attributeDefinitionId);
+      for (const opt of dim.options) {
+        if (opt.attributeOptionId) optionIds.add(opt.attributeOptionId);
+      }
+    }
+    if (definitionIds.size === 0 && optionIds.size === 0) return;
+
+    const [definitions, options] = await Promise.all([
+      this.prisma.attributeDefinition.findMany({
+        where: { tenantId, id: { in: [...definitionIds] } },
+        select: { id: true },
+      }),
+      this.prisma.attributeOption.findMany({
+        where: { tenantId, id: { in: [...optionIds] } },
+        select: { id: true, definitionId: true, name: true },
+      }),
+    ]);
+
+    const knownDefinitions = new Set(definitions.map((d) => d.id));
+    for (const id of definitionIds) {
+      if (!knownDefinitions.has(id)) {
+        throw new BadRequestException({
+          code: 'ATTRIBUTE_DEFINITION_NOT_FOUND',
+          message: `Attribute ${id} does not belong to this tenant.`,
+        });
+      }
+    }
+
+    const optionsById = new Map(options.map((o) => [o.id, o]));
+    for (const id of optionIds) {
+      if (!optionsById.has(id)) {
+        throw new BadRequestException({
+          code: 'ATTRIBUTE_OPTION_NOT_FOUND',
+          message: `Attribute option ${id} does not belong to this tenant.`,
+        });
+      }
+    }
+
+    for (const dim of dto.dimensions) {
+      for (const opt of dim.options) {
+        if (!opt.attributeOptionId) continue;
+        if (!dim.attributeDefinitionId) {
+          throw new BadRequestException({
+            code: 'ATTRIBUTE_LINK_INCOMPLETE',
+            message: `Option "${opt.name}" is mapped to the library but its dimension "${dim.name}" is not. Map the dimension first.`,
+          });
+        }
+        const libraryOption = optionsById.get(opt.attributeOptionId)!;
+        if (libraryOption.definitionId !== dim.attributeDefinitionId) {
+          throw new BadRequestException({
+            code: 'ATTRIBUTE_LINK_MISMATCH',
+            message: `Option "${opt.name}" is mapped to "${libraryOption.name}", which belongs to a different attribute than "${dim.name}" is mapped to.`,
+          });
+        }
+      }
+    }
   }
 
   // ── Variants ───────────────────────────────────────────────────────────────

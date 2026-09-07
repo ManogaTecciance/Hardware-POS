@@ -18,3 +18,4 @@ export * from './promotions/index.js';
 export * from './quotations.js';
 export * from './types/index.js';
 export * from './domains/index.js';
+export * from './catalogue/index.js';
