@@ -5576,3 +5576,78 @@ Recorded now so the sprint does not re-litigate it:
 6. **Stock, returns and reports need no change** — they are already `Decimal`.
    `8.3`'s `formatReportQuantity` already renders `0.750` as `0.75`, which was
    written for loose goods before this decision existed.
+
+---
+
+## D113a — a measured product is invisible to quantity-based promotions
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Closes the
+open sub-question in [D113](#d113). No migration of its own.
+
+### The decision
+
+**Option 1**, chosen by the PO:
+
+| Promotion kind | Applies to a `DECIMAL` product? |
+|---|---|
+| `BUY_X_GET_Y` | **No** |
+| `BUNDLE_FIXED_PRICE` | **No** |
+| `PERCENTAGE_DISCOUNT` | **Yes** |
+| `FIXED_AMOUNT_DISCOUNT` | **Yes** *(both line-level and cart-level)* |
+
+"10% off all rice" works. "Buy 2 get 1 free" on rice does not exist.
+
+### Why
+
+"Buy 2, get 1 free" on 0.75 kg has no meaning that a customer and a cashier
+would agree on before an argument. The other two readings — whole units only,
+and pro-rata — are both defensible and both surprising, and a promotion that
+surprises a customer at the till costs more than one that never fires.
+
+It also matches how grocers price in practice: percentage and amount-off on
+weighed goods, bundles on packaged ones.
+
+### Where it goes, and the shape it must take
+
+`claimsFor` in `packages/shared/src/promotions/applier.ts` is already a single
+dispatch on `rule.type`. The bypass belongs there — the two quantity-based
+branches see a filtered line list, the other two see the full one.
+
+**`PromotionCartLine` must carry the flag.** It currently holds `productId`,
+`unitPrice`, `quantity`, `lineSubtotal` and `manualDiscountAmount` and nothing
+else, so the applier cannot know a product is measured unless it is told. There
+is a proven precedent for exactly this shape: `manualDiscountAmount` non-zero
+already makes a line invisible to promotions (D102). This is the same idea,
+narrowed to two of the four kinds.
+
+**Both callers must set it.** The till builds a `PromotionCartLine` for the badge
+and the server builds one for the charge. If only one sets the flag, the cashier
+is shown a discount the server refuses — which is `2.12` and `3.10` again, and
+this branch has paid for that lesson twice. A test must assert the two agree.
+
+### The latent rounding this makes safe
+
+`applier.ts` currently does:
+
+```ts
+req.set(it.productId, (req.get(it.productId) ?? 0) + Math.max(1, it.quantity));
+```
+
+which rounds a fractional line **up to one whole unit** for bundle eligibility.
+Harmless today because no product can be fractional. With D113 shipped and
+without this bypass, 750 g of rice would count as a whole unit toward "buy 2 get
+1 free" — a customer getting a free bag for buying one and a half.
+
+**The bypass is what makes that line safe, not a fix to it.** Leave it: it is
+correct defence for a caller that forgets the flag, and a test should prove a
+measured line never reaches it.
+
+### What must be tested (D30)
+
+Both directions, or the assertion is worth nothing:
+
+1. **Positively** — a `PERCENTAGE_DISCOUNT` DOES discount a 0.75 kg line.
+2. **Negatively** — a `BUY_X_GET_Y` naming that product yields no claim on it.
+3. A **whole** product in the same basket still wins its bundle, so the filter
+   removes the measured line and not the promotion.
+4. The till's preview and the server's charge agree on the same basket.
