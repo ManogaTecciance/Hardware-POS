@@ -161,7 +161,19 @@ export function SaleA4Document({
                 <td className="r">{it.quantity}</td>
                 <td className="r">{formatMoney(it.unitPrice)}</td>
                 {profile.showDiscountColumn ? (
-                  <td className="r">{it.discountAmount > 0 ? `- ${formatMoney(it.discountAmount)}` : '—'}</td>
+                  // A per-unit discount shows its arithmetic: the amount taken is
+                  // larger than the figure agreed per item, and the customer
+                  // should be able to check it. Whole-line prints as it always
+                  // has, so no past invoice changes appearance.
+                  <td className="r">
+                    {it.discountAmount > 0
+                      ? `- ${formatMoney(it.discountAmount)}${
+                          it.discountBasis === 'UNIT' && it.discountValue != null
+                            ? ` (${formatMoney(it.discountValue)} × ${it.quantity})`
+                            : ''
+                        }`
+                      : '—'}
+                  </td>
                 ) : null}
                 <td className="r">{formatMoney(it.lineTotal)}</td>
               </tr>

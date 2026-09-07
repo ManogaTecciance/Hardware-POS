@@ -15,6 +15,9 @@ export interface ReceiptLine {
   quantity: number;
   unitPrice: number;
   discountAmount: number;
+  /** How a per-unit discount was arrived at, so the printed figure can be checked. */
+  discountBasis?: 'LINE' | 'UNIT';
+  discountValue?: number | null;
   lineTotal: number;
 }
 
@@ -73,7 +76,18 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
         <td>${esc(it.name)}${it.sku ? `<br><span class="muted">${esc(it.sku)}</span>` : ''}</td>
         <td class="r">${it.quantity}</td>
         <td class="r">${money(it.unitPrice, d.currency)}</td>
-        <td class="r">${it.discountAmount > 0 ? '-' + money(it.discountAmount, d.currency) : '—'}</td>
+        <td class="r">${
+          it.discountAmount > 0
+            ? '-' +
+              money(it.discountAmount, d.currency) +
+              // "/u" rather than the invoice's "× 3": a 32-character roll has no
+              // room for the long form, and the point is only that the amount is
+              // per unit.
+              (it.discountBasis === 'UNIT' && it.discountValue != null
+                ? ` (${money(it.discountValue, d.currency)}/u)`
+                : '')
+            : '—'
+        }</td>
         <td class="r">${money(it.lineTotal, d.currency)}</td>
       </tr>`,
     )
