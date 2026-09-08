@@ -299,6 +299,14 @@ describe('states other than ready', () => {
     show({}, { as: 'ADMIN' });
     expect(screen.getByText('Hardware store')).toBeTruthy();
   });
+
+  it('admits a salesperson (D100)', () => {
+    // The hardware Salesperson holds the owner's permissions and reaches the
+    // owner's screens; this is the settings half of that claim.
+    show({}, { as: 'SALESPERSON' });
+    expect(screen.getByText('Hardware store')).toBeTruthy();
+    expect(screen.queryByText('You don’t have access to settings')).toBeNull();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

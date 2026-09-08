@@ -7,7 +7,7 @@ import { ArrowLeft } from 'lucide-react';
 import { ProductWizard } from '@/components/products/wizard/product-wizard';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
-import { isAdminLevelRole, Permission } from '@/lib/permissions';
+import { Permission } from '@/lib/permissions';
 import { fetchCategoryTree, type CategoryNode } from '@/lib/products-api';
 
 /**

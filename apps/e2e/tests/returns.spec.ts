@@ -23,8 +23,9 @@ test.describe('RET — Returns & Refunds', () => {
     }));
 
     // A full-sale return requires approval — preview → approve → create.
-    // 2026-08-17: PIN 2222 belongs to the seeded OWNER now (the hardware
-    // template staffs Owner + Cashier; the manager demo user is gone).
+    // PIN 2222 belongs to the seeded OWNER (since 2026-08-17): the hardware
+    // template staffs Owner, Salesperson and Cashier (D100), the manager demo
+    // user is gone, and the demo Salesperson has no PIN.
     const preview = await ownerApi.post('/returns/preview', { originalSaleId: sale.id, items: lines, refundMethod: 'CASH' });
     const approval = await ownerApi.post('/returns/approve', {
       managerPin: '2222', originalSaleId: sale.id, refundTotal: preview.refundTotal,

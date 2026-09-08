@@ -34,6 +34,13 @@ import { LEGACY_TENANT_DEFAULTS } from '../../../src/modules/platform/platform.c
 // behaviour of the queue.
 import { SyncJobType } from '../../../src/modules/sync/queue/sync-queue.constants';
 
+/**
+ * `main` (2026-09-04) requires a payment due date on any sale that leaves a
+ * balance, and refuses one on a sale that does not. A fixed far-future day keeps
+ * these characterisations about what they characterise, not about dates.
+ */
+const CREDIT_DUE_DATE = '2099-12-31';
+
 let prisma: PrismaClient;
 let app: IntegrationApp;
 let tenant: SeededTenant;
@@ -140,6 +147,7 @@ describe.each(BOTH_SHAPES)('with %s', (_label, setUpProfile) => {
       customerId: tenant.creditCustomerId,
       items: oneUnitOfA(),
       payments: [],
+      paymentDueDate: CREDIT_DUE_DATE,
     });
 
     expect(sale.paymentStatus).toBe('UNPAID');
@@ -153,6 +161,7 @@ describe.each(BOTH_SHAPES)('with %s', (_label, setUpProfile) => {
       customerId: tenant.creditCustomerId,
       items: oneUnitOfA(),
       payments: [{ method: 'CASH', amount: 400 }],
+      paymentDueDate: CREDIT_DUE_DATE,
     });
 
     expect(sale.paymentStatus).toBe('PARTIAL');

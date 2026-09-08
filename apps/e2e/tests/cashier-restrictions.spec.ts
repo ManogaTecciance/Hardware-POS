@@ -90,6 +90,8 @@ test.describe('PERM — cashier UI is locked down', () => {
 
   test('visiting /products/new directly is blocked', async ({ page }) => {
     await page.goto('/products/new');
-    await expect(page.getByText(/don’t have permission to add products/i)).toBeVisible();
+    // Either apostrophe: `main` typeset the message with ’ and the wizard page
+    // this branch kept renders a plain '. The refusal is the claim, not the glyph.
+    await expect(page.getByText(/don[’']t have permission to add products/i)).toBeVisible();
   });
 });

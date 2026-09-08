@@ -31,6 +31,13 @@ import { createIntegrationApp, type IntegrationApp } from '../test-app';
 import type { AuthenticatedUser } from '../../../src/modules/auth/auth.types';
 import { QuerySalesDto } from '../../../src/modules/sales/dto/query-sales.dto';
 
+/**
+ * `main` (2026-09-04) requires a payment due date on any sale that leaves a
+ * balance, and refuses one on a sale that does not. A fixed far-future day keeps
+ * these characterisations about what they characterise, not about dates.
+ */
+const CREDIT_DUE_DATE = '2099-12-31';
+
 let prisma: PrismaClient;
 let app: IntegrationApp;
 let tenant: SeededTenant;
@@ -152,6 +159,7 @@ describe('credit and partial sales', () => {
       customerId: tenant.creditCustomerId,
       items: oneUnitOfA(),
       payments: [{ method: 'CASH', amount: 400 }],
+      paymentDueDate: CREDIT_DUE_DATE,
     });
 
     expect(sale.paymentStatus).toBe('PARTIAL');
@@ -166,6 +174,7 @@ describe('credit and partial sales', () => {
       customerId: tenant.creditCustomerId,
       items: oneUnitOfA(),
       payments: [],
+      paymentDueDate: CREDIT_DUE_DATE,
     });
 
     expect(sale.paymentStatus).toBe('UNPAID');
@@ -196,6 +205,7 @@ describe('credit and partial sales', () => {
         customerId: tenant.cashOnlyCustomerId,
         items: oneUnitOfA(),
         payments: [{ method: 'CASH', amount: 400 }],
+        paymentDueDate: CREDIT_DUE_DATE,
       }),
     ).rejects.toThrow(
       'This customer is not approved for credit. Take full payment to complete the sale.',
@@ -209,6 +219,7 @@ describe('credit and partial sales', () => {
       customerId: tenant.creditCustomerId,
       items: [{ productId: tenant.productAId, quantity: 45 }],
       payments: [],
+      paymentDueDate: CREDIT_DUE_DATE,
     });
 
     // A further 10 000 of credit would reach 55 000 — over the limit.
@@ -218,6 +229,7 @@ describe('credit and partial sales', () => {
         customerId: tenant.creditCustomerId,
         items: [{ productId: tenant.productAId, quantity: 10 }],
         payments: [],
+        paymentDueDate: CREDIT_DUE_DATE,
       }),
     ).rejects.toThrow(/Credit limit exceeded/);
   });

@@ -105,6 +105,30 @@ describe('QuickBooks is one domain’s integration (plan §4.9.5 / D68)', () => 
   });
 });
 
+describe('the Salesperson is one domain’s role (D100)', () => {
+  it('exactly the hardware domain offers the Salesperson template', () => {
+    // Registry-level twin of the parity spec's template assertion. The
+    // descriptor is what provisioning actually reads, so a vertical whose
+    // roleTemplates were composed from the hardware list — the extensibility
+    // fixture below once did exactly that — fails here by name.
+    const offering = BUSINESS_TYPE_VALUES.filter((t) =>
+      domainFor(t).roleTemplates.some((r) => r.key === 'SALESPERSON'),
+    );
+    expect(offering).toEqual(['HARDWARE']);
+  });
+
+  it('every other domain has an owner and no salesperson', () => {
+    for (const type of BUSINESS_TYPE_VALUES.filter((v) => v !== 'HARDWARE')) {
+      const keys = domainFor(type).roleTemplates.map((r) => r.key);
+      expect({ type, salesperson: keys.includes('SALESPERSON'), owner: keys.includes('OWNER') }).toEqual(
+        { type, salesperson: false, owner: true },
+      );
+    }
+    // The loop walked the whole enum minus one (D30.7), not an empty list.
+    expect(BUSINESS_TYPE_VALUES.length).toBeGreaterThan(5);
+  });
+});
+
 describe('workspace templates derive from the registry (D55/D56)', () => {
   it('offers exactly the three templates, in order, with the canonical types', () => {
     expect(WORKSPACE_TEMPLATES.map((t) => [t.key, t.businessType])).toEqual([
@@ -136,7 +160,11 @@ describe('the extensibility contract (plan §13.4)', () => {
       profile: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
       modules: domainFor('HARDWARE').modules.filter((m) => m !== 'QUICKBOOKS'),
       navigation: domainFor('HARDWARE').navigation,
-      roleTemplates: domainFor('HARDWARE').roleTemplates,
+      // A composed vertical takes the two roles every workspace has. It does
+      // NOT compose from the hardware list: the Salesperson is that template's
+      // own (D100), and the negative below is what keeps a copy-paste from
+      // carrying it along.
+      roleTemplates: domainFor('GENERAL').roleTemplates,
       capabilities: {
         ...RETAIL_CAPABILITIES,
         catalogue: { ...RETAIL_CAPABILITIES.catalogue, modifiers: true },
@@ -159,6 +187,7 @@ describe('the extensibility contract (plan §13.4)', () => {
     expect(d.modules).not.toContain('QUICKBOOKS');
     expect(d.navigation.length).toBeGreaterThan(0);
     expect(d.roleTemplates.map((r) => r.key)).toContain('OWNER');
+    expect(d.roleTemplates.map((r) => r.key)).not.toContain('SALESPERSON');
     expect(d.capabilities.catalogue.modifiers).toBe(true);
     expect(d.capabilities.fulfilment.kind).toBe('IMMEDIATE');
   });

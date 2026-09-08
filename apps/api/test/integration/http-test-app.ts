@@ -47,6 +47,13 @@ export interface RequestOptions {
   token?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  /**
+   * `fetch` follows redirects by default, which turns a route that answers
+   * with a redirect to the WEB app into a request for a web server the suite
+   * never starts. A spec that asserts on the redirect itself passes 'manual'.
+   */
+  // Spelled out: the test tsconfig has no DOM lib, so `RequestRedirect` is not a name here.
+  redirect?: 'follow' | 'manual' | 'error';
 }
 
 export interface HttpIntegrationApp {
@@ -108,6 +115,7 @@ export async function createHttpIntegrationApp(): Promise<HttpIntegrationApp> {
     ): Promise<HttpResult<T>> {
       const res = await fetch(`${baseUrl}${path}`, {
         method,
+        redirect: options.redirect ?? 'follow',
         headers: {
           'Content-Type': 'application/json',
           ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),

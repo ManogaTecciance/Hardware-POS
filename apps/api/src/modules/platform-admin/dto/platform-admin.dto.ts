@@ -43,9 +43,10 @@ export class UpdateWorkspaceDto {
 
 /*
  * D55.1: the role is a `Role` row belonging to THIS workspace, not a member of a
- * fixed list. Each template seeds a different set (2026-08-17: hardware gets
- * Owner + Cashier, food service Owner + Waiter + Cashier, hotel Owner + Waiter
- * + Receptionist), so a literal `@IsIn([...])` here could only ever be right
+ * fixed list. Each template seeds a different set (hardware gets Owner +
+ * Salesperson + Cashier, the Salesperson being hardware-only per D100; food
+ * service Owner + Waiter + Cashier + Kitchen staff; hotel Owner + Waiter +
+ * Receptionist), so a literal `@IsIn([...])` here could only ever be right
  * for one template — and would have rejected `WAITER`, which is precisely the
  * role a restaurant workspace exists to assign. The service validates the id
  * against the workspace's own rows, the only authority that knows the answer.

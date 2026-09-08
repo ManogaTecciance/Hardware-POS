@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, User } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { isAdminLevelRole } from './permissions';
 
 export type RefreshTokenWithUser = Prisma.RefreshTokenGetPayload<{ include: { user: true } }>;
 
@@ -97,9 +98,11 @@ export class AuthRepository {
   /**
    * Does this user currently have access to that branch, within their tenant?
    *
-   * OWNER and ADMIN implicitly access every active branch in their tenant —
-   * they are the roles that manage the branches, and a deactivated branch is
-   * still refused. Everyone else needs a matching `BranchAccess` row, OR to
+   * Owner-level roles (`isAdminLevelRole`: OWNER, ADMIN, and SALESPERSON —
+   * the hardware template's owner-equivalent, D100) implicitly access every
+   * active branch in their tenant — they are the roles that manage the
+   * branches, and a deactivated branch is still refused. Everyone else needs
+   * a matching `BranchAccess` row, OR to
    * have `User.branchId` still pointing at that branch (backwards compat with
    * pre-Phase-1.5.6 users). The branch must be active in every case.
    */
@@ -109,7 +112,7 @@ export class AuthRepository {
       select: { id: true },
     });
     if (!branch) return false;
-    if (user.role === 'OWNER' || user.role === 'ADMIN') return true;
+    if (isAdminLevelRole(user.role)) return true;
     if (user.branchId === branchId) return true;
     const access = await this.prisma.branchAccess.findUnique({
       where: { userId_branchId: { userId: user.id, branchId } },
@@ -120,7 +123,7 @@ export class AuthRepository {
 
   /** The list of branches this user can currently access, tenant-scoped. */
   async listAccessibleBranches(user: User): Promise<{ id: string; name: string }[]> {
-    if (user.role === 'OWNER' || user.role === 'ADMIN') {
+    if (isAdminLevelRole(user.role)) {
       return this.prisma.branch.findMany({
         where: { tenantId: user.tenantId, isActive: true },
         orderBy: { name: 'asc' },
@@ -146,8 +149,9 @@ export class AuthRepository {
 
   /**
    * Resolve the branch + register a session operates at: the user's assigned
-   * branch (or the tenant's first active branch for unassigned owners/admins)
-   * and that branch's first active register.
+   * branch (or the tenant's first active branch for an unassigned owner-level
+   * user — `isAdminLevelRole`, see `hasBranchAccess`) and that branch's first
+   * active register.
    */
   async resolveLocation(
     tenantId: string,

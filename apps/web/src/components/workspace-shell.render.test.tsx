@@ -294,6 +294,28 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     expect(links).not.toContain('QuickBooks');
     expect(links).not.toContain('Settings');
   });
+
+  it('D100 — a Salesperson is drawn the owner’s rail, Settings and QuickBooks included', async () => {
+    // The rendered counterpart of the cashier negative above: the role that
+    // holds the owner's permissions gets the owner's sidebar, entry for entry.
+    role = 'OWNER';
+    render(<Sidebar />);
+    await settle();
+    const ownerLinks = navLinks();
+    cleanup();
+
+    role = 'SALESPERSON';
+    render(<Sidebar />);
+    await settle();
+    const links = navLinks();
+
+    expect(links).toEqual(ownerLinks);
+    // Positive on the two entries the cashier case proves are gated, so the
+    // equality cannot hold on two empty rails.
+    for (const expected of ['POS', 'QuickBooks', 'Settings']) {
+      expect({ expected, present: links.includes(expected) }).toEqual({ expected, present: true });
+    }
+  });
 });
 
 describe('accessibility — the shell is navigable without sight or a mouse', () => {

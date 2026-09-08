@@ -18,15 +18,20 @@
  *
  * ## Operational roles are data, not enum members
  *
- * `UserRole` stays at the five built-in platform roles. The Waiter, the
- * food-service Cashier and the Receptionist are *rows*, because adding them to
- * a persisted enum would commit the whole platform to a vocabulary before the
- * features exist, and enum values cannot be removed without a destructive
- * migration. (That is also why trimming the template catalogue on 2026-08-17
+ * `UserRole` stays at the six built-in platform roles (the sixth, SALESPERSON,
+ * arrived from `main` on 2026-08-31). The Waiter, the food-service Cashier and
+ * the Receptionist are *rows*, because adding them to a persisted enum would
+ * commit the whole platform to a vocabulary before the features exist, and
+ * enum values cannot be removed without a destructive migration.
+ *
+ * Being enum-backed does not make a role universal, though. Salesperson is
+ * built in — a tenant cannot delete it — yet only the HARDWARE template offers
+ * it (D100). "Built in" says who owns the definition; the per-template lists at
+ * the bottom of this file say who gets a row. (That is also why trimming the template catalogue on 2026-08-17
  * deleted template OBJECTS below but no enum value: the enum is persisted
  * data with production users on it; a template is only a seeding blueprint.)
  */
-import { Permission, ROLE_PERMISSIONS, UserRole } from './authorization.js';
+import { ALL_USER_ROLES, Permission, ROLE_PERMISSIONS, UserRole } from './authorization.js';
 
 export interface RoleTemplate {
   /** Stable identifier. Never shown, never edited, unique per tenant. */
@@ -45,18 +50,25 @@ export interface RoleTemplate {
 /**
  * Templates for the built-in platform roles that workspaces still SEED.
  *
- * Only Owner and Cashier remain (PO decision, 2026-08-17): the ADMIN,
+ * Owner and Cashier survived the trim (PO decision, 2026-08-17): the ADMIN,
  * MANAGER and ACCOUNTANT templates were removed outright with the rest of
  * the unstaffed catalogue — a blueprint no template list references is not
  * dormant, it is an invitation to reintroduce the sprawl. The `UserRole`
- * ENUM keeps all five values: it is a persisted database enum, existing
- * users sit on those values and resolve through `ROLE_PERMISSIONS` on the
- * legacy fallback, and existing tenants keep their already-seeded rows.
- * Removing a template stops NEW seeding; it rewrites no one's authority.
+ * ENUM keeps every value: it is a persisted database enum, existing users
+ * sit on those values and resolve through `ROLE_PERMISSIONS` on the legacy
+ * fallback, and existing tenants keep their already-seeded rows. Removing a
+ * template stops NEW seeding; it rewrites no one's authority.
  *
- * Each surviving template derives its permissions from `ROLE_PERMISSIONS`
- * rather than restating them, so the two cannot disagree; the parity spec
- * still asserts the equality.
+ * Salesperson is the third (D100, PO decision 2026-09-08): owner-equivalent,
+ * and offered by the HARDWARE template alone. It lives in this list because
+ * it is enum-backed and undeletable like the other two — NOT because every
+ * workspace seeds it. This list is the catalogue of built-ins; which of them
+ * a workspace receives is decided by the per-template lists below, which is
+ * why GENERAL selects its two explicitly rather than reading this list whole.
+ *
+ * Each template derives its permissions from `ROLE_PERMISSIONS` rather than
+ * restating them, so the two cannot disagree; the parity spec still asserts
+ * the equality.
  */
 export const BUILT_IN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   {
@@ -72,6 +84,24 @@ export const BUILT_IN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Takes sales and payments at the till.',
     isBuiltIn: true,
     permissions: ROLE_PERMISSIONS.CASHIER,
+  },
+  {
+    /*
+     * D100 — the hardware shop's second owner-level post: the person on the
+     * counter who runs the shop as the owner would, with the owner's authority
+     * and the owner's screens. `ROLE_PERMISSIONS.SALESPERSON` is the OWNER set
+     * by reference (see authorization.ts), so "the same as the owner" is a
+     * structural fact here rather than a copy that could drift.
+     *
+     * Offered by `HARDWARE_ROLE_TEMPLATES` only. A restaurant, cafe, bakery,
+     * hotel or general workspace has no such post, and a template that
+     * appears in a picker is a template someone will assign.
+     */
+    key: UserRole.Salesperson,
+    name: 'Salesperson',
+    description: 'Owner-equivalent: full access to every feature the tenant has enabled.',
+    isBuiltIn: true,
+    permissions: ROLE_PERMISSIONS.SALESPERSON,
   },
 ];
 
@@ -310,8 +340,28 @@ function template(key: string): RoleTemplate {
  * is every list's first entry because a workspace is created around one.
  */
 
-/** Hardware / retail: Owner and Cashier. */
+/**
+ * Hardware / retail: Owner, Salesperson, Cashier.
+ *
+ * D100 (PO decision, 2026-09-08): the Salesperson is a hardware-shop job and
+ * is offered NOWHERE else — see the template's own comment above. Listed
+ * between the owner it is equivalent to and the till it is not.
+ */
 export const HARDWARE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
+  template(UserRole.Owner),
+  template(UserRole.Salesperson),
+  template(UserRole.Cashier),
+];
+
+/**
+ * General: Owner and Cashier — the two roles every workspace has.
+ *
+ * This used to be `BUILT_IN_ROLE_TEMPLATES` itself, which stopped meaning the
+ * same thing when Salesperson joined the built-ins for the hardware template
+ * only (D100). Selecting by key keeps GENERAL's staffing a decision written
+ * here, not a side effect of what the catalogue happens to contain.
+ */
+export const GENERAL_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   template(UserRole.Owner),
   template(UserRole.Cashier),
 ];
@@ -340,3 +390,32 @@ export const HOTEL_WORKSPACE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
 // not by an if-chain here that each new vertical had to remember to extend
 // (this one silently handed an unknown type the built-in roles only).
 // Consumers importing it from the package root are unaffected.
+
+/**
+ * D55.1 — the enum value that sits underneath a workspace role row.
+ *
+ * `User.role` is a persisted enum of six platform roles; the operational roles
+ * (Waiter, Kitchen staff, Receptionist, …) are rows. A user assigned one of
+ * those rows still has to store something in the enum column, and although
+ * `PermissionResolver` ignores it whenever `roleId` resolves, a handful of
+ * checks still read the enum directly — the owner-level cross-branch rules
+ * (`isAdminLevelRole`) and the QuickBooks role gates. So the value chosen here
+ * is a privilege decision, not bookkeeping.
+ *
+ * A built-in key is its own enum value; anything else — a custom role, a row
+ * with no key — is CASHIER, the least-privileged built-in, so that a custom
+ * role's enum fails CLOSED: a waiter must not gain cross-branch reach because
+ * the column had to hold something, and must not inherit manager permissions
+ * if their row is later deleted (the `LEGACY_FALLBACK` state).
+ *
+ * D100 moved this here from the API's platform-admin module because three
+ * callers now derive the column — the console, the tenant-facing role
+ * assignment and `provision-tenant.ts` — and a second copy of the mapping
+ * that decides whether a SALESPERSON row yields an owner-level enum would
+ * drift silently.
+ */
+export function baseUserRoleFor(roleKey: string | null): UserRole {
+  return roleKey !== null && (ALL_USER_ROLES as readonly string[]).includes(roleKey)
+    ? (roleKey as UserRole)
+    : UserRole.Cashier;
+}

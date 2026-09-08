@@ -13,13 +13,14 @@
  * logged-in session.
  */
 
+import { ADMIN_LEVEL_ROLES } from '@hardware-pos/shared';
 import {
   AccountingProviderKind,
   BusinessType,
   InventoryMode,
   ModuleKey,
   type PrismaClient,
-  type UserRole,
+  UserRole,
 } from '@hardware-pos/database';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
@@ -387,19 +388,67 @@ describe('tenant isolation', () => {
 // 12-16 — permission enforcement
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Who may write the profile, per enum role — explicit, and TOTAL over the
+ * persisted enum. `Record<UserRole, …>` fails to compile when a value is added
+ * without a verdict, and `EVERY_ROLE` is `Object.values(UserRole)` itself, so
+ * a new role cannot be left out of the matrices below by omission (D30). The
+ * verdicts are `PLATFORM_PROFILE_MANAGE`, which the owner-level roles hold and
+ * nobody else does; D100's Salesperson is owner-level and writes as the owner.
+ */
+const PROFILE_UPDATE_VERDICT: Record<UserRole, 200 | 403> = {
+  OWNER: 200,
+  ADMIN: 200,
+  SALESPERSON: 200,
+  MANAGER: 403,
+  ACCOUNTANT: 403,
+  CASHIER: 403,
+};
+const EVERY_ROLE: readonly UserRole[] = Object.values(UserRole);
+const PROFILE_WRITERS = EVERY_ROLE.filter((role) => PROFILE_UPDATE_VERDICT[role] === 200);
+const PROFILE_NON_WRITERS = EVERY_ROLE.filter((role) => PROFILE_UPDATE_VERDICT[role] === 403);
+
+/** The fixture's own user where it seeds one for the role; a fresh row otherwise. */
+async function userIdFor(role: UserRole): Promise<string> {
+  switch (role) {
+    case 'OWNER':
+      return tile.ownerId;
+    case 'MANAGER':
+      return tile.managerId;
+    case 'CASHIER':
+      return tile.cashierId;
+    default:
+      return userWithRole(tile, role);
+  }
+}
+
 describe('permission enforcement on PATCH', () => {
-  it.each([['CASHIER'], ['MANAGER'], ['ACCOUNTANT']] as const)(
-    '%s cannot update the platform profile',
-    async (role) => {
-      const userId = role === 'CASHIER' ? tile.cashierId : await userWithRole(tile, role);
-      const token = tokenFor(tile, userId, role);
+  it('POSITIVE CONTROL: the verdict table covers the whole enum and its writers are exactly the owner-level roles', () => {
+    // The `it.each` tables below are filters over this one; an empty filter
+    // would pass by running nothing (D30 rule 7).
+    expect(EVERY_ROLE.length).toBeGreaterThan(0);
+    expect(Object.keys(PROFILE_UPDATE_VERDICT).sort()).toEqual([...EVERY_ROLE].sort());
+    expect(PROFILE_WRITERS.length).toBeGreaterThan(0);
+    expect(PROFILE_NON_WRITERS.length).toBeGreaterThan(0);
+    // The writers are the owner-level set — the same set that crosses branches
+    // (D100) — stated as a set equality so neither side can drift alone.
+    expect([...PROFILE_WRITERS].sort()).toEqual([...ADMIN_LEVEL_ROLES].sort());
+    expect(PROFILE_WRITERS).toContain('SALESPERSON');
 
-      const res = await patchProfile(token, { businessType: BusinessType.RESTAURANT });
+    // MUTATION PROOF: a verdict table that let the till write would be caught
+    // by the set equality above.
+    const widened = [...PROFILE_WRITERS, 'CASHIER'].sort();
+    expect(() => expect(widened).toEqual([...ADMIN_LEVEL_ROLES].sort())).toThrow();
+  });
 
-      expect(res.status).toBe(403);
-      expect(await prisma.tenantBusinessProfile.count()).toBe(0);
-    },
-  );
+  it.each(PROFILE_NON_WRITERS)('%s cannot update the platform profile', async (role) => {
+    const token = tokenFor(tile, await userIdFor(role), role);
+
+    const res = await patchProfile(token, { businessType: BusinessType.RESTAURANT });
+
+    expect(res.status).toBe(403);
+    expect(await prisma.tenantBusinessProfile.count()).toBe(0);
+  });
 
   it('MANAGER cannot update even when the fixture manager id is used', async () => {
     const res = await patchProfile(tokenFor(tile, tile.managerId, 'MANAGER'), {
@@ -410,9 +459,8 @@ describe('permission enforcement on PATCH', () => {
     expect(await prisma.tenantBusinessProfile.count()).toBe(0);
   });
 
-  it.each([['OWNER'], ['ADMIN']] as const)('%s can update its own tenant profile', async (role) => {
-    const userId = role === 'OWNER' ? tile.ownerId : await userWithRole(tile, role);
-    const token = tokenFor(tile, userId, role);
+  it.each(PROFILE_WRITERS)('%s can update its own tenant profile', async (role) => {
+    const token = tokenFor(tile, await userIdFor(role), role);
 
     const res = await patchProfile(token, { businessType: BusinessType.HARDWARE });
 
@@ -420,22 +468,13 @@ describe('permission enforcement on PATCH', () => {
     expect(res.data.businessType).toBe(BusinessType.HARDWARE);
   });
 
-  it.each([['OWNER'], ['ADMIN'], ['MANAGER'], ['ACCOUNTANT'], ['CASHIER']] as const)(
-    '%s can read the effective profile — navigation depends on it',
-    async (role) => {
-      const userId =
-        role === 'OWNER'
-          ? tile.ownerId
-          : role === 'MANAGER'
-            ? tile.managerId
-            : role === 'CASHIER'
-              ? tile.cashierId
-              : await userWithRole(tile, role);
-
-      const res = await getProfile(tokenFor(tile, userId, role));
-      expect(res.status).toBe(200);
-    },
-  );
+  // Every enum value, the D100 Salesperson included: a role that cannot read
+  // its own tenant's profile renders an EMPTY navigation rail, not a reduced
+  // one, so the read is universal by design.
+  it.each(EVERY_ROLE)('%s can read the effective profile — navigation depends on it', async (role) => {
+    const res = await getProfile(tokenFor(tile, await userIdFor(role), role));
+    expect(res.status).toBe(200);
+  });
 
   it('records an audit entry on a successful update', async () => {
     await patchProfile(ownerToken(tile), { businessType: BusinessType.HARDWARE });

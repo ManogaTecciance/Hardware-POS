@@ -18,6 +18,9 @@ import * as path from 'node:path';
 
 export const AUTH = {
   owner: path.resolve(__dirname, '../.auth/owner.json'),
+  // D100 — the salesperson gets a browser session of its own so "the same UI
+  // as the owner" is something a spec can look at, not infer from a table.
+  salesperson: path.resolve(__dirname, '../.auth/salesperson.json'),
   cashier: path.resolve(__dirname, '../.auth/cashier.json'),
 } as const;
 

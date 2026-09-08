@@ -61,7 +61,8 @@ export class AuthService {
   ) {}
 
   /**
-   * Email + password login (owner / admin / accountant).
+   * Email + password login (owner-level and back-office roles; since D48 the
+   * till too, PINs having become approval-only).
    *
    * `User` is only `@@unique([tenantId, email])`, so the same email may exist in
    * more than one tenant. Resolution is therefore explicit and deterministic:
@@ -168,7 +169,6 @@ export class AuthService {
     return inactive.length === 1 ? inactive[0] : null;
   }
 
-  /** PIN login (cashier / manager), scoped to the given tenant. */
   /**
    * Exchange a live refresh token for a new access + refresh pair.
    * Tokens rotate on every use; presenting an already-rotated (revoked)

@@ -220,7 +220,11 @@ describe('4-13 — legacy and explicit QUICKBOOKS catalogue behaviour is unchang
     await expect(
       products.update(tile.tenantId, created.id, dto(UpdateProductDto, { quantityOnHand: 99 }), 'CASHIER'),
     ).rejects.toThrow(
-      'Stock for QuickBooks-managed products is controlled by QuickBooks. Ask an owner/admin to override.',
+      // `main` reworded the tail on 2026-08-31 (adf9d0e, the SALESPERSON role):
+      // "an owner/admin" became "someone with owner-level access" because the
+      // set of roles that can override is no longer two named ones. Production
+      // says this; the characterisation follows production, not the branch.
+      'Stock for QuickBooks-managed products is controlled by QuickBooks. Ask someone with owner-level access to override.',
     );
   });
 

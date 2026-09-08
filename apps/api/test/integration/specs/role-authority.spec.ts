@@ -215,10 +215,10 @@ describe('the readiness report describes reality', () => {
     await seedTenantRoles(prisma, other.tenantId, 'HARDWARE');
     await linkUsersToRoles(prisma, other.tenantId);
 
-    // The hardware template offers Owner and Cashier only (2026-08-17), so
-    // the fixtures' enum-MANAGER users have no matching row and linking
-    // rightly leaves them on the legacy path — the report must SAY so
-    // before it can go clean.
+    // The hardware template offers Owner, Salesperson and Cashier (D100) —
+    // no MANAGER row — so the fixtures' enum-MANAGER users have no matching
+    // row and linking rightly leaves them on the legacy path — the report
+    // must SAY so before it can go clean.
     const interim = await buildReport(prisma);
     expect(interim.usersOnLegacyFallback).toBe(2);
     expect(isReadyToRetireLegacyRole(interim)).toBe(false);
@@ -278,6 +278,122 @@ describe('the readiness report describes reality', () => {
       key: 'CASHIER',
       unexpected: ['settings:manage'],
     });
+  });
+});
+
+/**
+ * D100 — the Salesperson has a row of its own, seeded by the hardware template
+ * and no other. Before D100 the enum value existed with a permission set and
+ * nothing else, so a salesperson resolved through the legacy fallback forever
+ * and the console showed "Not set". Both halves are pinned here: the hardware
+ * salesperson links and resolves from the DATABASE with the owner's set; the
+ * same user in a food-service tenant stays on the fallback, and the report
+ * counts them rather than hiding them.
+ */
+describe('D100 — the Salesperson resolves from its own row, in the hardware template only', () => {
+  /** `{ role: SALESPERSON, roleId: null }` — a seeded or provisioned salesperson before linking. */
+  async function unlinkedSalesperson(tenant: SeededTenant): Promise<string> {
+    const id = `${tenant.tenantId}-salesperson`;
+    await prisma.user.create({
+      data: {
+        id,
+        tenantId: tenant.tenantId,
+        branchId: tenant.branchId,
+        role: 'SALESPERSON',
+        roleId: null,
+        name: 'Fixture Salesperson',
+        email: `salesperson@${tenant.tenantId}.test`,
+      },
+    });
+    return id;
+  }
+
+  const salespersonToken = (tenant: SeededTenant, userId: string) =>
+    http.tokenFor({ userId, tenantId: tenant.tenantId, role: 'SALESPERSON' });
+
+  const effectivePermissions = (tenant: SeededTenant, userId: string) =>
+    http.request<{ source: string; permissions: string[] }>(
+      'GET',
+      `/users/${userId}/effective-permissions`,
+      { token: ownerToken(tenant) },
+    );
+
+  it('links to the SALESPERSON row and resolves the owner’s set from the DATABASE', async () => {
+    const userId = await unlinkedSalesperson(tile);
+    await migrate(tile);
+
+    const row = await prisma.role.findUniqueOrThrow({
+      where: { tenantId_key: { tenantId: tile.tenantId, key: 'SALESPERSON' } },
+      select: { id: true, isSystem: true },
+    });
+    expect(row.isSystem).toBe(true);
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(user.roleId).toBe(row.id);
+
+    const res = await effectivePermissions(tile, userId);
+    expect(res.status).toBe(200);
+    expect(res.data.source).toBe('DATABASE');
+    // Compared to the OWNER constant, not to SALESPERSON's: the authority binds
+    // the two by reference (authorization.ts), and a narrowed salesperson
+    // template must not be able to satisfy this by agreeing with itself.
+    expect([...res.data.permissions].sort()).toEqual([...ROLE_PERMISSIONS.OWNER].sort());
+    expect(res.data.permissions.length).toBeGreaterThan(20);
+
+    // The report diffs every row whose key is in ROLE_PERMISSIONS — the
+    // SALESPERSON row included, as the mutation proof below shows — and
+    // finds nothing to name.
+    const report = await buildReport(prisma);
+    expect(report.builtInParityDifferences).toEqual([]);
+    expect(report.invalidRoleLinks).toEqual([]);
+    expect(report.crossTenantRoleLinks).toEqual([]);
+  });
+
+  it('MUTATION PROOF: the report inspects the SALESPERSON row — a narrowed row is named, and the user follows it', async () => {
+    const userId = await unlinkedSalesperson(tile);
+    await migrate(tile);
+    expect((await createProduct(salespersonToken(tile, userId))).status).toBe(201);
+
+    await prisma.role.update({
+      where: { tenantId_key: { tenantId: tile.tenantId, key: 'SALESPERSON' } },
+      data: { permissions: { disconnect: [{ key: 'product:manage' }] } },
+    });
+
+    const report = await buildReport(prisma);
+    expect(report.builtInParityDifferences).toEqual([
+      { tenantId: tile.tenantId, key: 'SALESPERSON', missing: ['product:manage'], unexpected: [] },
+    ]);
+    // Authority comes from the row now, so the write is refused on the very
+    // next request — the same rule the owner is held to above.
+    expect((await createProduct(salespersonToken(tile, userId))).status).toBe(403);
+  });
+
+  it('NEGATIVE: the same user in a RESTAURANT tenant stays on the legacy fallback, and is counted', async () => {
+    const userId = await unlinkedSalesperson(other);
+    await seedTenantRoles(prisma, other.tenantId, 'RESTAURANT');
+    const linked = await linkUsersToRoles(prisma, other.tenantId);
+
+    // POSITIVE CONTROL on the same call: it linked the owner (there IS an
+    // OWNER row), so leaving the salesperson is a decision, not a no-op.
+    expect(linked).toBe(1);
+    expect(
+      await prisma.role.findUnique({
+        where: { tenantId_key: { tenantId: other.tenantId, key: 'SALESPERSON' } },
+      }),
+    ).toBeNull();
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(user.roleId).toBeNull();
+
+    const res = await effectivePermissions(other, userId);
+    expect(res.status).toBe(200);
+    expect(res.data.source).toBe('LEGACY_FALLBACK');
+
+    // Counted, not hidden. `tile` is unmigrated here (its three fixture users),
+    // and of the restaurant's four only the owner linked: MANAGER and the
+    // retail CASHIER have no row in the food-service template either.
+    const report = await buildReport(prisma);
+    expect(report.usersWithRoleId).toBe(1);
+    expect(report.usersOnLegacyFallback).toBe(6);
+    expect(isReadyToRetireLegacyRole(report)).toBe(false);
   });
 });
 

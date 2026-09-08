@@ -87,12 +87,14 @@ async function main(): Promise<void> {
   ]);
 
   /*
-   * 2026-08-17: the hardware template staffs an Owner and Cashiers, so the
-   * demo does too — the old Manager and Accountant users are gone (and
+   * 2026-08-17: the hardware template staffs an Owner and Cashiers — and,
+   * since D100, an owner-equivalent Salesperson — so the demo does too; the
+   * old Manager and Accountant users are gone (and
    * `removeRetiredDemoUsers` below clears them from a re-seeded database, so
    * the console never shows a user whose role no longer exists). The OWNER
-   * carries the approval PIN now: in a two-role shop the owner is who answers
-   * the in-POS approval prompts (D48: PINs answer prompts, not the login
+   * carries the approval PIN now: the Salesperson signs in like the owner and
+   * deliberately has no PIN, so the owner is who answers the in-POS approval
+   * prompts (D48: PINs answer prompts, not the login
    * form), and their unlimited discount cap covers everything a manager's did.
    */
   const users = [
@@ -106,12 +108,18 @@ async function main(): Promise<void> {
       branchId: null as string | null,
     },
     {
-      // Owner-equivalent role (main, 2026-08-31), so it mirrors the owner's
-      // credentials exactly: email + password, no PIN. A 4-digit PIN is a weak
-      // credential for an account holding every permission. No role TEMPLATE
-      // exists for it (the hardware template staffs Owner + Cashier), so the
-      // user stays unlinked and resolves through the enum fallback — see the
-      // merge note in 00-decisions.md.
+      // Owner-equivalent role (main, 2026-08-31): email + password, and — the
+      // one deliberate difference from the owner — no PIN. Main's reasoning was
+      // that a 4-digit PIN is a weak credential for an account holding every
+      // permission; on this branch PINs only answer in-POS approval prompts
+      // (D48), so what the difference means here is that the demo salesperson
+      // cannot act as an approver, and the owner's 2222 answers those prompts.
+      // A real salesperson can be given a PIN like any other user.
+      //
+      // D100 gave the hardware template a SALESPERSON row, and
+      // `linkUsersToRoles` below links this user to it by enum key like the
+      // owner and the cashier — it resolves from the database, not the enum
+      // fallback.
       id: 'usr_salesperson',
       name: 'Salesperson',
       email: 'salesperson@hardwarepos.test',

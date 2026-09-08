@@ -27,20 +27,17 @@ GET /v1/health
 
 ## Auth
 
-Two login methods issue the same bearer JWT (payload: `sub`, `tenantId`, `role`). Send it as
-`Authorization: Bearer <token>` on all other calls; the tenant is taken from the token.
+Email + password is the only login path (D48): every role, the till included, signs in
+with it. The bearer JWT (payload: `sub`, `tenantId`, `role`) goes on all other calls as
+`Authorization: Bearer <token>`; the tenant is taken from the token. PINs no longer log
+anyone in — they answer the in-POS approval prompts (`/discounts/approve`,
+`/returns/approve`) and `POST /v1/auth/pin-login` is gone.
 
 ```
-POST /v1/auth/login                   # email + password (owner / admin / salesperson / accountant)
+POST /v1/auth/login                   # email + password (every role)
 body:  { "email": "owner@hardwarepos.test", "password": "password123" }
 200 →  { "data": { "token": "...", "user": { "id", "tenantId", "name", "email", "role" } } }
 401 →  invalid email or password
-
-POST /v1/auth/pin-login               # PIN (cashier / manager); requires x-tenant-id header
-headers: x-tenant-id: <tenantId>
-body:  { "pin": "1111" }
-200 →  { "data": { "token": "...", "user": { ... } } }
-401 →  invalid PIN
 
 GET  /v1/auth/me                      # current user + effective permissions
 200 →  { "data": { "id", "tenantId", "name", "email", "role", "branchId", "permissions": [] } }
@@ -112,8 +109,13 @@ difference between a day running 00:00–00:00 and one running 05:30–05:30.
 Roles: `OWNER`, `ADMIN`, `SALESPERSON`, `MANAGER`, `CASHIER`, `ACCOUNTANT`. Routes are
 protected by a global JWT guard plus role/permission guards. `SALESPERSON` is an
 owner-equivalent role — it carries exactly the `OWNER` permission set, the same
-unlimited discount ceiling, and the same admin-level overrides. Summary of enforced
-access:
+unlimited discount ceiling, and the same admin-level overrides. It is also the
+hardware template's role and no other's (D100): only a `HARDWARE` workspace seeds a
+`SALESPERSON` role row, so the roles endpoints — `GET /v1/roles` and the console's
+`GET /v1/platform-admin/workspaces/:id/roles`, both of which read the workspace's own
+rows — never list it for a food-service, hotel or general workspace, and
+`POST /v1/roles` refuses the key (`400 ROLE_KEY_RESERVED`, as for every built-in and
+template key). Summary of enforced access:
 
 | Capability                         | Roles                                       |
 | ---------------------------------- | ------------------------------------------- |

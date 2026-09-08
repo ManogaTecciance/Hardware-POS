@@ -47,8 +47,10 @@ export interface WorkspaceUserView {
 
 /**
  * A role this workspace can assign. Which roles exist is decided by the
- * workspace's template — a restaurant or hotel workspace has Waiter, Kitchen
- * Staff and the rest on top of the five built-ins; a hardware one does not.
+ * workspace's template, and a template's list is not "the built-ins plus
+ * extras": a hardware workspace has Owner, Salesperson and Cashier —
+ * Salesperson is hardware-only (D100); a food-service one has Owner, Waiter,
+ * Cashier and Kitchen staff; a hotel has Owner, Waiter and Receptionist.
  * Addressed by `id` because `key` is nullable server-side.
  */
 export interface WorkspaceRoleView {

@@ -18,6 +18,7 @@
  */
 import { UserRole as PrismaUserRole } from '@hardware-pos/database';
 import {
+  ADMIN_LEVEL_ROLES,
   ALL_PERMISSIONS,
   ALL_USER_ROLES,
   Permission,
@@ -236,7 +237,7 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
     expect(roleHasPermission('ACCOUNTANT', Permission.CUSTOMER_MANAGE)).toBe(false);
   });
 
-  it('the platform-profile split holds: many may read, only owner/admin may change', () => {
+  it('the platform-profile split holds: many may read, only the owner-level roles may change', () => {
     const readers = Object.values(PrismaUserRole).filter((r) =>
       roleHasPermission(r, Permission.PLATFORM_PROFILE_READ),
     );
@@ -251,12 +252,26 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
       'OWNER',
       'SALESPERSON',
     ]);
+    // Every persisted role reads the profile — it is how a client learns what
+    // kind of business it is (D88) — so the readers are the whole enum.
+    expect([...readers].sort()).toEqual([...ALL_USER_ROLES].sort());
     expect([...writers].sort()).toEqual([
         'ADMIN',
         'OWNER',
         // main, 2026-08-31 — owner-equivalent, so it may change the profile too.
         'SALESPERSON',
       ]);
+    // The writers are exactly the owner-level set — the one authority for
+    // "may step past a guard-rail" (D99, D100). A role added there without
+    // this permission, or granted the permission without being owner-level,
+    // fails here; the literal list above is what makes it fail by name.
+    expect([...writers].sort()).toEqual([...ADMIN_LEVEL_ROLES].sort());
+    // NEGATIVE, by name: the readers who may not change it — the split is real.
+    expect(readers.filter((r) => !writers.includes(r)).sort()).toEqual([
+      'ACCOUNTANT',
+      'CASHIER',
+      'MANAGER',
+    ]);
   });
 
   it('roleHasPermission discriminates, rather than always answering the same way', () => {

@@ -8,8 +8,9 @@ import { UserRole } from '@hardware-pos/database';
  * authorisation: every branch-scoped request re-validates that the user still
  * has access to the branch. See `BranchScopeGuard`.
  *
- * `null` means the caller is operating tenant-wide (OWNER/ADMIN who did not
- * choose a specific branch, or a legacy token issued before Phase 1.5.6).
+ * `null` means the caller is operating tenant-wide (an owner-level role —
+ * `isAdminLevelRole`: OWNER, ADMIN, SALESPERSON — that did not choose a
+ * specific branch, or a legacy token issued before Phase 1.5.6).
  */
 export interface JwtPayload {
   sub: string;

@@ -27,14 +27,24 @@
  * configuration, which stays the default so provisioning a retail company keeps
  * behaving as it always has. A restaurant must pass it: there is no way to infer
  * "this company serves food" from a name.
+ *
+ * The business type also decides which ROLES the tenant is seeded with, and a
+ * `--user` may only name one of them: a hardware (or no-profile, D57) tenant
+ * offers OWNER, SALESPERSON and CASHIER; a food-service one OWNER, WAITER,
+ * RESTAURANT_CASHIER and KITCHEN_STAFF; a hotel OWNER, WAITER and RECEPTIONIST.
+ * Every user is linked to their role ROW on creation (D100), so nobody
+ * provisioned here starts on the legacy enum fallback. The enum column is
+ * derived from the row the same way the platform console does it.
  */
 import { randomBytes } from 'node:crypto';
 
 import { BusinessType, PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
+import { baseUserRoleFor, roleTemplatesForBusinessType } from '@hardware-pos/shared';
+
 import { BUSINESS_PROFILE_PRESETS } from '../src/business-profile-presets';
-import { seedTenantRoles, syncPermissionCatalogue } from '../src/seed-roles';
+import { linkUsersToRoles, seedTenantRoles, syncPermissionCatalogue } from '../src/seed-roles';
 
 const prisma = new PrismaClient();
 const SALT_ROUNDS = 10;
@@ -44,6 +54,13 @@ const SHOP_TIME_ZONE = 'Asia/Colombo';
 interface UserSpec {
   name: string;
   email: string;
+  /** The role ROW's key — a template key of the tenant's business type. */
+  roleKey: string;
+  /**
+   * The enum column underneath, derived by the shared `baseUserRoleFor` — the
+   * same function the platform console and the tenant-facing role assignment
+   * use: a built-in key is its own enum value, anything else is CASHIER.
+   */
   role: UserRole;
   password: string;
   generated: boolean;
@@ -86,13 +103,12 @@ function parseArgs(argv: string[]): {
       businessType = raw as BusinessType;
     } else if (arg === '--user') {
       const raw = next();
-      const [userName, email, role, password, pin] = raw.split(':');
-      if (!userName || !email || !role) {
+      const [userName, email, roleKey, password, pin] = raw.split(':');
+      if (!userName || !email || !roleKey) {
         fail(`--user must be "Name:email:ROLE[:password[:pin]]" (got "${raw}")`);
       }
-      if (!(role in UserRole)) {
-        fail(`Unknown role "${role}" — use one of ${Object.keys(UserRole).join(', ')}`);
-      }
+      // Validated against the business type's templates once every argument
+      // is parsed — `--business-type` may follow `--user` on the command line.
       if (!email.includes('@')) fail(`"${email}" does not look like an email address`);
       if (pin && !/^\d{4,6}$/.test(pin)) {
         fail(`PIN for ${userName} must be 4–6 digits (got "${pin}")`);
@@ -100,7 +116,8 @@ function parseArgs(argv: string[]): {
       users.push({
         name: userName,
         email: email.toLowerCase(),
-        role: role as UserRole,
+        roleKey: roleKey.toUpperCase(),
+        role: baseUserRoleFor(roleKey.toUpperCase()),
         password: password || randomBytes(9).toString('base64url'),
         generated: !password,
         pin: pin || null,
@@ -121,6 +138,18 @@ function parseArgs(argv: string[]): {
   // PINs would be ambiguous.
   const pins = users.map((u) => u.pin).filter(Boolean);
   if (new Set(pins).size !== pins.length) fail('User PINs must be distinct');
+  // D100 — a role the template does not offer would leave the user with no
+  // row to link to, resolving from the enum instead: a SALESPERSON in a
+  // restaurant would be an owner-equivalent the template says cannot exist.
+  const offered = roleTemplatesForBusinessType(businessType ?? 'HARDWARE').map((t) => t.key);
+  for (const user of users) {
+    if (!offered.includes(user.roleKey)) {
+      fail(
+        `Role "${user.roleKey}" for ${user.name} is not one the ${businessType ?? 'HARDWARE'} ` +
+          `template offers — use one of ${offered.join(', ')}`,
+      );
+    }
+  }
   return { name, slug, branch, businessType, users };
 }
 
@@ -143,6 +172,7 @@ async function main(): Promise<void> {
   }
 
   let roleCount = 0;
+  let linkedCount = 0;
   const tenant = await prisma.$transaction(async (tx) => {
     const t = await tx.tenant.create({ data: { name, slug } });
     // Write the shop timezone rather than leaning on the code default, so a new
@@ -172,6 +202,11 @@ async function main(): Promise<void> {
     await syncPermissionCatalogue(tx);
     roleCount = (await seedTenantRoles(tx, t.id, businessType ?? 'HARDWARE')).length;
 
+    const roleIdByKey = new Map(
+      (await tx.role.findMany({ where: { tenantId: t.id }, select: { id: true, key: true } })).map(
+        (r) => [r.key as string, r.id] as const,
+      ),
+    );
     for (const user of users) {
       await tx.user.create({
         data: {
@@ -180,13 +215,23 @@ async function main(): Promise<void> {
           name: user.name,
           email: user.email,
           role: user.role,
+          // Linked to the row directly — validated above to exist — rather than
+          // through `linkUsersToRoles`, which can only match a key to an enum
+          // value and so could never link a waiter or a receptionist.
+          roleId: roleIdByKey.get(user.roleKey) ?? null,
           passwordHash: await bcrypt.hash(user.password, SALT_ROUNDS),
           pinHash: user.pin ? await bcrypt.hash(user.pin, SALT_ROUNDS) : null,
         },
       });
+      linkedCount += roleIdByKey.has(user.roleKey) ? 1 : 0;
     }
+    // Belt and braces for the built-ins; also what the backfill runs.
+    linkedCount += await linkUsersToRoles(tx, t.id);
     return t;
-  });
+  },
+  // The catalogue sync alone is sixty-odd upserts; Prisma's default
+  // five-second interactive-transaction budget is for a local database.
+  { timeout: 60_000, maxWait: 10_000 });
 
   console.log('\n✔ Company provisioned — no sample data, ready for first login.\n');
   console.log(`  Tenant   ${tenant.name}  (id: ${tenant.id}, slug: ${tenant.slug})`);
@@ -205,9 +250,9 @@ async function main(): Promise<void> {
   for (const user of users) {
     const note = user.generated ? '  ← generated, record it now' : '';
     const pin = user.pin ? ` / PIN ${user.pin}` : '';
-    console.log(`    ${user.role.padEnd(10)} ${user.email} / ${user.password}${pin}${note}`);
+    console.log(`    ${user.roleKey.padEnd(18)} ${user.email} / ${user.password}${pin}${note}`);
   }
-  console.log(`  Roles    ${roleCount} seeded (not yet used for authorization)\n`);
+  console.log(`  Roles    ${roleCount} seeded · ${linkedCount} of ${users.length} users linked to their role row\n`);
   console.log('\n  Sign in at the web app with the email + password above.');
   console.log('  PINs answer the in-POS approval prompts (discounts, returns).');
 }

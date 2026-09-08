@@ -11,6 +11,7 @@
  *  3. **Archival, never deletion.** Custom roles archive; built-ins do neither;
  *     keys are never reused; a user still holding an archived role fails closed.
  */
+import { ROLE_PERMISSIONS } from '@hardware-pos/shared';
 import { seedTenantRoles, syncPermissionCatalogue, linkUsersToRoles } from '@hardware-pos/database';
 import type { PrismaClient } from '@hardware-pos/database';
 
@@ -34,6 +35,15 @@ const CUSTOM = {
   name: 'Floor Supervisor',
   permissions: ['sale:read', 'product:read'],
 };
+
+/**
+ * The rows `seedTenantRoles(…, 'HARDWARE')` writes, all built in: Owner,
+ * Salesperson (D100) and Cashier — `HARDWARE_ROLE_TEMPLATES` by key. Written
+ * out rather than read from the template list so the immutability cases below
+ * name what they cover, and so the GET /roles case pins the set against the
+ * database independently of the function that seeded it.
+ */
+const HARDWARE_BUILT_INS = ['OWNER', 'SALESPERSON', 'CASHIER'] as const;
 
 interface RoleBody {
   id: string;
@@ -82,8 +92,13 @@ describe('reading roles', () => {
     const foreign = await prisma.role.findMany({ where: { tenantId: other.tenantId } });
     expect(foreign.length).toBeGreaterThan(0);
     expect(ids.filter((id: string) => foreign.some((f) => f.id === id))).toEqual([]);
-    // Positive control: it returned this tenant's roles rather than nothing.
-    expect(res.data.map((r) => r.key)).toContain('OWNER');
+    // Positive control: it returned this tenant's roles rather than nothing —
+    // and exactly the hardware template's rows (D100), each built in, with no
+    // food-service role among them.
+    const keys = res.data.map((r) => r.key).sort();
+    expect(keys).toEqual(['CASHIER', 'OWNER', 'SALESPERSON']);
+    expect(res.data.every((r) => r.isBuiltIn)).toBe(true);
+    expect(keys).not.toContain('WAITER');
   });
 
   it('refuses a caller without user:manage', async () => {
@@ -148,14 +163,54 @@ describe('creating a custom role', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  /*
+   * D100 — keys the platform already means something by are refused, whether
+   * or not this tenant's template seeds them. A custom SALESPERSON in a
+   * restaurant would map to the owner-level enum underneath and be adopted —
+   * marked built-in, permissions set to the owner's — by the next role seed.
+   * SALESPERSON is an enum value AND a row this tenant holds; ADMIN is an enum
+   * value with no template anywhere; WAITER is a template with no enum value.
+   */
+  it.each(['SALESPERSON', 'ADMIN', 'WAITER'] as const)(
+    'refuses the reserved key %s with ROLE_KEY_RESERVED and writes nothing (D100)',
+    async (key) => {
+      const rowsUnder = () =>
+        prisma.role.findMany({
+          where: { tenantId: tile.tenantId, key },
+          select: { id: true, isSystem: true, name: true },
+          orderBy: { id: 'asc' },
+        });
+      const before = await rowsUnder();
+      // The seeded row is the only thing that may sit under SALESPERSON; the
+      // other two keys are free here, so the refusal cannot be a key clash.
+      expect(before.length).toBe(key === 'SALESPERSON' ? 1 : 0);
+
+      const res = await createCustom(tile, { key, name: `Custom ${key}` });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('ROLE_KEY_RESERVED');
+
+      const after = await rowsUnder();
+      expect(after).toEqual(before);
+      expect(after.filter((r) => !r.isSystem)).toEqual([]);
+    },
+  );
+
+  it('POSITIVE CONTROL: a key of the tenant’s own is still created', async () => {
+    // Without this, a create that refused every key would pass the three above.
+    const res = await createCustom(tile);
+    expect(res.status).toBe(201);
+    expect(res.data.key).toBe(CUSTOM.key);
+  });
 });
 
 describe('editing roles', () => {
-  it('refuses to change a built-in role’s permissions', async () => {
-    const owner = await prisma.role.findFirstOrThrow({
-      where: { tenantId: tile.tenantId, key: 'OWNER' },
+  it.each(HARDWARE_BUILT_INS)('refuses to change the built-in %s role’s permissions', async (key) => {
+    const role = await prisma.role.findFirstOrThrow({
+      where: { tenantId: tile.tenantId, key },
     });
-    const res = await http.request('PUT', `/roles/${owner.id}/permissions`, {
+    expect(role.isSystem).toBe(true);
+    const res = await http.request('PUT', `/roles/${role.id}/permissions`, {
       token: ownerToken(tile),
       body: { permissions: ['sale:read'] },
     });
@@ -222,15 +277,19 @@ describe('archiving', () => {
     expect(await prisma.role.findUnique({ where: { id: roleId } })).not.toBeNull();
   });
 
-  it('refuses to archive a built-in role', async () => {
-    const cashier = await prisma.role.findFirstOrThrow({
-      where: { tenantId: tile.tenantId, key: 'CASHIER' },
+  it.each(HARDWARE_BUILT_INS)('refuses to archive the built-in %s role', async (key) => {
+    const role = await prisma.role.findFirstOrThrow({
+      where: { tenantId: tile.tenantId, key },
     });
-    const res = await http.request('POST', `/roles/${cashier.id}/archive`, {
+    expect(role.isSystem).toBe(true);
+    const res = await http.request('POST', `/roles/${role.id}/archive`, {
       token: ownerToken(tile),
       body: {},
     });
     expect(res.status).toBe(400);
+    // Still active — refused, not archived and then reported as an error.
+    const after = await prisma.role.findUniqueOrThrow({ where: { id: role.id } });
+    expect(after.isActive).toBe(true);
   });
 
   it('refuses to archive a role that still has users', async () => {
@@ -299,6 +358,95 @@ describe('assignment', () => {
     ).toBe(403);
   });
 
+  /**
+   * D100 — both columns move together. The enum underneath still decides the
+   * owner-level checks (cross-branch reach, the QuickBooks gates, the override
+   * paths), and this tenant-facing endpoint used to leave it behind: a cashier
+   * moved onto the Salesperson row stayed CASHIER for every one of them, and a
+   * demoted owner-level user kept the reach the demotion was meant to remove.
+   * `roleGrant` on the branch-access view is read straight from the DB enum,
+   * which makes it the honest witness here.
+   */
+  it('moving a user onto the Salesperson row makes them SALESPERSON underneath — owner-level reach included', async () => {
+    const roles = await http.request<RoleBody[]>('GET', '/roles', { token: ownerToken(tile) });
+    const salesperson = roles.data.find((r) => r.key === 'SALESPERSON')!;
+    expect(salesperson).toBeDefined();
+
+    const before = await http.request<{ role: string; roleGrant: boolean }>(
+      'GET',
+      `/users/${tile.cashierId}/branch-access`,
+      { token: ownerToken(tile) },
+    );
+    expect(before.data).toMatchObject({ role: 'CASHIER', roleGrant: false });
+
+    const put = await http.request('PUT', `/users/${tile.cashierId}/role`, {
+      token: ownerToken(tile),
+      body: { roleId: salesperson.id },
+    });
+    expect(put.status).toBe(200);
+
+    const after = await http.request<{ role: string; roleGrant: boolean }>(
+      'GET',
+      `/users/${tile.cashierId}/branch-access`,
+      { token: ownerToken(tile) },
+    );
+    expect(after.data).toMatchObject({ role: 'SALESPERSON', roleGrant: true });
+
+    // …and the row is the authority for permissions: the owner's set, from the database.
+    const effective = await http.request<{ source: string; permissions: string[] }>(
+      'GET',
+      `/users/${tile.cashierId}/effective-permissions`,
+      { token: ownerToken(tile) },
+    );
+    expect(effective.data.source).toBe('DATABASE');
+    expect([...effective.data.permissions].sort()).toEqual([...ROLE_PERMISSIONS.OWNER].sort());
+  });
+
+  it('NEGATIVE: moving them off it takes the enum with it — a demotion is not cosmetic', async () => {
+    const roles = await http.request<RoleBody[]>('GET', '/roles', { token: ownerToken(tile) });
+    const salesperson = roles.data.find((r) => r.key === 'SALESPERSON')!;
+    const cashier = roles.data.find((r) => r.key === 'CASHIER')!;
+    await http.request('PUT', `/users/${tile.cashierId}/role`, {
+      token: ownerToken(tile),
+      body: { roleId: salesperson.id },
+    });
+    // Positive control: the promotion took, so the demotion below undoes something.
+    expect(
+      (await http.request<{ role: string }>('GET', `/users/${tile.cashierId}/branch-access`, {
+        token: ownerToken(tile),
+      })).data.role,
+    ).toBe('SALESPERSON');
+
+    await http.request('PUT', `/users/${tile.cashierId}/role`, {
+      token: ownerToken(tile),
+      body: { roleId: cashier.id },
+    });
+    const demoted = await http.request<{ role: string; roleGrant: boolean }>(
+      'GET',
+      `/users/${tile.cashierId}/branch-access`,
+      { token: ownerToken(tile) },
+    );
+    expect(demoted.data).toMatchObject({ role: 'CASHIER', roleGrant: false });
+
+    // A custom row has no enum of its own and fails CLOSED to CASHIER, so a
+    // salesperson moved onto one loses owner-level reach rather than keeping it.
+    const custom = await createCustom(tile, { permissions: ['product:read'] });
+    await http.request('PUT', `/users/${tile.cashierId}/role`, {
+      token: ownerToken(tile),
+      body: { roleId: salesperson.id },
+    });
+    await http.request('PUT', `/users/${tile.cashierId}/role`, {
+      token: ownerToken(tile),
+      body: { roleId: custom.data.id },
+    });
+    const onCustom = await http.request<{ role: string; roleGrant: boolean }>(
+      'GET',
+      `/users/${tile.cashierId}/branch-access`,
+      { token: ownerToken(tile) },
+    );
+    expect(onCustom.data).toMatchObject({ role: 'CASHIER', roleGrant: false });
+  });
+
   it('cannot assign another tenant’s role', async () => {
     const foreign = await prisma.role.findFirstOrThrow({ where: { tenantId: other.tenantId } });
     const res = await http.request('PUT', `/users/${tile.cashierId}/role`, {
@@ -338,26 +486,30 @@ describe('lockout protection', () => {
     expect(JSON.stringify(res.body)).toContain('ROLE_LAST_ADMINISTRATOR');
   });
 
-  it('allows it when another administrator remains', async () => {
-    // The positive control. Without it, a service that refused every assignment
-    // would pass the case above.
-    await linkUsersToRoles(prisma, tile.tenantId);
-    // The hardware template seeds Owner and Cashier only (2026-08-17), so the
-    // "other administrator" is a second user on the OWNER role.
-    const ownerRole = await prisma.role.findFirstOrThrow({
-      where: { tenantId: tile.tenantId, key: 'OWNER' },
-    });
-    await prisma.user.update({ where: { id: tile.managerId }, data: { roleId: ownerRole.id } });
+  it.each(['OWNER', 'SALESPERSON'] as const)(
+    'allows it when another administrator remains on the %s role',
+    async (key) => {
+      // The positive control. Without it, a service that refused every
+      // assignment would pass the case above.
+      await linkUsersToRoles(prisma, tile.tenantId);
+      // The hardware template seeds two administrative rows (D100): the Owner
+      // and the owner-equivalent Salesperson. A second user on either one is
+      // "another administrator" — the guard counts permissions, not keys.
+      const adminRow = await prisma.role.findFirstOrThrow({
+        where: { tenantId: tile.tenantId, key },
+      });
+      await prisma.user.update({ where: { id: tile.managerId }, data: { roleId: adminRow.id } });
 
-    const created = await createCustom(tile, { permissions: ['product:read'] });
-    const weak = created.data.id;
+      const created = await createCustom(tile, { permissions: ['product:read'] });
+      const weak = created.data.id;
 
-    const res = await http.request('PUT', `/users/${tile.ownerId}/role`, {
-      token: ownerToken(tile),
-      body: { roleId: weak },
-    });
-    expect(res.status).toBe(200);
-  });
+      const res = await http.request('PUT', `/users/${tile.ownerId}/role`, {
+        token: ownerToken(tile),
+        body: { roleId: weak },
+      });
+      expect(res.status).toBe(200);
+    },
+  );
 
   it('refuses to strip administration from the role the last administrator holds', async () => {
     await linkUsersToRoles(prisma, tile.tenantId);

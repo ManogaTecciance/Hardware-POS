@@ -51,6 +51,13 @@ import { resetDatabase } from '../db-reset';
 import { dto } from '../dto';
 import { seedSecondTenant, seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 
+/**
+ * `main` (2026-09-04) requires a payment due date on any sale that leaves a
+ * balance, and refuses one on a sale that does not. A fixed far-future day keeps
+ * these characterisations about what they characterise, not about dates.
+ */
+const CREDIT_DUE_DATE = '2099-12-31';
+
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let sales: SalesService;
@@ -128,6 +135,7 @@ function creditSale(tenant: SeededTenant, actor: AuthenticatedUser) {
     customerId: tenant.creditCustomerId,
     items: [{ productId: tenant.productAId, quantity: 1 }],
     payments: [],
+    paymentDueDate: CREDIT_DUE_DATE,
   });
 }
 
@@ -137,6 +145,7 @@ function partialSale(tenant: SeededTenant, actor: AuthenticatedUser) {
     customerId: tenant.creditCustomerId,
     items: [{ productId: tenant.productAId, quantity: 1 }],
     payments: [{ method: 'CASH', amount: 400 }],
+    paymentDueDate: CREDIT_DUE_DATE,
   });
 }
 
@@ -391,6 +400,7 @@ describe('a tenant with NONE accounting', () => {
         branchId: other.branchId,
         items: [{ productId: other.productAId, quantity: 1 }],
         payments: [],
+        paymentDueDate: CREDIT_DUE_DATE,
       });
 
       expect(sale.paymentStatus).toBe('UNPAID');

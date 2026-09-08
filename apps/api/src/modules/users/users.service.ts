@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException, NotImplementedException } from '@nestjs/common';
-import type { Paginated } from '@hardware-pos/shared';
+import { isAdminLevelRole, type Paginated } from '@hardware-pos/shared';
 
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { paginate } from '../../common/pagination';
@@ -11,9 +11,9 @@ export interface UserBranchAccessView {
   role: string;
   /**
    * `true` when the user gains implicit access to every active branch of the
-   * tenant through their role (OWNER/ADMIN). Under that flag the explicit
-   * grants list is *supplementary* — the guard grants access through the
-   * role, not through the rows.
+   * tenant through their role (`isAdminLevelRole`: OWNER, ADMIN, SALESPERSON).
+   * Under that flag the explicit grants list is *supplementary* — the guard
+   * grants access through the role, not through the rows.
    */
   roleGrant: boolean;
   /** The user's default branch — the branch chosen at login without a switch. */
@@ -57,7 +57,9 @@ export class UsersService {
     return {
       userId: user.id,
       role: user.role,
-      roleGrant: user.role === 'OWNER' || user.role === 'ADMIN',
+      // Owner-level roles hold every branch through the role itself (D100
+      // added SALESPERSON to that set); the grants below are for everyone else.
+      roleGrant: isAdminLevelRole(user.role),
       defaultBranchId: user.branchId,
       explicitGrants: grants,
     };
@@ -99,10 +101,10 @@ export class UsersService {
     if (!exists) {
       return { removed: false, view: await this.listBranchAccess(tenantId, userId) };
     }
-    // Refuse to revoke the last branch a non-admin can reach. Owner and admin
-    // gain access implicitly through their role, so revoking their explicit
-    // grants never locks them out.
-    if (user.role !== 'OWNER' && user.role !== 'ADMIN') {
+    // Refuse to revoke the last branch a non-owner-level user can reach.
+    // Owner-level roles gain access implicitly through the role, so revoking
+    // their explicit grants never locks them out.
+    if (!isAdminLevelRole(user.role)) {
       const remaining = await this.usersRepository.countRemainingBranches(userId, branchId, user.branchId);
       if (remaining === 0) {
         throw new ForbiddenException(

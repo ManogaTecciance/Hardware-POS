@@ -61,6 +61,13 @@ import {
   type SeededTenant,
 } from '../fixtures';
 
+/**
+ * `main` (2026-09-04) requires a payment due date on any sale that leaves a
+ * balance, and refuses one on a sale that does not. A fixed far-future day keeps
+ * these characterisations about what they characterise, not about dates.
+ */
+const CREDIT_DUE_DATE = '2099-12-31';
+
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let sales: SalesService;
@@ -210,6 +217,7 @@ describe('1-5, 11 — legacy and explicit QUICKBOOKS sale stock behaviour is unc
       customerId: tile.creditCustomerId,
       items: [{ productId: tile.productAId, quantity: 2 }],
       payments: [],
+      paymentDueDate: CREDIT_DUE_DATE,
     });
     expect(await onHand(tile.productAId)).toBe(before - 2);
   });
@@ -221,6 +229,7 @@ describe('1-5, 11 — legacy and explicit QUICKBOOKS sale stock behaviour is unc
       customerId: tile.creditCustomerId,
       items: [{ productId: tile.productAId, quantity: 2 }],
       payments: [{ method: 'CASH', amount: 800 }],
+      paymentDueDate: CREDIT_DUE_DATE,
     });
     expect(await onHand(tile.productAId)).toBe(before - 2);
   });

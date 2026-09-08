@@ -8,6 +8,10 @@
  *  - NEGATIVE: malformed slugs are 400s; a duplicate slug — including one
  *    that differs only by CASE, and against a legacy mixed-case row — is a
  *    409, never a second workspace and never a raw database error.
+ *
+ * D100 adds the Salesperson: assignable through the console in a hardware
+ * workspace, and in no other — the picker reads the workspace's own rows
+ * (D55.1), so a restaurant simply has no such row to offer or accept.
  */
 import { syncPermissionCatalogue } from '@hardware-pos/database';
 import type { PrismaClient } from '@hardware-pos/database';
@@ -117,7 +121,9 @@ describe('the trimmed role catalogue, per template', () => {
 
   it('each template seeds exactly its staffed roles — nothing removed comes back', async () => {
     const cases: [string, string[]][] = [
-      ['HARDWARE', ['CASHIER', 'OWNER']],
+      // D100 added SALESPERSON to hardware — the owner-equivalent counter
+      // post — and to hardware ALONE: it must not appear in the two below.
+      ['HARDWARE', ['CASHIER', 'OWNER', 'SALESPERSON']],
       // D68 added KITCHEN_STAFF to food service — the kitchen board replaced
       // the kitchen printer, so the board needs somebody rostered to it.
       // Hotel deliberately does NOT get it: a hotel workspace is the front
@@ -133,5 +139,94 @@ describe('the trimmed role catalogue, per template', () => {
         keys: expected,
       });
     }
+  });
+});
+
+describe('D100 — the Salesperson is assignable in a hardware workspace and nowhere else', () => {
+  interface WorkspaceRole {
+    id: string;
+    key: string | null;
+    name: string;
+  }
+  interface WorkspaceUser {
+    id: string;
+    role: string;
+    roleKey: string | null;
+    roleId: string | null;
+  }
+
+  const rolesOf = async (workspaceId: string) =>
+    (
+      await http.request<WorkspaceRole[]>('GET', `/platform-admin/workspaces/${workspaceId}/roles`, {
+        token: adminToken,
+      })
+    ).data;
+
+  const createUser = (workspaceId: string, body: Record<string, unknown>) =>
+    http.request<WorkspaceUser>('POST', `/platform-admin/workspaces/${workspaceId}/users`, {
+      token: adminToken,
+      body: {
+        name: 'Counter Sales',
+        email: `sales-${Math.random().toString(36).slice(2, 10)}@prov.test`,
+        password: 'password123',
+        ...body,
+      },
+    });
+
+  it('creates a user on the SALESPERSON row and can move them to the CASHIER row', async () => {
+    const ws = await create({ slug: 'd100-hardware' });
+    expect(ws.status).toBe(201);
+    const roles = await rolesOf(ws.data.id);
+    const salesperson = roles.find((r) => r.key === 'SALESPERSON');
+    const cashier = roles.find((r) => r.key === 'CASHIER');
+    expect(salesperson).toBeDefined();
+    expect(cashier).toBeDefined();
+
+    const created = await createUser(ws.data.id, { roleId: salesperson!.id });
+    expect(created.status).toBe(201);
+    // Both columns: the enum underneath and the row in force. Before D100 the
+    // salesperson had no row, so the console could neither offer it nor show
+    // it as anything but "Not set".
+    expect(created.data).toMatchObject({
+      role: 'SALESPERSON',
+      roleKey: 'SALESPERSON',
+      roleId: salesperson!.id,
+    });
+
+    const moved = await http.request<WorkspaceUser>(
+      'PATCH',
+      `/platform-admin/workspaces/${ws.data.id}/users/${created.data.id}`,
+      { token: adminToken, body: { roleId: cashier!.id } },
+    );
+    expect(moved.status).toBe(200);
+    // Both columns move together — leaving the enum behind is how a demoted
+    // owner-level user would keep cross-branch visibility.
+    expect(moved.data).toMatchObject({ role: 'CASHIER', roleKey: 'CASHIER', roleId: cashier!.id });
+  });
+
+  it('NEGATIVE: a restaurant workspace offers no Salesperson, and the hardware row cannot be borrowed', async () => {
+    const hardware = await create({ slug: 'd100-hardware-2' });
+    const restaurant = await create({ slug: 'd100-restaurant', templateKey: 'RESTAURANT' });
+    expect(hardware.status).toBe(201);
+    expect(restaurant.status).toBe(201);
+
+    // Exact set, so the absence below is not satisfied by an empty picker.
+    const restaurantRoles = await rolesOf(restaurant.data.id);
+    expect(restaurantRoles.map((r) => r.key).sort()).toEqual([
+      'KITCHEN_STAFF',
+      'OWNER',
+      'RESTAURANT_CASHIER',
+      'WAITER',
+    ]);
+    expect(restaurantRoles.map((r) => r.key)).not.toContain('SALESPERSON');
+
+    const foreign = (await rolesOf(hardware.data.id)).find((r) => r.key === 'SALESPERSON');
+    expect(foreign).toBeDefined();
+    const email = 'borrowed-salesperson@prov.test';
+    const res = await createUser(restaurant.data.id, { roleId: foreign!.id, email });
+    expect(res.status).toBe(400);
+    // The 400 names what the workspace does offer; nothing was created.
+    expect(JSON.stringify(res.body)).toContain('does not belong to this workspace');
+    expect(await prisma.user.count({ where: { email } })).toBe(0);
   });
 });

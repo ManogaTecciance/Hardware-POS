@@ -94,10 +94,10 @@ export class PlatformAdminController {
   /**
    * D55.1 — the roles this workspace can assign, which its template decided.
    *
-   * A restaurant or hotel workspace answers with the five built-ins plus Waiter,
-   * Restaurant Manager, Restaurant Cashier, Kitchen Manager, Kitchen Staff and
-   * Bar Staff; a hardware workspace answers with the five. The console has no
-   * business hard-coding either list.
+   * A hardware workspace answers with Owner, Salesperson and Cashier — the
+   * Salesperson is the hardware template's alone (D100); a food-service one
+   * with Owner, Waiter, Cashier and Kitchen staff; a hotel with Owner, Waiter
+   * and Receptionist. The console has no business hard-coding any of them.
    */
   @Get('workspaces/:workspaceId/roles')
   listRoles(@Param('workspaceId') workspaceId: string) {

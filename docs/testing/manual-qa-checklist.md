@@ -5,9 +5,10 @@ Use `[x]` pass, `[!]` fail (add a note), `[-]` blocked/N-A.
 
 **Build under test:** ________  **Date:** ________  **Tester:** ________  **Env:** ☐ local ☐ staging
 
-**Test accounts** (tenant `tnt_dev`): Owner `owner@hardwarepos.test`/`password123` ·
-Salesperson `salesperson@hardwarepos.test`/`password123` ·
-Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · Cashier PIN `1111`.
+**Test accounts** (tenant `tnt_dev`): Owner `owner@hardwarepos.test`/`password123` (approver PIN `2222`) ·
+Salesperson `salesperson@hardwarepos.test`/`password123` (owner-equivalent, linked to the hardware
+template's `SALESPERSON` role row — the platform console shows "Salesperson", not "Not set"; no PIN) ·
+Cashier PIN `1111`. The Manager and Accountant demo users were retired on 2026-08-17.
 
 **Preconditions**
 - [ ] API and Web running; DB migrated + seeded.
@@ -60,9 +61,9 @@ Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · 
 
 ## 7. Manager approval
 - [ ] As **Cashier**, apply a discount → **Manager approval** modal appears (cashier limit 0%).
-- [ ] Enter Manager PIN `2222` with a value **≤15%** → approved; discount applies; token stored on the line.
-- [ ] Try **>15%** with Manager PIN → **rejected** (over manager cap).
-- [ ] Wrong Manager PIN → rejected, no approval.
+- [ ] Enter the Owner's approver PIN `2222` → approved at any value (no ceiling); discount applies; token stored on the line.
+- [ ] A Manager-tier PIN (provision one; none is seeded) with **>15%** → **rejected** (over manager cap).
+- [ ] Wrong PIN → rejected, no approval.
 - [ ] Complete the approved sale → succeeds; approver recorded.
 
 ## 8. Cash payment

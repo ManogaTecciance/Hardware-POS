@@ -32,9 +32,10 @@ pnpm db:seed
 ```
 
 The seed creates the demo tenant with branch `brn_dev` / register `reg_dev`, ten products, and
-these logins: `owner@hardwarepos.test` / `password123` (Owner), `accountant@hardwarepos.test` /
-`password123`, `salesperson@hardwarepos.test` / `password123` (Salesperson),
-Manager PIN `2222`, Cashier PIN `1111`.
+these logins: `owner@hardwarepos.test` / `password123` (Owner), `salesperson@hardwarepos.test` /
+`password123` (Salesperson — owner-equivalent, the hardware template's own role) and
+`cashier@hardwarepos.test` / `password123` (Cashier). PINs answer in-POS approval prompts, not
+the login form: `2222` is the Owner's, `1111` the Cashier's; the Salesperson has none.
 
 ## Running in development
 

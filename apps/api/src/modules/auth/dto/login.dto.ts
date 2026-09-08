@@ -1,7 +1,8 @@
 import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 /**
- * Owner / admin / accountant email + password login.
+ * Email + password login (owner-level and back-office roles; since D48 the
+ * till too, PINs having become approval-only).
  *
  * `workspace` is the tenant slug (Slice 7.2). It is optional for backward
  * compatibility: an email that exists in exactly one tenant still logs in without

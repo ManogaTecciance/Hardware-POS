@@ -55,6 +55,13 @@ import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
 import { resetDatabase } from '../db-reset';
 import { seedSecondTenant, seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 
+/**
+ * `main` (2026-09-04) requires a payment due date on any sale that leaves a
+ * balance, and refuses one on a sale that does not. A fixed far-future day keeps
+ * these characterisations about what they characterise, not about dates.
+ */
+const CREDIT_DUE_DATE = '2099-12-31';
+
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let prismaService: PrismaService;
@@ -731,6 +738,7 @@ describe('the existing pipeline is untouched by the providers existing', () => {
       customerId: tile.creditCustomerId,
       items: [{ productId: tile.productAId, quantity: 1 }],
       payments: [],
+      paymentDueDate: CREDIT_DUE_DATE,
     });
 
     expect(sale.paymentStatus).toBe('UNPAID');

@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { ALL_PERMISSIONS, ROLE_PERMISSIONS } from '@hardware-pos/shared';
+import {
+  ALL_PERMISSIONS,
+  ALL_ROLE_TEMPLATES,
+  ALL_USER_ROLES,
+  ROLE_PERMISSIONS,
+  baseUserRoleFor,
+} from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { Permission } from '../auth/permissions';
@@ -8,6 +14,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   BuiltInRoleImmutableError,
   RoleArchivedError,
+  RoleKeyReservedError,
   RoleKeyTakenError,
   RoleNotFoundError,
   RoleStillAssignedError,
@@ -15,6 +22,16 @@ import {
   TenantAdministrationLockoutError,
   UnknownPermissionError,
 } from './roles.errors';
+
+/**
+ * Every key a template or the enum already means something by. The two sets
+ * overlap (OWNER, CASHIER, SALESPERSON are both) and neither is a subset of
+ * the other: MANAGER has no template, WAITER has no enum value.
+ */
+const RESERVED_ROLE_KEYS: ReadonlySet<string> = new Set<string>([
+  ...ALL_USER_ROLES,
+  ...ALL_ROLE_TEMPLATES.map((t) => t.key),
+]);
 
 const CATALOGUE = new Set<string>(ALL_PERMISSIONS);
 
@@ -90,6 +107,12 @@ export class RolesService {
     input: { key: string; name: string; description?: string; permissions: string[] },
   ): Promise<RoleView> {
     const permissions = this.validatePermissions(input.permissions);
+
+    // Built-in and template keys belong to the platform (D100): a custom role
+    // under one would be mistaken for the built-in by everything that reads
+    // keys — the enum derivation, the role seed — whether or not this tenant's
+    // template happens to seed it.
+    if (RESERVED_ROLE_KEYS.has(input.key)) throw new RoleKeyReservedError(input.key);
 
     // Keys are never reused, so an archived role's key still blocks a new one.
     const clash = await this.prisma.role.findFirst({
@@ -210,7 +233,15 @@ export class RolesService {
       toRoleId: role.id,
     });
 
-    await this.prisma.user.update({ where: { id: user.id }, data: { roleId: role.id } });
+    // Both columns move together, exactly as the platform console does it. The
+    // enum still decides the owner-level checks (cross-branch access, the
+    // QuickBooks gates, the override paths), so a user moved onto the
+    // Salesperson row must become SALESPERSON underneath — and a demoted owner
+    // must stop being OWNER there, or the demotion would only be cosmetic.
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { roleId: role.id, role: baseUserRoleFor(role.key) },
+    });
     return this.get(tenantId, role.id);
   }
 

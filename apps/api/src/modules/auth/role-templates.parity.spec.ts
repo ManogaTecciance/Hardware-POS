@@ -21,6 +21,7 @@ import {
   ALL_PERMISSIONS,
   ALL_ROLE_TEMPLATES,
   BUILT_IN_ROLE_TEMPLATES,
+  BUSINESS_TYPE_VALUES,
   Permission,
   RESERVED_PERMISSIONS,
   RESTAURANT_ROLE_TEMPLATES,
@@ -38,21 +39,23 @@ import { collectRoutes } from '../../common/testkit/route-inventory';
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('the template catalogue is exactly what the workspace templates staff', () => {
-  it('exactly six templates exist — the removed ones stay removed', () => {
+  it('exactly seven templates exist — the removed ones stay removed', () => {
     /*
      * PO decision, 2026-08-17: the unstaffed blueprints (Admin, Manager,
      * Accountant, Restaurant Manager, Kitchen Manager, Bar Staff) were
      * DELETED, not parked. Exact set both ways: a template added back — or
-     * dropped — fails here by name. The UserRole ENUM keeps all five values
-     * (persisted data, legacy-fallback authority); this is about what NEW
-     * workspaces are seeded with.
+     * dropped — fails here by name. The UserRole ENUM keeps all six values
+     * (persisted data, legacy-fallback authority — SALESPERSON joined it on
+     * 2026-08-31, and D100 gave it a template that only the hardware
+     * workspace offers); this is about what NEW workspaces are seeded with.
      *
-     * KITCHEN_STAFF is the one addition since, and it is not a walk-back of
-     * that decision: D68 withdrew kitchen printing, which turned the kitchen
-     * board into the only place a ticket is ever delivered and created a job
-     * — watch the board, mark food done — that nothing else in the catalogue
-     * covers. The bar remains "a template must name a job someone is
-     * rostered to".
+     * KITCHEN_STAFF was the first addition since, and it is not a walk-back
+     * of that decision: D68 withdrew kitchen printing, which turned the
+     * kitchen board into the only place a ticket is ever delivered and
+     * created a job — watch the board, mark food done — that nothing else in
+     * the catalogue covers. SALESPERSON is the second (D100): the hardware
+     * shop's owner-equivalent counter post, offered by that template alone.
+     * The bar remains "a template must name a job someone is rostered to".
      */
     expect(ALL_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual([
       'CASHIER',
@@ -60,15 +63,20 @@ describe('the template catalogue is exactly what the workspace templates staff',
       'OWNER',
       'RECEPTIONIST',
       'RESTAURANT_CASHIER',
+      'SALESPERSON',
       'WAITER',
     ]);
   });
 
   it('each surviving built-in template grants exactly what ROLE_PERMISSIONS grants', () => {
     // Exact sets per role, not a total count: two roles could swap permission
-    // sets and keep the total identical. The enum authority still has five
-    // entries; only OWNER and CASHIER retain templates.
-    expect(BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual(['CASHIER', 'OWNER']);
+    // sets and keep the total identical. The enum authority has six entries;
+    // OWNER, CASHIER and (D100) SALESPERSON are the ones with templates.
+    expect(BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual([
+      'CASHIER',
+      'OWNER',
+      'SALESPERSON',
+    ]);
     for (const template of BUILT_IN_ROLE_TEMPLATES) {
       const authority = ROLE_PERMISSIONS[template.key as UserRole];
       expect({ role: template.key, granted: [...template.permissions].sort() }).toEqual({
@@ -84,12 +92,51 @@ describe('the template catalogue is exactly what the workspace templates staff',
   });
 
   it('every built-in template is marked built-in, and no other template is', () => {
-    expect(BUILT_IN_ROLE_TEMPLATES.every((t) => t.isBuiltIn)).toBe(true);
-    expect(RESTAURANT_ROLE_TEMPLATES.every((t) => !t.isBuiltIn)).toBe(true);
-    // Positive control: both collections are populated, so neither `every` is
-    // vacuously true.
-    expect(BUILT_IN_ROLE_TEMPLATES.length).toBe(2);
-    expect(RESTAURANT_ROLE_TEMPLATES.length).toBeGreaterThan(0);
+    // Exact key sets over the whole catalogue, both ways: a template that
+    // gained or lost the flag fails here by name, and neither side can be
+    // vacuously true. "Built in" says who owns a definition (enum-backed,
+    // undeletable); since D100 it no longer says who is seeded with it — the
+    // per-template lists do — which is why the flagged set is three and the
+    // GENERAL workspace still receives two.
+    const byFlag = (isBuiltIn: boolean) =>
+      ALL_ROLE_TEMPLATES.filter((t) => t.isBuiltIn === isBuiltIn)
+        .map((t) => t.key)
+        .sort();
+    expect(byFlag(true)).toEqual(['CASHIER', 'OWNER', 'SALESPERSON']);
+    expect(byFlag(false)).toEqual(['KITCHEN_STAFF', 'RECEPTIONIST', 'RESTAURANT_CASHIER', 'WAITER']);
+    // The list and the flag agree: `BUILT_IN_ROLE_TEMPLATES` is exactly the
+    // flagged set, and nothing in the restaurant list carries the flag.
+    expect(BUILT_IN_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual(byFlag(true));
+    expect(RESTAURANT_ROLE_TEMPLATES.filter((t) => t.isBuiltIn).map((t) => t.key)).toEqual([]);
+    expect(RESTAURANT_ROLE_TEMPLATES.map((t) => t.key).sort()).toEqual([
+      'KITCHEN_STAFF',
+      'RESTAURANT_CASHIER',
+      'WAITER',
+    ]);
+  });
+
+  /**
+   * D100 — the Salesperson IS the owner, permission for permission. Asserted
+   * three ways because each catches a different way of breaking it: the
+   * template equals the owner template (what a tenant is seeded with), the
+   * enum authority binds both roles to ONE array (what the legacy fallback
+   * grants — by reference, so the two cannot be edited apart), and the set is
+   * not some third thing both happen to share (the negative control).
+   */
+  it('the salesperson template grants exactly what the owner template grants', () => {
+    const owner = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === 'OWNER')!;
+    const salesperson = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === 'SALESPERSON')!;
+    expect(salesperson).toBeDefined();
+    expect([...salesperson.permissions].sort()).toEqual([...owner.permissions].sort());
+    expect(salesperson.isBuiltIn).toBe(true);
+
+    // By reference in the authority, not merely equal.
+    expect(ROLE_PERMISSIONS.SALESPERSON).toBe(ROLE_PERMISSIONS.OWNER);
+
+    // NEGATIVE — it is the OWNER's set, not ADMIN's narrowed one and not the
+    // till's: the equality above is not satisfied by any owner-ish set.
+    expect([...salesperson.permissions].sort()).not.toEqual([...ROLE_PERMISSIONS.ADMIN].sort());
+    expect([...salesperson.permissions].sort()).not.toEqual([...ROLE_PERMISSIONS.CASHIER].sort());
   });
 
   it('owner holds the whole catalogue, including reserved keys', () => {
@@ -148,14 +195,40 @@ describe('templates are selected by business type', () => {
    * business actually staffs, not the whole catalogue. EXACT sets per type —
    * a role added to or dropped from a template fails here by name.
    */
-  it('a hardware tenant gets Owner and Cashier, and no restaurant role', () => {
+  it('a hardware tenant gets Owner, Salesperson and Cashier, and no restaurant role', () => {
     const keys = roleTemplatesForBusinessType('HARDWARE').map((t) => t.key);
+    expect(keys.sort()).toEqual(['CASHIER', 'OWNER', 'SALESPERSON']);
+  });
+
+  it('a GENERAL tenant gets Owner and Cashier — not the hardware-only Salesperson', () => {
+    const keys = roleTemplatesForBusinessType('GENERAL').map((t) => t.key);
     expect(keys.sort()).toEqual(['CASHIER', 'OWNER']);
   });
 
-  it('a GENERAL tenant gets the surviving built-ins: Owner and Cashier', () => {
-    const keys = roleTemplatesForBusinessType('GENERAL').map((t) => t.key);
-    expect(keys.sort()).toEqual(['CASHIER', 'OWNER']);
+  /**
+   * D100 — the Salesperson is the hardware template's alone. The exact-set
+   * assertions above and below already imply this; naming it makes a future
+   * "why not offer it to hotels too" edit fail by name, and the positive
+   * control (every list still has its owner) proves the lists were populated.
+   */
+  it('no template but HARDWARE offers the Salesperson', () => {
+    // Iterated from the enum, not a hand-written list, so a business type
+    // added later is inspected here without a second edit.
+    const offering = BUSINESS_TYPE_VALUES.filter((type) =>
+      roleTemplatesForBusinessType(type).some((t) => t.key === 'SALESPERSON'),
+    );
+    expect(offering).toEqual(['HARDWARE']);
+    for (const type of BUSINESS_TYPE_VALUES.filter((v) => v !== 'HARDWARE')) {
+      const keys = roleTemplatesForBusinessType(type).map((t) => t.key);
+      expect({ type, salesperson: keys.includes('SALESPERSON'), owner: keys.includes('OWNER') }).toEqual({
+        type,
+        salesperson: false,
+        owner: true,
+      });
+    }
+    // Positive control: the enum is populated, so the loop ran over every
+    // other business type rather than an empty list (D30.7).
+    expect(BUSINESS_TYPE_VALUES.length).toBeGreaterThan(5);
   });
 
   it('a food-service tenant gets Owner, Waiter, Cashier and Kitchen staff', () => {
@@ -363,6 +436,30 @@ describe('the parity assertions can actually fail', () => {
 
     const drifted = [...cashier.permissions, Permission.SETTINGS_MANAGE].sort();
     expect(() => expect(drifted).toEqual([...ROLE_PERMISSIONS.CASHIER].sort())).toThrow();
+  });
+
+  it('a salesperson that lost one owner permission would be detected (D100)', () => {
+    const owner = BUILT_IN_ROLE_TEMPLATES.find((t) => t.key === 'OWNER')!;
+    const narrowed = owner.permissions.filter((p) => p !== Permission.SETTINGS_MANAGE);
+    expect(narrowed.length).toBe(owner.permissions.length - 1);
+    expect(() => expect([...narrowed].sort()).toEqual([...owner.permissions].sort())).toThrow();
+    // …and a copy that is equal but not the same array fails the by-reference
+    // claim, which is the claim that stops the two being edited apart.
+    expect(() => expect([...ROLE_PERMISSIONS.OWNER]).toBe(ROLE_PERMISSIONS.OWNER)).toThrow();
+  });
+
+  it('a Salesperson leaking into another template would be detected (D100)', () => {
+    const hotel = roleTemplatesForBusinessType('HOTEL').map((t) => t.key);
+    expect(hotel).not.toContain('SALESPERSON');
+    const leaked = [...hotel, 'SALESPERSON'];
+    const offering = [
+      ['HARDWARE', roleTemplatesForBusinessType('HARDWARE').map((t) => t.key)],
+      ['HOTEL', leaked],
+    ]
+      .filter(([, keys]) => (keys as string[]).includes('SALESPERSON'))
+      .map(([type]) => type);
+    expect(offering).toEqual(['HARDWARE', 'HOTEL']);
+    expect(() => expect(offering).toEqual(['HARDWARE'])).toThrow();
   });
 
   it('a reserved permission acquiring a route would be detected', () => {

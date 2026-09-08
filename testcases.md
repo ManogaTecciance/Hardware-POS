@@ -6,10 +6,12 @@ has a stable ID for traceability into automated Playwright specs.
 - **Type**: `P` = positive (happy path), `N` = negative (error/guard path)
 - **Status**: `Not Run` → `Pass` / `Fail` / `Blocked` / `Automated` (update as
   cases are executed manually or scripted)
-- Unless stated otherwise, cases assume the seeded demo tenant and the roles:
-  Owner (email login), Salesperson (email login), Manager, Cashier,
-  Accountant. Salesperson is owner-equivalent — every gate the owner
-  clears must open for it too.
+- Unless stated otherwise, cases assume the seeded demo tenant and the roles
+  the hardware template staffs: Owner (email login), Salesperson (email
+  login) and Cashier (PIN). Manager and Accountant are enum tiers with no
+  seeded user since 2026-08-17. Salesperson is owner-equivalent — every gate
+  the owner clears must open for it too — and, since D100, is linked to the
+  hardware template's `SALESPERSON` role row and offered by no other template.
 
 Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [DASH](#dash--dashboards) · [PROD](#prod--products--categories) ·
@@ -68,6 +70,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PERM-013 | Salesperson reaches owner-only QuickBooks routes | Salesperson calls GET /v1/quickbooks/connect | Not 403 (role gate allows owner-level roles) | P | Not Run |
 | PERM-014 | Salesperson nav matches the owner's | Log in as salesperson | Same nav entries as PERM-001 | P | Not Run |
 | PERM-015 | Salesperson discount needs no approval | Apply a 50% line discount as salesperson | Accepted with no manager PIN prompt (unlimited ceiling) | P | Not Run |
+| PERM-016 | Salesperson resolves from its own role row (D100) | Owner reads GET /v1/users/{salesperson}/effective-permissions | `source` is `DATABASE` and the permission list equals the owner's; the cashier's is shorter | P | Not Run |
 
 ## DASH — Dashboards
 
@@ -663,7 +666,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | ADM-002 | Provisioned tenant starts empty | Log in as new owner | 0 products/customers/suppliers/sales everywhere | P | Not Run |
 | ADM-003 | Provision refuses existing slug/name | Re-run same command | Aborts with clear message; nothing modified | N | Not Run |
 | ADM-004 | Provision refuses duplicate email | Use an email that exists in another tenant | Aborts | N | Not Run |
-| ADM-005 | Provision validates role and PIN format | Bad role / 3-digit PIN / duplicate PINs | Each aborts with specific message | N | Not Run |
+| ADM-005 | Provision validates role and PIN format | Role the business type's template does not offer / 3-digit PIN / duplicate PINs | Each aborts with a specific message naming the offered roles | N | Not Run |
 | ADM-006 | Provisioned PINs work for approvals | New tenant owner PIN at discount prompt | Approves within that tenant only | P | Not Run |
 | ADM-007 | Tenant data isolation — API | Tenant A token requests tenant B resource ids | 404/empty; never cross-tenant data | N | Not Run |
 | ADM-008 | PINs are tenant-scoped | Demo manager PIN in new tenant's approval dialog | 401 Invalid manager PIN | N | Not Run |
@@ -673,6 +676,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | ADM-012 | Duplicate email on user create rejected | POST /users with an existing email | 4xx conflict/validation error | N | Not Run |
 | ADM-013 | Invalid role on user create rejected | POST /users with role "SUPERADMIN" | 400 | N | Not Run |
 | ADM-014 | Audit log records sensitive actions | Approve a discount / change settings; GET /audit-logs | Entries with actor, action, timestamp | P | Not Run |
+| ADM-015 | Salesperson is a hardware-template role (D100) | Provision `--business-type RESTAURANT` with a `SALESPERSON` user; then a HARDWARE (or no-profile) tenant with one | Restaurant provisioning aborts naming OWNER, WAITER, RESTAURANT_CASHIER, KITCHEN_STAFF and creates nothing; the hardware user is created linked to the `SALESPERSON` row with enum SALESPERSON | N | Not Run |
 
 ## UI — Theme, Layout & Responsiveness
 

@@ -40,9 +40,10 @@ export class UserBranchAccessController {
 
   /**
    * The branches this user is currently allowed into — the caller's view of
-   * what an administrator has granted. OWNER/ADMIN users show `roleGrant`
-   * (implicit through their role) so the response never lies about *why*
-   * they can access something.
+   * what an administrator has granted. Owner-level users (`isAdminLevelRole`:
+   * OWNER, ADMIN and, since D100, SALESPERSON) show `roleGrant` (implicit
+   * through their role) so the response never lies about *why* they can
+   * access something.
    */
   @Get(':userId/branch-access')
   @RequirePermissions(Permission.USER_MANAGE)
@@ -88,9 +89,9 @@ export class UserBranchAccessController {
 
   /**
    * Revoke a granted branch. Fails when the user has no other access at all
-   * (would lock them out of every operational route). OWNER/ADMIN cannot be
-   * revoked here — they gain access through their role and this table does
-   * not gate them.
+   * (would lock them out of every operational route). Owner-level roles
+   * cannot be revoked here — they gain access through their role and this
+   * table does not gate them.
    */
   @Delete(':userId/branch-access/:branchId')
   @RequirePermissions(Permission.USER_MANAGE)

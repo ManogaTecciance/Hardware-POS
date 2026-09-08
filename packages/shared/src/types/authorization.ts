@@ -50,7 +50,11 @@ export const UserRole = {
   Admin: 'ADMIN',
   Owner: 'OWNER',
   Accountant: 'ACCOUNTANT',
-  /** Owner-equivalent (main, 2026-08-31): every permission, no discount ceiling, admin-level overrides. */
+  /**
+   * Owner-equivalent (main, 2026-08-31): every permission, no discount ceiling,
+   * admin-level overrides. The enum value is platform-wide like every other —
+   * the role TEMPLATE is offered by the hardware workspace only (D100).
+   */
   Salesperson: 'SALESPERSON',
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
@@ -171,10 +175,11 @@ export const Permission = {
   // edit-your-own / archive-your-own. Every mutation route requires BOTH the
   // matching permission AND `entity.createdByUserId === actor.id`; role alone
   // is never sufficient (that is what `_OWN` names — the row must belong to
-  // the caller). Only the OWNER role template holds these by default; ADMIN
-  // has them stripped from its otherwise-total set so that the "any other
-  // user must not edit that entity" rule survives even for the highest role
-  // short of OWNER.
+  // the caller). Only the owner-level set holds these by default — OWNER and
+  // its owner-equivalent SALESPERSON, bound to one constant (D100); ADMIN has
+  // them stripped from its otherwise-total set so that the "any other user
+  // must not edit that entity" rule survives even for the highest role short
+  // of the owner's.
   /** Create a Dining Area / Floor on a branch. */
   DINING_AREA_CREATE: 'dining-area:create',
   /** Edit a Dining Area the caller created. Ownership check is at the service. */
@@ -211,7 +216,7 @@ export const Permission = {
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
-/** Every permission value. Owner holds exactly this set; Admin holds all of it EXCEPT `CREATOR_OWNED_PERMISSIONS` — see below. */
+/** Every permission value. Owner (and the owner-equivalent Salesperson) holds exactly this set; Admin holds all of it EXCEPT `CREATOR_OWNED_PERMISSIONS` — see below. */
 export const ALL_PERMISSIONS: readonly Permission[] = Object.values(Permission);
 
 /**
@@ -219,9 +224,10 @@ export const ALL_PERMISSIONS: readonly Permission[] = Object.values(Permission);
  * (the row's `createdByUserId` must equal the caller). Naming an OWNER-only
  * capability isn't enough on its own — a Restaurant tenant would then have any
  * OWNER able to overwrite another OWNER's floor. The service layer enforces the
- * `_OWN` half; ROLE_PERMISSIONS below refuses to grant these to any role but
- * OWNER, so a compromised ADMIN account cannot escalate itself into every
- * floor manager's row.
+ * `_OWN` half; ROLE_PERMISSIONS below grants these only to the owner's set
+ * (OWNER, and SALESPERSON which IS that set by reference — D100), so a
+ * compromised ADMIN account cannot escalate itself into every floor manager's
+ * row.
  *
  * Restaurant Pilot Change 1 (Aug 2026) — dining-area and restaurant-table
  * management moved from role-only to creator-scoped.
@@ -262,7 +268,7 @@ export const ACTIVE_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS.filter(
 );
 
 /**
- * Role → permissions, for the five built-in roles.
+ * Role → permissions, for the six built-in roles.
  *
  * The `Record<UserRole, …>` key type is what makes a new role a **compile error**
  * here until someone decides what it may do. That is deliberate: the failure mode
@@ -275,13 +281,21 @@ export const ACTIVE_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS.filter(
  * *enabled modules*, not by a parallel permission system, so `MENU_MANAGE` will sit
  * beside `PRODUCT_MANAGE` and be gated at the route by `@RequireModule`.
  */
+/**
+ * The owner's set — everything — under its own name so that a role defined as
+ * "the same as the owner" can say so by reference. Two roles that each spell
+ * out `ALL_PERMISSIONS` are equal today and free to drift tomorrow; two roles
+ * bound to one constant cannot.
+ */
+const OWNER_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS;
+
 export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
-  OWNER: ALL_PERMISSIONS,
-  // Salesperson is defined as an owner-equivalent role: same permission set,
-  // same discount ceiling, same admin-level overrides (main, 2026-08-31). It
-  // holds the full catalogue, NOT ADMIN's narrowed set — the six creator-scoped
-  // permissions ADMIN lacks are exactly the ones an owner-equivalent keeps.
-  SALESPERSON: ALL_PERMISSIONS,
+  OWNER: OWNER_PERMISSIONS,
+  // Salesperson is the owner's set, by reference (main 2026-08-31; D100 makes
+  // it the hardware template's role). It holds the full catalogue, NOT ADMIN's
+  // narrowed set — the six creator-scoped permissions ADMIN lacks are exactly
+  // the ones an owner-equivalent keeps.
+  SALESPERSON: OWNER_PERMISSIONS,
   // ADMIN historically inherited ALL_PERMISSIONS. Restaurant Pilot Change 1
   // narrows that: the six CREATOR_OWNED_PERMISSIONS name capabilities that
   // must be paired with a per-row ownership check, and granting them at the

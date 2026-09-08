@@ -95,6 +95,24 @@ export class TenantAdministrationLockoutError extends ConflictException {
   }
 }
 
+/**
+ * D100 — the keys of the built-in and template roles are the platform's, not
+ * the tenant's. A custom role keyed SALESPERSON in a restaurant would map to
+ * the owner-level enum underneath (`baseUserRoleFor`) and be adopted as the
+ * built-in by the next role seed; refusing the key up front is what makes
+ * "offered by the hardware template only" a fact rather than a default.
+ */
+export class RoleKeyReservedError extends BadRequestException {
+  constructor(key: string) {
+    super({
+      statusCode: 400,
+      error: 'RoleError',
+      code: 'ROLE_KEY_RESERVED',
+      message: `${key} is the key of a built-in role. Choose a key of your own, e.g. FLOOR_SUPERVISOR.`,
+    });
+  }
+}
+
 export class RoleKeyTakenError extends ConflictException {
   constructor(key: string) {
     super({

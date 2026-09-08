@@ -3593,6 +3593,10 @@ the only place that question should be answered, which would extend each of
 them to the salesperson. They are security decisions on code `main` never had,
 so they were left as they were rather than widened in a merge.
 
+> **Resolved 2026-09-08 by [D100](#d100--the-salesperson-is-the-hardware-templates-role-with-a-row-of-its-own):**
+> all of them now ask `isAdminLevelRole`, so the Salesperson is cross-branch
+> and may hold branch access through the role, like the owner.
+
 **The salesperson demo user exists; the manager and accountant do not come
 back.** This branch retired both on 2026-08-17 and its seed actively deletes
 them, so re-adding them would be undone on the same run. The e2e fixtures and
@@ -3603,6 +3607,10 @@ was added, so the seeded salesperson is unlinked and resolves through the
 enum fallback — it works, and the platform console will show its role as
 "Not set". Whether the hardware workspace should offer Salesperson as a
 template is a product question, not a merge one.
+
+> **Resolved 2026-09-08 by [D100](#d100--the-salesperson-is-the-hardware-templates-role-with-a-row-of-its-own):**
+> the hardware template seeds a `SALESPERSON` row, `usr_salesperson` links to
+> it, and the console shows "Salesperson".
 
 **Per-unit discounts run through the one money engine.** `main` implemented
 the `UNIT` basis twice in float arithmetic — the sale pipeline and the
@@ -3637,6 +3645,132 @@ given the route-level `RETAIL_POS` guard every other sales write carries.
 `ExternalEntityRef` like its sibling, per D63. `ProductsModule` imports
 `SettingsModule` for the timezone-aware product report. The migration-set
 tripwire lists all 68 with the eight from `main` annotated.
+
+### D100 — the Salesperson is the hardware template's role, with a row of its own
+
+**Decision (PO, 2026-09-08).** `SALESPERSON` is specific to the **hardware**
+workspace template. It grants exactly what the hardware Owner grants — the same
+permissions and the same screens — and it has a **linked role row**: a built-in
+template keyed `SALESPERSON`, seeded into hardware workspaces and no others,
+with the seeded demo salesperson linked to it like every other seeded user.
+
+**Why.** D99 brought the role across from `main` as an enum value with a
+permission set and nothing else. That left it half a role: authority resolved
+through the legacy enum fallback, the platform console showed "Not set", the
+workspace picker could not offer it, and — because the enum is platform-wide —
+nothing said which kind of business the role belongs to. The product answer is
+that a Salesperson is a hardware-shop job: the person on the counter who runs
+the shop as the owner would. A restaurant, cafe, bakery or hotel has no such
+post, and a template that appears in a picker is a template someone will
+assign, so it is offered nowhere else.
+
+**What changed.**
+
+- **Template catalogue** (`packages/shared/src/types/role-templates.ts`).
+  `BUILT_IN_ROLE_TEMPLATES` gains Salesperson (`isBuiltIn: true`, so a tenant
+  cannot delete or edit it; `permissions: ROLE_PERMISSIONS.SALESPERSON`).
+  `HARDWARE_ROLE_TEMPLATES` is now Owner, Salesperson, Cashier. GENERAL used to
+  seed from the built-in list *as a whole*, which would have handed it the
+  Salesperson by accident; it now selects Owner and Cashier explicitly through a
+  new `GENERAL_ROLE_TEMPLATES`. Food-service and hotel lists are untouched.
+  "Built in" now says who owns a role's definition; the per-template lists say
+  who gets a row — the two were the same thing until this decision.
+- **Authority by reference** (`authorization.ts`). `ROLE_PERMISSIONS.OWNER` and
+  `ROLE_PERMISSIONS.SALESPERSON` are bound to one constant, not two spellings of
+  `ALL_PERMISSIONS`. "The same as the owner" is a structural fact the parity
+  spec asserts with `toBe`, not an equality that holds until someone edits one
+  side. No permission changed hands: the set was already the owner's.
+- **Owner-level checks that read the enum.** Five sites still decided
+  cross-branch access on `role === 'OWNER' || role === 'ADMIN'`: the branch
+  scope guard, `AuthRepository.hasBranchAccess` and `listAccessibleBranches`,
+  and `UsersService`'s `roleGrant` and last-branch revoke guard. All five now
+  ask `isAdminLevelRole`, the one place that answers "is this role
+  owner-level" (D99), so a salesperson reaches every active branch exactly as
+  the owner does. This is the "same UI" half of the decision: the accessible
+  branches, the branch-scoped screens and the branch-access console treat the
+  two identically. Nothing else in the web app keys on the enum — navigation
+  derives from permissions and modules, the dashboard resolver already sent
+  SALESPERSON to the admin dashboard, the discount ceiling was already
+  unlimited, and the product screens already used `isAdminLevelRole`. The one
+  visible difference is the profile chip, which prints the enum: "Salesperson".
+- **Seed and provisioning.** The demo `usr_salesperson` is linked by
+  `linkUsersToRoles` on key match, like the owner and the cashier, so it
+  resolves from the database and the console shows "Salesperson". A hardware
+  workspace created from the platform console seeds the row through the same
+  `seedTenantRoles` call as its other roles; the console's role picker reads
+  the workspace's own rows (D55.1) and so offers Salesperson in a hardware
+  workspace and in no other. `baseUserRoleFor('SALESPERSON')` already mapped to
+  its own enum value. `provision-tenant.ts` — the command-line production path
+  — never linked anyone to a row; it now validates each `--user` role against
+  the business type's templates (a SALESPERSON in a restaurant is refused, not
+  left on the fallback as an owner-equivalent) and links every user on
+  creation.
+- **Reserved keys.** A custom role keyed `SALESPERSON` in a restaurant would
+  have mapped to the owner-level enum underneath and been adopted — marked
+  built-in, permissions `set` to the owner's — by the next role seed. So
+  `RolesService.create` now refuses every enum value and template key
+  (`ROLE_KEY_RESERVED`), and `seedTenantRoles` refuses, rather than adopts, a
+  tenant-created row under a template key, and names a display-name collision
+  before writing instead of failing on the unique constraint half-way through.
+  `linkUsersToRoles` links to active rows only. The hole predates this
+  decision (ADMIN, MANAGER, ACCOUNTANT keys were free everywhere); D100 is
+  where it became worth closing because it is the first template offered to
+  one business type and withheld from the rest.
+- **Tests.** The parity spec pins seven templates, the exact built-in and
+  non-built-in sets, the exact hardware set, the absence of Salesperson from
+  every business type in `BUSINESS_TYPE_VALUES` but HARDWARE with a positive
+  control per type, the by-reference binding, and mutation proofs for a
+  narrowed salesperson and a leaked template; the domain-registry spec pins
+  the same "HARDWARE only" fact at the registry. `branch-scope.guard.spec.ts`
+  (new) proves with a Prisma stub that the set of roles the guard passes
+  without a grant is exactly `ADMIN_LEVEL_ROLES`, and mutation-proves it by
+  loading the real guard with `isAdminLevelRole` reverted to the old
+  `OWNER || ADMIN` and showing the set collapse; the quotations and
+  workspace-roles unit specs derive their owner-level sets from the same
+  authority. Integration: role-seeding (the row, its permissions, the two
+  refusals, linking), workspace-provisioning (the console's role list and a
+  console user on the Salesperson row), role-authority (a SALESPERSON user
+  links in a hardware tenant and not in a restaurant), role-management (the
+  exact tenant-facing role list, the built-in's immutability, the reserved
+  key, and the enum column moving with the row on assignment and demotion),
+  branch-scope (cross-branch reach for every owner-level role and refusal for
+  every other), platform-profile (every enum value in the read and write
+  matrices) and discount-approval (a salesperson PIN approves beyond the
+  manager cap). Web: the console users test's fixtures are the real hardware
+  and restaurant sets, and the rail, settings and shell specs assert the
+  Salesperson renders the owner's surface. End to end: PERM-014 (the
+  salesperson's rail equals the owner's in a browser), PERM-015 (a 50% line
+  discount needs no approval from a salesperson and is refused for a cashier)
+  and PERM-016 (the seeded salesperson resolves from its row).
+
+**No migration.** The enum value already exists (`main`'s
+`20260831090920_add_salesperson_role`); the row is data, written by
+`seedTenantRoles`, which is idempotent and never deletes.
+
+**Rollout to existing hardware tenants.** Production has had the `Role` table
+since the initial migration, empty: the two role migrations were additive and
+wrote no data, and `main`'s seed seeds no roles. So after this merge deploys,
+the pilot's users — its salesperson included — keep resolving through the
+legacy fallback until the tenant's rows are seeded and they are linked. That
+is an operator step, deliberately not a migration (§12.1): the new
+`prisma/backfill-tenant-roles.ts <slug> [--write]` runs the catalogue sync,
+`seedTenantRoles` for the tenant's business type (a no-profile tenant is
+HARDWARE, D57) and `linkUsersToRoles` in one transaction, lists the users it
+cannot link (an enum with no template — MANAGER, ACCOUNTANT, ADMIN — is a
+re-role decision for a person), and refuses on any collision with a
+tenant-created role. `role-authority-report.ts` is the confirmation. The
+runbook (`06-migration-and-rollout.md`) carries the step. Nothing is lost in
+the gap: a fallback salesperson holds the same permissions; only the console's
+"Not set" and row-based resolution wait on it. (D87 and D94 say their template
+grants reach existing users "through `pnpm db:seed`"; that is true of the
+development tenants only — on production the same backfill is the path.)
+
+**Not changed, on purpose.** The demo salesperson still has no PIN, as `main`
+decided. PINs only answer in-POS approval prompts here (D48), so the practical
+meaning is that the seeded salesperson cannot act as an approver in the demo
+while the owner's 2222 can; a real salesperson is given a PIN like any other
+user. The seed comment now states the difference instead of claiming the
+credentials mirror the owner's.
 
 ---
 

@@ -7,7 +7,7 @@
  * and `WORKSPACE_TEMPLATES` (registry.ts) filters on the offered set, so
  * offering it later is a data change here, not code elsewhere.
  */
-import { BUILT_IN_ROLE_TEMPLATES } from '../types/role-templates.js';
+import { GENERAL_ROLE_TEMPLATES } from '../types/role-templates.js';
 import { GENERAL_CAPABILITIES } from './capabilities.js';
 import type { DomainDescriptor } from './domain.types.js';
 import { SHARED_CORE_MODULES } from './modules.js';
@@ -26,7 +26,8 @@ export const GENERAL_DOMAIN: DomainDescriptor = {
   profile: { inventoryMode: 'DISABLED', accountingProvider: 'NONE' },
   modules: [...SHARED_CORE_MODULES],
   navigation: RETAIL_NAVIGATION,
-  roleTemplates: BUILT_IN_ROLE_TEMPLATES,
+  // Owner and Cashier only — the hardware-only Salesperson is not offered here (D100).
+  roleTemplates: GENERAL_ROLE_TEMPLATES,
   capabilities: GENERAL_CAPABILITIES,
   // No domain attributes (D64) — GENERAL is the deliberately-plain template.
   catalogue: { attributeSchema: [] },

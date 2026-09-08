@@ -10,6 +10,7 @@ import type { Request } from 'express';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthenticatedUser } from '../../modules/auth/auth.types';
+import { isAdminLevelRole } from '../../modules/auth/permissions';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import {
   BRANCH_SCOPE_METADATA,
@@ -100,9 +101,12 @@ export class BranchScopeGuard implements CanActivate {
       throw new NotFoundException('Branch not found');
     }
 
+    // Owner-level roles (OWNER, ADMIN and the hardware template's SALESPERSON,
+    // D100) reach every active branch implicitly; the one place that answers
+    // "is this role owner-level" is `isAdminLevelRole`, so a role added there
+    // is cross-branch here without a second edit.
     const hasAccess =
-      dbUser.role === 'OWNER' ||
-      dbUser.role === 'ADMIN' ||
+      isAdminLevelRole(dbUser.role) ||
       dbUser.branchId === candidateBranchId ||
       (await this.prisma.branchAccess.findUnique({
         where: { userId_branchId: { userId: dbUser.id, branchId: candidateBranchId } },

@@ -53,11 +53,9 @@ Seed data (`pnpm --filter @hardware-pos/database db:seed`) — tenant `tnt_dev`:
 
 | Role | Login | Discount limit | Notes |
 | --- | --- | --- | --- |
-| Owner | `owner@hardwarepos.test` / `password123` | unlimited | email/password |
-| Salesperson | `salesperson@hardwarepos.test` / `password123` | unlimited | owner-equivalent; email/password |
-| Accountant | `accountant@hardwarepos.test` / `password123` | n/a | email/password |
-| Manager | PIN `2222` | 15% | PIN login (`x-tenant-id: tnt_dev`) |
-| Cashier | PIN `1111` | 0% | PIN login (`x-tenant-id: tnt_dev`) |
+| Owner | `owner@hardwarepos.test` / `password123` | unlimited | email/password; approval PIN `2222` |
+| Salesperson | `salesperson@hardwarepos.test` / `password123` | unlimited | owner-equivalent; email/password; linked to the hardware template's `SALESPERSON` role row (D100); no PIN |
+| Cashier | `cashier@hardwarepos.test` / `password123` | 0% | email/password; approval PIN `1111` |
 
 Plus 10 seeded hardware products (Cement 50kg, PVC pipe, etc.) each carrying a mock
 `quickbooksItemId` (`QBO-ITEM-1001`…).

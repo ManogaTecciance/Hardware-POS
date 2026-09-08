@@ -187,14 +187,18 @@ export class Api {
 export const SEED = {
   owner: { email: 'owner@hardwarepos.test', password: 'password123' },
   cashier: { email: 'cashier@hardwarepos.test', password: 'password123' },
-  /** Owner-equivalent role added on main (2026-08-31): email + password, no PIN. */
+  /**
+   * Owner-equivalent role added on main (2026-08-31), offered by the hardware
+   * template alone (D100): email + password, no PIN.
+   */
   salesperson: { email: 'salesperson@hardwarepos.test', password: 'password123' },
   /**
    * Approval PINs (discount / return prompts) — no longer a login credential
-   * (D48). 2026-08-17: the hardware template staffs Owner + Cashier only, so
-   * the OWNER holds the approver PIN; the old manager/accountant demo users
-   * are gone. The manager-cap negative lives in the API integration spec
-   * (discount-approval.spec.ts), whose fixtures own a MANAGER user.
+   * (D48). The hardware template staffs Owner, Salesperson and Cashier, and
+   * the seeded Salesperson has no PIN, so the OWNER holds the approver PIN;
+   * the old manager/accountant demo users went on 2026-08-17. The manager-cap
+   * negative lives in the API integration spec (discount-approval.spec.ts),
+   * whose fixtures own a MANAGER user.
    */
   approverPin: '2222',
   cashierPin: '1111',

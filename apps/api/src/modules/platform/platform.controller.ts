@@ -52,8 +52,9 @@ export class PlatformController {
   /**
    * Create or update the authenticated tenant's explicit profile.
    *
-   * Restricted to `PLATFORM_PROFILE_MANAGE`, which only OWNER and ADMIN hold —
-   * MANAGER, ACCOUNTANT, and CASHIER receive 403 from the global
+   * Restricted to `PLATFORM_PROFILE_MANAGE`, which only the owner-level roles
+   * hold (OWNER, ADMIN and — the hardware template's owner-equivalent, D100 —
+   * SALESPERSON); MANAGER, ACCOUNTANT, and CASHIER receive 403 from the global
    * `PermissionsGuard` before this handler runs.
    */
   @Patch('profile')

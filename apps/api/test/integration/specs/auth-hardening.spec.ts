@@ -601,9 +601,16 @@ describe('7.6 — module guards, enforced', () => {
 
   it('the QuickBooks OAuth callback stays reachable without a session', async () => {
     // A class-level guard here would have broken the handshake for every tenant.
-    const res = await http.request('GET', '/quickbooks/callback?code=x&state=y&realmId=z');
+    // The callback always answers with a redirect to the web app (errors ride
+    // as query params), so the redirect is the answer — following it would ask
+    // for a web server this suite does not run.
+    const res = await http.request('GET', '/quickbooks/callback?code=x&state=y&realmId=z', {
+      redirect: 'manual',
+    });
     expect(res.status).not.toBe(403);
     expect(res.status).not.toBe(401);
+    // Positive control: it was the redirect, not an error page, that came back.
+    expect([302, 303, 307, 308]).toContain(res.status);
   });
 
   it('hiding a control in the UI is not what protects the route', async () => {

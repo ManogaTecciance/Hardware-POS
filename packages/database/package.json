@@ -19,6 +19,8 @@
     "db:format": "prisma format",
     "db:seed": "prisma db seed",
     "db:provision": "tsx prisma/provision-tenant.ts",
+    "db:backfill-roles": "tsx prisma/backfill-tenant-roles.ts",
+    "db:role-report": "tsx prisma/role-authority-report.ts",
     "build": "prisma generate && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo \"(no linter configured for @hardware-pos/database yet)\"",

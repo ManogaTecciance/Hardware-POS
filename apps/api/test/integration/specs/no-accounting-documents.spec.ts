@@ -41,6 +41,13 @@ import { MANAGER_PIN, seedTileShopWithQuickBooks, type SeededTenant } from '../f
 import { CreateReturnDto } from '../../../src/modules/returns/dto/create-return.dto';
 import { ApproveReturnDto } from '../../../src/modules/returns/dto/approve-return.dto';
 
+/**
+ * `main` (2026-09-04) requires a payment due date on any sale that leaves a
+ * balance, and refuses one on a sale that does not. A fixed far-future day keeps
+ * these characterisations about what they characterise, not about dates.
+ */
+const CREDIT_DUE_DATE = '2099-12-31';
+
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let sales: SalesService;
@@ -100,6 +107,7 @@ function creditSale() {
     customerId: tenant.creditCustomerId,
     items: [{ productId: tenant.productAId, quantity: 1 }],
     payments: [],
+    paymentDueDate: CREDIT_DUE_DATE,
   });
 }
 
@@ -110,6 +118,7 @@ function partialSale() {
     customerId: tenant.creditCustomerId,
     items: [{ productId: tenant.productAId, quantity: 1 }],
     payments: [{ method: 'CASH', amount: 400 }],
+    paymentDueDate: CREDIT_DUE_DATE,
   });
 }
 

@@ -104,6 +104,32 @@ docker compose -f docker-compose.prod.yml logs -f api
 curl -fsS https://api.axlopos.com/v1/health
 ```
 
+### Existing tenants: role rows (first deploy of Phase 1.5 / D100)
+
+Migrations create the `Role` table and never fill it. A tenant that predates
+role rows — the pilot — keeps every user on the legacy enum fallback until an
+operator seeds its roles and links its users. Run once per existing tenant,
+after step 5, and read the dry run before writing (D100):
+
+```bash
+# Dry run: what would be created, refreshed and linked, and who stays on the fallback.
+docker compose -f docker-compose.prod.yml run --rm --entrypoint sh api -c \
+  "pnpm --filter @hardware-pos/database exec tsx prisma/backfill-tenant-roles.ts <tenant-slug>"
+
+# Apply. Refuses if a tenant-created role collides with a template key or name.
+docker compose -f docker-compose.prod.yml run --rm --entrypoint sh api -c \
+  "pnpm --filter @hardware-pos/database exec tsx prisma/backfill-tenant-roles.ts <tenant-slug> --write"
+
+# Confirm: expect tenantsWithoutRoles 0 and builtInParityDifferences 0.
+docker compose -f docker-compose.prod.yml run --rm --entrypoint sh api -c \
+  "pnpm --filter @hardware-pos/database exec tsx prisma/role-authority-report.ts"
+```
+
+A no-profile tenant is seeded as HARDWARE (D57) — run `backfill-pilot-profile.ts`
+first if the profile row is still missing. Users on an enum with no template
+(MANAGER, ACCOUNTANT, ADMIN) are listed, not linked: re-role them by hand in the
+platform console.
+
 ### Production deployment — no schema change
 
 Skip steps 1, 3, and 4.

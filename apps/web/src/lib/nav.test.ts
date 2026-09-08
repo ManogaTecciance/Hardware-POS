@@ -344,6 +344,60 @@ describe('module and permission are both required', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// D100 — the Salesperson holds the owner's rail
+// ─────────────────────────────────────────────────────────────────────────────
+
+/*
+ * `ROLE_PERMISSIONS.SALESPERSON` is the OWNER set by reference, and the rail is
+ * derived from permissions, so parity is a consequence rather than a
+ * coincidence. It is asserted on the rail anyway: an edit that split the two
+ * sets would show up on the screen it changes, and the cashier negative is what
+ * stops the equality being satisfied by a resolver that answers the same
+ * reduced list for everyone.
+ */
+describe('D100 — a hardware Salesperson sees exactly the owner’s rail', () => {
+  const owner = nav('HARDWARE', LEGACY_MODULES, 'OWNER');
+  const salesperson = nav('HARDWARE', LEGACY_MODULES, 'SALESPERSON');
+  const cashier = nav('HARDWARE', LEGACY_MODULES, 'CASHIER');
+
+  it('labels, hrefs and groups are identical to the owner’s', () => {
+    expect(labels(salesperson)).toEqual(labels(owner));
+    expect(hrefs(salesperson)).toEqual(hrefs(owner));
+    expect(salesperson.map((g) => g.label)).toEqual(owner.map((g) => g.label));
+    // Not vacuous: the shared rail is the full retail one, System group
+    // included — the two entries a cashier never sees.
+    expect(labels(salesperson)).toContain('Settings');
+    expect(labels(salesperson)).toContain('QuickBooks');
+  });
+
+  it('and is NOT the cashier’s rail', () => {
+    expect(labels(salesperson)).not.toEqual(labels(cashier));
+    expect(hrefs(salesperson)).not.toEqual(hrefs(cashier));
+    // The difference itself, both ways, so neither list can be empty.
+    expect(labels(cashier)).toContain('POS');
+    expect(labels(cashier)).not.toContain('Settings');
+    expect(labels(salesperson)).toContain('Settings');
+  });
+
+  it('MUTATION PROOF — a narrowed Salesperson would be detected on the rail', () => {
+    // The binding the parity rests on, then the rail the equality above would
+    // see if somebody rebuilt the salesperson as "the owner minus settings".
+    expect(ROLE_PERMISSIONS.SALESPERSON).toBe(ROLE_PERMISSIONS.OWNER);
+
+    const narrowed = new Set<string>(ROLE_PERMISSIONS.OWNER);
+    narrowed.delete(Permission.SETTINGS_MANAGE);
+    const narrowedRail = resolveNavigation({
+      businessType: 'HARDWARE',
+      enabledModules: LEGACY_MODULES,
+      hasPermission: (p) => narrowed.has(p),
+    });
+    expect(labels(narrowedRail)).not.toContain('Settings');
+    expect(() => expect(labels(narrowedRail)).toEqual(labels(owner))).toThrow();
+    expect(() => expect(hrefs(narrowedRail)).toEqual(hrefs(owner))).toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The unresolved profile
 // ─────────────────────────────────────────────────────────────────────────────
 

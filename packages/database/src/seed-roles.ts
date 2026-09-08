@@ -6,12 +6,15 @@
  * closed once authorization reads them, so seeding is part of creating a tenant,
  * not an optional extra.
  *
- * ## What it does not do
+ * ## What reads these rows
  *
- * It does not assign a role to a user, and nothing reads these rows at
- * authorization time yet. This slice lands the authority **inert**: `User.role`
- * (the enum) is still what grants permissions, and stays so until parity is proven
- * and the resolution switch is made deliberately.
+ * `PermissionResolver` (apps/api), on every request: a user with `roleId` set
+ * resolves from their row (DATABASE); a user with none resolves from
+ * `ROLE_PERMISSIONS[User.role]` (LEGACY_FALLBACK). Phase 1.5.1 landed the rows
+ * inert and Phase 1.5.4 switched resolution over once parity was proven;
+ * `linkUsersToRoles` below is what moves a user from the second path to the
+ * first, and `provision-tenant.ts`, the platform console and
+ * `backfill-tenant-roles.ts` all run it.
  *
  * ## Permission rows
  *
@@ -52,6 +55,31 @@ export async function syncPermissionCatalogue(db: Db): Promise<number> {
  * reverted display names would be discovered by an operator, not by a test.
  * Permission assignments *are* re-applied, because those are the platform's
  * definition of the role rather than the tenant's presentation of it.
+ *
+ * ## Two refusals (D100)
+ *
+ * This runs against EXISTING tenants too — the production backfill
+ * (`backfill-tenant-roles.ts`) is exactly that — so a row it finds under a
+ * template key is not necessarily one it wrote:
+ *
+ * - A **tenant-created** row under a BUILT-IN template's key is refused, not
+ *   adopted. Adopting it would mark it built-in and `set` its permissions to
+ *   the template's — for SALESPERSON that is the owner's set — promoting
+ *   everyone holding a narrow custom role to owner-equivalent on an
+ *   idempotent re-run. The test is "a built-in's row must be a system row":
+ *   the operational templates (Waiter, Kitchen staff, …) are seeded as
+ *   NON-system rows by design, so `isSystem` cannot tell a seeded Waiter from
+ *   a tenant-created one, and those keep being adopted as they always were —
+ *   which is also what makes a restaurant's re-seed idempotent.
+ *   (`RolesService.create` refuses every template key going forward; this
+ *   guards rows created before it did, where the stakes are highest.)
+ * - A row with the template's **display name** under a different key would
+ *   make the create fail on `@@unique([tenantId, name])` half-way through the
+ *   loop with a raw constraint error. Named here instead, before anything is
+ *   written for that template, so the operator knows what to rename.
+ *
+ * Both throw: a seed that silently skipped a role would leave a tenant without
+ * it and nothing red.
  */
 export async function seedTenantRoles(
   db: Db,
@@ -65,10 +93,16 @@ export async function seedTenantRoles(
 
     const existing = await db.role.findUnique({
       where: { tenantId_key: { tenantId, key: template.key } },
-      select: { id: true },
+      select: { id: true, isSystem: true },
     });
 
     if (existing) {
+      if (template.isBuiltIn && !existing.isSystem) {
+        throw new Error(
+          `Refusing to seed role ${template.key} for tenant ${tenantId}: a tenant-created role ` +
+            `already uses that key. Built-in keys are reserved; rename or archive the custom role first.`,
+        );
+      }
       await db.role.update({
         where: { id: existing.id },
         // `set` rather than `connect`: a permission removed from a template must
@@ -76,6 +110,16 @@ export async function seedTenantRoles(
         data: { isSystem: template.isBuiltIn, permissions: { set: template.permissions.map((key) => ({ key })) } },
       });
     } else {
+      const nameClash = await db.role.findUnique({
+        where: { tenantId_name: { tenantId, name: template.name } },
+        select: { key: true },
+      });
+      if (nameClash) {
+        throw new Error(
+          `Refusing to seed role ${template.key} for tenant ${tenantId}: a role named ` +
+            `"${template.name}" already exists (key ${nameClash.key ?? 'none'}). Rename it first.`,
+        );
+      }
       await db.role.create({
         data: {
           tenantId,
@@ -107,8 +151,14 @@ export async function seedTenantRoles(
  * permission change, while no link is the status quo.
  */
 export async function linkUsersToRoles(db: DbWithUsers, tenantId: string): Promise<number> {
+  // Seeded, active rows only. A tenant-created row that happens to carry an
+  // enum's key (possible before `RolesService` reserved those keys) is not the
+  // built-in, and linking to it would hand the user that role's permissions —
+  // "something approximate", which the contract above rules out. An archived
+  // row fails closed at resolution, so a link to one would be a lockout
+  // dressed up as a migration.
   const roles = await db.role.findMany({
-    where: { tenantId },
+    where: { tenantId, isActive: true, isSystem: true },
     select: { id: true, key: true },
   });
   const byKey = new Map(roles.filter((r) => r.key).map((r) => [r.key as string, r.id]));

@@ -26,7 +26,8 @@ export class AuthController {
   ) {}
 
   /**
-   * Email + password login (owner / admin / accountant).
+   * Email + password login (owner-level and back-office roles; since D48 the
+   * till too, PINs having become approval-only).
    *
    * Tenant resolution, in precedence order (Slice 7.2): the `workspace` slug in the
    * body, then the `x-tenant-id` header, then a unique match on the email alone.
@@ -75,9 +76,10 @@ export class AuthController {
   /**
    * List the branches this session may switch into, right now (Phase 1.5.6).
    *
-   * OWNER/ADMIN see every active branch of their tenant. Everyone else sees
-   * their assigned `User.branchId` plus every branch granted through
-   * `BranchAccess`. Inactive branches are omitted.
+   * Owner-level roles (`isAdminLevelRole`: OWNER, ADMIN and, since D100, the
+   * hardware template's SALESPERSON) see every active branch of their tenant.
+   * Everyone else sees their assigned `User.branchId` plus every branch
+   * granted through `BranchAccess`. Inactive branches are omitted.
    */
   @Get('accessible-branches')
   listAccessibleBranches(
