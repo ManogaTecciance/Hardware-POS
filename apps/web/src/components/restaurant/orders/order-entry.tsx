@@ -252,10 +252,18 @@ export function OrderEntry({ session, sessionId }: Props) {
       const { saleId, openTableRelease } = await tableSessions.close(session, sessionId, {
         idempotencyKey: closeKey,
       });
-      // D50: when this was an open table sharing physical tables with another
-      // party, the server released only what it could prove was free. Stop
-      // before the bill and ask about the rest — the floor knows, the server
-      // cannot.
+      /*
+       * D50: when this was an open table sharing physical tables with another
+       * party, the server released only what it could prove was free. Stop
+       * before the bill and ask about the rest — the floor knows, the server
+       * cannot.
+       *
+       * D104: a close that left the arrangement standing (another party is
+       * still on it) releases nothing at all and has nothing to ask about —
+       * `remainingTabs` says so, and `stillReserved` is empty, so this falls
+       * straight through to the bill. That is the right outcome: the tables are
+       * not free and nobody needs prompting about it.
+       */
       if (openTableRelease && openTableRelease.stillReserved.length > 0 && branchId) {
         setShowCloseConfirm(false);
         setReleaseReminder({ saleId, stillReserved: openTableRelease.stillReserved });

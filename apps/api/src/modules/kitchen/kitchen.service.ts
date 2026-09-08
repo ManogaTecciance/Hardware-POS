@@ -7,6 +7,7 @@ import {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { withTabName } from '../../common/place-label';
 
 /** D83 — every item on the order a ticket belongs to, for the kitchen. */
 export interface KitchenOrderView {
@@ -329,6 +330,9 @@ export class KitchenService {
         session: {
           select: {
             waiterUserId: true,
+            // D104 — two parties can share one arrangement, so the tab's name
+            // is what keeps their tickets apart on the pass.
+            tabName: true,
             table: { select: { code: true, area: { select: { name: true } } } },
           },
         },
@@ -374,11 +378,14 @@ export class KitchenService {
       ticketId: ticket.id,
       ticketNumber: ticket.ticketNumber,
       orderNumber: order.orderNumber,
-      placeLabel: table
-        ? table.code === 'WALK-IN'
-          ? 'Takeaway'
-          : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
-        : null,
+      placeLabel: withTabName(
+        table
+          ? table.code === 'WALK-IN'
+            ? 'Takeaway'
+            : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
+          : null,
+        order.session?.tabName ?? null,
+      ),
       waiterName: waiter?.name ?? null,
       placedAt: order.createdAt.toISOString(),
       items: order.items.map((item) => ({
@@ -501,6 +508,8 @@ const TICKET_INCLUDE = {
           session: {
             select: {
               waiterUserId: true,
+              // D104 — see the ticket-detail query above.
+              tabName: true,
               table: { select: { code: true, area: { select: { name: true } } } },
             },
           },
@@ -527,11 +536,14 @@ function toView(
     orderNumber: row.round?.order?.orderNumber ?? null,
     // The synthetic walk-in table backs every counter and takeaway order;
     // the pass wants to read "Takeaway", not a table code nobody can find.
-    placeLabel: table
-      ? table.code === 'WALK-IN'
-        ? 'Takeaway'
-        : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
-      : null,
+    placeLabel: withTabName(
+      table
+        ? table.code === 'WALK-IN'
+          ? 'Takeaway'
+          : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
+        : null,
+      session?.tabName ?? null,
+    ),
     roundNumber: row.round?.roundNumber ?? null,
     waiterName: session?.waiterUserId ? waiterNames.get(session.waiterUserId) ?? null : null,
     items: row.items.map((i) => ({

@@ -3932,6 +3932,230 @@ to `/products`, `/menu` absent from every workspace's hrefs, and retail
 free of the label; the detail spec asserts a dish hides the two tabs while
 a stock item keeps them.
 
+### D104 — one joined table, several tabs
+
+PO, 2026-09-07, on the open tables shipped by D49/D50: "think I'm going with 3
+friends, the waiter makes a table with join ex M1 and M2 all having 6 seats, we
+want 4, then another two friends come — they also can book that new made group."
+
+D50 already answers *two parties, shared furniture*, but with the multiplicity
+the other way up: **N arrangements over 1 physical table**, each arrangement
+carrying exactly one tab. The PO is describing **1 arrangement carrying N
+tabs** — one named group the floor can keep selling seats on. Both shapes are
+real and they are not substitutes: the first is two unrelated pairs who happened
+to be sat at one four-top, the second is one joined table that is only half
+full.
+
+**The rule changes for `kind = OPEN` only.** `openSession`'s
+one-live-session-per-table check becomes kind-aware: a PHYSICAL table still
+refuses a second session — a four-top with a party at it is not something two
+parties can both be sold — and an arrangement admits as many tabs as it has
+chairs. The integration spec proves the relaxation is scoped by re-asserting the
+physical refusal beside the arrangement's acceptance, and
+`table-sessions.spec.ts`'s "the same table cannot have two open sessions"
+survives untouched because its fixture is a physical table.
+
+**Seats are counted, and the count is refused when it does not fit.** Live tabs
+are `OPEN` or `BILLING` — a party waiting for the bill is still in its chairs
+— and `guestCount` becomes required on an arrangement that HAS a recorded seat
+count. Where the operator wrote "seating as arranged" and left it blank (D49's
+optional `seats`), nothing is enforced: inventing a limit would refuse parties
+on a number nobody stated. The one list of live statuses now lives in
+`common/live-sessions.ts`, because "may another party sit here" and "may this
+arrangement be dissolved" are the same question about the same rows and two
+copies of the answer would drift.
+
+**A tab carries its own name.** Two parties on one arrangement previously
+produced byte-identical kitchen tickets and bill headers — the table's name was
+the whole label. `TableSession.tabName` is composed onto the place label by one
+helper used at all three read surfaces (kitchen board and ticket detail, bill,
+unified order list). It is required from the **second** tab onwards, and only
+then: naming a tab that has no sibling is typing for nothing, and a lone
+arrangement already reads unambiguously.
+
+**Release becomes last-*tab*-out.** This supersedes D49's "the arrangement ends
+with the tab". `releaseOpenTable` now returns without touching memberships,
+`isActive` or any member status while another live session remains on the open
+table; only the last close dissolves the arrangement, after which D50's
+member-level "still held by another open table" logic runs unchanged. The
+ordering inside `closeSession` is load-bearing — it marks its own session
+CLOSED *before* the fulfilment provider asks who is left, so a plain count
+excludes the tab that is closing — and an integration test pins it. The release
+summary gains `remainingTabs`, because "no member was freed" (a shared
+four-top, normal) and "two parties are still sitting here" (nothing happened at
+all) read identically without it.
+
+**In the POS, arrangements live under Open.** D92's partition holds — every
+table on the branch is in exactly one place — and an arrangement's place is
+**Open**, whether or not a party is on it. Deliberately not filed by status like
+a physical table: under this record an arrangement can be occupied AND still
+have chairs, so status would make it flicker between destinations as parties
+come and go, hiding the very table the next party is meant to join. A first pass
+gave them a separate "Joined" chip; the PO wanted them under Open, which is also
+the truer reading of D92. Tapping a group opens a small prompt for the guest
+count and the tab name — physical tables keep their one-tap seat, because that
+is the commonest action in service and a dialog on it would tax every cover to
+serve the rarer case. Occupancy (`liveTabs`, `seatsTaken`) is computed by the
+SERVER on `listOpenTables`: D70 scopes the open-session list to the caller's own
+tabs, so a client adding up what it can see would miss a colleague's party and
+offer seats that are not there.
+
+**Not in scope.** Seat-level assignment (which chair): seats stay a count.
+Moving or merging tabs. Reservations on arrangements — D49 still refuses
+non-PHYSICAL tables. And note the claim "physical tables keep one tab" is about
+`openSession`: takeaway and delivery already insert sessions directly on their
+synthetic WALK-IN / DELIVERY tables and never pass through it, so nothing here
+runs on those paths.
+
+**Migration.** `20260908000000_add_table_session_tab_name`: one nullable TEXT
+column. Purely additive — null on every existing row means "the table's name
+stands alone", which is exactly what those rows already meant, since before this
+record a table could not have a sibling tab to be distinguished from.
+
+**Two assertions were superseded, not accommodated** (D16 forbids the latter):
+`open-tables.service.spec.ts`'s "**always** archives the closing open table" —
+"always" was load-bearing under D49 and is now conditional, replaced by the pair
+(archives when last / leaves it standing when not) — and a POS render assertion
+from the same day that a tap on an arrangement "still resumes rather than seating
+a second session on it".
+
+Paired per D30 throughout, and mutation-proven inline: the render spec's five
+mutations fail 7/4/1/1/1 of its 7 tests (dropping the arrangement fetch kills
+all seven, which is the shape of the original defect — total absence), and the
+integration spec asserts every refusal beside the acceptance that proves the
+server has not simply started saying no.
+
+---
+
+### D105 — a table already inside an open table is not offered to another one
+
+PO, 2026-09-07, immediately after D104 landed: "in the main hall I joined M2
+and M3, then after creating a join table [they still show] in that place" —
+the **New open table** picker was still listing M2 and M3 while the arrangement
+holding them, `minin`, was in service with three tabs and eight guests
+physically at those two tables.
+
+**This narrows D50 to `AVAILABLE` only.** D50 had widened member eligibility by
+exactly one status, admitting `RESERVED` so two unrelated pairs could each hold
+their own arrangement over one free four-top. That widening was sound while an
+arrangement meant exactly ONE tab — "already shared" and "has a party at it"
+were then mutually exclusive, which is what D50's own sentence *"a table with a
+party physically at it is not shareable; a table already shared is"* relies on.
+
+**D104 dissolved that distinction.** Occupancy is recorded on the arrangement,
+never on its members: seating `minin` moves `minin` to OCCUPIED while M2 and M3
+stay `RESERVED`. So after D104 a `RESERVED` row means "held by an arrangement,
+which may or may not be full of people", and neither the service nor the picker
+could tell the two apart from the row alone. The rule was not merely stale — it
+was offering the floor tables that had guests sitting at them.
+
+**Nothing is lost, because D104 replaced the mechanism.** D50's worked example
+is now served better by a second **tab** on the existing arrangement than by a
+second arrangement over the same furniture: one bill each, one named tab each,
+and the physical tables released when the last of those tabs closes. Refusing
+here is how the floor gets pushed onto that route rather than onto a duplicate
+arrangement that no longer buys anything.
+
+**What changes.** `DiningService.createOpenTable`'s eligibility becomes
+`isActive && kind = PHYSICAL && status = AVAILABLE`. The picker's filter
+narrows to match, its "shared" hint goes with the rule that produced it, and
+its copy now names the replacement route instead of promising sharing. The
+existing `MemberTableUnavailableError` is unchanged and its wording — *"it is
+in service, archived, or already part of another open table"* — becomes true
+for the first time.
+
+**What deliberately does NOT change.** No migration and no schema change:
+`OpenTableMember` stays many-to-many. Restoring
+`@@unique([memberTableId])` would need a migration and would reject rows
+already written under D50, and the service is the authority in any case — the
+many-to-many shape simply stops being reachable through the create path. D50's
+member-level last-one-out logic in `releaseOpenTable` stays as written, correct
+and now practically unreachable, because it is what keeps rows created before
+this record honest. `releaseMemberTable` (Unreserve) is untouched and remains
+the escape hatch.
+
+**One assertion was superseded, not accommodated** (D16 forbids the latter):
+`open-tables.service.spec.ts`'s *"D50: a table already RESERVED by another open
+table can be shared"*, which asserted the create RESOLVES. It is now its
+opposite, and `RESERVED` joins the `it.each` refusal table beside SEATED /
+OCCUPIED / BILLING / CLEANING / BLOCKED, which is the tidiest statement of the
+new rule and leaves that test's message assertion untouched.
+
+Paired per D30 in three places, and mutation-proven inline with measured
+counts: the service spec asserts the refusal AND that nothing was written, and
+restoring `|| RESERVED` to the predicate fails 2 of its 22 tests; the picker —
+which had **no test at all** before this record — asserts a free table present
+beside the joined ones absent, and the same restoration fails 2 of its 3; and
+the integration spec refuses a member of an arrangement that is unseated AND
+one that is in service, then proves the same tables become joinable again once
+the last tab closes, which is what stops the pair passing against a server that
+has simply started saying no.
+
+---
+
+### D106 — a joined table is shown, not offered
+
+PO, 2026-09-07: "after the open table, like I join M1 and M3, then under the
+Main Hall section it shows the table with the button Unreserve — I think don't
+show, please. It shows Reserved status, can't click button. I think that is the
+best."
+
+It was more than a preference. Pressing that button is what broke the live
+floor: `minin` was found serving **three tabs and eight guests while holding
+zero tables** — M2 and M3 had been unreserved out from under the party sitting
+on them.
+
+**Why the guard never fired.** `releaseMemberTable` refused when the table had
+its own live session:
+
+    const ownSession = await tx.tableSession.findFirst({
+      where: { tableId: table.id, status: IN_SERVICE_SESSION_STATUSES },
+    });
+    if (ownSession) throw new TableInServiceError();
+
+A joined member never has a session of its own — the tab lives on the OPEN row —
+so the check could not fire for exactly the case it appeared to cover. It read
+like a safety rail and was one only for tables that were not joined.
+
+**Why the permission is withdrawn rather than fixed in place.** D50 allowed this
+deliberately, as the compaction escape hatch: two parties of three shared a
+four-top and a two-top, the first is billed, and the remaining three now fit on
+the four-top alone — only a human can see that. **D105 ended table sharing**, so
+that scenario cannot arise: there is no second arrangement whose departure frees
+furniture the first no longer needs. And **D104** made the failure expensive,
+because an arrangement now carries several tabs and several parties.
+
+**The card keeps its job, which was never the button.** A member table still
+shows the `Reserved` badge and the "Held by …" line naming the arrangement —
+that line is the whole answer to "where did my table go", and it is why the card
+is worth reading. What it no longer has is anything to press. The badge wording
+is unchanged on the PO's say-so, and it is shared with the dashboard and the POS
+picker.
+
+**Recovery was already correct and is now the only route.** Close the tabs — the
+last one releases every member automatically (D104) — or **Dissolve** the
+arrangement, which has always refused while a tab is live. An arrangement nobody
+has sat at yet can still have a member released, which is the honest half of the
+old behaviour and stays.
+
+**Server, not just screen.** Frontend hiding is usability only, so the rule
+moved into the service: `releaseMemberTable` now counts live tabs on the
+**arrangements holding the member** and throws the existing
+`OpenTableInServiceError`. The member's own-session check stays as well — a
+table can be RESERVED and separately mid-service in states this method has no
+business touching. No new error code, no new route, no migration; the endpoint
+and its route-matrix entry are untouched.
+
+Paired per D30 on both sides, and mutation-proven inline with measured counts:
+the floor spec asserts the card's CONTENT and its EMPTY action slot as separate
+tests, and restoring the button fails 1 of those 2; the service spec asserts the
+refusal beside the still-working unseated release, and deleting the holder probe
+fails 1 of its 23 tests and 2 of the 12 integration tests — which also assert
+the membership row and the member's RESERVED status survive the refusal, and
+that the member comes back by itself when the last tab closes.
+
+---
+
 ---
 
 ## Open decisions

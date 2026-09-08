@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, RestaurantTableKind, RestaurantTableStatus } from '@hardware-pos/database';
 
 import { nextDocumentNumber } from '../../common/document-sequence';
+import { LIVE_SESSION_STATUSES } from '../../common/live-sessions';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateDiningAreaDto,
@@ -68,6 +69,17 @@ export interface OpenTableReleaseSummary {
     label: string | null;
     heldBy: Array<{ id: string; code: string; label: string | null }>;
   }>;
+  /**
+   * D104 — live tabs left on the arrangement AFTER this close. Non-zero means
+   * nothing was released and nothing was dissolved, because other parties are
+   * still sitting there.
+   *
+   * It is on the summary rather than left to an empty `released` list because
+   * those two states are not the same thing and read identically without it:
+   * "no member was freed" is the normal outcome of a shared four-top, whereas
+   * "two parties are still here" is the reason the whole arrangement stayed.
+   */
+  remainingTabs: number;
 }
 
 /** D49 — an open table plus the physical tables it absorbed. */
@@ -79,16 +91,29 @@ export interface OpenTableView extends RestaurantTableView {
     areaId: string | null;
     status: RestaurantTableStatus;
   }>;
+  /**
+   * D104 — how full the arrangement is.
+   *
+   * Computed here rather than by the client because D70 scopes
+   * `listOpenSessions` to the caller's own sessions: a waiter summing what
+   * they can see would miss a colleague's party and report seats that are not
+   * there. `capacity` (inherited) minus `seatsTaken` is what is free; a null
+   * capacity means the operator recorded none (D49) and nothing is enforced.
+   */
+  liveTabs: number;
+  seatsTaken: number;
 }
 
 /**
- * Sessions the archive check treats as "in service". Explicit list, not
- * `!= CLOSED`, so a new status added later must be classified deliberately —
- * silently defaulting to "not in service" would let an unfinished session
- * bypass the archive block.
+ * Sessions the archive check treats as "in service".
+ *
+ * D104 moved the list itself to `common/live-sessions`, because the seat
+ * arithmetic in `openSession` has to agree with it exactly: "may another party
+ * sit here" and "may this arrangement be dissolved" are the same question about
+ * the same rows, and two copies of the answer would eventually disagree.
  */
 const IN_SERVICE_SESSION_STATUSES: Prisma.TableSessionWhereInput['status'] = {
-  in: ['OPEN', 'BILLING'],
+  in: [...LIVE_SESSION_STATUSES],
 };
 
 @Injectable()
@@ -325,17 +350,19 @@ export class DiningService {
       },
       orderBy: { createdAt: 'asc' },
     });
-    return rows.map((row) => ({
-      ...this.tableToView(row),
-      members: row.openMembers.map((m) => m.memberTable),
-    }));
+    return this.withOccupancy(rows);
   }
 
   /**
    * Join physical tables into a named open table (D49). Members go RESERVED
-   * inside the same transaction that creates the arrangement; the FOR UPDATE
-   * lock serialises two clerks grabbing the same table, and the
-   * OpenTableMember.memberTableId unique is the structural backstop.
+   * inside the same transaction that creates the arrangement, and the FOR
+   * UPDATE lock serialises two clerks grabbing the same table.
+   *
+   * There is no structural backstop below this check: D50 dropped
+   * `OpenTableMember.memberTableId`'s unique so one table could back several
+   * arrangements, and D105 closed that door at the service instead of
+   * restoring the constraint (which would reject rows already written under
+   * D50). The eligibility loop IS the rule.
    */
   async createOpenTable(
     tenantId: string,
@@ -356,15 +383,31 @@ export class DiningService {
       // not a conflict — nothing to name without leaking another tenant's rows.
       if (members.length !== memberIds.length) throw new TableNotFoundError();
       for (const member of members) {
-        // D50: RESERVED joins AVAILABLE as an eligible status — one physical
-        // table may back several open tables (two unrelated parties sharing a
-        // four-top). Everything else is still refused: a table with a party
-        // physically at it is not shareable, and an OPEN table is not a member.
+        /*
+         * D105 — AVAILABLE only. A table already inside an arrangement is not
+         * offered to a second one.
+         *
+         * This narrows D50, which admitted RESERVED so two unrelated pairs
+         * could each hold their own arrangement over one free four-top. That
+         * widening rested on an arrangement meaning exactly ONE tab, and D104
+         * ended that: a member stays RESERVED while its arrangement fills with
+         * guests, so "already shared" and "has a party physically at it" — the
+         * two states D50 was careful to separate — became indistinguishable
+         * from this row alone. The picker was therefore offering tables with
+         * people sitting at them.
+         *
+         * Nothing is lost, because D104 serves D50's case better: the second
+         * pair opens a second TAB on the existing arrangement, which is one
+         * bill each without a second arrangement. Refusing here is how the
+         * floor gets pushed onto that route.
+         *
+         * An OPEN-kind table is still never a member, and an archived one
+         * never was.
+         */
         const joinable =
           member.isActive &&
           member.kind === RestaurantTableKind.PHYSICAL &&
-          (member.status === RestaurantTableStatus.AVAILABLE ||
-            member.status === RestaurantTableStatus.RESERVED);
+          member.status === RestaurantTableStatus.AVAILABLE;
         if (!joinable) throw new MemberTableUnavailableError(member.code);
       }
 
@@ -439,6 +482,10 @@ export class DiningService {
             ? RestaurantTableStatus.AVAILABLE
             : RestaurantTableStatus.RESERVED,
         })),
+        // D104 — dissolve refuses while ANY tab is live (checked above), so a
+        // dissolved arrangement provably carries none.
+        liveTabs: 0,
+        seatsTaken: 0,
         release,
       };
     });
@@ -461,6 +508,29 @@ export class DiningService {
     tenantId: string,
     openTableId: string,
   ): Promise<OpenTableReleaseSummary> {
+    /*
+     * D104 — the arrangement outlives any one tab.
+     *
+     * Several parties may share one open table, each with its own bill, so the
+     * first bill to close must not dissolve the arrangement under the others.
+     * This supersedes D49's "the arrangement ends with the tab": it now ends
+     * with the LAST tab.
+     *
+     * The closing session is already CLOSED when this runs — `closeSession`
+     * updates it before calling the fulfilment provider — so a plain count over
+     * live statuses excludes it without needing to be told which one it was.
+     * That ordering is load-bearing and is pinned by an integration test.
+     */
+    const remainingTabs = await tx.tableSession.count({
+      where: { tableId: openTableId, status: { in: [...LIVE_SESSION_STATUSES] } },
+    });
+    if (remainingTabs > 0) {
+      // Nothing is touched: not the memberships, not `isActive`, not one
+      // member's status. The parties still at the table keep the tables they
+      // are sitting at.
+      return { released: [], stillReserved: [], remainingTabs };
+    }
+
     const memberIds = (
       await tx.openTableMember.findMany({
         where: { openTableId, tenantId },
@@ -473,7 +543,7 @@ export class DiningService {
       where: { id: openTableId },
       data: { isActive: false, status: RestaurantTableStatus.AVAILABLE },
     });
-    if (memberIds.length === 0) return { released: [], stillReserved: [] };
+    if (memberIds.length === 0) return { released: [], stillReserved: [], remainingTabs: 0 };
 
     // Who still holds each former member? Filtered on the holder being live so
     // a stale membership could never keep a table hostage.
@@ -513,19 +583,33 @@ export class DiningService {
       stillReserved: rows
         .filter((r) => holdersByMember.has(r.id))
         .map((r) => ({ ...r, heldBy: holdersByMember.get(r.id) ?? [] })),
+      remainingTabs: 0,
     };
   }
 
   /**
-   * D50 — manual early release of ONE physical table from every open table
-   * holding it.
+   * Release ONE physical table from every open table holding it.
    *
-   * The escape hatch for compaction: two parties of three shared a four-top
-   * and a two-top; the first is billed, and the remaining three now fit on the
-   * four-top alone. Only a human can know that, so the server never does it on
-   * its own. Deliberately permitted even when this strips the last member of a
-   * live open table — refusing would invent a rule that blocks a real
-   * compaction, and the server cannot see the room.
+   * D50 built this as the compaction escape hatch — two parties of three
+   * shared a four-top and a two-top, the first is billed, and the remaining
+   * three now fit on the four-top alone — and deliberately allowed it even
+   * when it stripped the last member of a LIVE arrangement, on the grounds
+   * that only a human can see the room.
+   *
+   * **D106 withdraws that permission.** Two things changed underneath it.
+   * D105 ended table sharing, so the compaction case no longer exists: there
+   * is no second arrangement whose departure frees furniture the first no
+   * longer needs. And D104 made the damage real — an arrangement can carry
+   * several tabs, and this method emptied one that was serving three of them,
+   * leaving eight guests seated at tables the floor plan had already handed
+   * back. The old guard read the MEMBER's own sessions, and a joined member
+   * never has one (the tab lives on the open-table row), so it could not fire
+   * for the case it appeared to cover.
+   *
+   * What remains is the honest half: an UNSEATED arrangement's members can
+   * still be freed. A seated one is emptied by closing its tabs, which
+   * releases the members anyway (D104), or by dissolving it — which has always
+   * refused while a tab is live.
    */
   async releaseMemberTable(
     tenantId: string,
@@ -553,6 +637,24 @@ export class DiningService {
       // table that no open table is holding.
       if (memberships.length === 0) throw new TableNotHeldByOpenTableError();
 
+      /*
+       * D106 — the question is about the ARRANGEMENTS, not this row.
+       *
+       * A joined member has no session of its own, so the pre-D106 probe on
+       * `table.id` was always null here and the refusal never happened. Asking
+       * the holders is what actually answers "is anybody sitting at this
+       * table". The member's own sessions are checked too, unchanged: a table
+       * can be RESERVED and separately mid-service in states this method has
+       * no business touching.
+       */
+      const heldByLive = await tx.tableSession.count({
+        where: {
+          tableId: { in: memberships.map((m) => m.openTable.id) },
+          status: IN_SERVICE_SESSION_STATUSES,
+        },
+      });
+      if (heldByLive > 0) throw new OpenTableInServiceError();
+
       const ownSession = await tx.tableSession.findFirst({
         where: { tableId: table.id, status: IN_SERVICE_SESSION_STATUSES },
         select: { id: true },
@@ -573,6 +675,53 @@ export class DiningService {
     });
   }
 
+  /**
+   * D104 — attach the live-tab count and seats taken to a set of arrangements.
+   *
+   * One grouped query for the whole page rather than a count per row: the floor
+   * plan and the POS both list every arrangement on the branch, and a per-row
+   * count is the classic N+1 that only shows up on a busy Saturday.
+   */
+  private async withOccupancy(
+    rows: Array<
+      Prisma.RestaurantTableGetPayload<{
+        include: {
+          openMembers: {
+            include: {
+              memberTable: {
+                select: { id: true; code: true; label: true; areaId: true; status: true };
+              };
+            };
+          };
+        };
+      }>
+    >,
+  ): Promise<OpenTableView[]> {
+    const ids = rows.map((r) => r.id);
+    const live = ids.length
+      ? await this.prisma.tableSession.findMany({
+          where: { tableId: { in: ids }, status: { in: [...LIVE_SESSION_STATUSES] } },
+          select: { tableId: true, guestCount: true },
+        })
+      : [];
+    const tabs = new Map<string, { liveTabs: number; seatsTaken: number }>();
+    for (const row of live) {
+      const acc = tabs.get(row.tableId) ?? { liveTabs: 0, seatsTaken: 0 };
+      acc.liveTabs += 1;
+      // A tab opened without a guest count contributes nothing to the total.
+      // That is only reachable on an arrangement with NO recorded capacity —
+      // `openSession` requires the count wherever seats are actually enforced.
+      acc.seatsTaken += row.guestCount ?? 0;
+      tabs.set(row.tableId, acc);
+    }
+    return rows.map((row) => ({
+      ...this.tableToView(row),
+      members: row.openMembers.map((m) => m.memberTable),
+      liveTabs: tabs.get(row.id)?.liveTabs ?? 0,
+      seatsTaken: tabs.get(row.id)?.seatsTaken ?? 0,
+    }));
+  }
+
   private async listOpenTablesById(tenantId: string, id: string): Promise<OpenTableView[]> {
     const rows = await this.prisma.restaurantTable.findMany({
       where: { id, tenantId },
@@ -586,10 +735,7 @@ export class DiningService {
         },
       },
     });
-    return rows.map((row) => ({
-      ...this.tableToView(row),
-      members: row.openMembers.map((m) => m.memberTable),
-    }));
+    return this.withOccupancy(rows);
   }
 
   // ── Ownership + tenant scoping ──────────────────────────────

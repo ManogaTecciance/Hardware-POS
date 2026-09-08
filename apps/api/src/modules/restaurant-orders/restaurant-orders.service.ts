@@ -8,6 +8,7 @@ import {
   TakeawayOrderStatus,
 } from '@hardware-pos/database';
 
+import { withTabName } from '../../common/place-label';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
@@ -466,7 +467,12 @@ function restaurantOrderBaseView(
     status: RestaurantOrderStatus;
     createdAt: Date;
     rounds: { status: string }[];
-    session: { table: { code: string; label: string | null } | null } | null;
+    // D104 — the tab's name rides alongside the table, so two parties sharing
+    // one arrangement are two distinguishable rows in this list.
+    session: {
+      tabName: string | null;
+      table: { code: string; label: string | null } | null;
+    } | null;
     takeawayProfile: {
       status: TakeawayOrderStatus;
       customerName: string | null;
@@ -497,9 +503,12 @@ function restaurantOrderBaseView(
 
   const contextLabel = isTakeaway
     ? o.takeawayProfile?.customerName ?? 'Walk-in'
-    : o.session?.table
-      ? o.session.table.label ?? o.session.table.code
-      : null;
+    : // D104 — an arrangement can carry several parties; the tab's name is what
+      // tells two rows of this list apart.
+      withTabName(
+        o.session?.table ? o.session.table.label ?? o.session.table.code : null,
+        o.session?.tabName ?? null,
+      );
 
   return {
     id: o.id,

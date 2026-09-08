@@ -2432,6 +2432,13 @@ model TableSession {
 
   waiterUserId String?
   guestCount   Int?
+
+  /// D104 — the tab's own name, when one arrangement carries several parties
+  /// ("minin · Kamal"). Null means the table's name stands alone, which is what
+  /// every row written before D104 means: a table could carry only one tab, so
+  /// nothing ever needed distinguishing from a sibling.
+  tabName String?
+
   openedAt     DateTime  @default(now())
   closedAt     DateTime?
 

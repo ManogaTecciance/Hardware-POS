@@ -56,6 +56,21 @@ function build(overrides: {
   openRow?: unknown;
   physicalRow?: unknown;
   liveSession?: unknown;
+  /**
+   * D104 — live tabs still on the CLOSING open table after its own session
+   * went CLOSED. Zero (the default) is the pre-D104 world and keeps every
+   * older test meaning exactly what it meant: the last tab out dissolves the
+   * arrangement.
+   */
+  remainingTabs?: number;
+  /**
+   * D106 — live tabs on the ARRANGEMENTS holding a member, asked by
+   * `releaseMemberTable` before it frees anything. Distinct from
+   * `remainingTabs`: that one is about the arrangement being closed.
+   */
+  holderLiveTabs?: number;
+  /** D104 — live sessions behind the occupancy figures on a listed arrangement. */
+  liveTabs?: Array<{ tableId: string; guestCount: number | null }>;
 } = {}) {
   const calls: Record<string, unknown[]> = {
     updateMany: [],
@@ -74,7 +89,28 @@ function build(overrides: {
       return [{ value: 3 }];
     }),
     branch: { findFirst: jest.fn(async () => ({ id: 'brn_1' })) },
-    tableSession: { findFirst: jest.fn(async () => overrides.liveSession ?? null) },
+    tableSession: {
+      findFirst: jest.fn(async () => overrides.liveSession ?? null),
+      /*
+       * Two different questions reach `count`, so it routes on the SHAPE of
+       * the query rather than on call order — the same rule the two
+       * `findMany` stubs follow, and for the same reason: a reordering inside
+       * the service must not silently feed a test the wrong number.
+       *
+       *   tableId: '<id>'        → D104, "is anybody else still on THIS
+       *                            arrangement", asked by releaseOpenTable.
+       *   tableId: { in: [...] } → D106, "is anybody on the arrangements
+       *                            holding this member", asked by
+       *                            releaseMemberTable.
+       */
+      count: jest.fn(async (args: { where?: { tableId?: unknown } }) =>
+        args?.where?.tableId && typeof args.where.tableId === 'object'
+          ? overrides.holderLiveTabs ?? 0
+          : overrides.remainingTabs ?? 0,
+      ),
+      // D104 — the occupancy pass behind liveTabs / seatsTaken.
+      findMany: jest.fn(async () => overrides.liveTabs ?? []),
+    },
     restaurantTable: {
       findFirst: jest.fn(async (args: { where: Record<string, unknown> }) =>
         args.where.kind === 'OPEN'
@@ -174,20 +210,38 @@ describe('DiningService — open tables (D49/D50)', () => {
       expect(view.members).toHaveLength(2);
     });
 
-    it('D50: a table already RESERVED by another open table can be shared', async () => {
-      // Two unrelated pairs on one four-top — the PO's first worked example.
+    /*
+     * D105 supersedes this test's predecessor, which asserted a RESERVED
+     * member could be SHARED into a second arrangement (D50's two-unrelated-
+     * pairs example). That widening rested on an arrangement meaning exactly
+     * one tab; D104 ended it, and a member now stays RESERVED while its
+     * arrangement fills with guests — so the rule was offering tables with
+     * people sitting at them. The case itself did not disappear: the second
+     * pair opens a second TAB on the existing arrangement instead.
+     *
+     * Asserted as a refusal AND with the write-side negative, because
+     * "rejects" alone would also pass against a service that had thrown for an
+     * unrelated reason before touching anything.
+     *
+     * Mutation-proven (D30 §5), measured: restoring
+     * `|| member.status === RESERVED` to the eligibility predicate in
+     * `createOpenTable` FAILS 2 of this file's 22 tests — this one and the
+     * `RESERVED` row of the refusal table below.
+     */
+    it('D105: a table already inside another open table is refused, not shared', async () => {
       const { service, calls } = build({ members: [physical('t4', 'T4', 'RESERVED')] });
       await expect(
         service.createOpenTable(TENANT, BRANCH, ACTOR, {
           name: 'Second pair',
           memberTableIds: ['t4'],
         } as never),
-      ).resolves.toMatchObject({ code: 'OPEN-3' });
-      expect(statusUpdates(calls.updateMany, 'RESERVED')).toEqual(['t4']);
+      ).rejects.toThrow(/Table T4 is not available/);
+      expect(statusUpdates(calls.updateMany, 'RESERVED')).toEqual([]);
+      expect(calls.createMany).toEqual([]);
     });
 
-    it.each([['OCCUPIED'], ['SEATED'], ['BILLING'], ['CLEANING'], ['BLOCKED']])(
-      'still refuses a %s member — a party is physically there',
+    it.each([['OCCUPIED'], ['SEATED'], ['BILLING'], ['CLEANING'], ['BLOCKED'], ['RESERVED']])(
+      'refuses a %s member — it is in service or already joined',
       async (status) => {
         const { service } = build({ members: [physical('t4', 'T4'), physical('t2', 'T2', status)] });
         await expect(
@@ -273,18 +327,49 @@ describe('DiningService — open tables (D49/D50)', () => {
       expect(statusUpdates(calls.updateMany, 'AVAILABLE')).toEqual(['t2']);
     });
 
-    it('always archives the closing open table and drops only its own memberships', async () => {
+    /*
+     * D104 supersedes this test's predecessor, which asserted the arrangement
+     * is ALWAYS archived by the closing tab. "Always" was load-bearing under
+     * D49's one-arrangement-one-tab model and is wrong once several parties can
+     * share an arrangement: the first bill to close must not dissolve the table
+     * under the others. The claim is now conditional, and asserted BOTH ways —
+     * a single-sided version would pass against a service that never archives
+     * at all, which is the opposite failure.
+     */
+    it('archives the closing open table and drops its own memberships — when it was the LAST tab', async () => {
       const { service, calls, prisma } = build({
         members: [physical('t4', 'T4')],
         ownMemberships: ['t4'],
         heldBy: { t4: [{ id: 'tbl_open_b', code: 'OPEN-4', label: null }] },
+        remainingTabs: 0,
       });
       const tx = (service as unknown as { prisma: unknown }).prisma;
-      await service.releaseOpenTable(tx as never, TENANT, 'tbl_open');
+      const summary = await service.releaseOpenTable(tx as never, TENANT, 'tbl_open');
 
       expect((calls.update as Array<{ data: { isActive: boolean } }>).some((c) => c.data.isActive === false)).toBe(true);
       const deletes = prisma.openTableMember.deleteMany.mock.calls[0][0];
       expect(deletes.where).toMatchObject({ openTableId: 'tbl_open', tenantId: TENANT });
+      expect(summary.remainingTabs).toBe(0);
+    });
+
+    it('D104: leaves the arrangement standing while another party is still on it', async () => {
+      const { service, calls, prisma } = build({
+        members: [physical('t4', 'T4')],
+        ownMemberships: ['t4'],
+        remainingTabs: 1,
+      });
+      const tx = (service as unknown as { prisma: unknown }).prisma;
+      const summary = await service.releaseOpenTable(tx as never, TENANT, 'tbl_open');
+
+      // NEGATIVE, and the whole point: nothing at all was written. Not the
+      // archive, not the memberships, not one member's status — the second
+      // party keeps the tables it is sitting at.
+      expect((calls.update as Array<{ data: { isActive?: boolean } }>).some((c) => c.data.isActive === false)).toBe(false);
+      expect(prisma.openTableMember.deleteMany).not.toHaveBeenCalled();
+      expect(statusUpdates(calls.updateMany, 'AVAILABLE')).toEqual([]);
+      // POSITIVE: and it says why, rather than returning an empty summary that
+      // reads identically to "a shared four-top freed nothing".
+      expect(summary).toEqual({ released: [], stillReserved: [], remainingTabs: 1 });
     });
   });
 
@@ -317,6 +402,38 @@ describe('DiningService — open tables (D49/D50)', () => {
       // untouched, not silently flipped to AVAILABLE.
       expect(calls.update).toEqual([]);
       expect(calls.deleteMany).toEqual([]);
+    });
+
+    it('D106: refuses while the arrangement holding it has a live tab', async () => {
+      /*
+       * The bug this closes: the pre-D106 guard read the MEMBER's own
+       * sessions, and a joined member never has one — its tab lives on the
+       * open-table row — so the refusal could not fire for the case it looked
+       * like it covered. It emptied an arrangement that was serving three
+       * tabs, leaving eight guests at tables the floor plan had handed back.
+       *
+       * D50 permitted this deliberately, for compaction between two
+       * arrangements sharing furniture; D105 ended that sharing, so the reason
+       * went with it. Paired with the success case above, which must stay
+       * green or this guard would be indistinguishable from "refuse always".
+       *
+       * Mutation-proven (D30 §5), measured: deleting the holder probe from
+       * `releaseMemberTable` — leaving only the member's own session, which is
+       * the pre-D106 code — FAILS 1 of this file's 23 tests (this one) and 2 of
+       * the 12 in `open-table-multi-tab.spec.ts`.
+       */
+      const { service, calls } = build({
+        physicalRow: { id: 't2', code: 'T2', label: null, kind: 'PHYSICAL', isActive: true },
+        heldBy: { t2: [{ id: 'tbl_open_b', code: 'OPEN-4', label: 'Threes B' }] },
+        holderLiveTabs: 1,
+      });
+
+      await expect(service.releaseMemberTable(TENANT, BRANCH, 't2')).rejects.toThrow(
+        OpenTableInServiceError,
+      );
+      // NEGATIVE — the membership survives and the table stays RESERVED.
+      expect(calls.deleteMany).toEqual([]);
+      expect(calls.update).toEqual([]);
     });
 
     it('404s a table outside this tenant/branch', async () => {

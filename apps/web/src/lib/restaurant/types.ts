@@ -351,6 +351,22 @@ export interface OpenTableView extends RestaurantTableView {
     areaId: string | null;
     status: RestaurantTableStatus;
   }>;
+  /**
+   * D104 — how full the arrangement is, counted by the SERVER.
+   *
+   * Never recomputed here: D70 scopes the open-session list to the waiter's own
+   * tabs, so a client adding up what it can see would miss a colleague's party
+   * and offer seats that are not there. `capacity` minus `seatsTaken` is what
+   * is free; a null capacity means the operator recorded none (D49), and then
+   * nothing is enforced and nothing is displayed.
+   */
+  liveTabs: number;
+  seatsTaken: number;
+}
+
+/** D104 — seats left on an arrangement, or null when none were ever recorded. */
+export function seatsFree(t: OpenTableView): number | null {
+  return t.capacity == null ? null : Math.max(0, t.capacity - t.seatsTaken);
 }
 
 // ── Table sessions & orders ─────────────────────────────────────────────────
@@ -362,6 +378,12 @@ export interface TableSessionView {
   status: TableSessionStatus;
   waiterUserId: string | null;
   guestCount: number | null;
+  /**
+   * D104 — this tab's own name, when an arrangement carries several parties.
+   * Null on a physical table's session and on a lone tab, where the table's
+   * own name is already unambiguous.
+   */
+  tabName: string | null;
   openedAt: string;
   closedAt: string | null;
   finalSaleId: string | null;

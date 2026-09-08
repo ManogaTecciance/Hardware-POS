@@ -4,6 +4,11 @@ export const SESSION_ERROR_CODES = {
   BRANCH_NOT_FOUND: 'BRANCH_NOT_FOUND',
   TABLE_NOT_FOUND: 'TABLE_NOT_FOUND',
   TABLE_ALREADY_OPEN: 'TABLE_ALREADY_OPEN',
+  // D104 — an arrangement carries several tabs, but only as many guests as it
+  // has chairs, and only if each tab can be told from its siblings.
+  OPEN_TABLE_SEATS_EXHAUSTED: 'OPEN_TABLE_SEATS_EXHAUSTED',
+  TAB_NAME_REQUIRED: 'TAB_NAME_REQUIRED',
+  GUEST_COUNT_REQUIRED: 'GUEST_COUNT_REQUIRED',
   SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
   SESSION_NOT_OPEN: 'SESSION_NOT_OPEN',
   SESSION_ALREADY_CLOSED: 'SESSION_ALREADY_CLOSED',
@@ -72,6 +77,61 @@ export class TableAlreadyOpenError extends ConflictException {
     );
   }
 }
+/**
+ * D104 — the arrangement has chairs, and they are counted.
+ *
+ * The free count is IN the message because "it does not fit" leaves the waiter
+ * guessing at a number the server already knows: a party of three refused on a
+ * six-top reads as a bug until you are told four are already sitting there.
+ */
+export class OpenTableSeatsExhaustedError extends ConflictException {
+  constructor(seatsFree: number) {
+    super(
+      err(
+        SESSION_ERROR_CODES.OPEN_TABLE_SEATS_EXHAUSTED,
+        seatsFree > 0
+          ? `Only ${seatsFree} seat${seatsFree === 1 ? '' : 's'} free on this open table.`
+          : 'This open table is full — every seat is taken.',
+      ),
+    );
+  }
+}
+
+/**
+ * D104 — the second tab must be nameable, or the kitchen cannot tell the two
+ * parties apart. Deliberately NOT required for the first tab: naming a tab that
+ * has no sibling is typing for nothing, and the arrangement's own name is
+ * already unambiguous while it stands alone.
+ */
+export class TabNameRequiredError extends ConflictException {
+  constructor() {
+    super(
+      err(
+        SESSION_ERROR_CODES.TAB_NAME_REQUIRED,
+        'Another party is already on this open table — name this tab so the kitchen can tell them apart.',
+      ),
+    );
+  }
+}
+
+/**
+ * D104 — seats cannot be counted without knowing the party size.
+ *
+ * Only thrown for an arrangement that HAS a recorded capacity: where the
+ * operator wrote "seating as arranged" and left it blank (D49), there is
+ * nothing to count against and the guest count stays optional.
+ */
+export class GuestCountRequiredError extends ConflictException {
+  constructor() {
+    super(
+      err(
+        SESSION_ERROR_CODES.GUEST_COUNT_REQUIRED,
+        'This open table has a seat count — say how many guests are being seated.',
+      ),
+    );
+  }
+}
+
 export class SessionNotFoundError extends NotFoundException {
   constructor() {
     super(err(SESSION_ERROR_CODES.SESSION_NOT_FOUND, 'Table session not found'));

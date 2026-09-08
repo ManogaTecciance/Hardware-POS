@@ -7,11 +7,15 @@ import { AreaChip } from '@/components/restaurant/area-chip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
+import { Dialog } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { type Session } from '@/lib/auth';
-import { diningAreas, restaurantTables, tableSessions } from '@/lib/restaurant/api';
+import { diningAreas, openTables, restaurantTables, tableSessions } from '@/lib/restaurant/api';
 import { TABLE_STATUS_LABELS, formatElapsed } from '@/lib/restaurant/labels';
+import { seatsFree } from '@/lib/restaurant/types';
 import type {
   DiningAreaView,
+  OpenTableView,
   RestaurantTableStatus,
   RestaurantTableView,
 } from '@/lib/restaurant/types';
@@ -33,6 +37,25 @@ import type {
 const OPEN_VIEW = '__open__';
 
 /*
+ * D49/D50/D104 — where the joined tables live.
+ *
+ * An arrangement has `areaId = null`, so it appears in NO area's table list and
+ * was unreachable from this screen entirely: the picker builds its grid by
+ * looping the areas, and `GET /restaurant/dining-areas/:areaId/tables` filters
+ * on `areaId`. A waiter could create one on the Tables screen and then never
+ * find it in the POS.
+ *
+ * They live under OPEN — always, seated or not — as their own group above the
+ * floors. An earlier pass gave them a separate "Joined" chip; the PO wanted
+ * them under Open, and on reflection that is also the truer reading of D92's
+ * partition: every table on the branch is in exactly one place, and an
+ * arrangement's place is Open. Unlike a physical table, it does not move when
+ * the party sits down — under D104 an arrangement can be BOTH occupied and
+ * seatable, so filing it by status would make it flicker between destinations
+ * as parties come and go.
+ */
+
+/*
  * "Open" means a session is running on the table, which is what "open table"
  * means everywhere else in this product (the floor plan, `/open-tables`, the
  * bill). It is deliberately not a status the waiter has to know the name of:
@@ -44,6 +67,21 @@ const OPEN_STATUSES: readonly RestaurantTableStatus[] = ['SEATED', 'OCCUPIED', '
 
 function isOpenTable(status: RestaurantTableStatus): boolean {
   return OPEN_STATUSES.includes(status);
+}
+
+/**
+ * D104 — what a tab is called: the table, then this party's own name.
+ *
+ * Mirrors `withTabName` on the server (`apps/api/src/common/place-label.ts`),
+ * which composes the same thing for the kitchen ticket and the bill. The two
+ * are deliberately separate implementations of a one-line rule rather than a
+ * shared package: what the waiter reads on a chip and what the pass reads on a
+ * ticket are allowed to diverge later, and a shared helper would make that
+ * change look riskier than it is.
+ */
+function tabLabel(tableName: string, tabName: string | null | undefined): string {
+  const tab = tabName?.trim();
+  return tab ? `${tableName} · ${tab}` : tableName;
 }
 
 /** The session the POS is currently taking orders onto. */
@@ -191,6 +229,8 @@ interface OpenSessionRow {
   tableId: string;
   openedAt: string;
   guestCount: number | null;
+  /** D104 — this tab's own name; null unless an arrangement is being shared. */
+  tabName: string | null;
   activeOrderId: string | null;
 }
 
@@ -210,9 +250,18 @@ function Picker({
   const [tablesByArea, setTablesByArea] = React.useState<Map<string, RestaurantTableView[]>>(
     new Map(),
   );
+  /** D49/D50 — kept apart from `tablesByArea` because they belong to no area. */
+  const [joined, setJoined] = React.useState<OpenTableView[]>([]);
   const [labels, setLabels] = React.useState<Map<string, string>>(new Map());
   const [loading, setLoading] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  /**
+   * D104 — the arrangement whose seat prompt is up. Only groups get a prompt:
+   * an ordinary free table still seats on one tap, because the fast path is
+   * the commonest action in service and adding a dialog to it would cost every
+   * waiter a tap on every cover to serve the rarer case.
+   */
+  const [seatTarget, setSeatTarget] = React.useState<OpenTableView | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   /**
    * Area filter — the floor plan's control, minus its "All areas" chip (PO,
@@ -226,9 +275,16 @@ function Picker({
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [sessions, areaRows] = await Promise.all([
+      const [sessions, areaRows, joinedRows] = await Promise.all([
         tableSessions.listOpen(session, branchId).catch(() => [] as OpenSessionRow[]),
         diningAreas.list(session, branchId, false).catch(() => [] as DiningAreaView[]),
+        /*
+         * D49/D50 — a separate request because a joined table has no area, so
+         * the per-area listing below cannot reach it. Swallowing the error
+         * matches the two calls above: a branch that has never joined tables
+         * must not lose its floor plan to a 403 on a feature it does not use.
+         */
+        openTables.list(session, branchId).catch(() => [] as OpenTableView[]),
       ]);
       const sorted = areaRows.slice().sort((a, b) => a.position - b.position);
       const lists = await Promise.all(
@@ -254,10 +310,18 @@ function Picker({
         for (const t of rows) labelMap.set(t.id, t.label ?? t.code);
         byArea.set(a.id, rows);
       });
+      /*
+       * D49/D50 — joined tables go into the SAME label map. A session on one
+       * is returned by `listOpen` like any other, so without this the strip
+       * above falls through to `s.sessionNumber` and the waiter is asked to
+       * recognise their party by "TS-000042".
+       */
+      for (const t of joinedRows) labelMap.set(t.id, t.label ?? t.code);
 
       setOpen(sessions as OpenSessionRow[]);
       setAreas(sorted);
       setTablesByArea(byArea);
+      setJoined(joinedRows);
       setLabels(labelMap);
       /*
        * With no "All" option there must always be a valid selection, so the
@@ -280,7 +344,14 @@ function Picker({
     void load();
   }, [load]);
 
-  const seat = async (table: RestaurantTableView) => {
+  /**
+   * Open a tab. `extra` carries the answers the group prompt collected (D104);
+   * an ordinary free table still seats on one tap with nothing to fill in.
+   */
+  const seat = async (
+    table: RestaurantTableView,
+    extra?: { guestCount?: number; tabName?: string },
+  ) => {
     setBusyId(table.id);
     setError(null);
     try {
@@ -294,11 +365,13 @@ function Picker({
       const opened = await tableSessions.open(session, branchId, {
         tableId: table.id,
         waiterUserId: session.user.id,
+        ...(extra?.guestCount != null ? { guestCount: extra.guestCount } : {}),
+        ...(extra?.tabName ? { tabName: extra.tabName } : {}),
       });
       onPick({
         id: opened.id,
         sessionNumber: opened.sessionNumber,
-        tableLabel: table.label ?? table.code,
+        tableLabel: tabLabel(table.label ?? table.code, opened.tabName),
         openedAt: opened.openedAt,
         guestCount: opened.guestCount,
         orderId: null,
@@ -321,6 +394,25 @@ function Picker({
   const showingOpen = selected === OPEN_VIEW;
   const visibleAreas = showingOpen ? areas : areas.filter((a) => a.id === selected);
 
+  /**
+   * D50 — which arrangements hold each physical table, the same derivation the
+   * floor plan makes (`table-floor.tsx`). Used only to name the holder on a
+   * RESERVED chip: "Reserved — another waiter's table" is the wrong story for a
+   * table that was absorbed rather than served, and the waiter who cannot tap
+   * M3 deserves to be told it is part of their own arrangement.
+   */
+  const heldByTableId = React.useMemo(() => {
+    const map = new Map<string, OpenTableView[]>();
+    for (const arrangement of joined) {
+      for (const member of arrangement.members) {
+        const list = map.get(member.id) ?? [];
+        list.push(arrangement);
+        map.set(member.id, list);
+      }
+    }
+    return map;
+  }, [joined]);
+
   /*
    * D91 — the open sessions this user is allowed to work, keyed by table.
    *
@@ -330,23 +422,38 @@ function Picker({
    * somebody else's table. It is shown, so the waiter can see the room, and
    * it is not clickable, because opening it is exactly what the server
    * refuses.
+   *
+   * D104 — a LIST per table, not a row. An arrangement can carry several of
+   * this waiter's own tabs at once, and the `new Map(...)` this replaces was
+   * last-wins: the earlier party simply vanished from the grid, which is the
+   * worst failure available here because nothing about it looks wrong.
    */
-  const mySessionByTable = React.useMemo(
-    () => new Map(open.map((s) => [s.tableId, s])),
-    [open],
-  );
+  const mySessionsByTable = React.useMemo(() => {
+    const map = new Map<string, OpenSessionRow[]>();
+    for (const s of open) {
+      const list = map.get(s.tableId) ?? [];
+      list.push(s);
+      map.set(s.tableId, list);
+    }
+    return map;
+  }, [open]);
 
   /** Resume a session the user already has — the strip and the grid share it. */
   const resume = React.useCallback(
-    (s: OpenSessionRow) =>
+    (s: OpenSessionRow) => {
+      const table = labels.get(s.tableId);
       onPick({
         id: s.id,
         sessionNumber: s.sessionNumber,
-        tableLabel: labels.get(s.tableId) ?? s.sessionNumber,
+        // D104 — two tabs on one arrangement resolve to the same table name, so
+        // without the tab the POS header, the bill sheet and this chip would
+        // all read identically for two different parties.
+        tableLabel: table ? tabLabel(table, s.tabName) : s.sessionNumber,
         openedAt: s.openedAt,
         guestCount: s.guestCount,
         orderId: s.activeOrderId,
-      }),
+      });
+    },
     [labels, onPick],
   );
 
@@ -355,6 +462,30 @@ function Picker({
     (tablesByArea.get(areaId) ?? []).filter((t) =>
       showingOpen ? isOpenTable(t.status) : !isOpenTable(t.status),
     );
+
+  /** Why a drawn table cannot be tapped — the reasons read differently. */
+  const unavailableTitle = (t: RestaurantTableView): string => {
+    const held = heldByTableId.get(t.id);
+    if (held && held.length > 0) {
+      const names = held.map((a) => a.label ?? a.code).join(', ');
+      return `${TABLE_STATUS_LABELS[t.status]} — joined into ${names}`;
+    }
+    return `${TABLE_STATUS_LABELS[t.status]} — another waiter's table`;
+  };
+
+  /*
+   * D104 — an arrangement is offered while it has chairs left, NOT while it is
+   * AVAILABLE. Status is the wrong question for a shared table: it leaves
+   * AVAILABLE the moment the first party sits, and the whole point is that a
+   * second party may still join. An arrangement with no recorded seat count
+   * (D49) is always offered — nobody stated a limit, so the server enforces
+   * none and neither does this.
+   */
+  const arrangementSeatsFree = (t: OpenTableView): number | null => seatsFree(t);
+  const arrangementIsFull = (t: OpenTableView): boolean => {
+    const free = arrangementSeatsFree(t);
+    return free !== null && free <= 0;
+  };
 
   return (
     /*
@@ -412,7 +543,11 @@ function Picker({
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {open.map((s) => {
-                    const name = labels.get(s.tableId);
+                    const table = labels.get(s.tableId);
+                    // D104 — two tabs on one arrangement are two chips here,
+                    // and the tab's name is the only thing that tells them
+                    // apart: the table name is identical on both.
+                    const name = table ? tabLabel(table, s.tabName) : undefined;
                     return (
                       <button
                         key={s.id}
@@ -488,15 +623,72 @@ function Picker({
                 <p className="py-4 text-sm text-muted-foreground">
                   No dining areas configured yet. Add an area and its tables in Tables.
                 </p>
-              ) : showingOpen && visibleAreas.every((a) => tablesIn(a.id).length === 0) ? (
+              ) : showingOpen &&
+                joined.length === 0 &&
+                visibleAreas.every((a) => tablesIn(a.id).length === 0) ? (
                 /* One message for the whole view rather than an empty heading
                    per floor: under Open, a branch with five quiet rooms would
                    otherwise print five identical "nothing here" lines. */
                 <p className="py-4 text-sm text-muted-foreground">
-                  No open tables right now. Pick a floor to seat one.
+                  No tables in service right now. Pick a floor to seat one.
                 </p>
               ) : (
-                visibleAreas.map((area) => {
+                <>
+                  {/* D104 — the arrangements, first and above the floors.
+                      They live under Open and nowhere else (they belong to no
+                      area), and unlike a physical table they stay here once a
+                      party sits down: an arrangement can be occupied AND still
+                      have chairs for a second party, so status is the wrong
+                      thing to file them by. */}
+                  {showingOpen && joined.length > 0 ? (
+                    <div>
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Open tables
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {joined.map((t) => {
+                          const free = arrangementSeatsFree(t);
+                          const full = arrangementIsFull(t);
+                          const name = t.label ?? t.code;
+                          const members = t.members.map((m) => m.code).join(' + ');
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              disabled={busyId !== null || full}
+                              title={
+                                full
+                                  ? `${name} is full — all ${t.capacity} seats are taken.`
+                                  : `Start a tab on ${name}`
+                              }
+                              onClick={() => setSeatTarget(t)}
+                              className={`inline-flex h-11 items-center gap-2 rounded-lg border px-3 text-sm disabled:opacity-60 ${
+                                full
+                                  ? 'border-dashed border-border bg-muted text-muted-foreground'
+                                  : 'border-border bg-card hover:border-primary'
+                              }`}
+                            >
+                              {busyId === t.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                              ) : null}
+                              {name}
+                              <span className="inline-flex items-center gap-0.5 text-xs font-normal text-muted-foreground">
+                                {members ? `${members} · ` : ''}
+                                {/* Seats only when the operator recorded them
+                                    (D49) — inventing "0 free" for an
+                                    arrangement nobody sized would refuse
+                                    nothing and confuse everyone. */}
+                                {free === null
+                                  ? `${t.liveTabs} tab${t.liveTabs === 1 ? '' : 's'}`
+                                  : `${t.capacity} seats · ${t.seatsTaken} taken, ${free} free`}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                  {visibleAreas.map((area) => {
                   const all = tablesByArea.get(area.id) ?? [];
                   const shown = tablesIn(area.id);
                   // Under Open, a floor with nothing running is skipped
@@ -518,83 +710,241 @@ function Picker({
                         </p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          {shown.map((t) => {
-                            const mine = mySessionByTable.get(t.id);
-                            const isActive = mine ? mine.id === activeId : false;
-                            const free = t.status === 'AVAILABLE';
-                            /*
-                             * Three kinds of table, and the difference is what
-                             * a tap does: seat a free one, carry on with one of
-                             * mine, and neither for anyone else's. The last is
-                             * still DRAWN — seeing that M4 is taken is the
-                             * whole point of the PO's request — but the server
-                             * refuses to hand it over (D70), so offering the
-                             * tap would be offering a refusal.
-                             */
-                            const clickable = free || !!mine;
-                            return (
-                              <button
-                                key={t.id}
-                                type="button"
-                                disabled={busyId !== null || !clickable}
-                                aria-current={isActive ? 'true' : undefined}
-                                title={
-                                  clickable
-                                    ? undefined
-                                    : `${TABLE_STATUS_LABELS[t.status]} — another waiter's table`
-                                }
-                                onClick={() => {
-                                  if (mine) resume(mine);
-                                  else if (free) void seat(t);
-                                }}
-                                className={`inline-flex h-11 items-center gap-2 rounded-lg border px-3 text-sm disabled:opacity-60 ${
-                                  isActive
-                                    ? 'border-primary bg-primary text-primary-foreground'
-                                    : mine
-                                      ? 'border-primary/40 bg-brand-50 hover:border-primary'
-                                      : free
-                                        ? 'border-border bg-card hover:border-primary'
-                                        : 'border-dashed border-border bg-muted text-muted-foreground'
-                                }`}
-                              >
-                                {busyId === t.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                                ) : null}
-                                {t.label ?? t.code}
-                                <span
-                                  className={`inline-flex items-center gap-0.5 text-xs font-normal ${
-                                    isActive ? 'opacity-80' : 'text-muted-foreground'
-                                  }`}
-                                >
-                                  {mine ? (
-                                    <>
-                                      {formatElapsed(mine.openedAt)}
-                                      {mine.guestCount ? ` · ${mine.guestCount}` : ''}
-                                    </>
-                                  ) : free ? (
-                                    t.capacity ? (
-                                      <>
-                                        <Users className="h-3 w-3" aria-hidden />
-                                        {t.capacity}
-                                      </>
-                                    ) : null
-                                  ) : (
-                                    TABLE_STATUS_LABELS[t.status]
-                                  )}
-                                </span>
-                              </button>
-                            );
-                          })}
+                          {shown.map((t) => (
+                            <TableChip
+                              key={t.id}
+                              table={t}
+                              // A physical table still carries at most one of
+                              // the waiter's tabs (D104 relaxed the rule for
+                              // arrangements only), so the first is the only.
+                              mine={mySessionsByTable.get(t.id)?.[0]}
+                              activeId={activeId}
+                              busyId={busyId}
+                              unavailableTitle={unavailableTitle(t)}
+                              freeDetail={
+                                t.capacity ? (
+                                  <>
+                                    <Users className="h-3 w-3" aria-hidden />
+                                    {t.capacity}
+                                  </>
+                                ) : null
+                              }
+                              onResume={resume}
+                              onSeat={seat}
+                            />
+                          ))}
                         </div>
                       )}
                     </div>
                   );
-                })
+                  })}
+                </>
               )}
             </div>
           </>
         )}
       </CardContent>
+      {seatTarget ? (
+        <SeatArrangementDialog
+          table={seatTarget}
+          busy={busyId === seatTarget.id}
+          onClose={() => setSeatTarget(null)}
+          onConfirm={async (guestCount, tabName) => {
+            const target = seatTarget;
+            setSeatTarget(null);
+            await seat(target, { guestCount, tabName });
+          }}
+        />
+      ) : null}
     </Card>
+  );
+}
+
+/**
+ * One tappable table, shared by the floor views and the joined view (D49/D50).
+ *
+ * Extracted rather than duplicated because a joined table must behave like any
+ * other table on this screen — the ONE thing that differs is what its secondary
+ * line says while it is free (`freeDetail`: seats on a physical table, member
+ * codes on an arrangement). If seating a joined table ever drifted from seating
+ * a physical one, it would drift here, silently.
+ *
+ * Three kinds of table, and the difference is what a tap does: seat a free one,
+ * carry on with one of mine, and neither for anyone else's. The last is still
+ * DRAWN — seeing that M4 is taken is the whole point of the PO's request (D91)
+ * — but the server refuses to hand it over (D70), so offering the tap would be
+ * offering a refusal.
+ */
+function TableChip({
+  table,
+  mine,
+  activeId,
+  busyId,
+  unavailableTitle,
+  freeDetail,
+  onResume,
+  onSeat,
+}: {
+  table: RestaurantTableView;
+  mine: OpenSessionRow | undefined;
+  activeId: string | null;
+  busyId: string | null;
+  unavailableTitle: string;
+  freeDetail: React.ReactNode;
+  onResume: (s: OpenSessionRow) => void;
+  onSeat: (t: RestaurantTableView) => void;
+}) {
+  const isActive = mine ? mine.id === activeId : false;
+  const free = table.status === 'AVAILABLE';
+  const clickable = free || !!mine;
+  return (
+    <button
+      type="button"
+      disabled={busyId !== null || !clickable}
+      aria-current={isActive ? 'true' : undefined}
+      title={clickable ? undefined : unavailableTitle}
+      onClick={() => {
+        if (mine) onResume(mine);
+        else if (free) void onSeat(table);
+      }}
+      className={`inline-flex h-11 items-center gap-2 rounded-lg border px-3 text-sm disabled:opacity-60 ${
+        isActive
+          ? 'border-primary bg-primary text-primary-foreground'
+          : mine
+            ? 'border-primary/40 bg-brand-50 hover:border-primary'
+            : free
+              ? 'border-border bg-card hover:border-primary'
+              : 'border-dashed border-border bg-muted text-muted-foreground'
+      }`}
+    >
+      {busyId === table.id ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+      ) : null}
+      {table.label ?? table.code}
+      <span
+        className={`inline-flex items-center gap-0.5 text-xs font-normal ${
+          isActive ? 'opacity-80' : 'text-muted-foreground'
+        }`}
+      >
+        {mine ? (
+          <>
+            {formatElapsed(mine.openedAt)}
+            {mine.guestCount ? ` · ${mine.guestCount}` : ''}
+          </>
+        ) : free ? (
+          freeDetail
+        ) : (
+          TABLE_STATUS_LABELS[table.status]
+        )}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * D104 — the prompt that opens a tab on an arrangement.
+ *
+ * Two questions, and both exist because a group is shared. The guest count is
+ * what the server subtracts from the seats, so without it the "4 taken, 2 free"
+ * on the chip would be a number nobody maintains. The tab name is what the
+ * kitchen ticket and the bill are headed with, and it is the only thing that
+ * tells two parties on one arrangement apart — so it is required exactly when
+ * a sibling tab already exists, and optional when this is the first.
+ *
+ * Physical tables get no dialog at all: they carry one party, so there is
+ * nothing to disambiguate and the one-tap seat stays one tap.
+ */
+function SeatArrangementDialog({
+  table,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  table: OpenTableView;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (guestCount: number | undefined, tabName: string | undefined) => void;
+}) {
+  const free = seatsFree(table);
+  const [guests, setGuests] = React.useState(free === null ? '2' : String(Math.min(2, free)));
+  const [tabName, setTabName] = React.useState('');
+  const name = table.label ?? table.code;
+  // A sibling tab is already running, so this one must be nameable.
+  const nameRequired = table.liveTabs > 0;
+  const guestNum = Number(guests);
+  const guestsValid =
+    free === null
+      ? guests === '' || (Number.isInteger(guestNum) && guestNum >= 1)
+      : Number.isInteger(guestNum) && guestNum >= 1 && guestNum <= free;
+  const valid = guestsValid && (!nameRequired || tabName.trim().length > 0);
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Start a tab on ${name}`}
+      description={
+        free === null
+          ? `Seating as arranged — no seat count recorded. ${table.liveTabs} tab${table.liveTabs === 1 ? '' : 's'} running.`
+          : `${table.capacity} seats, ${table.seatsTaken} taken — ${free} free.`
+      }
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() =>
+              onConfirm(
+                guests === '' ? undefined : guestNum,
+                tabName.trim() || undefined,
+              )
+            }
+            isLoading={busy}
+            disabled={!valid}
+          >
+            Open tab
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor="tab-guest-count">
+            Guest count
+          </label>
+          <Input
+            id="tab-guest-count"
+            value={guests}
+            onChange={(e) => setGuests(e.target.value)}
+            inputMode="numeric"
+            autoFocus
+          />
+          {guests && !guestsValid ? (
+            <p className="text-xs text-danger">
+              {free === null
+                ? 'The number of guests being seated.'
+                : `Between 1 and ${free} — the rest of this table is already taken.`}
+            </p>
+          ) : null}
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor="tab-name">
+            Tab name{nameRequired ? '' : ' (optional)'}
+          </label>
+          <Input
+            id="tab-name"
+            value={tabName}
+            onChange={(e) => setTabName(e.target.value)}
+            placeholder="Who this tab is for"
+          />
+          <p className="text-xs text-muted-foreground">
+            {nameRequired
+              ? `Another party is already on ${name} — name this tab so the kitchen can tell them apart.`
+              : 'Only needed once a second party shares this table.'}
+          </p>
+        </div>
+      </div>
+    </Dialog>
   );
 }

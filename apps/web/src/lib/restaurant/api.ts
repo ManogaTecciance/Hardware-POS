@@ -628,7 +628,9 @@ export const tableSessions = {
   open(
     session: Session,
     branchId: string,
-    body: { tableId: string; guestCount?: number; waiterUserId?: string },
+    // D104 — `tabName` names THIS tab when an arrangement carries several
+    // parties. The server requires it from the second tab onwards.
+    body: { tableId: string; guestCount?: number; waiterUserId?: string; tabName?: string },
   ) {
     return api.post<TableSessionView>(
       `/restaurant/branches/${branchId}/table-sessions`,

@@ -598,6 +598,13 @@ async function seedRestaurant(passwordHash: string) {
     prep?: number;
     tags?: string[];
   };
+  /*
+   * D101 — three dishes ship 86'd so the switch has something to act on from a
+   * fresh seed. One per station, so kitchen routing stays exercised on the
+   * items that remain sellable.
+   */
+  const SOLD_OUT_SKUS = new Set(['MN-STK', 'BEV-CAP', 'DS-ICE']);
+
   const menu: MenuRow[] = [
     // Starters
     { id: 'prd_resto_10', name: 'Fish Cutlets (4 pc)', sku: 'ST-CUT', price: 650, cat: 'cat_resto_starters', food: 'FOOD', station: 'kst_resto_kitchen', prep: 10 },
@@ -655,6 +662,18 @@ async function seedRestaurant(passwordHash: string) {
       foodType: m.food,
       prepMinutes: m.prep ?? null,
       dietaryTags: m.tags ?? [],
+      /*
+       * This seed writes Prisma directly, so it must mirror what
+       * `deriveSellableKind` (products.service.ts) would return for these rows:
+       * a foodType with no trackStock is a COMPOSED_ITEM. Leaving it to the
+       * schema default (STOCK_ITEM) hands the dish to the count branch of
+       * `sellable.service.ts`, and a quantityOnHand nothing maintains then
+       * reads as OUT — greying out food the kitchen is happily cooking, and
+       * disabling the 86 switch (D101) that governs these kinds instead.
+       */
+      sellableKind: 'COMPOSED_ITEM' as const,
+      // Explicit on both create and update, so re-seeding is idempotent.
+      soldOutAt: SOLD_OUT_SKUS.has(m.sku) ? new Date() : null,
     };
     await prisma.product.upsert({
       where: { id: m.id },

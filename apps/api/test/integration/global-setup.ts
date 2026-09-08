@@ -40,6 +40,11 @@ export default function globalSetup(): void {
     cwd: DATABASE_PACKAGE,
     stdio: 'inherit',
     env: process.env,
+    // On Windows `pnpm` is a .cmd shim, not an executable, so a bare
+    // execFileSync cannot find it and the whole integration run dies in
+    // globalSetup with a bare ENOENT. Harmless elsewhere; the argv is a fixed
+    // literal, so routing it through a shell introduces nothing to quote.
+    shell: process.platform === 'win32',
   });
 
   console.log('[integration] Schema ready.');
