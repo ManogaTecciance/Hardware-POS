@@ -24,6 +24,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { resolveMeasuredGoods } from '@/lib/products/product-presentation';
 import type { ManagedProduct } from '@/lib/products-api';
 
 import { StepPricingInventory } from './step-pricing-inventory';
@@ -50,7 +51,13 @@ function useHarness(initial: WizardState) {
   return { state, patch };
 }
 
-function Harness({ initial }: { initial?: WizardState }) {
+function Harness({
+  initial,
+  showMeasuredGoods = true,
+}: {
+  initial?: WizardState;
+  showMeasuredGoods?: boolean;
+}) {
   const h = useHarness(initial ?? initialState());
   return (
     <StepPricingInventory
@@ -58,6 +65,7 @@ function Harness({ initial }: { initial?: WizardState }) {
       errors={validateStep('pricing', h.state, { inventoryMode: 'LOCAL' })}
       branches={branches}
       showOpeningStock
+      showMeasuredGoods={showMeasuredGoods}
       onChange={h.patch}
     />
   );
@@ -125,6 +133,79 @@ describe('the control exists and writes', () => {
     // still be asking for a price per kilo for something sold in tins.
     expect(screen.queryByLabelText(/per kg/i)).toBeNull();
     expect(screen.getByLabelText(/^selling price/i)).toBeDefined();
+  });
+});
+
+
+/**
+ * D113e — the control is RETAIL-only, and this is the regression guard.
+ *
+ * `6.1b` rendered it unconditionally, which put a weighed-goods control in front
+ * of every restaurant and hardware workspace. `step-pricing-inventory` is the
+ * SHARED Step 3 for every business type — it already takes `businessKind` and
+ * already draws restaurant chrome from it — so an ungated card there reaches
+ * templates that never asked for the feature.
+ *
+ * Asserted from both sides, and through the resolver as well as the component:
+ * a test that only proved the card renders would pass for the ungated version
+ * that caused this, and a test that only proved it hides would pass for a
+ * component that had lost the feature entirely.
+ */
+describe('D113e — only a tenant that sells by measure is offered it', () => {
+  it('offers nothing when the capability is off', () => {
+    render(<Harness showMeasuredGoods={false} />);
+
+    expect(screen.queryByLabelText(/how is this sold/i)).toBeNull();
+    expect(screen.queryByLabelText(/^unit/i)).toBeNull();
+    // And the price label stays plain — no trace of the feature leaks through.
+    expect(screen.getByLabelText(/^selling price/i)).toBeDefined();
+    expect(screen.queryByLabelText(/per /i)).toBeNull();
+  });
+
+  it('still draws the rest of the pricing step when the capability is off', () => {
+    // The card is gated; the STEP is not. Without this, hiding the whole form
+    // for hardware would pass the assertion above.
+    render(<Harness showMeasuredGoods={false} />);
+
+    expect(screen.getByLabelText(/^sku/i)).toBeDefined();
+    expect(screen.getByLabelText(/^selling price/i)).toBeDefined();
+  });
+
+  it('defaults to OFF when the prop is absent', () => {
+    // The safe direction: a caller that has not been updated offers nothing,
+    // rather than leaking the control into a template that did not ask.
+    render(
+      <StepPricingInventory
+        state={initialState()}
+        errors={{}}
+        branches={branches}
+        showOpeningStock
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/how is this sold/i)).toBeNull();
+  });
+
+  it('RETAIL has the capability; hardware and food service do not', () => {
+    // The resolver, from the registry rather than an if-chain — which is what
+    // decides this for real. `RETAIL_CAPABILITIES` is shared by the HARDWARE and
+    // RETAIL domains, so hardware reading false is the assertion that proves the
+    // flag lives on the retail DESCRIPTOR and not in the shared constant.
+    expect(resolveMeasuredGoods('RETAIL')).toBe(true);
+
+    expect(resolveMeasuredGoods('HARDWARE')).toBe(false);
+    expect(resolveMeasuredGoods('RESTAURANT')).toBe(false);
+    expect(resolveMeasuredGoods('CAFE')).toBe(false);
+    expect(resolveMeasuredGoods('BAKERY')).toBe(false);
+    expect(resolveMeasuredGoods('HOTEL')).toBe(false);
+    expect(resolveMeasuredGoods('GENERAL')).toBe(false);
+  });
+
+  it('offers nothing while the profile is unresolved', () => {
+    // A control that appears a beat after the form loads is worse than one that
+    // was never offered — the same default the restaurant chrome takes.
+    expect(resolveMeasuredGoods(null)).toBe(false);
   });
 });
 

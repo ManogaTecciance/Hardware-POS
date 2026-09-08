@@ -51,6 +51,29 @@ export interface TenantCapabilities {
     readonly collections: boolean;
     /** Composed items carry component lists / recipes (Phase 8). */
     readonly components: boolean;
+    /**
+     * D113 / D113e — products may be sold by WEIGHT OR MEASURE: the wizard
+     * offers “How is this sold?” and the till opens a quantity keypad.
+     *
+     * **Optional, and absent means `false`.** Every other capability here is
+     * required, because the registry is total and a new vertical forgetting
+     * one should be a compile error. This one is deliberately the exception:
+     * absent means “this domain does not sell by measure”, which is the
+     * SAFE reading, and it is what every domain but retail wants. Making it
+     * required would mean writing `measuredGoods: false` into the hardware
+     * and food-service capability blocks — editing two templates in order to
+     * declare that nothing about them changes.
+     *
+     * `RETAIL_CAPABILITIES` is shared by the HARDWARE and RETAIL domains
+     * (read its own docstring: “the hardware/retail template”), so the flag
+     * cannot live in it — it is set on the retail DESCRIPTOR instead, which
+     * is the only place the two differ.
+     *
+     * Hardware is not excluded because selling rope by the metre is absurd —
+     * it is excluded because the PO has not asked for it. A capability must
+     * not claim more than the product offers.
+     */
+    readonly measuredGoods?: boolean;
   };
   readonly fulfilment: {
     readonly kind: FulfilmentKind;

@@ -35,6 +35,16 @@ interface Props {
   /** True when the tenant runs on locally-tracked inventory (LOCAL mode). */
   showOpeningStock: boolean;
   /**
+   * D113e — offer “How is this sold?” at all. RETAIL only: the capability is
+   * off for hardware and every food-service domain, and the shell resolves it
+   * so this component never sees a business type (D31).
+   *
+   * Defaults FALSE, so a caller that has not been updated offers nothing —
+   * the direction that cannot leak a control into a template that did not ask
+   * for one.
+   */
+  showMeasuredGoods?: boolean;
+  /**
    * Restaurant vs. Retail. Restaurant tenants get three extra cards
    * (Modifier Groups / Promotions / Availability & Kitchen) rendered below the
    * pricing matrix. Null while unresolved — same safe default as Step 1.
@@ -58,6 +68,7 @@ export function StepPricingInventory({
   errors,
   branches,
   showOpeningStock,
+  showMeasuredGoods,
   businessKind,
   session,
   branchId,
@@ -95,8 +106,16 @@ export function StepPricingInventory({
         property of the product, so it applies whether the price lives on
         the product or on its variants, and it has to be set BEFORE the
         price is read: "200" means nothing until you know it is per kilo.
+
+        D113e — and only where the tenant sells by measure. `6.1b` rendered
+        this unconditionally, which put a weighed-goods control in front of
+        every restaurant and hardware workspace: this file is the shared
+        Step 3 for every business type, and it already takes `businessKind`
+        for exactly that reason.
       */}
-      <MeasureCard state={state} errors={errors} onChange={onChange} />
+      {showMeasuredGoods ? (
+        <MeasureCard state={state} errors={errors} onChange={onChange} />
+      ) : null}
 
       {state.hasVariations ? (
         <VariantMatrix

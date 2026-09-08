@@ -13,6 +13,7 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
 import { useIsDesktop } from '@/lib/use-viewport';
 import {
   resolveBusinessKind,
+  resolveMeasuredGoods,
   resolveProductManagementPresentation,
 } from '@/lib/products/product-presentation';
 import {
@@ -131,6 +132,12 @@ export function ProductWizard(props: Props) {
   // themselves (D31 — the resolver is the single authority), so the shell
   // derives it once here and passes it as a prop.
   const businessKind = resolveBusinessKind(profile?.businessType ?? null);
+  /*
+   * D113e — weighed goods are RETAIL-only, and `businessKind` cannot say so:
+   * its `RETAIL` bucket includes hardware. Resolved from the capability here,
+   * beside the kind, so Step 3 takes a flag rather than a business type.
+   */
+  const showMeasuredGoods = resolveMeasuredGoods(profile?.businessType ?? null);
   /*
    * 3.15 — the tenant's tax rate, so the Taxable toggle can name the number it
    * turns on instead of saying "this shop's configured rate".
@@ -448,6 +455,7 @@ export function ProductWizard(props: Props) {
               errors={errors}
               branches={branches}
               showOpeningStock={showOpeningStock}
+              showMeasuredGoods={showMeasuredGoods}
               businessKind={businessKind}
               session={session}
               branchId={session.branchId}

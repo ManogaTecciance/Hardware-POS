@@ -91,7 +91,21 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
   ],
   navigation: RETAIL_NAVIGATION,
   roleTemplates: HARDWARE_ROLE_TEMPLATES,
-  capabilities: RETAIL_CAPABILITIES,
+  /**
+   * D113e — `RETAIL_CAPABILITIES` verbatim, plus weighed goods.
+   *
+   * Spread rather than added to the shared constant, because that constant
+   * is the HARDWARE template too. A grocer sells rice by the kilo; a
+   * hardware shop has not asked to, and Phase 6 must not decide that for
+   * them. This is the only line on which the two domains differ, and it is
+   * stated here rather than by a business-type comparison in a component —
+   * D56, and the reason `resolveBusinessKind` reads a capability instead of
+   * an if-chain that had already forgotten HOTEL once.
+   */
+  capabilities: {
+    ...RETAIL_CAPABILITIES,
+    catalogue: { ...RETAIL_CAPABILITIES.catalogue, measuredGoods: true },
+  },
   /**
    * D64 (2.4) — the clothing catalogue fields.
    *

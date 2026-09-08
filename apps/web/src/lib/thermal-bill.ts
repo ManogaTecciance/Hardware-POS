@@ -1,5 +1,3 @@
-import { saleLineQuantity } from '@hardware-pos/shared';
-
 import type { DocumentProfile } from './document-template-service';
 import { resolveImageUrl } from './products-api';
 import { formatMoney } from './restaurant/labels';
@@ -23,8 +21,6 @@ import { formatMoney } from './restaurant/labels';
 export interface ThermalBillLine {
   name: string;
   variantName?: string | null;
-  /** D113d (`6.5`) — the unit this line was sold in. Absent on older data. */
-  unitOfMeasure?: string | null;
   quantity: string;
   lineTotal: string;
   /** Printed under the line, indented — "no onions". */
@@ -228,15 +224,8 @@ function esc(v: unknown): string {
 }
 
 /** "2.000" reads as machinery on a bill; "2" and "0.5" read as plates. */
-/**
- * D113d (`6.5`) — through the shared formatter, like `saleLineLabel` beside it.
- *
- * A thermal receipt is 80mm wide and has no Unit column, so the unit rides
- * with the quantity: `0.75 kg`. A line with no unit renders exactly as it did
- * before, which is what leaves every existing receipt unchanged.
- */
-function qty(q: string, unit?: string | null): string {
-  return saleLineQuantity(q, unit);
+function qty(q: string): string {
+  return String(Number(q));
 }
 
 function money(value: string, currency?: string): string {
@@ -307,7 +296,7 @@ export function renderThermalBill(input: ThermalBillInput): string {
       const note = l.specialInstructions
         ? `<span class="note">${esc(l.specialInstructions)}</span>`
         : '';
-      return `<tr><td>${label}${note}</td><td class="q">${esc(qty(l.quantity, l.unitOfMeasure))}</td><td class="a">${esc(
+      return `<tr><td>${label}${note}</td><td class="q">${esc(qty(l.quantity))}</td><td class="a">${esc(
         money(l.lineTotal, input.currency),
       )}</td></tr>`;
     })
