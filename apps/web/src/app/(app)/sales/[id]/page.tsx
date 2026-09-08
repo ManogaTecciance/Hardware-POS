@@ -91,6 +91,13 @@ export default function SaleDetailPage() {
     setBusy(true);
     try {
       await reprintCustomerReceipt(session, sale.id);
+    } catch (err) {
+      // Without this the server's refusal escaped as an unhandled rejection
+      // and Next.js drew its runtime error overlay — so a perfectly clear
+      // sentence from the API (“this sale is still on hold…”) reached nobody,
+      // and a rule looked like a crash. Every other handler here already
+      // reports through `setError`.
+      setError(err instanceof Error ? err.message : 'Could not print the receipt');
     } finally {
       setBusy(false);
     }
@@ -145,7 +152,20 @@ export default function SaleDetailPage() {
     sale.status === 'COMPLETED' &&
     sale.returnStatus !== 'FULLY_RETURNED' &&
     hasPermission(Permission.RETURN_CREATE);
-  // D128 (`7.5`) — an exchange really does both halves, so it needs both
+  /*
+   * A receipt exists for any sale that took money, however it ended — a
+   * fully-returned or voided sale still reprints, because the transaction
+   * happened and the paper trail is the point. A voided one comes back
+   * stamped VOID so it cannot pass as proof of a live sale.
+   *
+   * `DRAFT` is the one exclusion: a held basket has taken no payment, so
+   * there is nothing to document. The button used to render for it — and
+   * for every other status — while the server refused, which is how an
+   * ordinary rule surfaced as a page crash. Gated here the way `canReturn`
+   * directly above has always been.
+   */
+  const canReprint = sale.status !== 'DRAFT';
+  // D107 (`7.5`) — an exchange really does both halves, so it needs both
   // permissions. Someone who may take returns but not make sales must not be
   // able to issue replacement goods through this door.
   const canExchange = canReturn && hasPermission(Permission.SALE_CREATE);
@@ -199,9 +219,11 @@ export default function SaleDetailPage() {
               Print A4 bill
             </Button>
           ) : null}
-          <Button variant="ghost" onClick={handleReprint} disabled={busy} leftIcon={<Printer className="h-4 w-4" />}>
-            Thermal receipt
-          </Button>
+          {canReprint ? (
+            <Button variant="ghost" onClick={handleReprint} disabled={busy} leftIcon={<Printer className="h-4 w-4" />}>
+              Thermal receipt
+            </Button>
+          ) : null}
           {canRetry ? (
             <Button variant="outline" onClick={handleRetry} disabled={busy}>
               <RefreshCw className="h-4 w-4" />
