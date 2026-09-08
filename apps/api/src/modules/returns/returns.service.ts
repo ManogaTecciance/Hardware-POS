@@ -152,6 +152,7 @@ export class ReturnsService {
         purchasedQuantity: purchased,
         previouslyReturnedQuantity: previously,
         availableReturnQuantity: round3(Math.max(0, purchased - previously)),
+        unitOfMeasure: it.unitOfMeasureSnapshot,
         productDiscount: Number(it.discountAmount),
         lineTotal: Number(it.lineTotal),
       };

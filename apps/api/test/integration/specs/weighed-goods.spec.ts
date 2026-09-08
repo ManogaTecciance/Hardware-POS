@@ -43,6 +43,8 @@ import { SellableService } from '../../../src/modules/products/sellable.service'
 import { SalesModule } from '../../../src/modules/sales/sales.module';
 import { SalesService } from '../../../src/modules/sales/sales.service';
 import { SettingsService } from '../../../src/modules/settings/settings.service';
+import { ReturnsModule } from '../../../src/modules/returns/returns.module';
+import { ReturnsService } from '../../../src/modules/returns/returns.service';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
 import { resetDatabase } from '../db-reset';
@@ -54,6 +56,7 @@ let products: ProductsService;
 let sellable: SellableService;
 let sales: SalesService;
 let settings: SettingsService;
+let returns: ReturnsService;
 let owner: { id: string; tenantId: string; role: string; activeBranchId: string | null };
 let shop: SeededTenant;
 
@@ -68,6 +71,7 @@ beforeAll(async () => {
       ProvidersModule,
       SalesModule,
       ProductsModule,
+      ReturnsModule,
     ],
   }).compile();
   testModule.useLogger(false);
@@ -76,6 +80,7 @@ beforeAll(async () => {
   sellable = testModule.get(SellableService);
   sales = testModule.get(SalesService);
   settings = testModule.get(SettingsService);
+  returns = testModule.get(ReturnsService);
 });
 
 afterAll(async () => {
@@ -426,5 +431,100 @@ describe('6.4 — the server charges a measured line the way the applier says', 
     // And the shelf dropped by three quarters of a kilo, not by one.
     const after = await prisma.product.findUniqueOrThrow({ where: { id: rice.id } });
     expect(after.quantityOnHand.toFixed(3)).toBe('99.250');
+  });
+});
+
+describe('6.5 / 6.6 — the unit follows the goods onto paper and back', () => {
+  async function sellRice(quantity: number) {
+    const rice = await products.create(
+      shop.tenantId,
+      productInput({ name: 'Rice', quantityType: 'DECIMAL', unitOfMeasure: 'kg', unitPrice: 200 }),
+    );
+    await prisma.product.update({ where: { id: rice.id }, data: { quantityOnHand: 100 } });
+    const sale = await sales.complete(shop.tenantId, owner as never, {
+      branchId: shop.branchId,
+      registerId: shop.registerId,
+      items: [{ productId: rice.id, quantity }],
+      payments: [{ method: 'CASH', amount: 200 * quantity }],
+    } as never);
+    return { rice, sale };
+  }
+
+  it('D113d — the sale line freezes the unit it was sold in', async () => {
+    const { sale } = await sellRice(0.75);
+
+    const item = await prisma.saleItem.findFirstOrThrow({ where: { saleId: sale.id } });
+    expect(item.unitOfMeasureSnapshot).toBe('kg');
+  });
+
+  it('a later reprice does NOT rewrite the old line', async () => {
+    // The whole argument for a snapshot over a join. A shop moving from grams to
+    // kilograms must not turn a historical receipt into one reading a thousand
+    // times larger.
+    const { rice, sale } = await sellRice(0.75);
+    await products.update(shop.tenantId, rice.id, { unitOfMeasure: 'g' } as never, 'OWNER' as never);
+
+    const item = await prisma.saleItem.findFirstOrThrow({ where: { saleId: sale.id } });
+    expect(item.unitOfMeasureSnapshot).toBe('kg');
+    // POSITIVE control: the product itself really did change, so the assertion
+    // above is about the snapshot and not about an update that failed.
+    const product = await prisma.product.findUniqueOrThrow({ where: { id: rice.id } });
+    expect(product.unitOfMeasure).toBe('g');
+  });
+
+  it('a WHOLE line stores no unit, so its documents are unchanged', async () => {
+    const shirt = await products.create(shop.tenantId, productInput({ name: 'A Shirt' }));
+    await prisma.product.update({ where: { id: shirt.id }, data: { quantityOnHand: 10 } });
+    const sale = await sales.complete(shop.tenantId, owner as never, {
+      branchId: shop.branchId,
+      registerId: shop.registerId,
+      items: [{ productId: shirt.id, quantity: 2 }],
+      payments: [{ method: 'CASH', amount: 200 }],
+    } as never);
+
+    const item = await prisma.saleItem.findFirstOrThrow({ where: { saleId: sale.id } });
+    expect(item.unitOfMeasureSnapshot).toBeNull();
+  });
+
+  it('6.6 — half a bag of rice can be returned, and the refund is fractional', async () => {
+    // The clamp this step removed made this impossible: a customer who bought
+    // 750 g and brought half back could be refunded for a whole kilo or nothing.
+    const { rice, sale } = await sellRice(0.75);
+    const saleItem = await prisma.saleItem.findFirstOrThrow({ where: { saleId: sale.id } });
+
+    const eligible = await returns.getReturnableItems(shop.tenantId, sale.id);
+    expect(eligible[0]!.availableReturnQuantity).toBe(0.75);
+    // The screen needs the unit to label what it is asking for.
+    expect(eligible[0]!.unitOfMeasure).toBe('kg');
+
+    const created = await returns.complete(
+      shop.tenantId,
+      owner as never,
+      {
+        saleId: sale.id,
+        items: [
+          {
+            saleItemId: saleItem.id,
+            returnQuantity: 0.375,
+            itemCondition: 'GOOD',
+            stockDisposition: 'RETURN_TO_STOCK',
+            returnReason: 'NOT_SUITABLE',
+          },
+        ],
+        refundMethod: 'CASH',
+      } as never,
+      `ret-${sale.id}`,
+    );
+
+    // Half of 0.75 kg at Rs 200/kg is Rs 75.
+    expect(Number(created.refundTotal)).toBe(75);
+    const returnItem = await prisma.returnItem.findFirstOrThrow({ where: { returnId: created.id } });
+    expect(returnItem.returnQuantity.toFixed(3)).toBe('0.375');
+    // D113d — the credit note prints the unit the customer was charged in.
+    expect(returnItem.unitOfMeasureSnapshot).toBe('kg');
+
+    // And the shelf took back exactly what came in, not a rounded kilo.
+    const after = await prisma.product.findUniqueOrThrow({ where: { id: rice.id } });
+    expect(after.quantityOnHand.toFixed(3)).toBe('99.625');
   });
 });
