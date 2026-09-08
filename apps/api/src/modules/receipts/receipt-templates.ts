@@ -9,6 +9,16 @@ export interface ReceiptLine {
   name: string;
   /** D102 (4.6) — "Promotion: <name>", printed under the item. Null when none. */
   promotionNote: string | null;
+  /**
+   * NOT printed. The customer receipt carried the SKU under every item name
+   * until 2026-09-08; it is an internal identifier and a customer has no use
+   * for it on an 80mm slip, where the width it costs is real.
+   *
+   * The field STAYS because `toReceiptContent` stores this object as the
+   * receipt's permanent record — dropping it would rewrite what an archived
+   * receipt knows about the line, which is a data change dressed up as a
+   * display fix. The A4 keeps its own SKU column behind `documents.showSku`.
+   */
   sku: string | null;
   /**
    * D113d (`6.5`) — already FORMATTED by `saleLineQuantity`, so `0.75 kg`
@@ -77,7 +87,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
     .map(
       (it) => `
       <tr>
-        <td>${esc(it.name)}${it.promotionNote ? `<br><span class="muted">${esc(it.promotionNote)}</span>` : ''}${it.sku ? `<br><span class="muted">${esc(it.sku)}</span>` : ''}</td>
+        <td>${esc(it.name)}${it.promotionNote ? `<br><span class="muted">${esc(it.promotionNote)}</span>` : ''}</td>
         <td class="r">${it.quantity}</td>
         <td class="r">${money(it.unitPrice, d.currency)}</td>
         <td class="r">${it.discountAmount > 0 ? '-' + money(it.discountAmount, d.currency) : '—'}</td>
