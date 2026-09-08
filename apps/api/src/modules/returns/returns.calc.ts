@@ -27,16 +27,16 @@ export interface OriginalSaleSnapshot {
   /** Order-level discount amount applied to the post-line-discount subtotal. */
   orderDiscountAmount: number;
   /**
-   * D105 — the sale's cart-level promotion. Allocated exactly as
+   * D126 — the sale's cart-level promotion. Allocated exactly as
    * `orderDiscountAmount` is, and separately, so a refund can still report which
    * part of the order discount was the cashier's and which the promotion's.
-   * Optional so a snapshot taken before D105 reads as 0.
+   * Optional so a snapshot taken before D126 reads as 0.
    */
   promotionOrderDiscountAmount?: number;
   /** Document-level tax amount on the sale. */
   taxAmount: number;
   /**
-   * D101 (3.11) — Σ over EVERY sale line of `lineTaxable × taxRatePercent`.
+   * D122 (3.11) — Σ over EVERY sale line of `lineTaxable × taxRatePercent`.
    *
    * The denominator that allocates the sale's recorded tax across its lines by
    * how much tax each one actually attracted. Null for a sale written before
@@ -52,7 +52,7 @@ export interface OriginalLineSnapshot {
   /** Product-level discount for the whole original line. */
   discountAmount: number;
   /**
-   * D102 (4.4) — the promotion that claimed this line, for the WHOLE line.
+   * D123 (4.4) — the promotion that claimed this line, for the WHOLE line.
    *
    * Already subtracted from `lineTotal` and already inside the sale's
    * `totalDiscount`. Reversed here at line level, `× frac`, exactly like the
@@ -67,7 +67,7 @@ export interface OriginalLineSnapshot {
    */
   lineTotal: number;
   /**
-   * D101 (3.11) — the rate this line was charged at, frozen at sale time.
+   * D122 (3.11) — the rate this line was charged at, frozen at sale time.
    * Null for a line written before 3.8. `0` is a real rate (zero-rated or an
    * exempt product) and is not the same fact.
    */
@@ -81,11 +81,11 @@ export interface ComputedReturnLine {
   originalLineSubtotal: number;
   /** Proportional share of the line's product discount reversed. */
   productDiscountAdjustment: number;
-  /** D102 (4.5) — proportional share of the line's PROMOTION reversed. */
+  /** D123 (4.5) — proportional share of the line's PROMOTION reversed. */
   promotionDiscountAdjustment: number;
   /** Proportional share of the sale's order discount reversed. */
   orderDiscountAdjustment: number;
-  /** D105 — proportional share of the sale's CART-LEVEL promotion reversed. */
+  /** D126 — proportional share of the sale's CART-LEVEL promotion reversed. */
   promotionOrderDiscountAdjustment: number;
   /** Proportional share of the sale's tax reversed. */
   taxAdjustment: number;
@@ -124,11 +124,11 @@ export function computeReturnLine(
 
   // Net of the product discount for the returned portion.
   /*
-   * 2b. D102 (4.5) — the promotion, reversed proportionally.
+   * 2b. D123 (4.5) — the promotion, reversed proportionally.
    *
    * LINE-level, `× frac`, the same shape as the product discount above and
    * deliberately not the order discount's basket-weighted share below. That
-   * difference is the whole of D102:
+   * difference is the whole of D123:
    *
    *   Two shirts at 1,000 and a tie at 500, tie free. The customer pays 2,000
    *   and returns the tie. Weighting the 500 saving across the basket by line
@@ -138,7 +138,7 @@ export function computeReturnLine(
    *
    * Allocation, never re-evaluation: returning one shirt does not recompute the
    * basket as though the promotion had never qualified. The shop absorbs a broken
-   * bundle by design (D102); any protection must be an explicit rule an operator
+   * bundle by design (D123); any protection must be an explicit rule an operator
    * can see, not a silent recomputation here.
    */
   const promotionDiscountAdjustment = round2(line.promotionDiscountAmount * frac);
@@ -157,7 +157,7 @@ export function computeReturnLine(
     sale.orderDiscountAmount > 0 ? round2(orderDiscountShareFull * frac) : 0;
 
   /*
-   * 3b. D105 — the cart-level promotion, allocated by the SAME weighting.
+   * 3b. D126 — the cart-level promotion, allocated by the SAME weighting.
    *
    * It is a separate figure rather than folded into `orderDiscountAmount`
    * because the two behave differently for tax: the manual order discount is
@@ -174,7 +174,7 @@ export function computeReturnLine(
   /*
    * 4. Tax, allocated from the sale's RECORDED total rather than recomputed.
    *
-   * D101 (3.11) weights each line by the tax it actually attracted:
+   * D122 (3.11) weights each line by the tax it actually attracted:
    *
    *     taxAdjustment = saleTax × (lineTaxable × rate) / Σ(lineTaxable × rate)
    *
@@ -249,7 +249,7 @@ export function computeReturnLine(
   }
 
   // 5. Final refundable line amount.
-  // D105 — the cart-level promotion comes off the refund too. The customer was
+  // D126 — the cart-level promotion comes off the refund too. The customer was
   // never charged for it, so refunding it would hand back money that was never
   // taken — the same reasoning that puts `orderDiscountAdjustment` here.
   const refundableAmount = round2(

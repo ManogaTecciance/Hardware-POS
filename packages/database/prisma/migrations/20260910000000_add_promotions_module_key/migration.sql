@@ -1,4 +1,4 @@
--- D103 — `PROMOTIONS` becomes its own module key.
+-- D124 — `PROMOTIONS` becomes its own module key.
 --
 -- `/promotions` was gated on `MENU_MANAGEMENT`, a food-service module, so a
 -- RETAIL tenant reached the Promotions screen and was told "Feature not
@@ -10,11 +10,11 @@
 --
 -- ── Why one migration ─────────────────────────────────────────────────────────
 --
--- D99a's two-migration rule is about USING a new enum label in the transaction
+-- D120a's two-migration rule is about USING a new enum label in the transaction
 -- that adds it — PostgreSQL refuses that. Nothing here writes a row with the new
 -- value, so adding it alone is correct and safe.
 --
--- `IF NOT EXISTS` follows the D44 variants and D99a precedent.
+-- `IF NOT EXISTS` follows the D44 variants and D120a precedent.
 --
 -- ── No backfill, and no tenant loses the screen ───────────────────────────────
 --

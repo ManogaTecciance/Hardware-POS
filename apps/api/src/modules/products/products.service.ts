@@ -122,7 +122,7 @@ export class ProductsService {
     // D64 — the empty document counts as a full document, so a domain with
     // required attributes refuses a create that omits them entirely.
     await this.attributes.assertValidDocument(tenantId, dto.attributes ?? {});
-    // D113c — a measured product must say what it is measured in.
+    // D134c — a measured product must say what it is measured in.
     assertMeasuredProductNamesItsUnit(
       dto.quantityType ?? QuantityType.WHOLE,
       dto.unitOfMeasure,
@@ -136,10 +136,10 @@ export class ProductsService {
       description: dto.description ?? null,
       categoryId: link.categoryId ?? null,
       subcategoryId: link.subcategoryId ?? null,
-      // D112 — validated against this tenant, so another tenant's brand id
+      // D133 — validated against this tenant, so another tenant's brand id
       // is refused rather than silently stored as a dangling reference.
       brandId: await this.resolveBrand(tenantId, dto.brandId),
-      // D113 / D113b — omitted means WHOLE, which is what every product was
+      // D134 / D134b — omitted means WHOLE, which is what every product was
       // before the column existed.
       quantityType: dto.quantityType ?? QuantityType.WHOLE,
       unitOfMeasure: dto.unitOfMeasure?.trim() || null,
@@ -150,7 +150,7 @@ export class ProductsService {
       quantityAsOfDate: dto.quantityAsOfDate ? new Date(dto.quantityAsOfDate) : new Date(),
       reorderLevel: dto.reorderLevel ?? null,
       isActive: dto.isActive ?? true,
-      // D101 (3.13) — absent means taxable. A `false` default here would
+      // D122 (3.13) — absent means taxable. A `false` default here would
       // zero-rate every product any client created without the field.
       taxable: dto.taxable ?? true,
       // Pre-uploaded URL from the Add Product wizard (D44); optional in every
@@ -208,7 +208,7 @@ export class ProductsService {
     }
 
     /*
-     * D113c — checked against the RESULTING state, not the payload.
+     * D134c — checked against the RESULTING state, not the payload.
      *
      * `update` is partial, so a payload-only check would pass the only two
      * cases worth guarding: turning a product DECIMAL when it has no unit, and
@@ -246,13 +246,13 @@ export class ProductsService {
       description: dto.description,
       categoryId: link.categoryId,
       subcategoryId: link.subcategoryId,
-      // D112 — `undefined` leaves the stored brand alone, an empty string clears
+      // D133 — `undefined` leaves the stored brand alone, an empty string clears
       // it, and a real id is validated against this tenant. Three different
       // intentions; a single `?? null` would collapse the first two.
       ...(dto.brandId !== undefined
         ? { brandId: dto.brandId ? await this.resolveBrand(tenantId, dto.brandId) : null }
         : {}),
-      // D113 / D113b — same three-state contract as `brandId` above, with one
+      // D134 / D134b — same three-state contract as `brandId` above, with one
       // difference that cost a 500: **`null` also means clear.**
       //
       // `@IsOptional()` skips validation for `null` as well as `undefined`, so a
@@ -261,7 +261,7 @@ export class ProductsService {
       // `dto.unitOfMeasure?.trim()`; this one did not, so the same field had two
       // contracts depending on which verb you used.
       //
-      // Clearing a DECIMAL product's unit is still refused — by D113c above,
+      // Clearing a DECIMAL product's unit is still refused — by D134c above,
       // against the resulting state, which is where that rule belongs. This line
       // only decides what "no unit" is spelled as.
       quantityType: dto.quantityType,
@@ -433,7 +433,7 @@ export class ProductsService {
    * Returns only the fields that should be written.
    */
   /**
-   * D112 (`8.9`) — a brand id, checked to belong to this tenant.
+   * D133 (`8.9`) — a brand id, checked to belong to this tenant.
    *
    * `tenantId` in the predicate is what makes another tenant's brand id a
    * refusal rather than a dangling reference stored on a product. Same shape as
@@ -531,7 +531,7 @@ function toCatalogShape(product: Product): ProductCatalogShape {
 }
 
 /**
- * D113c — a product sold by weight or measure must say what it is measured in.
+ * D134c — a product sold by weight or measure must say what it is measured in.
  *
  * The rule is CONDITIONAL, which is why it lives here and not on the column: it
  * is mandatory for a `DECIMAL` product and meaningless for a shirt, and a

@@ -3,7 +3,7 @@
  *
  * ## The defect this exists for
  *
- * D105 added `minimumSpend` to `PromotionRule`, declared it OPTIONAL, and
+ * D126 added `minimumSpend` to `PromotionRule`, declared it OPTIONAL, and
  * `toPromotionRule` was not updated. Building the object without it type-checked
  * cleanly — a missing optional field is a valid value — so the till received
  * `undefined`, read it as "no threshold", and took Rs 1,000 off a Rs 500 basket
@@ -56,7 +56,7 @@ describe('toPromotionRule carries the whole rule to the till', () => {
   });
 
   it('turns an absent threshold into null, never undefined', () => {
-    // A server predating D105 omits the field. `undefined` would read as
+    // A server predating D126 omits the field. `undefined` would read as
     // "no threshold" — which is the RIGHT answer here, but only by accident;
     // the same `undefined` arriving for a rule that HAS a threshold is the bug.
     // Asserting null keeps the two cases distinguishable.

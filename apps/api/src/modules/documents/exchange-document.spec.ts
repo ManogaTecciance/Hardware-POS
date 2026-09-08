@@ -5,7 +5,7 @@
  * *document renderer* but no Exchange *transaction* — no Prisma model,
  * migration, API module, route or permission key (decision D2).
  *
- * **That changed in Phase 7.** D107 built the transaction, and `7.3` connected
+ * **That changed in Phase 7.** D128 built the transaction, and `7.3` connected
  * this renderer to it. Two things follow: the rendering output is no longer
  * merely "preserved" but load-bearing for a real document a customer is handed,
  * and the tax column now follows the tenant's setting rather than being forced

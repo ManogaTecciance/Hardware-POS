@@ -15,8 +15,8 @@ the handover of what remains.
 | ☑ | Every step `8.0`–`8.11` implemented | 11 / 11 |
 | ☑ | Every step has integration tests against a real database | yes |
 | ☑ | Every new route classified in `route-module-matrix.spec.ts` **and** its document | 305 → 308 routes, 209 → 211 guarded and ungated as declared |
-| ☑ | Every decision that needed a record has one | `D108`, `D109`, `D110`, `D111`, `D112` |
-| ☑ | No migration without a decision record | `8.7` → `D111`, `8.9` → `D112`; both verified with `migrate diff` before commit |
+| ☑ | Every decision that needed a record has one | `D129`, `D130`, `D131`, `D132`, `D133` |
+| ☑ | No migration without a decision record | `8.7` → `D132`, `8.9` → `D133`; both verified with `migrate diff` before commit |
 | ☑ | Schema and migrations agree | "This is an empty migration", both times — **with the untracked drift folder present, as it is on this machine**. Without it the diff emits one pre-existing D44 foreign-key pair and nothing else; see handover item 5 |
 | ☑ | No restaurant source file edited | Checked, not assumed: `git diff --name-only b703721~1..HEAD` filtered for `restaurant|menu|dining|kitchen|table-session|takeaway|billing|delivery` returns **three files, all documentation** — `docs/restaurant-pos/{00-decisions,route-module-matrix,phase-8-verification}.md`, which live under a folder that happens to be named for Phase 1. **Zero source files** |
 | ☑ | The protected drift folder untouched | `packages/database/prisma/migrations/20260828081727/` still untracked, never staged |
@@ -37,14 +37,14 @@ the handover of what remains.
 | `8.2` | Open a Reports screen that is about a shop, not a restaurant | — |
 | `8.3` | See what sold, by product and by size, best sellers first | — |
 | `8.4` | Reconcile tax at each rate against what was charged | — |
-| `8.5` | See what the goods that sold actually earned | `D110` |
+| `8.5` | See what the goods that sold actually earned | `D131` |
 | `8.6` | Find stock that has not moved in ninety days, and what it is worth | — |
-| `8.7` | Count a shelf and correct the books, auditably | `D111` |
+| `8.7` | Count a shelf and correct the books, auditably | `D132` |
 | `8.8` | Put a basket down and pick it up again | — |
-| `8.9` | Filter and report by brand, as an entity rather than a string | `D112` |
+| `8.9` | Filter and report by brand, as an entity rather than a string | `D133` |
 
 `8.1` handed **A8** to the restaurant team as `RT-02` and kept its rule on the
-retail side as a mutation-proven tripwire (`D108`), because the defect lives only
+retail side as a mutation-proven tripwire (`D129`), because the defect lives only
 in `restaurant-reports.service.ts` and editing it would breach the PO's
 constraint and this plan's own guarantee.
 
@@ -54,7 +54,7 @@ constraint and this plan's own guarantee.
 
 These are things the code does not do, stated so nobody has to re-derive them.
 
-1. **Margin is costed at today's weighted average** (`D110`), not the cost on the
+1. **Margin is costed at today's weighted average** (`D131`), not the cost on the
    day of the sale. Exact costing means freezing a unit cost onto `SaleItem` at
    sale time — a migration and a change to the write path every tenant runs
    through — and would still not answer for sales already taken. The screen says

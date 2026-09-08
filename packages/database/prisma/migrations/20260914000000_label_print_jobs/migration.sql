@@ -1,10 +1,10 @@
--- D106 — a label print job has no sale (Phase 5, step 5.7).
+-- D127 — a label print job has no sale (Phase 5, step 5.7).
 --
 -- Two changes, both additive in effect:
 --
 --   1. `PrintJobType` gains PRODUCT_LABEL. Adding an enum value is additive and
---      needs no exception (D99); it cannot be used in the same transaction that
---      adds it (D99a), which is why nothing here inserts one.
+--      needs no exception (D120); it cannot be used in the same transaction that
+--      adds it (D120a), which is why nothing here inserts one.
 --   2. `PrintJob.saleId` is widened from NOT NULL to nullable.
 --
 -- No existing row is touched. Every receipt, picking slip and return document

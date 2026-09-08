@@ -35,11 +35,11 @@ export interface BarcodeAuditReport {
 }
 
 /**
- * D104 Part 3 — find and reissue barcodes that cannot be printed (`5.9`).
+ * D125 Part 3 — find and reissue barcodes that cannot be printed (`5.9`).
  *
  * ## Why this step exists
  *
- * The D104 investigation measured the pilot database and found **18 of 20
+ * The D125 investigation measured the pilot database and found **18 of 20
  * barcodes carry an invalid EAN-13 check digit** — two generators in play, and
  * neither computed one. The prefix is right (`2`, the GS1 in-store range), so
  * nothing looks wrong until `5.7` renders a label, which cannot produce an
@@ -58,7 +58,7 @@ export interface BarcodeAuditReport {
  * Every reissue writes an audit event carrying the OLD barcode, so a wrongly
  * reissued code can be recovered from the permanent record. Without that, this
  * operation would be exactly the "silently rewrite existing barcode data" that
- * D104 warns against.
+ * D125 warns against.
  *
  * ## A supplier's barcode is never reissued
  *

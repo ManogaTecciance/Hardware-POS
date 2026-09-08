@@ -294,7 +294,7 @@ export class UpdateLabelSettingsDto {
   symbology?: 'EAN13' | 'CODE128';
 }
 
-/** D104 Part 3 `5.4` + `5.8`. */
+/** D125 Part 3 `5.4` + `5.8`. */
 export class UpdateCatalogueSettingsDto {
   /**
    * 2-6 digits starting `02` or `20`-`29`. The shape is checked here; the GS1
@@ -302,7 +302,7 @@ export class UpdateCatalogueSettingsDto {
    * settings form give the identical explanation for a refusal.
    *
    * `null` is allowed and means "not configured" — allocation then refuses,
-   * which is the D104 sequencing constraint made real rather than documented.
+   * which is the D125 sequencing constraint made real rather than documented.
    */
   @Matches(/^\d{2,6}$/)
   @IsOptional()

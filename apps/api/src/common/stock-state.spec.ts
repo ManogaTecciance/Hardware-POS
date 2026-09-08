@@ -7,7 +7,7 @@ import {
 } from '../modules/providers/inventory/local-inventory.provider';
 
 /**
- * D99 (1c.6) — a product with variants derives its stock from the variant rows.
+ * D120 (1c.6) — a product with variants derives its stock from the variant rows.
  *
  * The rule this pins is "stock is tracked by variant id, not product id". The
  * parent's own `quantityOnHand` is the D10 rollup mirror and had drifted to 350
@@ -117,7 +117,7 @@ describe('stockStateFor is the single threshold rule', () => {
 });
 
 /**
- * D99 (2.15) — the restaurant path through `restoreStock` did not change.
+ * D120 (2.15) — the restaurant path through `restoreStock` did not change.
  *
  * 1a.20 switched `restoreStock` from `aggregate` (keyed by product) to
  * `aggregateByVariant` (keyed by product+variant). RESTAURANT tenants run LOCAL

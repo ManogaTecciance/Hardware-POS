@@ -131,7 +131,7 @@ export class SalesController {
    * `8.5` — what the goods that sold actually earned.
    *
    * Costed at TODAY'S weighted average, which is an approximation for a
-   * historical sale — D110. The response says which cost each row used and
+   * historical sale — D131. The response says which cost each row used and
    * which rows have no cost at all, rather than presenting one figure as if
    * every part of it were equally solid.
    */

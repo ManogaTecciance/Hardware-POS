@@ -1,5 +1,5 @@
 /**
- * D104 Part 3 — the barcode audit and reissue pass (Phase 5, `5.9`), and label
+ * D125 Part 3 — the barcode audit and reissue pass (Phase 5, `5.9`), and label
  * printing (`5.7`).
  *
  * Required fields throughout, for the `4.15` / `4.21` reason: a wire field that

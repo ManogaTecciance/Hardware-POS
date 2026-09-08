@@ -1,5 +1,5 @@
 /**
- * D113 (`6.1`) — the product form can declare a product sold by weight.
+ * D134 (`6.1`) — the product form can declare a product sold by weight.
  *
  * ## Why this file exists at all
  *
@@ -138,7 +138,7 @@ describe('the control exists and writes', () => {
 
 
 /**
- * D113e — the control is RETAIL-only, and this is the regression guard.
+ * D134e — the control is RETAIL-only, and this is the regression guard.
  *
  * `6.1b` rendered it unconditionally, which put a weighed-goods control in front
  * of every restaurant and hardware workspace. `step-pricing-inventory` is the
@@ -151,7 +151,7 @@ describe('the control exists and writes', () => {
  * that caused this, and a test that only proved it hides would pass for a
  * component that had lost the feature entirely.
  */
-describe('D113e — only a tenant that sells by measure is offered it', () => {
+describe('D134e — only a tenant that sells by measure is offered it', () => {
   it('offers nothing when the capability is off', () => {
     render(<Harness showMeasuredGoods={false} />);
 
@@ -209,7 +209,7 @@ describe('D113e — only a tenant that sells by measure is offered it', () => {
   });
 });
 
-describe('the unit is required only for a measured product (D113c)', () => {
+describe('the unit is required only for a measured product (D134c)', () => {
   it('refuses a measured product with no unit', () => {
     const errors = validateStep('pricing', measured(''), { inventoryMode: 'LOCAL' });
     expect(errors['unitOfMeasure']).toBeDefined();

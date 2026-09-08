@@ -14,7 +14,7 @@ export const exchangeWithLegs = {
 export type ExchangeWithLegs = Prisma.ExchangeGetPayload<{ include: typeof exchangeWithLegs }>;
 
 /**
- * Data access for `Exchange` (D107).
+ * Data access for `Exchange` (D128).
  *
  * Deliberately thin: an exchange owns no lines and no money of its own, so there
  * is very little here. Everything substantive lives in the Return and Sale
@@ -52,7 +52,7 @@ export class ExchangesRepository {
    *
    * Its own `DocumentSequence` type so an exchange number can never collide with
    * the sale or return it links. Gaps are accepted on the same terms as every
-   * other document type (D104b).
+   * other document type (D125b).
    */
   async nextExchangeNumber(tenantId: string): Promise<string> {
     return `X-${padSequence(await nextDocumentNumber(this.prisma, tenantId, 'EXCHANGE'))}`;
@@ -69,7 +69,7 @@ export class ExchangesRepository {
   }) {
     // `replacementSaleId` is deliberately absent: the return leg has committed
     // and the sale has not been attempted yet. That interval is the recoverable
-    // state D107 chose, and the row has to be able to express it.
+    // state D128 chose, and the row has to be able to express it.
     return this.prisma.exchange.create({ data, include: exchangeWithLegs });
   }
 

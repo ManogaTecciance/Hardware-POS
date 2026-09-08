@@ -1,5 +1,5 @@
 /**
- * The clothing seed pack (D99, 2.6).
+ * The clothing seed pack (D120, 2.6).
  *
  * ## Why categories are always seeded and products are not
  *
@@ -224,7 +224,7 @@ export async function seedClothingPack(
       }
 
       // Variant stock is branch-scoped and normally arrives by goods receipt
-      // (D99 decision 8). Opening stock is written directly here because a
+      // (D120 decision 8). Opening stock is written directly here because a
       // sample product with no stock cannot be sold, and a receipt would need a
       // supplier this tenant does not have.
       await db.branchInventory.create({

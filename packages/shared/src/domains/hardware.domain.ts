@@ -22,7 +22,7 @@ export const HARDWARE_DOMAIN: DomainDescriptor = {
   label: 'Hardware store',
   template: {
     key: 'HARDWARE',
-    // 2.10 — was "Hardware / Retail". D99 puts a real Retail card beside this
+    // 2.10 — was "Hardware / Retail". D120 puts a real Retail card beside this
     // one, and two cards both claiming "retail" — one of them QuickBooks-backed,
     // the other explicitly not — is a support call waiting to happen. This card
     // now says what it is; the Retail card says what it is.

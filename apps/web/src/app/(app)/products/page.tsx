@@ -85,7 +85,7 @@ export default function ProductsPage() {
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [categoryId, setCategoryId] = React.useState('');
-  // D112 (`8.9`) — brand as a filter, beside category. A clothing buyer's
+  // D133 (`8.9`) — brand as a filter, beside category. A clothing buyer's
   // first question about a catalogue is "show me everything by this label".
   const [brandId, setBrandId] = React.useState('');
   const [subcategoryId, setSubcategoryId] = React.useState('');
@@ -151,7 +151,7 @@ export default function ProductsPage() {
     fetchCategoryTree(session).then(setCategories).catch(() => setCategories([]));
     // Archived brands are deliberately absent: this picker is where a NEW
     // choice is made, and a retired label is not one. The products that still
-    // carry it keep showing it (D112).
+    // carry it keep showing it (D133).
     fetchBrands(session).then(setBrands).catch(() => setBrands([]));
   }, [session]);
 
@@ -304,7 +304,7 @@ export default function ProductsPage() {
           ]}
         />
         {/*
-          D112 (`8.9`). Hidden entirely when the tenant has no brands rather than
+          D133 (`8.9`). Hidden entirely when the tenant has no brands rather than
           shown empty: a shop that does not track brands should not carry a
           permanently useless control, and an empty picker teaches nothing.
         */}

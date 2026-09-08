@@ -1,5 +1,5 @@
 /**
- * D102 (4.3) — the till receives enough to PRICE a promotion, not only badge it.
+ * D123 (4.3) — the till receives enough to PRICE a promotion, not only badge it.
  *
  * ## What was wrong
  *

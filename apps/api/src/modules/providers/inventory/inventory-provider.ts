@@ -75,7 +75,7 @@ export interface InventoryProvider {
   getAvailability(ctx: ProviderContext, productIds: string[]): Promise<AvailabilityMap>;
 
   /**
-   * D99 — on-hand availability for specific variants. **Optional.**
+   * D120 — on-hand availability for specific variants. **Optional.**
    *
    * Optional rather than required because only a provider whose stock is
    * branch-and-variant scoped can answer it. QuickBooks holds a cache of an
@@ -186,7 +186,7 @@ export interface InventoryProvider {
   ): Promise<ReceiveStockLineOutcome[]>;
 
   /**
-   * D111 (`8.7`) — apply a stock COUNT, inside the caller's transaction.
+   * D132 (`8.7`) — apply a stock COUNT, inside the caller's transaction.
    *
    * A count is not an adjustment and not a movement: it is an assertion by an
    * operator about what is physically on a shelf. So it **sets** the quantity

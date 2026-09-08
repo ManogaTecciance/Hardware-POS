@@ -12,7 +12,7 @@ import { CreateStockTakeDto } from './dto/create-stock-take.dto';
 import { StockTakesService, type StockTakeView } from './stock-takes.service';
 
 /**
- * Stock takes / cycle counts — D111 (`8.7`).
+ * Stock takes / cycle counts — D132 (`8.7`).
  *
  * `INVENTORY`-gated, like receiving: both are inventory operations, and a tenant
  * without the module has no stock to count.
@@ -20,7 +20,7 @@ import { StockTakesService, type StockTakeView } from './stock-takes.service';
  * `PRODUCT_MANAGE` rather than a new permission. It is the permission that
  * already authorises writing stock quantities — the bulk product import does
  * exactly that — and it is held by Owner, Admin and Manager, which is the set a
- * count needs. D111 records that a dedicated `inventory:count` is the natural
+ * count needs. D132 records that a dedicated `inventory:count` is the natural
  * next step if a tenant wants a floor manager who counts but cannot edit the
  * catalogue; minting one now would add vocabulary nobody has asked for.
  *

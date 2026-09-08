@@ -26,7 +26,7 @@ import { resetDatabase } from '../db-reset';
 import { MANAGER_PIN, seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 
 /**
- * D101 (3.9) — the rate a line was charged at, frozen at sale time.
+ * D122 (3.9) — the rate a line was charged at, frozen at sale time.
  *
  * ## The property this spec exists to defend
  *
@@ -161,7 +161,7 @@ describe('3.9 changes no money — the permanent regression guard', () => {
     const sale = await sell(1, 1180);
 
     // The snapshot records the RATE. Splitting the order-level tax across lines
-    // is a different change, deferred with the per-category work (D101).
+    // is a different change, deferred with the per-category work (D122).
     expect(Number((await lineOf(sale.id)).taxAmount)).toBe(0);
   });
 
@@ -382,7 +382,7 @@ describe('restaurant tenants are structurally unaffected', () => {
 });
 
 /**
- * D101 (3.11) — a refund allocates the tax the sale actually recorded.
+ * D122 (3.11) — a refund allocates the tax the sale actually recorded.
  */
 async function refund(
   saleId: string,
@@ -534,7 +534,7 @@ describe('3.11 — returns refund the tax the line actually paid', () => {
 });
 
 /**
- * D101 (3.13) — the API accepts `taxable`, and absent means taxable.
+ * D122 (3.13) — the API accepts `taxable`, and absent means taxable.
  *
  * This is the step that makes everything 3.8–3.12 built REACHABLE: until now
  * the flag could only be set by writing the column directly.

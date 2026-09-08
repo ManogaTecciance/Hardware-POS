@@ -1,8 +1,8 @@
 /**
- * D104 Part 3 — EAN-13, and why 18 of the 20 pilot barcodes are invalid
+ * D125 Part 3 — EAN-13, and why 18 of the 20 pilot barcodes are invalid
  * (Phase 5, steps `5.5` and `5.9`).
  *
- * The investigation that produced D104 measured every barcode in the pilot
+ * The investigation that produced D125 measured every barcode in the pilot
  * database and found two generators in play (`2001…` and `2990…`), NEITHER of
  * which computes a check digit. The two that pass do so by coincidence — a
  * sequential counter lands on the right digit about one time in ten.

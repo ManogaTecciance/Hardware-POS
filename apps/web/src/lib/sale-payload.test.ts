@@ -5,7 +5,7 @@ import type { ClientProduct, ClientVariant } from './catalog';
 import { toSaleItemPayload } from './sales';
 
 /**
- * D99 (1c.7) — the till actually sends the variant id.
+ * D120 (1c.7) — the till actually sends the variant id.
  *
  * `productVariantId` is optional on the payload AND on the server DTO, so a
  * literal that forgets it compiles, validates, returns 201, and quietly sells at
@@ -32,7 +32,7 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     stockState: 'IN_STOCK',
     imageUrl: null,
     taxable: true,
-    // D113 (`6.2`) — required on `ClientProduct`, so the compiler names every
+    // D134 (`6.2`) — required on `ClientProduct`, so the compiler names every
     // fixture that forgets it. Phase 4 lesson 7: a field crossing a wire
     // should be REQUIRED, because an optional one is dropped in silence.
     quantityType: 'WHOLE',

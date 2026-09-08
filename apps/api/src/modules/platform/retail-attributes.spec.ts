@@ -1,7 +1,7 @@
 import { domainFor, validateAttributes, coerceAttributeQueryValue } from '@hardware-pos/shared';
 
 /**
- * D64 / D99 (2.4) — the clothing catalogue fields.
+ * D64 / D120 (2.4) — the clothing catalogue fields.
  *
  * The schema is data, but it is a COMMITMENT: `validateAttributes` refuses
  * unknown keys, so removing a field later strands whatever tenants have stored

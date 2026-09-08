@@ -34,7 +34,7 @@ export type PaymentMethodCode =
 export interface SaleItemPayload {
   productId: string;
   /**
-   * D99 (1c.7) — the exact variant sold. Mirrors `SaleItemInputDto` on the
+   * D120 (1c.7) — the exact variant sold. Mirrors `SaleItemInputDto` on the
    * server: optional, because most sellable things have no variant (loose goods,
    * a service, a single-SKU product).
    *
@@ -205,16 +205,16 @@ export interface SaleDetailItem {
    * site has to say which it is.
    */
   variantName: string | null;
-  /** D113d (`6.5`) — the unit this line was SOLD in. Null for a whole product. */
+  /** D134d (`6.5`) — the unit this line was SOLD in. Null for a whole product. */
   unitOfMeasure: string | null;
   /**
-   * D101 (3.12) — the tax rate frozen onto this line. Null for a sale written
+   * D122 (3.12) — the tax rate frozen onto this line. Null for a sale written
    * before 3.8; `0` is a real rate (zero-rated or exempt) and means something
    * different.
    */
   taxRatePercent: number | null;
   /**
-   * D102 (4.6) — the promotion that claimed this line, frozen at sale time.
+   * D123 (4.6) — the promotion that claimed this line, frozen at sale time.
    * Null when none, and on any sale written before 4.4.
    */
   promotionName: string | null;
@@ -312,11 +312,11 @@ interface ApiSaleDetail {
     productName: string;
     /** D44 snapshot; absent on responses predating variants. */
     variantNameSnapshot?: string | null;
-    /** D113d snapshot; absent on responses predating weighed goods. */
+    /** D134d snapshot; absent on responses predating weighed goods. */
     unitOfMeasureSnapshot?: string | null;
-    /** D101 snapshot; absent on responses predating per-line tax. */
+    /** D122 snapshot; absent on responses predating per-line tax. */
     taxRatePercent?: string | number | null;
-    /** D102 snapshots; absent on responses predating 4.4. */
+    /** D123 snapshots; absent on responses predating 4.4. */
     promotionNameSnapshot?: string | null;
     promotionDiscountAmount?: string | number | null;
     sku: string | null;
@@ -428,12 +428,12 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
     items: s.items.map((it) => ({
       id: it.id,
       productName: it.productName,
-      // D44/D99 (1c.7) — the SNAPSHOT, never the live variant. Renaming
+      // D44/D120 (1c.7) — the SNAPSHOT, never the live variant. Renaming
       // "Medium" to "M" next month must not rewrite last month's sale. The
       // server has always returned this; the client was dropping it, so a
       // returns clerk could not see which size a past sale was for.
       variantName: it.variantNameSnapshot ?? null,
-      // D113d (`6.5`) — the SNAPSHOT, for the reason above one line up. A
+      // D134d (`6.5`) — the SNAPSHOT, for the reason above one line up. A
       // shop repricing saffron from grams to kilograms must not rewrite an
       // old receipt into one that reads a thousand times larger.
       unitOfMeasure: it.unitOfMeasureSnapshot ?? null,

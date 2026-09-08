@@ -68,7 +68,7 @@ import { cn, formatMoney, round2 } from '@/lib/utils';
 
 const PAGE_SIZES = [20, 30, 40, 50];
 interface PendingLineApproval {
-  /** D99 — which cart line to update. */
+  /** D120 — which cart line to update. */
   lineKey: CartLineKey;
   /** The product the approval is *for* — `/discounts/approve` is product-scoped. */
   productId: string;
@@ -100,10 +100,10 @@ export function PosRetailCheckout() {
   const [pageSize, setPageSize] = React.useState(20);
   const [noteFor, setNoteFor] = React.useState<CartLineKey | null>(null);
   const [discountFor, setDiscountFor] = React.useState<CartLineKey | null>(null);
-  // D99 (1c.4) — the product whose sizes are being chosen, or null when closed.
+  // D120 (1c.4) — the product whose sizes are being chosen, or null when closed.
   const [pickVariantFor, setPickVariantFor] = React.useState<ClientProduct | null>(null);
   /**
-   * D113 (`6.3`) — the measured line waiting for a weight.
+   * D134 (`6.3`) — the measured line waiting for a weight.
    *
    * Nothing is in the cart while this is set: cancelling adds nothing, because
    * a half-added line is worse than no line.
@@ -169,7 +169,7 @@ export function PosRetailCheckout() {
   const pageProducts = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   /**
-   * D113 (`6.3`) — **the one place a line enters the cart.**
+   * D134 (`6.3`) — **the one place a line enters the cart.**
    *
    * Four routes reach the cart: a card tap, the variant picker, a scanned
    * barcode and a typed code. A measured product must prompt on ALL FOUR, and
@@ -191,7 +191,7 @@ export function PosRetailCheckout() {
   };
 
   /**
-   * D99 (1c.4) — the single add-to-cart path.
+   * D120 (1c.4) — the single add-to-cart path.
    *
    * Every route into the cart goes through here — card tap, Enter on search, the
    * sole-visible-result shortcut — so the quick-add ladder cannot differ between
@@ -234,7 +234,7 @@ export function PosRetailCheckout() {
       }
       const { product, variant } = hit;
 
-      // D99 (1c.5) — a barcode names ONE size, so a variant match adds it
+      // D120 (1c.5) — a barcode names ONE size, so a variant match adds it
       // directly. Opening the picker after a scan would ask a question the code
       // already answered.
       if (variant) {
@@ -242,7 +242,7 @@ export function PosRetailCheckout() {
           showToast(`${product.name} (${variant.name}) is out of stock`, 'warning');
           return;
         }
-        // D113 (`6.3`) — through the seam, so a scanned measured product still
+        // D134 (`6.3`) — through the seam, so a scanned measured product still
         // asks for a weight. The code named the size, not the amount.
         commitAdd(product, variant);
         setQuery('');
@@ -278,14 +278,14 @@ export function PosRetailCheckout() {
   // Enter adds an exact code match (whole catalog), else the sole visible result.
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
-    // D99 (1c.5) — a typed variant SKU is as specific as a scanned barcode, so
+    // D120 (1c.5) — a typed variant SKU is as specific as a scanned barcode, so
     // it adds that size rather than falling back to the product and prompting.
     // The same path as a scan, deliberately: a cashier typing a code a damaged
     // barcode would have carried must get the same result.
     const exact = findByCode(q);
     if (exact) {
       if (exact.variant) {
-        // D113 (`6.3`) — the same seam as a scan, deliberately.
+        // D134 (`6.3`) — the same seam as a scan, deliberately.
         commitAdd(exact.product, exact.variant);
       } else {
         addProduct(exact.product);
@@ -352,7 +352,7 @@ export function PosRetailCheckout() {
     data.promotionRules,
   );
   /*
-   * D102 (4.4) — the list below reads THESE lines, not its own `computeLine`.
+   * D123 (4.4) — the list below reads THESE lines, not its own `computeLine`.
    * A promotion needs the whole basket to resolve, so a per-line call cannot see
    * it: the rows would show pre-promotion totals under a post-promotion footer,
    * and the cart would visibly not add up.
@@ -404,7 +404,7 @@ export function PosRetailCheckout() {
                 quantity: it.quantity,
                 lineSubtotal: line.lineSubtotal,
                 manualDiscountAmount: line.discountAmount,
-                // D113a (`6.4`) — same flag as `cart.ts` and the server.
+                // D134a (`6.4`) — same flag as `cart.ts` and the server.
                 isMeasured: it.product.quantityType === 'DECIMAL',
               };
             }),
@@ -635,7 +635,7 @@ export function PosRetailCheckout() {
           cart.items.map((item) => {
             const line = linesByKey.get(item.lineKey)!;
             return (
-              // D99 (1c.6) — keyed by the LINE, not the product. 1c.2 re-keyed the
+              // D120 (1c.6) — keyed by the LINE, not the product. 1c.2 re-keyed the
               // cart's own map but left this list on `product.id`, so two sizes of
               // one product were duplicate siblings: React reconciles those by
               // position, and a note or discount could be applied to the wrong row.
@@ -702,7 +702,7 @@ export function PosRetailCheckout() {
 
                 <div className="mt-2 flex items-center justify-between">
                   {/*
-                    D113 (`6.3`) — a measured line does not step. ±1 kg of rice is
+                    D134 (`6.3`) — a measured line does not step. ±1 kg of rice is
                     not what anyone wants, and inventing a smaller increment would
                     be a guess. Tapping the amount re-opens the numpad, which is
                     the same way it was entered.
@@ -806,7 +806,7 @@ export function PosRetailCheckout() {
           )}
         </button>
         {/*
-          * D105 — a cart-level promotion. Named rather than folded into "Order
+          * D126 — a cart-level promotion. Named rather than folded into "Order
           * discount": that row means the cashier's own decision and carries an
           * approval badge, and putting an automatic promotion under it would
           * make the badge's absence read as an unapproved manual discount.
@@ -986,7 +986,7 @@ export function PosRetailCheckout() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2.5">
               {pageProducts.map((p) => {
-                // D99 (1c.6) — the server's classification, not a threshold
+                // D120 (1c.6) — the server's classification, not a threshold
                 // comparison here. For a variant product it is rolled up from the
                 // sizes, so a shirt with no Mediums but plenty of Larges stays
                 // sellable instead of being greyed out by a stale parent number.
@@ -1081,7 +1081,7 @@ export function PosRetailCheckout() {
                         </span>
                       </div>
                       {/*
-                        D99 (1c.4) — option B. Tapping the card quick-adds the
+                        D120 (1c.4) — option B. Tapping the card quick-adds the
                         default size; this button opens the picker instead, so a
                         cashier selling a Large is never stuck with the default.
                         A product with one option or none keeps the plain Add.
@@ -1230,7 +1230,7 @@ export function PosRetailCheckout() {
       />
 
       {/*
-        D113 (`6.3`) — the weight prompt. Opened by `commitAdd`, which every one
+        D134 (`6.3`) — the weight prompt. Opened by `commitAdd`, which every one
         of the four add paths goes through, so a scan asks for a weight exactly
         as a card tap does.
       */}

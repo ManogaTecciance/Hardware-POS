@@ -23,7 +23,7 @@ export interface ExchangeResult {
   returnNumber: string;
   replacementSaleId: string | null;
   replacementSaleNumber: string | null;
-  /** False while the replacement leg has not completed — see D107. */
+  /** False while the replacement leg has not completed — see D128. */
   complete: boolean;
 }
 
@@ -38,11 +38,11 @@ export class ExchangesService {
   ) {}
 
   /**
-   * D107 — return one variant, issue another, settle the difference.
+   * D128 — return one variant, issue another, settle the difference.
    *
    * This method **orchestrates and records**. It computes no prices, moves no
    * stock, touches no tax and writes no payment of its own. Promotion allocation
-   * (D102), tax snapshots (`3.11`) and variant-grain stock (`1a.20`, `1c.6`) are
+   * (D123), tax snapshots (`3.11`) and variant-grain stock (`1a.20`, `1c.6`) are
    * already correct in the two paths it calls, and a second copy of any of them
    * is where they drift.
    *
@@ -57,9 +57,9 @@ export class ExchangesService {
    *                stock, so this is free to do after the return)
    *   3. Sale    → paid in full by the caller's own tenders
    *
-   * ## Settlement is GROSS, not netted (D107a)
+   * ## Settlement is GROSS, not netted (D128a)
    *
-   * D107 originally netted the two legs through `STORE_CREDIT`. That cannot run
+   * D128 originally netted the two legs through `STORE_CREDIT`. That cannot run
    * at a counter: `ReturnsService` refuses a store-credit refund unless the sale
    * has a saved, non-walk-in customer — correctly, since store credit is a
    * liability held against an account — and a clothing shop swapping a size is
@@ -73,14 +73,14 @@ export class ExchangesService {
    * If step 3 fails the exchange row survives with `replacementSaleId = null`
    * and the customer has already been refunded for the goods they handed back.
    * Nothing is lost, nothing is double-counted, and the operator can ring the
-   * replacement up as an ordinary sale. That is the recoverable state D107
+   * replacement up as an ordinary sale. That is the recoverable state D128
    * chose, not an accident.
    */
   /**
    * The returning leg, priced and evaluated **as part of an exchange**.
    *
    * `7.5` previewed through `POST /returns/preview`, which cannot know it is
-   * inside an exchange, so it evaluated approval WITHOUT D109's waiver and
+   * inside an exchange, so it evaluated approval WITHOUT D130's waiver and
    * every counter exchange demanded a manager PIN that the completion would
    * not have asked for. The screen and the server disagreed, and the screen
    * was the stricter of the two — which is the direction that goes unnoticed,
@@ -133,7 +133,7 @@ export class ExchangesService {
         idempotencyKey: key ? `${key}:return` : undefined,
       },
       null,
-      // D109 — waives the `Full-sale return` approval trigger, and only that
+      // D130 — waives the `Full-sale return` approval trigger, and only that
       // one. Set here rather than accepted from the request, so a caller of
       // `POST /returns` cannot claim to be an exchange and skip the check.
       { withinExchange: true },
@@ -222,7 +222,7 @@ export class ExchangesService {
       returnNumber: row.return.returnNumber,
       replacementSaleId: row.replacementSaleId,
       replacementSaleNumber: row.replacementSale?.saleNumber ?? null,
-      // The nullable column IS the status (D107) — there is no second field
+      // The nullable column IS the status (D128) — there is no second field
       // encoding the same fact.
       complete: row.replacementSaleId !== null,
     };

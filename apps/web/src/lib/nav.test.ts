@@ -118,7 +118,7 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
       'Quotations',
       'Returns',
       'Products',
-      // `8.7` (D111) added a `Stock count` entry here and the **PO removed it
+      // `8.7` (D132) added a `Stock count` entry here and the **PO removed it
       // from the rail on 2026-09-08**. Edited on that instruction, not to make
       // a refactor pass — which is the distinction D16 draws. The screen and
       // the endpoints are untouched; only the rail entry is gone.
@@ -146,7 +146,7 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
      * token or a mis-wired caller gets a visibly empty rail, not a plausibly
      * wrong retail one.
      *
-     * `RETAIL` was a second probe here until D99 brought the template back. It
+     * `RETAIL` was a second probe here until D120 brought the template back. It
      * is registered now, so asserting it renders nothing would assert the
      * opposite of the truth. `GHOST_TYPE` replaces it — a value that cannot
      * ever be registered, which is what the probe always meant.
@@ -158,14 +158,14 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
     expect(labels(nav('HARDWARE', LEGACY_MODULES)).length).toBeGreaterThan(0);
   });
 
-  it('D99 — RETAIL is registered, and gets the retail rail', () => {
+  it('D120 — RETAIL is registered, and gets the retail rail', () => {
     // The counterpart of the probe retired above: the value that used to prove
     // "unregistered renders nothing" must now prove the opposite, or the change
     // above would have quietly weakened the suite by one assertion.
     const retail = labels(nav('RETAIL', LEGACY_MODULES));
 
     expect(retail.length).toBeGreaterThan(0);
-    // Same rail as HARDWARE — RETAIL_NAVIGATION is shared, not forked (D99).
+    // Same rail as HARDWARE — RETAIL_NAVIGATION is shared, not forked (D120).
     expect(retail).toEqual(labels(nav('HARDWARE', LEGACY_MODULES)));
   });
 
@@ -904,7 +904,7 @@ describe('D93 — any-of permission gates', () => {
 });
 
 /**
- * D99 (2.8) — D93 verification for the Retail rail.
+ * D120 (2.8) — D93 verification for the Retail rail.
  *
  * D93's rule: **a rail entry is gated on what the screen can do.** Its failure
  * was `SALE_CREATE` — a retail permission — gating the restaurant `/pos` entry,
@@ -936,7 +936,7 @@ describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
       ['/quotations', Permission.QUOTATION_READ],
       ['/returns', Permission.RETURN_READ],
       ['/products', Permission.PRODUCT_READ],
-      // `/stock-takes` sat here from `8.7` (D111) until the PO removed the rail
+      // `/stock-takes` sat here from `8.7` (D132) until the PO removed the rail
       // entry on 2026-09-08. The screen and its endpoints are unchanged — this
       // list only describes what the RAIL offers.
       ['/suppliers', Permission.SUPPLIER_READ],

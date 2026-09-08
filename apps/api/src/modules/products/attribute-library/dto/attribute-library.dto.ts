@@ -12,7 +12,7 @@ import {
 } from 'class-validator';
 
 /**
- * D104 / D104a — the tenant option library's write shape.
+ * D125 / D125a — the tenant option library's write shape.
  *
  * NOT `Product.attributes` (D64, `product-attributes.service.ts`), which
  * validates a domain's declared catalogue fields. Two different things one word
@@ -67,7 +67,7 @@ export class CreateAttributeDefinitionDto {
   position?: number;
 
   /**
-   * D104a — the binding hint. Nullable: an unbound definition applies to every
+   * D125a — the binding hint. Nullable: an unbound definition applies to every
    * category. Never enforcement; nothing refuses a product in another category.
    */
   @IsString()

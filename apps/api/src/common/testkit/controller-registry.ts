@@ -157,13 +157,13 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   SellableController,
   // D64 — Phase 7 attribute schema read.
   ProductAttributeSchemaController,
-  // D104 / D104a — Phase 5 option library. SHARED CORE: any business selling
+  // D125 / D125a — Phase 5 option library. SHARED CORE: any business selling
   // variants benefits from saying "Size" once, and gating it on a business type
   // would be the D56 mistake. Permission-gated, not module-gated.
   AttributeLibraryController,
-  // D107 — Phase 7. The transaction behind the EXCHANGES key D2 reserved.
+  // D128 — Phase 7. The transaction behind the EXCHANGES key D2 reserved.
   ExchangesController,
-  // D104 Part 3 / D106 — Phase 5 barcode audit + reissue, and label printing.
+  // D125 Part 3 / D127 — Phase 5 barcode audit + reissue, and label printing.
   // Also shared core: a barcode is a catalogue concern, not a vertical one.
   BarcodesController,
   LabelsController,
@@ -245,9 +245,9 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'restaurant-orders',
   // D44 — Product variants + purchase receipts.
   'inventory-receipts',
-  // D111 (`8.7`) — stock takes / cycle counts.
+  // D132 (`8.7`) — stock takes / cycle counts.
   'stock-takes',
-  // D112 (`8.9`) — brand as an entity.
+  // D133 (`8.9`) — brand as an entity.
   'brands',
   'product-images',
   'product-variants',
@@ -263,10 +263,10 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'collection',
   'collection-sections',
   'catalogue-entries',
-  // D104 / D104a / D106 — Phase 5 option library, barcode audit, labels.
+  // D125 / D125a / D127 — Phase 5 option library, barcode audit, labels.
   'attribute-library',
   'barcodes',
   'labels',
-  // D107 — Phase 7.
+  // D128 — Phase 7.
   'exchanges',
 ];

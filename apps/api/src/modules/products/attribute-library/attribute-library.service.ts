@@ -35,7 +35,7 @@ interface NormalisedOption {
 }
 
 /**
- * D104 / D104a — the tenant option library.
+ * D125 / D125a — the tenant option library.
  *
  * The library is a vocabulary, not a rule. It exists so that `Colour :: Black`
  * means the same thing on every product that adopts it, which is what makes a
@@ -45,7 +45,7 @@ interface NormalisedOption {
  * before this table existed (D28/D31 — unresolved is its own state).
  *
  * Nothing here merges `Colour` into `Color`. That judgement belongs to an
- * operator looking at their own catalogue, which is why D104 kept the link
+ * operator looking at their own catalogue, which is why D125 kept the link
  * columns nullable and the mapping a UI task.
  */
 @Injectable()

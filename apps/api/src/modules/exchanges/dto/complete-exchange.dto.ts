@@ -15,7 +15,7 @@ import { SaleItemInputDto } from '../../sales/dto/sale-item.dto';
 import { SalePaymentInputDto } from '../../sales/dto/sale-payment.dto';
 
 /**
- * D107 — complete an exchange: return one variant, issue another, settle the
+ * D128 — complete an exchange: return one variant, issue another, settle the
  * difference.
  *
  * The line DTOs are **imported, not redefined**. A returned line is exactly a
@@ -23,12 +23,12 @@ import { SalePaymentInputDto } from '../../sales/dto/sale-payment.dto';
  * shape here would be a second copy that drifts the first time one of them gains
  * a field — the `4.15` / `4.21` failure in a different costume.
  *
- * **Settlement is gross, not netted** (D107a). The return refunds the goods
+ * **Settlement is gross, not netted** (D128a). The return refunds the goods
  * coming back and the replacement is paid for in full, so `payments` must cover
  * the whole replacement value. For an even swap the customer hands over what
  * they are handed back and the drawer nets to zero.
  *
- * D107 originally netted through `STORE_CREDIT`. That cannot work at a counter:
+ * D128 originally netted through `STORE_CREDIT`. That cannot work at a counter:
  * `ReturnsService` refuses a store-credit refund unless the sale has a saved,
  * non-walk-in customer — correctly, because store credit is a liability held
  * against an account — and a clothing shop swapping a size is almost always a
@@ -87,7 +87,7 @@ export class CompleteExchangeDto {
   /**
    * Approval token from `POST /returns/approve`.
    *
-   * D107: return-approval rules apply unchanged. There is no exchange-specific
+   * D128: return-approval rules apply unchanged. There is no exchange-specific
    * bypass, because the goods coming back are the same goods either way.
    */
   @IsString()

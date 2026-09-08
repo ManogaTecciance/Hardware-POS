@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * D104 Part 3 — the barcode audit and reissue pass (Phase 5, `5.9`).
+ * D125 Part 3 — the barcode audit and reissue pass (Phase 5, `5.9`).
  *
  * The screen exists because the problem is invisible without it. The pilot's
  * barcodes are the right length, in the right GS1 range, and 18 of 20 carry a

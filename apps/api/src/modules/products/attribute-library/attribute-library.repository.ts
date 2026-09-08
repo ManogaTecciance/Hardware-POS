@@ -4,7 +4,7 @@ import { Prisma } from '@hardware-pos/database';
 import { PrismaService } from '../../../prisma/prisma.service';
 
 /**
- * Data access for the tenant option library (D104 / D104a).
+ * Data access for the tenant option library (D125 / D125a).
  *
  * The repository owns every `Prisma.*Args` shape, so the service reasons in
  * domain terms only — the same split the variants repository next door uses.

@@ -48,7 +48,7 @@ export class UpdatePromotionDto {
   @IsOptional()
   amountOff?: number;
 
-  /** D105 — the cart threshold. See `CreatePromotionDto.minimumSpend`. */
+  /** D126 — the cart threshold. See `CreatePromotionDto.minimumSpend`. */
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @IsOptional()
@@ -109,7 +109,7 @@ export class UpdatePromotionDto {
    * Replace the entire item set. Sent only when the caller actually wants to
    * reshape the promotion's items — undefined leaves them alone.
    *
-   * D105 — an empty array is now ACCEPTED here, because clearing the products is
+   * D126 — an empty array is now ACCEPTED here, because clearing the products is
    * how a product-scoped FIXED_AMOUNT_DISCOUNT becomes cart-level. It is not a
    * hole: `update` re-runs `validateTypeShape` over the MERGED state, so
    * emptying a bundle's items still fails, and fails with a message naming the

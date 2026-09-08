@@ -26,7 +26,7 @@ import { PromotionView, PromotionsService } from './promotions.service';
 /**
  * D45 — Promotions module.
  *
- * Superseded by D103 on the gate only. This originally read "gated on
+ * Superseded by D124 on the gate only. This originally read "gated on
  * INVENTORY … INVENTORY is the one module that BOTH Restaurant and Retail
  * tenants carry by default", which was mistaken — food service has no
  * `INVENTORY` — while correctly predicting that a food-service-only module
@@ -35,7 +35,7 @@ import { PromotionView, PromotionsService } from './promotions.service';
  */
 @Controller('promotions')
 /*
- * D103 — gated on its OWN key.
+ * D124 — gated on its OWN key.
  *
  * The docblock above was right that `MENU_MANAGEMENT` would refuse retail, and
  * the D45 hotfix was right that food service lacks `INVENTORY`. Both are true:

@@ -54,7 +54,7 @@ const returnForDoc = {
 
 type ReturnForDocRow = Prisma.ReturnGetPayload<{ include: typeof returnForDoc }>;
 
-/** D107 (`7.3`) — everything the exchange note needs, in one read. */
+/** D128 (`7.3`) — everything the exchange note needs, in one read. */
 const exchangeForDoc = {
   return: { include: { items: true } },
   replacementSale: { include: { items: true } },
@@ -124,7 +124,7 @@ const SAMPLE_ITEMS: { name: string; sku: string; unit: string; unitPrice: number
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /**
- * The taxable net of each line, for the shared allocation (D101, 3.12).
+ * The taxable net of each line, for the shared allocation (D122, 3.12).
  *
  * Line net less its proportional share of the order discount — the same
  * quantity `computeReturnLine` derives, so the printed rows and a later refund
@@ -267,7 +267,7 @@ export class DocumentsService {
 
     const lines: DocLine[] = sale.items.map((it, i) => ({
       index: i + 1,
-      // D44/D99 — identify the SIZE that was sold, from the snapshots frozen at
+      // D44/D120 — identify the SIZE that was sold, from the snapshots frozen at
       // sale time rather than the live variant. A return is argued from this
       // paper: printing only "Cotton Shirt" left a clerk no way to tell a
       // returned Medium from a Large.
@@ -276,13 +276,13 @@ export class DocumentsService {
       // for, and into `saleLineLabel` so all four renderers agree.
       name: saleLineLabel(it.productName, it.variantNameSnapshot),
       sku: it.variantSkuSnapshot ?? it.sku,
-      // D102 (4.6) — a line at 0.00 with no explanation reads as a pricing
+      // D123 (4.6) — a line at 0.00 with no explanation reads as a pricing
       // error. `description` renders as the muted sub-line beneath the name,
       // which is where 2.12 originally put the size. Snapshot, not the live
       // promotion, so a reprint says what the customer was actually given (D44).
       description: saleLinePromotionNote(it.promotionNameSnapshot),
       quantity: num(it.quantity),
-      // D113d (`6.5`) — the A4 has carried a Unit column since quotations;
+      // D134d (`6.5`) — the A4 has carried a Unit column since quotations;
       // a sale line passed `null` into it. It now prints what the line was
       // sold in, so "0.75" reads as "0.75 kg".
       unitType: it.unitOfMeasureSnapshot,
@@ -296,7 +296,7 @@ export class DocumentsService {
     const balance = num(sale.balanceAmount);
     const summary: A4SummaryLine[] = [{ label: 'Subtotal', value: formatCurrency(num(sale.subtotal)) }];
     /*
-     * D102 (4.6) — the two discount rows.
+     * D123 (4.6) — the two discount rows.
      *
      * 4.4 folded promotions into `totalDiscount` because the maths requires it,
      * which left this row printing "Product discounts" for a buy-two-get-one:
@@ -413,7 +413,7 @@ export class DocumentsService {
         sku: it.variantSkuSnapshot ?? it.skuSnapshot,
         description: desc,
         quantity: num(it.returnQuantity),
-        // D113d (`6.5`) — a credit note is a document as much as a receipt is,
+        // D134d (`6.5`) — a credit note is a document as much as a receipt is,
         // which is why 3.8 put `taxRatePercent` on both tables too.
         unitType: it.unitOfMeasureSnapshot,
         unitPrice: num(it.originalUnitPrice),
@@ -502,7 +502,7 @@ export class DocumentsService {
 
   // ── Exchange A4 (returned + replacement lines → net difference) ──────────────
   //
-  // `7.4` — exchanges ARE a first-class transaction as of Phase 7 (D107). This
+  // `7.4` — exchanges ARE a first-class transaction as of Phase 7 (D128). This
   // comment used to say they were not, and that the renderer was "ready for"
   // the feature; `exchangeHtml` below is the feature, and the Settings sample
   // preview is now the secondary caller rather than the only one.
@@ -576,7 +576,7 @@ export class DocumentsService {
     };
   }
 
-  // ── Exchange A4 from REAL data (D107, `7.3`) ─────────────────────────────
+  // ── Exchange A4 from REAL data (D128, `7.3`) ─────────────────────────────
 
   /**
    * Render the note for a real exchange.
@@ -611,7 +611,7 @@ export class DocumentsService {
     }));
 
     // An exchange whose replacement leg never completed still prints: the
-    // customer has been refunded and is entitled to a note saying so. D107 —
+    // customer has been refunded and is entitled to a note saying so. D128 —
     // unresolved is its own state, and refusing to render would leave the
     // operator with nothing to hand over.
     const replacements: ExchangeLine[] = (row.replacementSale?.items ?? []).map((it) => ({

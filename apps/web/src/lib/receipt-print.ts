@@ -26,7 +26,7 @@ export interface ReceiptContext {
   customerName: string;
   items: CartItem[];
   /**
-   * D102 (4.4) — the promotions this sale was priced with. Empty is safe and
+   * D123 (4.4) — the promotions this sale was priced with. Empty is safe and
    * means "none applied"; without them the fallback would print pre-promotion
    * line totals under a post-promotion total.
    */
@@ -35,7 +35,7 @@ export interface ReceiptContext {
   totalDiscount: number;
   orderDiscount: number;
   taxAmount: number;
-  /** D101 (3.12) — per-rate rows, empty when a single rate covers the sale. */
+  /** D122 (3.12) — per-rate rows, empty when a single rate covers the sale. */
   taxBreakdown?: { ratePercent: number; taxAmount: number }[];
   storeName?: string;
 }
@@ -53,7 +53,7 @@ function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
     computeCartLines(ctx.items, ctx.promotionRules ?? []).map((l) => [l.lineKey, l]),
   );
   /*
-   * D102 (4.6) — the SHARED split, so this fallback and the server receipt
+   * D123 (4.6) — the SHARED split, so this fallback and the server receipt
    * divide the same figure the same way. The live cart is the source here, so
    * the promotional part is summed from the lines just priced.
    */
@@ -64,14 +64,14 @@ function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
   const rows = ctx.items
     .map((it) => {
       const line = priced.get(it.lineKey)!;
-      // D99 (1c.7 / 2.12) — the size goes on the paper. Unlike the server
+      // D120 (1c.7 / 2.12) — the size goes on the paper. Unlike the server
       // document this reads the live cart rather than a snapshot, because it
       // prints at the moment of sale: there is nothing yet to have drifted from.
       // The FORMAT is shared, so this fallback and the server render identically.
       const label = saleLineLabel(it.product.name, it.variant?.name ?? null);
-      // D102 (4.6) — the offer, under the item, exactly as the other three
+      // D123 (4.6) — the offer, under the item, exactly as the other three
       // renderers print it. A free line at 0.00 with no reason reads as an error.
-      // D113d (`6.5`) — the unit beside the amount: `0.75 kg × Rs 200.00`. Read
+      // D134d (`6.5`) — the unit beside the amount: `0.75 kg × Rs 200.00`. Read
       // from the LIVE product like the label above, and for the same reason —
       // this prints at the moment of sale, so nothing has drifted yet.
       const promo = saleLinePromotionNote(line.promotionName);

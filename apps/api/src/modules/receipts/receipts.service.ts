@@ -132,15 +132,15 @@ export class ReceiptsService {
       customerName: sale.customer?.name ?? null,
       currency,
       items: sale.items.map((it) => ({
-        // D99 (2.12) — the size, on the paper a customer walks out with. This
+        // D120 (2.12) — the size, on the paper a customer walks out with. This
         // renderer was missed by 1c.7, so the same sale printed with the variant
         // from the A4 endpoint and without it from here.
         name: saleLineLabel(it.productName, it.variantNameSnapshot),
-        // D102 (4.6) — the offer, on the paper the customer walks out with. A
+        // D123 (4.6) — the offer, on the paper the customer walks out with. A
         // free line printed at 0.00 with no reason reads as a pricing error.
         promotionNote: saleLinePromotionNote(it.promotionNameSnapshot),
         sku: it.variantSkuSnapshot ?? it.sku,
-        // D113d (`6.5`) — through the shared formatter, like `saleLineLabel`
+        // D134d (`6.5`) — through the shared formatter, like `saleLineLabel`
         // three lines up and for the same reason: four renderers print a sale
         // line, and 1c.7 fixed two of them.
         quantity: saleLineQuantity(it.quantity.toString(), it.unitOfMeasureSnapshot),
@@ -150,7 +150,7 @@ export class ReceiptsService {
       })),
       subtotal: Number(sale.subtotal),
       totalDiscount: Number(sale.totalDiscount),
-      // D102 (4.6) — the SHARED split, so this receipt and the A4 divide the
+      // D123 (4.6) — the SHARED split, so this receipt and the A4 divide the
       // same figure the same way.
       promotionDiscount: splitLineDiscounts(
         sale.items.map((it) => ({ promotionDiscountAmount: Number(it.promotionDiscountAmount) })),
@@ -158,7 +158,7 @@ export class ReceiptsService {
       ).promotional,
       orderDiscount: Number(sale.orderDiscountAmount),
       taxAmount: Number(sale.taxAmount),
-      // D101 (3.12) — the SHARED allocation, so the printed rows and a later
+      // D122 (3.12) — the SHARED allocation, so the printed rows and a later
       // refund divide the recorded tax the same way. Empty for a single-rate
       // sale, which is every tenant today.
       taxBreakdown: taxBreakdownForDocument(

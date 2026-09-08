@@ -1,4 +1,4 @@
--- D104 / D104a — the tenant-level option library (Phase 5, step 5.1).
+-- D125 / D125a — the tenant-level option library (Phase 5, step 5.1).
 --
 -- Additive only. Two new tables and two new nullable columns; not one existing
 -- value is read, rewritten or backfilled. A deploy that runs this without the

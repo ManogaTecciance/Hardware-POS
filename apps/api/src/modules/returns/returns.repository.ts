@@ -257,7 +257,7 @@ export class ReturnsRepository {
             create: input.items.map((it) => ({
               originalSaleItemId: it.originalSaleItemId,
               productId: it.productId,
-              // D99 (1a.20) — these three columns have existed since D44 built
+              // D120 (1a.20) — these three columns have existed since D44 built
               // them and had never been written.
               //
               // The scalar FK, not `productVariant: { connect }`: `productId` is
@@ -270,7 +270,7 @@ export class ReturnsRepository {
               variantSkuSnapshot: it.variantSkuSnapshot,
               variantNameSnapshot: it.variantNameSnapshot,
               unitOfMeasureSnapshot: it.unitOfMeasureSnapshot,
-              // D101 (3.11) — what this refund reversed, so a credit note is
+              // D122 (3.11) — what this refund reversed, so a credit note is
               // self-contained and a later rate change cannot rewrite it.
               taxRatePercent: it.taxRatePercent,
               productNameSnapshot: it.productNameSnapshot,
@@ -286,11 +286,11 @@ export class ReturnsRepository {
               note: it.note,
               originalLineSubtotal: it.originalLineSubtotal,
               productDiscountAdjustment: it.productDiscountAdjustment,
-              // D102 (4.5) — the promotion reversed on this line. Stored beside
+              // D123 (4.5) — the promotion reversed on this line. Stored beside
               // the other two adjustments so a credit note is self-contained.
               promotionDiscountAdjustment: it.promotionDiscountAdjustment,
               orderDiscountAdjustment: it.orderDiscountAdjustment,
-              // D105 — this line's share of the cart-level promotion.
+              // D126 — this line's share of the cart-level promotion.
               promotionOrderDiscountAdjustment: it.promotionOrderDiscountAdjustment,
               taxAdjustment: it.taxAdjustment,
               refundableAmount: it.refundableAmount,

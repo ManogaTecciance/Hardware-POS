@@ -1,4 +1,4 @@
--- D105 — cart-level FIXED_AMOUNT_DISCOUNT promotions.
+-- D126 — cart-level FIXED_AMOUNT_DISCOUNT promotions.
 --
 -- Five additive, nullable-or-defaulted columns. Nothing is backfilled and
 -- nothing is rewritten: every existing promotion has no threshold (NULL) and

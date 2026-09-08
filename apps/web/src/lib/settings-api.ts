@@ -47,11 +47,11 @@ export interface DocumentSettings {
 }
 
 /**
- * D104 Part 3 (`5.4`) and Phase 5 `5.8` — barcode prefixes and label geometry.
+ * D125 Part 3 (`5.4`) and Phase 5 `5.8` — barcode prefixes and label geometry.
  *
  * `barcodePrefix` is `string | null`, REQUIRED on this type. Null is a real
  * value meaning "not configured", and allocation refuses while it holds — the
- * D104 sequencing constraint. Making it optional would let a mapper drop it and
+ * D125 sequencing constraint. Making it optional would let a mapper drop it and
  * turn a deliberate refusal into an accidental one, which is the `4.15` /
  * `4.21` shape exactly.
  */

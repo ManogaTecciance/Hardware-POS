@@ -1,4 +1,4 @@
--- D104 Part 3 — barcode provenance and uniqueness (Phase 5, step 5.6).
+-- D125 Part 3 — barcode provenance and uniqueness (Phase 5, step 5.6).
 --
 -- Additive. One new enum, one new nullable column, one unique index. Nothing is
 -- backfilled and no existing barcode is read, rewritten or cleared.
@@ -10,7 +10,7 @@
 -- unknown, which is the truth, and 5.9 sets it explicitly for the rows it can
 -- prove are shop-generated.
 --
--- Why the unique index needs no remediation: the D104 investigation measured
+-- Why the unique index needs no remediation: the D125 investigation measured
 -- every row first — 48 variants, 20 with a barcode, zero duplicates within a
 -- tenant and zero across tenants. Postgres treats NULLs as distinct in a unique
 -- index, so the 28 variants with no barcode are unaffected and can stay that

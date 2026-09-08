@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * D107 / D107a — swap a Medium for a Large (Phase 7, `7.5`).
+ * D128 / D128a — swap a Medium for a Large (Phase 7, `7.5`).
  *
  * The thinnest visible path, deliberately: one returned line, one replacement
  * variant **of the same product**, settled and done. Multi-line exchanges,
@@ -11,7 +11,7 @@
  *
  * ## What this screen has to say out loud
  *
- * **Settlement is gross** (D107a). The customer is handed the value of what they
+ * **Settlement is gross** (D128a). The customer is handed the value of what they
  * brought back and pays for what they take away. For an even swap those are the
  * same figure and nothing changes hands — but the till still records both, so
  * the screen shows both rather than only the difference.
@@ -19,7 +19,7 @@
  * **A manager PIN is asked for only when one is genuinely required.** This
  * paragraph used to say it was "usually" required, because `Full-sale return`
  * is an approval trigger and a customer swapping the size of the one shirt
- * they bought returns the whole sale by definition. **D109 waived exactly that
+ * they bought returns the whole sale by definition. **D130 waived exactly that
  * trigger for exchanges** — on the server, in `evaluateApproval` — and this
  * screen was never updated, so it went on previewing through the plain returns
  * route and demanding a PIN the completion did not want. An owner was being
@@ -125,7 +125,7 @@ export default function NewExchangePage() {
   // ── preview the returning leg, for its value AND its approval verdict ─────
   //
   // `previewExchange`, NOT `previewReturn`. The returns route cannot know it
-  // is inside an exchange, so it evaluated approval without D109's waiver and
+  // is inside an exchange, so it evaluated approval without D130's waiver and
   // this screen demanded a manager PIN on every exchange — including from an
   // owner, who was being asked to approve themselves. The completion never
   // wanted it. Same rule, both paths, decided on the server.
@@ -203,7 +203,7 @@ export default function NewExchangePage() {
             quantity: chosen.availableReturnQuantity,
           },
         ],
-        // Gross settlement (D107a): the replacement is paid for in full.
+        // Gross settlement (D128a): the replacement is paid for in full.
         payments: [
           { method: 'CASH', amount: replacementValue * chosen.availableReturnQuantity },
         ],

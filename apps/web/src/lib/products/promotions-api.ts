@@ -81,7 +81,7 @@ export interface Promotion {
   fixedPrice: number | null;
   percentageOff: number | null;
   amountOff: number | null;
-  /** D105 — cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT; null = none. */
+  /** D126 — cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT; null = none. */
   minimumSpend: number | null;
   buyQuantity: number | null;
   getQuantity: number | null;

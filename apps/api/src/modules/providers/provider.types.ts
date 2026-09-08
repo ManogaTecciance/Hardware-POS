@@ -47,7 +47,7 @@ export interface ProviderContext {
  * `productId`, `productName` (for the user-facing insufficient-stock message),
  * `quantity`, and `trackInventory` (only `Inventory`-type products move stock).
  *
- * D99 — `productVariantId` closes the asymmetry with {@link ReceiveStockLine},
+ * D120 — `productVariantId` closes the asymmetry with {@link ReceiveStockLine},
  * which has carried a variant since goods receipts learned to write
  * `BranchInventory` per (branch, product, variant). Selling could not say which
  * variant moved, so a sale reduced a single product-level number and left the
@@ -106,7 +106,7 @@ export interface StockAdjustment {
 }
 
 /**
- * D111 (`8.7`) — one counted line of a stock take.
+ * D132 (`8.7`) — one counted line of a stock take.
  *
  * `countedQuantity` is an ASSERTION, not a delta: it is what the operator
  * says is physically on the shelf. The provider works out the variance.
@@ -152,7 +152,7 @@ export interface ProductAvailability {
 export type AvailabilityMap = ReadonlyMap<string, ProductAvailability>;
 
 /**
- * D99 — what a provider knows about one variant's availability.
+ * D120 — what a provider knows about one variant's availability.
  *
  * Deliberately smaller than {@link ProductAvailability}: there is no
  * `trackInventory` or `isUnlimited` here because those are properties of the
@@ -168,7 +168,7 @@ export interface VariantAvailability {
  * Availability keyed by variant id.
  *
  * A variant with no row is **absent**, exactly as an unknown product is absent
- * from {@link AvailabilityMap}. The caller reads absent as zero, which is D99
+ * from {@link AvailabilityMap}. The caller reads absent as zero, which is D120
  * decision 8 stated at read time: variant stock is created by goods receipts, so
  * a variant never received into the branch has none.
  */

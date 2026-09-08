@@ -1,5 +1,5 @@
 /**
- * D107 / D107a — exchanges (Phase 7, `7.5`).
+ * D128 / D128a — exchanges (Phase 7, `7.5`).
  *
  * Every field is REQUIRED on the in-process type, even where the server could
  * conceivably omit one. That is the standing rule from Phase 4: `4.15` and
@@ -29,7 +29,7 @@ export interface ExchangeResult {
   /**
    * False while the replacement leg has not completed.
    *
-   * A real state, not an error (D107): the customer has been refunded and the
+   * A real state, not an error (D128): the customer has been refunded and the
    * operator can ring the replacement up as an ordinary sale.
    */
   complete: boolean;
@@ -55,7 +55,7 @@ export interface CompleteExchangeInput {
   returnItems: ReturnItemInput[];
   replacementItems: ExchangeReplacementInput[];
   /**
-   * The replacement is paid for IN FULL (D107a). Settlement is gross: the
+   * The replacement is paid for IN FULL (D128a). Settlement is gross: the
    * customer is handed the value of what they brought back and pays for what
    * they take away, so the money nets at the drawer rather than in the request.
    */
@@ -76,7 +76,7 @@ function auth(session: Session) {
  * Price the returning leg AS AN EXCHANGE.
  *
  * NOT `previewReturn`, which is what `7.5` used: that route cannot know it is
- * inside an exchange, so it evaluated approval without D109's waiver and every
+ * inside an exchange, so it evaluated approval without D130's waiver and every
  * exchange asked for a manager PIN the completion would not have required.
  */
 export function previewExchange(

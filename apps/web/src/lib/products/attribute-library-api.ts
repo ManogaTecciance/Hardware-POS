@@ -1,5 +1,5 @@
 /**
- * D104 / D104a — the tenant option library (Phase 5, `5.1` / `5.2`).
+ * D125 / D125a — the tenant option library (Phase 5, `5.1` / `5.2`).
  *
  * Every field here is REQUIRED on the in-process type, even where the server
  * could conceivably omit it. That is the standing rule from Phase 4: `4.15` and

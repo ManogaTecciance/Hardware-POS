@@ -1,5 +1,5 @@
 /**
- * D111 (`8.7`) — stock takes / cycle counts.
+ * D132 (`8.7`) — stock takes / cycle counts.
  *
  * ## What can only be proven here
  *

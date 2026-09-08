@@ -1,5 +1,5 @@
 /**
- * D113c (`6.1`) — a measured product must name its unit.
+ * D134c (`6.1`) — a measured product must name its unit.
  *
  * ## Why this is a unit spec and not only an integration one
  *
@@ -23,7 +23,7 @@ import { QuantityType } from '@hardware-pos/database';
 
 import { assertMeasuredProductNamesItsUnit } from './products.service';
 
-describe('D113c — a measured product must name its unit', () => {
+describe('D134c — a measured product must name its unit', () => {
   it('refuses a DECIMAL product with no unit', () => {
     expect(() => assertMeasuredProductNamesItsUnit(QuantityType.DECIMAL, null)).toThrow(
       BadRequestException,
@@ -53,7 +53,7 @@ describe('D113c — a measured product must name its unit', () => {
     // The assertion that stops this rule from being "every product needs a
     // unit". A NOT NULL column would have failed exactly here, for every shirt,
     // service line and restaurant menu item in every tenant — which is the
-    // reason D113c put the rule in the service instead.
+    // reason D134c put the rule in the service instead.
     expect(() => assertMeasuredProductNamesItsUnit(QuantityType.WHOLE, null)).not.toThrow();
     expect(() => assertMeasuredProductNamesItsUnit(QuantityType.WHOLE, undefined)).not.toThrow();
     expect(() => assertMeasuredProductNamesItsUnit(QuantityType.WHOLE, '')).not.toThrow();
@@ -61,7 +61,7 @@ describe('D113c — a measured product must name its unit', () => {
 
   it('leaves a WHOLE product alone even when it carries a unit', () => {
     // Not an error state: a product switched back from DECIMAL keeps whatever
-    // unit it had, and refusing that would block the very correction D113b §2
+    // unit it had, and refusing that would block the very correction D134b §2
     // exists to allow.
     expect(() => assertMeasuredProductNamesItsUnit(QuantityType.WHOLE, 'kg')).not.toThrow();
   });

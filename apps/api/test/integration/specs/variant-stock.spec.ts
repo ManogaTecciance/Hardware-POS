@@ -1,5 +1,5 @@
 /**
- * D99 — variant-level stock depletion, against real PostgreSQL.
+ * D120 — variant-level stock depletion, against real PostgreSQL.
  *
  * Goods receipts have written `BranchInventory` per (branch, product, variant)
  * since D44. Selling could not name a variant, so a sale reduced one product-level
@@ -95,7 +95,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase(prisma);
   tile = await seedTileShopWithQuickBooks(prisma);
-  // LOCAL is the retail posture (D99): the tenant owns its own stock numbers.
+  // LOCAL is the retail posture (D120): the tenant owns its own stock numbers.
   await prisma.tenantBusinessProfile.create({
     data: {
       tenantId: tile.tenantId,
@@ -227,7 +227,7 @@ describe('refusals', () => {
     expect(await variantQty(mediumId)).toBe(2);
   });
 
-  it('refuses a variant that was never received into this branch (D99 decision 8)', async () => {
+  it('refuses a variant that was never received into this branch (D120 decision 8)', async () => {
     // A variant with no BranchInventory row has no stock — receipts create stock,
     // sales never do. The conditional write matches nothing and reports it as such.
     const orphan = await prisma.productVariant.create({
@@ -239,7 +239,7 @@ describe('refusals', () => {
     );
   });
 
-  it('refuses a variant line with no branch context (D99 decision 9)', async () => {
+  it('refuses a variant line with no branch context (D120 decision 9)', async () => {
     const { mediumId } = await twoSizes(10, 10);
 
     // A variant's stock is branch-scoped, so there is no row to target. Failing
@@ -455,7 +455,7 @@ describe('read-time availability agrees with the write guard (1a.19)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * D99 (1c.7) — the loop closed: a completed SALE, not a provider call.
+ * D120 (1c.7) — the loop closed: a completed SALE, not a provider call.
  *
  * Everything above proves `reduceStock` handles variants. None of it proves the
  * sale pipeline ever *hands* it one. Between the two sat `SaleItemInputDto`'s
@@ -576,7 +576,7 @@ describe('omitting the variant is still a valid product-level sale', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * D99 (1a.20) — a return puts stock back on the SIZE that was sold.
+ * D120 (1a.20) — a return puts stock back on the SIZE that was sold.
  *
  * `restoreStock` aggregated by product alone and touched `Product.quantityOnHand`
  * only, which made the two paths asymmetric for a variant line:
@@ -758,7 +758,7 @@ describe('product-level returns are unchanged (regression guard)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * D44 / D99 (1a.21) — the append-only stock ledger for retail.
+ * D44 / D120 (1a.21) — the append-only stock ledger for retail.
  *
  * Stock levels were already correct in both directions after 1a.20. What was
  * missing was the record of WHY a number moved: a shop could see a size go

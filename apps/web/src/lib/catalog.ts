@@ -6,11 +6,11 @@ import * as React from 'react';
 import { api } from './api';
 import type { Session } from './auth';
 
-/** D99 — one sellable size/pack of a product, as the till needs it. */
+/** D120 — one sellable size/pack of a product, as the till needs it. */
 export interface ClientVariant {
   id: string;
   sku: string;
-  /** D99 — the scannable code. Only variants have one; `Product` has no column. */
+  /** D120 — the scannable code. Only variants have one; `Product` has no column. */
   barcode: string | null;
   /** "Black / Medium", or the SKU when the variant carries no options. */
   name: string;
@@ -25,7 +25,7 @@ export interface ClientVariant {
 export type StockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED';
 
 /**
- * D113 (`6.2`) — mirrors the Prisma `QuantityType` enum.
+ * D134 (`6.2`) — mirrors the Prisma `QuantityType` enum.
  *
  * Declared here rather than imported: `@hardware-pos/database` is a server
  * package and the browser cannot load it. Same idiom as `StockState` above.
@@ -69,7 +69,7 @@ export interface ClientProduct {
   stockState: StockState;
   imageUrl: string | null;
   /**
-   * D101 (3.14) — whether the product attracts tax.
+   * D122 (3.14) — whether the product attracts tax.
    *
    * The till needs it to preview the same total the server will charge. Absent
    * on a response from an API predating the field, and `?? true` keeps that
@@ -77,7 +77,7 @@ export interface ClientProduct {
    */
   taxable: boolean;
   /**
-   * D113 (`6.2`) — `'WHOLE'` is sold by the piece, `'DECIMAL'` by weight or
+   * D134 (`6.2`) — `'WHOLE'` is sold by the piece, `'DECIMAL'` by weight or
    * measure.
    *
    * What the cart reads to decide whether to open the numpad. Absent on a
@@ -85,9 +85,9 @@ export interface ClientProduct {
    * always did — the same shape `taxable` uses above, for the same reason.
    */
   quantityType: ClientQuantityType;
-  /** D113b — `'kg'`, `'L'`. Null for a WHOLE product, which has no unit. */
+  /** D134b — `'kg'`, `'L'`. Null for a WHOLE product, which has no unit. */
   unitOfMeasure: string | null;
-  /** D99 — empty for a single-SKU product; the sizes to choose from otherwise. */
+  /** D120 — empty for a single-SKU product; the sizes to choose from otherwise. */
   variants: ClientVariant[];
 }
 
@@ -133,9 +133,9 @@ interface ApiSellableItem {
   subcategory: { id: string; name: string } | null;
   imageUrl: string | null;
   hasVariants: boolean;
-  /** D101 (3.14); absent on responses predating the field. */
+  /** D122 (3.14); absent on responses predating the field. */
   taxable?: boolean;
-  /** D113 (`6.2`); absent on responses predating the field. */
+  /** D134 (`6.2`); absent on responses predating the field. */
   quantityType?: ClientQuantityType;
   unitOfMeasure?: string | null;
   variants?: {
@@ -160,7 +160,7 @@ interface ApiSellableItem {
  */
 /**
  * Exported for test only. A wire mapper is where a field goes to die — 4.15 lost
- * `productName` here and D105 lost `minimumSpend` the same way — so this one is
+ * `productName` here and D126 lost `minimumSpend` the same way — so this one is
  * asserted directly rather than through three layers of catalogue fetching.
  */
 export function toPromotionRule(api: ApiPromotionRule): PromotionRule {
@@ -172,7 +172,7 @@ export function toPromotionRule(api: ApiPromotionRule): PromotionRule {
     fixedPrice: num(api.fixedPrice),
     percentageOff: num(api.percentageOff),
     amountOff: num(api.amountOff),
-    // D105 — the cart threshold. `?? null` because a server predating D105 omits
+    // D126 — the cart threshold. `?? null` because a server predating D126 omits
     // the field entirely, and `undefined` would read as "no threshold" and hand
     // the discount to every basket regardless of size.
     minimumSpend: num(api.minimumSpend ?? null),
@@ -187,7 +187,7 @@ export function toPromotionRule(api: ApiPromotionRule): PromotionRule {
   };
 }
 
-/** D102 (4.3) — the priceable shape, as it arrives. Decimals are strings. */
+/** D123 (4.3) — the priceable shape, as it arrives. Decimals are strings. */
 export interface ApiPromotionRule {
   id: string;
   name: string;
@@ -195,7 +195,7 @@ export interface ApiPromotionRule {
   fixedPrice: string | null;
   percentageOff: string | null;
   amountOff: string | null;
-  /** D105 — optional on the WIRE: a server predating D105 does not send it. */
+  /** D126 — optional on the WIRE: a server predating D126 does not send it. */
   minimumSpend?: string | null;
   buyQuantity: number | null;
   getQuantity: number | null;
@@ -223,7 +223,7 @@ export interface CheckoutData {
   categoryTree: CatalogCategory[];
   settings: PosSettings;
   /**
-   * D102 (4.3) — the promotions eligible for this till, in the shape the shared
+   * D123 (4.3) — the promotions eligible for this till, in the shape the shared
    * applier consumes. Empty when the API predates 4.3, so an older server simply
    * prices nothing rather than throwing.
    *
@@ -238,7 +238,7 @@ export interface CheckoutData {
 /**
  * What price to show for a product card.
  *
- * A variant product has no price of its own (D99): the read model reports null
+ * A variant product has no price of its own (D120): the read model reports null
  * because its variants own the number. Until the card renders a range or a
  * "from" price (1c.4), show the cheapest active variant — the honest answer to
  * "what does this start at" — and fall back to 0 only when there is nothing to
@@ -275,7 +275,7 @@ function normalizeApi(item: ApiSellableItem): ClientProduct {
     quantityOnHand: item.availableQuantity != null ? Number(item.availableQuantity) : 0,
     stockState: item.stockState ?? 'UNTRACKED',
     taxable: item.taxable ?? true,
-    // D113 — an older server omits it, and WHOLE is what every product was
+    // D134 — an older server omits it, and WHOLE is what every product was
     // before the column existed. Never inferred from the name or the category.
     quantityType: item.quantityType ?? 'WHOLE',
     unitOfMeasure: item.unitOfMeasure ?? null,

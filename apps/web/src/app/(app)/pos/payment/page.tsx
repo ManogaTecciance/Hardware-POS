@@ -85,7 +85,7 @@ export default function PaymentPage() {
     data.promotionRules,
   );
   // Same derivation the totals above used, so the table and the footer cannot
-  // disagree (D102, 4.4).
+  // disagree (D123, 4.4).
   const cartLines = React.useMemo(
     () => new Map(computeCartLines(cart.items, data.promotionRules).map((l) => [l.lineKey, l])),
     [cart.items, data.promotionRules],
@@ -232,7 +232,7 @@ export default function PaymentPage() {
       const dto: CompleteSaleDto = {
         ...saleLocation(session!),
         customerId: cart.customerId || undefined,
-        // D99 (1c.7) — closes the loop. Everything behind this (variant pricing,
+        // D120 (1c.7) — closes the loop. Everything behind this (variant pricing,
         // the ownership checks, per-variant depletion and its oversell guard,
         // the D44 snapshots) was built in 1a and never once reached from the
         // till, because the payload did not carry the variant id.
@@ -251,7 +251,7 @@ export default function PaymentPage() {
         currency,
         customerName,
         items: cart.items,
-        // D102 (4.4) — the fallback receipt prices from the live cart, so it
+        // D123 (4.4) — the fallback receipt prices from the live cart, so it
         // needs the same rules the totals above were derived with.
         promotionRules: data.promotionRules,
         subtotal: totals.subtotal,
@@ -689,7 +689,7 @@ function OrderSummary({
 }: {
   items: CartItem[];
   /**
-   * D102 (4.4) — priced by `computeCartLines`, the same derivation the footer
+   * D123 (4.4) — priced by `computeCartLines`, the same derivation the footer
    * uses. Recomputing here with `computeLine` would miss any promotion, since a
    * promotion needs the whole basket to resolve, and the rows would not add up
    * to the total printed beneath them.
@@ -730,7 +730,7 @@ function OrderSummary({
               const line = lines.get(it.lineKey)!;
               return (
                 <tr
-                  // D99 (1c.8) — keyed by the LINE. Same collision 1c.6 fixed in the
+                  // D120 (1c.8) — keyed by the LINE. Same collision 1c.6 fixed in the
                   // cart: two sizes of one product were duplicate React siblings
                   // here, reconciled by position, so a quantity change could land
                   // on the wrong row.
@@ -743,7 +743,7 @@ function OrderSummary({
                         <div className="truncate font-medium leading-tight">{it.product.name}</div>
                         <div className="truncate text-xs text-muted-foreground">
                           {/*
-                            D99 (1c.8) — the size, on the last screen before money
+                            D120 (1c.8) — the size, on the last screen before money
                             changes hands.
 
                             "Paint Brush 2 inch" hides how bad this was: hardware

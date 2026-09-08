@@ -1,5 +1,5 @@
 /**
- * D104 / D104a — the shared rules for an option `code` and a `swatchHex`.
+ * D125 / D125a — the shared rules for an option `code` and a `swatchHex`.
  *
  * These functions live in `@hardware-pos/shared` because the API validates with
  * them at the DTO and the web form previews with them as the operator types.

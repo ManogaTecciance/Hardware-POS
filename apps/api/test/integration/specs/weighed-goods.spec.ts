@@ -1,12 +1,12 @@
 /**
- * `6.1` — weighed goods, the data layer (D113, D113b, D113c).
+ * `6.1` — weighed goods, the data layer (D134, D134b, D134c).
  *
  * ## What can only be proven here
  *
  *  • That `quantityType` defaults to `WHOLE` for a product created by a client
  *    that has never heard of it — the property that makes the migration safe for
  *    every existing restaurant, hardware and retail tenant.
- *  • That D113c is checked against the **resulting** state. A payload-only check
+ *  • That D134c is checked against the **resulting** state. A payload-only check
  *    passes the only two cases worth guarding, and only a stored row can show
  *    the difference.
  *  • That a fractional quantity survives the round trip to `Decimal(12,3)`.
@@ -130,7 +130,7 @@ describe('the flag defaults to WHOLE', () => {
   });
 });
 
-describe('D113c — the unit is required for a measured product', () => {
+describe('D134c — the unit is required for a measured product', () => {
   it('refuses a DECIMAL product created with no unit', async () => {
     await expect(
       products.create(shop.tenantId, productInput({ quantityType: 'DECIMAL' })),
@@ -213,7 +213,7 @@ describe('D113c — the unit is required for a measured product', () => {
     expect(row.unitOfMeasure).toBe('kg');
   });
 
-  it('allows switching back to WHOLE, keeping the unit (D113b §2)', async () => {
+  it('allows switching back to WHOLE, keeping the unit (D134b §2)', async () => {
     // Switching is always allowed — a shop that flagged something wrongly on day
     // one must be able to correct it. The unit is left alone rather than
     // scrubbed: switching back again should not lose it.
@@ -266,9 +266,9 @@ describe('D113c — the unit is required for a measured product', () => {
       expect(row.unitOfMeasure).toBeNull();
     });
 
-    it('still REFUSES null on a product that stays measured (D113c)', async () => {
+    it('still REFUSES null on a product that stays measured (D134c)', async () => {
       // The negative half. Accepting null must not have opened a second route
-      // around D113c — which is precisely the risk in making a guard tolerant.
+      // around D134c — which is precisely the risk in making a guard tolerant.
       const rice = await products.create(
         shop.tenantId,
         productInput({ name: 'Rice', quantityType: 'DECIMAL', unitOfMeasure: 'kg' }),
@@ -344,7 +344,7 @@ describe('D113c — the unit is required for a measured product', () => {
 
 describe('a fractional quantity survives the database', () => {
   it('stores 0.750 exactly, at three decimal places', async () => {
-    // `Decimal(12,3)` is the whole reason D113 needs no schema work beyond the
+    // `Decimal(12,3)` is the whole reason D134 needs no schema work beyond the
     // flag. Asserted rather than assumed: a column that silently truncated would
     // make every weighed sale wrong by up to a gram.
     const rice = await products.create(
@@ -367,7 +367,7 @@ describe('a fractional quantity survives the database', () => {
   });
 
   it('keeps three places and no more', async () => {
-    // A fourth place is truncated by the column, which is exactly why D113b §3
+    // A fourth place is truncated by the column, which is exactly why D134b §3
     // caps entry at three where the operator can still see it.
     const rice = await products.create(
       shop.tenantId,
@@ -442,7 +442,7 @@ describe('6.4 — the server charges a measured line the way the applier says', 
    * The applier's own behaviour is proven exhaustively in `applier.spec.ts`.
    * What can only be shown HERE is that `sales.service` actually SETS
    * `isMeasured` when it builds its promotion context — the caller obligation
-   * D113a names, and the half that a unit test of a pure function cannot reach.
+   * D134a names, and the half that a unit test of a pure function cannot reach.
    */
   async function riceOnTheShelf(quantity: number) {
     const rice = await products.create(
@@ -489,7 +489,7 @@ describe('6.4 — the server charges a measured line the way the applier says', 
   it('POSITIVE CONTROL: a PERCENTAGE promotion still discounts the same line', async () => {
     // Without this, the assertion above would pass for a server that had stopped
     // applying promotions to measured products altogether — which is not the
-    // decision. D113a keeps value-based promotions working.
+    // decision. D134a keeps value-based promotions working.
     const rice = await riceOnTheShelf(100);
     await prisma.promotion.create({
       data: {
@@ -553,7 +553,7 @@ describe('6.5 / 6.6 — the unit follows the goods onto paper and back', () => {
     return { rice, sale };
   }
 
-  it('D113d — the sale line freezes the unit it was sold in', async () => {
+  it('D134d — the sale line freezes the unit it was sold in', async () => {
     const { sale } = await sellRice(0.75);
 
     const item = await prisma.saleItem.findFirstOrThrow({ where: { saleId: sale.id } });
@@ -623,7 +623,7 @@ describe('6.5 / 6.6 — the unit follows the goods onto paper and back', () => {
     expect(Number(created.refundTotal)).toBe(75);
     const returnItem = await prisma.returnItem.findFirstOrThrow({ where: { returnId: created.id } });
     expect(returnItem.returnQuantity.toFixed(3)).toBe('0.375');
-    // D113d — the credit note prints the unit the customer was charged in.
+    // D134d — the credit note prints the unit the customer was charged in.
     expect(returnItem.unitOfMeasureSnapshot).toBe('kg');
 
     // And the shelf took back exactly what came in, not a rounded kilo.

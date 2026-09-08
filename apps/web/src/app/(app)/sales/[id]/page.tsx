@@ -145,7 +145,7 @@ export default function SaleDetailPage() {
     sale.status === 'COMPLETED' &&
     sale.returnStatus !== 'FULLY_RETURNED' &&
     hasPermission(Permission.RETURN_CREATE);
-  // D107 (`7.5`) — an exchange really does both halves, so it needs both
+  // D128 (`7.5`) — an exchange really does both halves, so it needs both
   // permissions. Someone who may take returns but not make sales must not be
   // able to issue replacement goods through this door.
   const canExchange = canReturn && hasPermission(Permission.SALE_CREATE);

@@ -16,7 +16,7 @@ export interface LineDiscount {
 }
 
 /**
- * D99 — the identity of one cart line.
+ * D120 — the identity of one cart line.
  *
  * Branded rather than a bare `string` so the compiler refuses a raw `product.id`
  * where a line key is expected. Every cart operation used to take a product id,
@@ -48,7 +48,7 @@ export interface CartItem {
   /** Stable identity of this line. Stored, not derived — see {@link cartLineKey}. */
   lineKey: CartLineKey;
   product: ClientProduct;
-  /** D99 — the size/pack chosen, or null for a product sold without variants. */
+  /** D120 — the size/pack chosen, or null for a product sold without variants. */
   variant: ClientVariant | null;
   quantity: number;
   note?: string;
@@ -77,7 +77,7 @@ export function computeDiscount(lineSubtotal: number, discount?: LineDiscount): 
 /**
  * The price actually charged for a cart line.
  *
- * D99 — `ClientProduct.unitPrice` is **null when variants own the price**, which
+ * D120 — `ClientProduct.unitPrice` is **null when variants own the price**, which
  * the read model states explicitly rather than repeating a number that means
  * nothing for a variant product. Until the cart carries a chosen variant (1c.2),
  * a variant product has no line price and falls to 0 rather than to a wrong
@@ -86,7 +86,7 @@ export function computeDiscount(lineSubtotal: number, discount?: LineDiscount): 
  */
 export function linePrice(item: CartItem): number {
   // A variant owns its price outright — the same rule the server applies
-  // (D99): `ClientProduct.unitPrice` is null for a variant product precisely
+  // (D120): `ClientProduct.unitPrice` is null for a variant product precisely
   // because the number lives on the variant.
   return item.variant ? item.variant.unitPrice : (item.product.unitPrice ?? 0);
 }
@@ -98,7 +98,7 @@ export function linePrice(item: CartItem): number {
  * visible UI shows the same two facts stacked (name above, size below); this is
  * the flattened form, kept here so the two can never describe a line differently.
  *
- * D99 (1c.8) — the payment screen announced "Increase Cotton Shirt quantity" for
+ * D120 (1c.8) — the payment screen announced "Increase Cotton Shirt quantity" for
  * two adjacent buttons, giving a screen-reader user no way to tell which size
  * they were changing.
  */
@@ -113,7 +113,7 @@ export function computeLine(item: CartItem): LineTotals {
     lineSubtotal,
     discountAmount,
     lineTotal: round2(lineSubtotal - discountAmount),
-    // D99 — a variant line is short against ITS OWN row, not the product total.
+    // D120 — a variant line is short against ITS OWN row, not the product total.
     // Comparing against the product would let 10 Mediums look fine because the
     // Larges make up the number, and the server would then refuse the sale.
     outOfStock: item.variant
@@ -126,14 +126,14 @@ export function computeLine(item: CartItem): LineTotals {
 /** One cart line, priced — including whatever promotion claimed it. */
 export interface CartLineTotals extends LineTotals {
   lineKey: string;
-  /** D102 (4.4) — already subtracted from `lineTotal`. Kept for display. */
+  /** D123 (4.4) — already subtracted from `lineTotal`. Kept for display. */
   promotionDiscountAmount: number;
   promotionId: string | null;
   promotionName: string | null;
 }
 
 /**
- * D102 (4.4) — the ONE place a cart line's money is derived.
+ * D123 (4.4) — the ONE place a cart line's money is derived.
  *
  * A promotion cannot be computed per line: a bundle spans lines and a BOGO counts
  * across them, so it needs the whole basket. That makes `computeLine` alone
@@ -158,7 +158,7 @@ export function computeCartLines(
 }
 
 /**
- * D105 — lines AND the cart-level promotion from ONE `applyPromotions` call.
+ * D126 — lines AND the cart-level promotion from ONE `applyPromotions` call.
  *
  * `computeTotals` needs both, and the threshold a cart-level promotion is
  * measured against depends on what the line promotions took. Calling the applier
@@ -180,9 +180,9 @@ function priceCart(
       quantity: item.quantity,
       lineSubtotal: line.lineSubtotal,
       // Precedence lives in the applier: a manually discounted line is invisible
-      // to promotions, so it cannot even complete a bundle (D102).
+      // to promotions, so it cannot even complete a bundle (D123).
       manualDiscountAmount: line.discountAmount,
-      // D113a (`6.4`) — the till's preview must carry the same flag the server
+      // D134a (`6.4`) — the till's preview must carry the same flag the server
       // charges with, or the cashier is shown a discount that never lands.
       isMeasured: item.product.quantityType === 'DECIMAL',
     })),
@@ -202,7 +202,7 @@ function priceCart(
       promotionName: won?.promotionName ?? null,
       // The promotion reduces the LINE. Everything downstream — the order
       // discount's base, and `taxableBase` — reads `lineTotal`, so tax follows
-      // with no tax code at all (D102).
+      // with no tax code at all (D123).
       lineTotal: round2(line.lineTotal - promotionDiscountAmount),
     };
   });
@@ -211,10 +211,10 @@ function priceCart(
 }
 
 /**
- * D102 open decision 3 (PO-confirmed 2026-09-04) — a manual discount that costs
+ * D123 open decision 3 (PO-confirmed 2026-09-04) — a manual discount that costs
  * the customer MORE than it saves them.
  *
- * A manually discounted line is invisible to promotions (D102): the cashier is
+ * A manually discounted line is invisible to promotions (D123): the cashier is
  * acting deliberately, usually under an approval limit, and a promotion stacking
  * on top would push the total past a figure nobody approved. The maths is right.
  * What was missing is that nobody was told: knock Rs 50 off a line carrying a
@@ -294,7 +294,7 @@ export interface CartTotals {
   totalDiscount: number;
   orderDiscountAmount: number;
   /**
-   * D105 — a CART-LEVEL promotion (money off the whole order once it reaches a
+   * D126 — a CART-LEVEL promotion (money off the whole order once it reaches a
    * threshold), separate from `totalDiscount` because it never touches a line.
    * 0 when none applies.
    */
@@ -312,7 +312,7 @@ export function computeTotals(
   orderDiscount?: OrderDiscount,
   promotionRules: readonly PromotionRule[] = [],
 ): CartTotals {
-  // D102 (4.4) — one derivation, shared with every renderer. Computing lines
+  // D123 (4.4) — one derivation, shared with every renderer. Computing lines
   // here independently is how the footer and the list come to disagree.
   const { lines, orderPromotion } = priceCart(items, promotionRules);
   let subtotal = 0;
@@ -325,7 +325,7 @@ export function computeTotals(
     const line = lines[i]!;
     subtotal += line.lineSubtotal;
     /*
-     * D102 (4.4) — `totalDiscount` is every LINE-level reduction, manual and
+     * D123 (4.4) — `totalDiscount` is every LINE-level reduction, manual and
      * promotional. It has to be: `discountedSubtotal` is derived from it, and
      * `discountedSubtotal` must equal Σ lineTotal or the order discount is
      * computed on money the customer never owed and the tax base drifts with it.
@@ -343,7 +343,7 @@ export function computeTotals(
   const discountedSubtotal = round2(subtotal - totalDiscount);
   const orderDiscountAmount = computeDiscount(discountedSubtotal, orderDiscount);
   /*
-   * D101 (3.14) — the SHARED base rule, so the till previews exactly what the
+   * D122 (3.14) — the SHARED base rule, so the till previews exactly what the
    * server will charge.
    *
    * 3.10 narrowed the base on the server and left this alone, so a cashier was
@@ -365,7 +365,7 @@ export function computeTotals(
    * the same distinction, in the same words.
    */
   /*
-   * D105 — the cart-level promotion, capped at what is left after the manual
+   * D126 — the cart-level promotion, capped at what is left after the manual
    * order discount so a total can never go negative.
    *
    * It is applied AFTER `taxBase` above and is deliberately absent from it: the

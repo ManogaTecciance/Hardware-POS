@@ -42,10 +42,10 @@ export interface ManagedProduct {
   /** POS-side product photo (S3) — never pushed to QuickBooks. */
   imageUrl: string | null;
   isActive: boolean;
-  /** D101 — read back so the edit wizard can round-trip it. */
+  /** D122 — read back so the edit wizard can round-trip it. */
   taxable: boolean;
   /**
-   * D113 (`6.1`) — sold by the piece, or by weight/measure.
+   * D134 (`6.1`) — sold by the piece, or by weight/measure.
    *
    * REQUIRED, not optional, for the reason `taxable` above is: the edit
    * wizard reads this to re-populate its own control, and an optional field
@@ -54,7 +54,7 @@ export interface ManagedProduct {
    * the control — rice would quietly stop being sold by the kilo.
    */
   quantityType: ClientQuantityType;
-  /** D113b — `"kg"`, `"L"`. Null for a WHOLE product, which has no unit. */
+  /** D134b — `"kg"`, `"L"`. Null for a WHOLE product, which has no unit. */
   unitOfMeasure: string | null;
   quickbooksItemId: string | null;
   syncStatus: ProductSyncStatus;
@@ -105,7 +105,7 @@ export interface ProductsQuery {
   pageSize?: number;
   search?: string;
   categoryId?: string;
-  /** D112 (`8.9`) — everything carrying one label. */
+  /** D133 (`8.9`) — everything carrying one label. */
   brandId?: string;
   subcategoryId?: string;
   isActive?: 'true' | 'false';
@@ -129,7 +129,7 @@ export interface ProductInput {
   reorderLevel?: number | null;
   isActive?: boolean;
   /**
-   * D101 (3.13) — whether the product attracts tax. Omitted means TAXABLE: the
+   * D122 (3.13) — whether the product attracts tax. Omitted means TAXABLE: the
    * server defaults it to true, so a client that never learned about this field
    * cannot zero-rate a product by silence.
    */
@@ -272,7 +272,7 @@ function buildQuery(q: ProductsQuery): string {
   params.set('pageSize', String(q.pageSize ?? 25));
   if (q.search) params.set('search', q.search);
   if (q.categoryId) params.set('categoryId', q.categoryId);
-  // D112 (`8.9`). This builder names every field explicitly, so a new one that
+  // D133 (`8.9`). This builder names every field explicitly, so a new one that
   // is not listed here is dropped in silence and the filter looks broken rather
   // than absent — which is exactly what happened on the first pass.
   if (q.brandId) params.set('brandId', q.brandId);

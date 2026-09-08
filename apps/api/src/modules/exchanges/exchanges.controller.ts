@@ -23,7 +23,7 @@ import { CompleteExchangeDto } from './dto/complete-exchange.dto';
 import { ExchangesService, type ExchangeResult } from './exchanges.service';
 
 /**
- * `/exchanges` — D107, and the end of D2's "reserved key with no workflow".
+ * `/exchanges` — D128, and the end of D2's "reserved key with no workflow".
  *
  * Gated on `ModuleKey.EXCHANGES`, which retail already carries and food service
  * deliberately does not (D2). That gate has existed since Phase 0; until now it
@@ -51,7 +51,7 @@ export class ExchangesController {
   }
 
   /**
-   * Price the returning leg AS AN EXCHANGE (D109).
+   * Price the returning leg AS AN EXCHANGE (D130).
    *
    * Its own route rather than `POST /returns/preview` for two reasons. The
    * flag that waives the `Full-sale return` trigger is then set by the server

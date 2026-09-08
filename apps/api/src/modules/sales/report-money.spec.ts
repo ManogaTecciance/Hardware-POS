@@ -1,5 +1,5 @@
 /**
- * D108 (`8.1`) — no retail report may coerce a money `Decimal` to a number.
+ * D129 (`8.1`) — no retail report may coerce a money `Decimal` to a number.
  *
  * ## Why this exists
  *
@@ -71,7 +71,7 @@ export function hasFloatMoney(source: string): boolean {
  */
 const GUARDED_DIRS = ['modules/sales', 'modules/products', 'modules/dashboard'];
 
-describe('D108 — retail reports keep money in Decimal', () => {
+describe('D129 — retail reports keep money in Decimal', () => {
   it('the analyser sees the real A8 defect it was written for', () => {
     // Mutation proof, against production source rather than a fixture: the
     // restaurant reports file IS A8. A detector that cannot flag it proves

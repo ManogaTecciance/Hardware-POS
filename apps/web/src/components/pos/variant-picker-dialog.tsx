@@ -8,7 +8,7 @@ import type { ClientProduct, ClientVariant } from '@/lib/catalog';
 import { cn, formatMoney } from '@/lib/utils';
 
 /**
- * D99 (1c.4) — choose which size / pack of a product to sell.
+ * D120 (1c.4) — choose which size / pack of a product to sell.
  *
  * A modal rather than a dropdown, for three reasons that all point the same way
  * on a till: the rows are finger-sized on a touchscreen, each one can carry its

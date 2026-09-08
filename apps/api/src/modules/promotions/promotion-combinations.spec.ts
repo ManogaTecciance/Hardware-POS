@@ -1,5 +1,5 @@
 /**
- * D105 — all four promotion types in one basket, in every combination.
+ * D126 — all four promotion types in one basket, in every combination.
  *
  * ## What this exists for
  *
@@ -96,7 +96,7 @@ const PCT = (stackable = true) =>
     items: [{ productId: 'cap', role: 'BUY', quantity: 1 }],
   });
 
-/** D105 — cart-level: NO items, and a threshold. */
+/** D126 — cart-level: NO items, and a threshold. */
 const AMT = (stackable = true) =>
   rule({
     id: 'amt',
@@ -147,7 +147,7 @@ for (const k of KEYS) {
   alone.set(k, { line: r.totalDiscount, order: r.orderPromotion?.discountAmount ?? 0 });
 }
 
-describe('D105 — every combination of the four promotion types', () => {
+describe('D126 — every combination of the four promotion types', () => {
   it('each type on its own discounts something, so the matrix is not measuring zeroes', () => {
     // A positive control for the whole file. Without it, a fixture mistake that
     // made every promotion inapplicable would let all 15 rows below pass by
@@ -156,7 +156,7 @@ describe('D105 — every combination of the four promotion types', () => {
     expect(alone.get('bogo')).toEqual({ line: 500, order: 0 });
     expect(alone.get('pct')).toEqual({ line: 80, order: 0 });
     // The cart-level one produces NO line discount and an order discount — the
-    // distinction D105 exists for.
+    // distinction D126 exists for.
     expect(alone.get('amt')).toEqual({ line: 0, order: 1000 });
   });
 
@@ -187,7 +187,7 @@ describe('D105 — every combination of the four promotion types', () => {
           keys.includes('amt') ? 'amt' : null,
         );
 
-        // One promotion per line, always — the schema fact behind D102.
+        // One promotion per line, always — the schema fact behind D123.
         const lineIds = result.lines.map((l) => l.lineId);
         expect(new Set(lineIds).size).toBe(lineIds.length);
       });
@@ -226,7 +226,7 @@ describe('D105 — every combination of the four promotion types', () => {
   });
 });
 
-describe('D105 — stackable is still respected', () => {
+describe('D126 — stackable is still respected', () => {
   it('all NON-stackable: the best one takes the basket, cart-level included', () => {
     const result = run(['bundle', 'bogo', 'pct', 'amt'], false);
 
@@ -262,7 +262,7 @@ describe('D105 — stackable is still respected', () => {
   });
 });
 
-describe('D105 — the cart-level threshold', () => {
+describe('D126 — the cart-level threshold', () => {
   const cartOnly = (total: number) =>
     applyPromotions({
       lines: [item('l1', 'anything', total)],
@@ -321,7 +321,7 @@ describe('D105 — the cart-level threshold', () => {
   });
 });
 
-describe('D105 — payment is blocked only by a missing reward', () => {
+describe('D126 — payment is blocked only by a missing reward', () => {
   const owed = (lines: PromotionCartLine[], promotions: PromotionRule[]) =>
     outstandingRewards({ lines, promotions });
 

@@ -37,7 +37,7 @@ export interface VariantView {
   productId: string;
   sku: string;
   barcode: string | null;
-  /** D104 Part 3 (`5.6`) — provenance. NULL means unknown, and unknown is not
+  /** D125 Part 3 (`5.6`) — provenance. NULL means unknown, and unknown is not
    *  the system's to overwrite. */
   barcodeSource: BarcodeSource | null;
   unitPrice: string;
@@ -61,13 +61,13 @@ export interface VariationDimensionView {
   id: string;
   name: string;
   position: number;
-  /** D104 — the library definition this dimension is mapped to, if any. */
+  /** D125 — the library definition this dimension is mapped to, if any. */
   attributeDefinitionId: string | null;
   options: {
     id: string;
     name: string;
     position: number;
-    /** D104 — the library option this option is mapped to, if any. */
+    /** D125 — the library option this option is mapped to, if any. */
     attributeOptionId: string | null;
     /**
      * `5.2` — the segment this option contributes to a generated SKU, and
@@ -172,7 +172,7 @@ export class ProductVariantsService {
     // free to trust the shape.
     const requestedDimensionNames = new Set(dto.dimensions.map((d) => d.name));
 
-    // D104 — validate every library link BEFORE opening the transaction, so an
+    // D125 — validate every library link BEFORE opening the transaction, so an
     // id from another tenant is a clean 400 rather than a half-applied write.
     await this.assertLibraryLinks(tenantId, dto);
 
@@ -265,7 +265,7 @@ export class ProductVariantsService {
   }
 
   /**
-   * D104 — refuse a library link that does not make sense.
+   * D125 — refuse a library link that does not make sense.
    *
    * Three ways it can be wrong, and all three are silent if unchecked because
    * the columns are nullable and the FKs are `SET NULL`:
@@ -463,7 +463,7 @@ export class ProductVariantsService {
       const ids: string[] = [];
 
       // Allocated INSIDE the transaction, so a rolled-back batch burns the
-      // numbers rather than leaving a half-used sequence behind (D104: gaps
+      // numbers rather than leaving a half-used sequence behind (D125: gaps
       // are accepted, reuse is not).
       const generated = new Map<number, string>();
       if (needsSku) {

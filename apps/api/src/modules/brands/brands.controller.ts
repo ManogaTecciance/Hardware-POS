@@ -7,7 +7,7 @@ import { BrandsService, type BrandView } from './brands.service';
 import { CreateBrandDto, QueryBrandsDto, UpdateBrandDto } from './dto/brand.dto';
 
 /**
- * Brands — D112 (`8.9`).
+ * Brands — D133 (`8.9`).
  *
  * No `@RequireModule`: brands belong to the product catalogue, which is shared
  * core. Gating them on `INVENTORY` would hide a tenant's own labels from them

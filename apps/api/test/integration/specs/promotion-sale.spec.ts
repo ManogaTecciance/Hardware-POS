@@ -1,5 +1,5 @@
 /**
- * D102 (4.4) — a promotion reduces what the customer actually pays.
+ * D123 (4.4) — a promotion reduces what the customer actually pays.
  *
  * ## The figures here are shared with the till
  *
@@ -15,7 +15,7 @@
  *
  * The BOGO case asserts WHICH LINE carries the saving, not merely that the total
  * fell by 500. Spreading it across the basket would produce the same total and
- * still refund 400 on a free item — the defect D102 exists to prevent.
+ * still refund 400 on a free item — the defect D123 exists to prevent.
  *
  * The invariant case asserts `discountedSubtotal === Σ lineTotal` against the
  * PERSISTED rows, because that pair is what the order discount and the tax base
@@ -307,7 +307,7 @@ describe('4.5 — a return reverses the promotion it was given', () => {
     );
   };
 
-  it('THE D102 CASE — returning the free tie refunds exactly 0.00', async () => {
+  it('THE D123 CASE — returning the free tie refunds exactly 0.00', async () => {
     await seedBogo();
     const sale = await sellBasket(2360);
     const [, tieLine] = await linesOf(sale.id); // 'Shirt' then 'Tie'
@@ -320,7 +320,7 @@ describe('4.5 — a return reverses the promotion it was given', () => {
      *
      * Had the 500 been allocated ORDER-WIDE by line value — weight 500 against
      * the shirts' 2,000 — the tie would have absorbed 100 and this refund would
-     * be 400 on a free item. That is what D102 Option A was chosen to prevent,
+     * be 400 on a free item. That is what D123 Option A was chosen to prevent,
      * and it is why the breakdown is asserted and not only the total.
      */
     expect(Number(ret.refundTotal)).toBe(0);
@@ -356,7 +356,7 @@ describe('4.5 — a return reverses the promotion it was given', () => {
      * Three separate transactions, deliberately: the free tie, then one shirt,
      * then the other. Allocation makes each share exact on its own, so the parts
      * sum to the whole however the customer splits the return and no line has to
-     * absorb a remainder — the reconciliation property 3.11 built and D102
+     * absorb a remainder — the reconciliation property 3.11 built and D123
      * inherits by allocating rather than re-evaluating.
      *
      * Each refund stays under the manager-approval threshold, which is a

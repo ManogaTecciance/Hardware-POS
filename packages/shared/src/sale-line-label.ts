@@ -1,5 +1,5 @@
 /**
- * How a sold line is named on a document (D99, 2.12).
+ * How a sold line is named on a document (D120, 2.12).
  *
  * ## Why this lives in `shared` and not beside one renderer
  *
@@ -61,7 +61,7 @@ export function saleLineLabel(
 }
 
 /**
- * The promotion note printed beneath a sale line (D102, 4.6).
+ * The promotion note printed beneath a sale line (D123, 4.6).
  *
  * A bill that shows a tie at 0.00 with no explanation reads as a pricing error;
  * naming the offer is what makes the zero legible, and it is what a customer
@@ -83,7 +83,7 @@ export function saleLinePromotionNote(
 }
 
 /**
- * The quantity printed on a sale or return line — D113d (`6.5`).
+ * The quantity printed on a sale or return line — D134d (`6.5`).
  *
  * `0.750` with a unit of `kg` becomes `0.75 kg`; `2` with no unit stays `2`.
  *
@@ -105,7 +105,7 @@ export function saleLinePromotionNote(
  * ## The unit is a SNAPSHOT
  *
  * `null` when the line carries none — a whole product, or a line written before
- * D113d — and the output is then exactly what it was before this existed, which
+ * D134d — and the output is then exactly what it was before this existed, which
  * is what leaves every historical document unchanged.
  */
 export function saleLineQuantity(

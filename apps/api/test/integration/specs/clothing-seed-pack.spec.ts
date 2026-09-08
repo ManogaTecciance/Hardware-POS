@@ -10,7 +10,7 @@ import { resetDatabase } from '../db-reset';
 import { seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 
 /**
- * D99 (2.6) — the clothing seed pack, against real PostgreSQL.
+ * D120 (2.6) — the clothing seed pack, against real PostgreSQL.
  *
  * What can only be proven here: that the four-level chain
  * `Dimension -> Option -> Variant -> VariantOptionValue` is actually linked. A

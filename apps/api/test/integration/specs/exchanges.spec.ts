@@ -1,8 +1,8 @@
 /**
- * D107 / D107a — an exchange is a return followed by a sale, settled GROSS
+ * D128 / D128a — an exchange is a return followed by a sale, settled GROSS
  * (Phase 7, `7.1b` and `7.2`).
  *
- * D107 first netted the two legs through `STORE_CREDIT`. `ReturnsService`
+ * D128 first netted the two legs through `STORE_CREDIT`. `ReturnsService`
  * refuses a store-credit refund unless the sale has a saved, non-walk-in
  * customer — correctly, since store credit is a liability held against an
  * account — and a shop swapping a size is almost always a walk-in. So the
@@ -16,7 +16,7 @@
  *    that this file's arithmetic matches itself.
  *  • The **recoverable state**: that a failed replacement leaves the exchange
  *    row with a null `replacementSaleId` AND the customer already refunded.
- *    D107 asserts this is safe; a test has to show it, not repeat it.
+ *    D128 asserts this is safe; a test has to show it, not repeat it.
  *  • Idempotency across two money movements — the case where a duplicate would
  *    refund a customer for goods they kept.
  *
@@ -159,9 +159,9 @@ async function onHand(variantId: string): Promise<number> {
 /**
  * A manager PIN, for the cases that still need one.
  *
- * D109 waives ONE approval trigger inside an exchange — `Full-sale return` —
+ * D130 waives ONE approval trigger inside an exchange — `Full-sale return` —
  * so the ordinary size swap below needs no token at all. Every other trigger
- * still applies, which is what the D109 block at the end of this file proves.
+ * still applies, which is what the D130 block at the end of this file proves.
  */
 async function managerApproval(saleId: string, refundTotal: number): Promise<string> {
   const result = await app.returnsService.approve(
@@ -407,7 +407,7 @@ describe('a replayed exchange', () => {
   });
 });
 
-// ── The recoverable state D107 claims ───────────────────────────────────────
+// ── The recoverable state D128 claims ───────────────────────────────────────
 
 describe('when the replacement leg fails', () => {
   it('leaves the exchange open AND the customer already refunded', async () => {
@@ -435,12 +435,12 @@ describe('when the replacement leg fails', () => {
     ).rejects.toBeDefined();
 
     // The exchange row survives, open. `replacementSaleId` being nullable is
-    // what makes this expressible at all (D107).
+    // what makes this expressible at all (D128).
     const exchanges = await prisma.exchange.findMany({ where: { tenantId: tenant.tenantId } });
     expect(exchanges).toHaveLength(1);
     expect(exchanges[0]!.replacementSaleId).toBeNull();
 
-    // And the money is where D107a says it is: the return completed and the
+    // And the money is where D128a says it is: the return completed and the
     // customer was refunded exactly what they handed back. Nothing is lost
     // and nothing is double-counted — the operator can ring the replacement
     // up as an ordinary sale.
@@ -527,7 +527,7 @@ describe('the exchange note', () => {
   });
 
   it('renders an exchange whose replacement never completed', async () => {
-    // D107 — unresolved is its own state. The customer has been refunded and is
+    // D128 — unresolved is its own state. The customer has been refunded and is
     // entitled to a note saying so; refusing to render would leave the operator
     // with nothing to hand over.
     await seedVariants();
@@ -562,7 +562,7 @@ describe('the exchange note', () => {
   });
 });
 
-// ── D109 — the approval exception, and its edges ────────────────────────────
+// ── D130 — the approval exception, and its edges ────────────────────────────
 
 /**
  * Regression, 2026-09-08. The COMPLETION waived the trigger (proved below since
@@ -579,7 +579,7 @@ describe('the exchange note', () => {
  * that only checked `complete` succeeds — which is what existed — passes
  * happily while the operator is being asked for a PIN they do not need.
  */
-describe('D109 — the preview agrees with the completion', () => {
+describe('D130 — the preview agrees with the completion', () => {
   it('an exchange preview asks for NO approval on a full-sale return', async () => {
     await seedVariants();
     const sale = await soldOneMedium();
@@ -609,8 +609,8 @@ describe('D109 — the preview agrees with the completion', () => {
     expect(preview.approvalReasons).toContain('Full-sale return');
   });
 
-  it('an exchange preview STILL asks when a trigger D109 does not waive applies', async () => {
-    // D109 waives exactly one trigger. Damaged goods are the shop's problem
+  it('an exchange preview STILL asks when a trigger D130 does not waive applies', async () => {
+    // D130 waives exactly one trigger. Damaged goods are the shop's problem
     // whether or not the customer leaves with a replacement, so this must
     // still stop at a manager.
     await seedVariants();
@@ -666,7 +666,7 @@ describe('D109 — the preview agrees with the completion', () => {
   });
 });
 
-describe('D109 — a full-sale return inside an exchange needs no manager', () => {
+describe('D130 — a full-sale return inside an exchange needs no manager', () => {
   it('completes with NO approval token, where a standalone return could not', async () => {
     await seedVariants();
     const sale = await soldOneMedium();
@@ -680,7 +680,7 @@ describe('D109 — a full-sale return inside an exchange needs no manager', () =
       payments: [{ method: 'CASH' as const, amount: 1000 }],
     };
 
-    // No approvalToken anywhere. This is the whole point of D109.
+    // No approvalToken anywhere. This is the whole point of D130.
     const exchange = await app.exchangesService.complete(tenant.tenantId, owner, request, null);
     expect(exchange.complete).toBe(true);
   });
@@ -706,7 +706,7 @@ describe('D109 — a full-sale return inside an exchange needs no manager', () =
   });
 
   it('waives ONLY the full-sale trigger — damaged goods still need a manager', async () => {
-    // D109 is narrow by design: the goods coming back are the shop's problem
+    // D130 is narrow by design: the goods coming back are the shop's problem
     // either way, and an exchange does not change their condition.
     await seedVariants();
     const sale = await soldOneMedium();

@@ -45,7 +45,7 @@ export interface IntegrationApp {
   salesService: SalesService;
   salesRepository: SalesRepository;
   returnsService: ReturnsService;
-  /** D107 (Phase 7) — composes the two services above; owns no money path. */
+  /** D128 (Phase 7) — composes the two services above; owns no money path. */
   exchangesService: ExchangesService;
   returnsRepository: ReturnsRepository;
   settingsService: SettingsService;

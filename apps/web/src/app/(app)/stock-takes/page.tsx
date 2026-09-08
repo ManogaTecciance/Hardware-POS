@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Stock count — D111 (`8.7`).
+ * Stock count — D132 (`8.7`).
  *
  * Two halves: build a count, and read the counts already taken.
  *

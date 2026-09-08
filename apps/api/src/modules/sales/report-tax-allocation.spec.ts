@@ -24,7 +24,7 @@ import { allocateSaleTax, type AllocatableLine, type AllocatableSale } from './r
 
 const d = (v: number | string): Prisma.Decimal => new Prisma.Decimal(v);
 
-/** Σ lineTotal is the discounted subtotal by construction (D102). */
+/** Σ lineTotal is the discounted subtotal by construction (D123). */
 function saleOf(lines: AllocatableLine[], tax: number, orderDiscount = 0): AllocatableSale {
   const subtotal = lines.reduce((acc, l) => acc.plus(d(l.lineTotal as number)), d(0));
   return {

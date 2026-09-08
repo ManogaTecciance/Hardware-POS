@@ -233,7 +233,7 @@ drives the wizard's generic attributes step and the server-side validator.
 
 ### ExchangesController
 
-D107 (Phase 7): return one variant, issue another, settle the difference. The
+D128 (Phase 7): return one variant, issue another, settle the difference. The
 transaction behind the `EXCHANGES` key **D2** reserved in the Phase 0 audit —
 until now a module key with an A4 renderer and no workflow.
 
@@ -257,7 +257,7 @@ The A4 note lives on `DocumentsController` with the other documents:
 
 ### AttributeLibraryController
 
-D104 / D104a (Phase 5, `5.1` / `5.2`): the tenant option library — Size and
+D125 / D125a (Phase 5, `5.1` / `5.2`): the tenant option library — Size and
 colour scales defined once and shared by every product that adopts them.
 
 **Shared core, deliberately.** Any business selling variants benefits from
@@ -275,7 +275,7 @@ definition sees an empty list, which is a real answer rather than a denial.
 
 ### BarcodesController
 
-D104 Part 3 (Phase 5, `5.9`): the barcode audit and reissue pass. Sequenced
+D125 Part 3 (Phase 5, `5.9`): the barcode audit and reissue pass. Sequenced
 before label rendering, because an EAN-13 symbol cannot be produced from a
 payload with a wrong check digit — 18 of the pilot's 20 codes.
 
@@ -289,7 +289,7 @@ has a problem. The reissue is `product:manage`, because it rewrites identifiers.
 
 ### LabelsController
 
-D106 (Phase 5, `5.7`): render and queue a sheet of product labels as a
+D127 (Phase 5, `5.7`): render and queue a sheet of product labels as a
 `PRODUCT_LABEL` print job — the only job type with no sale behind it.
 
 Two endpoints rather than one: `preview` returns the HTML to look at, `print`

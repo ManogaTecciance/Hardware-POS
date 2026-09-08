@@ -1,5 +1,5 @@
 /**
- * D104 / D104a — the wire contract for the option library (`5.1` / `5.2`).
+ * D125 / D125a — the wire contract for the option library (`5.1` / `5.2`).
  *
  * ## Why this test exists at all
  *

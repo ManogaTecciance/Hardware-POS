@@ -80,7 +80,7 @@ export default function NewReturnPage() {
   const [step, setStep] = React.useState<Step>(saleId ? 'select' : 'find');
   const [elig, setElig] = React.useState<ReturnEligibility | null>(null);
   const [items, setItems] = React.useState<ReturnableItem[]>([]);
-  /** D113 (`6.6`) — the measured line whose return amount is being typed. */
+  /** D134 (`6.6`) — the measured line whose return amount is being typed. */
   const [measureFor, setMeasureFor] = React.useState<ReturnableItem | null>(null);
   const [preview, setPreview] = React.useState<ReturnPreview | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -156,7 +156,7 @@ export default function NewReturnPage() {
       draft.removeSelection(it.saleItemId);
     } else {
       draft.setSelection(it.saleItemId, {
-        // D113 (`6.6`) — a measured line starts at everything that is left,
+        // D134 (`6.6`) — a measured line starts at everything that is left,
         // because "one kilo" is not a sensible default for something sold by
         // weight. The clerk adjusts it through the numpad.
         returnQuantity: it.unitOfMeasure
@@ -170,7 +170,7 @@ export default function NewReturnPage() {
   };
 
   /**
-   * D113 (`6.6`) — the last integer clamp in the app.
+   * D134 (`6.6`) — the last integer clamp in the app.
    *
    * `Math.max(1, …)` made returning 0.5 kg of rice impossible: a customer who
    * bought 750 g and brought half of it back could only be refunded for a
@@ -312,7 +312,7 @@ export default function NewReturnPage() {
                         {sel ? (
                           it.unitOfMeasure ? (
                             /*
-                              D113 (`6.6`) — a measured line is typed, not stepped.
+                              D134 (`6.6`) — a measured line is typed, not stepped.
                               ±1 kg is not what a returns clerk means, and the same
                               numpad the till used to enter it is the least
                               surprising way to change it.
@@ -606,7 +606,7 @@ export default function NewReturnPage() {
       />
 
       {/*
-        D113 (`6.6`) — the same keypad the till used to weigh it. A returns clerk
+        D134 (`6.6`) — the same keypad the till used to weigh it. A returns clerk
         taking back half a bag of rice types the amount rather than stepping it.
       */}
       {measureFor ? (

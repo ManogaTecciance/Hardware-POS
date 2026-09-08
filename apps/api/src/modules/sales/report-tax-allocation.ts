@@ -8,9 +8,9 @@ import { Prisma } from '@hardware-pos/database';
  *
  * **`SaleItem.taxAmount` is always `0`.** `sales.service` writes it that way on
  * purpose — "splitting the order-level tax across lines is per-line COMPUTATION,
- * which is parked with grocery (D101)". Tax is computed once for the whole sale
+ * which is parked with grocery (D122)". Tax is computed once for the whole sale
  * and lives on `Sale.taxAmount`; the line carries only the RATE it was charged
- * at (`taxRatePercent`, frozen by D101).
+ * at (`taxRatePercent`, frozen by D122).
  *
  * Verified on the pilot database rather than inferred from the comment: 43 sale
  * lines, none with a non-zero `taxAmount`, while 12 of 20 completed sales carry
@@ -31,7 +31,7 @@ import { Prisma } from '@hardware-pos/database';
  *     tax return needs that one row more than anyone.
  *  2. It works in `number`. A document allocates one sale's tax and prints it;
  *     a report adds thousands of those together, which is where float error
- *     accumulates — the shape audit item A8 describes (D108, D59).
+ *     accumulates — the shape audit item A8 describes (D129, D59).
  *
  * ## The rule
  *
@@ -44,7 +44,7 @@ import { Prisma } from '@hardware-pos/database';
  * refund and this report all divide the recorded tax identically.
  *
  * The cart-level promotion (`Sale.promotionOrderDiscountAmount`) is deliberately
- * NOT subtracted: D105 applies it after tax, so it never entered the taxable
+ * NOT subtracted: D126 applies it after tax, so it never entered the taxable
  * base and must not be removed from it here either.
  */
 
@@ -60,7 +60,7 @@ export interface AllocatableLine {
   /** Line net after its own discount and promotion, before the order discount. */
   lineTotal: Prisma.Decimal | number;
   /**
-   * The rate frozen onto the line (D101). `null` means the line predates 3.8 —
+   * The rate frozen onto the line (D122). `null` means the line predates 3.8 —
    * its own state, never to be read as 0%.
    */
   taxRatePercent: Prisma.Decimal | number | null;
@@ -69,7 +69,7 @@ export interface AllocatableLine {
 export interface AllocatableSale {
   /** Σ lineSubtotal, before any discount. */
   subtotal: Prisma.Decimal | number;
-  /** Σ line discounts and line promotions (D102). */
+  /** Σ line discounts and line promotions (D123). */
   totalDiscount: Prisma.Decimal | number;
   /** The manual order-level discount. */
   orderDiscountAmount: Prisma.Decimal | number;

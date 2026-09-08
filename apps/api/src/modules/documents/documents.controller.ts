@@ -69,7 +69,7 @@ export class DocumentsController {
   }
 
   /**
-   * D107 (`7.3`) — the exchange note, from real data.
+   * D128 (`7.3`) — the exchange note, from real data.
    *
    * Gated on EXCHANGES like the transaction itself. `RETURN_READ` to view, the
    * same permission the return note uses: an exchange note reveals nothing the

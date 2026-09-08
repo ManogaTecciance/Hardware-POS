@@ -15,7 +15,7 @@ export class ApproveReturnDto {
   originalSaleId!: string;
 
   /**
-   * D102 (4.6) — `@Min(0)`, not `@IsPositive()`.
+   * D123 (4.6) — `@Min(0)`, not `@IsPositive()`.
    *
    * A refund of exactly zero is a real return since promotions: a customer
    * handing back a free buy-two-get-one item is owed nothing, but the goods come

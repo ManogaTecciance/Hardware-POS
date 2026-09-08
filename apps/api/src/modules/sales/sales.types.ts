@@ -53,7 +53,7 @@ export interface SalesListFilter {
 /** Normalized cart line coming into the compute pipeline. */
 export interface CartItemInput {
   productId: string;
-  /** D99 — the variant sold, when the client names one. */
+  /** D120 — the variant sold, when the client names one. */
   productVariantId?: string | null;
   quantity: number;
   unitPrice?: number;
@@ -70,7 +70,7 @@ export interface CartItemInput {
 export interface ComputedLine {
   productId: string;
   /**
-   * D99 — the exact variant sold, or null for a product that has none.
+   * D120 — the exact variant sold, or null for a product that has none.
    *
    * Null is also the answer when a variant product is sold without one being
    * named: the line then behaves exactly as it did before variants existed, at
@@ -85,7 +85,7 @@ export interface ComputedLine {
   variantSkuSnapshot: string | null;
   variantNameSnapshot: string | null;
   /**
-   * D113d (`6.5`) — the unit this line was sold in, frozen at sale time.
+   * D134d (`6.5`) — the unit this line was sold in, frozen at sale time.
    * `null` for a WHOLE product, which has no unit.
    */
   unitOfMeasureSnapshot: string | null;
@@ -103,7 +103,7 @@ export interface ComputedLine {
   approvedByUserId: string | null;
   taxAmount: number;
   /**
-   * D101 (3.9) — the tax rate this line was charged at, frozen at sale time.
+   * D122 (3.9) — the tax rate this line was charged at, frozen at sale time.
    *
    * A number, never null, on every NEW line. `SaleItem.taxRatePercent` is
    * nullable only so that lines written before 3.8 can be recognised as
@@ -113,12 +113,12 @@ export interface ComputedLine {
    */
   taxRatePercent: number;
   /**
-   * D102 (4.4) — the promotion that claimed this line, if any.
+   * D123 (4.4) — the promotion that claimed this line, if any.
    *
    * `promotionDiscountAmount` is ALREADY subtracted from `lineTotal` and is
    * already inside the sale's `totalDiscount`. It is carried separately so the
    * receipt can name the offer and Phase 8 can report on it — a mirror, never a
-   * second source of truth (the D100 relationship).
+   * second source of truth (the D121 relationship).
    *
    * Mutually exclusive with `discountAmount`: a manual line discount overrides
    * any promotion on that line, so at most one of the two is non-zero.
@@ -153,7 +153,7 @@ export interface ComputedSale {
   orderDiscountReason: string | null;
   orderDiscountApprovedById: string | null;
   /**
-   * D105 — a cart-level promotion, stored beside the manual order discount
+   * D126 — a cart-level promotion, stored beside the manual order discount
    * rather than on a line. Unlike the manual figure this does NOT reduce the
    * taxable base; see `sales.service` for why.
    */

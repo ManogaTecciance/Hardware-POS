@@ -79,7 +79,7 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     SuppliersModule,
     SalesModule,
     ReturnsModule,
-    // D107 (Phase 7) — composes ReturnsModule and SalesModule; owns no money path.
+    // D128 (Phase 7) — composes ReturnsModule and SalesModule; owns no money path.
     ExchangesModule,
     QuotationsModule,
     DiscountsModule,

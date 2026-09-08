@@ -1,5 +1,5 @@
 /**
- * D104 Part 3 and D106 — barcode allocation, provenance, the reissue pass and
+ * D125 Part 3 and D127 — barcode allocation, provenance, the reissue pass and
  * label printing (Phase 5, steps `5.4`–`5.9`).
  *
  * ## What can only be proven here
@@ -9,7 +9,7 @@
  *  • `@@unique([tenantId, barcode])` and the retry that clears a collision.
  *  • That a reissue writes an `AuditLog` row carrying the PREVIOUS barcode —
  *    the thing that makes this a correction rather than silent destruction.
- *  • D106: a `PRODUCT_LABEL` print job with `saleId = null` actually inserts,
+ *  • D127: a `PRODUCT_LABEL` print job with `saleId = null` actually inserts,
  *    which the schema forbade until this phase.
  *
  * ## What makes these assertions non-vacuous (D30)
@@ -18,7 +18,7 @@
  * SUCCEED, so a service that refused everything fails as loudly as one that
  * refused nothing: a supplier barcode is protected while an internal one is
  * reissued; an invalid EAN-13 is skipped while a valid one on the same sheet is
- * drawn. The existing receipt print job is asserted unchanged, because D106
+ * drawn. The existing receipt print job is asserted unchanged, because D127
  * widened a column the restaurant and hardware modules both write to.
  */
 
@@ -105,7 +105,7 @@ beforeEach(async () => {
  * `(tenantId, branchId)` — which Postgres does not enforce across two NULL
  * branchIds, so calling it twice leaves two rows and the service reads
  * whichever `findFirst` returns. The same NULL-distinctness that keeps
- * `categoryId` out of D104a's unique key. Deleting first makes the helper
+ * `categoryId` out of D125a's unique key. Deleting first makes the helper
  * idempotent for this spec without changing a fixture other specs rely on.
  */
 async function writeSettings(data: Record<string, unknown>): Promise<void> {
@@ -419,7 +419,7 @@ describe('the barcode audit', () => {
   });
 });
 
-// ── 5.7 / 5.8 / D106: labels ────────────────────────────────────────────────
+// ── 5.7 / 5.8 / D127: labels ────────────────────────────────────────────────
 
 describe('label printing', () => {
   async function seedForLabels() {
@@ -471,7 +471,7 @@ describe('label printing', () => {
     expect(sheet.html).not.toContain('class="price"');
   });
 
-  it('queues a PRODUCT_LABEL job with no sale behind it (D106)', async () => {
+  it('queues a PRODUCT_LABEL job with no sale behind it (D127)', async () => {
     const { good } = await seedForLabels();
     const result = await labels.queueSheet(
       shop.tenantId,
@@ -482,7 +482,7 @@ describe('label printing', () => {
 
     const job = await prisma.printJob.findUnique({ where: { id: result.printJobId } });
     expect(job!.type).toBe(PrintJobType.PRODUCT_LABEL);
-    // The whole reason D106 exists. Before this phase the column was NOT NULL.
+    // The whole reason D127 exists. Before this phase the column was NOT NULL.
     expect(job!.saleId).toBeNull();
     expect(job!.copies).toBe(2);
     expect(result.labelCount).toBe(4);
@@ -507,7 +507,7 @@ describe('label printing', () => {
   });
 
   /**
-   * D106 widened `PrintJob.saleId` on a table the restaurant and hardware
+   * D127 widened `PrintJob.saleId` on a table the restaurant and hardware
    * modules both write to. This asserts the existing shape still works — a
    * receipt job with a real sale — beside the new one that does not.
    */

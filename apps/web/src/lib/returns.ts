@@ -49,7 +49,7 @@ export interface ReturnableItem {
   previouslyReturnedQuantity: number;
   availableReturnQuantity: number;
   /**
-   * D113d (`6.6`) — the unit this line was SOLD in, so the returns screen can
+   * D134d (`6.6`) — the unit this line was SOLD in, so the returns screen can
    * accept 0.5 kg back and label what it is asking for.
    *
    * The SNAPSHOT, not the product's current unit: a refund is measured in what

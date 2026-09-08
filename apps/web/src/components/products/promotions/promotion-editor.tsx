@@ -334,7 +334,7 @@ export function PromotionEditor({
   const validate = (): string | null => {
     if (!state.name.trim()) return 'Give the promotion a name.';
     /*
-     * D105 — an EMPTY product list is how a FIXED_AMOUNT_DISCOUNT declares
+     * D126 — an EMPTY product list is how a FIXED_AMOUNT_DISCOUNT declares
      * itself cart-level, so the blanket "add at least one product" no longer
      * holds for that type. Every other type still needs its products, and the
      * server re-checks all of it per type either way.
@@ -381,7 +381,7 @@ export function PromotionEditor({
           : null,
       amountOff:
         state.type === 'FIXED_AMOUNT_DISCOUNT' && state.amountOff ? Number(state.amountOff) : null,
-      // D105 — only meaningful for money-off; the server rejects it elsewhere,
+      // D126 — only meaningful for money-off; the server rejects it elsewhere,
       // so send null rather than leaving a stale value from a type switch.
       minimumSpend:
         state.type === 'FIXED_AMOUNT_DISCOUNT' && state.minimumSpend
@@ -631,7 +631,7 @@ export function PromotionEditor({
             />
             <p className="text-xs text-muted-foreground">
               {/*
-                * D105 — the two shapes of this promotion type, said where the
+                * D126 — the two shapes of this promotion type, said where the
                 * operator decides between them. Leaving Products empty is the
                 * ONLY way to get a whole-cart discount, and nothing else on the
                 * screen would tell them that.

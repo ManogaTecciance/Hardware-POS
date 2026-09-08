@@ -113,7 +113,7 @@ const product: ManagedProduct = {
   imageUrl: null,
   isActive: true,
   taxable: true,
-  // D113 (`6.1`) — these fixtures stand for ordinary counted stock.
+  // D134 (`6.1`) — these fixtures stand for ordinary counted stock.
   quantityType: 'WHOLE',
   unitOfMeasure: null,
   // A perfectly valid local product: never reached QuickBooks, and under LOCAL or

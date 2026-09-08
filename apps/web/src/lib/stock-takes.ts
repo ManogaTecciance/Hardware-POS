@@ -1,5 +1,5 @@
 /**
- * Stock takes / cycle counts — D111 (`8.7`).
+ * Stock takes / cycle counts — D132 (`8.7`).
  *
  * The client sends only what was COUNTED. It never sends an expected quantity or
  * a variance: the server reads the book value inside the same transaction that
@@ -37,7 +37,7 @@ export interface StockTakeLineView {
   countedQuantity: string;
   /** Negative is shrinkage, positive is a found item. */
   variance: string;
-  /** `null` when nothing has ever been received — unknown, not zero (D110). */
+  /** `null` when nothing has ever been received — unknown, not zero (D131). */
   unitCost: string | null;
   varianceValue: string | null;
 }

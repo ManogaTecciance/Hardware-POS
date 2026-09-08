@@ -108,7 +108,7 @@ enum PrintJobType {
   CUSTOMER_RECEIPT
   WAREHOUSE_PICKING
   RETURN_RECEIPT
-  /// D106 (Phase 5, 5.7) — a sheet of shelf/product labels. The only job type
+  /// D127 (Phase 5, 5.7) — a sheet of shelf/product labels. The only job type
   /// with no sale behind it; see `PrintJob.saleId`.
   PRODUCT_LABEL
 }
@@ -235,7 +235,7 @@ enum BusinessType {
   /// workspaces are distinguishable in data before they diverge in behaviour.
   HOTEL
   GENERAL
-  /// D99. Clothing first, grocery behind it. LOCAL inventory, no accounting
+  /// D120. Clothing first, grocery behind it. LOCAL inventory, no accounting
   /// provider — the opposite posture to HARDWARE, which is QuickBooks-backed.
   /// Appended rather than positioned: `ALTER TYPE … ADD VALUE` appends, and
   /// keeping the schema in the database's own order avoids a phantom diff.
@@ -279,7 +279,7 @@ enum ModuleKey {
   RETURNS
   EXCHANGES
   SUPPLIERS
-  /// D103 — its own key: promotions are an admin surface BOTH retail and food
+  /// D124 — its own key: promotions are an admin surface BOTH retail and food
   /// service own, and no pre-existing module was common to the two.
   PROMOTIONS
   REPORTING
@@ -596,7 +596,7 @@ model User {
   createdRestaurantTables  RestaurantTable[]   @relation("RestaurantTableCreator")
   createdTableReservations TableReservation[]  @relation("TableReservationCreator")
   createdInventoryReceipts InventoryReceipt[]  @relation("InventoryReceiptCreator")
-  /// D111 (`8.7`) — stock counts this user submitted.
+  /// D132 (`8.7`) — stock counts this user submitted.
   countedStockTakes        StockTake[]         @relation("StockTakeCounter")
 
   /// D68 — kitchen tickets this user marked done on the board.
@@ -692,7 +692,7 @@ model ProductCategory {
   children      ProductCategory[]    @relation("CategoryTree")
   subcategories ProductSubcategory[]
   products      Product[]
-  // D104a -- option scales bound to this category ("Footwear offers 24-46").
+  // D125a -- option scales bound to this category ("Footwear offers 24-46").
   // The FK is ON DELETE SET NULL, so removing a category unbinds its scales
   // rather than deleting a library that other categories may also be using.
   attributeDefinitions AttributeDefinition[]
@@ -745,24 +745,24 @@ model Product {
   categoryId            String?
   subcategoryId         String?
   unitPrice             Decimal       @default(0) @db.Decimal(12, 2)
-  /// D112 (`8.9`) — brand as an ENTITY, not a string. Nullable forever:
+  /// D133 (`8.9`) — brand as an ENTITY, not a string. Nullable forever:
   /// most hardware and grocery products carry no brand worth recording, and
   /// "unbranded" is the absence of a brand rather than a brand called that.
   brandId               String?
-  /// D113 (`6.1`) — sold by the piece, or by weight/measure.
+  /// D134 (`6.1`) — sold by the piece, or by weight/measure.
   ///
   /// Defaulted to WHOLE so every existing product — retail, hardware and
   /// restaurant alike — reads exactly as it did before this column existed.
   /// A tenant that never sets DECIMAL runs the behaviour that shipped in
   /// Phase 8, byte for byte.
   quantityType          QuantityType  @default(WHOLE)
-  /// D113b — what the quantity is measured IN: "kg", "g", "L", "m".
+  /// D134b — what the quantity is measured IN: "kg", "g", "L", "m".
   ///
   /// Free text, because nothing computes on it — it is printed, exactly like
   /// `material` in the clothing attribute schema. It is what lets the till ask
   /// "How many kg?" instead of "How many?", and the receipt say `0.750 kg`.
   ///
-  /// NULLABLE at the column and REQUIRED in the service (D113c): the rule is
+  /// NULLABLE at the column and REQUIRED in the service (D134c): the rule is
   /// conditional — mandatory for a DECIMAL product, meaningless for a shirt —
   /// and a NOT NULL column would demand a unit from every product in every
   /// tenant. `ProductsService` enforces it against the RESULTING state.
@@ -810,7 +810,7 @@ model Product {
   /// columns; description goes here. Never read by pricing, tax, inventory
   /// or settlement — those read typed columns only. GIN-indexed so domain
   /// screens can filter on it.
-  /// D101 (3.8) — whether this product attracts tax at all.
+  /// D122 (3.8) — whether this product attracts tax at all.
   ///
   /// Defaults TRUE because that is already true of every product: there is no
   /// per-product exemption anywhere today, tax is one rate on the whole bill,
@@ -841,7 +841,7 @@ model Product {
   variationDimensions  ProductVariationDimension[]
   receiptLines         InventoryReceiptLine[]
   stockTakeLines       StockTakeLine[]
-  /// D112 (`8.9`) — the label this product carries, or NULL for none.
+  /// D133 (`8.9`) — the label this product carries, or NULL for none.
   brand                Brand?                      @relation(fields: [brandId], references: [id], onDelete: SetNull)
   modifierGroups       ProductModifierGroup[]
   stationLinks         ProductStationLink[]
@@ -859,7 +859,7 @@ model Product {
   @@index([tenantId, name])
   @@index([categoryId])
   @@index([subcategoryId])
-  /// D112 (`8.9`) — declared explicitly. PostgreSQL does not index a foreign key
+  /// D133 (`8.9`) — declared explicitly. PostgreSQL does not index a foreign key
   /// on its own, and "every product of this brand" is the query the entity exists
   /// for; the sibling category indexes above are here for exactly that reason.
   @@index([brandId])
@@ -985,7 +985,7 @@ model Sale {
   orderDiscountAmount       Decimal                 @default(0) @db.Decimal(12, 2)
   orderDiscountReason       String?
   orderDiscountApprovedById String?
-  /// D105 — a CART-LEVEL promotion (FIXED_AMOUNT_DISCOUNT with no products),
+  /// D126 — a CART-LEVEL promotion (FIXED_AMOUNT_DISCOUNT with no products),
   /// stored beside the manual order discount rather than pushed onto a line.
   ///
   /// It cannot live on `SaleItem`: that row holds ONE `promotionId`, and a
@@ -999,7 +999,7 @@ model Sale {
   /// the single best eligible cart-level promotion. A second one would need a
   /// child table and its own decision.
   ///
-  /// Like D102's line columns, `promotionOrderId` carries no relation and the
+  /// Like D123's line columns, `promotionOrderId` carries no relation and the
   /// name is snapshotted, so deleting a promotion never rewrites a sold document.
   promotionOrderDiscountAmount Decimal              @default(0) @db.Decimal(12, 2)
   promotionOrderId             String?
@@ -1051,7 +1051,7 @@ model Sale {
   receipt    Receipt?
   printJobs  PrintJob[]
   returns    Return[]
-  /// D107 — exchanges taken against this sale, and exchanges that issued it.
+  /// D128 — exchanges taken against this sale, and exchanges that issued it.
   /// Two relations to the same model, so both are named.
   exchangesAgainst   Exchange[] @relation("ExchangeOriginalSale")
   exchangesIssuing   Exchange[] @relation("ExchangeReplacementSale")
@@ -1086,14 +1086,14 @@ model SaleItem {
   /// snapshot pattern already used on ReturnItem for products.
   variantSkuSnapshot  String?
   variantNameSnapshot String?
-  /// D113d (`6.5`) — the unit this line was SOLD in: "kg", "L".
+  /// D134d (`6.5`) — the unit this line was SOLD in: "kg", "L".
   ///
   /// Frozen at sale time like every other thing a document prints (D44). A
   /// shop that reprices saffron from grams to kilograms must not have its old
   /// receipts reprint 0.750 kg where the customer bought 0.750 g.
   ///
   /// NULL means no unit was recorded — a WHOLE line, or a line written before
-  /// this column existed. Same contract as `taxRatePercent` (D101).
+  /// this column existed. Same contract as `taxRatePercent` (D122).
   unitOfMeasureSnapshot String?
   unitPrice           Decimal            @db.Decimal(12, 2)
   quantity            Decimal            @db.Decimal(12, 3)
@@ -1119,7 +1119,7 @@ model SaleItem {
   discountReason      String?
   approvedByUserId    String?
   taxAmount           Decimal            @default(0) @db.Decimal(12, 2)
-  /// D101 (3.8) — the tax rate applied to THIS line, frozen at sale time.
+  /// D122 (3.8) — the tax rate applied to THIS line, frozen at sale time.
   ///
   /// NULL for every line sold before per-line tax existed, and for a line sold
   /// under no tax configuration. Deliberately distinct from `0.00`, which means
@@ -1135,12 +1135,12 @@ model SaleItem {
   /// Frozen, not joined (D44): a rate change next year must not rewrite last
   /// year's receipt — or last year's refund.
   taxRatePercent      Decimal?           @db.Decimal(5, 2)
-  /// D102 (4.1) — the promotion that reduced this line, if any.
+  /// D123 (4.1) — the promotion that reduced this line, if any.
   ///
   /// `promotionDiscountAmount` is a MIRROR, not the authority: `lineTotal` is
   /// already net of it, and `lineTotal` is what tax (`taxableBase`) and returns
   /// read. The column exists so a promotion is separately reportable without a
-  /// second source of truth — the relationship D100 records for
+  /// second source of truth — the relationship D121 records for
   /// `Product.quantityOnHand`.
   ///
   /// At most ONE of `discountAmount` and `promotionDiscountAmount` is non-zero on
@@ -1257,7 +1257,7 @@ model Receipt {
 model PrintJob {
   id              String         @id @default(cuid())
   tenantId        String
-  /// D106 — nullable since Phase 5. Every receipt, picking slip and return
+  /// D127 — nullable since Phase 5. Every receipt, picking slip and return
   /// document belongs to a sale and still carries one; a PRODUCT_LABEL sheet is
   /// printed from the catalogue and belongs to none. Widened rather than given
   /// a second table, because the queue, the agent polling, the status lifecycle
@@ -1462,7 +1462,7 @@ model Return {
   subtotal                  Decimal                       @default(0) @db.Decimal(12, 2)
   productDiscountAdjustment Decimal                       @default(0) @db.Decimal(12, 2)
   orderDiscountAdjustment   Decimal                       @default(0) @db.Decimal(12, 2)
-  /// D105 — the returned share of a cart-level promotion, allocated exactly as
+  /// D126 — the returned share of a cart-level promotion, allocated exactly as
   /// `orderDiscountAdjustment` is. Separate from it so a refund can still say
   /// which part was the cashier's decision and which the promotion's.
   promotionOrderDiscountAdjustment Decimal                  @default(0) @db.Decimal(12, 2)
@@ -1493,7 +1493,7 @@ model Return {
   refundPayments RefundPayment[]
   printJobs      PrintJob[]
 
-  /// D107 — the exchange this return is the returning leg of, if any.
+  /// D128 — the exchange this return is the returning leg of, if any.
   exchange Exchange?
 
   @@unique([tenantId, returnNumber])
@@ -1508,7 +1508,7 @@ model Return {
   @@index([createdAt])
 }
 
-/// D107 — an exchange is a LINK between a return and a sale, not a third money
+/// D128 — an exchange is a LINK between a return and a sale, not a third money
 /// path.
 ///
 ///     1. Return the Medium   -> refundMethod = STORE_CREDIT, value R
@@ -1517,7 +1517,7 @@ model Return {
 ///
 /// `ExchangeService` orchestrates and records. It computes no prices, moves no
 /// stock, touches no tax and writes no payment of its own — every one of those
-/// rules is already correct in the Return and Sale paths (D102, 3.11, 1a.20,
+/// rules is already correct in the Return and Sale paths (D123, 3.11, 1a.20,
 /// 1c.6), and a second copy is where they drift.
 ///
 /// Composed rather than atomic: `ReturnsRepository` and `SalesRepository` each
@@ -1536,7 +1536,7 @@ model Exchange {
   /// The replacement leg. NULLABLE, deliberately — the return commits first, so
   /// there is a real interval where an exchange has no replacement yet. A
   /// required column would make the row unwritable until both legs succeeded,
-  /// which destroys the recoverable state D107 chose: if the sale fails, the
+  /// which destroys the recoverable state D128 chose: if the sale fails, the
   /// customer holds store credit worth what they handed back and the operator
   /// retries. Unresolved is its own state (D28/D31).
   ///
@@ -1588,7 +1588,7 @@ model ReturnItem {
   /// keeps the exact variant identity even after a rename.
   variantSkuSnapshot         String?
   variantNameSnapshot        String?
-  /// D113d (`6.5`) — the unit the ORIGINAL line was sold in. A credit note is
+  /// D134d (`6.5`) — the unit the ORIGINAL line was sold in. A credit note is
   /// a document as much as a receipt is, and 3.8 added `taxRatePercent` to
   /// both tables for the same reason.
   unitOfMeasureSnapshot      String?
@@ -1604,11 +1604,11 @@ model ReturnItem {
   originalLineSubtotal       Decimal          @db.Decimal(12, 2)
   productDiscountAdjustment  Decimal          @default(0) @db.Decimal(12, 2)
   orderDiscountAdjustment    Decimal          @default(0) @db.Decimal(12, 2)
-  /// D105 — this line's share of a CART-LEVEL promotion, reversed. Stored per
-  /// item for the same reason D102 stores `promotionDiscountAdjustment` here:
+  /// D126 — this line's share of a CART-LEVEL promotion, reversed. Stored per
+  /// item for the same reason D123 stores `promotionDiscountAdjustment` here:
   /// a credit note has to be self-contained.
   promotionOrderDiscountAdjustment Decimal     @default(0) @db.Decimal(12, 2)
-  /// D102 (4.1) — the promotion reversed on this return line.
+  /// D123 (4.1) — the promotion reversed on this return line.
   ///
   /// A THIRD adjustment beside the two above, and deliberately of the LINE-level
   /// shape: `promotionDiscountAmount × frac`, like the product discount and
@@ -1617,7 +1617,7 @@ model ReturnItem {
   /// refund money on an item the customer got for nothing.
   promotionDiscountAdjustment Decimal         @default(0) @db.Decimal(12, 2)
   taxAdjustment              Decimal          @default(0) @db.Decimal(12, 2)
-  /// D101 (3.8) — the rate that was REVERSED, copied from the original SaleItem.
+  /// D122 (3.8) — the rate that was REVERSED, copied from the original SaleItem.
   ///
   /// Copied, never re-resolved: 1a.20 established that a return reads the sale's
   /// historical record rather than asking the client or the current config, so a
@@ -3450,7 +3450,7 @@ model WebhookDeliveryLog {
 //   • Selling price is never touched by a receipt (D44). Cost changes are
 //     surfaced to the operator, who explicitly decides whether to reprice.
 
-/// D104 / D104a — the TENANT-level option library.
+/// D125 / D125a — the TENANT-level option library.
 ///
 /// `ProductVariationDimension` below is keyed `@@unique([productId, name])`, so
 /// a dimension belongs to exactly ONE product. Measured against the pilot
@@ -3473,7 +3473,7 @@ model AttributeDefinition {
   name     String
   position Int    @default(0)
 
-  /// D104a — a BINDING HINT, not part of this definition's identity.
+  /// D125a — a BINDING HINT, not part of this definition's identity.
   /// "Bind scales to categories" (04-format-packs §3) so Footwear offers 24-46
   /// while Apparel offers XS-XXXL. Nullable: an unbound definition (`Colour`)
   /// applies everywhere. Deliberately absent from the unique key — see below.
@@ -3512,7 +3512,7 @@ model AttributeOption {
   name     String
   position Int    @default(0)
 
-  /// D104a — the colour picker's swatch (04-format-packs §3). `#RRGGBB`,
+  /// D125a — the colour picker's swatch (04-format-packs §3). `#RRGGBB`,
   /// validated at the DTO. Nullable: only a colour scale has one, and a colour
   /// with no swatch yet is still a usable option.
   swatchHex String?
@@ -3543,7 +3543,7 @@ model ProductVariationDimension {
   name     String
   position Int    @default(0)
 
-  /// D104 — optional link into the tenant option library. Nullable forever:
+  /// D125 — optional link into the tenant option library. Nullable forever:
   /// "this dimension has not been mapped yet" is a state the system must be
   /// able to hold, not an error to default away. SET NULL on delete, so
   /// retiring a library definition never destroys a product's own dimension.
@@ -3574,7 +3574,7 @@ model ProductVariationOption {
   name     String
   position Int    @default(0)
 
-  /// D104 — optional link into the tenant option library, same contract as
+  /// D125 — optional link into the tenant option library, same contract as
   /// `ProductVariationDimension.attributeDefinitionId` above.
   attributeOptionId String?
 
@@ -3593,19 +3593,19 @@ model ProductVariationOption {
   @@index([attributeOptionId])
 }
 
-/// D113 (`6.1`) — how a product is measured when it is sold.
+/// D134 (`6.1`) — how a product is measured when it is sold.
 ///
 /// The variant answers "which one"; this answers "how much". They are
 /// orthogonal: rice has colour and type variants AND is sold by weight.
 enum QuantityType {
-  /// Sold by the piece. Every product that existed before D113.
+  /// Sold by the piece. Every product that existed before D134.
   WHOLE
   /// Sold by weight or measure. The till asks the cashier for the amount,
   /// read off an ordinary offline scale — there is no device integration.
   DECIMAL
 }
 
-/// D104 Part 3 (`5.6`) — where a variant's barcode came from.
+/// D125 Part 3 (`5.6`) — where a variant's barcode came from.
 ///
 /// Provenance, not a second column. A variant carries ONE barcode; this answers
 /// the only question the system actually asks of it: "may I regenerate this?"
@@ -3634,7 +3634,7 @@ model ProductVariant {
   productId    String
   sku          String
   barcode      String?
-  /// D104 Part 3 — see `BarcodeSource`. NULL until something can prove it.
+  /// D125 Part 3 — see `BarcodeSource`. NULL until something can prove it.
   barcodeSource BarcodeSource?
   unitPrice    Decimal  @default(0) @db.Decimal(12, 2)
   /// Latest purchase cost captured on the most recent receipt (mirror of the
@@ -3675,7 +3675,7 @@ model ProductVariant {
   catalogueEntries     CatalogueEntry[]
 
   @@unique([tenantId, sku])
-  // D104 Part 3 asked for `@@unique([tenantId, barcode])`. It is NOT declared
+  // D125 Part 3 asked for `@@unique([tenantId, barcode])`. It is NOT declared
   // here, because the constraint has existed since D44: the
   // add_product_variants migration creates
   //
@@ -3776,7 +3776,7 @@ model InventoryReceiptLine {
   @@index([productId, productVariantId, createdAt])
 }
 
-/// D111 (`8.7`) — one stock count, on one branch, at one moment.
+/// D132 (`8.7`) — one stock count, on one branch, at one moment.
 ///
 /// Immutable once written, like `InventoryReceipt`: a count is something that
 /// HAPPENED. There is deliberately no `status` column — a counting session that
@@ -3828,7 +3828,7 @@ model StockTakeLine {
   variance         Decimal @db.Decimal(12, 3)
 
   /// The unit cost the variance was valued at, and its value. Both NULL when
-  /// nothing has ever been received — unknown, never zero (D110).
+  /// nothing has ever been received — unknown, never zero (D131).
   unitCost      Decimal? @db.Decimal(12, 4)
   varianceValue Decimal? @db.Decimal(12, 2)
 
@@ -3846,7 +3846,7 @@ model StockTakeLine {
   @@index([productVariantId])
 }
 
-/// D112 (`8.9`) — a brand a tenant stocks.
+/// D133 (`8.9`) — a brand a tenant stocks.
 ///
 /// Per TENANT, not per domain: brands are data a shop owns, and an enum in the
 /// domain's attribute schema would make every shop share one list and every new
@@ -3940,13 +3940,13 @@ model Promotion {
   percentageOff Decimal? @db.Decimal(5, 2)
   /// FIXED_AMOUNT_DISCOUNT — money-off.
   amountOff     Decimal? @db.Decimal(12, 2)
-  /// D105 — FIXED_AMOUNT_DISCOUNT only. The eligible cart amount the basket
+  /// D126 — FIXED_AMOUNT_DISCOUNT only. The eligible cart amount the basket
   /// must reach before the discount applies. NULL = no threshold, which is
-  /// every row that existed before D105, so the backfill is "do nothing".
+  /// every row that existed before D126, so the backfill is "do nothing".
   ///
   /// Measured against the amount the discount would reduce: line subtotals
   /// less any line-level promotion, over lines that carry no MANUAL discount
-  /// (D102 makes a manually discounted line invisible to promotions, and a
+  /// (D123 makes a manually discounted line invisible to promotions, and a
   /// threshold that counted it would be counting money no promotion may touch).
   minimumSpend  Decimal? @db.Decimal(12, 2)
   /// BUY_X_GET_Y — how many of the BUY item(s) must be in the cart.

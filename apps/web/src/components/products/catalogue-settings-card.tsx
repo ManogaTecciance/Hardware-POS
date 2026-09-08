@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * D104 Part 3 (`5.4`) and Phase 5 `5.8` — the barcode prefix and label geometry.
+ * D125 Part 3 (`5.4`) and Phase 5 `5.8` — the barcode prefix and label geometry.
  *
  * ## Why this lives here and not on the Settings page
  *
@@ -14,7 +14,7 @@
  *
  * ## The sequencing constraint, said out loud
  *
- * D104 adopts as binding that the prefix is configured BEFORE any allocation,
+ * D125 adopts as binding that the prefix is configured BEFORE any allocation,
  * or the tenant reprints every label. The form says so, because a warning after
  * the fact is worth nothing.
  */

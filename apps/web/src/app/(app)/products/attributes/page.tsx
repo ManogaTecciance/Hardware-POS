@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * D104 / D104a — the tenant option library (Phase 5, `5.1` / `5.2`).
+ * D125 / D125a — the tenant option library (Phase 5, `5.1` / `5.2`).
  *
- * This screen exists because D104 decided the migration of existing per-product
+ * This screen exists because D125 decided the migration of existing per-product
  * dimensions is a UI task, not a SQL backfill: whether `Colour` or `Color` wins
  * is a judgement nobody should make in a migration script, and eleven dimension
  * rows across two tenants is small enough for an operator to map by hand.

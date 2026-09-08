@@ -1,5 +1,5 @@
 /**
- * D104 — option-code resolution (`5.2`) and SKU composition (`5.3`).
+ * D125 — option-code resolution (`5.2`) and SKU composition (`5.3`).
  *
  * Both are pure, so they are exhaustively testable without a database. The
  * allocation half — `DocumentSequence`, collision retry, gaps — is a
@@ -47,7 +47,7 @@ describe('resolveOptionCode', () => {
 
   it('is why the library exists: two spellings, one segment', () => {
     // `Colour :: Black` and `Color :: Black`, both mapped to the same library
-    // option. This equality is the entire argument for D104.
+    // option. This equality is the entire argument for D125.
     const colour = resolveOptionCode({ name: 'Black', libraryCode: 'BLK' });
     const color = resolveOptionCode({ name: 'Black ', libraryCode: 'BLK' });
     expect(colour!.code).toBe(color!.code);

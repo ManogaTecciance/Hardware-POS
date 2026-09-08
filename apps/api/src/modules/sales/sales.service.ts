@@ -59,7 +59,7 @@ function requireProductId(productId: string | null, saleItemId: string): string 
 }
 
 /**
- * D102 (4.4) — the Decimal → number boundary for promotions, in one place.
+ * D123 (4.4) — the Decimal → number boundary for promotions, in one place.
  *
  * `shared` carries no runtime dependency on Prisma, so the applier works in
  * plain numbers with cent rounding. `catalog.ts` performs the mirror-image
@@ -74,7 +74,7 @@ function toPromotionRule(p: PromotionWithItems): PromotionRule {
     fixedPrice: p.fixedPrice === null ? null : Number(p.fixedPrice),
     percentageOff: p.percentageOff === null ? null : Number(p.percentageOff),
     amountOff: p.amountOff === null ? null : Number(p.amountOff),
-    // D105 — the cart threshold. Null on every rule written before D105, which
+    // D126 — the cart threshold. Null on every rule written before D126, which
     // the applier reads as "no threshold".
     minimumSpend: p.minimumSpend === null ? null : Number(p.minimumSpend),
     buyQuantity: p.buyQuantity,
@@ -206,7 +206,7 @@ export class SalesService {
         // lines were written by this module with a product, so a null here is
         // corruption, not a state — fail the completion rather than sell air.
         productId: requireProductId(it.productId, it.id),
-        // D99 — a draft line already carries the variant chosen when the draft was
+        // D120 — a draft line already carries the variant chosen when the draft was
         // built; completing it must sell the same one, not fall back to product level.
         productVariantId: it.productVariantId,
         quantity: Number(it.quantity),
@@ -410,7 +410,7 @@ export class SalesService {
     const products = await this.salesRepository.findProductsByIds(tenantId, ids);
     const byId = new Map(products.map((p) => [p.id, p]));
 
-    // D99 — resolve every named variant in one read, mirroring the product fetch
+    // D120 — resolve every named variant in one read, mirroring the product fetch
     // above. A cart that names no variant does no query at all, so the ordinary
     // single-SKU sale costs exactly what it did before.
     const variantIds = [
@@ -431,7 +431,7 @@ export class SalesService {
     // write remains the authority under concurrency.
     const availability = await inventory.getAvailability({ tenantId, branchId }, ids);
 
-    // D99 — the same courtesy, at variant grain. Without it the two checks
+    // D120 — the same courtesy, at variant grain. Without it the two checks
     // disagree: the product total is 10 across four sizes, so the read passes, and
     // then `reduceStock` finds 0 on the Medium's row and refuses with the terser
     // transactional message. Optional on the provider — QuickBooks and DISABLED
@@ -452,7 +452,7 @@ export class SalesService {
         if (!product.isActive) {
           throw new BadRequestException(`Product ${product.name} is inactive`);
         }
-        // D99 — resolve and vet the variant before any money is computed from it.
+        // D120 — resolve and vet the variant before any money is computed from it.
         const variant = item.productVariantId ? (variantById.get(item.productVariantId) ?? null) : null;
         if (item.productVariantId && !variant) {
           // Unknown id and another tenant's id give the same message on purpose:
@@ -488,7 +488,7 @@ export class SalesService {
         const stock = availability.get(product.id);
         if (stock && !stock.isUnlimited && stock.quantityOnHand !== null) {
           if (variant && variantAvailability) {
-            // D99 — a variant line is checked against its own row. Absent means no
+            // D120 — a variant line is checked against its own row. Absent means no
             // row, which is no stock (decision 8), so it reads as zero rather than
             // falling back to the product total: the product may hold plenty across
             // its other sizes while this one has none.
@@ -551,7 +551,7 @@ export class SalesService {
           // not be able to rewrite what this receipt said.
           variantSkuSnapshot: variant?.sku ?? null,
           variantNameSnapshot: variant ? variantDisplayName(variant.optionValues, variant.sku) : null,
-          // D113d — frozen here, so a shop repricing saffron from grams to
+          // D134d — frozen here, so a shop repricing saffron from grams to
           // kilograms cannot make an old receipt reprint 0.750 kg for what
           // was actually 0.750 g.
           unitOfMeasureSnapshot: product.unitOfMeasure ?? null,
@@ -566,11 +566,11 @@ export class SalesService {
           discountReason: item.discountReason ?? null,
           approvedByUserId,
           // Still 0. Splitting the order-level tax across lines is per-line
-          // COMPUTATION, which is parked with grocery (D101). 3.9 records the
+          // COMPUTATION, which is parked with grocery (D122). 3.9 records the
           // rate; it does not change a single figure.
           taxAmount: 0,
           /*
-           * D101 (3.9) — the rate this line was charged at, frozen now.
+           * D122 (3.9) — the rate this line was charged at, frozen now.
            *
            * `taxable` defaults true, so for every existing product this is the
            * tenant rate — exactly what the order-level arithmetic below already
@@ -601,7 +601,7 @@ export class SalesService {
     );
 
     /*
-     * D102 (4.4) — promotions, as a BASKET pass.
+     * D123 (4.4) — promotions, as a BASKET pass.
      *
      * It cannot live in the loop above: a bundle spans lines and a BOGO counts
      * across them. It runs after, and folds its answer back into each line.
@@ -624,11 +624,11 @@ export class SalesService {
         unitPrice: l.unitPrice,
         quantity: l.quantity,
         lineSubtotal: l.lineSubtotal,
-        // Precedence (D102) is enforced inside the applier: a manually
+        // Precedence (D123) is enforced inside the applier: a manually
         // discounted line is invisible to promotions and cannot complete a
         // bundle. Passing it truthfully is this call site's whole obligation.
         manualDiscountAmount: l.discountAmount,
-        // D113a (`6.4`) — a measured line is invisible to the two
+        // D134a (`6.4`) — a measured line is invisible to the two
         // QUANTITY-based promotion kinds. Set on BOTH sides: the till
         // previews with the same flag, or the cashier is shown a discount
         // the server refuses.
@@ -657,7 +657,7 @@ export class SalesService {
       .reduce((acc, l) => acc.plus(l.lineSubtotal), new Prisma.Decimal(0))
       .toNumber();
     /*
-     * D102 (4.4) — every LINE-level reduction, manual and promotional.
+     * D123 (4.4) — every LINE-level reduction, manual and promotional.
      *
      * It has to be both. `discountedSubtotal` is derived from this and must
      * equal Σ lineTotal; if a promotion reduced the lines but not this sum, the
@@ -683,7 +683,7 @@ export class SalesService {
     );
 
     /*
-     * D101 (3.10, extracted to `shared` in 3.14) — `Product.taxable` narrows
+     * D122 (3.10, extracted to `shared` in 3.14) — `Product.taxable` narrows
      * the taxable base.
      *
      * The rule itself lives in `@hardware-pos/shared` because the TILL has to
@@ -709,7 +709,7 @@ export class SalesService {
     // The TOTAL still starts from the full discounted subtotal: an exempt line is
     // untaxed, not unsold.
     /*
-     * D105 — a cart-level promotion, capped so it can never exceed what is left
+     * D126 — a cart-level promotion, capped so it can never exceed what is left
      * to pay after the manual order discount.
      *
      * DELIBERATELY NOT in `taxableBase` above, which is where the MANUAL order
@@ -875,7 +875,7 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
 function toCartItem(dto: SaleItemInputDto): CartItemInput {
   return {
     productId: dto.productId,
-    // D99 — forward the variant. Omitting it here would type-check cleanly and
+    // D120 — forward the variant. Omitting it here would type-check cleanly and
     // silently drop every variant the till sent, since the field is optional on
     // both sides.
     productVariantId: dto.productVariantId ?? null,

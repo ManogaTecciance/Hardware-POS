@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * The weight/measure numpad — D113 (`6.3`).
+ * The weight/measure numpad — D134 (`6.3`).
  *
  * A cashier reads an amount off an ordinary offline scale and types it here.
- * There is no device integration and no scale driver: D113's whole argument is
+ * There is no device integration and no scale driver: D134's whole argument is
  * that the shop already owns a scale and the cashier can already read it, so the
  * system's job is to accept the number rather than to acquire it.
  *
@@ -26,14 +26,14 @@ import { Delete } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 
-/** The most a `Decimal(12,3)` column can hold — grams (D113b §3). */
+/** The most a `Decimal(12,3)` column can hold — grams (D134b §3). */
 const MAX_DECIMALS = 3;
 
 export interface MeasureNumpadProps {
   open: boolean;
   /** "Rice (Red / Samba)" — what is being weighed. */
   label: string;
-  /** "kg". Never blank for a measured product: D113c makes the server refuse one. */
+  /** "kg". Never blank for a measured product: D134c makes the server refuse one. */
   unit: string;
   /**
    * The quantity already on this line, when the cashier is re-entering it.
@@ -67,7 +67,7 @@ export function appendKey(current: string, key: string): string {
   if (current === '0') return key;
   const next = `${current}${key}`;
   const [, fraction] = next.split('.');
-  // D113b §3 — a fourth place is silently truncated by the database, so it is
+  // D134b §3 — a fourth place is silently truncated by the database, so it is
   // refused where the operator can still see it.
   if (fraction !== undefined && fraction.length > MAX_DECIMALS) return current;
   return next;
@@ -97,7 +97,7 @@ export function MeasureNumpad({
 
   const overStock = parsed !== null && max !== undefined && parsed > max;
   // `0` is refused HERE, not only by the server's `@IsPositive()` — the cashier
-  // finds out while they can still fix it (D113).
+  // finds out while they can still fix it (D134).
   const valid = parsed !== null && parsed > 0 && !overStock;
 
   const confirm = () => {
@@ -150,7 +150,7 @@ export function MeasureNumpad({
         </div>
 
         <div className="flex gap-2">
-          {/* Cancel adds NOTHING. A half-added line is worse than no line (D113). */}
+          {/* Cancel adds NOTHING. A half-added line is worse than no line (D134). */}
           <Button variant="outline" className="flex-1" onClick={onCancel}>
             Cancel
           </Button>

@@ -17,7 +17,7 @@ export interface AppSettings {
   sharing: SharingSettings;
 
   /**
-   * D104 Part 3 (`5.4`) and Phase 5 step `5.8` — barcode prefixes and label
+   * D125 Part 3 (`5.4`) and Phase 5 step `5.8` — barcode prefixes and label
    * geometry. Both live in the settings blob rather than columns, so neither
    * needs a migration and the shape can evolve per format pack.
    */
@@ -26,7 +26,7 @@ export interface AppSettings {
 
 /** Quotation defaults. Owner/Admin tune these; the quotation service reads them. */
 /**
- * D104 Part 3 — the barcode prefix map, and Phase 5 `5.8` — label geometry.
+ * D125 Part 3 — the barcode prefix map, and Phase 5 `5.8` — label geometry.
  *
  * ## The sequencing constraint, which is binding
  *

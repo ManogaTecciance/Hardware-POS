@@ -13,7 +13,7 @@ import {
 import { referencesIdentifier, stripComments } from '../providers/testkit/source-analysis';
 
 /**
- * D99 (2.12) — every renderer of a sold line names the variant.
+ * D120 (2.12) — every renderer of a sold line names the variant.
  *
  * ## Why this test exists
  *
@@ -97,7 +97,7 @@ describe('every sale-line renderer uses the shared formatter', () => {
     expect(referencesIdentifier(source, 'saleLineLabel')).toBe(true);
   });
 
-  it.each(SALE_LINE_RENDERERS)('$file also prints the unit (D113d, 6.5)', ({ file }) => {
+  it.each(SALE_LINE_RENDERERS)('$file also prints the unit (D134d, 6.5)', ({ file }) => {
     /*
      * Same enumeration, fourth shared rule. Before `6.5` these four formatted a
      * quantity three different ways — one of them a ternary whose branches were
@@ -132,7 +132,7 @@ describe('every sale-line renderer uses the shared formatter', () => {
     ).toBe(true);
   });
 
-  it.each(SALE_LINE_RENDERERS)('$file also names the promotion (D102, 4.6)', ({ file }) => {
+  it.each(SALE_LINE_RENDERERS)('$file also names the promotion (D123, 4.6)', ({ file }) => {
     /*
      * Same enumeration, third shared rule. A promoted line prints at 0.00, and a
      * zero with no reason beside it reads as a pricing error rather than a gift.
@@ -272,7 +272,7 @@ describe('the formatter itself', () => {
 });
 
 /**
- * D101 (3.12) — a single-rate document renders exactly what it rendered before.
+ * D122 (3.12) — a single-rate document renders exactly what it rendered before.
  *
  * The zero-change guarantee for hardware and restaurant, asserted on the shared
  * allocation itself rather than on four renderers: every one of them takes the
@@ -385,7 +385,7 @@ describe('the breakdown when rates differ', () => {
   });
 });
 
-describe('saleLineQuantity (D113d, 6.5)', () => {
+describe('saleLineQuantity (D134d, 6.5)', () => {
   it('prints the unit beside the amount', () => {
     expect(saleLineQuantity('0.750', 'kg')).toBe('0.75 kg');
   });
@@ -398,7 +398,7 @@ describe('saleLineQuantity (D113d, 6.5)', () => {
 
   it('leaves a line with no unit exactly as it was', () => {
     // The property that keeps every existing document unchanged. A whole
-    // product, and every line written before D113d, has no unit.
+    // product, and every line written before D134d, has no unit.
     expect(saleLineQuantity('3', null)).toBe('3');
     expect(saleLineQuantity('3', undefined)).toBe('3');
     expect(saleLineQuantity('3', '   ')).toBe('3');

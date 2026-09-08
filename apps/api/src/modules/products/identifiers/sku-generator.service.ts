@@ -28,7 +28,7 @@ export interface GeneratedSku {
 const MAX_ATTEMPTS = 3;
 
 /**
- * D104 — generate `<CATEGORY>-<SEQ>[-<OPTION CODE>…]` for a variant.
+ * D125 — generate `<CATEGORY>-<SEQ>[-<OPTION CODE>…]` for a variant.
  *
  * ## Why `DocumentSequence` and not a new table
  *

@@ -1,5 +1,5 @@
 /**
- * Splitting a recorded tax total across the rates that produced it (D101, 3.12).
+ * Splitting a recorded tax total across the rates that produced it (D122, 3.12).
  *
  * ## Why this is allocation and not calculation
  *
@@ -137,7 +137,7 @@ export function taxRateLabel(ratePercent: number): string {
   return `${Number(ratePercent.toFixed(2))}%`;
 }
 
-/** One line's contribution to the order-level taxable base (D101, 3.14). */
+/** One line's contribution to the order-level taxable base (D122, 3.14). */
 export interface TaxBaseLine {
   /** Net of the per-line discount — the sale's `lineTotal`. */
   lineTotal: number;
@@ -146,7 +146,7 @@ export interface TaxBaseLine {
 }
 
 /**
- * The amount an order-level tax rate applies to (D101, 3.10, extracted in 3.14).
+ * The amount an order-level tax rate applies to (D122, 3.10, extracted in 3.14).
  *
  * ## Why this is shared
  *

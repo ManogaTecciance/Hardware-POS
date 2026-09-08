@@ -4,7 +4,7 @@ import type { ClientProduct, ClientVariant } from './catalog';
 import { resolveScan } from './scan-resolver';
 
 /**
- * D99 (1c.5) — a scanned code resolves to a specific variant.
+ * D120 (1c.5) — a scanned code resolves to a specific variant.
  *
  * Two things are being pinned. First the precedence, which is the whole
  * behaviour: variant barcode, then variant SKU, then a legacy product SKU. Second
@@ -41,7 +41,7 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     stockState: 'IN_STOCK',
     imageUrl: null,
     taxable: true,
-    // D113 (`6.2`) — required on `ClientProduct`; see the note in
+    // D134 (`6.2`) — required on `ClientProduct`; see the note in
     // `cart-line-key.test.ts`. This fixture feeds the SCAN path, which `6.3`
     // must intercept for a measured product.
     quantityType: 'WHOLE',

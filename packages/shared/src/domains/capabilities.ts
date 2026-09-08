@@ -52,7 +52,7 @@ export interface TenantCapabilities {
     /** Composed items carry component lists / recipes (Phase 8). */
     readonly components: boolean;
     /**
-     * D113 / D113e — products may be sold by WEIGHT OR MEASURE: the wizard
+     * D134 / D134e — products may be sold by WEIGHT OR MEASURE: the wizard
      * offers “How is this sold?” and the till opens a quantity keypad.
      *
      * **Optional, and absent means `false`.** Every other capability here is

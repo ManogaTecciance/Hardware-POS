@@ -1,5 +1,5 @@
 /**
- * D104 / D104a — the tenant option library, and the links from a product's own
+ * D125 / D125a — the tenant option library, and the links from a product's own
  * dimensions into it (Phase 5, step `5.1`).
  *
  * ## What can only be proven here, not in a unit spec
@@ -8,7 +8,7 @@
  *    one tenant may not own it twice. A mocked repository proves neither.
  *  • `@@unique([definitionId, code])` and `([definitionId, name])`.
  *  • `ON DELETE SET NULL` on the three optional FKs. This is the whole safety
- *    argument of D104 and it lives in the database, not in TypeScript.
+ *    argument of D125 and it lives in the database, not in TypeScript.
  *  • That the delete guard is load-bearing: without it the database would
  *    ACCEPT the delete and silently unmap every product that adopted the scale.
  *  • That an unmapped dimension behaves exactly as it did before this table
@@ -267,7 +267,7 @@ describe('mapping a product dimension to the library', () => {
 
   it('leaves an unmapped dimension working exactly as before — the additive guarantee', async () => {
     // No library involved at all. This is the shape every existing product in
-    // every existing tenant is in, and it must be untouched by D104.
+    // every existing tenant is in, and it must be untouched by D125.
     await variants.replaceVariations(
       shop.tenantId,
       shop.productAId,

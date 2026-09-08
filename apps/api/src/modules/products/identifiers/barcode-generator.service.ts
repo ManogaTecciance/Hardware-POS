@@ -20,11 +20,11 @@ export interface AllocatedBarcode {
 const MAX_ATTEMPTS = 5;
 
 /**
- * D104 Part 3 — allocate in-store EAN-13 barcodes (`5.4`, `5.5`, `5.6`).
+ * D125 Part 3 — allocate in-store EAN-13 barcodes (`5.4`, `5.5`, `5.6`).
  *
  * ## The sequencing constraint is enforced, not documented
  *
- * D104 adopts as binding: the prefix map must be configured BEFORE any
+ * D125 adopts as binding: the prefix map must be configured BEFORE any
  * allocation, or the tenant reprints every label. So allocation REFUSES while
  * `catalogue.barcodePrefix` is null. A default prefix would be the failure the
  * constraint exists to prevent — silently committing a shop to a number nobody

@@ -90,13 +90,13 @@ export interface WizardState {
   description: string;
   trackInventory: boolean;
   /**
-   * D101 (3.13) — whether the product attracts tax. Defaults true, because that
+   * D122 (3.13) — whether the product attracts tax. Defaults true, because that
    * is already true of every product: there is no per-product exemption in any
    * tenant's history.
    */
   taxable: boolean;
   /**
-   * D113 (`6.1`) — sold by the piece, or by weight/measure.
+   * D134 (`6.1`) — sold by the piece, or by weight/measure.
    *
    * Top-level rather than inside `simple`, because it is a fact about the
    * PRODUCT and not about one pricing shape: rice is sold by the kilo
@@ -105,10 +105,10 @@ export interface WizardState {
    */
   quantityType: ClientQuantityType;
   /**
-   * D113b — what the quantity is measured IN: "kg", "g", "L", "m".
+   * D134b — what the quantity is measured IN: "kg", "g", "L", "m".
    *
-   * Free text, deliberately (D113b §1): nothing computes on it, it is
-   * printed. A fixed dropdown was the original Phase 6 scope and D113
+   * Free text, deliberately (D134b §1): nothing computes on it, it is
+   * printed. A fixed dropdown was the original Phase 6 scope and D134
    * reduced it to one field precisely so a shop selling by the cubit is
    * not blocked on us adding a row.
    *
@@ -210,7 +210,7 @@ export function initialState(): WizardState {
     description: '',
     trackInventory: true,
     taxable: true,
-    // WHOLE, like the column default (D113): a new product behaves exactly
+    // WHOLE, like the column default (D134): a new product behaves exactly
     // as products did before this field existed.
     quantityType: 'WHOLE',
     unitOfMeasure: '',
@@ -501,7 +501,7 @@ export function validateStep(
   }
 
   if (step === 'pricing') {
-    // D113c — a measured product MUST name its unit. The server refuses it
+    // D134c — a measured product MUST name its unit. The server refuses it
     // too, and the server is the authority; this is here so the operator
     // finds out beside the field rather than as a toast after Save.
     if (state.quantityType === 'DECIMAL' && !state.unitOfMeasure.trim()) {
@@ -565,7 +565,7 @@ export function validateStep(
 }
 
 /**
- * D113 (`6.1`) — "Selling price", or "Selling price (per kg)".
+ * D134 (`6.1`) — "Selling price", or "Selling price (per kg)".
  *
  * The operator's actual question was "where do I enter a weight price" — so
  * the price field has to SAY it is per kilo, or the number is ambiguous the
@@ -639,11 +639,11 @@ export interface ProductCreatePayload {
   costPrice: number | null;
   reorderLevel: number | null;
   isActive: boolean;
-  /** D101 (3.13) — always sent, so the value the operator saw is what is stored. */
+  /** D122 (3.13) — always sent, so the value the operator saw is what is stored. */
   taxable: boolean;
-  /** D113 (`6.1`) — always sent, for the same reason `taxable` is. */
+  /** D134 (`6.1`) — always sent, for the same reason `taxable` is. */
   quantityType: ClientQuantityType;
-  /** D113b — null when the product is sold by the piece. */
+  /** D134b — null when the product is sold by the piece. */
   unitOfMeasure: string | null;
   imageUrl?: string | null;
   /**

@@ -23,7 +23,7 @@ export interface LabelSheet {
 /**
  * Phase 5 `5.7` + `5.8` — render a sheet of product labels and queue it.
  *
- * ## Why this reuses the print-job queue (D106)
+ * ## Why this reuses the print-job queue (D127)
  *
  * The queue, the agent polling, the `PENDING → PRINTED → FAILED` lifecycle and
  * the retry behaviour already exist and are in production use. A second table
@@ -145,7 +145,7 @@ export class LabelPrintService {
   /**
    * Render and queue.
    *
-   * The job is `PRODUCT_LABEL` with no `saleId` — D106. Refuses when nothing
+   * The job is `PRODUCT_LABEL` with no `saleId` — D127. Refuses when nothing
    * could be drawn, so an operator never sees a queued job that will print a
    * blank page.
    */
@@ -167,7 +167,7 @@ export class LabelPrintService {
     const job = await this.prisma.printJob.create({
       data: {
         tenantId,
-        // D106 — the only job type with no sale behind it.
+        // D127 — the only job type with no sale behind it.
         saleId: null,
         type: PrintJobType.PRODUCT_LABEL,
         html: sheet.html,

@@ -6,7 +6,7 @@ export class SaleItemInputDto {
   productId!: string;
 
   /**
-   * D99 — the exact variant sold, for a product that has variants.
+   * D120 — the exact variant sold, for a product that has variants.
    *
    * Optional because most sellable things do not have one: loose goods, a
    * service, a single-SKU product. `SaleItem.productVariantId` is nullable for

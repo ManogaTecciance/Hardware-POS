@@ -385,7 +385,7 @@ function TaxByRateSection({ session, range }: { session: Session; range: ReportR
  * earning, not the one earning most.
  *
  * Two things are said out loud rather than left for the reader to infer, because
- * both change how much weight the figures can carry (D110): the cost is TODAY'S,
+ * both change how much weight the figures can carry (D131): the cost is TODAY'S,
  * not the cost on the day of the sale; and any row whose cost is unknown is
  * outside the totals rather than counted as pure profit.
  */

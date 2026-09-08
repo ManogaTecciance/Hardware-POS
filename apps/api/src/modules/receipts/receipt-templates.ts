@@ -7,11 +7,11 @@ import { taxRateLabel } from '@hardware-pos/shared';
 
 export interface ReceiptLine {
   name: string;
-  /** D102 (4.6) — "Promotion: <name>", printed under the item. Null when none. */
+  /** D123 (4.6) — "Promotion: <name>", printed under the item. Null when none. */
   promotionNote: string | null;
   sku: string | null;
   /**
-   * D113d (`6.5`) — already FORMATTED by `saleLineQuantity`, so `0.75 kg`
+   * D134d (`6.5`) — already FORMATTED by `saleLineQuantity`, so `0.75 kg`
    * reaches the paper as one string. An 80mm receipt has no Unit column.
    */
   quantity: string;
@@ -30,12 +30,12 @@ export interface CustomerReceiptData {
   items: ReceiptLine[];
   subtotal: number;
   totalDiscount: number;
-  /** D102 (4.6) — the promotional part of `totalDiscount`, printed separately. */
+  /** D123 (4.6) — the promotional part of `totalDiscount`, printed separately. */
   promotionDiscount: number;
   orderDiscount: number;
   taxAmount: number;
   /**
-   * D101 (3.12) — per-rate rows, or empty when the document should print
+   * D122 (3.12) — per-rate rows, or empty when the document should print
    * exactly what it printed before: a single-rate sale, a restaurant Sale (no
    * lines) or a sale predating 3.8.
    */

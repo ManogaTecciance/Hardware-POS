@@ -20,7 +20,7 @@ export class UpdateBrandDto {
 
   /**
    * Archive or restore. There is no delete: removing a brand would silently
-   * unlink every product that used it (D112).
+   * unlink every product that used it (D133).
    */
   @IsOptional()
   @IsBoolean()

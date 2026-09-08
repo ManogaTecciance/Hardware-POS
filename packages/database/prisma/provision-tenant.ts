@@ -168,7 +168,7 @@ async function main(): Promise<void> {
     await syncPermissionCatalogue(tx);
     roleCount = (await seedTenantRoles(tx, t.id, businessType ?? 'HARDWARE')).length;
 
-    // D99 (2.6) — the clothing pack, inside this transaction so a failure leaves
+    // D120 (2.6) — the clothing pack, inside this transaction so a failure leaves
     // no half-seeded tenant.
     //
     // Categories always; sample PRODUCTS only when asked. The reasoning is the

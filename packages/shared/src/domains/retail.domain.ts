@@ -1,8 +1,8 @@
 /**
- * The retail domain — clothing first, grocery behind it (D99).
+ * The retail domain — clothing first, grocery behind it (D120).
  *
  * D57 removed `RETAIL` on the finding that there was no Retail template and the
- * value carried zero rows. D99 supersedes that on its facts: a clothing retailer
+ * value carried zero rows. D120 supersedes that on its facts: a clothing retailer
  * is now in scope. The reasoning was never wrong — re-adding is cheap precisely
  * because the removal was clean.
  *
@@ -24,7 +24,7 @@
  * ## What is deliberately reused
  *
  * `RETAIL_CAPABILITIES`, `RETAIL_NAVIGATION` and `HARDWARE_ROLE_TEMPLATES` are
- * adopted as-is, per D99's "reuse; do not fork". Three things worth knowing:
+ * adopted as-is, per D120's "reuse; do not fork". Three things worth knowing:
  *
  *  1. `RETAIL_CAPABILITIES` already declares `catalogue.variants: true`. **That
  *     is why the whole Phase 1 variant engine works here with no further code** —
@@ -64,15 +64,15 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
     // kind of incidental ordering that looks deliberate until it moves.
     order: 4,
   },
-  // D99 — the defining difference. `LOCAL` means the tenant owns its own stock
+  // D120 — the defining difference. `LOCAL` means the tenant owns its own stock
   // numbers, which is what makes per-variant `BranchInventory` rows authoritative
-  // (D100) rather than a mirror of somebody else's ledger.
+  // (D121) rather than a mirror of somebody else's ledger.
   profile: { inventoryMode: 'LOCAL', accountingProvider: 'NONE' },
-  // RETAIL_MODULES minus QUICKBOOKS, per D99. Filtered rather than re-listed so a
+  // RETAIL_MODULES minus QUICKBOOKS, per D120. Filtered rather than re-listed so a
   // module added to the shared list arrives here too; the exclusion is the only
   // thing this descriptor is asserting.
   /*
-   * D103 — `PROMOTIONS` is declared HERE rather than added to `RETAIL_MODULES`.
+   * D124 — `PROMOTIONS` is declared HERE rather than added to `RETAIL_MODULES`.
    *
    * `HARDWARE` composes its default set from `RETAIL_MODULES` too, and
    * `platform.constants.spec` pins that set as byte-equal to
@@ -92,7 +92,7 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
   navigation: RETAIL_NAVIGATION,
   roleTemplates: HARDWARE_ROLE_TEMPLATES,
   /**
-   * D113e — `RETAIL_CAPABILITIES` verbatim, plus weighed goods.
+   * D134e — `RETAIL_CAPABILITIES` verbatim, plus weighed goods.
    *
    * Spread rather than added to the shared constant, because that constant
    * is the HARDWARE template too. A grocer sells rice by the kilo; a
@@ -134,7 +134,7 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
    * data. Declaring it here now would mean migrating tenants' stored strings
    * into an entity later."
    *
-   * **`8.9` built it (D112)**, and the prediction paid off exactly: because
+   * **`8.9` built it (D133)**, and the prediction paid off exactly: because
    * `brand` was never an attribute, no tenant had a stored string to migrate.
    * It is `Brand` — a per-tenant row — with a nullable `Product.brandId`. It
    * stays out of this list permanently: an attribute is validated and printed,

@@ -48,7 +48,7 @@ describe('shared vocabulary mirrors the persisted enums, both ways', () => {
     // The consolidation is only done when neither side can express the old
     // value — one side alone would reintroduce the drift this spec ends.
     //
-    // `RETAIL` used to be asserted here too. **D99 supersedes D57 on that value
+    // `RETAIL` used to be asserted here too. **D120 supersedes D57 on that value
     // only**: a clothing retailer is now in scope, so the template returned and
     // the value with it. The TILE_SHOP finding is untouched — it was about an
     // entity (the pilot tile shop really is a HARDWARE workspace), not about
@@ -61,7 +61,7 @@ describe('shared vocabulary mirrors the persisted enums, both ways', () => {
     expect(BUSINESS_TYPE_VALUES).toContain('HARDWARE');
   });
 
-  it('D99: RETAIL is back, on BOTH sides and in step', () => {
+  it('D120: RETAIL is back, on BOTH sides and in step', () => {
     // The mirror is hand-maintained, so the two can drift. Asserting both is
     // what makes adding a value to one of them a test failure rather than a
     // runtime surprise — which is how the shared union's omission was caught

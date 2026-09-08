@@ -25,7 +25,7 @@ export class ReissueBarcodesDto {
 }
 
 /**
- * `/barcodes` — D104 Part 3, the audit and reissue pass (`5.9`).
+ * `/barcodes` — D125 Part 3, the audit and reissue pass (`5.9`).
  *
  * Sequenced BEFORE label rendering (`5.7`): an EAN-13 symbol cannot be produced
  * from a payload with a wrong check digit, so 18 of the pilot's 20 codes would

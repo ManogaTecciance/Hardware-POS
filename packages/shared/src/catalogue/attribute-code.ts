@@ -1,5 +1,5 @@
 /**
- * D104 / D104a — the rules for an option library entry's `code` and `swatchHex`.
+ * D125 / D125a — the rules for an option library entry's `code` and `swatchHex`.
  *
  * These live in `@hardware-pos/shared` for one reason: the API validates them at
  * the DTO and the web form previews them live as the operator types. Phase 4

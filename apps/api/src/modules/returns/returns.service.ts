@@ -162,7 +162,7 @@ export class ReturnsService {
   // ── preview ────────────────────────────────────────────────────────────────
 
   /**
-   * D109 — `options` are what the SERVER may set, never the client, exactly
+   * D130 — `options` are what the SERVER may set, never the client, exactly
    * as on `complete` below. A `PreviewReturnDto` field would let any caller
    * of `POST /returns/preview` assert it; only `ExchangesService` can reach
    * this.
@@ -261,7 +261,7 @@ export class ReturnsService {
   // ── complete (create the return atomically) ────────────────────────────────
 
   /**
-   * D109 — options the SERVER may set, never the client.
+   * D130 — options the SERVER may set, never the client.
    *
    * `withinExchange` waives one approval trigger (see `evaluateApproval`).
    * It is a parameter rather than a `CreateReturnDto` field on purpose: a
@@ -292,7 +292,7 @@ export class ReturnsService {
     const computed = this.computeReturn(sale, dto.items);
     const refundTotal = computed.totals.refundTotal;
     /*
-     * D102 (4.5) — NEGATIVE is refused; ZERO is a real return.
+     * D123 (4.5) — NEGATIVE is refused; ZERO is a real return.
      *
      * This guard was `<= 0` when a zero refund could only come from a degenerate
      * input. Promotions made zero legitimate: a customer returning a free
@@ -513,7 +513,7 @@ export class ReturnsService {
     // The recorded sale.taxAmount is the authoritative tax the customer paid; the
     // calc allocates that amount proportionally (it is 0 when tax was disabled).
     /*
-     * D101 (3.11) — the weight that allocates the sale's recorded tax.
+     * D122 (3.11) — the weight that allocates the sale's recorded tax.
      *
      * Σ over EVERY sale line of `lineTaxable × rate`, where `lineTaxable` is the
      * line net less its proportional share of the order discount — the same
@@ -545,7 +545,7 @@ export class ReturnsService {
       subtotal: Number(sale.subtotal),
       totalDiscount: Number(sale.totalDiscount),
       orderDiscountAmount: Number(sale.orderDiscountAmount),
-      // D105 — allocated back by the same weighting as the manual order
+      // D126 — allocated back by the same weighting as the manual order
       // discount. Deliberately NOT added into `taxWeightTotal` above: the sale
       // did not reduce tax for it, so the refund must not either.
       promotionOrderDiscountAmount: Number(sale.promotionOrderDiscountAmount ?? 0),
@@ -605,7 +605,7 @@ export class ReturnsService {
           unitPrice: Number(si.unitPrice),
           purchasedQuantity: purchased,
           discountAmount: Number(si.discountAmount),
-          // D102 (4.5) — reversed line-level, `× frac`, like the product
+          // D123 (4.5) — reversed line-level, `× frac`, like the product
           // discount above and not like the order discount's weighted share.
           // `?? 0` is defence in depth, not a NULL/0 distinction: the column is
           // NOT NULL DEFAULT 0, so absent can only mean zero. Without it a row
@@ -643,7 +643,7 @@ export class ReturnsService {
       persistItems.push({
         originalSaleItemId: si.id,
         productId,
-        // D99 (1a.20) — the variant comes from the SALE, never from the caller.
+        // D120 (1a.20) — the variant comes from the SALE, never from the caller.
         // `ReturnItemInputDto` names a `saleItemId`, so the server already holds
         // the historical record; a client cannot restock a size other than the
         // one that was sold, because it is never asked which.
@@ -654,10 +654,10 @@ export class ReturnsService {
         // rename since must not change what the return says came back.
         variantSkuSnapshot: si.variantSkuSnapshot,
         variantNameSnapshot: si.variantNameSnapshot,
-        // D113d — copied from the sale line, never re-read from the product:
+        // D134d — copied from the sale line, never re-read from the product:
         // a refund must print the unit the customer was charged in.
         unitOfMeasureSnapshot: si.unitOfMeasureSnapshot,
-        // D101 (3.11) — the rate REVERSED, copied from the sale line for the
+        // D122 (3.11) — the rate REVERSED, copied from the sale line for the
         // same reason: a rate change between purchase and return must not alter
         // the refund, and a credit note should be self-contained.
         taxRatePercent: si.taxRatePercent === null ? null : Number(si.taxRatePercent),
@@ -729,7 +729,7 @@ export class ReturnsService {
   /**
    * Which triggers demand manager approval for this return (spec §6).
    *
-   * `withinExchange` (D109) waives EXACTLY ONE of them — `Full-sale return`.
+   * `withinExchange` (D130) waives EXACTLY ONE of them — `Full-sale return`.
    * Every other trigger still applies: damaged goods, outside the return
    * period, a cashier over their limit, a credit customer, a refund method
    * the sale was not paid with. Those are about the goods and the money, and
@@ -767,7 +767,7 @@ export class ReturnsService {
     if (refundMethod === 'CASH' && !originalMethods.has('CASH')) {
       reasons.push('Cash refund requested for a non-cash sale');
     }
-    // D109 — a full-sale return is a manager's business because the customer
+    // D130 — a full-sale return is a manager's business because the customer
     // walks out with the whole sale refunded. In an exchange they walk out
     // with replacement goods instead, and the money largely nets at the
     // drawer. A one-shirt size swap returns the whole sale by definition, so
@@ -974,7 +974,7 @@ function eligibleRestockLines(items: PersistReturnItem[]): StockLine[] {
     .filter((it) => it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK')
     .map((it) => ({
       productId: it.productId,
-      // D99 (1a.20) — threaded now that 1c.7 lets a sale record a variant.
+      // D120 (1a.20) — threaded now that 1c.7 lets a sale record a variant.
       // Hardcoding null here meant a returned Medium credited the customer,
       // bumped the product total, and never went back on the shelf: the variant
       // row stayed down and the D10 mirror drifted up with every return.

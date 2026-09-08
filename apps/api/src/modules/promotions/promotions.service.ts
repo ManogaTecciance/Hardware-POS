@@ -60,7 +60,7 @@ export interface PromotionView {
   fixedPrice: string | null;
   percentageOff: string | null;
   amountOff: string | null;
-  /** D105 — the cart threshold; null when there is none. */
+  /** D126 — the cart threshold; null when there is none. */
   minimumSpend: string | null;
   buyQuantity: number | null;
   getQuantity: number | null;
@@ -341,7 +341,7 @@ export class PromotionsService {
     }
 
     /*
-     * D105 — a threshold only means something for money-off. Silently ignoring
+     * D126 — a threshold only means something for money-off. Silently ignoring
      * it on a bundle would let an operator save "bundle, minimum spend 10,000"
      * and watch it fire below the threshold with no explanation.
      */
@@ -413,7 +413,7 @@ export class PromotionsService {
           );
         }
         /*
-         * D105 — two legal shapes, told apart by whether products are named:
+         * D126 — two legal shapes, told apart by whether products are named:
          *
          *   items empty      -> CART-LEVEL: money off the whole order.
          *   one or more BUY  -> product-scoped, exactly as before.

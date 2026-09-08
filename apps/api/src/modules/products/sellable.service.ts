@@ -59,7 +59,7 @@ export interface SellableItem {
   id: string;
   name: string;
   /**
-   * D99 — the legacy single-SKU identifier, for scanning and typed search.
+   * D120 — the legacy single-SKU identifier, for scanning and typed search.
    *
    * **Null for a variant product.** D44 is explicit that once `hasVariants` is
    * set "the variant rows own price, cost, SKU, barcode… the parent-level
@@ -79,7 +79,7 @@ export interface SellableItem {
   subcategory: { id: string; name: string } | null;
   hasVariants: boolean;
   /**
-   * D101 (3.14) — whether this product attracts tax.
+   * D122 (3.14) — whether this product attracts tax.
    *
    * The till needs it to preview the same total the server will charge. 3.10
    * narrowed the taxable base on the server only, so a cashier was quoted 18%
@@ -87,20 +87,20 @@ export interface SellableItem {
    */
   taxable: boolean;
   /**
-   * D113 (`6.2`) — sold by the piece, or by weight/measure.
+   * D134 (`6.2`) — sold by the piece, or by weight/measure.
    *
    * The till cannot intercept what it cannot see: without this on the read
    * model there is no way for the cart to know a numpad is needed. **Read,
    * never inferred** — no component may guess "this looks like rice" (D56).
    */
   quantityType: QuantityType;
-  /** D113b — `"kg"`, `"L"`. Null for a WHOLE product, which has no unit. */
+  /** D134b — `"kg"`, `"L"`. Null for a WHOLE product, which has no unit. */
   unitOfMeasure: string | null;
   variants?: {
     id: string;
     sku: string;
     /**
-     * D99 — the scannable code. Only `ProductVariant` has one; `Product` has no
+     * D120 — the scannable code. Only `ProductVariant` has one; `Product` has no
      * barcode column at all, which is why scanning is inherently a variant-level
      * operation in this data model.
      */
@@ -110,7 +110,7 @@ export interface SellableItem {
     isDefault: boolean;
     isActive: boolean;
     /**
-     * D99 — this variant's own branch stock, so the till can grey out a size and
+     * D120 — this variant's own branch stock, so the till can grey out a size and
      * cap its stepper. `null` when the tenant does not track stock; `"0.000"`
      * when the variant has no `BranchInventory` row, which is no stock rather
      * than unknown (decision 8).
@@ -141,7 +141,7 @@ export interface SellableItem {
 }
 
 /**
- * D102 (4.3) — a promotion in the shape the APPLIER needs, not the badge.
+ * D123 (4.3) — a promotion in the shape the APPLIER needs, not the badge.
  *
  * `SellableItem.promotions` above carries `{ id, name, type, description }`: enough
  * to show "Buy 2 Get 1" on a tile, and nothing to price it with. The till could
@@ -164,7 +164,7 @@ export interface SellablePromotionRule {
   fixedPrice: string | null;
   percentageOff: string | null;
   amountOff: string | null;
-  /** D105 — the cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT. */
+  /** D126 — the cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT. */
   minimumSpend: string | null;
   buyQuantity: number | null;
   getQuantity: number | null;
@@ -344,7 +344,7 @@ export class SellableService {
       this.promotions.listForCatalogue(tenantId),
     ]);
 
-    // D99 — one read for every variant on the page, so the till can badge each
+    // D120 — one read for every variant on the page, so the till can badge each
     // size. Keyed by variant; a variant with no row is simply absent, and reads
     // below as zero (decision 8: variant stock comes from goods receipts).
     const variantIds = rows.flatMap((p) => p.variants.map((v) => v.id));
@@ -391,7 +391,7 @@ export class SellableService {
           fixedPrice: promo.fixedPrice?.toString() ?? null,
           percentageOff: promo.percentageOff?.toString() ?? null,
           amountOff: promo.amountOff?.toString() ?? null,
-          // D105 — a cart-level promotion carries no PromotionItem rows, and
+          // D126 — a cart-level promotion carries no PromotionItem rows, and
           // reaches the till anyway because these rules are built from the
           // tenant's active promotions rather than from the promotions hanging
           // off each product.
@@ -514,7 +514,7 @@ export class SellableService {
           item.availableQuantity = null;
           item.stockState = 'UNTRACKED';
         } else if (p.hasVariants && p.variants.length > 0) {
-          // D99 (1c.6) — stock is tracked by variant, not by product. The
+          // D120 (1c.6) — stock is tracked by variant, not by product. The
           // parent's `quantityOnHand` is the D10 rollup mirror; it is maintained
           // on sale and receipt but it is not the authority, and it had drifted
           // to 350 against 22 real units on the shelf. Derive from the rows that

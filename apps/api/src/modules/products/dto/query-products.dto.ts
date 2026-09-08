@@ -19,7 +19,7 @@ export class QueryProductsDto extends PaginationQueryDto {
   @IsOptional()
   subcategoryId?: string;
 
-  /** D112 (`8.9`) — "show me everything by this label". */
+  /** D133 (`8.9`) — "show me everything by this label". */
   @IsString()
   @IsOptional()
   brandId?: string;

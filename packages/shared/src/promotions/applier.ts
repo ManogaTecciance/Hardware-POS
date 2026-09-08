@@ -1,5 +1,5 @@
 /**
- * The promotion applier (D102, 4.2) — the one place a promotion becomes money.
+ * The promotion applier (D123, 4.2) — the one place a promotion becomes money.
  *
  * ## Why this lives in `shared`
  *
@@ -19,7 +19,7 @@
  * the result for persistence; both sides run this arithmetic and agree by
  * construction.
  *
- * ## The rule this encodes (D102)
+ * ## The rule this encodes (D123)
  *
  * A promotion reduces the LINE it applies to, computed once at sale time and
  * frozen. It is never re-derived at return time.
@@ -56,13 +56,13 @@ export interface PromotionCartLine {
   lineSubtotal: number;
   /**
    * A manual discount already on this line. Non-zero means the line is INVISIBLE
-   * to promotions (D102): a cashier discounting is acting deliberately, usually
+   * to promotions (D123): a cashier discounting is acting deliberately, usually
    * under an approval limit, and an automatic promotion stacking on top would
    * push the total past a figure nobody approved.
    */
   manualDiscountAmount: number;
   /**
-   * D113a (`6.4`) — this line is sold by weight or measure.
+   * D134a (`6.4`) — this line is sold by weight or measure.
    *
    * `true` makes the line invisible to the two QUANTITY-based promotion kinds
    * and to those only: "buy 2 get 1 free" on 0.75 kg of rice has no meaning a
@@ -105,7 +105,7 @@ export interface PromotionRule {
    */
   stackable: boolean;
   /**
-   * D105 — FIXED_AMOUNT_DISCOUNT only. The eligible cart amount the basket must
+   * D126 — FIXED_AMOUNT_DISCOUNT only. The eligible cart amount the basket must
    * reach before this applies. Null means no threshold.
    *
    * REQUIRED, not optional, and that is the whole point. It shipped optional for
@@ -121,7 +121,7 @@ export interface PromotionRule {
    */
   minimumSpend: number | null;
   /**
-   * D105 — EMPTY on a FIXED_AMOUNT_DISCOUNT means the promotion is CART-LEVEL:
+   * D126 — EMPTY on a FIXED_AMOUNT_DISCOUNT means the promotion is CART-LEVEL:
    * it names no products and discounts the order rather than any line. Every
    * other type, and a FIXED_AMOUNT_DISCOUNT that does name products, stays
    * line-level and unchanged.
@@ -160,7 +160,7 @@ export interface PromotionResult {
   /**
    * Σ of the LINE discounts. A convenience mirror, never a second source.
    *
-   * D105: this deliberately does NOT include `orderPromotion`. The invariant
+   * D126: this deliberately does NOT include `orderPromotion`. The invariant
    * `discountedSubtotal === Σ lineTotal` is asserted on both the till and the
    * server, and folding an order-level figure into it would break that on both
    * sides at once. A cart-level discount is added where the manual order
@@ -168,7 +168,7 @@ export interface PromotionResult {
    */
   totalDiscount: number;
   /**
-   * D105 — the single cart-level promotion that applied, or null.
+   * D126 — the single cart-level promotion that applied, or null.
    *
    * At most one: `Sale` carries one set of order-promotion columns, so the
    * applier picks the best eligible candidate rather than summing several.
@@ -176,7 +176,7 @@ export interface PromotionResult {
   orderPromotion: OrderPromotionResult | null;
 }
 
-/** D105 — a promotion that reduced the ORDER, not a line. */
+/** D126 — a promotion that reduced the ORDER, not a line. */
 export interface OrderPromotionResult {
   promotionId: string;
   promotionName: string;
@@ -473,7 +473,7 @@ export interface RewardEntitlement {
  */
 export function rewardEntitlements(context: PromotionContext): RewardEntitlement[] {
   /*
-   * D113a (`6.4`) — measured lines are excluded here too, and they have to be.
+   * D134a (`6.4`) — measured lines are excluded here too, and they have to be.
    *
    * This function drives `outstandingRewards`, which gates `canPay` (4.14). It
    * runs BUY_X_GET_Y logic, so if a measured line could earn an entitlement here
@@ -546,7 +546,7 @@ function applyBuyXGetY(lines: readonly PromotionCartLine[], rule: PromotionRule)
 }
 
 /**
- * D113a (`6.4`) — the lines a QUANTITY-based promotion may consider.
+ * D134a (`6.4`) — the lines a QUANTITY-based promotion may consider.
  *
  * A measured line is removed; everything else passes through. Kept as its own
  * function so the two call sites below cannot drift, and so what it does is
@@ -558,12 +558,12 @@ function countableLines(lines: readonly PromotionCartLine[]): readonly Promotion
 
 function claimsFor(lines: readonly PromotionCartLine[], rule: PromotionRule): Claim[] {
   switch (rule.type) {
-    // D113a — value-based, so a measured line is eligible like any other.
+    // D134a — value-based, so a measured line is eligible like any other.
     case 'PERCENTAGE_DISCOUNT':
       return applyPercentage(lines, rule);
     case 'FIXED_AMOUNT_DISCOUNT':
       return applyFixedAmount(lines, rule);
-    // D113a — quantity-based, so a measured line is not. "Buy 2 get 1 free" on
+    // D134a — quantity-based, so a measured line is not. "Buy 2 get 1 free" on
     // 0.75 kg is undefined; these two never see it.
     case 'BUNDLE_FIXED_PRICE':
       return applyBundle(countableLines(lines), rule);
@@ -618,7 +618,7 @@ export function applyPromotions(context: PromotionContext): PromotionResult {
   const eligibleLines = context.lines.filter((l) => l.manualDiscountAmount <= 0);
 
   const candidates = context.promotions
-    // D105 — cart-level rules discount the order, not a line. They are resolved
+    // D126 — cart-level rules discount the order, not a line. They are resolved
     // in a second pass below, against what the line pass leaves behind.
     .filter((rule) => !isCartLevel(rule))
     .map((rule) => {
@@ -698,7 +698,7 @@ export function applyPromotions(context: PromotionContext): PromotionResult {
 }
 
 /**
- * D105 — the one cart-level promotion that applies, if any.
+ * D126 — the one cart-level promotion that applies, if any.
  *
  * Runs AFTER the line pass, which is what makes the threshold well-defined: it
  * is measured against the money this discount would actually reduce, so the line
@@ -724,7 +724,7 @@ function resolveOrderPromotion(
   /*
    * The eligible net amount: what the line promotions left, over lines a
    * promotion is allowed to touch at all. `eligibleLines` already excludes
-   * manually discounted lines (D102), so a threshold can never be cleared by
+   * manually discounted lines (D123), so a threshold can never be cleared by
    * money no promotion may reduce.
    */
   const claimedByLine = new Map<string, number>();
@@ -786,7 +786,7 @@ export interface DiscountSplit {
 
 /**
  * Split a sale's `totalDiscount` into what a cashier gave and what a promotion
- * did (D102, 4.6).
+ * did (D123, 4.6).
  *
  * 4.4 folded promotions into `totalDiscount` because the maths requires it —
  * `discountedSubtotal` derives from that figure and must equal Σ `lineTotal`.

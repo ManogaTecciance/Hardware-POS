@@ -1,5 +1,5 @@
 /**
- * D104 — resolving the code a product's variation option contributes to a SKU
+ * D125 — resolving the code a product's variation option contributes to a SKU
  * (Phase 5, step `5.2`).
  *
  * Two sources, and the difference between them is the whole point of the
@@ -15,7 +15,7 @@
  *             the segment changes, and two products spelling the same concept
  *             differently produce different segments.
  *
- * The fallback exists because the library is optional (D104 — the links are
+ * The fallback exists because the library is optional (D125 — the links are
  * nullable and stay that way). A product that never adopts it must still be
  * able to generate a SKU. But the caller is told which source it got, so a
  * screen can say "this segment will change if you rename the option" rather

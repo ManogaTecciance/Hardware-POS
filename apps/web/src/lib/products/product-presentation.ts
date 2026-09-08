@@ -71,7 +71,7 @@ export function resolveBusinessKind(businessType: BusinessType | null): ProductB
 }
 
 /**
- * D113e — does this tenant sell things by weight or measure?
+ * D134e — does this tenant sell things by weight or measure?
  *
  * Its own resolver rather than a branch on {@link ProductBusinessKind},
  * because that kind is a COARSE split whose `RETAIL` covers “hardware, tile

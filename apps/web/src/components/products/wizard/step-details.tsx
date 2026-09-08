@@ -117,7 +117,7 @@ export function StepDetails({
       </div>
 
       {/*
-        D99 (2.13, revised 2026-09-02) — the RETAIL arm is neutral; the
+        D120 (2.13, revised 2026-09-02) — the RETAIL arm is neutral; the
         restaurant arm is left exactly as it was.
         
         It read `isRestaurant ? 'e.g. Mix Kottu' : 'e.g. Milk 200ml'`, which made
@@ -325,7 +325,7 @@ export function StepDetails({
       )}
 
       {/*
-        D101 (3.13) — the toggle that makes `Product.taxable` reachable.
+        D122 (3.13) — the toggle that makes `Product.taxable` reachable.
 
         Defaults ON, because that is already true of every product: there is no
         per-product exemption in any tenant's history, so the switch records the

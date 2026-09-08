@@ -10,7 +10,7 @@ import {
 } from './dto/attribute-library.dto';
 
 /**
- * `/attribute-library` — the tenant option library (D104 / D104a).
+ * `/attribute-library` — the tenant option library (D125 / D125a).
  *
  * SHARED CORE, not a retail module. Any business that sells variants benefits
  * from saying "Size" once, and gating it on a business type would be the D56

@@ -55,7 +55,7 @@ import { ProductVariantsService } from './variants/product-variants.service';
   // AuditLogModule is imported for D45: the Product ↔ ModifierGroup and
   // Product ↔ KitchenStation attachment endpoints record a mutation audit
   // event so the wizard's changes are traceable per-tenant.
-  // SettingsModule (D104 Part 3): the barcode prefix map lives in the settings
+  // SettingsModule (D125 Part 3): the barcode prefix map lives in the settings
   // blob, and allocation reads it FRESH rather than from the 30-second cache —
   // a stale prefix would issue codes under the wrong range.
   imports: [
@@ -72,10 +72,10 @@ import { ProductVariantsService } from './variants/product-variants.service';
     // ('sellable', 'attribute-schema').
     SellableController,
     ProductAttributeSchemaController,
-    // D104 — the tenant option library. Its own root path, so it does not
+    // D125 — the tenant option library. Its own root path, so it does not
     // compete with ProductsController's GET /products/:id.
     AttributeLibraryController,
-    // D104 Part 3 / D106 — barcode audit + reissue (5.9) and label printing
+    // D125 Part 3 / D127 — barcode audit + reissue (5.9) and label printing
     // (5.7). Their own root paths, so no /products/:id capture.
     BarcodesController,
     LabelsController,

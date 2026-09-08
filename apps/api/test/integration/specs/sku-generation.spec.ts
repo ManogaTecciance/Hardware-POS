@@ -1,11 +1,11 @@
 /**
- * D104 — SKU generation (Phase 5, step `5.3`), and the `5.2` codes it consumes.
+ * D125 — SKU generation (Phase 5, step `5.3`), and the `5.2` codes it consumes.
  *
  * ## What can only be proven here
  *
  *  • `nextDocumentNumber(tx, tenantId, 'SKU')` under a real `DocumentSequence`
  *    row — that the sequence is per TENANT, moves per variant, and what a
- *    rollback actually does to it. D104 predicted a rolled-back batch would
+ *    rollback actually does to it. D125 predicted a rolled-back batch would
  *    burn its numbers; measured here, it does not, because the allocation is a
  *    statement in the same transaction. The gaps the record accepts come from
  *    the collision retry instead.
@@ -339,7 +339,7 @@ describe('SKU generation', () => {
   });
 
   /**
-   * D104 Part 2 predicted this and predicted it WRONG, so the assertion records
+   * D125 Part 2 predicted this and predicted it WRONG, so the assertion records
    * what the mechanism actually does.
    *
    * The record says: "`nextDocumentNumber` increments inside the transaction,
@@ -347,7 +347,7 @@ describe('SKU generation', () => {
    * increment is a statement in the SAME transaction, so a rollback reverts it
    * along with everything else — measured here, not reasoned about.
    *
-   * The conclusion D104 drew from the wrong premise still stands: gaps are
+   * The conclusion D125 drew from the wrong premise still stands: gaps are
    * accepted. They just arise somewhere else — from the collision retry above,
    * which allocates a number, finds the composed SKU taken, and abandons it.
    */
@@ -391,7 +391,7 @@ describe('SKU generation', () => {
   });
 
   it('DOES burn a number when a collision retry abandons one', async () => {
-    // This is where the gaps D104 accepts actually come from. Occupy the value
+    // This is where the gaps D125 accepts actually come from. Occupy the value
     // the first allocation composes, and 0001 is consumed without being used.
     await categorise('Apparel');
     const dims = await declareSize();

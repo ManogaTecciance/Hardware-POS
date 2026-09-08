@@ -1,4 +1,4 @@
--- D101 (3.8) — per-line tax: the columns, shipped inert.
+-- D122 (3.8) — per-line tax: the columns, shipped inert.
 --
 -- Phase 3 narrowed to Option B (Tech Lead, 2026-09-02). The flat-rate engine
 -- already works for retail — 18% on a clothing workspace produces
@@ -13,7 +13,7 @@
 --
 -- ── Why one migration ─────────────────────────────────────────────────────────
 --
--- D99a's two-migration rule is scoped to `ALTER TYPE … ADD VALUE`: PostgreSQL
+-- D120a's two-migration rule is scoped to `ALTER TYPE … ADD VALUE`: PostgreSQL
 -- refuses to USE a new enum label in the transaction that adds it. Nothing here
 -- adds an enum value — three columns, no new type — so splitting would be
 -- following a rule past its reason.

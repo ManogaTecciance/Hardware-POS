@@ -37,7 +37,7 @@ export class VariantOptionValueInputDto {
 
 export class CreateVariantInputDto {
   /**
-   * D104 (`5.3`) — OMIT to have one generated, send a value to override it.
+   * D125 (`5.3`) — OMIT to have one generated, send a value to override it.
    *
    * Optional here and only here. The general rule from Phase 4 is that a field
    * crossing a wire should be required, because an optional one can be dropped

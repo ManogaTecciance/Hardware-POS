@@ -133,7 +133,7 @@ export function ProductWizard(props: Props) {
   // derives it once here and passes it as a prop.
   const businessKind = resolveBusinessKind(profile?.businessType ?? null);
   /*
-   * D113e — weighed goods are RETAIL-only, and `businessKind` cannot say so:
+   * D134e — weighed goods are RETAIL-only, and `businessKind` cannot say so:
    * its `RETAIL` bucket includes hardware. Resolved from the capability here,
    * beside the kind, so Step 3 takes a flag rather than a business type.
    */

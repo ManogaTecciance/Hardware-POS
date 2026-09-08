@@ -1,5 +1,5 @@
 /**
- * D112 (`8.9`) — brand as an entity.
+ * D133 (`8.9`) — brand as an entity.
  *
  * ## What can only be proven here
  *
@@ -185,7 +185,7 @@ describe('archiving, not deleting', () => {
   it('unlinks rather than deletes a product if a brand row is ever removed', async () => {
     // There is no delete route. This asserts the SCHEMA's referential action, so
     // that a future admin tool, a migration or a manual DELETE cannot take
-    // products with it — the property D112 relies on, enforced by Postgres.
+    // products with it — the property D133 relies on, enforced by Postgres.
     const brand = await brands.create(shop.tenantId, { name: 'Doomed' });
     await prisma.product.update({ where: { id: shop.productAId }, data: { brandId: brand.id } });
 

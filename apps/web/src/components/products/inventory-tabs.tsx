@@ -40,7 +40,7 @@ const TABS: Tab[] = [
   { href: '/products', label: 'Products', matchPrefixes: ['/products/new'] },
   { href: '/products/categories', label: 'Categories' },
   { href: '/products/promotions', label: 'Promotions' },
-  // Phase 5 — D104 / D104a.
+  // Phase 5 — D125 / D125a.
   { href: '/products/attributes', label: 'Attributes' },
   { href: '/products/barcodes', label: 'Barcodes' },
   // Stock + Purchases are placeholder tabs — the wording sets expectations,

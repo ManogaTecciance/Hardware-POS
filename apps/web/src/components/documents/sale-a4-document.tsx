@@ -51,7 +51,7 @@ function formatDateTime(iso: string | null): string {
 }
 
 /**
- * Each line's taxable net for the shared allocation (D101, 3.12) — line net
+ * Each line's taxable net for the shared allocation (D122, 3.12) — line net
  * less its proportional share of the order discount, matching the server.
  */
 function taxableLinesOfSale(sale: SaleDetail): TaxableLine[] {
@@ -76,7 +76,7 @@ export function SaleA4Document({
   const accent = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(profile.accentColor)
     ? profile.accentColor
     : '#006c68';
-  // D102 (4.6) — one authority for the division, shared with the server A4.
+  // D123 (4.6) — one authority for the division, shared with the server A4.
   const discountSplit = splitLineDiscounts(sale.items, sale.totalDiscount);
   const logo = resolveImageUrl(profile.logoUrl);
   const signature = resolveImageUrl(profile.signatureUrl);
@@ -169,13 +169,13 @@ export function SaleA4Document({
             {sale.items.map((it, i) => (
               <tr key={it.id}>
                 <td>{i + 1}</td>
-                {/* D99 (2.12) — this renderer is a SECOND A4, separate from the
+                {/* D120 (2.12) — this renderer is a SECOND A4, separate from the
                     server's, and 1c.7 fixed only the server's. The same sale
                     printed with the size from one endpoint and without it from
                     here. Both now call `saleLineLabel`. */}
                 <td>
                   {saleLineLabel(it.productName, it.variantName)}
-                  {/* D102 (4.6) — the offer, as a muted sub-line, exactly where
+                  {/* D123 (4.6) — the offer, as a muted sub-line, exactly where
                       the server A4 puts it. A line at 0.00 with no reason reads
                       as a pricing error. */}
                   {saleLinePromotionNote(it.promotionName) ? (
@@ -186,7 +186,7 @@ export function SaleA4Document({
                 </td>
                 {profile.showSku ? <td>{it.sku ?? '—'}</td> : null}
                 {/*
-                  D113d (`6.5`) — this A4 has no Unit column (the server-rendered
+                  D134d (`6.5`) — this A4 has no Unit column (the server-rendered
                   one does), so the unit rides with the quantity: `0.75 kg`.
                 */}
                 <td className="r">{saleLineQuantity(it.quantity, it.unitOfMeasure)}</td>
@@ -205,7 +205,7 @@ export function SaleA4Document({
           <table>
             <tbody>
               <SumRow k="Subtotal" v={formatMoney(sale.subtotal)} />
-              {/* D102 (4.6) — the SHARED split, so this A4 and the server's
+              {/* D123 (4.6) — the SHARED split, so this A4 and the server's
                   divide the same figure the same way. */}
               {discountSplit.manual > 0 ? (
                 <SumRow k="Product discount" v={`- ${formatMoney(discountSplit.manual)}`} muted />
@@ -214,7 +214,7 @@ export function SaleA4Document({
                 <SumRow k="Promotions" v={`- ${formatMoney(discountSplit.promotional)}`} muted />
               ) : null}
               {sale.orderDiscountAmount > 0 ? <SumRow k="Order discount" v={`- ${formatMoney(sale.orderDiscountAmount)}`} muted /> : null}
-              {/* D101 (3.12) — the SHARED allocation. Empty for a single-rate
+              {/* D122 (3.12) — the SHARED allocation. Empty for a single-rate
                   sale, so this renders exactly what it rendered before. */}
               {sale.taxAmount > 0
                 ? taxBreakdownForDocument(taxableLinesOfSale(sale), sale.taxAmount).map((t) => (

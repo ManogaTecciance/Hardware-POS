@@ -1,5 +1,5 @@
 /**
- * D104 Part 3 — EAN-13 arithmetic, prefix rules and symbol encoding
+ * D125 Part 3 — EAN-13 arithmetic, prefix rules and symbol encoding
  * (Phase 5, steps `5.4`, `5.5`, `5.7`, `5.9`).
  *
  * ## What makes these assertions non-vacuous (D30)
@@ -8,7 +8,7 @@
  * validity is not in question, and against the same codes deliberately
  * corrupted — a validator that returned `true` unconditionally, and one that
  * returned `false` unconditionally, both fail. That is the same procedure the
- * D104 investigation used before believing its own finding that 18 of the
+ * D125 investigation used before believing its own finding that 18 of the
  * pilot's 20 barcodes are invalid.
  *
  * The symbol encoder is proven by **round trip**: this file implements a
@@ -39,7 +39,7 @@ const PUBLISHED_VALID = [
   '0075678164125',
 ];
 
-/** The pilot's real barcodes, from the D104 investigation. */
+/** The pilot's real barcodes, from the D125 investigation. */
 const PILOT_INVALID = ['2001000000015', '2001000000022', '2990001000000'];
 const PILOT_VALID = ['2990001000001'];
 
@@ -65,7 +65,7 @@ describe('ean13CheckDigit / isValidEan13', () => {
     }
   });
 
-  it('reproduces the D104 finding on the real pilot data', () => {
+  it('reproduces the D125 finding on the real pilot data', () => {
     // This is the measurement the phase plan is built on, re-run as a test.
     expect(PILOT_INVALID.filter((c) => isValidEan13(c))).toEqual([]);
     expect(PILOT_VALID.filter((c) => !isValidEan13(c))).toEqual([]);

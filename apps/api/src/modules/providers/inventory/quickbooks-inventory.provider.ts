@@ -166,7 +166,7 @@ export class QuickBooksInventoryProvider implements InventoryProvider {
   }
 
   /**
-   * D111 — refused, loudly.
+   * D132 — refused, loudly.
    *
    * QuickBooks owns the stock. `quantityOnHand` here is a CACHE of an upstream
    * figure, so writing a counted quantity into it would be overwritten by the

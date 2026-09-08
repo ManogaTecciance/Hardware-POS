@@ -1,5 +1,5 @@
 /**
- * D104 — SKU composition (Phase 5, step `5.3`).
+ * D125 — SKU composition (Phase 5, step `5.3`).
  *
  * `<CATEGORY>-<SEQ>[-<OPTION CODE>…]` — for example `APPAREL-0007-BLK-M`.
  *

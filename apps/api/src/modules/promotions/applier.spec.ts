@@ -1,5 +1,5 @@
 /**
- * D102 (4.2) — the promotion applier's arithmetic.
+ * D123 (4.2) — the promotion applier's arithmetic.
  *
  * ## Why this spec lives here and not in `packages/shared`
  *
@@ -16,7 +16,7 @@
  *
  * The BOGO cases assert the discount lands on the RIGHT LINE, not merely that
  * some discount appeared — putting the tie's 500 on a shirt would still total
- * 500 and would still refund wrongly, which is the defect D102 exists to prevent.
+ * 500 and would still refund wrongly, which is the defect D123 exists to prevent.
  */
 import {
   applyPromotions,
@@ -278,11 +278,11 @@ describe('BUNDLE_FIXED_PRICE', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BUY_X_GET_Y — the case D102 was written around
+// BUY_X_GET_Y — the case D123 was written around
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('BUY_X_GET_Y', () => {
-  it('puts the whole saving on the FREE item — the D102 worked example', () => {
+  it('puts the whole saving on the FREE item — the D123 worked example', () => {
     // Two shirts at 1,000 and a tie at 500, tie free. The customer pays 2,000.
     const lines = [item('l_shirt', 'p_shirt', 1000, 2), item('l_tie', 'p_tie', 500)];
     const promo = rule({
@@ -305,7 +305,7 @@ describe('BUY_X_GET_Y', () => {
      * The whole 500 sits on the tie, so `lineTotal` for that line is 0 and a
      * return of the tie refunds nothing. Spreading it across the basket by value
      * would give the tie only 100 and refund 400 on a free item — the defect
-     * D102 exists to prevent, and the reason this asserts the LINE and not just
+     * D123 exists to prevent, and the reason this asserts the LINE and not just
      * the total.
      */
     expect(byLine(result)).toEqual({ l_tie: 500 });
@@ -339,7 +339,7 @@ describe('BUY_X_GET_Y', () => {
     // POSITIVE: half of 500, on the reward line.
     expect(byLine(applyPromotions({ lines, promotions: [halfOff] }))).toEqual({ l_tie: 250 });
 
-    // POSITIVE CONTROL: 100 still means free, so the D102 case is unchanged.
+    // POSITIVE CONTROL: 100 still means free, so the D123 case is unchanged.
     const free = rule({ ...halfOff, id: 'r2', percentageOff: 100 });
     expect(byLine(applyPromotions({ lines, promotions: [free] }))).toEqual({ l_tie: 500 });
   });
@@ -485,7 +485,7 @@ describe('BUY_X_GET_Y', () => {
 // Basket-level rules
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('the basket rules D102 fixed', () => {
+describe('the basket rules D123 fixed', () => {
   const tenPercentOff = (id: string, productId: string) =>
     rule({
       id,
@@ -582,7 +582,7 @@ describe('the basket rules D102 fixed', () => {
 
   it('an empty basket and an empty promotion list both produce nothing', () => {
     // Exact object, deliberately: this is the assertion that notices a new
-    // field appearing on the result, which is how D105's `orderPromotion` was
+    // field appearing on the result, which is how D126's `orderPromotion` was
     // caught the moment it shipped rather than by a later surprise.
     expect(applyPromotions({ lines: [], promotions: [] })).toEqual({
       lines: [],
@@ -748,7 +748,7 @@ describe('rewardEntitlements', () => {
   });
 
   it('a manually discounted BUY line cannot earn a reward', () => {
-    // Precedence (D102) holds here too: a discounted line is invisible to
+    // Precedence (D123) holds here too: a discounted line is invisible to
     // promotions, so it cannot satisfy a threshold — and the till must not add
     // an item the applier would then charge for.
     const lines = [item('l_shirt', 'p_shirt', 1000, 2, 50)];
@@ -935,7 +935,7 @@ describe('outstandingRewards', () => {
   });
 
   it('a manually discounted qualifying line owes nothing', () => {
-    // Precedence (D102) still holds: a discounted line is invisible to
+    // Precedence (D123) still holds: a discounted line is invisible to
     // promotions, so it earns no reward and the cashier is not asked for one.
     const lines = [item('l_buy', 'p_a', 1000, 2, 50)];
 
@@ -1215,7 +1215,7 @@ describe('a stackable promotion that partially overlaps keeps its free lines', (
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D113a (`6.4`) — a measured line and the four promotion kinds
+// D134a (`6.4`) — a measured line and the four promotion kinds
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A line sold by weight: 0.75 kg of rice at Rs 200/kg. */
@@ -1230,7 +1230,7 @@ const measured = (id: string, productId: string, unitPrice: number, quantity: nu
     isMeasured: true,
   });
 
-describe('D113a — measured lines bypass quantity-based promotions', () => {
+describe('D134a — measured lines bypass quantity-based promotions', () => {
   it('PERCENTAGE_DISCOUNT still applies — "10% off all rice" works', () => {
     const rice = measured('l_rice', 'p_rice', 200, 0.75);
     const result = applyPromotions({
@@ -1330,7 +1330,7 @@ describe('D113a — measured lines bypass quantity-based promotions', () => {
 
   it('an absent flag behaves exactly as WHOLE', () => {
     // `isMeasured` is optional because the wire type predates it. A caller that
-    // omits it must get the behaviour that shipped before D113a, byte for byte.
+    // omits it must get the behaviour that shipped before D134a, byte for byte.
     const soap = item('l_soap', 'p_soap', 100, 2);
     expect(soap.isMeasured).toBeUndefined();
 

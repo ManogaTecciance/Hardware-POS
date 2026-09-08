@@ -22,7 +22,7 @@ interface Row {
   fixedPrice: number | null;
   percentageOff: number | null;
   amountOff: number | null;
-  /** D105 — optional so existing fixtures stay untouched. */
+  /** D126 — optional so existing fixtures stay untouched. */
   minimumSpend?: number | null;
   buyQuantity: number | null;
   getQuantity: number | null;
@@ -141,7 +141,7 @@ function toRepoShape(row: Row): PromotionWithItems {
     fixedPrice: decimalish(row.fixedPrice),
     percentageOff: decimalish(row.percentageOff),
     amountOff: decimalish(row.amountOff),
-    // D105 — the double carries the column so a cart-level promotion is
+    // D126 — the double carries the column so a cart-level promotion is
     // representable here, not just in the applier's own fixtures.
     minimumSpend: decimalish(row.minimumSpend ?? null),
     buyQuantity: row.buyQuantity,

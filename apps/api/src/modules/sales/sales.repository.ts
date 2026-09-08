@@ -122,7 +122,7 @@ const saleListInclude = {
 } satisfies Prisma.SaleInclude;
 
 /**
- * D99 — a variant as the sale path needs it: the row plus the option values the
+ * D120 — a variant as the sale path needs it: the row plus the option values the
  * display name is derived from. Declared with `validator` so the include shape
  * and the type cannot drift apart.
  */
@@ -232,7 +232,7 @@ export class SalesRepository {
   }
 
   /**
-   * D99 — resolve the variants a cart names.
+   * D120 — resolve the variants a cart names.
    *
    * `tenantId` in the predicate is what makes another tenant's variant id return
    * nothing rather than a row, exactly as `findProductsByIds` does. The caller
@@ -583,7 +583,7 @@ function orderDiscountData(computed: PersistSaleInput['computed']) {
     orderDiscountAmount: computed.orderDiscountAmount,
     orderDiscountReason: computed.orderDiscountReason,
     orderDiscountApprovedById: computed.orderDiscountApprovedById,
-    // D105 — travels with the order discount because it is one, just an
+    // D126 — travels with the order discount because it is one, just an
     // automatic one. Kept in separate columns so a refund can say which was the
     // cashier's decision and which the promotion's.
     promotionOrderDiscountAmount: computed.promotionOrderDiscountAmount,
@@ -595,7 +595,7 @@ function orderDiscountData(computed: PersistSaleInput['computed']) {
 function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleInput {
   return {
     product: { connect: { id: line.productId } },
-    // D99 — `connect` only when a variant was actually sold; a product-level line
+    // D120 — `connect` only when a variant was actually sold; a product-level line
     // must leave the relation unset rather than connect to nothing.
     ...(line.productVariantId
       ? { productVariant: { connect: { id: line.productVariantId } } }
@@ -603,7 +603,7 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
     // D44 — frozen at sale time, so a later rename cannot rewrite this receipt.
     variantSkuSnapshot: line.variantSkuSnapshot,
     variantNameSnapshot: line.variantNameSnapshot,
-    // D113d (`6.5`) — the unit, frozen with the names beside it.
+    // D134d (`6.5`) — the unit, frozen with the names beside it.
     unitOfMeasureSnapshot: line.unitOfMeasureSnapshot,
     productName: line.productName,
     sku: line.sku,
@@ -617,11 +617,11 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
       ? { approvedBy: { connect: { id: line.approvedByUserId } } }
       : {}),
     taxAmount: line.taxAmount,
-    // D101 (3.9) — the frozen rate. Required on ComputedLine, so a new row can
+    // D122 (3.9) — the frozen rate. Required on ComputedLine, so a new row can
     // never carry the null that marks a pre-3.8 line.
     taxRatePercent: line.taxRatePercent,
     /*
-     * D102 (4.4) — what the applier decided, frozen.
+     * D123 (4.4) — what the applier decided, frozen.
      *
      * `lineTotal` above is already net of this; the amount is stored separately
      * so a receipt can name the offer and Phase 8 can report on it. The name is
@@ -650,7 +650,7 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
 function toStockLines(lines: ComputedLine[]): StockLine[] {
   return lines.map((line) => ({
     productId: line.productId,
-    // D99 — the real variant now, resolved by `computeCart`. Still null for a
+    // D120 — the real variant now, resolved by `computeCart`. Still null for a
     // product-level line, which the providers handle as they always have.
     productVariantId: line.productVariantId,
     productName: line.productName,

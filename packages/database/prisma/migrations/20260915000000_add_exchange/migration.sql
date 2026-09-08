@@ -1,4 +1,4 @@
--- D107 — an exchange links a return to a sale (Phase 7, step 7.1a).
+-- D128 — an exchange links a return to a sale (Phase 7, step 7.1a).
 --
 -- Additive: one new table. No existing table, column or row is touched. Nothing
 -- is backfilled, because there are no exchanges to backfill — the transaction
@@ -7,10 +7,10 @@
 -- Why `replacementSaleId` is nullable: the return leg commits first, so there is
 -- a real interval in which an exchange exists with no replacement. A NOT NULL
 -- column would make the row unwritable until both legs succeeded, which destroys
--- the recoverable state D107 chose — if the sale fails, the customer holds store
+-- the recoverable state D128 chose — if the sale fails, the customer holds store
 -- credit worth what they handed back and the operator retries.
 --
--- Deliberately NOT `CREATE ... IF NOT EXISTS`. D104c: `IF NOT EXISTS` keys on the
+-- Deliberately NOT `CREATE ... IF NOT EXISTS`. D125c: `IF NOT EXISTS` keys on the
 -- NAME, so it silently accepts a different object that happens to share one, and
 -- converts "this exists, differently" into "fine". A name collision should fail
 -- loudly here, which is the cheapest place to find it.

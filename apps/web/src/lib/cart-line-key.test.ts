@@ -17,7 +17,7 @@ import type { ClientProduct, ClientVariant } from './catalog';
 import { isMeasured, stockCap } from './pos-cart';
 
 /**
- * D99 (1c.2) — the cart is keyed by (product, variant), not by product.
+ * D120 (1c.2) — the cart is keyed by (product, variant), not by product.
  *
  * Before this, every cart operation matched on `it.product.id`, so a Medium and a
  * Large of one shirt collapsed into a single line: `addToCart` found the product
@@ -42,7 +42,7 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     stockState: 'IN_STOCK',
     imageUrl: null,
     taxable: true,
-    // D113 (`6.2`) — required on `ClientProduct`, so the compiler names every
+    // D134 (`6.2`) — required on `ClientProduct`, so the compiler names every
     // fixture that forgets it. Phase 4 lesson 7: a field crossing a wire
     // should be REQUIRED, because an optional one is dropped in silence.
     quantityType: 'WHOLE',
@@ -221,7 +221,7 @@ describe('outOfStock is judged against the variant', () => {
 });
 
 /**
- * D99 (1c.6) — the two defects that survived 1c.2 because nothing called the
+ * D120 (1c.6) — the two defects that survived 1c.2 because nothing called the
  * variant-aware code with a variant.
  */
 describe('a line is identified by its size, not just its product', () => {
@@ -266,7 +266,7 @@ describe('the quantity cap follows the chosen size', () => {
 });
 
 /**
- * D99 (1c.8) — a line named in one piece, for assistive text.
+ * D120 (1c.8) — a line named in one piece, for assistive text.
  */
 describe('lineLabel names the size', () => {
   it('includes the variant name', () => {
@@ -292,7 +292,7 @@ describe('lineLabel names the size', () => {
 });
 
 /**
- * D101 (3.14) — the till previews exactly what the server will charge.
+ * D122 (3.14) — the till previews exactly what the server will charge.
  *
  * 3.10 narrowed the taxable base on the SERVER and left `computeTotals` alone,
  * so a cashier was quoted 18% on an exempt item the server then charged nothing
@@ -375,7 +375,7 @@ describe('the till and the server agree on tax', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D102 (4.4) — promotions on the till
+// D123 (4.4) — promotions on the till
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -433,7 +433,7 @@ describe('promotions on the till (4.4)', () => {
     );
 
     // POSITIVE: the tie carries all 500 and nets to zero, so returning it
-    // refunds nothing (D102).
+    // refunds nothing (D123).
     expect(byProduct.tie!.promotionDiscountAmount).toBe(500);
     expect(byProduct.tie!.lineTotal).toBe(0);
     expect(byProduct.tie!.promotionName).toBe('Buy 2 shirts, tie free');
@@ -489,7 +489,7 @@ describe('promotions on the till (4.4)', () => {
     /*
      * NEGATIVE: …and the BOGO did NOT fire, because the shirts are the BUY
      * side and a manually discounted line is invisible to promotions — it
-     * cannot even satisfy a threshold (D102). The tie stays full price.
+     * cannot even satisfy a threshold (D123). The tie stays full price.
      */
     expect(lines[1]!.promotionDiscountAmount).toBe(0);
     expect(lines[1]!.lineTotal).toBe(500);
@@ -517,7 +517,7 @@ describe('promotions on the till (4.4)', () => {
  *
  * ## What was wrong
  *
- * D102 makes a manually discounted line invisible to promotions: the cashier is
+ * D123 makes a manually discounted line invisible to promotions: the cashier is
  * acting deliberately, usually under an approval limit, and a promotion stacking
  * on top would push the total past a figure nobody approved. That is correct and
  * stays. What was missing is that nobody was told — knock Rs 50 off a line
@@ -649,7 +649,7 @@ describe('forgonePromotions — a manual discount that displaced a bigger offer'
   });
 });
 
-describe('D113 (`6.3`) — isMeasured is read, never inferred', () => {
+describe('D134 (`6.3`) — isMeasured is read, never inferred', () => {
   it('reads the flag and nothing else', () => {
     expect(isMeasured(product({ quantityType: 'DECIMAL' }))).toBe(true);
     expect(isMeasured(product({ quantityType: 'WHOLE' }))).toBe(false);
@@ -664,7 +664,7 @@ describe('D113 (`6.3`) — isMeasured is read, never inferred', () => {
   });
 
   it('does not guess from the unit either', () => {
-    // A unit left behind by a product switched back to WHOLE (D113b §2) must not
+    // A unit left behind by a product switched back to WHOLE (D134b §2) must not
     // make it measured again.
     expect(isMeasured(product({ quantityType: 'WHOLE', unitOfMeasure: 'kg' }))).toBe(false);
   });

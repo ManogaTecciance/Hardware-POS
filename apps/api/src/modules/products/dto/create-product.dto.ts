@@ -63,7 +63,7 @@ export class CreateProductDto {
   subcategoryId?: string;
 
   /**
-   * D112 (`8.9`) — the brand this product carries.
+   * D133 (`8.9`) — the brand this product carries.
    *
    * Optional forever. Most hardware and grocery products have no brand
    * worth recording, and requiring one would make every existing product
@@ -74,7 +74,7 @@ export class CreateProductDto {
   brandId?: string;
 
   /**
-   * D113 (`6.1`) — sold by the piece, or by weight/measure.
+   * D134 (`6.1`) — sold by the piece, or by weight/measure.
    *
    * Omitted means `WHOLE`, which is what every product was before this
    * existed. A client that has never heard of measured goods keeps working.
@@ -84,12 +84,12 @@ export class CreateProductDto {
   quantityType?: QuantityType;
 
   /**
-   * D113b — what the quantity is measured in: `kg`, `g`, `L`.
+   * D134b — what the quantity is measured in: `kg`, `g`, `L`.
    *
    * **Required when `quantityType` is `DECIMAL`** — enforced in
    * `ProductsService` against the RESULTING state, not here, because the
    * rule is conditional on another field and a DTO cannot see the stored row
-   * (D113c).
+   * (D134c).
    */
   @IsString()
   @IsOptional()
@@ -133,7 +133,7 @@ export class CreateProductDto {
   isActive?: boolean;
 
   /**
-   * D101 (3.13) — whether this product attracts tax.
+   * D122 (3.13) — whether this product attracts tax.
    *
    * Optional on the wire, and ABSENT MEANS TAXABLE. The service defaults it to
    * true, matching the column default and for the same reason: there is no

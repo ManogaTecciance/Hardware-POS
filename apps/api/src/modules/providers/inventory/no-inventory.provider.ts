@@ -123,7 +123,7 @@ export class NoInventoryProvider implements InventoryProvider {
   }
 
   /**
-   * D111 — refused, loudly.
+   * D132 — refused, loudly.
    *
    * There is no stock to count. A tenant with inventory tracking off has no
    * shelf figure to correct, so a count would be a document about nothing —

@@ -1,4 +1,4 @@
--- D102 (4.1) — promotion allocation: the columns, shipped inert.
+-- D123 (4.1) — promotion allocation: the columns, shipped inert.
 --
 -- Phase 4 builds the discount engine. The Promotion models, the four types and
 -- the schedule already exist; nothing turns a promotion into money, which is
@@ -6,13 +6,13 @@
 --
 -- ── Nothing reads these columns yet ───────────────────────────────────────────
 --
--- Same pattern as D101 (3.8): the columns and their defaults ship first, and the
+-- Same pattern as D122 (3.8): the columns and their defaults ship first, and the
 -- applier that writes them lands in 4.2. Restaurant, hardware and retail behave
 -- identically after this migration.
 --
 -- ── Why one migration ─────────────────────────────────────────────────────────
 --
--- Four ADD COLUMNs, no new type, no enum value, no backfill. D99a's
+-- Four ADD COLUMNs, no new type, no enum value, no backfill. D120a's
 -- two-migration rule is scoped to `ALTER TYPE … ADD VALUE` and does not apply.
 --
 -- PostgreSQL 11+ adds a defaulted column without rewriting the table, so this is
@@ -21,7 +21,7 @@
 -- ── 1. SaleItem.promotionDiscountAmount ───────────────────────────────────────
 --
 -- The promotion's reduction of THIS line. Per line, not order-level, and that is
--- the whole decision D102 records:
+-- the whole decision D123 records:
 --
 --   Two shirts at 1,000 and a tie at 500, tie free under buy-two-get-one. The
 --   customer pays 2,000 and returns the tie. Allocating the 500 saving ORDER-WIDE
@@ -32,11 +32,11 @@
 --
 -- DEFAULT 0, not nullable, because "no promotion" and "a promotion worth nothing"
 -- are the same fact for this column — unlike `taxRatePercent`, where NULL and
--- 0.00 are different facts (D101, and the trap 3.16 documented).
+-- 0.00 are different facts (D122, and the trap 3.16 documented).
 --
 -- A MIRROR, not the authority. `lineTotal` is already net of this and is what
 -- `taxableBase` and `returns.calc` read. The column exists so Phase 8 can report
--- promotional savings without a second source of truth — the relationship D100
+-- promotional savings without a second source of truth — the relationship D121
 -- records between `Product.quantityOnHand` and the per-variant rows.
 --
 -- INVARIANT: at most one of `discountAmount` and `promotionDiscountAmount` is

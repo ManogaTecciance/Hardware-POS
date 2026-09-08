@@ -6,7 +6,7 @@ const PLAIN_SALE: OriginalSaleSnapshot = {
   totalDiscount: 0,
   orderDiscountAmount: 0,
   taxAmount: 0,
-  // D101 (3.11) — null marks a sale written BEFORE per-line rates existed, so
+  // D122 (3.11) — null marks a sale written BEFORE per-line rates existed, so
   // every assertion in this file exercises the proportional FALLBACK. That is
   // deliberate: these numbers are what historical sales refunded, and they must
   // not move. No assertion in this file was edited (D16); only the fixtures now
@@ -130,7 +130,7 @@ describe('sumReturnTotals — full sale return equals the sale total', () => {
 });
 
 /**
- * D101 (3.11) — the snapshot path.
+ * D122 (3.11) — the snapshot path.
  *
  * Every test ABOVE uses `taxWeightTotal: null` and therefore exercises the
  * proportional fallback that pre-3.8 sales are refunded by. These pin the new
@@ -285,11 +285,11 @@ describe('weighted allocation — degenerate inputs refuse rather than divide', 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D102 (4.5) — promotions are reversed at LINE level
+// D123 (4.5) — promotions are reversed at LINE level
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The exact basket D102 was decided on.
+ * The exact basket D123 was decided on.
  *
  * Two shirts at 1,000 and a tie at 500, tie free under buy-two-get-one, 18% tax.
  * The customer pays 2,360:
@@ -331,8 +331,8 @@ const TIE_LINE = {
   taxRatePercent: 18,
 };
 
-describe('promotions on a return (D102, 4.5)', () => {
-  it('THE D102 CASE — returning a free item refunds exactly 0.00', () => {
+describe('promotions on a return (D123, 4.5)', () => {
+  it('THE D123 CASE — returning a free item refunds exactly 0.00', () => {
     const line = computeReturnLine(BOGO_SALE, TIE_LINE, 1);
 
     // The whole point of Option A. The customer paid nothing for the tie, so
@@ -346,7 +346,7 @@ describe('promotions on a return (D102, 4.5)', () => {
      *
      * Had the 500 been allocated ORDER-WIDE by line value instead — weight 500
      * against the shirts' 2,000 — the tie would have absorbed only 100 and this
-     * refund would be 400. That is the defect D102 exists to prevent, and it is
+     * refund would be 400. That is the defect D123 exists to prevent, and it is
      * why this asserts the breakdown and not just the total.
      */
     expect(line.originalLineSubtotal).toBe(500);
@@ -373,8 +373,8 @@ describe('promotions on a return (D102, 4.5)', () => {
     const totals = sumReturnTotals([shirts, tie]);
 
     // Returning everything gives back exactly the 2,360 that was paid — no
-    // remainder to absorb, which is the reconciliation property D101 built and
-    // D102 inherits by allocating rather than re-evaluating.
+    // remainder to absorb, which is the reconciliation property D122 built and
+    // D123 inherits by allocating rather than re-evaluating.
     expect(totals.refundTotal).toBe(2360);
     expect(totals.promotionDiscountAdjustment).toBe(500);
     expect(totals.taxAdjustment).toBe(360);
@@ -423,7 +423,7 @@ describe('promotions on a return (D102, 4.5)', () => {
 
   it('a promotion and a manual discount never both reverse on one line', () => {
     /*
-     * They are mutually exclusive by construction (D102): a manual discount
+     * They are mutually exclusive by construction (D123): a manual discount
      * makes a line invisible to promotions, so at most one is non-zero. Asserted
      * here because `lineNet` subtracts BOTH — if that invariant were ever broken
      * upstream, this calculator would happily refund less than the customer paid.

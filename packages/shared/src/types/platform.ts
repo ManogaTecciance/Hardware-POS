@@ -28,7 +28,7 @@
  * hardware-template business (PO decision, 2026-08-14), and `RETAIL` was a
  * speculative value nothing ever used. One value per workspace template.
  *
- * **D99 supersedes D57 on `RETAIL` only.** A clothing retailer is now in scope,
+ * **D120 supersedes D57 on `RETAIL` only.** A clothing retailer is now in scope,
  * so the value returns — appended, matching the order
  * `ALTER TYPE … ADD VALUE` produces in the database. `TILE_SHOP` stays gone;
  * that finding was about an entity, not a template.
@@ -70,7 +70,7 @@ export const MODULE_KEY_VALUES = [
   'RETURNS',
   'EXCHANGES',
   'SUPPLIERS',
-  // D103 — its own key; no module was common to retail and food service.
+  // D124 — its own key; no module was common to retail and food service.
   'PROMOTIONS',
   'REPORTING',
   'USERS',

@@ -17,7 +17,7 @@ export interface StockTakeLineView {
   countedQuantity: string;
   /** `counted - expected`. Negative is shrinkage, positive is a found item. */
   variance: string;
-  /** The cost the variance was valued at, or `null` (D110). */
+  /** The cost the variance was valued at, or `null` (D131). */
   unitCost: string | null;
   varianceValue: string | null;
 }
@@ -42,7 +42,7 @@ export interface StockTakeView {
 }
 
 /**
- * Stock takes / cycle counts — D111 (`8.7`).
+ * Stock takes / cycle counts — D132 (`8.7`).
  *
  * ## What a count is
  *
@@ -207,7 +207,7 @@ export class StockTakesService {
   /**
    * Current names and unit costs for the counted lines.
    *
-   * Cost preference is D110's, exactly: a variant answers for itself and never
+   * Cost preference is D131's, exactly: a variant answers for itself and never
    * reads its parent's legacy cost columns; only a variant-less line reads the
    * product.
    */

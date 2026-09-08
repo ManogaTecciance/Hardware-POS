@@ -44,7 +44,7 @@ export interface ReturnableItem {
   previouslyReturnedQuantity: number;
   availableReturnQuantity: number;
   /**
-   * D113d (`6.6`) — the unit this line was SOLD in, so the returns screen can
+   * D134d (`6.6`) — the unit this line was SOLD in, so the returns screen can
    * accept 0.5 kg back and label what it is asking for.
    *
    * The SNAPSHOT, not the product's current unit: a refund is measured in what
@@ -79,10 +79,10 @@ export interface ReturnPreviewItem {
   originalUnitPrice: number;
   originalLineSubtotal: number;
   productDiscountAdjustment: number;
-  /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
+  /** D123 (4.5) — the promotion reversed on this line, `× frac`. */
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
-  /** D105 — this line's share of a CART-LEVEL promotion, reversed. */
+  /** D126 — this line's share of a CART-LEVEL promotion, reversed. */
   promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundableAmount: number;
@@ -98,10 +98,10 @@ export interface ReturnPreview {
   items: ReturnPreviewItem[];
   subtotal: number;
   productDiscountAdjustment: number;
-  /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
+  /** D123 (4.5) — the promotion reversed on this line, `× frac`. */
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
-  /** D105 — this line's share of a CART-LEVEL promotion, reversed. */
+  /** D126 — this line's share of a CART-LEVEL promotion, reversed. */
   promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;
@@ -163,7 +163,7 @@ export interface PersistReturnItem {
   originalSaleItemId: string;
   productId: string;
   /**
-   * D99 (1a.20) — the exact variant that was sold, copied from the original
+   * D120 (1a.20) — the exact variant that was sold, copied from the original
    * SaleItem rather than named by the client.
    *
    * `ReturnItemInputDto` identifies a line by `saleItemId`, so the server
@@ -185,10 +185,10 @@ export interface PersistReturnItem {
    */
   variantSkuSnapshot: string | null;
   variantNameSnapshot: string | null;
-  /** D113d (`6.5`) — the unit the ORIGINAL sale line was sold in. */
+  /** D134d (`6.5`) — the unit the ORIGINAL sale line was sold in. */
   unitOfMeasureSnapshot: string | null;
   /**
-   * D101 (3.11) — the tax rate REVERSED, copied from the original SaleItem.
+   * D122 (3.11) — the tax rate REVERSED, copied from the original SaleItem.
    *
    * Required-nullable rather than optional: null is a meaningful value here
    * (the sale predates 3.8), so a construction site must say which it means
@@ -206,10 +206,10 @@ export interface PersistReturnItem {
   note: string | null;
   originalLineSubtotal: number;
   productDiscountAdjustment: number;
-  /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
+  /** D123 (4.5) — the promotion reversed on this line, `× frac`. */
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
-  /** D105 — this line's share of a CART-LEVEL promotion, reversed. */
+  /** D126 — this line's share of a CART-LEVEL promotion, reversed. */
   promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundableAmount: number;
@@ -229,10 +229,10 @@ export interface PersistReturnInput {
   notes: string | null;
   subtotal: number;
   productDiscountAdjustment: number;
-  /** D102 (4.5) — the promotion reversed on this line, `× frac`. */
+  /** D123 (4.5) — the promotion reversed on this line, `× frac`. */
   promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
-  /** D105 — this line's share of a CART-LEVEL promotion, reversed. */
+  /** D126 — this line's share of a CART-LEVEL promotion, reversed. */
   promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;

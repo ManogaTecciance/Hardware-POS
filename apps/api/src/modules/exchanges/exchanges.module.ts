@@ -7,7 +7,7 @@ import { ExchangesRepository } from './exchanges.repository';
 import { ExchangesService } from './exchanges.service';
 
 /**
- * D107 — the exchange module imports the two it composes and adds nothing else.
+ * D128 — the exchange module imports the two it composes and adds nothing else.
  *
  * No `ProvidersModule`, no `SyncModule`, no `SettingsModule`: this module
  * resolves no provider, enqueues no sync and reads no setting. Everything that

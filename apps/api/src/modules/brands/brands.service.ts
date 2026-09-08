@@ -13,7 +13,7 @@ export interface BrandView {
 }
 
 /**
- * Brands — D112 (`8.9`).
+ * Brands — D133 (`8.9`).
  *
  * A brand is a per-tenant row, not a string on a product and not an enum in the
  * domain's attribute schema. D64 predicted this table and deliberately left

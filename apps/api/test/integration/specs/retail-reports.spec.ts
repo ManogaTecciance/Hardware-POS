@@ -12,7 +12,7 @@
  *  • **That a sale written by the real `SalesService` reports its tax.** This is
  *    the assertion the first cut of `8.3` did not have, and the reason it
  *    shipped a tax column that read `0.00` for every genuine sale:
- *    `SaleItem.taxAmount` is written as zero on purpose (D101) and the report
+ *    `SaleItem.taxAmount` is written as zero on purpose (D122) and the report
  *    summed it. A hand-written fixture hid that; driving the real service is
  *    what exposes it.
  *
@@ -177,7 +177,7 @@ interface FixtureLine {
   variantId: string | null;
   quantity: number;
   lineTotal: number;
-  /** The rate FROZEN on the line (D101). `null` marks a pre-3.8 line. */
+  /** The rate FROZEN on the line (D122). `null` marks a pre-3.8 line. */
   rate: number | null;
   discount?: number;
   promotion?: number;
@@ -261,7 +261,7 @@ describe('8.3 — sales by variant', () => {
     expect(report.rows[0]).toEqual({
       productId: shop.productAId,
       productName: 'Fixture Product A',
-      // D112 (`8.9`) — null because this fixture product carries no brand.
+      // D133 (`8.9`) — null because this fixture product carries no brand.
       // Asserted rather than omitted: an exact-shape assertion is what
       // catches a field appearing, and `brandName` appearing is what 8.9
       // did to this row.
@@ -291,7 +291,7 @@ describe('8.3 — sales by variant', () => {
   });
 
   it('names the brand a product carries, and null when it carries none', async () => {
-    // D112 (`8.9`) — "reports by brand" is what the entity was for. Resolved
+    // D133 (`8.9`) — "reports by brand" is what the entity was for. Resolved
     // from the product as it stands today, like the product name beside it.
     const brand = await prisma.brand.create({
       data: { tenantId: shop.tenantId, name: 'Fixture Label' },
@@ -981,7 +981,7 @@ describe('8.6 — ageing / slow movers', () => {
     expect(report.rows[0]!.quantityOnHand).toBe('10.000');
   });
 
-  it('values the sitting stock, and separates what it cannot value (D110)', async () => {
+  it('values the sitting stock, and separates what it cannot value (D131)', async () => {
     await setVariantCost(mediumId, 600);
     await putOnShelf(mediumId, 5);
     await putOnShelf(largeId, 2);

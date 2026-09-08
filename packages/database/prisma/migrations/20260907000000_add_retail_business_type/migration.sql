@@ -1,4 +1,4 @@
--- D99 / D99a — the Retail template returns.
+-- D120 / D120a — the Retail template returns.
 --
 -- D57 removed `TILE_SHOP` and `RETAIL` on 14 August, correctly: the enum was ten
 -- days old, the values carried zero rows, and there was no Retail customer.
@@ -19,7 +19,7 @@
 -- Verified on this project's PostgreSQL 16.14, not assumed. The transaction
 -- rolls back so no data is at risk, but it strands a migration in a failed
 -- state that every developer then resolves by hand. Anything that uses the
--- value belongs in a later migration (D99a).
+-- value belongs in a later migration (D120a).
 --
 -- `IF NOT EXISTS` follows the D44 variants migration (20260812000000), which
 -- writes `ADD VALUE IF NOT EXISTS 'RECEIPT'`. It makes the statement re-runnable

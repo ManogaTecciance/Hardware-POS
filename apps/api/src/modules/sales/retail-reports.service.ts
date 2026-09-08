@@ -15,7 +15,7 @@ export interface VariantSalesRow {
   productId: string | null;
   productName: string;
   /**
-   * D112 (`8.9`) — the brand as it stands TODAY, or `null` for an unbranded
+   * D133 (`8.9`) — the brand as it stands TODAY, or `null` for an unbranded
    * product. Resolved from the product rather than snapshotted onto the sale
    * line, the same choice `productName` makes here and for the same reason: a
    * buyer asking "how did this label do" means the label it carries now.
@@ -140,7 +140,7 @@ export interface AgeingRow {
   ageBasis: AgeBasis;
   /** Whole days, by `ageBasis`. `null` only when the basis is UNKNOWN. */
   ageDays: number | null;
-  /** Quantity × unit cost, or `null` when the cost is unknown (D110). */
+  /** Quantity × unit cost, or `null` when the cost is unknown (D131). */
   stockValue: string | null;
   costSource: CostSource;
 }
@@ -188,7 +188,7 @@ type SaleForReport = Prisma.SaleGetPayload<{
 /**
  * Phase 8 retail reporting.
  *
- * ## Money never becomes a number here (D108)
+ * ## Money never becomes a number here (D129)
  *
  * Every figure is `Prisma.Decimal` from the column to the response, and is
  * emitted with `Decimal.toFixed()`. Nothing is accumulated in JavaScript. That is
@@ -199,7 +199,7 @@ type SaleForReport = Prisma.SaleGetPayload<{
  *
  * `8.3` originally summed `SaleItem.taxAmount` in SQL, which was fast, elegant
  * and always `0.00`: `sales.service` writes that column as zero on purpose, tax
- * being computed once per sale and parked at line level with grocery (D101).
+ * being computed once per sale and parked at line level with grocery (D122).
  * Tax has to be allocated down from `Sale.taxAmount` before it can be grouped by
  * anything, and an allocation is per-sale arithmetic that SQL aggregation cannot
  * express. The rows are therefore loaded and folded in `Decimal`.
@@ -401,7 +401,7 @@ export class RetailReportsService {
    * the unit cost onto `SaleItem` at sale time — a schema change, a migration
    * and a decision record, and it could not answer for sales already taken.
    *
-   * So this report is an approximation, and D110 records it as one. The screen
+   * So this report is an approximation, and D131 records it as one. The screen
    * says so in words rather than printing a figure that looks exact. For a shop
    * whose costs are stable it is very nearly right; for one buying a falling
    * market it flatters recent history, and a reader has to know that.
@@ -733,7 +733,7 @@ export class RetailReportsService {
               sku: true,
               averageCost: true,
               costPrice: true,
-              // D112 — one join, not a second query: the brand name is wanted on
+              // D133 — one join, not a second query: the brand name is wanted on
               // every row this map already answers for.
               brand: { select: { name: true } },
             },
@@ -812,7 +812,7 @@ function dec(value: Prisma.Decimal | null): Prisma.Decimal {
 
 interface ResolvedRow {
   productName: string;
-  /** D112 — `null` for an unbranded product, which most hardware stock is. */
+  /** D133 — `null` for an unbranded product, which most hardware stock is. */
   brandName: string | null;
   variantName: string | null;
   sku: string | null;

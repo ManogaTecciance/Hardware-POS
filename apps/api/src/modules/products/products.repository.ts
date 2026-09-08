@@ -22,7 +22,7 @@ export interface ProductListFilters {
   search?: string;
   categoryId?: string;
   subcategoryId?: string;
-  /** D112 (`8.9`) — everything carrying one label. */
+  /** D133 (`8.9`) — everything carrying one label. */
   brandId?: string;
   isActive?: boolean;
   type?: string;
@@ -162,7 +162,7 @@ export class ProductsRepository {
         : {}),
       ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
       ...(filters.subcategoryId ? { subcategoryId: filters.subcategoryId } : {}),
-      // D112 (`8.9`) — brand as a filter, beside the category filters it sits
+      // D133 (`8.9`) — brand as a filter, beside the category filters it sits
       // with in the UI. Indexed on `Product.brandId`, declared explicitly
       // because PostgreSQL does not index a foreign key on its own.
       ...(filters.brandId ? { brandId: filters.brandId } : {}),

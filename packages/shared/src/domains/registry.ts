@@ -24,7 +24,7 @@ export const DOMAIN_REGISTRY: Record<BusinessType, DomainDescriptor> = {
   BAKERY: FOOD_SERVICE_DOMAIN,
   HOTEL: HOTEL_DOMAIN,
   GENERAL: GENERAL_DOMAIN,
-  // D99. The registry is total, so adding `RETAIL` to `BusinessType` without
+  // D120. The registry is total, so adding `RETAIL` to `BusinessType` without
   // this line is a COMPILE ERROR — which is why 2.1 and 2.2 land together.
   RETAIL: RETAIL_DOMAIN,
 };

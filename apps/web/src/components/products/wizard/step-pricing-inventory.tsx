@@ -35,7 +35,7 @@ interface Props {
   /** True when the tenant runs on locally-tracked inventory (LOCAL mode). */
   showOpeningStock: boolean;
   /**
-   * D113e — offer “How is this sold?” at all. RETAIL only: the capability is
+   * D134e — offer “How is this sold?” at all. RETAIL only: the capability is
    * off for hardware and every food-service domain, and the shell resolves it
    * so this component never sees a business type (D31).
    *
@@ -102,12 +102,12 @@ export function StepPricingInventory({
       ) : null}
 
       {/*
-        D113 (`6.1`) — above both pricing shapes on purpose. Measure is a
+        D134 (`6.1`) — above both pricing shapes on purpose. Measure is a
         property of the product, so it applies whether the price lives on
         the product or on its variants, and it has to be set BEFORE the
         price is read: "200" means nothing until you know it is per kilo.
 
-        D113e — and only where the tenant sells by measure. `6.1b` rendered
+        D134e — and only where the tenant sells by measure. `6.1b` rendered
         this unconditionally, which put a weighed-goods control in front of
         every restaurant and hardware workspace: this file is the shared
         Step 3 for every business type, and it already takes `businessKind`
@@ -582,14 +582,14 @@ function VariantMatrix({
 // ── Small primitives ─────────────────────────────────────────────────────────
 
 /**
- * D113 (`6.1`) — how this product is sold, and in what unit.
+ * D134 (`6.1`) — how this product is sold, and in what unit.
  *
  * The gap this closes: `quantityType` shipped on the column, the DTO, the
  * read model and the till, and there was no way to SET it. A measured
  * product could only be created by writing to the database directly, which
  * is how the seeded rice worked and why nothing else could.
  *
- * The unit is free text (D113b §1) and the examples are a placeholder, not
+ * The unit is free text (D134b §1) and the examples are a placeholder, not
  * a list — a shop selling rope by the foot must not have to wait for us.
  */
 function MeasureCard({

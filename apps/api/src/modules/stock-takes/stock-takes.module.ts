@@ -5,7 +5,7 @@ import { StockTakesController } from './stock-takes.controller';
 import { StockTakesService } from './stock-takes.service';
 
 /**
- * Stock takes / cycle counts (D111).
+ * Stock takes / cycle counts (D132).
  *
  * Imports `ProvidersModule` because the service resolves
  * `InventoryProvider.applyStockCount` rather than writing stock itself — the

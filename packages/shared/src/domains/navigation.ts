@@ -146,7 +146,7 @@ export const RETAIL_NAVIGATION: readonly NavGroupSpec[] = [
       // them.
       { href: '/products', label: 'Products', icon: 'Package', permission: Permission.PRODUCT_READ },
       /*
-       * `8.7` (D111) put a `Stock count` entry here. **The PO removed it from
+       * `8.7` (D132) put a `Stock count` entry here. **The PO removed it from
        * the rail on 2026-09-08**, for every domain that reads this list —
        * RETAIL, HARDWARE and GENERAL.
        *
@@ -154,11 +154,11 @@ export const RETAIL_NAVIGATION: readonly NavGroupSpec[] = [
        * by the PO's choice: hardware and general only ever had the entry as a
        * side effect of Phase 8 adding it here, so this restores the rail they
        * had before `8.7` rather than inventing a change for them. It also
-       * keeps D99's "reuse; do not fork" intact, and keeps the asserted
+       * keeps D120's "reuse; do not fork" intact, and keeps the asserted
        * `retail rail === hardware rail` equality true.
        *
        * **Nothing else is removed.** `/stock-takes` still renders if reached
-       * by URL, `POST /v1/stock-takes` is untouched, and D111 stands: a count
+       * by URL, `POST /v1/stock-takes` is untouched, and D132 stands: a count
        * states reality and never touches the oversell guard. Only the rail
        * entry is gone, so putting it back is this comment in reverse.
        */

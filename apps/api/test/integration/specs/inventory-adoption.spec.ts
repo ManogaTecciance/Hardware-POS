@@ -1060,7 +1060,7 @@ describe('6C-A.5 — the provider is genuinely invoked, not merely imported', ()
     expect(lines).toEqual([
       {
         productId: tile.productAId,
-        // D99 — the sell/restock paths carry a variant slot now. Both pass null
+        // D120 — the sell/restock paths carry a variant slot now. Both pass null
         // until `computeCart` resolves one, so this pins today's behaviour and
         // will fire again the moment a real variant starts flowing through.
         productVariantId: null,
@@ -1086,7 +1086,7 @@ describe('6C-A.5 — the provider is genuinely invoked, not merely imported', ()
     expect(lines).toEqual([
       {
         productId: tile.productAId,
-        // D99 — the sell/restock paths carry a variant slot now. Both pass null
+        // D120 — the sell/restock paths carry a variant slot now. Both pass null
         // until `computeCart` resolves one, so this pins today's behaviour and
         // will fire again the moment a real variant starts flowing through.
         productVariantId: null,

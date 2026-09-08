@@ -4,7 +4,7 @@ import { needsVariantChoice, quickAddVariant } from './variant-picker-dialog';
 import type { ClientProduct, ClientVariant } from '@/lib/catalog';
 
 /**
- * D99 (1c.4) — the quick-add ladder.
+ * D120 (1c.4) — the quick-add ladder.
  *
  * The whole behaviour of the picker step is *when it does not open*: a grocery
  * item, a single-option product and a default size must all still be one tap.
@@ -39,7 +39,7 @@ function product(variants: ClientVariant[] = []): ClientProduct {
     stockState: 'IN_STOCK',
     imageUrl: null,
     taxable: true,
-    // D113 (`6.2`) — required on `ClientProduct`, so the compiler names every
+    // D134 (`6.2`) — required on `ClientProduct`, so the compiler names every
     // fixture that forgets it. Phase 4 lesson 7: a field crossing a wire
     // should be REQUIRED, because an optional one is dropped in silence.
     quantityType: 'WHOLE',

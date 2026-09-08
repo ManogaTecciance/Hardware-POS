@@ -1,5 +1,5 @@
 /**
- * Brands — D112 (`8.9`).
+ * Brands — D133 (`8.9`).
  *
  * Per-tenant catalogue data, not a domain enum: the list is fetched, never
  * hard-coded. There is no delete — archiving is the operation, because removing

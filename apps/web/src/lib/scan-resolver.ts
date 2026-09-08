@@ -2,7 +2,7 @@ import type { ClientProduct, ClientVariant } from './catalog';
 import { scanCandidates } from './use-barcode-scanner';
 
 /**
- * D99 (1c.5) — what a scanned or typed code resolves to.
+ * D120 (1c.5) — what a scanned or typed code resolves to.
  *
  * `variant` is null only for a legacy variant-less product, where the code
  * matched the product's own SKU. Every barcode match names a variant, because

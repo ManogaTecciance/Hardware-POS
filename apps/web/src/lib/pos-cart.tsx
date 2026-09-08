@@ -31,7 +31,7 @@ interface PosCartState {
 const EMPTY: PosCartState = { items: [], customerId: '', addedCustomers: [] };
 
 /**
- * D99 — repair a cart persisted before lines had a key.
+ * D120 — repair a cart persisted before lines had a key.
  *
  * sessionStorage survives a deploy, so the first load after this change reads
  * back items with no `lineKey` and no `variant`. Left alone every line would key
@@ -59,7 +59,7 @@ function migrate(state: PosCartState): PosCartState {
  * stock-tracked and can always be sold.
  */
 export function stockCap(product: ClientProduct, variant: ClientVariant | null = null): number | null {
-  // D99 — a variant caps against its own branch stock (1b.1 put it on the read
+  // D120 — a variant caps against its own branch stock (1b.1 put it on the read
   // model). Without this a cashier can add ten Mediums when three exist and only
   // find out at checkout, where the server refuses with the message 1a.19 built.
   if (variant) {
@@ -69,7 +69,7 @@ export function stockCap(product: ClientProduct, variant: ClientVariant | null =
 }
 
 /**
- * D113 (`6.3`) — is this product sold by weight or measure?
+ * D134 (`6.3`) — is this product sold by weight or measure?
  *
  * **Read, never inferred** (D56). One predicate so the cart, the till and the
  * promotion mapper cannot disagree about what "measured" means.
@@ -81,7 +81,7 @@ export function isMeasured(product: ClientProduct): boolean {
 interface PosCartValue extends PosCartState {
   /** True once sessionStorage has been read (avoids empty-cart flash on route load). */
   hydrated: boolean;
-  /** D99 — `variant` is optional so pre-picker callers keep working (1c.4 supplies it). */
+  /** D120 — `variant` is optional so pre-picker callers keep working (1c.4 supplies it). */
   addToCart: (product: ClientProduct, variant?: ClientVariant | null) => void;
   changeQty: (lineKey: CartLineKey, delta: number) => void;
   /** Set an item's quantity to an absolute value (typed in). Clamped to >= 1. */
@@ -151,7 +151,7 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
       hydrated,
       addToCart: (product, variant = null) =>
         setState((s) => {
-          // D99 — the key decides merge-or-append. Two sizes of one shirt produce
+          // D120 — the key decides merge-or-append. Two sizes of one shirt produce
           // two keys and therefore two lines; the same size twice still merges.
           const key = cartLineKey(product.id, variant?.id ?? null);
           const found = s.items.find((it) => it.lineKey === key);
@@ -166,7 +166,7 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
             .map((it) => {
               if (it.lineKey !== lineKey) return it;
               /*
-               * D113 (`6.3`) — a measured line does not step.
+               * D134 (`6.3`) — a measured line does not step.
                *
                * ±1 kg of rice is not what anyone wants, and inventing a smaller
                * increment (±0.1?) would be a guess. The till replaces the stepper
@@ -195,7 +195,7 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
               if (it.lineKey !== lineKey) return it;
               const cap = stockCap(it.product, it.variant);
               /*
-               * D113 (`6.3`) — the clamp is CONDITIONAL, not relaxed.
+               * D134 (`6.3`) — the clamp is CONDITIONAL, not relaxed.
                *
                * A WHOLE line keeps flooring to a minimum of 1, byte for byte as
                * before: you cannot sell half a shirt, and removal is the trash
@@ -205,7 +205,7 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
                * `Decimal(12,3)`, which is grams — and may go below 1, because
                * 750 g of rice is the ordinary case rather than an edge one. The
                * floor is 0.001 rather than 0: that is the smallest amount the
-               * column can hold, not an invented minimum (D113b §3), and the
+               * column can hold, not an invented minimum (D134b §3), and the
                * numpad refuses 0 before it ever reaches here.
                */
               let q = isMeasured(it.product)
@@ -243,7 +243,7 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
           const items = s.items.map((it) => {
             const fresh = byId.get(it.product.id);
             if (!fresh) return it;
-            // D99 — refresh the VARIANT snapshot too. Without this a size's price
+            // D120 — refresh the VARIANT snapshot too. Without this a size's price
             // and stock go stale while its product updates around them, and the
             // quantity cap would then be enforced against a number another till
             // has already moved.

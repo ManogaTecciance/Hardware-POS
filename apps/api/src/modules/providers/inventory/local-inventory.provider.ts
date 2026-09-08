@@ -35,7 +35,7 @@ import { InventoryProvider } from './inventory-provider';
  * at branch A silently reduces the number branch B is also reading.
  *
  * `BranchInventory` **does** exist (D44) and is branch- and variant-scoped — this
- * comment claimed otherwise until D99 corrected it. But only receipts and variant
+ * comment claimed otherwise until D120 corrected it. But only receipts and variant
  * sales write it; a product-level sale still moves the global column, so the guard
  * below remains necessary. D10's Phase 2.5, which would move *every* path onto
  * branch-scoped rows, is still outstanding.
@@ -74,7 +74,7 @@ export class LocalInventoryProvider implements InventoryProvider {
   }
 
   /**
-   * D99 — read-time availability at variant grain, so the courtesy check in
+   * D120 — read-time availability at variant grain, so the courtesy check in
    * `computeCart` speaks about the same rows `reduceStock` will guard.
    *
    * Without this the two disagree: the read sees a product total of 10 across four
@@ -84,7 +84,7 @@ export class LocalInventoryProvider implements InventoryProvider {
    *
    * A variant with no `BranchInventory` row is **absent from the map**, matching
    * how an unknown product is absent from {@link getAvailability}. The caller reads
-   * absent as zero — D99 decision 8 at read time.
+   * absent as zero — D120 decision 8 at read time.
    *
    * Returns an empty map when there is no branch context rather than throwing:
    * this is a read, and `reduceStock` already fails loudly for a variant line with
@@ -159,7 +159,7 @@ export class LocalInventoryProvider implements InventoryProvider {
       }
 
       // ── variant line: the row lives in BranchInventory ─────────────────────
-      // D99 decision 9 — a variant's stock is branch-scoped, so there is no row to
+      // D120 decision 9 — a variant's stock is branch-scoped, so there is no row to
       // target without a branch. Fail loudly, matching `receiveStock`, rather than
       // quietly reducing product-level stock and hiding the caller's omission.
       if (ctx.branchId === null) {
@@ -173,7 +173,7 @@ export class LocalInventoryProvider implements InventoryProvider {
       // the predicate is what makes two concurrent sales of the last unit
       // serialise — one updates the row, the other matches nothing.
       //
-      // D99 decision 8 — no row means the variant was never received into this
+      // D120 decision 8 — no row means the variant was never received into this
       // branch, so it matches nothing and reports insufficient stock. Variant
       // stock is created by goods receipts, never by a sale.
       const res = await tx.branchInventory.updateMany({
@@ -214,7 +214,7 @@ export class LocalInventoryProvider implements InventoryProvider {
    * silently restocks nothing, and there is no row-count check because restoring
    * stock cannot fail a business rule.
    *
-   * ## D99 (1a.20) — the return goes back to the size that was sold
+   * ## D120 (1a.20) — the return goes back to the size that was sold
    *
    * This used to aggregate by product alone and touch `Product.quantityOnHand`
    * only, which left the sell and return paths asymmetric:
@@ -334,7 +334,7 @@ export class LocalInventoryProvider implements InventoryProvider {
    * to record, and inventing one would corrupt a future FIFO walk.
    */
   /**
-   * D111 (`8.7`) — apply a stock count.
+   * D132 (`8.7`) — apply a stock count.
    *
    * ## What is authoritative for "expected"
    *
@@ -354,7 +354,7 @@ export class LocalInventoryProvider implements InventoryProvider {
    *
    * `quantityOnHand: counted`. No `gte` predicate, no row-count check, no
    * refusal for going down: the shelf is the authority and the books are what is
-   * wrong. This is the whole point of D111, and it is why the count does not
+   * wrong. This is the whole point of D132, and it is why the count does not
    * reuse `reduceStock` — whose conditional write exists to lose a race safely,
    * a property a count must not have.
    *
@@ -479,7 +479,7 @@ export class LocalInventoryProvider implements InventoryProvider {
     // The caller writes its own — see `StockMovementMetadata`.
     if (!metadata) return;
     // Every movement is branch-scoped. A product-level reduction is allowed
-    // without a branch (D99 decision 9), and there is no meaningful branch to
+    // without a branch (D120 decision 9), and there is no meaningful branch to
     // attribute such a movement to, so it is not recorded rather than guessed at.
     if (ctx.branchId === null) return;
 
@@ -718,7 +718,7 @@ export class LocalInventoryProvider implements InventoryProvider {
  * lines move stock.
  */
 /**
- * D99 — aggregate by (product, variant) rather than by product.
+ * D120 — aggregate by (product, variant) rather than by product.
  *
  * A cart holding a Medium and a Large of one shirt must produce two decrements
  * against two rows; keying by product alone would collapse them into one against

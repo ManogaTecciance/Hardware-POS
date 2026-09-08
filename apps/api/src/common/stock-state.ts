@@ -12,7 +12,7 @@ export type StockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED';
  * Classify an on-hand quantity against an optional reorder level.
  *
  * Extracted so the item level and the variant level cannot disagree about what
- * "low" means. `sellable.service` computed this inline for products; D99 added the
+ * "low" means. `sellable.service` computed this inline for products; D120 added the
  * same question per variant, and two copies of a threshold rule is how a variant
  * ends up badged `IN_STOCK` on the same screen where its product reads `LOW`.
  *
@@ -43,7 +43,7 @@ export interface VariantStockCell {
 /**
  * Roll a product's variant stock up into the single figure its card shows.
  *
- * ## Why this exists (D99, 1c.6)
+ * ## Why this exists (D120, 1c.6)
  *
  * Stock is tracked by **variant**, not by product. `Product.quantityOnHand` is a
  * legacy rollup *mirror* (D10) — maintained on sale and receipt, but a mirror, and

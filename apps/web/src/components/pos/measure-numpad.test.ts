@@ -1,5 +1,5 @@
 /**
- * D113 (`6.3`) — what the weight keypad will and will not accept.
+ * D134 (`6.3`) — what the weight keypad will and will not accept.
  *
  * ## What makes these assertions non-vacuous (D30)
  *
@@ -48,7 +48,7 @@ describe('the weight keypad', () => {
   });
 
   it('refuses a fourth decimal place', () => {
-    // D113b §3 — the database silently truncates the fourth place, so it is
+    // D134b §3 — the database silently truncates the fourth place, so it is
     // refused where the operator can still see it rather than after the fact.
     expect(appendKey('1.235', '9')).toBe('1.235');
   });
