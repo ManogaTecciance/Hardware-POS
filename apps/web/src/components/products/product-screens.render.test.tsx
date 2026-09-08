@@ -13,7 +13,7 @@
  * Only the boundaries are stubbed: the API client, the session, and the profile
  * hook. The components, the resolver and the wiring between them are real.
  */
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -173,6 +173,16 @@ vi.mock('@/lib/products/branches-api', async (importOriginal) => {
   return {
     ...actual,
     fetchBranches: vi.fn().mockResolvedValue([]),
+  };
+});
+
+// D133/D136 gave the list a brands filter; unmocked, every render issued a
+// live GET for brands and, with a dev API up, a 401 that signs the test out.
+vi.mock('@/lib/products/brands-api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/products/brands-api')>();
+  return {
+    ...actual,
+    fetchBrands: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -507,5 +517,88 @@ describe('40/41 — these render assertions can actually fail', () => {
     cleanup();
     await renderScreen(ProductDetailPage, ready('QUICKBOOKS'));
     expect(screen.queryByRole('button', { name: /sync to quickbooks/i })).not.toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The product search box
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Two defects, both reported from the floor.
+ *
+ * The term reached the API through a bare `.trim()`, which strips the ends and
+ * leaves internal runs intact — so "rice  curry" was sent with its double space
+ * and matched nothing, because the server's `contains` is literal and the
+ * stored name has one. Customers and Sales already collapsed runs; this screen
+ * did not. It now uses the shared `normalizeSearchTerm`.
+ *
+ * And there was no way to clear the box but to select the text and delete it,
+ * which is unpleasant on a tablet and is the only route back to the unfiltered
+ * list.
+ *
+ * The normalisation cases assert the SENT value rather than the input's, since
+ * the input deliberately keeps whatever was typed — asserting the input alone
+ * would pass against the old bare-trim build.
+ */
+const productsApi = await import('@/lib/products-api');
+
+describe('the product search box', () => {
+  /** The query object of the LAST fetchProducts call. */
+  function lastQuery(): Record<string, unknown> {
+    const calls = vi.mocked(productsApi.fetchProducts).mock.calls;
+    return (calls.at(-1)?.[1] ?? {}) as Record<string, unknown>;
+  }
+
+  async function typeSearch(value: string) {
+    await renderScreen(ProductsPage, ready('LOCAL'));
+    fireEvent.change(screen.getByLabelText('Search products'), { target: { value } });
+  }
+
+  it('collapses internal whitespace before the term reaches the API', async () => {
+    await typeSearch('  rice   curry  ');
+
+    await waitFor(() => expect(lastQuery().search).toBe('rice curry'));
+    // The negative half: the old build sent this instead, and a test that only
+    // checked "search is truthy" would pass on both.
+    expect(lastQuery().search).not.toBe('rice   curry');
+  });
+
+  it('treats a whitespace-only term as no term at all', async () => {
+    await typeSearch('    ');
+
+    // `'' || undefined` — the key must be absent, not an empty string, or the
+    // API filters on a term that matches everything.
+    await waitFor(() => expect(lastQuery().search).toBeUndefined());
+  });
+
+  it('leaves what was typed in the box — normalising is for the request', async () => {
+    await typeSearch('  rice   curry  ');
+
+    expect((screen.getByLabelText('Search products') as HTMLInputElement).value).toBe(
+      '  rice   curry  ',
+    );
+  });
+
+  it('offers a clear button only once something is typed', async () => {
+    await renderScreen(ProductsPage, ready('LOCAL'));
+
+    expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Search products'), { target: { value: 'rice' } });
+
+    expect(screen.getByRole('button', { name: 'Clear search' })).toBeTruthy();
+  });
+
+  it('empties the box and drops the filter when cleared', async () => {
+    await typeSearch('rice');
+    await waitFor(() => expect(lastQuery().search).toBe('rice'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+
+    expect((screen.getByLabelText('Search products') as HTMLInputElement).value).toBe('');
+    await waitFor(() => expect(lastQuery().search).toBeUndefined());
+    // The button goes with the text it clears.
+    expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
   });
 });

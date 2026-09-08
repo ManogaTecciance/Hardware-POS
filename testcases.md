@@ -158,6 +158,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD-047 | The Taxable toggle names the tenant rate (D122) | Retail wizard → Details with the tenant rate at 18%: Taxable on; Taxable off; set the rate to 0 in Settings → Business and reopen | Helper reads "Tax applies at 18%." / "Zero-rated — no tax is charged on this product." / "This shop's tax rate is 0%, so nothing is charged yet. Set it in Settings → Business."; a product saved with Taxable off is untaxed on a real sale and its line records `taxRatePercent` 0.00 | P | Not Run |
 | PROD-048 | Measured goods are refused outside RETAIL by the server (D134e) | As a hardware owner POST /v1/products with `quantityType: "DECIMAL"`; PATCH an already-DECIMAL hardware product's name only, then set it back to WHOLE; repeat the create on a RETAIL workspace | Hardware create is 400 `MEASURED_GOODS_NOT_OFFERED` (the wizard hides the control, the API refuses the assertion); the rename and the switch to WHOLE both succeed — the rule is "you may not assert measured here", not "no measured row may exist"; the RETAIL create is 201 | N | Not Run |
 | PROD-049 | Variations come from the attribute library (D125/5.11) | On a RETAIL workspace with a "Size" definition bound to Apparel and an unbound "Colour": Add Product → category Apparel → Variations; pick Size and tick S, M; change the category; also add a hand-typed "Fit" | The picker offers Size and Colour (unbound applies everywhere) and not another category's scales; ticked options become the rows, nothing is adopted wholesale; after the category change a definition it no longer offers is unmapped (`attributeDefinitionId` null) while the typed options stay; the saved product carries the ids on Size and none on Fit; a hardware workspace with no library still gets the free-text fields | P | Not Run |
+| PROD-050 | Products search collapses whitespace and can be cleared; categories live on the tab (D137) | Type "rice  curry" (two spaces) in the products search; press the Clear control; look for a Categories button in the header and open the Categories tab | The list matches "Rice Curry"; the field has the accessible name "Search products" and empties on Clear; there is no Categories button in the header and the tab reaches /products/categories | P | Not Run |
 
 ## PIMP — Product Bulk Import
 
@@ -230,6 +231,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | POS-059 | Cart lines are keyed by variant (D120/D121) | Add a shirt's Medium, then its Large, then Medium again; tap a product with an `isDefault` size; tap one whose default is sold out | Two lines (Medium ×2, Large ×1), never one line of 3; the default size quick-adds without the "Choose an option" dialog; a sold-out default opens the picker with that size reading "Out of stock"; a product with one sellable option adds it without asking | P | Not Run |
 | POS-060 | Weighed goods ask for the amount (D134/D134b) | On a RETAIL workspace (D134e): Rice: DECIMAL, unit kg, Rs 200/kg, 5 kg on hand; tap the card; type `0.750`; then try `0`, a fourth decimal place, and `6` | "How many kg?" opens with "Line total:" Rs 150.00 computed by the cart, not the keypad; Add is disabled at 0; the fourth decimal is ignored; 6 reads "Only 5 kg in stock."; Cancel adds nothing; the confirmed line is 0.750 kg, the server stores 0.750 exactly and the receipt prints `0.75 kg` | P | Not Run |
 | POS-061 | Quantity promotions ignore a measured line (D134a) | On a RETAIL workspace (D134e): BUY_X_GET_Y naming Rice and a PERCENTAGE_DISCOUNT on Rice; ring 0.75 kg beside two shirts inside a bundle | The BOGO yields no claim on the rice and no reward is asked for; the percentage discount applies to it; the shirts still win their bundle; till preview and server charge agree | N | Not Run |
+| POS-062 | An unbilled order reads Unpaid; only what was never owed reads Not tracked (D137) | Submit a dine-in order and leave the table unbilled; place a takeaway and do not settle it; cancel a third order; view a third-party order; then open the Orders page with the Unpaid chip | The unbilled dine-in and the unsettled takeaway carry an Unpaid badge and appear under Unpaid; the cancelled and third-party rows carry a "Not tracked" badge in the list AND in the detail drawer, never a bare "—"; a settled takeaway (D117) reads Paid from its sale | P | Not Run |
 
 ## PAY — Payments & Credit
 
@@ -832,9 +834,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | AUTH | 15 | CUST | 36 |
 | PERM | 16 | CIMP | 10 |
 | DASH | 24 | SUP | 15 |
-| PROD | 49 | SIMP | 8 |
+| PROD | 50 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
-| POS | 61 | SET | 31 |
+| POS | 62 | SET | 31 |
 | PAY | 41 | DOC | 22 |
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
@@ -845,7 +847,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 617 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 619 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

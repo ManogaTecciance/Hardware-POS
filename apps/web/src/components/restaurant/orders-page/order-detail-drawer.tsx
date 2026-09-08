@@ -20,6 +20,7 @@ import {
   PAYMENT_LABELS,
   PAYMENT_METHOD_LABELS,
   PAYMENT_TONES,
+  PAYMENT_UNTRACKED_LABEL,
   UNIFIED_CHANNEL_LABELS,
   UNIFIED_CHANNEL_TONES,
   UNIFIED_SOURCE_LABELS,
@@ -254,7 +255,10 @@ function OrderDetailSections({
                 tone={PAYMENT_TONES[order.paymentStatus]}
               />
             ) : (
-              <span className="text-sm text-muted-foreground">—</span>
+              // The same badge the row shows: a third-party or cancelled order
+              // must not read "Not tracked" in the queue and "—" one tap later
+              // (D137).
+              <StatusBadge label={PAYMENT_UNTRACKED_LABEL} tone="muted" />
             )}
           </div>
         </div>

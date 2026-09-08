@@ -541,7 +541,7 @@ function restaurantOrderBaseView(
     source,
     orderNumber: o.orderNumber,
     unifiedStatus: unified,
-    paymentStatus: sale?.paymentStatus ?? null,
+    paymentStatus: sale?.paymentStatus ?? unbilledPaymentStatus(unified),
     customerName: o.takeawayProfile?.customerName ?? null,
     customerPhone: o.takeawayProfile?.customerPhone ?? null,
     contextLabel,
@@ -555,6 +555,36 @@ function restaurantOrderBaseView(
       qty: Number(i.quantity),
     })),
   };
+}
+
+/**
+ * What a restaurant order with no Sale of its own reports as its payment state.
+ *
+ * A Sale is only written at settlement, so an order that is placed, cooked and
+ * handed over but never billed carried NO payment status at all. In the queue
+ * that read as an ambiguous dash, and — the real damage — it made the Unpaid
+ * filter skip exactly the orders somebody still has to chase, because that
+ * filter is an equality test against this field and `null === 'UNPAID'` is
+ * false. "Show me who has not paid" answered with the orders that HAD been
+ * billed, and hid every table still holding the money.
+ *
+ * Until D137 the narrower reading — `UNPAID` only once a bill exists — lived
+ * in this code alone (`sale?.paymentStatus ?? null`); the log never recorded
+ * it (there is no D53 record, and D52's sentence is about the Sale row
+ * legitimately existing unpaid). D137 widens it to the plain-money reading —
+ * nobody has taken the money yet — because that is the question the queue's
+ * Unpaid chip is actually asked. A raised-but-unpaid bill and a never-billed
+ * order are both money owed on this branch tonight, and the counter chases
+ * them the same way.
+ *
+ * CANCELLED and DRAFT stay `null`. Nothing was ever owed on an order that was
+ * called off or never submitted, so badging them Unpaid would park permanent
+ * false debt in the queue. `null` keeps its honest meaning of "no payment
+ * state of ours applies" — which is also what a third-party row returns, since
+ * that money is the platform's to collect and was never ours to report.
+ */
+function unbilledPaymentStatus(unified: UnifiedOrderStatus): 'UNPAID' | null {
+  return unified === 'CANCELLED' || unified === 'DRAFT' ? null : 'UNPAID';
 }
 
 /** The queue-row projection of an ExternalOrder — see restaurantOrderBaseView. */
@@ -574,7 +604,7 @@ function externalOrderBaseView(e: {
     unifiedStatus: unifiedStatusForExternalOrder(e.status),
     // Payment status for 3rd party lives on the platform side; the
     // MOCK adapter does not surface it, so we return null and the
-    // UI shows "—".
+    // UI reads "Not tracked" (D137) — never Unpaid, which is ours to say.
     paymentStatus: null,
     customerName: null,
     customerPhone: null,

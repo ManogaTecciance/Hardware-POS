@@ -7648,6 +7648,43 @@ before the D134c unit check while the update path runs them the other
 way round, so a hardware `DECIMAL` create with no unit is refused for the
 domain and the same update for the unit.
 
+### D137 — merging `fix/issues-restaurant`'s follow-up: an unbilled order is Unpaid
+
+`origin/fix/issues-restaurant` moved on by one commit after D119
+(`f6e45a6`, 2026-09-08): a restaurant order with no Sale of its own now
+reports `paymentStatus: UNPAID` instead of `null`, the queue renders a
+"Not tracked" badge where a row genuinely carries no payment state of ours
+(a third-party order, a cancelled or draft one), and the products screen
+gains the shared search normaliser, a Clear control and an accessible
+name for its search box while its header loses the Categories button.
+Seven files, no textual conflict, no migration, no reference to renumber.
+
+**What the widening means.** Until now a Sale was written only at
+settlement, so an order placed, cooked and handed over but never billed
+carried no payment status — and the queue's Unpaid chip, an equality test
+on that field, skipped exactly the orders somebody still has to chase. Their
+change reads `UNPAID` as "nobody has taken the money yet"; `CANCELLED` and
+`DRAFT` stay `null` because nothing was ever owed. The commit cites "D53"
+for the narrower reading; this log holds no D53 record — D52 is followed
+by D54, and no D53 heading ever existed in the history — and the narrower
+reading lived only in the old code (`sale?.paymentStatus ?? null`). D52's
+"a restaurant bill legitimately exists unpaid — `paymentStatus: UNPAID`
+already records that" is about the Sale row and is not what was widened.
+Nothing in D110, D117 or D119 reads `null` as "not yet billed", so no
+consumer changes meaning; the derived field stays derived, and D117's
+settled takeaway still reads from its Sale. The review found two places
+their commit left behind: the order drawer still printed a bare dash where
+the row now says "Not tracked" (both read the same badge now), and the
+third-party projection's comment still promised a dash. A products render
+test on our side never mocked the brands request the retail merge added;
+it does now, so it no longer touches a live API.
+
+**The products header.** Their commit drops the Categories button because
+the inventory tabs above the list already carry a Categories tab to the
+same route; the merged page still renders those tabs, so the screen stays
+reachable for every business kind. The search box collapses runs of
+whitespace the way Customers and Sales already do.
+
 ## Open decisions
 
 | ID | Question | Needed by |

@@ -193,3 +193,76 @@ describe('date range', () => {
     expect(url.get('to')).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The payment badge on a queue row.
+ *
+ * Two defects met here. The row rendered bare `payment —` text beside real
+ * pills whenever `paymentStatus` was absent, which read as broken markup; and
+ * absent was the state of every live unbilled order, because the projection
+ * only had a payment status once a Sale existed. The server now reports those
+ * UNPAID (see payment-status.spec.ts), leaving absence to mean the two things
+ * it should: a third-party order, or a cancelled/draft one.
+ *
+ * Paired per D30: the badge each case expects is asserted PRESENT and the
+ * other one ABSENT, so a row that rendered one label unconditionally fails.
+ */
+function orderRow(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'ord_1',
+    channel: 'DINE_IN',
+    source: 'POS',
+    orderNumber: 'ORD-1',
+    unifiedStatus: 'IN_PROGRESS',
+    paymentStatus: 'UNPAID',
+    customerName: null,
+    customerPhone: null,
+    contextLabel: 'T1',
+    pickupAt: null,
+    createdAt: '2026-09-08T12:00:00.000Z',
+    total: null,
+    saleId: null,
+    itemCount: 1,
+    itemPreview: [{ name: 'Rice and Curry', qty: 1 }],
+    ...over,
+  };
+}
+
+function pageWith(items: ReturnType<typeof orderRow>[]) {
+  return { ...emptyPage(), items, total: items.length };
+}
+
+describe('the payment badge', () => {
+  it('badges a live unbilled order Unpaid', async () => {
+    list.mockResolvedValue(pageWith([orderRow({ paymentStatus: 'UNPAID' })]));
+    render(<OrdersPage session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('Unpaid')).toBeTruthy());
+    expect(screen.queryByText('Not tracked')).toBeNull();
+    // The shipped bug's exact shape — bare text where a pill belongs.
+    expect(screen.queryByText(/payment —/)).toBeNull();
+  });
+
+  it('badges a row with no payment state of ours as Not tracked', async () => {
+    // A third-party order: the platform collects, so we report nothing.
+    list.mockResolvedValue(
+      pageWith([orderRow({ channel: 'THIRD_PARTY', source: 'UBER_EATS', paymentStatus: null })]),
+    );
+    render(<OrdersPage session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('Not tracked')).toBeTruthy());
+    expect(screen.queryByText('Unpaid')).toBeNull();
+    expect(screen.queryByText(/payment —/)).toBeNull();
+  });
+
+  it('still distinguishes a settled bill', async () => {
+    list.mockResolvedValue(pageWith([orderRow({ paymentStatus: 'PAID', total: '2400.00' })]));
+    render(<OrdersPage session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('Paid')).toBeTruthy());
+    expect(screen.queryByText('Unpaid')).toBeNull();
+    expect(screen.queryByText('Not tracked')).toBeNull();
+  });
+});

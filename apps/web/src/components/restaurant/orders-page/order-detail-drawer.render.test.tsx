@@ -216,6 +216,42 @@ describe('the source chip', () => {
 
     expect(screen.getByText('via Uber Eats')).toBeTruthy();
   });
+
+  it('says "Not tracked" for a payment state that is not ours — the same badge as the row (D137)', () => {
+    detailFn.mockResolvedValue(null);
+    render(
+      <OrderDetailDrawer
+        order={{
+          ...ROW,
+          id: 'ext_2',
+          channel: 'THIRD_PARTY',
+          source: 'UBER_EATS',
+          paymentStatus: null,
+          saleId: null,
+        }}
+        branchId="brn_1"
+        onClose={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Not tracked')).toBeTruthy();
+    // NEGATIVE — the bare dash the drawer used to print, and the badge a live
+    // unbilled order would get; neither belongs to money that is not ours.
+    expect(screen.queryByText('—')).toBeNull();
+    expect(screen.queryByText('Unpaid')).toBeNull();
+  });
+
+  it('NEGATIVE control — a live row with a status shows that status, not "Not tracked"', () => {
+    detailFn.mockResolvedValue(null);
+    render(
+      <OrderDetailDrawer
+        order={{ ...ROW, paymentStatus: 'UNPAID' }}
+        branchId="brn_1"
+        onClose={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Unpaid')).toBeTruthy();
+    expect(screen.queryByText('Not tracked')).toBeNull();
+  });
 });
 
 describe('degradation', () => {
