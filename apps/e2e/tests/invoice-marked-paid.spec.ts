@@ -124,15 +124,18 @@ test.describe('MARK — accounting for a credit invoice', () => {
     }
   });
 
+  // The second user is the cashier rather than the manager: the manager demo user
+  // was retired on the feature side (2026-08-17). Any second user holding
+  // payment:create makes the point — the tick keeps its first author.
   test('MARK-016 an invoice already ticked keeps whoever ticked it', async ({
     ownerApi,
-    managerApi,
+    cashierApi,
   }) => {
     // The manager accounted for one; the owner then takes the money. The
     // settlement must not take credit for the manager's tick.
     const first = await creditSale(ownerApi);
     const second = await creditSale(ownerApi, first.customerId);
-    await managerApi.post(`/sales/${first.sale.id}/marked-paid`, { marked: true });
+    await cashierApi.post(`/sales/${first.sale.id}/marked-paid`, { marked: true });
 
     const before = await ownerApi.get(`/sales/${first.sale.id}`);
     const owed = Number((await ownerApi.get(`/customers/${first.customerId}/credit`)).outstanding);

@@ -128,6 +128,27 @@ export class QuickBooksProductSyncService {
             lastSyncedAt: new Date(),
           },
         }),
+        // D63 dual-write.
+        this.prisma.externalEntityRef.upsert({
+          where: {
+            tenantId_provider_entityType_localId: {
+              tenantId,
+              provider: 'QUICKBOOKS',
+              entityType: 'PRODUCT',
+              localId: product.id,
+            },
+          },
+          update: { externalId: quickbooksItemId, syncStatus: 'SYNCED', syncError: null, lastSyncedAt: new Date() },
+          create: {
+            tenantId,
+            provider: 'QUICKBOOKS',
+            entityType: 'PRODUCT',
+            localId: product.id,
+            externalId: quickbooksItemId,
+            syncStatus: 'SYNCED',
+            lastSyncedAt: new Date(),
+          },
+        }),
         this.prisma.syncLog.create({
           data: {
             tenantId,
@@ -162,6 +183,26 @@ export class QuickBooksProductSyncService {
       this.prisma.product.update({
         where: { id: product.id },
         data: { syncStatus: 'FAILED' },
+      }),
+      // D63 dual-write.
+      this.prisma.externalEntityRef.upsert({
+        where: {
+          tenantId_provider_entityType_localId: {
+            tenantId,
+            provider: 'QUICKBOOKS',
+            entityType: 'PRODUCT',
+            localId: product.id,
+          },
+        },
+        update: { syncStatus: 'FAILED', syncError: message },
+        create: {
+          tenantId,
+          provider: 'QUICKBOOKS',
+          entityType: 'PRODUCT',
+          localId: product.id,
+          syncStatus: 'FAILED',
+          syncError: message,
+        },
       }),
       this.prisma.syncLog.create({
         data: {

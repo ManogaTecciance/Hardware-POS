@@ -6,12 +6,18 @@ import { validateEnv } from './config/env.validation';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { PlatformBoundaryGuard } from './common/guards/platform-boundary.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
+import { ModuleAccessGuard } from './common/guards/module-access.guard';
+import { BranchScopeGuard } from './common/guards/branch-scope.guard';
 import { StorageModule } from './common/storage/storage.module';
+import { ThrottlingModule } from './common/throttling/throttling.module';
+import { RealtimeModule } from './common/realtime/realtime.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { RolesModule } from './modules/roles/roles.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProductsModule } from './modules/products/products.module';
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -30,14 +36,39 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { BranchesModule } from './modules/branches/branches.module';
+import { PlatformModule } from './modules/platform/platform.module';
+import { PlatformAdminModule } from './modules/platform-admin/platform-admin.module';
+import { RestaurantModule } from './modules/restaurant/restaurant.module';
+import { MenuModule } from './modules/menu/menu.module';
+import { DiningModule } from './modules/dining/dining.module';
+import { TableSessionsModule } from './modules/table-sessions/table-sessions.module';
+import { ReservationsModule } from './modules/reservations/reservations.module';
+import { KitchenModule } from './modules/kitchen/kitchen.module';
+import { TakeawayModule } from './modules/takeaway/takeaway.module';
+import { CatalogueModule } from './modules/catalogue/catalogue.module';
+import { BillingModule } from './modules/billing/billing.module';
+import { RestaurantReportsModule } from './modules/restaurant-reports/restaurant-reports.module';
+import { DeliveryHubModule } from './modules/delivery-hub/delivery-hub.module';
+import { RestaurantOrdersModule } from './modules/restaurant-orders/restaurant-orders.module';
+import { InventoryReceiptsModule } from './modules/inventory-receipts/inventory-receipts.module';
+import { PromotionsModule } from './modules/promotions/promotions.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     StorageModule,
+    // Global: AuthController attaches AuthThrottleInterceptor without needing to
+    // import the rate-limiting plumbing it otherwise has no interest in.
+    ThrottlingModule,
+    RealtimeModule,
     PrismaModule,
+    // Global: ModuleAccessGuard and (from Slice 5) the provider factories resolve
+    // the tenant's business profile, so BusinessProfileService must be reachable
+    // without every feature module importing PlatformModule.
+    PlatformModule,
     HealthModule,
     AuthModule,
+    RolesModule,
     UsersModule,
     ProductsModule,
     CategoriesModule,
@@ -53,15 +84,47 @@ import { BranchesModule } from './modules/branches/branches.module';
     QuickBooksModule,
     SyncModule,
     SettingsModule,
+    PlatformAdminModule,
     AuditLogModule,
     DashboardModule,
     BranchesModule,
+    RestaurantModule,
+    MenuModule,
+    DiningModule,
+    TableSessionsModule,
+    ReservationsModule,
+    KitchenModule,
+    TakeawayModule,
+    CatalogueModule,
+    BillingModule,
+    RestaurantReportsModule,
+    DeliveryHubModule,
+    RestaurantOrdersModule,
+    // D44 — Purchase Receipts / Receive Stock. Consumes InventoryProviderFactory
+    // (via ProvidersModule) so weighted-average cost has one implementation
+    // shared with the product-variant wizard's opening-stock path.
+    InventoryReceiptsModule,
+    // D45 — Scheduled auto-apply promotions (Bundle / BOGO / % / $). Peer of
+    // DiscountsModule; DiscountsModule stays authoritative for operator-applied
+    // retail line/order discounts at sale time. RestaurantModule re-imports
+    // PromotionsModule so the POS Catalogue service can consume the evaluator
+    // via DI.
+    PromotionsModule,
   ],
   providers: [
     // Order matters: authenticate first (populates request.user), then authorize.
+    // ModuleAccessGuard runs before BranchScopeGuard because there is no point
+    // validating branch context for a module the tenant does not have at all.
+    // Routes without any of the four metadata keys pass through untouched.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // D55: runs after JwtAuthGuard (request.user populated), before the
+    // permission guards — a platform admin must be refused a tenant route
+    // regardless of what permissions it asks for.
+    { provide: APP_GUARD, useClass: PlatformBoundaryGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: ModuleAccessGuard },
+    { provide: APP_GUARD, useClass: BranchScopeGuard },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

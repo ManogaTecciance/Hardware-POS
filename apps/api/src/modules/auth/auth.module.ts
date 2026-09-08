@@ -2,12 +2,22 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 
+import { ThrottlingModule } from '../../common/throttling/throttling.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 import { AuthController } from './auth.controller';
 import { AuthRepository } from './auth.repository';
 import { AuthService } from './auth.service';
+import { PermissionResolver } from './permission-resolver.service';
 
 @Module({
   imports: [
+    // Imported explicitly even though ThrottlingModule is @Global: globality only
+    // applies once a module is in the application graph, so an isolated
+    // TestingModule that pulls in AuthModule alone would otherwise fail to resolve
+    // AuthThrottleInterceptor. Declaring the dependency is also simply honest —
+    // AuthController genuinely uses it.
+    ThrottlingModule,
+    AuditLogModule,
     JwtModule.registerAsync({
       global: true,
       inject: [ConfigService],
@@ -22,7 +32,10 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AuthRepository],
-  exports: [AuthService],
+  // PermissionResolver is exported because PermissionsGuard is registered globally
+  // in AppModule and Nest resolves an APP_GUARD's dependencies from the root
+  // injector — a provider declared here but not exported would not be visible to it.
+  providers: [AuthService, AuthRepository, PermissionResolver],
+  exports: [AuthService, PermissionResolver],
 })
 export class AuthModule {}

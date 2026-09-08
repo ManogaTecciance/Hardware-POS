@@ -1,5 +1,7 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { ModuleKey } from '@hardware-pos/database';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
@@ -7,7 +9,10 @@ import { DiscountsService } from './discounts.service';
 import { DiscountApprovalResult } from './discounts.types';
 import { ApproveDiscountRequestDto } from './dto/approve-discount-request.dto';
 
+// Phase 1.5.9 — discount approval is a retail POS operation. Restaurant bill
+// discounting arrives in Phase 8 on its own routes.
 @Controller('discounts')
+@RequireModule(ModuleKey.RETAIL_POS)
 export class DiscountsController {
   constructor(private readonly discountsService: DiscountsService) {}
 

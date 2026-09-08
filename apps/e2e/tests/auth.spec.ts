@@ -12,11 +12,21 @@ test.describe('AUTH — Sessions', () => {
     await expect(page.getByRole('banner')).toBeVisible();
   });
 
-  test('AUTH-002 cashier logs in with PIN (demo tenant)', async ({ page }) => {
+  test('AUTH-002 cashier logs in with email + password (D48)', async ({ page }) => {
     await page.goto('/login');
-    await page.locator('#pin').fill(SEED.cashierPin);
-    await page.getByRole('button', { name: 'PIN sign in' }).click();
+    await page.locator('#email').fill(SEED.cashier.email);
+    await page.locator('#password').fill(SEED.cashier.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.waitForURL((u) => !u.pathname.startsWith('/login'));
+  });
+
+  test('AUTH-002b the login page offers no PIN sign-in (D48)', async ({ page }) => {
+    // Positive control first: the page rendered its real form...
+    await page.goto('/login');
+    await expect(page.locator('#email')).toBeVisible();
+    // ...and carries no PIN affordance of any kind.
+    await expect(page.locator('#pin')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'PIN sign in' })).toHaveCount(0);
   });
 
   test('AUTH-003 login with wrong password rejected', async ({ page }) => {
@@ -37,23 +47,23 @@ test.describe('AUTH — Sessions', () => {
     await ctx.dispose();
   });
 
-  test('AUTH-007 cashier PIN login via API', async () => {
+  test('AUTH-007 the PIN login endpoint is gone (D48)', async () => {
     const ctx = await request.newContext();
     const res = await ctx.post(`${API_URL}/auth/pin-login`, {
       data: { pin: SEED.cashierPin },
       headers: { 'X-Tenant-Id': SEED.tenantId },
     });
-    expect(res.ok()).toBeTruthy();
+    // 404, not 401: the route does not exist, it is not merely refusing.
+    expect(res.status()).toBe(404);
     await ctx.dispose();
   });
 
-  test('AUTH-008 wrong PIN rejected', async () => {
+  test('AUTH-008 cashier email login works where the PIN used to (D48)', async () => {
     const ctx = await request.newContext();
-    const res = await ctx.post(`${API_URL}/auth/pin-login`, {
-      data: { pin: '0000' },
-      headers: { 'X-Tenant-Id': SEED.tenantId },
+    const res = await ctx.post(`${API_URL}/auth/login`, {
+      data: { email: SEED.cashier.email, password: SEED.cashier.password },
     });
-    expect(res.ok()).toBeFalsy();
+    expect(res.ok()).toBeTruthy();
     await ctx.dispose();
   });
 

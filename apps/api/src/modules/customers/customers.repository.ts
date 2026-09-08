@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Customer, CustomerType, Prisma } from '@hardware-pos/database';
 
+import { mirrorExternalRef } from '../quickbooks/external-ref';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreditService } from '../credit/credit.service';
 
@@ -67,6 +68,8 @@ export class CustomersRepository {
   async markQuickBooksSyncFailed(tenantId: string, id: string, reason: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.customer.update({ where: { id }, data: { syncStatus: 'FAILED' } });
+      // D63 dual-write — the same mirror `queueQuickBooksSync` performs below.
+      await mirrorExternalRef(tx, tenantId, 'CUSTOMER', id, { syncStatus: 'FAILED' });
       await tx.syncLog.create({
         data: {
           tenantId,

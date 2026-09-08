@@ -14,12 +14,17 @@ import {
 
 export type { Session, SessionUser };
 
-const DEV_TENANT = 'tnt_dev';
-
 interface LoginResponse {
   token: string;
   refreshToken: string;
   user: Omit<SessionUser, 'permissions'>;
+  /**
+   * The permissions the SERVER resolved for this session. Absent only on a
+   * session minted before the field existed — see `toSession`.
+   */
+  permissions?: string[];
+  /** D55 — true when this session belongs to the platform console. */
+  isPlatformAdmin?: boolean;
   branch: { id: string; name: string } | null;
   register: { id: string; name: string } | null;
 }
@@ -29,18 +34,29 @@ interface AuthContextValue {
   loading: boolean;
   isAuthenticated: boolean;
   hasPermission: (permission: Permission) => boolean;
-  loginWithEmail: (email: string, password: string) => Promise<void>;
-  loginWithPin: (pin: string) => Promise<void>;
+  loginWithEmail: (email: string, password: string, workspace?: string) => Promise<Session>;
   logout: () => void;
 }
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
 function toSession(res: LoginResponse): Session {
+  /*
+   * Use what the server resolved. Deriving the set from `user.role` — which is
+   * what this did — is only correct for a user whose authority still comes from
+   * their enum role. A user linked to a custom role (a waiter) has the enum
+   * role CASHIER and an entirely different authority, so the rail offered them
+   * Sales while the API refused it, and hid Orders which they could actually
+   * use. The enum fallback remains for a token minted before the field existed.
+   */
   return {
     token: res.token,
     refreshToken: res.refreshToken,
-    user: { ...res.user, permissions: permissionsForRole(res.user.role) },
+    isPlatformAdmin: res.isPlatformAdmin === true,
+    user: {
+      ...res.user,
+      permissions: (res.permissions as Permission[] | undefined) ?? permissionsForRole(res.user.role),
+    },
     branchId: res.branch?.id ?? null,
     registerId: res.register?.id ?? null,
     branchName: res.branch?.name ?? 'No branch assigned',
@@ -59,19 +75,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return subscribeSession(setSession);
   }, []);
 
-  const loginWithEmail = React.useCallback(async (email: string, password: string) => {
-    const res = await api.post<LoginResponse>('/auth/login', { email, password });
-    saveSession(toSession(res));
-  }, []);
-
-  const loginWithPin = React.useCallback(async (pin: string) => {
-    const res = await api.post<LoginResponse>(
-      '/auth/pin-login',
-      { pin },
-      { tenantId: DEV_TENANT },
-    );
-    saveSession(toSession(res));
-  }, []);
+  /**
+   * Email + password sign-in, optionally scoped to a workspace (Slice 8.2).
+   *
+   * `workspace` is omitted from the payload when blank rather than sent as `''` —
+   * the API distinguishes "no workspace supplied" (fall back to a unique email
+   * match) from a workspace that failed validation, and an empty string is the
+   * latter.
+   */
+  const loginWithEmail = React.useCallback(
+    async (email: string, password: string, workspace?: string) => {
+      const slug = workspace?.trim();
+      const res = await api.post<LoginResponse>('/auth/login', {
+        email,
+        password,
+        ...(slug ? { workspace: slug } : {}),
+      });
+      const next = toSession(res);
+      saveSession(next);
+      // Returned so the caller can route on it immediately: a platform admin
+      // goes to the console, everyone else to their workspace dashboard, and
+      // waiting for the context to re-render first would flash the wrong page.
+      return next;
+    },
+    [],
+  );
 
   const logout = React.useCallback(() => {
     const current = loadSession();
@@ -91,10 +119,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAuthenticated: !!session,
       hasPermission: (p) => !!session?.user.permissions.includes(p),
       loginWithEmail,
-      loginWithPin,
       logout,
     }),
-    [session, loading, loginWithEmail, loginWithPin, logout],
+    [session, loading, loginWithEmail, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

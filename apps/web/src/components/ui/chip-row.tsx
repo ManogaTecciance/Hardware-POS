@@ -39,11 +39,16 @@ export function ChipRow({
     const el = scrollRef.current;
     if (!el) return;
     el.addEventListener('scroll', update, { passive: true });
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
+    // ResizeObserver ships in every modern browser but jsdom (used by the
+    // render specs) does not implement it. Guard so consumers can render
+    // this primitive in a test without patching a global — the post-render
+    // useEffect below still recalculates edge fades on every commit.
+    const ro =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(el);
     return () => {
       el.removeEventListener('scroll', update);
-      ro.disconnect();
+      ro?.disconnect();
     };
   }, [update]);
 
@@ -56,10 +61,18 @@ export function ChipRow({
   });
 
   // Keep the selected chip visible (e.g. selection restored after a reload).
+  // jsdom implements Element but not `scrollIntoView`, so guard for the
+  // render specs — the effect is purely cosmetic and its absence in tests
+  // is fine.
   React.useEffect(() => {
-    scrollRef.current
-      ?.querySelector('[data-active="true"]')
-      ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+    const target = scrollRef.current?.querySelector('[data-active="true"]');
+    if (target && typeof (target as Element & { scrollIntoView?: unknown }).scrollIntoView === 'function') {
+      (target as HTMLElement).scrollIntoView({
+        inline: 'nearest',
+        block: 'nearest',
+        behavior: 'smooth',
+      });
+    }
   }, [activeKey]);
 
   const nudge = (dir: 1 | -1) => {

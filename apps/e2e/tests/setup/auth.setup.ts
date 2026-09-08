@@ -7,9 +7,9 @@ import { SEED } from '../../src/api';
 const authPath = (name: string) => path.resolve(__dirname, `../../.auth/${name}.json`);
 
 /**
- * Creates one authenticated browser storage state per role. Email roles use
- * the credential form; PIN roles use the demo-tenant PIN box. The saved state
- * carries the localStorage session the app reads on boot.
+ * Creates one authenticated browser storage state per role, all through the
+ * credential form — email + password is the only login path (D48). The saved
+ * state carries the localStorage session the app reads on boot.
  */
 
 async function emailLogin(page: import('@playwright/test').Page, email: string, password: string) {
@@ -21,29 +21,13 @@ async function emailLogin(page: import('@playwright/test').Page, email: string, 
   await expect(page.getByRole('banner')).toBeVisible();
 }
 
-async function pinLogin(page: import('@playwright/test').Page, pin: string) {
-  await page.goto('/login');
-  await page.locator('#pin').fill(pin);
-  await page.getByRole('button', { name: 'PIN sign in' }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
-}
 
 setup('owner storage state', async ({ page }) => {
   await emailLogin(page, SEED.owner.email, SEED.owner.password);
   await page.context().storageState({ path: authPath('owner') });
 });
 
-setup('accountant storage state', async ({ page }) => {
-  await emailLogin(page, SEED.accountant.email, SEED.accountant.password);
-  await page.context().storageState({ path: authPath('accountant') });
-});
-
-setup('manager storage state', async ({ page }) => {
-  await pinLogin(page, SEED.managerPin);
-  await page.context().storageState({ path: authPath('manager') });
-});
-
 setup('cashier storage state', async ({ page }) => {
-  await pinLogin(page, SEED.cashierPin);
+  await emailLogin(page, SEED.cashier.email, SEED.cashier.password);
   await page.context().storageState({ path: authPath('cashier') });
 });

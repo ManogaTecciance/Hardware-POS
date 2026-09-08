@@ -17,11 +17,14 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [PAY](#pay--payments--credit) · [DISC](#disc--discount-basis) ·
 [MARK](#mark--accounting-for-a-credit-invoice) ·
 [SALE](#sale--sales-history) ·
-[RET](#ret--returns--refunds) · [QUO](#quo--quotations) ·
+[RET](#ret--returns--refunds) · [EXC](#exc--exchanges) · [QUO](#quo--quotations) ·
 [CUST](#cust--customers) · [CIMP](#cimp--customer-bulk-import) ·
 [SUP](#sup--suppliers-vendors) · [SIMP](#simp--vendor-bulk-import) ·
 [QB](#qb--quickbooks-integration) · [SET](#set--settings) ·
-[DOC](#doc--documents--printing) · [ADM](#adm--administration--multi-tenancy) ·
+[DOC](#doc--documents--printing) · [RSV](#rsv--table-reservations--calendar-d47) ·
+[OTBL](#otbl--open-tables-d49d50) ·
+[BSPL](#bspl--bill-splitting-by-item-d51) ·
+[ADM](#adm--administration--multi-tenancy) ·
 [UI](#ui--theme-layout--responsiveness) · [SEC](#sec--security)
 
 ---
@@ -36,9 +39,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | AUTH-004 | Login with unknown email | Nonexistent email | Same generic error (no user enumeration) | N | Not Run |
 | AUTH-005 | Login with empty fields | Submit with blank email/password | Client validation blocks; no API call | N | Not Run |
 | AUTH-006 | Inactive user cannot log in | Deactivate a user, attempt login | "Invalid email or password" | N | Not Run |
-| AUTH-007 | Cashier PIN login (demo tenant) | Enter valid cashier PIN in PIN box | Logged in as cashier | P | Not Run |
-| AUTH-008 | PIN login with wrong PIN | Enter unused PIN | Error shown; not logged in | N | Not Run |
-| AUTH-009 | PIN login is demo-tenant scoped | Use a non-demo tenant user's PIN in login PIN box | Rejected (PIN box resolves against demo tenant only) | N | Not Run |
+| AUTH-007 | PIN login endpoint removed (D48) | POST /v1/auth/pin-login | 404 — the route does not exist | N | Passed |
+| AUTH-008 | Cashier signs in with email + password (D48) | Cashier credentials in the login form | Logged in; lands on dashboard | P | Passed |
+| AUTH-009 | Login page has no PIN affordance (D48) | Inspect /login | No PIN field or PIN button rendered | N | Passed |
 | AUTH-010 | Session survives reload | Log in, hard-reload the browser | Still authenticated; same route restored | P | Not Run |
 | AUTH-011 | Logout clears session | Account menu → Log out | Redirected to /login; back-button does not restore an authenticated page | P | Not Run |
 | AUTH-012 | Expired access token silently refreshes | Wait past access-token TTL (or force 401), perform an action | Token refresh rotates; request succeeds without logout | P | Not Run |
@@ -352,6 +355,39 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | RET-017 | Return detail view | Open a completed return | Lines, conditions/dispositions, refunds, approver shown | P | Not Run |
 | RET-018 | Failed refund surfaced | Force QB push failure on a return | Refund/return status FAILED visible; document shows FAILED watermark | N | Not Run |
 
+## EXC — Exchanges
+
+> **Status: the Exchange A4 document renderer exists; the Exchange transaction does not.**
+>
+> `DocumentsService.buildExchangeDocument` renders a combined returned +
+> replacement A4 note, and `'exchange'` is a valid document-preview type. There is
+> no Exchange Prisma model, migration, API module, route, permission key, or UI
+> flow — the renderer's own comment says so: *"Exchanges are not yet a first-class
+> transaction in the POS."*
+>
+> `EXC-D-*` (document) cases are live and covered by
+> `apps/api/src/modules/documents/documents.preview.spec.ts`, plus `SET-013` and
+> `DOC-014`. They are the Tile Shop exchange regression.
+>
+> `EXC-T-*` (transaction) cases are **Blocked — feature not implemented**. They are
+> listed for traceability only and must not be counted as coverage.
+> Exchanges remain a shared-platform feature for Tile Shop / Hardware tenants and
+> are excluded from the Restaurant profile (`EXCHANGES` module key hidden).
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| EXC-D-001 | Exchange A4 document renders | Settings → document preview → type "Exchange" | A4 note renders with returned + replacement lines and a net difference | P | Passed |
+| EXC-D-002 | Returned lines are negative, replacements positive | Preview an exchange with both line kinds | Returned lines prefixed "Return:" and negated; replacements prefixed "New:" | P | Passed |
+| EXC-D-003 | Exchange document honours letterhead settings | Change logo/accent/margins, re-preview | Exchange doc reflects the same document settings as invoice/quotation | P | Passed |
+| EXC-D-004 | Signature blocks present on the exchange doc | Preview exchange | Same signature chain as other document types (see DOC-014) | P | Passed |
+| EXC-T-001 | Create an exchange transaction | — | — | P | Blocked — feature not implemented |
+| EXC-T-002 | Exchange adjusts stock for returned and replacement items | — | — | P | Blocked — feature not implemented |
+| EXC-T-003 | Exchange with a net amount due collects payment | — | — | P | Blocked — feature not implemented |
+| EXC-T-004 | Exchange with a net refund issues a refund | — | — | P | Blocked — feature not implemented |
+| EXC-T-005 | Exchange pushes the correct QuickBooks document(s) | — | — | P | Blocked — feature not implemented |
+| EXC-T-006 | Exchange requires a permission (`exchange:create`) | — | — | N | Blocked — feature not implemented |
+| EXC-T-007 | Exchange is hidden for Restaurant tenants | — | — | N | Blocked — feature not implemented |
+
 ## QUO — Quotations
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
@@ -552,6 +588,72 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DOC-014 | Signature chain on every doc type | Open quotation, invoice, return, exchange | All four blocks present on each | P | Passed |
 | DOC-015 | Signature row fits A4 width | Print a document with signature fields on | Four equal columns on one row, no wrap or overflow | P | Not Run |
 | DOC-016 | Uploaded signature/stamp fit their column | Upload a wide signature image, print | Image scales to column width, does not overlap "Checked by" | P | Not Run |
+
+## RSV — Table Reservations & Calendar (D47)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| RSV-001 | Book a table for a timeslot | Calendar → click empty slot → fill name/party/duration → save | Reservation created with RSV-###### number, block renders in the grid | P | Passed |
+| RSV-002 | Double-booking rejected | Book a second reservation overlapping the first on the same table | 409 naming the blocking reservation number | N | Passed |
+| RSV-003 | Back-to-back slots allowed | Book a slot starting exactly when the previous ends | Created — [start, end) intervals do not collide | P | Passed |
+| RSV-004 | Day list by window | Open the calendar for the booking's day | All reservations intersecting the day window shown | P | Passed |
+| RSV-005 | Lifecycle: seat then complete | BOOKED → Seat guests → Complete | Status transitions succeed, badge updates | P | Passed |
+| RSV-006 | Illegal transition refused | Attempt SEATED on a COMPLETED reservation | 409 status-conflict error | N | Passed |
+| RSV-007 | Past bookings refused | Create with a start hours in the past | 400 "cannot start in the past" | N | Passed |
+| RSV-008 | Walk-up grace | Create with a start a few minutes ago | Allowed (recording a walk-up) | P | Passed |
+| RSV-009 | Move a reservation | Edit → change table or time | Overlap re-checked at the new slot; move persists | P | Passed |
+| RSV-010 | Module gating | Retail/hardware tenant calls a reservation route | 403 Feature not available; no Calendar nav item | N | Passed |
+| RSV-011 | Past days read-only | Navigate the calendar to yesterday | History visible, click-to-book and New reservation disabled | P | Not Run |
+| RSV-012 | Cancel and no-show | BOOKED → Cancel / No-show | Terminal states; slot freed for rebooking | P | Not Run |
+| RSV-013 | Un-seat correction | SEATED → Un-seat | Returns to BOOKED only if the slot is still free | P | Not Run |
+| RSV-014 | Customer link optional | Book with free-text name/phone only | Reservation saves without a Customer row | P | Passed |
+| RSV-015 | Link existing customer | Search and pick an existing customer in the dialog | customerId linked; name/phone snapshotted | P | Not Run |
+| RSV-016 | Permissions | Sign in as a role without reservation:view | Calendar nav item absent; routes 403 | N | Not Run |
+
+## OTBL — Open Tables (D49/D50)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| OTBL-001 | Create an open table joining two tables | Tables → New open table → name, select 2 available tables | Open table appears with auto code OPEN-n; members badge Reserved | P | Passed |
+| OTBL-002 | Optional seat count | Create with and without Seats | With: "Seats N"; without: "Seats as arranged" | P | Passed |
+| OTBL-003 | Reserved member refuses its own session | Try to seat a joined member table | 409 "joined into an open table — seat the open table instead" | N | Passed |
+| OTBL-004 | Member cannot be joined twice | Create a second open table selecting a reserved member | 409 naming the table code | N | Passed |
+| OTBL-005 | Members must be available | Select an occupied/archived table (API) | 409 naming the code; UI never offers them | N | Passed |
+| OTBL-006 | Bill close auto-releases | Seat the open table, close its bill | Members return to Available; open table disappears | P | Passed |
+| OTBL-007 | Manual dissolve | Dissolve a never-seated open table | Members released; arrangement archived | P | Passed |
+| OTBL-008 | Dissolve refused mid-service | Dissolve while its session is live | 409 "close or settle its bill first" | N | Passed |
+| OTBL-009 | No reservations on open tables | Book the open table on the Calendar (API) | 404 — transient tables have no calendar presence | N | Passed |
+| OTBL-010 | Reserved member cannot be archived | Archive a joined member table (owner menu) | 409 in-service refusal | N | Passed |
+| OTBL-011 | Permission gate | Role without open-table:manage | No New open table / Dissolve controls; POST 403 | N | Not Run |
+| OTBL-012 | Orders + KOT flow through | Send a round from the open table's session | Kitchen ticket prints like any table | P | Not Run |
+| OTBL-013 | Two parties share one table (D50) | Create 2 open tables both reserving the same four-top | Both created; table Reserved once | P | Passed |
+| OTBL-014 | First bill does not free a shared table | Close party A's bill | Table stays Reserved; close response lists it as still-reserved | P | Passed |
+| OTBL-015 | Last bill frees the shared table | Close party B's bill | Table returns to Available automatically | P | Passed |
+| OTBL-016 | Billing reminder appears | Close a bill leaving tables held by another party | Dialog lists each table + who holds it, offers Unreserve, then Continue to bill | P | Passed |
+| OTBL-017 | Manual unreserve (compaction) | Two threes on a four-top + two-top; close one, Unreserve the two-top | Two-top Available, four-top still Reserved for the remaining party | P | Passed |
+| OTBL-018 | Unreserve refused when not held | Release a table no open table holds | 409 "not held by an open table" — the safety rule | N | Passed |
+| OTBL-019 | Held-by indication on the floor | View a shared table's card | Shows "Held by <open tables>"; Unreserve renders only on held tables | P | Passed |
+| OTBL-020 | Picker offers shared tables | Open the create dialog while a table is Reserved by an open table | Table selectable, marked "shared" | P | Passed |
+| OTBL-021 | Occupied tables still refused | Try to join a table with its own live session | 409 naming the code | N | Passed |
+
+## BSPL — Bill Splitting by Item (D51)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| BSPL-001 | Bill shows its line items | Open a closed tab's bill | Items card lists each line with qty × unit price and line total | P | Passed |
+| BSPL-002 | Split by item creates a bill per guest | Assign lines to 2+ guests, Create bills | One split per guest, each listing its own items | P | Passed |
+| BSPL-003 | Shares sum to the bill total exactly | Compare Σ split shares to the total | Equal to the cent, including non-divisible totals | P | Passed |
+| BSPL-004 | A multi-unit line splits across guests | 3 × item assigned 2/1 to two guests | Each guest billed for their units only | P | Passed |
+| BSPL-005 | Service charge shared pro rata | Split a bill carrying a service charge | Each share = own items + proportional charge | P | Passed |
+| BSPL-006 | Partial assignment refused | Save with items unassigned | 400 naming the item and the shortfall; UI disables Create | N | Passed |
+| BSPL-007 | Foreign item refused | Assign an orderItemId from another bill | 400 "not on this bill" | N | Passed |
+| BSPL-008 | Payment allocates to its split | Collect for one split | That split's Paid rises; bill Paid rises; others unchanged | P | Passed |
+| BSPL-009 | Overpaying a split refused | Pay more than a split's remaining | 400 naming the split balance | N | Passed |
+| BSPL-010 | Re-split refused after payment | Split a bill that has a payment | 400 — reopen or refund first | N | Passed |
+| BSPL-011 | Paying all splits settles the bill | Collect each split in turn | Bill reaches PAID with paid == total | P | Passed |
+| BSPL-012 | Per-split printable bill | Click Print on a split | Print window shows that guest's items and amount only | P | Not Run |
+| BSPL-013 | Amount-based splitting still works | Use "By amount" | Existing even/arbitrary split unchanged | P | Not Run |
+| BSPL-014 | Permission gate | Role without bill:split | No split controls; POST 403 | N | Not Run |
 
 ## ADM — Administration & Multi-Tenancy
 

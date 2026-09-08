@@ -1,5 +1,7 @@
+import { ModuleKey } from '@hardware-pos/database';
 import { Controller, Get, Query } from '@nestjs/common';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
@@ -18,6 +20,8 @@ import {
 } from './dashboard.types';
 
 @Controller('dashboard')
+// Slice 7.6 — enabled for every business profile; inert today, meaningful once switched off.
+@RequireModule(ModuleKey.REPORTING)
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 

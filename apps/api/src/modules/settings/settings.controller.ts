@@ -1,3 +1,4 @@
+import { ModuleKey } from '@hardware-pos/database';
 import {
   BadRequestException,
   Body,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
@@ -37,6 +39,8 @@ const ASSET_FIELD: Record<BrandingAsset, 'logoUrl' | 'signatureUrl' | 'stampUrl'
 };
 
 @Controller('settings')
+// Slice 7.6 — enabled for every business profile; inert today, meaningful once switched off.
+@RequireModule(ModuleKey.SETTINGS)
 export class SettingsController {
   constructor(
     private readonly settingsService: SettingsService,

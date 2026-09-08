@@ -1,6 +1,48 @@
 # Restaurant Vertical — Backend Implementation Plan
 
-> Status: proposal (not yet implemented) · Scope: `apps/api` + `packages/database` only.
+> ## ⚠️ SUPERSEDED — historical reference only
+>
+> **This document is no longer the implementation authority.** It was superseded
+> on **2026-08-04** by the approved AxloPOS Restaurant POS requirements. The
+> canonical documentation now lives in **[`docs/restaurant-pos/`](./restaurant-pos/)**
+> — start at [`docs/restaurant-pos/README.md`](./restaurant-pos/README.md).
+>
+> It is retained deliberately, unmodified below this notice, because it records
+> the reasoning behind several decisions that were kept.
+>
+> **Superseded — do not implement from this document:**
+>
+> | This document proposed | The approved design instead uses |
+> |---|---|
+> | `Tenant.vertical` enum (`RETAIL` \| `RESTAURANT`) | `TenantBusinessProfile` with 7 `BusinessType` values |
+> | `@RequireVertical()` guard | `@RequireModule()` + `TenantModule` enabled-module flags |
+> | `Tab` / `TabRound` / `TabItem` | `TableSession` / `RestaurantOrder` / `OrderRound` / `RestaurantOrderItem` |
+> | Multiple concurrent open tabs per table, `label`-distinguished | One `TableSession` per visit, with explicit merge / transfer / unmerge |
+> | QuickBooks assumed always present | QuickBooks optional behind `AccountingProvider`; `InventoryMode` selectable |
+>
+> **Retained and still authoritative (carried into the approved design):**
+>
+> - Additive-only migrations: new models, new nullable columns, appended enum
+>   values. Never widen or repurpose an existing retail column.
+> - No `if (vertical)` / `if (businessType)` branching inside shared modules;
+>   vertical behaviour lives in vertical modules or behind a provider port.
+> - Server-authoritative state — sessions and orders are database entities
+>   mutated through the API, never client storage, because several devices work
+>   the same table concurrently.
+> - Optimistic concurrency via a `version` column plus conditional
+>   `updateMany` + row-count checks, following the proven `decrementStock` idiom.
+> - **One junction point:** closing a table session produces a `Sale`, so
+>   everything downstream (payments, receipts, reports, dashboards, accounting)
+>   is reused rather than rebuilt.
+> - Follow the house module pattern: `controller → service → repository →
+>   PrismaService`, class-validator DTOs, `@TenantId()` / `@RequirePermissions()`,
+>   `Paginated<T>` responses, pure `*.calc.ts` with a colocated spec.
+> - Menu ≠ catalog: restaurant menu items are their own models, optionally
+>   mapped to a `Product`, never forced into the QuickBooks-cached `Product` table.
+
+---
+
+> Status: **superseded** (originally: proposal, not yet implemented) · Scope: `apps/api` + `packages/database` only.
 > The retail POS front-end is untouched; a restaurant front-end is a separate effort
 > that consumes the APIs specified here.
 
@@ -337,11 +379,13 @@ Reuse the print-job queue; this is what it exists for.
 | GET | `/kitchen/tickets?station=KITCHEN&status=PENDING` | KDS screen or print agent |
 | POST | `/print-jobs/:id/mark-printed` | already exists — reused |
 
-**Physical printing** is intentionally out of the backend's body: a small print-agent
-daemon on the venue LAN polls the endpoint above and drives ESC/POS printers, marking
-jobs printed. The backend contract (poll + ack) is fully defined by this phase; the
-agent is a separate deliverable. A browser-based KDS (kitchen display) works with
-zero extra backend work and is the recommended v1.
+**Physical printing** was intentionally out of the backend's body, on the assumption
+that a small print-agent daemon on the venue LAN would poll the endpoint above and
+drive ESC/POS printers. That daemon was built (D67) and withdrawn a day later
+(**D68**): the kitchen takes its tickets from the board, and the only thing that
+prints is the bill, which the cashier sends from the browser. The last line of this
+paragraph turned out to be the whole answer — "a browser-based KDS works with zero
+extra backend work and is the recommended v1".
 
 **Deliverables:** 1 migration (enum value + 2 nullable columns), kitchen module
 (feed endpoint + template), fire-transaction integration.
@@ -464,8 +508,9 @@ flow with tickets.
 
 - Reservations / waitlists; table merge & split-tab-by-seat billing (model fields
   `seat` already captured to enable it later); recipe/ingredient-level inventory;
-  happy-hour price schedules; the physical print-agent daemon (contract defined
-  here, implementation separate); the restaurant web/PWA front-end; KDS UI.
+  happy-hour price schedules; the restaurant web/PWA front-end. (The physical
+  print-agent daemon left this list, shipped as D67, and was withdrawn by D68 —
+  see §8.)
 
 ## 14. Risks and mitigations
 

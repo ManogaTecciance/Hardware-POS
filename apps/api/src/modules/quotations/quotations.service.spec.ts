@@ -25,8 +25,13 @@ const SETTINGS = {
   },
 };
 
-const CASHIER: AuthenticatedUser = { id: 'u1', tenantId: 't1', role: 'CASHIER' };
-const OWNER: AuthenticatedUser = { id: 'u2', tenantId: 't1', role: 'OWNER' };
+const CASHIER: AuthenticatedUser = {
+  id: 'u1',
+  tenantId: 't1',
+  role: 'CASHIER',
+  activeBranchId: null,
+};
+const OWNER: AuthenticatedUser = { id: 'u2', tenantId: 't1', role: 'OWNER', activeBranchId: null };
 
 function makeService(repo: Partial<QuotationsRepository>) {
   const settings = { getSettings: () => SETTINGS } as unknown as SettingsService;

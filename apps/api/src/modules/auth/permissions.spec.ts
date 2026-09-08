@@ -43,6 +43,15 @@ describe('role tables stay exhaustive', () => {
     const fullAccess = roles.filter(
       (role) => ROLE_PERMISSIONS[role].length === Object.values(Permission).length,
     );
-    expect(fullAccess.sort()).toEqual([...ADMIN_LEVEL_ROLES].sort());
+    // Exactly the two owner-equivalents. On main this list equalled
+    // ADMIN_LEVEL_ROLES; after the restaurant merge ADMIN is still owner-level
+    // for guard-rail overrides but no longer holds the full catalogue — Restaurant
+    // Pilot Change 1 withholds the six creator-scoped permissions from it. So the
+    // two claims are made separately: who holds everything, and that everyone
+    // who does is owner-level.
+    expect(fullAccess.sort()).toEqual(['OWNER', 'SALESPERSON']);
+    for (const role of fullAccess) expect(ADMIN_LEVEL_ROLES).toContain(role);
+    expect(ADMIN_LEVEL_ROLES).toContain('ADMIN');
+    expect(ROLE_PERMISSIONS.ADMIN.length).toBeLessThan(Object.values(Permission).length);
   });
 });

@@ -1,0 +1,53 @@
+# Hardware POS — disposable PostgreSQL for the API integration test suite.
+#
+# Deliberately hostile to being mistaken for a real database:
+#   • port 5433, never the dev/prod 5432
+#   • database name hardware_pos_test — the `_test` suffix is REQUIRED by
+#     apps/api/test/integration/assert-test-database.ts, which refuses to run
+#     against anything else
+#   • tmpfs data directory — the database cannot survive the container, so a
+#     stale test database can never quietly accumulate real-looking data
+#
+# Usage:
+#   pnpm test:integration            # up --wait, run, down -v
+#   pnpm test:integration:up         # leave it running between runs
+#   pnpm test:integration:down
+#
+# See docs/restaurant-pos/phase-01-plan.md for the harness design.
+
+# Its own Compose project, so this stack is fully isolated from the dev stack in
+# docker-compose.yml. Without this, both files share the directory-derived project
+# name and `down -v` here would target the development containers and volumes.
+name: hardware-pos-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    # No container_name on purpose: a fixed name collides across Compose projects
+    # (and across two checkouts of this repo). Reach it through Compose instead:
+    #   docker compose -f docker-compose.test.yml exec postgres-test psql -U postgres -d hardware_pos_test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hardware_pos_test
+      # Durability is worthless for a throwaway database; this makes the suite
+      # noticeably faster.
+      POSTGRES_INITDB_ARGS: "--no-sync"
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hardware_pos_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s

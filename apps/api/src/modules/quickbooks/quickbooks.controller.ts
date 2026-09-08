@@ -1,7 +1,9 @@
 import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Res } from '@nestjs/common';
+import { ModuleKey } from '@hardware-pos/database';
 import type { Response } from 'express';
 
 import { Public } from '../../common/decorators/public.decorator';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
@@ -30,6 +32,16 @@ export interface SyncAllSummary {
 
 @Controller('quickbooks')
 export class QuickBooksController {
+  /*
+   * Slice 7.6 — module guards are applied PER ROUTE here, not on the class.
+   *
+   * `callback` is `@Public()`: it is the redirect Intuit sends the browser back
+   * to, and it carries no session. `ModuleAccessGuard` denies any route that
+   * requires a module but has no authenticated tenant — correctly, since the
+   * `x-tenant-id` header is client-supplied — so a class-level guard would break
+   * the OAuth handshake for every tenant. Every other route is gated.
+   */
+
   constructor(
     private readonly quickBooksService: QuickBooksService,
     private readonly quickBooksSyncService: QuickBooksSyncService,
@@ -40,6 +52,7 @@ export class QuickBooksController {
 
   /** Customer / vendor mapping counts for the overview cards. */
   @Get('party-sync-status')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @RequirePermissions(Permission.QUICKBOOKS_READ)
   partySyncStatus(@TenantId() tenantId: string): Promise<PartySyncStatus> {
     return this.quickBooksPartiesSyncService.partyStatus(tenantId);
@@ -51,6 +64,7 @@ export class QuickBooksController {
    * party syncs maintain linkage without overwriting local field edits.
    */
   @Post('sync')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @RequirePermissions(Permission.QUICKBOOKS_MANAGE)
   async syncAll(@TenantId() tenantId: string): Promise<SyncAllSummary> {
     const products = await this.quickBooksSyncService.syncProducts(tenantId);
@@ -61,6 +75,7 @@ export class QuickBooksController {
 
   /** Search QuickBooks vendors for supplier mapping (empty when not connected). */
   @Get('vendors')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @RequirePermissions(Permission.SUPPLIER_QB_MAP)
   vendors(
     @TenantId() tenantId: string,
@@ -75,6 +90,7 @@ export class QuickBooksController {
    * plain browser navigation cannot send. Owner-level roles only.
    */
   @Get('connect')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @Roles(...ADMIN_LEVEL_ROLES)
   async connect(@TenantId() tenantId: string): Promise<{ url: string }> {
     return { url: await this.quickBooksService.getAuthorizationUrl(tenantId) };
@@ -93,6 +109,7 @@ export class QuickBooksController {
 
   /** Disconnect the company: revoke the token and remove the stored connection. */
   @Post('disconnect')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @HttpCode(HttpStatus.OK)
   @Roles(...ADMIN_LEVEL_ROLES)
   disconnect(@TenantId() tenantId: string): Promise<{ disconnected: boolean }> {
@@ -101,6 +118,7 @@ export class QuickBooksController {
 
   /** Connection status — never exposes tokens. */
   @Get('status')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @RequirePermissions(Permission.QUICKBOOKS_READ)
   status(@TenantId() tenantId: string): Promise<QuickBooksConnectionStatus> {
     return this.quickBooksService.getConnectionStatus(tenantId);
@@ -108,6 +126,7 @@ export class QuickBooksController {
 
   /** Pull inventory + non-inventory items from QuickBooks into the local cache. */
   @Post('sync-products')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(Permission.QUICKBOOKS_MANAGE)
   syncProducts(@TenantId() tenantId: string): Promise<SyncProductsSummary> {
@@ -119,6 +138,7 @@ export class QuickBooksController {
    * linked Payment otherwise). A failed push keeps the sale and marks it FAILED.
    */
   @Post('sync-sale/:saleId')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(Permission.QUICKBOOKS_MANAGE)
   syncSale(
@@ -130,6 +150,7 @@ export class QuickBooksController {
 
   /** Retry a failed sale sync identified by its sync-log id. */
   @Post('retry/:syncLogId')
+  @RequireModule(ModuleKey.QUICKBOOKS)
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(Permission.QUICKBOOKS_MANAGE)
   retry(

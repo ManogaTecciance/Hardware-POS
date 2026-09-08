@@ -2,7 +2,24 @@ import { Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../prisma/prisma.service';
 
-export type DocumentType = 'SALE' | 'RETURN' | 'QUOTATION';
+export type DocumentType =
+  | 'SALE'
+  | 'RETURN'
+  | 'QUOTATION'
+  // Phase 5 additions — table sessions and restaurant orders each get
+  // their own per-tenant sequence so waiters can talk about "TS-47" out
+  // loud, and order numbers don't collide with sale numbers.
+  | 'TABLE_SESSION'
+  | 'RESTAURANT_ORDER'
+  // D44 — Purchase Receipts (Receive Stock / GRN). Kept as its own tenant
+  // sequence so the "RCV-000042" identifiers do not collide with sales,
+  // returns or quotations, and so gaps caused by aborted transactions are
+  // impossible on the same guarantees as every other document type.
+  | 'RECEIPT'
+  // D47 — table reservations ("Reservation RSV-000047" over the phone).
+  | 'RESERVATION'
+  // D49 — auto-assigned codes for open tables ("OPEN-3" on the floor).
+  | 'OPEN_TABLE';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;

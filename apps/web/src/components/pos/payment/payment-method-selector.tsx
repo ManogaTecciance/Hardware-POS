@@ -16,7 +16,7 @@ import {
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Dialog } from '@/components/ui/dialog';
+import { Sheet } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 
 /** Every payment mode the Payment page can be in. */
@@ -50,9 +50,11 @@ export function getMethod(mode: Mode): MethodOption {
 /**
  * Compact selected-payment-method card with a `Change` action. The full method
  * list stays hidden until the cashier taps Change, which opens an accessible
- * picker dialog (centered on desktop, bottom-sheet on mobile — closes on
- * selection, overlay click, or Escape). A dialog rather than an inline popover
- * so the unified payment card can keep `overflow: hidden` without clipping it.
+ * bottom sheet — the sheet gives us a thumb-reachable target on tablet and,
+ * unlike the old `max-w-md` dialog, widens to `sm:max-w-2xl` so 3-across
+ * method tiles have room on iPad landscape without shrinking the icon+label
+ * pair. A sheet rather than an inline popover so the unified payment card
+ * can keep `overflow: hidden` without clipping it.
  */
 export function PaymentMethodSelector({
   value,
@@ -92,13 +94,23 @@ export function PaymentMethodSelector({
         </Button>
       </div>
 
-      <Dialog
+      <Sheet
         open={open}
         onClose={() => setOpen(false)}
         title="Choose payment method"
-        className="max-w-md"
+        className="sm:max-w-2xl"
+        footer={
+          <Button variant="ghost" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+        }
       >
-        <div role="radiogroup" aria-label="Payment method" className="grid grid-cols-2 gap-2">
+        {/* 2-across on portrait tablet + phone, 3-across on landscape tablet
+            (`tab:`, 900px+). 4-across (the old grid at desktop widths) was
+            cramped for a tile that carries icon + label + description; the
+            three-column landscape layout gives PAYMENT_METHODS' eight
+            entries room to breathe over three rows. */}
+        <div role="radiogroup" aria-label="Payment method" className="grid grid-cols-2 gap-3 tab:grid-cols-3">
           {PAYMENT_METHODS.map((m) => {
             const isSelected = m.key === value;
             return (
@@ -109,7 +121,7 @@ export function PaymentMethodSelector({
                 aria-checked={isSelected}
                 onClick={() => select(m.key)}
                 className={cn(
-                  'relative flex min-h-[4rem] flex-col justify-center gap-1 rounded-xl border p-3 text-left transition-colors',
+                  'relative flex min-h-[5.5rem] flex-col justify-center gap-1 rounded-xl border p-3 text-left transition-colors touch-target-coarse',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                   isSelected
                     ? 'border-primary bg-brand-50 text-brand-700'
@@ -130,7 +142,7 @@ export function PaymentMethodSelector({
             );
           })}
         </div>
-      </Dialog>
+      </Sheet>
     </>
   );
 }

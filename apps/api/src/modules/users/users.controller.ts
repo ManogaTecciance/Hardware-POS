@@ -1,6 +1,8 @@
+import { ModuleKey } from '@hardware-pos/database';
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
@@ -10,6 +12,8 @@ import { PublicUser } from './users.repository';
 import { UsersService } from './users.service';
 
 @Controller('users')
+// Slice 7.6 — enabled for every business profile; inert today, meaningful once switched off.
+@RequireModule(ModuleKey.USERS)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

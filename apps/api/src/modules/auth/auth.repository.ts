@@ -9,9 +9,74 @@ export type RefreshTokenWithUser = Prisma.RefreshTokenGetPayload<{ include: { us
 export class AuthRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Look up an active user by email (for password login). */
-  findActiveByEmail(email: string): Promise<User | null> {
-    return this.prisma.user.findFirst({ where: { email, isActive: true } });
+  /**
+   * Active users with this email, ACROSS ALL TENANTS, in a deterministic order.
+   *
+   * `User` is only `@@unique([tenantId, email])`, so one email may legitimately
+   * exist in several tenants. This returns every candidate so the caller can
+   * decide deterministically instead of silently taking whichever row PostgreSQL
+   * happened to return first — the defect this replaces.
+   *
+   * Ordered by `tenantId` purely so repeated calls are stable and tests are not
+   * flaky; the caller must never resolve ambiguity by picking the first row.
+   */
+  findActiveUsersByEmail(email: string): Promise<User[]> {
+    return this.prisma.user.findMany({
+      where: { email, isActive: true },
+      orderBy: { tenantId: 'asc' },
+    });
+  }
+
+  /**
+   * How many ACTIVE tenants hold an active user with this email.
+   *
+   * Used only to decide between "log in" and "ask for a workspace" (Slice 7.2).
+   * Returns a count and nothing else on purpose — the caller must never be able to
+   * turn this into a list of which companies an address belongs to.
+   */
+  async countActiveTenantsForEmail(email: string): Promise<number> {
+    const rows = await this.prisma.user.findMany({
+      where: { email, isActive: true, tenant: { isActive: true } },
+      select: { tenantId: true },
+      distinct: ['tenantId'],
+    });
+    return rows.length;
+  }
+
+  /**
+   * Resolve an ACTIVE tenant by its slug, or null.
+   *
+   * `Tenant.slug` is `@unique`, so this is exact. The `isActive` filter matters:
+   * a deactivated workspace must behave exactly like one that never existed, or
+   * the difference becomes a signal about which companies have been suspended.
+   */
+  findActiveTenantBySlug(slug: string): Promise<{ id: string } | null> {
+    return this.prisma.tenant.findFirst({
+      where: { slug: slug.trim().toLowerCase(), isActive: true },
+      select: { id: true },
+    });
+  }
+
+  /**
+   * The single active user with this email inside one tenant. Exact by
+   * construction: `@@unique([tenantId, email])` guarantees at most one row.
+   */
+  findActiveByTenantAndEmail(tenantId: string, email: string): Promise<User | null> {
+    return this.prisma.user.findFirst({ where: { tenantId, email, isActive: true } });
+  }
+
+  /**
+   * Like the two "Active" lookups above but INCLUDING deactivated rows — used
+   * only by the login path, which must be able to tell "deactivated" from
+   * "wrong password" AFTER the password verifies (AccountDeactivatedError).
+   * Nothing else may want these: every other caller means "usable account".
+   */
+  findUsersByEmailAnyStatus(email: string): Promise<User[]> {
+    return this.prisma.user.findMany({ where: { email }, orderBy: { tenantId: 'asc' } });
+  }
+
+  findByTenantAndEmailAnyStatus(tenantId: string, email: string): Promise<User | null> {
+    return this.prisma.user.findFirst({ where: { tenantId, email } });
   }
 
   /** Active users in a tenant that have a PIN set (for PIN login / approval). */
@@ -27,6 +92,54 @@ export class AuthRepository {
 
   async touchLastLogin(id: string): Promise<void> {
     await this.prisma.user.update({ where: { id }, data: { lastLoginAt: new Date() } });
+  }
+
+  /**
+   * Does this user currently have access to that branch, within their tenant?
+   *
+   * OWNER and ADMIN implicitly access every active branch in their tenant —
+   * they are the roles that manage the branches, and a deactivated branch is
+   * still refused. Everyone else needs a matching `BranchAccess` row, OR to
+   * have `User.branchId` still pointing at that branch (backwards compat with
+   * pre-Phase-1.5.6 users). The branch must be active in every case.
+   */
+  async hasBranchAccess(user: User, branchId: string): Promise<boolean> {
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, tenantId: user.tenantId, isActive: true },
+      select: { id: true },
+    });
+    if (!branch) return false;
+    if (user.role === 'OWNER' || user.role === 'ADMIN') return true;
+    if (user.branchId === branchId) return true;
+    const access = await this.prisma.branchAccess.findUnique({
+      where: { userId_branchId: { userId: user.id, branchId } },
+      select: { id: true },
+    });
+    return access !== null;
+  }
+
+  /** The list of branches this user can currently access, tenant-scoped. */
+  async listAccessibleBranches(user: User): Promise<{ id: string; name: string }[]> {
+    if (user.role === 'OWNER' || user.role === 'ADMIN') {
+      return this.prisma.branch.findMany({
+        where: { tenantId: user.tenantId, isActive: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      });
+    }
+    const rows = await this.prisma.branch.findMany({
+      where: {
+        tenantId: user.tenantId,
+        isActive: true,
+        OR: [
+          { id: user.branchId ?? '__no_match__' },
+          { branchAccess: { some: { userId: user.id } } },
+        ],
+      },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+    return rows;
   }
 
   // ── session location ─────────────────────────────────────────────────────

@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  Prisma,
+  AccountingProviderKind,
   DiscountBasis,
   DiscountType,
   PaymentStatus,
@@ -9,16 +11,29 @@ import { CURRENCY_SYMBOL, type Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
+import { computeDocumentLine, discountAmountOf } from '../../common/money/document-totals';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { DiscountsService, ORDER_DISCOUNT_KEY } from '../discounts/discounts.service';
 import { CreditService } from '../credit/credit.service';
+import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
+import { InventoryProviderFactory } from '../providers/inventory/inventory-provider.factory';
+import { InventoryProvider } from '../providers/inventory/inventory-provider';
+import { ProviderOperationUnavailableError } from '../providers/provider.errors';
 import { SettingsService } from '../settings/settings.service';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { CompleteSaleDto } from './dto/complete-sale.dto';
 import { QuerySalesDto } from './dto/query-sales.dto';
 import { SaleItemInputDto } from './dto/sale-item.dto';
 import { resolvePaymentDueDate, resolveSaleDate } from './sale-date';
-import { SaleListRow, SaleWithRelations, SalesRepository } from './sales.repository';
+import { resolveCustomerDocumentKind } from './customer-document';
+import {
+  ExternalSaleDocument,
+  PostAccounting,
+  ReduceStock,
+  SaleListRow,
+  SaleWithRelations,
+  SalesRepository,
+} from './sales.repository';
 import {
   CartItemInput,
   ComputedSale,
@@ -27,6 +42,14 @@ import {
   SaleListItem,
 } from './sales.types';
 
+/** D58 — see the draft-completion mapping below. */
+function requireProductId(productId: string | null, saleItemId: string): string {
+  if (productId === null) {
+    throw new Error(`Draft sale item ${saleItemId} has no productId — refusing to complete`);
+  }
+  return productId;
+}
+
 @Injectable()
 export class SalesService {
   constructor(
@@ -34,6 +57,8 @@ export class SalesService {
     private readonly settingsService: SettingsService,
     private readonly discountsService: DiscountsService,
     private readonly credit: CreditService,
+    private readonly accountingProviders: AccountingProviderFactory,
+    private readonly inventoryProviders: InventoryProviderFactory,
   ) {}
 
   async list(tenantId: string, query: QuerySalesDto): Promise<Paginated<SaleListItem>> {
@@ -71,7 +96,17 @@ export class SalesService {
     dto: CreateDraftDto,
   ): Promise<SaleWithRelations> {
     await this.assertLocations(tenantId, dto.branchId, dto.registerId, dto.customerId);
-    const computed = await this.computeCart(tenantId, actor, dto.items.map(toCartItem));
+    // A draft moves no stock, but it must not be built against availability the
+    // tenant's provider cannot vouch for — an EXTERNAL tenant fails closed here
+    // rather than at completion.
+    const inventory = await this.inventoryProviders.forTenant(tenantId);
+    const computed = await this.computeCart(
+      tenantId,
+      actor,
+      dto.items.map(toCartItem),
+      inventory,
+      dto.branchId,
+    );
     return this.salesRepository.createDraft({
       tenantId,
       cashierId: actor.id,
@@ -104,7 +139,10 @@ export class SalesService {
         throw new NotFoundException(`Draft sale ${dto.saleId} not found`);
       }
       items = draft.items.map((it) => ({
-        productId: it.productId,
+        // D58: nullable only for PROJECTED restaurant lines. A retail draft's
+        // lines were written by this module with a product, so a null here is
+        // corruption, not a state — fail the completion rather than sell air.
+        productId: requireProductId(it.productId, it.id),
         quantity: Number(it.quantity),
         discountType: it.discountType,
         discountBasis: it.discountBasis,
@@ -138,16 +176,45 @@ export class SalesService {
       reason: dto.orderDiscountReason,
       approvalToken: dto.orderApprovalToken,
     };
-    const computed = await this.computeCart(tenantId, actor, items, orderDiscountInput);
+    // Resolve BOTH providers once, from the authenticated tenant, before any work.
+    // Independent of each other by design: inventory authority and accounting
+    // destination are separate concepts (D29), and a tenant may legitimately keep
+    // stock locally while filing documents in QuickBooks. Neither is derived from
+    // the other, and no DTO field can name either.
+    const inventory = await this.inventoryProviders.forTenant(tenantId);
+
+    const computed = await this.computeCart(
+      tenantId,
+      actor,
+      items,
+      inventory,
+      branchId,
+      orderDiscountInput,
+    );
     const paidAmount = sum2(dto.payments.map((p) => p.amount));
     const { total } = computed;
     const paymentStatus: PaymentStatus =
       paidAmount <= 0 ? 'UNPAID' : paidAmount >= total ? 'PAID' : 'PARTIAL';
     const balanceAmount = Math.max(0, round2(total - paidAmount));
-    const quickbooksDocumentType: QuickBooksDocumentType =
-      paymentStatus === 'PAID' ? 'SALES_RECEIPT' : 'INVOICE';
 
-    if (quickbooksDocumentType === 'INVOICE' && !customerId) {
+    // Resolve the tenant's accounting provider ONCE, from the authenticated tenant.
+    // The same instance decides the document type and performs the submission, so
+    // the two can never come from different providers. `tenantId` reaches here from
+    // `@TenantId()` — the verified session — and there is no DTO field a client
+    // could use to name a provider.
+    const accounting = await this.accountingProviders.forTenant(tenantId);
+    const documentDecision = accounting.resolveSaleDocumentType({
+      paymentStatus,
+      hasCustomer: Boolean(customerId),
+      total,
+    });
+    const quickbooksDocumentType = documentDecision.documentType;
+
+    // The provider states the requirement; this raises the existing error with its
+    // existing wording, so the behaviour Tile Shop users and tests see is unchanged.
+    // A tenant with no accounting provider does not impose it — a QuickBooks Invoice
+    // needs a CustomerRef, a local invoice does not.
+    if (documentDecision.requiresCustomer && !customerId) {
       throw new BadRequestException('A customer is required for a credit/partial sale (Invoice)');
     }
 
@@ -185,14 +252,42 @@ export class SalesService {
       balanceAmount,
       paymentStatus,
       quickbooksDocumentType,
+      // Derived from the provider's own decision, not from its identity: a sale with
+      // an external document is PENDING a push, one without was never queued and is
+      // NOT_SYNCED. A `NONE` tenant left permanently "pending" would be showing a
+      // QuickBooks state to someone who does not use QuickBooks.
+      syncStatus: quickbooksDocumentType === null ? 'NOT_SYNCED' : 'PENDING',
     };
 
+    const postAccounting: PostAccounting = (tx, saleId) =>
+      accounting.postSale(tx, { tenantId, branchId }, saleId, quickbooksDocumentType);
+
+    // Slice 6C-A: the same resolved instance that answered the availability question
+    // performs the reduction, inside the repository's transaction. The conditional
+    // write it contains — not the read above — is what prevents two concurrent sales
+    // from both taking the last unit.
+    const reduceStock: ReduceStock = (tx, lines) =>
+      inventory.reduceStock(tx, { tenantId, branchId }, lines);
+
     return dto.saleId
-      ? this.salesRepository.completeDraft(tenantId, dto.saleId, persist)
-      : this.salesRepository.createCompleted(persist);
+      ? this.salesRepository.completeDraft(tenantId, dto.saleId, persist, postAccounting, reduceStock)
+      : this.salesRepository.createCompleted(persist, postAccounting, reduceStock);
   }
 
-  /** MOCK QuickBooks push for a completed sale (real QBO integration comes later). */
+  /**
+   * MOCK QuickBooks push for a completed sale (real QBO integration comes later).
+   *
+   * Slice 6A gated this on the tenant's accounting provider. A tenant with no
+   * external accounting has nothing to push, so the request is refused outright
+   * rather than being handed to a QuickBooks-specific code path that would invent an
+   * identifier for it. Nothing is written on the refusal.
+   *
+   * For a QuickBooks tenant the behaviour is unchanged, mock and all: the identifiers
+   * are still generated locally because there is still no real Intuit call here.
+   * That remains open question O1, deferred to Phase 2 — this slice removes the
+   * fabrication for tenants that should never have reached it, and makes the
+   * repository refuse to invent one, but it does not resolve O1.
+   */
   async syncToQuickBooks(tenantId: string, id: string): Promise<SaleWithRelations> {
     const sale = await this.salesRepository.findByIdForTenant(tenantId, id);
     if (!sale) {
@@ -201,15 +296,55 @@ export class SalesService {
     if (sale.status !== 'COMPLETED') {
       throw new BadRequestException('Only completed sales can be synced to QuickBooks');
     }
-    return this.salesRepository.markSynced(sale);
+
+    const accounting = await this.accountingProviders.forTenant(tenantId);
+    if (accounting.provider !== AccountingProviderKind.QUICKBOOKS) {
+      throw new ProviderOperationUnavailableError(accounting.name, 'QuickBooks sale sync');
+    }
+    if (sale.quickbooksDocumentType === null) {
+      // Belt and braces: a QuickBooks tenant's sales always carry a document type,
+      // so this only fires on inconsistent data — and refusing beats guessing.
+      throw new BadRequestException(
+        `Sale ${sale.saleNumber} has no QuickBooks document type and cannot be synced`,
+      );
+    }
+
+    return this.salesRepository.markSynced(sale, this.mockQuickBooksDocument(sale));
+  }
+
+  /**
+   * The mock identifiers the QuickBooks push has always produced.
+   *
+   * Isolated into a named method so the fabrication is visible rather than buried in
+   * a `??` inside the repository, and so the day a real Intuit call replaces it,
+   * exactly one function disappears. The prefix branch is now exhaustive over a
+   * non-null document type — it can no longer fall through to `INV` for a null.
+   */
+  private mockQuickBooksDocument(sale: SaleWithRelations): ExternalSaleDocument {
+    const documentType = sale.quickbooksDocumentType as QuickBooksDocumentType;
+    const prefix = documentType === 'SALES_RECEIPT' ? 'SR' : 'INV';
+    return {
+      documentId: sale.quickbooksDocumentId ?? `QBO-${prefix}-${sale.saleNumber}`,
+      documentType,
+      paymentIds: sale.payments.map((_, i) => `QBO-PMT-${sale.saleNumber}-${i + 1}`),
+    };
   }
 
   // ── compute pipeline ───────────────────────────────────────────────────────
 
+  /**
+   * Validate and price a cart.
+   *
+   * `inventory` is the provider the *caller* already resolved, passed in rather
+   * than resolved here so one operation cannot check availability against one
+   * provider and then move stock through another.
+   */
   private async computeCart(
     tenantId: string,
     actor: AuthenticatedUser,
     items: CartItemInput[],
+    inventory: InventoryProvider,
+    branchId: string,
     orderDiscountInput?: OrderDiscountInput,
   ): Promise<ComputedSale> {
     if (items.length === 0) {
@@ -220,6 +355,14 @@ export class SalesService {
     const products = await this.salesRepository.findProductsByIds(tenantId, ids);
     const byId = new Map(products.map((p) => [p.id, p]));
     const settings = this.settingsService.getSettings(tenantId);
+
+    // Availability comes from the provider, not from the product row. For
+    // QUICKBOOKS and LOCAL that is still `Product.quantityOnHand`, read the same
+    // way, so the answer is identical; for DISABLED every product is unlimited and
+    // no sale is ever rejected for stock. Read-only, so it happens before the
+    // transaction opens — it is a courtesy check, and `reduceStock`'s conditional
+    // write remains the authority under concurrency.
+    const availability = await inventory.getAvailability({ tenantId, branchId }, ids);
 
     const lines = await Promise.all(
       items.map(async (item) => {
@@ -238,11 +381,20 @@ export class SalesService {
         }
 
         const quantity = item.quantity;
-        const onHand = Number(product.quantityOnHand);
-        if (product.type === 'Inventory' && quantity > onHand) {
-          throw new BadRequestException(
-            `Insufficient stock for ${product.name} (on hand ${onHand}, requested ${quantity})`,
-          );
+        // `isUnlimited` is how a provider says "no ceiling" without inventing a
+        // quantity. Absent from the map means the provider does not know the
+        // product, which the `!product` guard above has already excluded.
+        const stock = availability.get(product.id);
+        if (stock && !stock.isUnlimited && stock.quantityOnHand !== null) {
+          const onHand = stock.quantityOnHand;
+          if (quantity > onHand) {
+            // Wording preserved verbatim — this is the message the POS surfaces and
+            // the Slice 3 characterisation spec asserts. Note it is deliberately
+            // NOT the same string `reduceStock` throws; both are unchanged.
+            throw new BadRequestException(
+              `Insufficient stock for ${product.name} (on hand ${onHand}, requested ${quantity})`,
+            );
+          }
         }
 
         if (item.discountBasis === 'UNIT' && item.discountType !== 'FIXED') {
@@ -252,11 +404,18 @@ export class SalesService {
           throw new BadRequestException('A per-unit discount must be a fixed amount');
         }
 
-        const lineSubtotal = round2(cachedPrice * quantity);
-        const discountAmount = computeDiscount(lineSubtotal, item.discountType, item.discountValue, {
-          basis: item.discountBasis,
+        // D59: line money runs in the shared Decimal engine; the number
+        // boundary is exact because every engine output is a 2dp figure. The
+        // per-unit basis (main, 2026-09-07) rides through the same engine.
+        const computedLine = computeDocumentLine({
+          unitPrice: cachedPrice,
           quantity,
+          discountType: item.discountType ?? null,
+          discountValue: item.discountValue ?? null,
+          discountBasis: item.discountBasis ?? 'LINE',
         });
+        const lineSubtotal = computedLine.lineSubtotal.toNumber();
+        const discountAmount = computedLine.discountAmount.toNumber();
         const effectivePercent = lineSubtotal > 0 ? (discountAmount / lineSubtotal) * 100 : 0;
 
         // Enforce the role-based discount limit; over-limit lines need a covering
@@ -291,15 +450,21 @@ export class SalesService {
           approvedByUserId,
           taxAmount: 0,
           lineSubtotal,
-          lineTotal: round2(lineSubtotal - discountAmount),
+          lineTotal: computedLine.lineTotal.toNumber(),
         };
       }),
     );
 
-    const subtotal = sum2(lines.map((l) => l.lineSubtotal));
-    const totalDiscount = sum2(lines.map((l) => l.discountAmount));
+    // D59: sums and tax in Decimal. Line figures are 2dp, so these sums are
+    // exact; sum2's float accumulation could drift a hair below a half.
+    const subtotal = lines
+      .reduce((acc, l) => acc.plus(l.lineSubtotal), new Prisma.Decimal(0))
+      .toNumber();
+    const totalDiscount = lines
+      .reduce((acc, l) => acc.plus(l.discountAmount), new Prisma.Decimal(0))
+      .toNumber();
     // Order-level discount applies to the subtotal AFTER per-line discounts.
-    const discountedSubtotal = round2(subtotal - totalDiscount);
+    const discountedSubtotal = new Prisma.Decimal(subtotal).minus(totalDiscount).toNumber();
     const orderDiscount = await this.resolveOrderDiscount(
       tenantId,
       actor,
@@ -307,9 +472,12 @@ export class SalesService {
       orderDiscountInput,
     );
 
-    const taxable = round2(discountedSubtotal - orderDiscount.amount);
-    const taxAmount = settings.taxRatePercent > 0 ? round2((taxable * settings.taxRatePercent) / 100) : 0;
-    const total = round2(taxable + taxAmount);
+    const taxableD = new Prisma.Decimal(discountedSubtotal).minus(orderDiscount.amount);
+    const taxAmount =
+      settings.taxRatePercent > 0
+        ? taxableD.mul(settings.taxRatePercent).div(100).toDecimalPlaces(2).toNumber()
+        : 0;
+    const total = taxableD.plus(taxAmount).toNumber();
 
     return {
       lines,
@@ -517,6 +685,9 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
     returnedAmount: Number(row.returnedAmount),
     quickbooksDocumentType: row.quickbooksDocumentType,
     syncStatus: row.syncStatus,
+    // Always present, derived from local payment state — so a client never has to
+    // fall back to the external type (or to nothing) to know what document this is.
+    documentKind: resolveCustomerDocumentKind(row.paymentStatus),
   };
 }
 
@@ -550,14 +721,15 @@ export function computeDiscount(
   value: number | null | undefined,
   opts: { basis?: DiscountBasis | null; quantity?: number } = {},
 ): number {
-  if (!type || value == null || value <= 0) {
-    return 0;
-  }
-  if (type === 'PERCENTAGE') {
-    return Math.min(lineSubtotal, round2((lineSubtotal * value) / 100));
-  }
-  // Multiply first, round once — the same shape as the percentage branch, and
-  // it has to match the client's copy to the cent or the sale lands PARTIAL.
-  const units = opts.basis === 'UNIT' ? (opts.quantity ?? 1) : 1;
-  return Math.min(lineSubtotal, round2(value * units));
+  /*
+   * D59: delegated to the one Decimal engine. Same signature, same
+   * cannot-exceed-base rule; the float arithmetic this replaced mis-rounded
+   * exact half-cent boundaries (10% of 19.85 → 1.98 instead of 1.99). The UNIT
+   * basis (main, 2026-09-07) multiplies first and rounds once inside the
+   * engine, so a per-unit quotation converts to a sale on the same cent.
+   */
+  return discountAmountOf(lineSubtotal, type ?? null, value ?? null, {
+    basis: opts.basis ?? null,
+    units: opts.quantity ?? 1,
+  }).toNumber();
 }

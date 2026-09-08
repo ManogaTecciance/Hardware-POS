@@ -6,19 +6,11 @@
  */
 
 /**
- * Staff roles — mirrors the `UserRole` enum in packages/database. Managers can
- * approve high discounts via manager PIN; Owner, Admin and Salesperson are
- * owner-level roles that hold every permission with no discount ceiling.
+ * `UserRole` used to live here, listing only Cashier/Manager/Admin while the
+ * database, the seeds and the API all had five roles. It now lives in
+ * `authorization.ts` beside the permission map it governs, complete and
+ * parity-tested against the Prisma enum.
  */
-export const UserRole = {
-  Cashier: 'CASHIER',
-  Manager: 'MANAGER',
-  Admin: 'ADMIN',
-  Owner: 'OWNER',
-  Accountant: 'ACCOUNTANT',
-  Salesperson: 'SALESPERSON',
-} as const;
-export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
 /** Lifecycle of a sale within the POS. */
 export const SaleStatus = {

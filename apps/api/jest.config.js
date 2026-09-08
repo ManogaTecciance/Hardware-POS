@@ -1,14 +1,26 @@
 /**
- * Jest config for the API. Unit specs are co-located as `*.spec.ts` next to the
- * unit under test and mock all I/O (Prisma / HTTP / QuickBooks). Integration
- * specs (a real disposable Postgres + a QuickBooks stub) are a separate future
- * project — see docs/testing/integration-test-plan.md.
+ * Jest config for the API's fast suite — no Docker, no database.
+ *
+ * Picks up:
+ *   • unit specs co-located as `*.spec.ts` under `src`, which mock all I/O
+ *     (Prisma / HTTP / QuickBooks);
+ *   • pure specs under `test/integration/` that guard the integration harness
+ *     itself — notably `assert-test-database.spec.ts`. They need no database, and
+ *     the production-URL guard is precisely the thing that must never quietly
+ *     stop working, so it runs on every `pnpm test`.
+ *
+ * Excludes `test/integration/specs/`, which needs a real disposable PostgreSQL.
+ * Those run via `pnpm test:integration` — see
+ * test/integration/jest.integration.config.js and
+ * docs/restaurant-pos/phase-01-plan.md.
  */
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  rootDir: 'src',
+  rootDir: '.',
+  roots: ['<rootDir>/src', '<rootDir>/test/integration'],
   testRegex: '.*\\.spec\\.ts$',
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/test/integration/specs/'],
   moduleFileExtensions: ['ts', 'js', 'json'],
 };

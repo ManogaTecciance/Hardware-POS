@@ -1,3 +1,4 @@
+import { ModuleKey } from '@hardware-pos/database';
 import {
   BadRequestException,
   Body,
@@ -18,6 +19,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
@@ -39,6 +41,8 @@ interface UploadedSpreadsheet {
 }
 
 @Controller('suppliers')
+// Slice 7.6 — retail-only. Legacy tenants enable SUPPLIERS, so Tile Shop is unaffected.
+@RequireModule(ModuleKey.SUPPLIERS)
 export class SuppliersController {
   constructor(
     private readonly suppliersService: SuppliersService,

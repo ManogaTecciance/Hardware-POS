@@ -19,7 +19,26 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      // Playwright reads these to find the stack under test. Turbo filters the
+      // environment it hands to a task, so without this the browser suite silently
+      // falls back to localhost:3000/4000 and fails against whatever happens to be
+      // listening there — which looks like a product defect, not a wiring one.
+      // They are pass-through rather than `env`: pointing the suite at a different
+      // host does not change what the code under test hashes to.
+      "passThroughEnv": ["E2E_BASE_URL", "E2E_API_URL", "E2E_PROVISION"]
+    },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      // Never cached: the result depends on an external PostgreSQL container, so a
+      // cache hit would report a pass without having touched the database.
+      "cache": false,
+      "env": [
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "TOKEN_ENCRYPTION_KEY",
+        "SYNC_WORKER_ENABLED"
+      ]
     },
     "clean": {
       "cache": false

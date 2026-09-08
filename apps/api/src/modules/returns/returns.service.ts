@@ -10,7 +10,6 @@ import { JwtService } from '@nestjs/jwt';
 import {
   PaymentMethod,
   Prisma,
-  QuickBooksReturnDocumentType,
   UserRole,
 } from '@hardware-pos/database';
 import { safeTimeZone, type Paginated } from '@hardware-pos/shared';
@@ -20,11 +19,22 @@ import { paginate } from '../../common/pagination';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { AuthService } from '../auth/auth.service';
 import { Permission, roleHasPermission } from '../auth/permissions';
+import { AccountingProviderFactory } from '../providers/accounting/accounting-provider.factory';
+import { InventoryProviderFactory } from '../providers/inventory/inventory-provider.factory';
+import { AccountingProvider } from '../providers/accounting/accounting-provider';
+import { ProviderOperationUnavailableError } from '../providers/provider.errors';
+import { StockLine } from '../providers/provider.types';
 import { formatReceiptDateTime } from '../receipts/receipt-templates';
 import { SettingsService } from '../settings/settings.service';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
+import {
+  customerReturnDocumentLabel,
+  resolveCustomerReturnDocumentKind,
+} from './customer-return-document';
 import { computeReturnLine, sumReturnTotals, type ComputedReturnLine } from './returns.calc';
 import {
+  PostReturnAccounting,
+  RestoreStock,
   ReturnListRow,
   ReturnWithRelations,
   ReturnsRepository,
@@ -75,7 +85,22 @@ export class ReturnsService {
     private readonly authService: AuthService,
     private readonly jwtService: JwtService,
     private readonly syncQueue: SyncQueueService,
+    private readonly accountingProviders: AccountingProviderFactory,
+    private readonly inventoryProviders: InventoryProviderFactory,
   ) {}
+
+  /**
+   * The accounting provider that owns this sale's financial record.
+   *
+   * Resolved from the sale's own stored evidence, never from the tenant's current
+   * `TenantBusinessProfile`: a return has to reverse the entry where the sale was
+   * actually filed. A tenant that moved from QuickBooks to NONE still has sales in
+   * QuickBooks that must be credited there, and a tenant that moved the other way
+   * must not have credit notes pushed for sales QuickBooks never recorded.
+   */
+  private accountingFor(sale: SaleForReturn): AccountingProvider {
+    return this.accountingProviders.forSale(sale);
+  }
 
   // ── sale eligibility / returnable items ────────────────────────────────────
 
@@ -110,7 +135,16 @@ export class ReturnsService {
 
   async getReturnableItems(tenantId: string, saleId: string): Promise<ReturnableItem[]> {
     const sale = await this.loadSale(tenantId, saleId);
-    return sale.items.map((it) => {
+    /*
+     * D58: a projected restaurant line may carry no productId (a legacy
+     * MenuItem sale). Restaurant returns are explicitly deferred — the
+     * RETURNS module is not in the food-service set — so a productless line
+     * is not returnable here rather than half-returnable. Retail lines
+     * always carry a product; this filters nothing for them.
+     */
+    return sale.items
+      .filter((it): it is (typeof it) & { productId: string } => it.productId !== null)
+      .map((it) => {
       const purchased = Number(it.quantity);
       const previously = Number(it.returnedQuantity);
       return {
@@ -145,6 +179,10 @@ export class ReturnsService {
       actor.role,
     );
 
+    // The same provider the completion will use, resolved from the same evidence,
+    // so a preview can never advertise a document the completion will not produce.
+    const accounting = this.accountingFor(sale);
+
     return {
       originalSaleId: sale.id,
       saleNumber: sale.saleNumber,
@@ -159,7 +197,14 @@ export class ReturnsService {
       approvalReasons: reasons,
       suggestedRefundMethod: this.suggestRefundMethod(sale),
       allowedRefundMethods: this.allowedRefundMethods(settings.returns),
-      quickbooksDocumentType: this.resolveQboDocType(sale, refundMethod),
+      quickbooksDocumentType: accounting.resolveReturnDocumentType({
+        originalPaymentStatus: sale.paymentStatus,
+        refundMethod,
+      }).documentType,
+      documentKind: resolveCustomerReturnDocumentKind({
+        refundMethod,
+        originalPaymentStatus: sale.paymentStatus,
+      }),
     };
   }
 
@@ -240,32 +285,66 @@ export class ReturnsService {
       ? await this.verifyApprovalToken(tenantId, dto.originalSaleId, refundTotal, dto.approvalToken, reasons)
       : null;
 
-    const quickbooksDocumentType = this.resolveQboDocType(sale, dto.refundMethod);
+    // One provider for the whole operation: the document decision below and the
+    // submission inside the transaction come from the same resolved instance, so
+    // they cannot disagree.
+    const accounting = this.accountingFor(sale);
+    const quickbooksDocumentType = accounting.resolveReturnDocumentType({
+      originalPaymentStatus: sale.paymentStatus,
+      refundMethod: dto.refundMethod,
+    }).documentType;
+
+    const postAccounting: PostReturnAccounting = (tx, returnId) =>
+      accounting.postReturn(
+        tx,
+        { tenantId, branchId: sale.branchId },
+        returnId,
+        quickbooksDocumentType,
+      );
+
+    // Inventory is resolved from the tenant's CURRENT mode, not from the sale's
+    // accounting provenance. Inventory authority and accounting provenance are
+    // separate concepts (D29), and there is no per-sale inventory provenance to
+    // read — which is safe only because `BusinessProfileService` now refuses to
+    // change `inventoryMode` once stock has moved.
+    const inventory = await this.inventoryProviders.forTenant(tenantId);
+    const restockLines = eligibleRestockLines(computed.persistItems);
+    const restoreStock: RestoreStock = (tx, lines) =>
+      inventory.restoreStock(tx, { tenantId, branchId: sale.branchId }, lines);
 
     let created: ReturnWithRelations;
     try {
-      created = await this.repo.createCompleted({
-        tenantId,
-        branchId: sale.branchId,
-        registerId: sale.registerId,
-        originalSaleId: sale.id,
-        customerId: sale.customerId,
-        createdByUserId: actor.id,
-        approvedByUserId,
-        approvalToken: requiresApproval ? (dto.approvalToken ?? null) : null,
-        idempotencyKey: key ?? null,
-        notes: dto.notes?.trim() || null,
-        subtotal: computed.totals.subtotal,
-        productDiscountAdjustment: computed.totals.productDiscountAdjustment,
-        orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
-        taxAdjustment: computed.totals.taxAdjustment,
-        refundTotal,
-        refundMethod: dto.refundMethod,
-        refundReference: dto.refundReference?.trim() || null,
-        refundMetadata: dto.refundMetadata ?? null,
-        quickbooksDocumentType,
-        items: computed.persistItems,
-      });
+      created = await this.repo.createCompleted(
+        {
+          tenantId,
+          branchId: sale.branchId,
+          registerId: sale.registerId,
+          originalSaleId: sale.id,
+          customerId: sale.customerId,
+          createdByUserId: actor.id,
+          approvedByUserId,
+          approvalToken: requiresApproval ? (dto.approvalToken ?? null) : null,
+          idempotencyKey: key ?? null,
+          notes: dto.notes?.trim() || null,
+          subtotal: computed.totals.subtotal,
+          productDiscountAdjustment: computed.totals.productDiscountAdjustment,
+          orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
+          taxAdjustment: computed.totals.taxAdjustment,
+          refundTotal,
+          refundMethod: dto.refundMethod,
+          refundReference: dto.refundReference?.trim() || null,
+          refundMetadata: dto.refundMetadata ?? null,
+          quickbooksDocumentType,
+          restockLines,
+          // No external document means nothing is pending. Leaving this `PENDING`
+          // would show a QuickBooks push that is never going to happen, and would
+          // leave the return permanently "waiting for QuickBooks".
+          syncStatus: quickbooksDocumentType === null ? 'NOT_SYNCED' : 'PENDING',
+          items: computed.persistItems,
+        },
+        postAccounting,
+        restoreStock,
+      );
     } catch (err) {
       // Unique-key race on idempotency: return the winner instead of failing.
       if (
@@ -331,7 +410,20 @@ export class ReturnsService {
     return this.issueReceipt(tenantId, ret, userId);
   }
 
-  retrySync(tenantId: string, id: string): Promise<{ id: string; syncStatus: string }> {
+  /**
+   * Re-queue a failed external push.
+   *
+   * Gated on the return's own provenance rather than the tenant's current profile.
+   * A return with no external accounting document has nothing to retry: there is
+   * no `SyncJob` to requeue and no external system that ever received it, so this
+   * refuses instead of producing a confusing "no sync job found" from the queue.
+   */
+  async retrySync(tenantId: string, id: string): Promise<{ id: string; syncStatus: string }> {
+    const ret = await this.getById(tenantId, id);
+    const accounting = this.accountingProviders.forReturn(ret);
+    if (accounting.provider !== 'QUICKBOOKS') {
+      throw new ProviderOperationUnavailableError(accounting.name, 'retrying an external sync');
+    }
     return this.syncQueue.requeueReturn(tenantId, id);
   }
 
@@ -388,6 +480,18 @@ export class ReturnsService {
         throw new BadRequestException(`Sale item ${input.saleItemId} appears twice`);
       }
       seen.add(input.saleItemId);
+      /*
+       * D58: a projected restaurant line may have no product. Restaurant
+       * returns are deferred (the RETURNS module is not in the food-service
+       * set), so such a line is refused loudly rather than returned without a
+       * stock identity. Retail lines always carry a product.
+       */
+      const productId = si.productId;
+      if (productId === null) {
+        throw new BadRequestException(
+          `${si.productName} was sold without a product reference and cannot be returned here`,
+        );
+      }
 
       const purchased = Number(si.quantity);
       const previously = Number(si.returnedQuantity);
@@ -423,7 +527,7 @@ export class ReturnsService {
 
       previewItems.push({
         saleItemId: si.id,
-        productId: si.productId,
+        productId,
         productName: si.productName,
         sku: si.sku,
         returnQuantity: qty,
@@ -440,7 +544,7 @@ export class ReturnsService {
 
       persistItems.push({
         originalSaleItemId: si.id,
-        productId: si.productId,
+        productId,
         productNameSnapshot: si.productName,
         skuSnapshot: si.sku,
         imageUrlSnapshot: null,
@@ -609,8 +713,23 @@ export class ReturnsService {
   }
 
   private toReceiptData(ret: ReturnWithRelations, footer: string, tz: string): ReturnReceiptData {
+    // `quickbooksDocumentType` is external-integration metadata and is null for a
+    // tenant with no accounting provider. The two explicit branches keep today's
+    // QuickBooks wording byte-identical — a QuickBooks return always has a document
+    // type, so its label never comes from the local resolver. The fallback is the
+    // Slice 6B local decision, so a null never silently prints "Refund Receipt" on
+    // a return where no money moved.
     const documentTypeLabel =
-      ret.quickbooksDocumentType === 'CREDIT_MEMO' ? 'Credit Memo' : 'Refund Receipt';
+      ret.quickbooksDocumentType === 'CREDIT_MEMO'
+        ? 'Credit Memo'
+        : ret.quickbooksDocumentType === 'REFUND_RECEIPT'
+          ? 'Refund Receipt'
+          : customerReturnDocumentLabel(
+              resolveCustomerReturnDocumentKind({
+                refundMethod: ret.refundMethod,
+                originalPaymentStatus: ret.originalSale.paymentStatus,
+              }),
+            );
     const remaining = round2(Number(ret.originalSale.total) - Number(ret.originalSale.returnedAmount));
     return {
       storeName: ret.tenant.name,
@@ -641,7 +760,12 @@ export class ReturnsService {
       refundMethod: humanize(ret.refundMethod ?? ''),
       refundReference: ret.refundReference,
       remainingSaleValue: remaining,
-      syncStatus: ret.syncStatus,
+      // The template prints a "QuickBooks · <status>" row whenever this is set, on
+      // a CUSTOMER-facing receipt. Suppress it for a tenant with no accounting
+      // provider — telling a customer their refund is "QuickBooks NOT_SYNCED" is
+      // wrong for a tenant that does not use QuickBooks at all. A tenant that does
+      // always has a document type, so their receipt is unchanged.
+      syncStatus: ret.quickbooksDocumentType === null ? null : ret.syncStatus,
       footer,
     };
   }
@@ -659,12 +783,12 @@ export class ReturnsService {
       .filter((m) => settings.allowStoreCredit || m !== 'STORE_CREDIT') as PaymentMethod[];
   }
 
-  private resolveQboDocType(sale: SaleForReturn, refundMethod: PaymentMethod): QuickBooksReturnDocumentType {
-    // Store / customer credit is always a Credit Memo; a fully-paid sale refunded
-    // by cash/card/bank is a Refund Receipt; credit / partial sales are Credit Memos.
-    if (refundMethod === 'STORE_CREDIT') return 'CREDIT_MEMO';
-    return sale.paymentStatus === 'PAID' ? 'REFUND_RECEIPT' : 'CREDIT_MEMO';
-  }
+  // `resolveQboDocType` used to live here. Its rule — STORE_CREDIT → CREDIT_MEMO,
+  // otherwise a fully-paid sale → REFUND_RECEIPT and anything else → CREDIT_MEMO —
+  // now lives in `QuickBooksAccountingProvider.resolveReturnDocumentType`,
+  // unchanged. It was moved rather than rewritten, and
+  // `return-accounting-adoption.spec.ts` pins the two against each other across
+  // every payment-status × refund-method pair.
 }
 
 /** PaymentMethod enum values as a plain object (Prisma enums are type-only at runtime). */
@@ -694,7 +818,37 @@ function toReturnListItem(row: ReturnListRow): ReturnListItem {
     status: row.status,
     refundStatus: row.refundStatus,
     syncStatus: row.syncStatus,
+    quickbooksDocumentType: row.quickbooksDocumentType,
+    documentKind: resolveCustomerReturnDocumentKind({
+      refundMethod: row.refundMethod,
+      originalPaymentStatus: row.originalSale.paymentStatus,
+    }),
   };
+}
+
+/**
+ * Which returned lines re-enter available stock.
+ *
+ * The rule is unchanged from `returns.repository`: only GOOD items marked
+ * RETURN_TO_STOCK. Damaged, opened, defective and non-resellable stock never
+ * restocks whatever the disposition says.
+ *
+ * `trackInventory: true` on every eligible line is deliberate and preserves
+ * today's behaviour exactly. The old code did not know a product's type either —
+ * it relied on `type: 'Inventory'` in the update predicate to make a Service
+ * product silently restock nothing, and both stock-tracking providers carry that
+ * same predicate. Deciding it here instead would need an extra product read and
+ * would move a rule that is already enforced correctly one layer down.
+ */
+function eligibleRestockLines(items: PersistReturnItem[]): StockLine[] {
+  return items
+    .filter((it) => it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK')
+    .map((it) => ({
+      productId: it.productId,
+      productName: it.productNameSnapshot,
+      quantity: Number(it.returnQuantity),
+      trackInventory: true,
+    }));
 }
 
 /** Turn an enum value (WRONG_PRODUCT) into a label (Wrong product). */

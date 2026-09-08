@@ -7,6 +7,8 @@ import {
 import { Prisma, Supplier } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { mirrorExternalRef } from '../quickbooks/external-ref';
+import { PrismaService } from '../../prisma/prisma.service';
 import { QuickBooksVendorsService } from '../quickbooks/quickbooks-vendors.service';
 import type { QuerySuppliersDto } from './dto/query-suppliers.dto';
 import type { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier-input.dto';
@@ -23,6 +25,7 @@ export class SuppliersService {
   constructor(
     private readonly repo: SuppliersRepository,
     private readonly qbVendors: QuickBooksVendorsService,
+      private readonly prisma: PrismaService,
   ) {}
 
   private async getOr404(tenantId: string, id: string): Promise<Supplier> {
@@ -130,6 +133,12 @@ export class SuppliersService {
         qbStatus: 'CONNECTED',
         qbLastSyncedAt: new Date(),
       });
+      // D63 dual-write.
+      await mirrorExternalRef(this.prisma, tenantId, 'SUPPLIER', id, {
+        externalId: vendor.id,
+        syncStatus: 'SYNCED',
+        lastSyncedAt: new Date(),
+      });
       return toSupplierDto(supplier);
     } catch (err) {
       if (isUniqueViolation(err)) {
@@ -146,6 +155,12 @@ export class SuppliersService {
       quickbooksVendorName: null,
       qbStatus: 'NOT_CONNECTED',
       qbLastSyncedAt: null,
+    });
+    // D63 dual-write: an unmap clears the external identity.
+    await mirrorExternalRef(this.prisma, tenantId, 'SUPPLIER', id, {
+      externalId: null,
+      syncStatus: 'NOT_SYNCED',
+      lastSyncedAt: null,
     });
     return toSupplierDto(supplier);
   }

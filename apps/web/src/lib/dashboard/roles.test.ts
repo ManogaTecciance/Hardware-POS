@@ -36,11 +36,18 @@ describe('SALESPERSON ↔ OWNER parity (web mirror)', () => {
   });
 
   it('grants no role outside ADMIN_LEVEL_ROLES the full permission set', () => {
-    const roles = Object.keys(ROLE_PERMISSIONS) as UserRole[];
-    const full = roles.filter(
-      (r) => ROLE_PERMISSIONS[r].length === Object.values(Permission).length,
+    const fullAccess = (Object.keys(ROLE_PERMISSIONS) as UserRole[]).filter(
+      (role) => ROLE_PERMISSIONS[role].length === Object.values(Permission).length,
     );
-    expect(full.sort()).toEqual([...ADMIN_LEVEL_ROLES].sort());
+    // Exactly the two owner-equivalents. On main this equalled ADMIN_LEVEL_ROLES;
+    // after the restaurant merge ADMIN stays owner-level for guard-rail overrides
+    // but no longer holds the full catalogue (Restaurant Pilot Change 1 withholds
+    // the six creator-scoped permissions). So: who holds everything, and that
+    // everyone who does is owner-level — asserted separately.
+    expect([...fullAccess].sort()).toEqual(['OWNER', 'SALESPERSON']);
+    for (const role of fullAccess) expect(ADMIN_LEVEL_ROLES).toContain(role);
+    expect(ADMIN_LEVEL_ROLES).toContain('ADMIN');
+    expect(ROLE_PERMISSIONS.ADMIN.length).toBeLessThan(Object.values(Permission).length);
   });
 });
 

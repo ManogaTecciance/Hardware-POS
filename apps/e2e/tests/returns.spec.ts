@@ -9,7 +9,7 @@ test.describe('RET — Returns & Refunds', () => {
     expect(items[0].saleItemId).toBeTruthy();
   });
 
-  test('RET-004 full return completes and restocks (with manager approval)', async ({ ownerApi, managerApi }) => {
+  test('RET-004 full return completes and restocks (with approval)', async ({ ownerApi }) => {
     const p = await ownerApi.createProduct({ quantityOnHand: 20, unitPrice: 500 });
     const sale = await ownerApi.completeSale([{ productId: p.id, quantity: 2 }]);
     const afterSale = await ownerApi.get(`/products/${p.id}`);
@@ -22,9 +22,11 @@ test.describe('RET — Returns & Refunds', () => {
       stockDisposition: 'RETURN_TO_STOCK' as const,
     }));
 
-    // A full-sale return requires manager approval — preview → approve → create.
+    // A full-sale return requires approval — preview → approve → create.
+    // 2026-08-17: PIN 2222 belongs to the seeded OWNER now (the hardware
+    // template staffs Owner + Cashier; the manager demo user is gone).
     const preview = await ownerApi.post('/returns/preview', { originalSaleId: sale.id, items: lines, refundMethod: 'CASH' });
-    const approval = await managerApi.post('/returns/approve', {
+    const approval = await ownerApi.post('/returns/approve', {
       managerPin: '2222', originalSaleId: sale.id, refundTotal: preview.refundTotal,
     });
     expect(approval.approvalToken).toBeTruthy();
@@ -44,12 +46,12 @@ test.describe('RET — Returns & Refunds', () => {
     expect(Number(afterReturn.quantityOnHand)).toBe(Number(afterSale.quantityOnHand) + 2);
   });
 
-  test('RET-008 damaged disposition does NOT restock', async ({ ownerApi, managerApi }) => {
+  test('RET-008 damaged disposition does NOT restock', async ({ ownerApi }) => {
     const p = await ownerApi.createProduct({ quantityOnHand: 20, unitPrice: 500 });
     const sale = await ownerApi.completeSale([{ productId: p.id, quantity: 2 }]);
     const afterSale = await ownerApi.get(`/products/${p.id}`);
     const items = await ownerApi.get(`/sales/${sale.id}/returnable-items`);
-    // A damaged-item return requires manager approval (regardless of quantity).
+    // A damaged-item return requires approval (regardless of quantity).
     const lines = [{
       saleItemId: items[0].saleItemId,
       returnQuantity: 1,
@@ -58,7 +60,7 @@ test.describe('RET — Returns & Refunds', () => {
       stockDisposition: 'DAMAGED_STOCK' as const,
     }];
     const preview = await ownerApi.post('/returns/preview', { originalSaleId: sale.id, items: lines, refundMethod: 'CASH' });
-    const approval = await managerApi.post('/returns/approve', {
+    const approval = await ownerApi.post('/returns/approve', {
       managerPin: '2222', originalSaleId: sale.id, refundTotal: preview.refundTotal,
     });
     const ret = await ownerApi.post('/returns', {

@@ -1,7 +1,8 @@
 import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
-import { SyncLog } from '@hardware-pos/database';
+import { SyncLog, ModuleKey } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
+import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
@@ -10,6 +11,8 @@ import { RefreshResult, RetryResult } from './sync.interfaces';
 import { SyncService } from './sync.service';
 
 @Controller('sync')
+// Slice 7.6 — the sync queue exists only to serve QuickBooks.
+@RequireModule(ModuleKey.QUICKBOOKS)
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}
 

@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { PanelLeftClose, PanelLeftOpen, Store } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import * as React from 'react';
 
-import { NAV_GROUPS } from '@/lib/nav';
+import { resolveNavigation } from '@/lib/nav';
 import { useAuth } from '@/lib/auth';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 import { useSidebar } from '@/lib/sidebar';
 import { cn } from '@/lib/utils';
 
@@ -19,11 +20,12 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
         collapsed ? 'justify-center px-0' : 'px-6',
       )}
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-        <Store className="h-5 w-5" />
-      </span>
+      {/* The brand logo (same asset as the login page and the platform
+          console), not a generic glyph (PO request, 2026-08-17). */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/brand/axlo-icon.svg" alt="" className="h-9 w-auto shrink-0" aria-hidden />
       {!collapsed ? (
-        <span className="text-base font-semibold tracking-tight">Hardware POS</span>
+        <span className="text-base font-semibold tracking-tight">Axlo POS</span>
       ) : null}
     </div>
   );
@@ -35,17 +37,41 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
  * collapsed, labels are hidden, icons are centered and a native tooltip
  * (`title`) surfaces each label.
  */
-function NavList({ collapsed }: { collapsed?: boolean }) {
+/**
+ * `label` distinguishes the two instances.
+ *
+ * The desktop rail and the mobile drawer both render this list, so both emit a
+ * `<nav>`. Two navigation landmarks sharing one accessible name is a real defect —
+ * a screen-reader user gets "Main navigation" twice with no way to tell them
+ * apart — and it surfaced as an ambiguous query in the render spec.
+ */
+function NavList({ collapsed, label }: { collapsed?: boolean; label: string }) {
   const pathname = usePathname();
   const { hasPermission } = useAuth();
+  const { profile, status } = useEffectiveProfile();
 
-  const groups = NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => !item.permission || hasPermission(item.permission)),
-  })).filter((group) => group.items.length > 0);
+  // Slice 8: navigation is derived from the tenant's business type and enabled
+  // modules as well as the user's permissions. While the profile is unresolved the
+  // resolver returns nothing, and the neutral placeholder below is rendered — a
+  // restaurant operator must never watch POS and QuickBooks appear and vanish.
+  const groups = resolveNavigation({
+    businessType: profile?.businessType ?? null,
+    enabledModules: profile?.enabledModules ?? null,
+    hasPermission,
+  });
+
+  if (groups.length === 0) {
+    return (
+      <nav className="flex-1 overflow-y-auto p-3" aria-label={label}>
+        <p className="px-3 py-2 text-xs text-muted-foreground" role="status">
+          {status === 'error' ? 'Navigation unavailable' : 'Loading…'}
+        </p>
+      </nav>
+    );
+  }
 
   return (
-    <nav className="flex-1 overflow-y-auto p-3">
+    <nav className="flex-1 overflow-y-auto p-3" aria-label={label}>
       {groups.map((group, gi) => (
         <div key={group.label ?? `group-${gi}`} className={cn(gi > 0 && 'mt-4')}>
           {group.label && !collapsed ? (
@@ -84,7 +110,19 @@ function NavList({ collapsed }: { collapsed?: boolean }) {
                     />
                   ) : null}
                   <item.icon className="h-5 w-5 shrink-0" />
-                  {!collapsed ? <span>{item.label}</span> : null}
+                  {!collapsed ? (
+                    <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                      <span className="truncate">{item.label}</span>
+                      {/* Text, not colour: the marker has to survive a screen
+                          reader and a monochrome display, because it is the only
+                          thing distinguishing a shell from a working feature. */}
+                      {item.upcoming ? (
+                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Soon
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </Link>
               );
             })}
@@ -95,11 +133,36 @@ function NavList({ collapsed }: { collapsed?: boolean }) {
   );
 }
 
-const FOOTER_NOTE = 'QuickBooks is the inventory & accounting master.';
+/**
+ * The sidebar footer note, per accounting provider (Slice 8.5).
+ *
+ * This was a hardcoded string asserting QuickBooks was the master for **every**
+ * tenant, including ones that have never connected it. A restaurant running
+ * entirely on AxloPOS was being told its books lived somewhere they do not.
+ *
+ * `QUICKBOOKS` keeps the sentence verbatim, so the Tile Shop sidebar is unchanged.
+ * `null` renders nothing at all — no note, and no divider above it.
+ *
+ * D89 (PO, 2026-08-21): `NONE` returns null too. "Sales and catalogue are
+ * managed in AxloPOS" told an AxloPOS user they were using AxloPOS; it earned
+ * a rule and a block of rail that the QuickBooks note earns because it names
+ * a system somewhere else. The unresolved case keeps returning null for the
+ * original reason — the app does not yet know what to say.
+ */
+function footerNote(accountingProvider: string | null | undefined): string | null {
+  switch (accountingProvider) {
+    case 'QUICKBOOKS':
+      return 'QuickBooks is the inventory & accounting master.';
+    default:
+      return null;
+  }
+}
 
 export function Sidebar() {
   const { collapsed, toggleCollapsed, mobileOpen, closeMobile } = useSidebar();
   const pathname = usePathname();
+  const { profile } = useEffectiveProfile();
+  const note = footerNote(profile?.accountingProvider);
 
   // Close the mobile drawer whenever the route changes.
   React.useEffect(() => {
@@ -116,21 +179,26 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Desktop rail: collapses to an icon-only strip. */}
+      {/* Desktop / landscape-tablet rail: collapses to an icon-only strip.
+          Cutover raised from `md:` (768) to `tab:` (900) so portrait iPad
+          (768–834) gets the drawer instead of a permanent 64/256 px rail
+          that leaves the working area cramped. `pl-safe` keeps the icon
+          column clear of the notch when a landscape iPad reports a
+          non-zero left safe-area inset (Split View, Slide Over). */}
       <aside
         className={cn(
-          'hidden shrink-0 flex-col border-r border-border bg-surface transition-[width] md:flex',
+          'hidden shrink-0 flex-col border-r border-border bg-surface pl-safe transition-[width] tab:flex',
           collapsed ? 'w-16' : 'w-64',
         )}
       >
         <Brand collapsed={collapsed} />
-        <NavList collapsed={collapsed} />
-        {!collapsed ? (
-          <div className="border-t border-border p-4 text-xs text-muted-foreground">
-            {FOOTER_NOTE}
-          </div>
+        <NavList collapsed={collapsed} label="Main" />
+        {!collapsed && note ? (
+          <div className="border-t border-border p-4 text-xs text-muted-foreground">{note}</div>
         ) : null}
-        {/* Collapse / expand the rail — preference persists (localStorage). */}
+        {/* Collapse / expand the rail — preference persists (localStorage).
+            `touch-target-coarse` bumps the tap area to 44px on touch input
+            without inflating the desktop rail button. */}
         <div className="border-t border-border p-3">
           <button
             type="button"
@@ -138,7 +206,7 @@ export function Sidebar() {
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className={cn(
-              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+              'touch-target-coarse flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
               collapsed && 'justify-center gap-0',
             )}
           >
@@ -152,9 +220,13 @@ export function Sidebar() {
         </div>
       </aside>
 
-      {/* Mobile off-canvas drawer. Stays mounted for the slide transition;
-          made inert when closed so its links leave the tab order. */}
-      <div className="md:hidden" inert={mobileOpen ? undefined : true}>
+      {/* Portrait / mobile off-canvas drawer. Stays mounted for the slide
+          transition; made inert when closed so its links leave the tab
+          order. `tab:hidden` matches the rail's `tab:flex` above — the two
+          are strictly exclusive at the same cutover so the app never
+          shows both or neither. `pt-safe` / `pl-safe` keep the drawer
+          clear of the status bar and any left inset (Split View). */}
+      <div className="tab:hidden" inert={mobileOpen ? undefined : true}>
         <button
           type="button"
           aria-label="Close navigation"
@@ -166,15 +238,15 @@ export function Sidebar() {
         />
         <aside
           className={cn(
-            'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-surface transition-transform',
+            'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-surface pl-safe pt-safe transition-transform',
             mobileOpen ? 'translate-x-0' : '-translate-x-full',
           )}
         >
           <Brand />
-          <NavList />
-          <div className="border-t border-border p-4 text-xs text-muted-foreground">
-            {FOOTER_NOTE}
-          </div>
+          <NavList label="Main (mobile)" />
+          {note ? (
+            <div className="border-t border-border p-4 text-xs text-muted-foreground">{note}</div>
+          ) : null}
         </aside>
       </div>
     </>

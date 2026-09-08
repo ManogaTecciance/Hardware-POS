@@ -6,6 +6,10 @@ import { paginate } from '../../common/pagination';
 import { safeTimeZone } from '@hardware-pos/shared';
 
 import { SettingsService } from '../settings/settings.service';
+import {
+  customerDocumentLabel,
+  resolveCustomerDocumentKind,
+} from '../sales/customer-document';
 import { ReceiptsRepository, SaleForReceipt } from './receipts.repository';
 import {
   CustomerReceiptData,
@@ -122,7 +126,14 @@ export class ReceiptsService {
       storeName: sale.tenant.name,
       saleNumber: sale.saleNumber,
       dateTime: formatReceiptDateTime(sale.completedAt ?? sale.createdAt, tz),
-      documentType: sale.quickbooksDocumentType,
+      // External-integration metadata when the tenant has an accounting provider —
+      // unchanged, so a QuickBooks receipt still prints exactly `SALES_RECEIPT` or
+      // `INVOICE`. Otherwise the LOCAL document kind, derived from payment status, so
+      // a tenant with no accounting provider gets a real "Receipt"/"Invoice" label
+      // instead of a blank space where a badge used to be.
+      documentType:
+        sale.quickbooksDocumentType ??
+        customerDocumentLabel(resolveCustomerDocumentKind(sale.paymentStatus)),
       customerName: sale.customer?.name ?? null,
       currency,
       items: sale.items.map((it) => ({

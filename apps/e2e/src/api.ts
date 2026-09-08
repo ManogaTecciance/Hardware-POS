@@ -19,9 +19,13 @@ interface Envelope<T> {
   data: T;
 }
 
-export async function apiLogin(email: string, password: string): Promise<Auth> {
+export async function apiLogin(email: string, password: string, workspace?: string): Promise<Auth> {
   const ctx = await request.newContext();
-  const res = await ctx.post(`${API_URL}/auth/login`, { data: { email, password } });
+  const res = await ctx.post(`${API_URL}/auth/login`, {
+    // Omitted rather than sent empty: the API distinguishes "no workspace given"
+    // from "a workspace that failed validation".
+    data: workspace ? { email, password, workspace } : { email, password },
+  });
   expect(res.ok(), `login as ${email}`).toBeTruthy();
   const { data } = (await res.json()) as Envelope<{
     token: string;
@@ -30,25 +34,6 @@ export async function apiLogin(email: string, password: string): Promise<Auth> {
     branch: { id: string; name: string } | null;
     register: { id: string; name: string } | null;
   }>;
-  await ctx.dispose();
-  return {
-    token: data.token,
-    refreshToken: data.refreshToken,
-    tenantId: data.user.tenantId,
-    user: data.user,
-    branch: data.branch,
-    register: data.register,
-  };
-}
-
-export async function apiPinLogin(pin: string, tenantId = 'tnt_dev'): Promise<Auth> {
-  const ctx = await request.newContext();
-  const res = await ctx.post(`${API_URL}/auth/pin-login`, {
-    data: { pin },
-    headers: { 'X-Tenant-Id': tenantId },
-  });
-  expect(res.ok(), `pin login ${pin}`).toBeTruthy();
-  const { data } = (await res.json()) as Envelope<any>;
   await ctx.dispose();
   return {
     token: data.token,
@@ -201,11 +186,44 @@ export class Api {
 
 export const SEED = {
   owner: { email: 'owner@hardwarepos.test', password: 'password123' },
-  accountant: { email: 'accountant@hardwarepos.test', password: 'password123' },
+  cashier: { email: 'cashier@hardwarepos.test', password: 'password123' },
+  /** Owner-equivalent role added on main (2026-08-31): email + password, no PIN. */
   salesperson: { email: 'salesperson@hardwarepos.test', password: 'password123' },
-  managerPin: '2222',
+  /**
+   * Approval PINs (discount / return prompts) — no longer a login credential
+   * (D48). 2026-08-17: the hardware template staffs Owner + Cashier only, so
+   * the OWNER holds the approver PIN; the old manager/accountant demo users
+   * are gone. The manager-cap negative lives in the API integration spec
+   * (discount-approval.spec.ts), whose fixtures own a MANAGER user.
+   */
+  approverPin: '2222',
   cashierPin: '1111',
   tenantId: 'tnt_dev',
   branchId: 'brn_dev',
   registerId: 'reg_dev',
+  /** The Tile Shop workspace slug, for workspace-scoped sign-in. */
+  workspace: 'demo',
+};
+
+/**
+ * The Restaurant demo tenant (Slice 8.9 seed).
+ *
+ * A second tenant with a different business profile — RESTAURANT, LOCAL
+ * inventory, no accounting provider — so the module-aware behaviour can be tested
+ * against a real workspace rather than a mocked profile. It is also the
+ * tenant-isolation subject: nothing it can see may belong to `tnt_dev`.
+ */
+export const RESTAURANT_SEED = {
+  owner: { email: 'restaurant.owner@axlopos.test', password: 'Restaurant123!' },
+  cashier: { email: 'restaurant.cashier@axlopos.test', password: 'Restaurant123!' },
+  /** Approval PIN only (D48). */
+  cashierPin: '3333',
+  /** D69/D70/D71 — the dine-in flow belongs to the waiter. */
+  waiter: { email: 'waiter@axlopos.test', password: 'Restaurant123!' },
+  /** D68 — the board is theirs to work; D94 gave the till a read-only view. */
+  kitchen: { email: 'kitchen@axlopos.test', password: 'Restaurant123!' },
+  tenantId: 'tnt_resto',
+  workspace: 'restaurant-demo',
+  branchId: 'brn_resto',
+  registerId: 'reg_resto',
 };

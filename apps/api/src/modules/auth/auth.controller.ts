@@ -1,32 +1,49 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseInterceptors } from '@nestjs/common';
 
+import { AuthThrottle } from '../../common/throttling/auth-throttle.decorator';
+import { AuthThrottleInterceptor } from '../../common/throttling/auth-throttle.interceptor';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { OptionalTenantId } from '../../common/decorators/optional-tenant-id.decorator';
 import { Public } from '../../common/decorators/public.decorator';
-import { TenantId } from '../../common/decorators/tenant-id.decorator';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser, AuthTokenResult } from './auth.types';
 import { AuthService, CurrentUserView } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { PinLoginDto } from './dto/pin-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { SwitchActiveBranchDto } from './dto/switch-active-branch.dto';
 
+/**
+ * Every credential-accepting route here carries `@AuthThrottle` (Slice 7.1).
+ * `auth-throttle.coverage.spec.ts` asserts the exact set, so a new route added
+ * without one fails the build rather than shipping unmetered.
+ */
 @Controller('auth')
+@UseInterceptors(AuthThrottleInterceptor)
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly audit: AuditLogService,
+  ) {}
 
-  /** Email + password login (owner / admin / accountant). */
+  /**
+   * Email + password login (owner / admin / accountant).
+   *
+   * Tenant resolution, in precedence order (Slice 7.2): the `workspace` slug in the
+   * body, then the `x-tenant-id` header, then a unique match on the email alone.
+   * All three are client-supplied and only ever NARROW the lookup — the password is
+   * always verified against the resolved user's own hash — so a wrong value can
+   * only make a login fail. An email held by several workspaces returns
+   * `WORKSPACE_REQUIRED` rather than picking one.
+   */
   @Public()
+  @AuthThrottle('email-login')
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  login(@Body() dto: LoginDto): Promise<AuthTokenResult> {
-    return this.authService.login(dto);
-  }
-
-  /** PIN login (cashier / manager). Tenant comes from the x-tenant-id header. */
-  @Public()
-  @Post('pin-login')
-  @HttpCode(HttpStatus.OK)
-  pinLogin(@TenantId() tenantId: string, @Body() dto: PinLoginDto): Promise<AuthTokenResult> {
-    return this.authService.pinLogin(tenantId, dto);
+  login(
+    @Body() dto: LoginDto,
+    @OptionalTenantId() tenantHint: string | null,
+  ): Promise<AuthTokenResult> {
+    return this.authService.login(dto, tenantHint);
   }
 
   /**
@@ -34,6 +51,7 @@ export class AuthController {
    * Public: this is exactly the call made once the access token has expired.
    */
   @Public()
+  @AuthThrottle('refresh')
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   refresh(@Body() dto: RefreshTokenDto): Promise<AuthTokenResult> {
@@ -52,5 +70,44 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser): Promise<CurrentUserView> {
     return this.authService.getCurrentUser(user.id);
+  }
+
+  /**
+   * List the branches this session may switch into, right now (Phase 1.5.6).
+   *
+   * OWNER/ADMIN see every active branch of their tenant. Everyone else sees
+   * their assigned `User.branchId` plus every branch granted through
+   * `BranchAccess`. Inactive branches are omitted.
+   */
+  @Get('accessible-branches')
+  listAccessibleBranches(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ id: string; name: string }[]> {
+    return this.authService.listAccessibleBranches(user.id);
+  }
+
+  /**
+   * Switch the caller's active branch. Issues a new access + refresh pair.
+   * A stale token or a branch the user was removed from is refused here just
+   * as it would be on any branch-scoped request. Cross-tenant ids answer 404.
+   */
+  @Post('active-branch')
+  @HttpCode(HttpStatus.OK)
+  async switchActiveBranch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SwitchActiveBranchDto,
+  ): Promise<AuthTokenResult> {
+    const result = await this.authService.switchActiveBranch(user.id, dto.branchId);
+    await this.audit.record(user.tenantId, {
+      userId: user.id,
+      action: 'AUTH_ACTIVE_BRANCH_CHANGED',
+      entityType: 'User',
+      entityId: user.id,
+      metadata: {
+        previousBranchId: user.activeBranchId,
+        newBranchId: dto.branchId,
+      },
+    });
+    return result;
   }
 }

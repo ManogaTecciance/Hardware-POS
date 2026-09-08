@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
 
+import { mirrorExternalRef } from './external-ref';
 import { PrismaService } from '../../prisma/prisma.service';
 import { toQuickBooksTxnDate } from '../sales/sale-date';
 import { QuickBooksConfig } from './quickbooks.config';
@@ -196,8 +197,16 @@ export class QuickBooksSalesSyncService {
 
   // ── document building ──────────────────────────────────────────────────────
 
-  private async buildLines(tenantId: string, sale: SaleWithSyncRelations): Promise<QboSalesLine[]> {
-    const productIds = [...new Set(sale.items.map((it) => it.productId))];
+  private async buildLines(
+    tenantId: string,
+    sale: SaleWithSyncRelations,
+  ): Promise<QboSalesLine[]> {
+    // D58 made SaleItem.productId nullable for projected restaurant lines.
+    // A QuickBooks tenant's sales are retail and always carry a product; the
+    // filter is type honesty, not a behaviour change.
+    const productIds = [
+      ...new Set(sale.items.map((it) => it.productId).filter((id): id is string => id !== null)),
+    ];
     const products = await this.prisma.product.findMany({
       where: { tenantId, id: { in: productIds } },
       select: { id: true, quickbooksItemId: true },
@@ -211,7 +220,7 @@ export class QuickBooksSalesSyncService {
       const lineTotal = Number(item.lineTotal); // net of the line discount
 
       // Make sale line items use quickbooksItemId when available.
-      const quickbooksItemId = itemIdByProduct.get(item.productId);
+      const quickbooksItemId = item.productId ? itemIdByProduct.get(item.productId) : undefined;
       const itemRef: QboRef | undefined = quickbooksItemId
         ? { value: quickbooksItemId }
         : undefined;
@@ -310,8 +319,20 @@ export class QuickBooksSalesSyncService {
         where: { id: sale.id },
         data: { syncStatus: 'SYNCED', quickbooksDocumentId: documentId, syncError: null },
       });
+      // D63 dual-write — same transaction, same facts, satellite copy.
+      await mirrorExternalRef(tx, sale.tenantId, 'SALE', sale.id, {
+        externalId: documentId,
+        externalType: sale.quickbooksDocumentType,
+        syncStatus: 'SYNCED',
+        syncError: null,
+        lastSyncedAt: new Date(),
+      });
       // Payments are settled by the created document; record the QBO payment id
       // (invoice case) and mark them synced.
+      const paymentRows = await tx.payment.findMany({
+        where: { saleId: sale.id },
+        select: { id: true },
+      });
       await tx.payment.updateMany({
         where: { saleId: sale.id },
         data: {
@@ -319,6 +340,13 @@ export class QuickBooksSalesSyncService {
           ...(quickbooksPaymentId ? { quickbooksPaymentId } : {}),
         },
       });
+      for (const row of paymentRows) {
+        await mirrorExternalRef(tx, sale.tenantId, 'PAYMENT', row.id, {
+          ...(quickbooksPaymentId ? { externalId: quickbooksPaymentId } : {}),
+          syncStatus: 'SYNCED',
+          lastSyncedAt: new Date(),
+        });
+      }
       await tx.syncJob.updateMany({
         where: {
           tenantId: sale.tenantId,
@@ -357,6 +385,11 @@ export class QuickBooksSalesSyncService {
       await tx.sale.update({
         where: { id: sale.id },
         data: { syncStatus: 'FAILED', syncError: message },
+      });
+      // D63 dual-write.
+      await mirrorExternalRef(tx, sale.tenantId, 'SALE', sale.id, {
+        syncStatus: 'FAILED',
+        syncError: message,
       });
       await tx.syncJob.updateMany({
         where: {

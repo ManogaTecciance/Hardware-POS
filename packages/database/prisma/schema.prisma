@@ -87,6 +87,31 @@ enum QuickBooksDocumentType {
   INVOICE
 }
 
+/// D58 — which fulfilment lifecycle settled a sale. Total over the enum:
+/// a new FulfilmentProvider (Phase 4) must add its value here.
+enum FulfilmentKind {
+  IMMEDIATE
+  TABLE_SERVICE
+}
+
+/// D58 — sales channel on the settlement document. COUNTER is the
+/// immediate-fulfilment (retail) channel; the three food-service values keep
+/// the names of RestaurantOrderChannel so no data changes meaning.
+enum OrderChannel {
+  COUNTER
+  DINE_IN
+  TAKEAWAY
+  ONLINE
+}
+
+/// D58 — where a SaleItem line came from. RETAIL_CART is the default so every
+/// pre-existing retail row keeps its semantics; RESTAURANT_ORDER_ITEM marks a
+/// line projected from an order round at close.
+enum SaleItemSourceKind {
+  RETAIL_CART
+  RESTAURANT_ORDER_ITEM
+}
+
 enum SaleStatus {
   DRAFT
   COMPLETED
@@ -202,6 +227,85 @@ enum ShareStatus {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Platform business profile (AxloPOS multi-profile support)
+// ─────────────────────────────────────────────────────────────
+
+/// What kind of business a tenant runs. Drives the domain registry
+/// (`@hardware-pos/shared` `domainFor`), never the correctness of a shared
+/// code path.
+///
+/// D57: one value per workspace template. `TILE_SHOP` and `RETAIL` were
+/// removed — the pilot tile shop IS a hardware-template business (PO,
+/// 2026-08-14), and `RETAIL` was speculative and never used. Both carried
+/// zero data; migration 20260821000000 recreated the type without them.
+enum BusinessType {
+  HARDWARE
+  RESTAURANT
+  CAFE
+  BAKERY
+  /// D55. Currently mirrors RESTAURANT everywhere; its own value so hotel
+  /// workspaces are distinguishable in data before they diverge in behaviour.
+  HOTEL
+  GENERAL
+}
+
+/// Where stock lives and who is authoritative for it.
+/// `QUICKBOOKS` is the current (and only) production behaviour.
+enum InventoryMode {
+  LOCAL
+  QUICKBOOKS
+  EXTERNAL
+  DISABLED
+}
+
+/// Which accounting system receives sales, payments, refunds, and credit notes.
+/// Named with the `Kind` suffix so the persisted enum does not collide with the
+/// `AccountingProvider` TypeScript port introduced in Slice 5.
+enum AccountingProviderKind {
+  NONE
+  QUICKBOOKS
+  FUTURE_EXTERNAL
+}
+
+/// Switchable feature modules.
+///
+/// These values are written to the database (`TenantModule.moduleKey`) and are
+/// STABLE IDENTIFIERS — renaming one is a data migration, not a refactor
+/// (decision D3).
+///
+/// `PAYMENTS` is deliberately absent: collecting payment is core to every
+/// business profile and must never be switchable off. Payment behaviour is
+/// controlled through payment-method settings, permissions, branch
+/// configuration, and provider configuration instead.
+enum ModuleKey {
+  // Retail + shared
+  RETAIL_POS
+  INVENTORY
+  CUSTOMERS
+  QUOTATIONS
+  RETURNS
+  EXCHANGES
+  SUPPLIERS
+  REPORTING
+  USERS
+  BRANCHES
+  SETTINGS
+  BRANDING
+  QUICKBOOKS
+
+  // Restaurant
+  MENU_MANAGEMENT
+  DINING
+  TABLE_MANAGEMENT
+  TAKEAWAY
+  KITCHEN
+  KITCHEN_DISPLAY
+  ONLINE_ORDERS
+  DELIVERY_INTEGRATIONS
+  RESERVATIONS
+}
+
+// ─────────────────────────────────────────────────────────────
 // Tenancy & locations
 // ─────────────────────────────────────────────────────────────
 
@@ -213,30 +317,130 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  branches             Branch[]
-  registers            Register[]
-  users                User[]
-  roles                Role[]
-  categories           ProductCategory[]
-  products             Product[]
-  customers            Customer[]
-  sales                Sale[]
-  payments             Payment[]
-  discounts            Discount[]
-  syncJobs             SyncJob[]
-  syncLogs             SyncLog[]
-  quickbooksConnection QuickBooksConnection?
-  quickbooksMappings   QuickBooksMapping[]
-  auditLogs            AuditLog[]
-  printJobs            PrintJob[]
-  returns              Return[]
-  refundPayments       RefundPayment[]
-  subcategories        ProductSubcategory[]
-  quotations           Quotation[]
-  quotationShareLogs   QuotationShareLog[]
-  refreshTokens        RefreshToken[]
-  settings             TenantSettings[]
-  suppliers            Supplier[]
+  branches                     Branch[]
+  registers                    Register[]
+  users                        User[]
+  roles                        Role[]
+  categories                   ProductCategory[]
+  products                     Product[]
+  customers                    Customer[]
+  sales                        Sale[]
+  payments                     Payment[]
+  discounts                    Discount[]
+  syncJobs                     SyncJob[]
+  syncLogs                     SyncLog[]
+  quickbooksConnection         QuickBooksConnection?
+  quickbooksMappings           QuickBooksMapping[]
+  saleItemModifiers            SaleItemModifier[]
+  catalogueEntries             CatalogueEntry[]
+  externalEntityRefs           ExternalEntityRef[]
+  productComponents            ProductComponent[]
+  auditLogs                    AuditLog[]
+  printJobs                    PrintJob[]
+  returns                      Return[]
+  refundPayments               RefundPayment[]
+  subcategories                ProductSubcategory[]
+  quotations                   Quotation[]
+  quotationShareLogs           QuotationShareLog[]
+  refreshTokens                RefreshToken[]
+  settings                     TenantSettings[]
+  suppliers                    Supplier[]
+  businessProfile              TenantBusinessProfile?
+  modules                      TenantModule[]
+  restaurantConfigs            RestaurantBranchConfig[]
+  branchOpeningHours           BranchOpeningHours[]
+  branchOpeningHoursOverrides  BranchOpeningHoursOverride[]
+  kitchenStations              KitchenStation[]
+  menus                        Menu[]
+  menuSections                 MenuSection[]
+  menuItems                    MenuItem[]
+  modifierGroups               ModifierGroup[]
+  modifierOptions              ModifierOption[]
+  diningAreas                  DiningArea[]
+  restaurantTables             RestaurantTable[]
+  tableSessions                TableSession[]
+  tableReservations            TableReservation[]
+  openTableMembers             OpenTableMember[]
+  billSplitItems               BillSplitItem[]
+  restaurantOrders             RestaurantOrder[]
+  orderRounds                  OrderRound[]
+  restaurantOrderItems         RestaurantOrderItem[]
+  restaurantOrderItemModifiers RestaurantOrderItemModifier[]
+  restaurantOrderStatusHistory RestaurantOrderStatusHistory[]
+  branchInventory              BranchInventory[]
+  stockMovements               StockMovement[]
+  productVariants              ProductVariant[]
+  productVariationDimensions   ProductVariationDimension[]
+  productVariationOptions      ProductVariationOption[]
+  productVariantOptionValues   ProductVariantOptionValue[]
+  inventoryReceipts            InventoryReceipt[]
+  inventoryReceiptLines        InventoryReceiptLine[]
+  promotions                   Promotion[]
+  kitchenPrinters              KitchenPrinter[]
+  kitchenTickets               KitchenTicket[]
+  kitchenTicketItems           KitchenTicketItem[]
+  kitchenPrintAttempts         KitchenPrintAttempt[]
+  takeawayOrderProfiles        TakeawayOrderProfile[]
+  billSplits                   BillSplit[]
+  deliveryPlatforms            DeliveryPlatform[]
+  externalOrders               ExternalOrder[]
+  externalOrderEvents          ExternalOrderEvent[]
+  webhookDeliveryLogs          WebhookDeliveryLog[]
+}
+
+/**
+ * Explicit platform configuration for one tenant: which kind of business it is,
+ * where inventory lives, and which accounting system (if any) receives its
+ * documents.
+ * A tenant may have NO row. That is a first-class, supported state: it resolves
+ * to the legacy configuration (HARDWARE / QUICKBOOKS / QUICKBOOKS and the full
+ * retail module set — D57 renamed the value from TILE_SHOP), which is exactly
+ * how every tenant behaved before this table existed. The pilot tenant HAS an
+ * explicit row since D57; the no-row path remains supported.
+ * `version` is an optimistic-concurrency counter incremented on every write, so
+ * two administrators editing the profile concurrently cannot silently overwrite
+ * one another once a compare-and-set caller is added.
+ */
+model TenantBusinessProfile {
+  id       String @id @default(cuid())
+  /// One profile per tenant, enforced by the database rather than convention.
+  tenantId String @unique
+
+  businessType       BusinessType
+  inventoryMode      InventoryMode
+  accountingProvider AccountingProviderKind
+
+  /// Incremented on every update. Optimistic-concurrency token.
+  version Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * Per-tenant module enablement. One row per (tenant, module) the tenant has an
+ * explicit opinion about; `isEnabled = false` is a deliberate revocation and is
+ * meaningfully different from "no row".
+ * A tenant with no rows at all falls back to the default module set for its
+ * business type — and a tenant with no business profile falls back to the legacy
+ * retail set. No rows are generated for existing tenants by the migration.
+ */
+model TenantModule {
+  id        String    @id @default(cuid())
+  tenantId  String
+  moduleKey ModuleKey
+  isEnabled Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// A module cannot be configured twice for the same tenant.
+  @@unique([tenantId, moduleKey])
+  @@index([tenantId])
 }
 
 /**
@@ -272,15 +476,54 @@ model Branch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  registers  Register[]
-  users      User[]
-  sales      Sale[]
-  returns    Return[]
-  quotations Quotation[]
+  tenant                Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  registers             Register[]
+  users                 User[]
+  branchAccess          BranchAccess[]
+  sales                 Sale[]
+  returns               Return[]
+  quotations            Quotation[]
+  restaurantConfig      RestaurantBranchConfig?
+  openingHours          BranchOpeningHours[]
+  openingHoursOverrides BranchOpeningHoursOverride[]
+  kitchenStations       KitchenStation[]
+  menus                 Menu[]
+  diningAreas           DiningArea[]
+  restaurantTables      RestaurantTable[]
+  tableSessions         TableSession[]
+  tableReservations     TableReservation[]
+  restaurantOrders      RestaurantOrder[]
+  branchInventory       BranchInventory[]
+  stockMovements        StockMovement[]
+  inventoryReceipts     InventoryReceipt[]
+  kitchenPrinters       KitchenPrinter[]
+  kitchenTickets        KitchenTicket[]
+  deliveryPlatforms     DeliveryPlatform[]
+  externalOrders        ExternalOrder[]
+  webhookDeliveryLogs   WebhookDeliveryLog[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
+}
+
+/// Phase 1.5.6. Multi-branch access without altering `User.branchId` — the
+/// existing column stays as the user's default active branch, matching the
+/// login/register-resolution flow that Slice 7 depends on. Rows are additive:
+/// unassigned users fall back to the tenant's active branches for OWNER/ADMIN
+/// (policy) and to `User.branchId` alone for anyone else.
+model BranchAccess {
+  id              String   @id @default(cuid())
+  userId          String
+  branchId        String
+  grantedAt       DateTime @default(now())
+  grantedByUserId String?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, branchId])
+  @@index([branchId])
+  @@index([userId])
 }
 
 model Register {
@@ -308,47 +551,80 @@ model Register {
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id           String    @id @default(cuid())
-  tenantId     String
-  branchId     String?
-  roleId       String?
-  role         UserRole  @default(CASHIER)
-  name         String
-  email        String?
-  passwordHash String?
-  pinHash      String?
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  tenantId        String
+  branchId        String?
+  roleId          String?
+  role            UserRole  @default(CASHIER)
+  name            String
+  email           String?
+  passwordHash    String?
+  pinHash         String?
+  isActive        Boolean   @default(true)
+  /// D55. A cross-tenant platform operator. Lives in the dedicated `platform`
+  /// tenant so this FK stays satisfied; `PlatformBoundaryGuard` refuses their
+  /// token on every tenant-scoped route and everyone else's on platform routes.
+  isPlatformAdmin Boolean   @default(false)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch             Branch?             @relation(fields: [branchId], references: [id])
-  customRole         Role?               @relation(fields: [roleId], references: [id])
-  sales              Sale[]
-  salesMarkedPaid    Sale[]               @relation("SaleMarkedPaidBy")
-  payments           Payment[]
-  approvedDiscounts  SaleItem[]          @relation("DiscountApprover")
-  auditLogs          AuditLog[]
-  returnsCreated     Return[]            @relation("ReturnCreatedBy")
-  returnsApproved    Return[]            @relation("ReturnApprovedBy")
-  refundPayments     RefundPayment[]
-  quotationsCreated  Quotation[]         @relation("QuotationCreatedBy")
-  quotationRevisions QuotationRevision[] @relation("QuotationRevisionChangedBy")
-  quotationShares    QuotationShareLog[] @relation("QuotationShareSentBy")
-  refreshTokens      RefreshToken[]
+  tenant                   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                   Branch?             @relation(fields: [branchId], references: [id])
+  customRole               Role?               @relation(fields: [roleId], references: [id])
+  branchAccess             BranchAccess[]
+  sales                    Sale[]
+  salesMarkedPaid          Sale[]              @relation("SaleMarkedPaidBy")
+  payments                 Payment[]
+  approvedDiscounts        SaleItem[]          @relation("DiscountApprover")
+  auditLogs                AuditLog[]
+  returnsCreated           Return[]            @relation("ReturnCreatedBy")
+  returnsApproved          Return[]            @relation("ReturnApprovedBy")
+  refundPayments           RefundPayment[]
+  quotationsCreated        Quotation[]         @relation("QuotationCreatedBy")
+  quotationRevisions       QuotationRevision[] @relation("QuotationRevisionChangedBy")
+  quotationShares          QuotationShareLog[] @relation("QuotationShareSentBy")
+  refreshTokens            RefreshToken[]
+  // Restaurant Pilot Change 1 — creator back-references so a user cannot be
+  // hard-deleted while they still hold owned rows (FK is ON DELETE SET NULL,
+  // which drops the ownership rather than the row, matching the fail-closed
+  // posture: an ownerless row stays unmanageable).
+  createdDiningAreas       DiningArea[]        @relation("DiningAreaCreator")
+  createdRestaurantTables  RestaurantTable[]   @relation("RestaurantTableCreator")
+  createdTableReservations TableReservation[]  @relation("TableReservationCreator")
+  createdInventoryReceipts InventoryReceipt[]  @relation("InventoryReceiptCreator")
+
+  /// D68 — kitchen tickets this user marked done on the board.
+  completedKitchenTickets KitchenTicket[] @relation("KitchenTicketCompletedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([branchId])
 }
 
+/// A role owned by one tenant (decision D36). `tenantId` is required and no row is
+/// ever shared, so a role belonging to one tenant can never be assigned within
+/// another.
 model Role {
   id          String   @id @default(cuid())
   tenantId    String
+  /// Stable internal identifier: OWNER, MANAGER, WAITER, … Never shown to a user
+  /// and never edited. `name` is the display label and may be customised, which is
+  /// exactly why lookups must not use it — renaming "Manager" must not orphan the
+  /// role the code resolves. Nullable only so the column could be added without a
+  /// backfill; every seeded row sets it (decision D40).
+  key         String?
   name        String
   description String?
+  /// Built-in roles cannot be deleted or archived by a tenant.
   isSystem    Boolean  @default(false)
+  /// Archived roles keep every historical assignment and audit reference — roles
+  /// are never physically deleted (Phase 1.5.5). An archived role cannot be
+  /// assigned to anyone new, and any user still holding one fails closed.
+  isActive    Boolean  @default(true)
+  /// Optimistic-concurrency token. Incremented on every mutation so two
+  /// administrators editing one role cannot silently overwrite each other.
+  version     Int      @default(1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -357,6 +633,7 @@ model Role {
   permissions Permission[] @relation("RolePermissions")
 
   @@unique([tenantId, name])
+  @@unique([tenantId, key])
   @@index([tenantId])
 }
 
@@ -447,45 +724,88 @@ model ProductSubcategory {
 /// and reorder point. `isActive` and the sync columns are system fields
 /// (QBO items have active status too; soft-delete keeps sale history intact).
 model Product {
-  id                    String     @id @default(cuid())
+  id                    String        @id @default(cuid())
   tenantId              String
   quickbooksItemId      String?
   name                  String
   /// QuickBooks item type: Inventory | NonInventory | Service.
-  type                  String     @default("Inventory")
+  type                  String        @default("Inventory")
   sku                   String?
   /// Sales description — appears on sales forms and receipts.
   description           String?
   categoryId            String?
   subcategoryId         String?
-  unitPrice             Decimal    @default(0) @db.Decimal(12, 2)
+  unitPrice             Decimal       @default(0) @db.Decimal(12, 2)
   /// QBO income account name (auto-resolved on sync; read-only in the UI).
   incomeAccount         String?
   /// Purchase description — what vendors see on purchase forms.
   purchaseDescription   String?
-  costPrice             Decimal?   @db.Decimal(12, 2)
+  costPrice             Decimal?      @db.Decimal(12, 2)
   /// QBO expense account name (auto-resolved on sync; read-only in the UI).
   expenseAccount        String?
-  quantityOnHand        Decimal    @default(0) @db.Decimal(12, 3)
+  quantityOnHand        Decimal       @default(0) @db.Decimal(12, 3)
   /// The date the quantity on hand was counted (QBO InvStartDate).
   quantityAsOfDate      DateTime?
-  reorderLevel          Decimal?   @db.Decimal(12, 3)
+  reorderLevel          Decimal?      @db.Decimal(12, 3)
   /// QBO inventory asset account name (auto-resolved; read-only in the UI).
   inventoryAssetAccount String?
   /// POS-side product photo (S3/LocalStack) — never pushed to QuickBooks.
   imageUrl              String?
-  isActive              Boolean    @default(true)
+  isActive              Boolean       @default(true)
+  /// D44 — set once the product has one or more `ProductVariant` rows. Legacy
+  /// (false) rows keep the pre-D44 single-SKU semantics: `unitPrice`,
+  /// `costPrice`, `quantityOnHand` and the product-level SKU stay
+  /// authoritative. When true the variant rows own price, cost, SKU, barcode,
+  /// and per-branch stock; the parent-level `unitPrice` / `sku` /
+  /// `quantityOnHand` remain as legacy fallbacks and are not read.
+  hasVariants           Boolean       @default(false)
+  /// D44 — weighted-average cost for legacy variant-less products.
+  /// Recomputed on every InventoryReceipt. NULL until the first receipt.
+  /// Variant products carry their `averageCost` on `ProductVariant` instead.
+  averageCost           Decimal?      @db.Decimal(12, 4)
+  /// D60 — see the SellableKind enum. Defaulted so every existing row is
+  /// valid unchanged; the convergence backfill reclassifies Service rows and
+  /// D45 restaurant products.
+  sellableKind          SellableKind  @default(STOCK_ITEM)
+  /// D45 — Restaurant Product wizard fields. All nullable / defaulted so
+  /// Retail (Tile Shop, Hardware) rows stay valid without a backfill.
+  /// `foodType` reuses the D41 `MenuItemType` enum to avoid a second
+  /// authority for FOOD / BEVERAGE / DESSERT.
+  prepMinutes           Int?
+  dietaryTags           String[]      @default([])
+  foodType              MenuItemType?
+  /// D64 — domain-specific attributes, validated against the tenant
+  /// descriptor's `catalogue.attributeSchema` (plan §4.6). Behaviour goes in
+  /// columns; description goes here. Never read by pricing, tax, inventory
+  /// or settlement — those read typed columns only. GIN-indexed so domain
+  /// screens can filter on it.
+  attributes            Json          @default("{}")
   lastSyncedAt          DateTime?
-  syncStatus            SyncStatus @default(NOT_SYNCED)
-  createdAt             DateTime   @default(now())
-  updatedAt             DateTime   @updatedAt
+  syncStatus            SyncStatus    @default(NOT_SYNCED)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category       ProductCategory?    @relation(fields: [categoryId], references: [id])
-  subcategory    ProductSubcategory? @relation(fields: [subcategoryId], references: [id])
-  saleItems      SaleItem[]
-  returnItems    ReturnItem[]
-  quotationItems QuotationItem[]
+  tenant               Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category             ProductCategory?            @relation(fields: [categoryId], references: [id])
+  subcategory          ProductSubcategory?         @relation(fields: [subcategoryId], references: [id])
+  saleItems            SaleItem[]
+  returnItems          ReturnItem[]
+  quotationItems       QuotationItem[]
+  menuItems            MenuItem[]
+  branchInventory      BranchInventory[]
+  stockMovements       StockMovement[]
+  variants             ProductVariant[]
+  variationDimensions  ProductVariationDimension[]
+  receiptLines         InventoryReceiptLine[]
+  modifierGroups       ProductModifierGroup[]
+  stationLinks         ProductStationLink[]
+  promotionItems       PromotionItem[]
+  restaurantOrderItems RestaurantOrderItem[]
+  catalogueEntries     CatalogueEntry[]
+  /// D65 — this product's recipe (when COMPOSED_ITEM / BUNDLE).
+  components           ProductComponent[]          @relation("AssembledProduct")
+  /// D65 — recipes this product appears in as an ingredient.
+  usedInComponents     ProductComponent[]          @relation("ComponentProduct")
 
   @@unique([tenantId, quickbooksItemId])
   @@unique([tenantId, sku])
@@ -493,6 +813,50 @@ model Product {
   @@index([tenantId, name])
   @@index([categoryId])
   @@index([subcategoryId])
+  @@index([attributes], type: Gin)
+}
+
+/// D65 — what a COMPOSED_ITEM (or BUNDLE) consumes per unit sold (convergence
+/// plan §8.8, Phase 8). ONE level, no recursion: depletion expands a sold
+/// line through these rows exactly once — a component that is itself
+/// composed is depleted as a product, its own components untouched.
+///
+/// A COMPOSED_ITEM with NO rows here depletes NOTHING (deliberate deviation
+/// from the plan's "absent = 1:1" note, recorded in D65): its stock number is
+/// a number nothing maintains, and the sellable listing already reports it
+/// UNTRACKED (D62). 1:1 depletion belongs to STOCK_ITEM — a packaged drink
+/// misclassified COMPOSED is fixed by reclassifying it, with a stock-take.
+///
+/// Deliberately out of scope (plan §8.8): recursive nesting, yield
+/// management, par levels, theoretical-vs-actual variance.
+model ProductComponent {
+  id       String @id @default(cuid())
+  tenantId String
+
+  productId        String
+  /// Loose reference (no FK), per plan: recipes-per-variant arrive with a
+  /// wizard surface for them; the column exists so data written then needs
+  /// no migration.
+  productVariantId String?
+
+  componentProductId String
+  componentVariantId String?
+
+  quantity    Decimal @db.Decimal(12, 4)
+  unit        String?
+  /// Proportional loss (trim, evaporation). 0.05 = 5%.
+  wastageRate Decimal @default(0) @db.Decimal(5, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant           Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product          Product @relation("AssembledProduct", fields: [productId], references: [id], onDelete: Cascade)
+  componentProduct Product @relation("ComponentProduct", fields: [componentProductId], references: [id])
+
+  @@unique([productId, productVariantId, componentProductId, componentVariantId])
+  @@index([tenantId])
+  @@index([componentProductId])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -540,11 +904,12 @@ model Customer {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  sales      Sale[]
-  returns    Return[]
-  quotations Quotation[]
-  payments   Payment[]
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sales             Sale[]
+  returns           Return[]
+  quotations        Quotation[]
+  payments          Payment[]
+  tableReservations TableReservation[]
 
   @@unique([tenantId, quickbooksCustomerId])
   @@index([tenantId])
@@ -572,6 +937,11 @@ model Sale {
   orderDiscountReason       String?
   orderDiscountApprovedById String?
   taxAmount                 Decimal                 @default(0) @db.Decimal(12, 2)
+  /// Phase 8: restaurant service charge, computed at close from
+  /// RestaurantBranchConfig.serviceChargePercent (D8). 0 for retail sales.
+  serviceChargeAmount       Decimal                 @default(0) @db.Decimal(12, 2)
+  /// Phase 8: packaging surcharge for takeaway (per branch config, future).
+  packagingCharge           Decimal                 @default(0) @db.Decimal(12, 2)
   total                     Decimal                 @default(0) @db.Decimal(12, 2)
   paidAmount                Decimal                 @default(0) @db.Decimal(12, 2)
   balanceAmount             Decimal                 @default(0) @db.Decimal(12, 2)
@@ -603,21 +973,39 @@ model Sale {
   syncStatus                SyncStatus              @default(NOT_SYNCED)
   syncError                 String?
   completedAt               DateTime?
+  /// D58 — which lifecycle settled this sale. Domain-neutral.
+  fulfilmentKind            FulfilmentKind          @default(IMMEDIATE)
+  /// D58 — sales channel. COUNTER for retail; DINE_IN/TAKEAWAY/ONLINE for
+  /// food service. Supersedes joining through TableSession → RestaurantOrder.
+  channel                   OrderChannel            @default(COUNTER)
+  /// D58 — typed reference to the operational work unit this sale settled
+  /// ('TABLE_SESSION' today). Null for a counter sale. Loose by design: the
+  /// operational row may be archived independently of the financial document.
+  sourceRefKind             String?
+  sourceRefId               String?
+  /// D58 (plan Q6) — who served, as distinct from cashierId ("who took the
+  /// money"). session.waiterUserId at close. Loose reference, no FK.
+  servedByUserId            String?
+  /// Phase 8: optimistic-concurrency token for cross-cashier billing.
+  billingVersion            Int                     @default(1)
+  /// Phase 8: idempotency key for the closing operation.
+  closeIdempotencyKey       String?
   createdAt                 DateTime                @default(now())
   updatedAt                 DateTime                @updatedAt
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch    Branch     @relation(fields: [branchId], references: [id])
-  register  Register?  @relation(fields: [registerId], references: [id])
-  cashier   User       @relation(fields: [cashierId], references: [id])
-  markedPaidBy User?   @relation("SaleMarkedPaidBy", fields: [markedPaidByUserId], references: [id])
-  customer  Customer?  @relation(fields: [customerId], references: [id])
-  items     SaleItem[]
-  payments  Payment[]
-  receipt   Receipt?
-  printJobs PrintJob[]
-  returns   Return[]
-  quotation Quotation? @relation("QuotationConvertedSale")
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch      @relation(fields: [branchId], references: [id])
+  register     Register?   @relation(fields: [registerId], references: [id])
+  cashier      User        @relation(fields: [cashierId], references: [id])
+  markedPaidBy User?       @relation("SaleMarkedPaidBy", fields: [markedPaidByUserId], references: [id])
+  customer     Customer?   @relation(fields: [customerId], references: [id])
+  items        SaleItem[]
+  payments     Payment[]
+  receipt      Receipt?
+  printJobs    PrintJob[]
+  returns      Return[]
+  quotation    Quotation?  @relation("QuotationConvertedSale")
+  billSplits   BillSplit[]
 
   @@unique([tenantId, saleNumber])
   @@index([tenantId])
@@ -626,9 +1014,13 @@ model Sale {
   @@index([customerId])
   @@index([syncStatus])
   @@index([createdAt])
+  @@index([channel])
   // Sales history, the PDF report and every dashboard window filter and order on
   // the business date, which backdating decouples from createdAt. Composite
-  // because every one of those queries is already tenant-scoped.
+  // because every one of those queries is already tenant-scoped. (Declared once
+  // here for both branches; the feature's settlement migration created it and
+  // main's index migration is the duplicate — see the merge note in
+  // 00-decisions.md and 20260822000000_add_universal_settlement_document.)
   @@index([tenantId, completedAt])
   // The overdue filter asks for "due before today and still owing", so the due
   // date is a tenant-scoped range scan.
@@ -640,39 +1032,92 @@ model Sale {
 }
 
 model SaleItem {
-  id               String           @id @default(cuid())
-  saleId           String
-  productId        String
-  productName      String
-  sku              String?
-  unitPrice        Decimal          @db.Decimal(12, 2)
-  quantity         Decimal          @db.Decimal(12, 3)
-  discountId       String?
-  discountType     DiscountType?
-  discountValue    Decimal?         @db.Decimal(12, 2)
+  id                  String             @id @default(cuid())
+  saleId              String
+  /// D58 — nullable: a line projected from a legacy MenuItem has no Product;
+  /// `productName` and the snapshots below carry the document's meaning.
+  productId           String?
+  /// D44 — optional link to the exact sellable variant this line represents.
+  /// NULL for legacy (variant-less) product sales. When set, the sale reduces
+  /// the *variant's* branch inventory rather than the product's rollup.
+  productVariantId    String?
+  productName         String
+  sku                 String?
+  /// D44 — snapshot of the variant's SKU / display name at sale time so a
+  /// later variant rename cannot rewrite historical receipts. Mirror of the
+  /// snapshot pattern already used on ReturnItem for products.
+  variantSkuSnapshot  String?
+  variantNameSnapshot String?
+  unitPrice           Decimal            @db.Decimal(12, 2)
+  quantity            Decimal            @db.Decimal(12, 3)
+  /// D58 — which fulfilment lifecycle produced this line.
+  sourceKind          SaleItemSourceKind @default(RETAIL_CART)
+  /// D58 — the operational row projected from (RestaurantOrderItem.id when
+  /// sourceKind = RESTAURANT_ORDER_ITEM). Typed by sourceKind, never reused
+  /// for a different entity — the lesson of the polymorphic `menuItemId`.
+  sourceItemId        String?
+  /// D58 — modifier price-deltas frozen onto the line, so bill maths never
+  /// needs the child rows.
+  modifierTotal       Decimal            @default(0) @db.Decimal(12, 2)
+  /// D58 — the note that reached the preparer ("no nuts"): it can change
+  /// what was actually delivered, so it belongs on the settled document.
+  notes               String?
+  /// D58/Q1 — set only by the historical backfill, never by a live close, so
+  /// reconstructed financial detail stays distinguishable forever.
+  backfilledAt        DateTime?
+  discountId          String?
+  discountType        DiscountType?
+  discountValue       Decimal?           @db.Decimal(12, 2)
   /// Whether `discountValue` was per unit or for the line. Only meaningful with
   /// a FIXED discount. `discountAmount` remains the money actually taken off —
   /// this records how it was arrived at, so a bill can justify it.
-  discountBasis    DiscountBasis    @default(LINE)
-  discountAmount   Decimal          @default(0) @db.Decimal(12, 2)
-  discountReason   String?
-  approvedByUserId String?
-  taxAmount        Decimal          @default(0) @db.Decimal(12, 2)
-  lineSubtotal     Decimal          @db.Decimal(12, 2)
-  lineTotal        Decimal          @db.Decimal(12, 2)
-  returnedQuantity Decimal          @default(0) @db.Decimal(12, 3)
-  returnStatus     SaleReturnStatus @default(NOT_RETURNED)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  discountBasis       DiscountBasis      @default(LINE)
+  discountAmount      Decimal            @default(0) @db.Decimal(12, 2)
+  discountReason      String?
+  approvedByUserId    String?
+  taxAmount           Decimal            @default(0) @db.Decimal(12, 2)
+  lineSubtotal        Decimal            @db.Decimal(12, 2)
+  lineTotal           Decimal            @db.Decimal(12, 2)
+  returnedQuantity    Decimal            @default(0) @db.Decimal(12, 3)
+  returnStatus        SaleReturnStatus   @default(NOT_RETURNED)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
-  sale        Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  product     Product      @relation(fields: [productId], references: [id])
-  discount    Discount?    @relation(fields: [discountId], references: [id])
-  approvedBy  User?        @relation("DiscountApprover", fields: [approvedByUserId], references: [id])
-  returnItems ReturnItem[]
+  sale           Sale               @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product        Product?           @relation(fields: [productId], references: [id])
+  productVariant ProductVariant?    @relation(fields: [productVariantId], references: [id])
+  discount       Discount?          @relation(fields: [discountId], references: [id])
+  approvedBy     User?              @relation("DiscountApprover", fields: [approvedByUserId], references: [id])
+  returnItems    ReturnItem[]
+  modifiers      SaleItemModifier[]
 
   @@index([saleId])
   @@index([productId])
+  @@index([productVariantId])
+  @@index([sourceKind, sourceItemId])
+}
+
+/// D58 — frozen modifier selections on a settled line. Mirrors
+/// RestaurantOrderItemModifier field-for-field so the projection at close is
+/// a copy with no interpretation.
+model SaleItemModifier {
+  id         String @id @default(cuid())
+  tenantId   String
+  saleItemId String
+
+  /// Loose: the option may be deleted later; the snapshots below survive.
+  modifierOptionId String?
+  optionName       String
+  groupName        String
+  priceDelta       Decimal @default(0) @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  saleItem SaleItem @relation(fields: [saleItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([saleItemId])
 }
 
 /// Money received. Exactly one of `saleId` or `customerId` is set — a database
@@ -845,6 +1290,45 @@ model QuickBooksConnection {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
+/// D63 — the ONE home for a local entity's identity in an EXTERNAL system
+/// (convergence plan §4.9.4). Generalises QuickBooksMapping by `provider`, so
+/// a second integration needs rows, not columns on Layer-1 models.
+///
+/// Phase 6 status: dual-written alongside the legacy vendor columns; the
+/// read switch (plan §8.10 step 5) lands only after a production
+/// reconciliation cycle proves the satellite complete. Rule from then on:
+/// no model outside a provider implementation may reference this table, and
+/// no Layer-1 model gains a vendor-named column again.
+model ExternalEntityRef {
+  id       String @id @default(cuid())
+  tenantId String
+
+  /// 'QUICKBOOKS' today. Comes from the provider, never a caller.
+  provider   String
+  /// 'PRODUCT' | 'PRODUCT_CATEGORY' | 'CUSTOMER' | 'SUPPLIER' | 'SALE' |
+  /// 'PAYMENT' | 'RETURN' | 'REFUND_PAYMENT'
+  entityType String
+  /// The AxloPOS id. Loose by design: this table must never cascade-delete a
+  /// core row, and a ref outliving its entity is a reconciliation signal.
+  localId    String
+
+  externalId   String?
+  externalType String?
+
+  syncStatus   SyncStatus @default(NOT_SYNCED)
+  syncError    String?
+  lastSyncedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, entityType, localId])
+  @@index([tenantId, provider, syncStatus])
+  @@index([tenantId, provider, entityType, externalId])
+}
+
 model QuickBooksMapping {
   id             String    @id @default(cuid())
   tenantId       String
@@ -957,10 +1441,18 @@ model ReturnItem {
   returnId                   String
   originalSaleItemId         String
   productId                  String
+  /// D44 — carries the variant reference forward from the original SaleItem
+  /// when present, so the correct variant's branch inventory is restored on
+  /// completion. NULL for legacy variant-less product returns.
+  productVariantId           String?
   // Snapshots so the return survives product edits / deletes.
   productNameSnapshot        String
   skuSnapshot                String?
   imageUrlSnapshot           String?
+  /// D44 — mirrors of the SaleItem variant snapshots so the return document
+  /// keeps the exact variant identity even after a rename.
+  variantSkuSnapshot         String?
+  variantNameSnapshot        String?
   originalUnitPrice          Decimal          @db.Decimal(12, 2)
   purchasedQuantity          Decimal          @db.Decimal(12, 3)
   previouslyReturnedQuantity Decimal          @db.Decimal(12, 3)
@@ -977,13 +1469,15 @@ model ReturnItem {
   refundableAmount           Decimal          @db.Decimal(12, 2)
   createdAt                  DateTime         @default(now())
 
-  return           Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  originalSaleItem SaleItem @relation(fields: [originalSaleItemId], references: [id])
-  product          Product  @relation(fields: [productId], references: [id])
+  return           Return          @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  originalSaleItem SaleItem        @relation(fields: [originalSaleItemId], references: [id])
+  product          Product         @relation(fields: [productId], references: [id])
+  productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id])
 
   @@index([returnId])
   @@index([originalSaleItemId])
   @@index([productId])
+  @@index([productVariantId])
 }
 
 model RefundPayment {
@@ -1227,10 +1721,1932 @@ model Supplier {
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receipts InventoryReceipt[]
 
   @@unique([tenantId, name])
   @@unique([tenantId, quickbooksVendorId])
   @@index([tenantId])
   @@index([tenantId, isActive])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restaurant Phase 2A — restaurant configuration + kitchen stations
+// ─────────────────────────────────────────────────────────────
+//
+// Configuration first, workflow later (Phase 2D and beyond). Tables here are
+// dormant until the operational surface lands, but the shapes are set now so
+// that later migrations are additive. Menu, dining areas and table sessions
+// are separate sub-slices with their own migrations (decision AD-12).
+//
+// The RestaurantOrderChannel enum is deliberately NOT here — it lands with
+// the operational order model in Phase 2D, so this sub-slice contains no
+// substring the migration tripwire forbids.
+
+/// Per-branch restaurant configuration.
+///
+/// Optional — a branch with no row falls back to code defaults. Tenant-level
+/// restaurant defaults live in `TenantSettings.data.restaurant` (Phase 8+);
+/// this row is the branch-level override, primarily service-charge and open
+/// hours. Zero rows for a hardware tenant is the expected state.
+/// D90 — the branch's ordinary week. One row per configured weekday; a weekday
+/// with no row falls back to the documented default (08:00–23:00), which is
+/// what the calendar has always drawn for an unconfigured branch.
+model BranchOpeningHours {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  /// 0 = Sunday … 6 = Saturday, matching `Date.getDay()` so the client never
+  /// has to re-map. An enum would read better and convert worse.
+  dayOfWeek Int
+  /// Shut all day. Kept separate from the times so a branch can keep its
+  /// usual hours recorded while closing on Mondays.
+  isClosed  Boolean @default(false)
+  /// Minutes since LOCAL midnight. 07:00 = 420.
+  opensAt   Int     @default(480)
+  /// Minutes since the SAME local midnight, so the small hours of the next
+  /// day are expressible: a kitchen closing at 01:00 is 1500, not 60.
+  closesAt  Int     @default(1380)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, dayOfWeek])
+  @@index([tenantId])
+}
+
+/// D90 — one named date that does not follow the weekly rule: a poya day, a
+/// private function, a public holiday. Beats the weekday rule for that date.
+model BranchOpeningHoursOverride {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  /// The local calendar date this applies to. `@db.Date` because a time here
+  /// would be a second timezone to reason about for no gain.
+  date     DateTime @db.Date
+  isClosed Boolean  @default(false)
+  opensAt  Int      @default(480)
+  closesAt Int      @default(1380)
+  /// Why, in the owner's words — "Poya day", "Private function". Printed
+  /// nowhere; it exists so the list is readable a month later.
+  note     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, date])
+  @@index([tenantId])
+}
+
+model RestaurantBranchConfig {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String @unique
+
+  /// Service charge percent — 0 disables. Default disabled per D8.
+  serviceChargePercent       Decimal @default(0) @db.Decimal(5, 2)
+  /// Enable takeaway operations on this branch. Independent of service charge.
+  ///
+  /// D97 — defaults TRUE. It was false, and since the enforcement in
+  /// `TakeawayService.create` only refuses when a row EXISTS and says false,
+  /// the mere act of creating this row (saving a service charge) turned
+  /// takeaway off for a branch that had been taking orders. A column whose
+  /// default contradicts the behaviour of a branch without the column is a
+  /// trap for every future writer, not just the one that sprang it.
+  takeawayEnabled            Boolean @default(true)
+  /// Enable dine-in operations on this branch.
+  dineInEnabled              Boolean @default(true)
+  /// Default target time for a KOT ticket, in minutes. Informational only in
+  /// Phase 2A — Phase 6 will surface this on the kitchen display.
+  defaultTicketTargetMinutes Int?
+
+  /// D52. Which channels levy the service charge. Defaults to dine-in only,
+  /// which is what the code did implicitly before this was configurable.
+  serviceChargeChannels RestaurantOrderChannel[] @default([DINE_IN])
+  /// D52. Whether the service charge sits inside the taxable base. Varies by
+  /// jurisdiction and cannot be guessed; true matches the pilot market.
+  serviceChargeTaxable  Boolean                  @default(true)
+  /// D52. Flat per-order packaging charge for TAKEAWAY / ONLINE. The
+  /// Sale.packagingCharge column and the bill row already existed with
+  /// nothing to fill them.
+  packagingChargeAmount Decimal                  @default(0) @db.Decimal(12, 2)
+
+  /// D59 (plan Q5). Per-branch tax rate. NULL = inherit the tenant-wide
+  /// `TenantSettings.taxRatePercent` — nullable rather than defaulted to 0
+  /// because 0 is a meaningful rate and must be distinguishable from "unset".
+  /// No UI yet, deliberately; the column and fallback ship first.
+  taxRatePercent Decimal? @db.Decimal(5, 2)
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+/// Kitchen station — the physical or logical destination that receives a
+/// portion of a restaurant order.
+///
+/// Belongs to a branch (kitchens don't cross locations). The join to menu
+/// items lands in Phase 2B; the join to printers is a separate model that
+/// stays empty until Phase 6 (decision AD-14).
+model KitchenStation {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  /// Stable identifier used in KOT routing — upper-snake-case, immutable,
+  /// unique per branch. Distinct from `name`, which is the display label.
+  code String
+  name String
+
+  /// Distinguish a bar from a hot line so Phase 6 can route drinks vs. dishes.
+  /// String rather than enum because tenants add their own (e.g. DESSERT, COLD).
+  category String @default("KITCHEN")
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  printers     KitchenStationPrinter[]
+  menuItems    MenuItemStationLink[]
+  productLinks ProductStationLink[]
+  tickets      KitchenTicket[]
+
+  @@unique([branchId, code])
+  @@index([tenantId])
+  @@index([branchId])
+}
+
+/// Zero-or-many printers per station (D6). Empty until Phase 6 ships the
+/// `KitchenPrinter` model — the join sits here so a future printer migration
+/// is additive on this side. `isPrimary` chooses which printer receives the
+/// KOT first; the redundancy pair per D6 is the secondary.
+model KitchenStationPrinter {
+  id        String  @id @default(cuid())
+  stationId String
+  printerId String
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  station KitchenStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([stationId, printerId])
+  @@index([printerId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restaurant Phase 2B — menu, sections, items, modifiers
+// ─────────────────────────────────────────────────────────────
+//
+// Retained principle from the superseded plan (D1): **menu ≠ catalog**.
+// Menu prices are what the customer pays; product prices are what a retail
+// checkout charges. A `MenuItem.productId` is optional (AD-13); items that
+// map to a `Product` decrement stock through the existing local inventory
+// path when Phase 5 sends them, items without a product map to composed
+// dishes tracked elsewhere.
+//
+// Menu is per-branch (one branch can offer a different menu from another).
+// A future multi-branch menu-share mechanism is deliberately deferred —
+// solving that before there is any real menu data would over-engineer.
+
+enum MenuAvailabilityDayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum ModifierSelection {
+  SINGLE
+  MULTIPLE
+}
+
+/// Restaurant Menu wizard segmentation. Optional so pre-existing rows stay
+/// valid (legacy items were created before the wizard existed). String enum
+/// rather than a free-form field so the /menu filters and future POS
+/// styling (bar layout, dessert grid) can key off a stable value.
+/// D60 — what kind of sellable thing a Product IS, in AxloPOS's own
+/// vocabulary. Drives inventory behaviour; `foodType` stays presentation and
+/// the QuickBooks `type` string stays provider data.
+///
+///  STOCK_ITEM    — depletes 1:1 when sold. A bolt, a bottled beer.
+///  COMPOSED_ITEM — assembled from components (Phase 8 recipes); with no
+///                  component list it depletes 1:1 like a stock item.
+///  SERVICE       — no stock. Key cutting, corkage, a delivery fee.
+///  BUNDLE        — sold as one line, composed of other products.
+///  TIME_SLOT / STAY_UNIT — named now, unused: the two shapes we know are
+///                  coming (salon, hotel rooms), so nobody invents
+///                  `Product.type = 'Room'` in the meantime.
+enum SellableKind {
+  STOCK_ITEM
+  COMPOSED_ITEM
+  SERVICE
+  BUNDLE
+  TIME_SLOT
+  STAY_UNIT
+}
+
+enum MenuItemType {
+  FOOD
+  BEVERAGE
+  DESSERT
+}
+
+/// One menu belongs to one branch. A branch may run several menus but only one
+/// is `isActive` per channel at a time (a lunch menu and a dinner menu can
+/// coexist if their availability windows are disjoint; Phase 3 enforces the
+/// windowing).
+model Menu {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  name        String
+  description String?
+  /// D66 — which sales channels this collection applies to (Phase 9,
+  /// "channel-scoped assortments"). Empty = all channels, which is what
+  /// every pre-existing row means unchanged.
+  channels    OrderChannel[] @default([])
+  isActive    Boolean        @default(true)
+  version     Int            @default(1)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  sections MenuSection[]
+
+  @@unique([branchId, name])
+  @@index([tenantId])
+  @@index([branchId])
+}
+
+/// Ordered heading within a menu — Starters, Mains, Desserts, Drinks.
+model MenuSection {
+  id       String @id @default(cuid())
+  tenantId String
+  menuId   String
+
+  name        String
+  description String?
+  /// Display order within the menu, 0-based. Ties are broken by name to keep
+  /// the render deterministic when two sections share a position.
+  position    Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  menu    Menu             @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  items   MenuItem[]
+  entries CatalogueEntry[]
+
+  @@unique([menuId, name])
+  @@index([tenantId])
+  @@index([menuId])
+}
+
+/// One line item on a menu, with its own price. Optionally maps to a `Product`
+/// so that dispatch through the local inventory provider stays uniform between
+/// retail sales and restaurant orders (AD-13).
+model MenuItem {
+  id        String @id @default(cuid())
+  tenantId  String
+  sectionId String
+
+  name             String
+  description      String?
+  /// Base price per item, before modifiers. Menu prices are the source of truth
+  /// for what the customer pays; `productId` (if set) is used for stock only.
+  basePrice        Decimal @db.Decimal(12, 2)
+  /// Optional link to the retail catalogue. When set, sending an order round
+  /// decrements `Product.quantityOnHand` (LocalInventoryProvider) exactly as a
+  /// retail sale would. When null, this item is a composed dish tracked
+  /// elsewhere (Phase 3 or later may introduce ingredient recipes).
+  productId        String?
+  /// D44 — optional link to a specific sellable variant of the linked Product.
+  /// Set only when `productId` is also set. When set, this Menu Item routes to
+  /// that variant's branch inventory rather than to the product rollup; POS
+  /// sales of the Menu Item decrement the exact variant. NULL means "any
+  /// variant" (Menu Item picks up the parent-product stock — legacy behaviour).
+  productVariantId String?
+
+  isActive Boolean @default(true)
+  /// Optional display order within the section. Ties broken by name.
+  position Int     @default(0)
+
+  /// Menu-level preparation estimate in minutes. Distinct from
+  /// KitchenTicket.prepMinutes, which is the ticket-level actual. Optional so
+  /// legacy rows and Prepared Dishes without an estimate stay valid.
+  prepMinutes Int?
+
+  /// Segmented control on the wizard — Food / Beverage / Dessert. Optional so
+  /// legacy items remain valid; the wizard requires it on new items.
+  itemType MenuItemType?
+
+  /// Presentation tags — Veg, Non-Veg, Egg, Spicy, Gluten-free, etc. String
+  /// array rather than enum so tenants can add "Halal", "Kosher" without
+  /// another migration. The wizard limits to a short curated set.
+  dietaryTags String[] @default([])
+
+  /// URL to the item image. Uses whatever media backend Product already uses
+  /// (see Product.imageUrl at schema:600) — no new media pipeline.
+  imageUrl String?
+
+  /// D60 — the Product this menu item was migrated into (set for UNLINKED
+  /// items, where the backfill created one; linked items keep `productId`).
+  /// Audit trail plus the source for the order-item productId backfill.
+  /// MenuItem is FROZEN from D60: writes 410, reads stay for reprints.
+  migratedProductId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  section        MenuSection             @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  product        Product?                @relation(fields: [productId], references: [id])
+  productVariant ProductVariant?         @relation(fields: [productVariantId], references: [id])
+  modifierGroups MenuItemModifierGroup[]
+  channelPrices  MenuItemChannelPrice[]
+  availability   MenuAvailability[]
+  stationLinks   MenuItemStationLink[]
+
+  @@index([tenantId])
+  @@index([sectionId])
+  @@index([productId])
+  @@index([productVariantId])
+}
+
+/// A group of related choices (e.g. "Choose bread type") with min/max
+/// selection rules. `min` = 0 makes the group optional; `min` = 1 forces the
+/// customer to choose; `max` > 1 with `selection = MULTIPLE` gives a checklist.
+model ModifierGroup {
+  id       String @id @default(cuid())
+  tenantId String
+
+  name          String
+  selection     ModifierSelection @default(SINGLE)
+  minSelections Int               @default(0)
+  maxSelections Int               @default(1)
+  isActive      Boolean           @default(true)
+
+  /// Optional presentation marker used by the Menu wizard to distinguish a
+  /// "size" group from an ordinary "extras" group. NULL for legacy groups;
+  /// 'SIZE' for wizard-created variation groups. Other roles (PROTEIN,
+  /// REMOVAL, …) reserved for future use. Server enforces nothing on this —
+  /// it is a frontend semantics marker only, kept next to the group so an
+  /// edit round-trip does not lose the wizard's intent.
+  role String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  options  ModifierOption[]
+  items    MenuItemModifierGroup[]
+  products ProductModifierGroup[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+/// One option within a modifier group. Price delta is added to the parent
+/// item's price when selected. Negative deltas allowed (a discount for
+/// substituting a cheaper side).
+model ModifierOption {
+  id       String @id @default(cuid())
+  tenantId String
+  groupId  String
+
+  name       String
+  priceDelta Decimal @default(0) @db.Decimal(12, 2)
+  position   Int     @default(0)
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  group  ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, name])
+  @@index([groupId])
+}
+
+/// Junction linking a menu item to a modifier group. A group can be reused
+/// across items (all pasta dishes might share "Choose pasta type"), and an
+/// item can have several groups.
+model MenuItemModifierGroup {
+  id              String @id @default(cuid())
+  menuItemId      String
+  modifierGroupId String
+  position        Int    @default(0)
+
+  menuItem      MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  modifierGroup ModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, modifierGroupId])
+  @@index([modifierGroupId])
+}
+
+/// Channel-specific price override. When absent, the menu item's `basePrice`
+/// applies. Enables e.g. an online-delivery markup without changing the
+/// dine-in price.
+model MenuItemChannelPrice {
+  id         String  @id @default(cuid())
+  menuItemId String
+  /// String rather than enum so tenants can add channels beyond the built-in
+  /// DINE_IN / TAKEAWAY / ONLINE without a migration. Validation is at the
+  /// service layer.
+  channel    String
+  price      Decimal @db.Decimal(12, 2)
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, channel])
+  @@index([menuItemId])
+}
+
+/// Time-based availability. When any row exists for an item, the item is
+/// available ONLY during matching windows. When no rows exist, the item is
+/// always available. Overlapping rows widen availability rather than restrict.
+model MenuAvailability {
+  id         String @id @default(cuid())
+  menuItemId String
+
+  dayOfWeek MenuAvailabilityDayOfWeek
+  /// HH:MM in the tenant's local time, inclusive.
+  startTime String
+  /// HH:MM inclusive.
+  endTime   String
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@index([menuItemId])
+}
+
+/// Menu item ↔ kitchen station routing. A single item may fan out to several
+/// stations (a burger with a milkshake side splits between grill and bar); a
+/// single station receives many items.
+///
+/// Landed in Phase 2B rather than 2A because the FK on this side needs
+/// `MenuItem` to exist. `KitchenStation` came in 2A.
+model MenuItemStationLink {
+  id         String @id @default(cuid())
+  menuItemId String
+  stationId  String
+
+  createdAt DateTime @default(now())
+
+  menuItem MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  station  KitchenStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, stationId])
+  @@index([stationId])
+}
+
+/// D60 — REPLACES the fat MenuItem: a thin placement of a Product in a menu
+/// section. `priceOverride` is the ONLY price a placement may own — an
+/// override of the product's price, never a second authority (plan P1).
+model CatalogueEntry {
+  id        String @id @default(cuid())
+  tenantId  String
+  sectionId String
+
+  productId        String
+  /// Pin the placement to one variant; null = operator picks at the till.
+  productVariantId String?
+
+  /// Null = the product's price applies.
+  priceOverride Decimal? @db.Decimal(12, 2)
+
+  position Int     @default(0)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  section        MenuSection             @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  product        Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant?         @relation(fields: [productVariantId], references: [id])
+  availability   CatalogueAvailability[]
+  channelPrices  CatalogueChannelPrice[]
+
+  @@unique([sectionId, productId, productVariantId])
+  @@index([tenantId])
+  @@index([productId])
+}
+
+/// D60 — placement availability windows (re-homed from MenuAvailability).
+/// When any row exists the entry is available ONLY in matching windows.
+model CatalogueAvailability {
+  id      String @id @default(cuid())
+  entryId String
+
+  dayOfWeek MenuAvailabilityDayOfWeek
+  /// HH:MM in the tenant's local time, inclusive.
+  startTime String
+  endTime   String
+
+  entry CatalogueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+}
+
+/// D60 — placement channel price override (re-homed from MenuItemChannelPrice).
+model CatalogueChannelPrice {
+  id      String  @id @default(cuid())
+  entryId String
+  /// String rather than enum so tenants can add channels without a migration.
+  channel String
+  price   Decimal @db.Decimal(12, 2)
+
+  entry CatalogueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, channel])
+  @@index([entryId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restaurant Phase 2C — dining areas + restaurant tables
+// ─────────────────────────────────────────────────────────────
+//
+// Configuration only in this sub-slice; the operational lifecycle (opening a
+// table, orders, sessions) lands with Phase 2D and Phase 5. A `DiningArea`
+// belongs to a branch (a floor plan is per-location), and each area holds
+// zero-or-many `RestaurantTable` rows. The status column on the table lives
+// here so a future `TableStatusChange` history table can be added additively
+// in Phase 5 without an ALTER.
+
+/// D49. PHYSICAL is the floor plan; OPEN is an ad-hoc joined arrangement
+/// (named by the operator, dissolved when its bill closes).
+enum RestaurantTableKind {
+  PHYSICAL
+  OPEN
+}
+
+enum RestaurantTableStatus {
+  /// Ready for the next party.
+  AVAILABLE
+  /// A party is seated but no order has been sent yet.
+  SEATED
+  /// A session is in progress.
+  OCCUPIED
+  /// The bill has been requested / printed; no more orders expected.
+  BILLING
+  /// Cleaning between parties.
+  CLEANING
+  /// Explicit shutdown — booked out or blocked from seating.
+  BLOCKED
+  /// D49: physically absorbed into an open table; refuses its own sessions.
+  RESERVED
+}
+
+/// A section of the floor plan — a dining room, a patio, a bar. Belongs to
+/// one branch; a tenant with two branches can have two "Main Room" areas
+/// without collision.
+model DiningArea {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  name        String
+  description String?
+  /// Display order on the floor plan; ties broken by name.
+  position    Int     @default(0)
+  isActive    Boolean @default(true)
+
+  /// The user who created this floor. Populated on create from the authenticated
+  /// context; nullable ONLY so the additive migration can add the column without
+  /// breaking legacy rows — new writes always populate it. Ownership-scoped edit
+  /// and archive endpoints refuse rows whose creator is not the caller
+  /// (Restaurant Pilot Change 1). Legacy backfill in the migration attributes
+  /// unowned rows to the tenant's first active OWNER; a row that still has no
+  /// owner after that (a tenant with no active owner) is unmanageable, which is
+  /// the correct fail-closed default.
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch  Branch            @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  creator User?             @relation("DiningAreaCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tables  RestaurantTable[]
+
+  @@unique([branchId, name])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([createdByUserId])
+}
+
+/// A physical table (or "table" — bar seat, counter position, patio spot).
+///
+/// `code` is the operator-facing label (T1, T2, BAR-3) and must be unique per
+/// area. `capacity` is nominal — the current `guestCount` on the session
+/// (Phase 2D) may differ.
+///
+/// The `status` column lives on the table because it is the answer to "what
+/// is happening here right now" — that question is best answered from the
+/// row the floor plan renders, without joining. A history table lands in
+/// Phase 5 additively, so audit does not require it here.
+model RestaurantTable {
+  id       String  @id @default(cuid())
+  tenantId String
+  branchId String
+  /// Null ONLY for kind=OPEN (D49) — an ad-hoc table belongs to no floor area.
+  areaId   String?
+
+  kind RestaurantTableKind @default(PHYSICAL)
+
+  /// Unique operator-facing label per area, e.g. T1, T2, BAR-3.
+  code      String
+  /// Optional display name for a large or named table.
+  label     String?
+  /// Nominal seat count. Null ONLY for kind=OPEN with no recorded seats (D49).
+  capacity  Int?
+  /// Optional pixel-level layout coordinates for the floor plan (Phase 4 uses).
+  positionX Int?
+  positionY Int?
+
+  status   RestaurantTableStatus @default(AVAILABLE)
+  isActive Boolean               @default(true)
+
+  /// See DiningArea.createdByUserId — same story, same rule. Legacy backfill
+  /// attributes existing tables to the tenant's first active OWNER; the row
+  /// stays unmanageable if no owner exists.
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch  Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  area    DiningArea? @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  creator User?       @relation("RestaurantTableCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  sessions     TableSession[]
+  reservations TableReservation[]
+  /// D49: the physical tables this OPEN table absorbed…
+  openMembers  OpenTableMember[]  @relation("OpenTableParent")
+  /// …and the open table this PHYSICAL table is currently absorbed into.
+  memberOf     OpenTableMember[]  @relation("OpenTableMemberTable")
+
+  @@unique([areaId, code])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([areaId])
+  @@index([status])
+  @@index([createdByUserId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restaurant Phase 2D — table sessions + order lifecycle
+// ─────────────────────────────────────────────────────────────
+//
+// Operational core. `TableSession` is one seating; `RestaurantOrder` is the
+// per-session order book; `OrderRound` is the immutable slice of items sent
+// to the kitchen in one submit. The junction to `Sale` (closing a session
+// produces a Sale) is a nullable FK, matching Quotation.convertedSaleId.
+//
+// Every mutation-prone entity carries a `version` column for optimistic
+// concurrency, per D11 and the Phase 2 schema-conventions checklist.
+
+enum RestaurantOrderChannel {
+  DINE_IN
+  TAKEAWAY
+  ONLINE
+}
+
+enum TableSessionStatus {
+  OPEN
+  BILLING
+  CLOSED
+  CANCELLED
+}
+
+enum RestaurantOrderStatus {
+  DRAFT
+  SUBMITTED
+  PARTIAL
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderRoundStatus {
+  DRAFT
+  SUBMITTED
+  IN_PROGRESS
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum RestaurantOrderItemStatus {
+  PENDING
+  SENT
+  IN_PROGRESS
+  READY
+  DELIVERED
+  VOIDED
+}
+
+/// D46 — where a round item came from. `MENU_ITEM` is the legacy path (an
+/// existing Restaurant MenuItem was tapped in the POS); `PRODUCT` is the
+/// D45-enabled path (a Restaurant Product from Inventory, with optional
+/// variant selection). The `submitRound` service keys off this to pick the
+/// right resolver (menu-item lookup vs product+variant lookup) and to pick
+/// the right kitchen-station junction (MenuItemStationLink vs
+/// ProductStationLink).
+enum RestaurantOrderItemSourceKind {
+  MENU_ITEM
+  PRODUCT
+}
+
+/// One party at one table. Opened by a waiter, closed when the bill is paid.
+/// `guestCount` and `waiterUserId` are set at open and may be updated during
+/// the session. When the session closes into a Sale, `finalSaleId` is set
+/// (unique to prevent a double-close producing two Sales).
+model TableSession {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  tableId  String
+
+  /// Human-friendly reference number; assigned via `DocumentSequence` at
+  /// open so waiters can talk about "Session 47" out loud.
+  sessionNumber String
+
+  status TableSessionStatus @default(OPEN)
+
+  waiterUserId String?
+  guestCount   Int?
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+
+  /// Double-close guard. Matches Quotation.convertedSaleId — a session that
+  /// has produced a Sale is unique to that Sale row.
+  finalSaleId String? @unique
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  table  RestaurantTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  orders RestaurantOrder[]
+
+  @@unique([tenantId, sessionNumber])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([tableId])
+  @@index([status])
+}
+
+/// D47. BOOKED -> SEATED -> COMPLETED is the happy path; CANCELLED and
+/// NO_SHOW are terminal. Only BOOKED and SEATED block a timeslot.
+enum ReservationStatus {
+  BOOKED
+  SEATED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+/// D47. One booked timeslot `[startAt, endAt)` on one table. Customer link is
+/// optional — phone reservations must not force a Customer row — and the
+/// name/phone are snapshots so the calendar renders without a join and
+/// survives customer deletion (same discipline as RestaurantOrderItem).
+model TableReservation {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  tableId  String
+
+  /// Human-friendly reference; assigned via `DocumentSequence` at booking
+  /// ("Reservation RSV-000047" on the phone).
+  reservationNumber String
+
+  customerId    String?
+  customerName  String
+  customerPhone String?
+
+  partySize Int
+  /// Half-open interval: a 19:00-20:30 booking does not collide with one
+  /// starting exactly at 20:30. Slot size is a Calendar rendering choice,
+  /// not a storage concept (D47).
+  startAt   DateTime
+  endAt     DateTime
+
+  status ReservationStatus @default(BOOKED)
+  notes  String?
+
+  /// See DiningArea.createdByUserId — nullable only for FK hygiene; new
+  /// writes always populate it. Reservations are NOT creator-owned (D47).
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  table    RestaurantTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  customer Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  creator  User?           @relation("TableReservationCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, reservationNumber])
+  @@index([tenantId, branchId, startAt])
+  @@index([tableId, startAt])
+  @@index([customerId])
+  @@index([status])
+}
+
+/// D49. One row per physical table absorbed into an open table. Rows are
+/// deleted on release (bill close or manual dissolve); the audit log keeps
+/// the history.
+model OpenTableMember {
+  id            String @id @default(cuid())
+  tenantId      String
+  openTableId   String
+  memberTableId String
+
+  createdAt DateTime @default(now())
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  openTable   RestaurantTable @relation("OpenTableParent", fields: [openTableId], references: [id], onDelete: Cascade)
+  memberTable RestaurantTable @relation("OpenTableMemberTable", fields: [memberTableId], references: [id], onDelete: Cascade)
+
+  @@unique([openTableId, memberTableId])
+  /// D50: NO unique on memberTableId — one physical table may back several
+  /// open tables at once (two unrelated parties sharing a four-top, each with
+  /// its own tab). The pair unique above still stops the same table being
+  /// added twice to the SAME open table.
+  @@index([memberTableId])
+  @@index([tenantId])
+}
+
+/// The order book for a session. In dine-in there is one per session; in
+/// takeaway / online there can be several per branch attached to a
+/// synthetic session (Phase 7 / 10).
+model RestaurantOrder {
+  id        String @id @default(cuid())
+  tenantId  String
+  branchId  String
+  sessionId String
+
+  orderNumber String
+  channel     RestaurantOrderChannel @default(DINE_IN)
+  status      RestaurantOrderStatus  @default(DRAFT)
+
+  /// Optimistic concurrency token.
+  version Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch  Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  session TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  rounds          OrderRound[]
+  items           RestaurantOrderItem[]
+  takeawayProfile TakeawayOrderProfile?
+
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([sessionId])
+  @@index([status])
+}
+
+/// An immutable slice of order items sent to the kitchen in one submit.
+/// A single item belongs to exactly one round; a round belongs to one order.
+/// The submitter's identity is snapshotted on the round.
+model OrderRound {
+  id       String @id @default(cuid())
+  tenantId String
+  orderId  String
+
+  /// 1-based sequence within its order.
+  roundNumber       Int
+  submittedAt       DateTime? // null while DRAFT
+  submittedByUserId String?
+  status            OrderRoundStatus @default(DRAFT)
+  /// Idempotency key for round submission — a re-submit of the same key
+  /// returns the existing row rather than creating a duplicate round.
+  idempotencyKey    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order   RestaurantOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items   RestaurantOrderItem[]
+  tickets KitchenTicket[]
+
+  @@unique([orderId, roundNumber])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId])
+}
+
+/// One line on an order round. Prices are snapshotted at send-to-kitchen so
+/// a later menu edit does not retroactively alter the round (AD-15).
+model RestaurantOrderItem {
+  id       String @id @default(cuid())
+  tenantId String
+  orderId  String
+  roundId  String
+
+  menuItemId          String
+  /// Snapshot at submit: name, code and price of the item at that instant.
+  menuItemName        String
+  menuItemCode        String?
+  unitPrice           Decimal @db.Decimal(12, 2)
+  /// Sum of the modifier price-deltas snapshotted with this item.
+  modifierTotal       Decimal @default(0) @db.Decimal(12, 2)
+  /// Quantity ordered.
+  quantity            Decimal @default(1) @db.Decimal(12, 3)
+  specialInstructions String?
+
+  /// D46 — source discriminator. `MENU_ITEM` is the legacy path (default,
+  /// so every historical row keeps its semantics). `PRODUCT` is set when
+  /// the round item was sourced from a Restaurant Product (with optional
+  /// variant selection) via D45's `/restaurant/pos-catalogue`.
+  sourceKind RestaurantOrderItemSourceKind @default(MENU_ITEM)
+
+  /// D46 — Product+Variant reference for a PRODUCT-sourced item. Both are
+  /// nullable so a MENU_ITEM row (or a Product-sourced item on a
+  /// non-variant Product) leaves the appropriate field NULL. FK is
+  /// ON DELETE SET NULL — a Product deletion never cascades into
+  /// historical order rows, and the snapshots below preserve display.
+  productId        String?
+  productVariantId String?
+
+  /// D46 — immutable variant snapshot. Captured at submit time so a later
+  /// variant rename or price change cannot rewrite historical orders /
+  /// KOTs / bills / receipts. Both nullable — NULL on MENU_ITEM rows and
+  /// on non-variant Products.
+  variantNameSnapshot  String?
+  variantPriceSnapshot Decimal? @db.Decimal(12, 2)
+
+  status         RestaurantOrderItemStatus @default(PENDING)
+  voidReason     String?
+  voidedByUserId String?
+  voidedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order          RestaurantOrder               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  round          OrderRound                    @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  product        Product?                      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productVariant ProductVariant?               @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  modifiers      RestaurantOrderItemModifier[]
+  /// D51 — which bill splits cover this line.
+  billSplitItems BillSplitItem[]
+
+  @@index([tenantId])
+  @@index([orderId])
+  @@index([roundId])
+  @@index([menuItemId])
+  @@index([status])
+  @@index([productId])
+  @@index([productVariantId])
+  @@index([sourceKind])
+}
+
+/// One selected modifier on an order item. Snapshotted like the item itself —
+/// the option's name and priceDelta are frozen at submit time.
+model RestaurantOrderItemModifier {
+  id       String @id @default(cuid())
+  tenantId String
+  itemId   String
+
+  modifierOptionId String
+  optionName       String
+  groupName        String
+  priceDelta       Decimal @default(0) @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item   RestaurantOrderItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([itemId])
+}
+
+/// Append-only history of order status changes — one row per transition.
+model RestaurantOrderStatusHistory {
+  id       String @id @default(cuid())
+  tenantId String
+  orderId  String
+
+  fromStatus      RestaurantOrderStatus?
+  toStatus        RestaurantOrderStatus
+  reason          String?
+  changedByUserId String?
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([orderId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.5 — Branch-scoped inventory (D10, AD-16)
+// ─────────────────────────────────────────────────────────────
+//
+// `Product.quantityOnHand` is tenant-wide today, which is incorrect for any
+// tenant running two or more selling branches. This adds the correct model:
+//
+//   `BranchInventory`  — current per-branch balance.
+//   `StockMovement`    — append-only ledger, one row per transaction line.
+//
+// Rollout (four steps, none of which is destructive):
+//   1. This migration lands the two tables (no reader changes).
+//   2. Backfill one BranchInventory row per default-branch × product with an
+//      OPENING movement (insert only).
+//   3. `LocalInventoryProvider` dual-writes BranchInventory (authoritative)
+//      and `Product.quantityOnHand` (rollup + QuickBooks cache).
+//   4. Migrate readers behind `INVENTORY_BRANCH_SCOPED` and verify the
+//      rollup equals the sum of branches (AD-16).
+//
+// `Product.quantityOnHand` is retained permanently — never dropped, never
+// repurposed (D10).
+
+enum StockMovementReason {
+  SALE
+  RETURN
+  ADJUSTMENT
+  TRANSFER_IN
+  TRANSFER_OUT
+  IMPORT
+  QB_PULL
+  WASTAGE
+  OPENING
+  ORDER_ROUND
+  /// D44 — a vendor stock receipt (Purchase Receipt / GRN). The paired
+  /// StockMovement.refId points at `InventoryReceiptLine.id`; the row's
+  /// unitCost captures the cost snapshot at receive time.
+  RECEIPT
+}
+
+/// Current per-branch balance.
+///
+/// `reorderLevel` is per-branch because different branches have different
+/// footfall and lead times. `version` supports optimistic concurrency for a
+/// UI-driven adjustment; the sales path uses a conditional update guarded
+/// by `quantityOnHand >= qty`, the same idiom the tenant-wide column uses.
+model BranchInventory {
+  id               String   @id @default(cuid())
+  tenantId         String
+  branchId         String
+  productId        String
+  /// D44 — optional variant reference. NULL rows keep the legacy "one row per
+  /// (branch, product)" semantics; non-NULL rows are "one row per (branch,
+  /// variant)". The two uniqueness cases are enforced by paired partial
+  /// unique indexes (see migration 20260812000000_add_product_variants_and_
+  /// purchase_receipts) because Prisma cannot express partial uniques.
+  productVariantId String?
+  quantityOnHand   Decimal  @default(0) @db.Decimal(12, 3)
+  reorderLevel     Decimal? @db.Decimal(12, 3)
+  /// D44 — per-branch weighted-average cost of the (product, variant?)
+  /// combination. Recomputed on every InventoryReceipt into this branch.
+  /// NULL until the first receipt.
+  averageCost      Decimal? @db.Decimal(12, 4)
+  version          Int      @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([productId])
+  @@index([productVariantId])
+}
+
+/// Append-only ledger of stock movements. NEVER updated. Every row represents
+/// one delta applied to `BranchInventory.quantityOnHand`; `balanceAfter`
+/// captures the post-application value so a later reconciliation can walk
+/// the ledger without re-running Prisma transactions.
+model StockMovement {
+  id               String  @id @default(cuid())
+  tenantId         String
+  branchId         String
+  productId        String
+  /// D44 — variant this movement affects. NULL for legacy variant-less
+  /// products; set for every variant sale, return, adjustment or receipt.
+  productVariantId String?
+
+  delta           Decimal             @db.Decimal(12, 3)
+  balanceAfter    Decimal             @db.Decimal(12, 3)
+  /// D44 — unit cost captured on a RECEIPT movement so the ledger alone is
+  /// enough to walk the cost history for a future FIFO policy. NULL for other
+  /// reasons (sales, returns, adjustments) where cost is not authoritative.
+  unitCost        Decimal?            @db.Decimal(12, 2)
+  reason          StockMovementReason
+  /// Free-form typed reference, e.g. 'SALE' | 'RETURN' | 'ORDER_ROUND' |
+  /// 'INVENTORY_RECEIPT_LINE'.
+  refType         String?
+  refId           String?
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id])
+
+  @@index([tenantId, productId, createdAt])
+  @@index([branchId])
+  @@index([refType, refId])
+  @@index([productVariantId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 6 — KOT/BOT + printing (D6, scenario 20)
+// ─────────────────────────────────────────────────────────────
+//
+// A KOT (kitchen order ticket) is generated when a round is submitted and
+// routed to the stations the round's items map to. Each ticket lands as a
+// print job on a specific printer; the print job carries retry state so
+// printer failure never loses the order (scenario 20 — the sale is already
+// recorded; the ticket is a downstream side effect).
+
+enum KitchenPrinterKind {
+  ESC_POS_NETWORK
+  ESC_POS_USB
+  A4_NETWORK
+  MOCK
+}
+
+/// D68 — a ticket's life on the kitchen BOARD, not on a printer.
+///
+/// `QUEUED` is what the kitchen has to make; `COMPLETED` is kitchen staff
+/// saying the food is done. The three print values are retained but are no
+/// longer produced by any code path: they are a persisted database enum with
+/// rows already on them in existing tenants, and removing an enum value is a
+/// destructive migration that buys nothing. A board reads anything that is
+/// not COMPLETED as still outstanding, so a pre-D68 ticket left on PRINTED
+/// stays visible rather than vanishing.
+enum KitchenTicketStatus {
+  QUEUED
+  PRINTED
+  REPRINTED
+  FAILED
+  COMPLETED
+}
+
+enum KitchenPrintAttemptStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model KitchenPrinter {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  code     String
+  name     String
+  kind     KitchenPrinterKind
+  address  String
+  isActive Boolean            @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  tickets       KitchenTicket[]
+  printAttempts KitchenPrintAttempt[]
+
+  @@unique([branchId, code])
+  @@index([tenantId])
+  @@index([branchId])
+}
+
+model KitchenTicket {
+  id               String  @id @default(cuid())
+  tenantId         String
+  branchId         String
+  roundId          String
+  stationId        String
+  primaryPrinterId String?
+
+  ticketNumber String
+
+  status KitchenTicketStatus @default(QUEUED)
+
+  /// D68 — who marked the food done, and when. Recorded because "the kitchen
+  /// says it is ready" is the only signal the floor gets that a dish exists;
+  /// when a table disputes it, the board must be able to say who pressed it.
+  completedAt       DateTime?
+  completedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  round          OrderRound      @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  station        KitchenStation  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  primaryPrinter KitchenPrinter? @relation(fields: [primaryPrinterId], references: [id])
+  completedBy    User?           @relation("KitchenTicketCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+
+  items    KitchenTicketItem[]
+  attempts KitchenPrintAttempt[]
+
+  @@unique([tenantId, ticketNumber])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([roundId])
+  @@index([stationId])
+  @@index([status])
+}
+
+model KitchenTicketItem {
+  id       String @id @default(cuid())
+  ticketId String
+  tenantId String
+
+  menuItemName        String
+  /// D46 — the variant selection printed on the KOT ("MEDIUM", "LARGE").
+  /// The kitchen must not infer the variant from the selling price. NULL
+  /// when the round item has no variant selection (a non-variant Product,
+  /// or a legacy MenuItem without SIZE-role modifiers).
+  variantName         String?
+  quantity            Decimal  @db.Decimal(12, 3)
+  modifierNames       String[]
+  specialInstructions String?
+
+  ticket KitchenTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([ticketId])
+}
+
+model KitchenPrintAttempt {
+  id        String @id @default(cuid())
+  tenantId  String
+  ticketId  String
+  printerId String
+
+  status      KitchenPrintAttemptStatus @default(PENDING)
+  error       String?
+  attemptedAt DateTime                  @default(now())
+  completedAt DateTime?
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket  KitchenTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  printer KitchenPrinter @relation(fields: [printerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([printerId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 7 — Takeaway
+// ─────────────────────────────────────────────────────────────
+//
+// A takeaway order piggy-backs on a RestaurantOrder with channel=TAKEAWAY.
+// The extra pickup/handover state lives on the paired TakeawayOrderProfile.
+// Behind the scenes we still create a TableSession (attached to a synthetic
+// "walk-in" table per branch, provisioned on first use), so the junction to
+// Sale stays unified (D1).
+
+enum TakeawayOrderStatus {
+  PLACED
+  IN_KITCHEN
+  READY
+  HANDED_OVER
+  CANCELLED
+}
+
+model TakeawayOrderProfile {
+  id       String @id @default(cuid())
+  tenantId String
+  orderId  String @unique
+
+  customerName  String?
+  customerPhone String?
+  pickupAt      DateTime?
+  handoverAt    DateTime?
+
+  status TakeawayOrderStatus @default(PLACED)
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order  RestaurantOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 8 — Bill splitting
+// ─────────────────────────────────────────────────────────────
+//
+// One Sale, several bill splits. Each split is a partial claim on the
+// Sale's total that a specific guest will settle. The sum of `share` must
+// equal Sale.total; the service enforces that on create.
+
+model BillSplit {
+  id       String @id @default(cuid())
+  tenantId String
+  saleId   String
+
+  /// Optional label ("Alex", "By-card guest") for the receipt.
+  label      String?
+  share      Decimal @db.Decimal(12, 2)
+  paidAmount Decimal @default(0) @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sale   Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  items  BillSplitItem[]
+
+  @@index([tenantId])
+  @@index([saleId])
+}
+
+/// D51. One line of a bill assigned to one split, with how much of that line
+/// the split covers — a "3 x Beer" row can go 2/1 across two friends. The
+/// split's `share` is DERIVED from these rows plus a pro-rata slice of the
+/// sale's service charge / tax / packaging; it is never an operator input on
+/// this path.
+model BillSplitItem {
+  id          String @id @default(cuid())
+  tenantId    String
+  billSplitId String
+  /// The RestaurantOrderItem this covers. Cascade: a split's rows die with it.
+  orderItemId String
+
+  /// Assigned portion of that line. Matches RestaurantOrderItem.quantity's
+  /// precision so a fractional line (0.5 kg) can be split too.
+  quantity Decimal @db.Decimal(12, 3)
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  billSplit BillSplit           @relation(fields: [billSplitId], references: [id], onDelete: Cascade)
+  orderItem RestaurantOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  /// One row per (split, line): a second assignment of the same line to the
+  /// same split is an edit of the quantity, not another row.
+  @@unique([billSplitId, orderItemId])
+  @@index([tenantId])
+  @@index([orderItemId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 10 — Online orders integration hub (infrastructure only)
+// ─────────────────────────────────────────────────────────────
+//
+// The abstraction plus a Mock adapter. Uber Eats and PickMe are deferred
+// (user instruction / D9). ExternalOrder is the normalised inbound order
+// from a delivery platform; ExternalOrderEvent captures each state
+// notification; WebhookDeliveryLog records what arrived and whether we
+// answered 200.
+
+enum DeliveryPlatformKind {
+  MOCK
+  UBER_EATS
+  PICKME_FOOD
+  DOORDASH
+  OTHER
+}
+
+enum ExternalOrderStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  IN_KITCHEN
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+model DeliveryPlatform {
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+
+  kind             DeliveryPlatformKind
+  externalStoreRef String?
+  isActive         Boolean              @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  externalOrders ExternalOrder[]
+  webhookLogs    WebhookDeliveryLog[]
+
+  @@unique([branchId, kind])
+  @@index([tenantId])
+}
+
+model ExternalOrder {
+  id         String @id @default(cuid())
+  tenantId   String
+  branchId   String
+  platformId String
+
+  externalOrderRef String
+  status           ExternalOrderStatus @default(PENDING)
+  externalTotal    Decimal?            @db.Decimal(12, 2)
+
+  restaurantOrderId String?
+
+  receivedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  platform DeliveryPlatform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+
+  events ExternalOrderEvent[]
+
+  @@unique([platformId, externalOrderRef])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([status])
+}
+
+model ExternalOrderEvent {
+  id              String @id @default(cuid())
+  tenantId        String
+  externalOrderId String
+
+  fromStatus ExternalOrderStatus?
+  toStatus   ExternalOrderStatus
+  payload    Json?
+  createdAt  DateTime             @default(now())
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  externalOrder ExternalOrder @relation(fields: [externalOrderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([externalOrderId])
+}
+
+model WebhookDeliveryLog {
+  id         String  @id @default(cuid())
+  tenantId   String
+  branchId   String?
+  platformId String?
+
+  payload        Json
+  responseStatus Int
+  message        String?
+
+  receivedAt DateTime @default(now())
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch?           @relation(fields: [branchId], references: [id])
+  platform DeliveryPlatform? @relation(fields: [platformId], references: [id])
+
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([platformId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// D44 — Product variants + Purchase Receipts + Weighted-Average
+// ─────────────────────────────────────────────────────────────
+//
+// A `Product` is the commercial master. It may have 0 variation dimensions
+// (legacy: one sellable configuration, exactly what the pre-D44 schema
+// described) or N variation dimensions ("Size", "Packaging", "Color", …).
+// Each *sellable combination* is a `ProductVariant` — its own SKU, barcode,
+// selling price, cost history, weighted-average cost, per-branch inventory
+// and reorder point. Independent from Restaurant menu variations, which are
+// modifier-style options on a MenuItem (see `ModifierGroup.role = 'SIZE'`).
+//
+// The three-table variation model (dimension / option / variant-option-value
+// junction) captures ANY number of dimensions without a schema change: the
+// wizard adds a `ProductVariationDimension` row per group and a
+// `ProductVariationOption` row per option; each `ProductVariant` fixes one
+// option per dimension via `ProductVariantOptionValue`.
+//
+// Purchase Receipts / Weighted-Average.
+//   • `InventoryReceipt` is the header (branch, supplier, GRN, invoice ref,
+//     received-at, notes, createdBy). `InventoryReceiptLine` is one row per
+//     variant received on this receipt (qty, unit cost, lot, expiry).
+//   • Both are IMMUTABLE once written. A future correction goes through a new
+//     movement (adjustment or reversing receipt), never by updating history.
+//   • Receiving stock: (1) insert receipt + lines, (2) upsert `BranchInventory`
+//     for each line (qty += received, averageCost recomputed), (3) append a
+//     `StockMovement` with `reason: RECEIPT`, `refType: 'INVENTORY_RECEIPT_LINE'`,
+//     `refId: line.id`, `unitCost: line.unitCost`. All inside one transaction.
+//   • Weighted-average = (existingQty × existingAvg + receivedQty × unitCost)
+//     ÷ (existingQty + receivedQty). Computed per branch per variant. First
+//     receipt where averageCost is NULL just adopts the received unitCost.
+//   • Selling price is never touched by a receipt (D44). Cost changes are
+//     surfaced to the operator, who explicitly decides whether to reprice.
+
+/// One variation axis on a Product ("Size", "Packaging", "Color", …). A
+/// Product may have zero or many. Order is captured by `position`.
+model ProductVariationDimension {
+  id        String @id @default(cuid())
+  tenantId  String
+  productId String
+
+  name     String
+  position Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  options       ProductVariationOption[]
+  variantValues ProductVariantOptionValue[]
+
+  @@unique([productId, name])
+  @@index([tenantId])
+  @@index([productId])
+}
+
+/// One option within a variation dimension ("200ml", "Glass Bottle", "Red").
+model ProductVariationOption {
+  id          String @id @default(cuid())
+  tenantId    String
+  dimensionId String
+
+  name     String
+  position Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dimension ProductVariationDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+
+  variantValues ProductVariantOptionValue[]
+
+  @@unique([dimensionId, name])
+  @@index([tenantId])
+  @@index([dimensionId])
+}
+
+/// A sellable variant of a Product — its own SKU, barcode, selling price,
+/// cost history, per-branch stock and reorder point.
+///
+/// A Product without variants is still valid (`Product.hasVariants=false`
+/// and no `ProductVariant` rows). When a Product has variants, `SaleItem`,
+/// `ReturnItem`, `BranchInventory`, `StockMovement` and `InventoryReceiptLine`
+/// all key on `productVariantId`; the parent Product's `unitPrice` / `sku` /
+/// `quantityOnHand` fall back to legacy roles and are not read.
+model ProductVariant {
+  id           String   @id @default(cuid())
+  tenantId     String
+  productId    String
+  sku          String
+  barcode      String?
+  unitPrice    Decimal  @default(0) @db.Decimal(12, 2)
+  /// Latest purchase cost captured on the most recent receipt (mirror of the
+  /// max-receivedAt line's unitCost, refreshed on receive). Legacy-style;
+  /// prefer walking `receiptLines` when full history matters.
+  costPrice    Decimal? @db.Decimal(12, 2)
+  /// Weighted-average cost across all receipts of this variant, rolled up
+  /// from the per-branch BranchInventory.averageCost values. NULL until the
+  /// first receipt.
+  averageCost  Decimal? @db.Decimal(12, 4)
+  reorderLevel Decimal? @db.Decimal(12, 3)
+  imageUrl     String?
+  /// Manual ordering for the Variants tab, 0-based. Ties broken by SKU.
+  position     Int      @default(0)
+  isActive     Boolean  @default(true)
+  /// D45 — one variant per product may be `isDefault=true`. The POS
+  /// quick-add path picks this one when the operator taps the product
+  /// card without opening the variant picker. Uniqueness of "one
+  /// default per product" is enforced by a partial unique index
+  /// (declared in the D45 migration; Prisma cannot express it).
+  isDefault    Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  optionValues         ProductVariantOptionValue[]
+  saleItems            SaleItem[]
+  returnItems          ReturnItem[]
+  menuItems            MenuItem[]
+  branchInventory      BranchInventory[]
+  stockMovements       StockMovement[]
+  receiptLines         InventoryReceiptLine[]
+  restaurantOrderItems RestaurantOrderItem[]
+  catalogueEntries     CatalogueEntry[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([productId])
+  @@index([isActive])
+}
+
+/// Junction: which option of which dimension this variant carries. Exactly
+/// one row per (variant, dimension); a Product with two dimensions and 6
+/// enabled variants produces 12 rows here.
+model ProductVariantOptionValue {
+  id          String @id @default(cuid())
+  tenantId    String
+  variantId   String
+  dimensionId String
+  optionId    String
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  variant   ProductVariant            @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  dimension ProductVariationDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  option    ProductVariationOption    @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, dimensionId])
+  @@index([tenantId])
+  @@index([optionId])
+  @@index([dimensionId])
+}
+
+/// One vendor stock receipt into one branch. Immutable once written — every
+/// correction is a new movement, never an in-place edit. `idempotencyKey`
+/// guards against a double-submitted receive form producing two receipts.
+model InventoryReceipt {
+  id               String   @id @default(cuid())
+  tenantId         String
+  branchId         String
+  supplierId       String?
+  receiptNumber    String
+  receivedAt       DateTime @default(now())
+  invoiceReference String?
+  grnReference     String?
+  notes            String?
+  createdByUserId  String
+  idempotencyKey   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch    Branch                 @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  supplier  Supplier?              @relation(fields: [supplierId], references: [id])
+  createdBy User                   @relation("InventoryReceiptCreator", fields: [createdByUserId], references: [id])
+  lines     InventoryReceiptLine[]
+
+  @@unique([tenantId, receiptNumber])
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([supplierId])
+  @@index([receivedAt])
+}
+
+/// One line on an InventoryReceipt. Immutable. `productVariantId` may be
+/// NULL for a legacy variant-less product; otherwise the pair
+/// (productId, productVariantId) is authoritative.
+model InventoryReceiptLine {
+  id               String    @id @default(cuid())
+  tenantId         String
+  receiptId        String
+  productId        String
+  productVariantId String?
+  quantityReceived Decimal   @db.Decimal(12, 3)
+  unitCost         Decimal   @db.Decimal(12, 2)
+  lotNumber        String?
+  expiryDate       DateTime?
+
+  createdAt DateTime @default(now())
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receipt InventoryReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  product Product          @relation(fields: [productId], references: [id])
+  variant ProductVariant?  @relation(fields: [productVariantId], references: [id])
+
+  @@index([tenantId])
+  @@index([receiptId])
+  @@index([productId])
+  @@index([productVariantId])
+  @@index([productId, productVariantId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// D45 — Restaurant Product wizard + Promotions
+// ─────────────────────────────────────────────────────────────
+//
+// Merges Restaurant Menu Item authority into the Product wizard.
+// Restaurant tenants manage all POS-sellable items from Inventory →
+// Products; the Restaurant Menu admin UI is deprecated (its routes
+// redirect to /products for Restaurant tenants, though historical
+// MenuItems remain readable via the existing menu-items API so
+// historical orders / KOTs / bills survive).
+//
+// Two junctions promote existing MenuItem relationships to Product:
+//
+//   • ProductModifierGroup  — Product ↔ ModifierGroup (peer of
+//     `MenuItemModifierGroup`). ModifierGroup rows themselves are
+//     tenant-scoped and reusable across products and menu items.
+//   • ProductStationLink    — Product ↔ KitchenStation (peer of
+//     `MenuItemStationLink`). KOT routing widens to read from either
+//     junction depending on whether a round item was sourced from
+//     Product or MenuItem.
+//
+// A new Promotion domain covers scheduled auto-apply rules (Bundle
+// fixed price, BOGO, %/$ discount) with day-of-week, time-of-day,
+// date-range, branch scope, and channel scope. Kept independent from
+// the existing `Discount` model, which stays authoritative for
+// operator-applied retail line/order discounts at sale time.
+
+enum PromotionType {
+  BUNDLE_FIXED_PRICE
+  BUY_X_GET_Y
+  PERCENTAGE_DISCOUNT
+  FIXED_AMOUNT_DISCOUNT
+}
+
+/// A product's role in a promotion. `BUY` items must be in the cart
+/// to trigger the promotion; `GET` items are the reward (may be free
+/// or discounted); `BUNDLE` items belong to a fixed-price bundle.
+enum PromotionItemRole {
+  BUY
+  GET
+  BUNDLE
+}
+
+/// One promotion — scheduled auto-apply rule evaluated server-side.
+///
+/// The schedule columns are all nullable so an "always on" promotion
+/// carries every one as NULL, and a "Friday 5–10pm only" carries
+/// exactly the two relevant columns. This is more useful than an
+/// "always" sentinel because schedule intent is surfaced in the row
+/// directly.
+///
+/// `stackable` defaults to false per the brief — promotions do not
+/// stack unless explicitly allowed.
+model Promotion {
+  id       String @id @default(cuid())
+  tenantId String
+
+  name        String
+  description String?
+  type        PromotionType
+
+  /// BUNDLE_FIXED_PRICE — the collapsed final price for the bundle.
+  fixedPrice    Decimal? @db.Decimal(12, 2)
+  /// PERCENTAGE_DISCOUNT / BUY_X_GET_Y — 0-100. 100 = free reward.
+  percentageOff Decimal? @db.Decimal(5, 2)
+  /// FIXED_AMOUNT_DISCOUNT — money-off.
+  amountOff     Decimal? @db.Decimal(12, 2)
+  /// BUY_X_GET_Y — how many of the BUY item(s) must be in the cart.
+  buyQuantity   Int?
+  /// BUY_X_GET_Y — how many rewards awarded per trigger.
+  getQuantity   Int?
+
+  /// Schedule — everything nullable / defaulted-empty.
+  startsOn     DateTime?
+  endsOn       DateTime?
+  /// TEXT[] rather than an enum[] so a new day-of-week label (a
+  /// hypothetical "public-holiday" flag) does not force a schema
+  /// migration. Values are `MenuAvailabilityDayOfWeek` names —
+  /// service-level validation enforces the vocabulary.
+  daysOfWeek   String[]  @default([])
+  /// HH:MM local tenant time. Both NULL = whole day.
+  startTime    String?
+  endTime      String?
+  /// Empty = every branch; else the specific branchIds the promotion
+  /// applies to.
+  branchScope  String[]  @default([])
+  /// Empty = every channel; else `RestaurantOrderChannel` names
+  /// (DINE_IN / TAKEAWAY / ONLINE).
+  channelScope String[]  @default([])
+
+  /// Default (per brief): promotions do NOT stack unless explicitly
+  /// allowed. Server evaluation refuses to apply a second promotion
+  /// to a line already covered by an unstackable one.
+  stackable Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items  PromotionItem[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@index([startsOn, endsOn])
+}
+
+/// One product involved in a promotion, carrying its role.
+///
+///   BUNDLE_FIXED_PRICE  → every included item has role=BUNDLE.
+///   BUY_X_GET_Y         → the trigger item has role=BUY, the reward
+///                         has role=GET.
+///   PERCENTAGE_DISCOUNT → each discounted item has role=BUY (the
+///                         discount applies to it directly; no reward).
+///   FIXED_AMOUNT_DISCOUNT → same as PERCENTAGE.
+model PromotionItem {
+  id          String            @id @default(cuid())
+  promotionId String
+  productId   String
+  role        PromotionItemRole
+  quantity    Int               @default(1)
+
+  createdAt DateTime @default(now())
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id])
+
+  @@unique([promotionId, productId, role])
+  @@index([promotionId])
+  @@index([productId])
+}
+
+/// Junction: which modifier groups a Product carries.
+///
+/// Peer of `MenuItemModifierGroup`. ModifierGroups themselves are
+/// tenant-scoped and reusable — a group can be attached to both a
+/// Product AND a MenuItem during the read-only-deprecate transition
+/// window.
+model ProductModifierGroup {
+  id              String @id @default(cuid())
+  productId       String
+  modifierGroupId String
+  position        Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  modifierGroup ModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, modifierGroupId])
+  @@index([modifierGroupId])
+}
+
+/// Junction: which kitchen stations a Product routes to at KOT time.
+///
+/// Peer of `MenuItemStationLink`. `KitchenService.generateTicketsForRound`
+/// widens to read station IDs from EITHER junction depending on whether
+/// the round item was sourced from a MenuItem or a Product.
+model ProductStationLink {
+  id        String @id @default(cuid())
+  productId String
+  stationId String
+
+  createdAt DateTime @default(now())
+
+  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  station KitchenStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, stationId])
+  @@index([stationId])
 }

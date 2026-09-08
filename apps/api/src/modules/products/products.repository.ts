@@ -7,6 +7,7 @@ import {
   Product,
 } from '@hardware-pos/database';
 
+import { mirrorExternalRef } from '../quickbooks/external-ref';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface ProductSearchFilters {
@@ -191,10 +192,16 @@ export class ProductsRepository {
           lastSyncedAt: now,
         };
 
-        await tx.product.upsert({
+        const upserted = await tx.product.upsert({
           where: { tenantId_quickbooksItemId: { tenantId, quickbooksItemId: p.quickbooksItemId } },
           update: data,
           create: { tenantId, quickbooksItemId: p.quickbooksItemId, ...data },
+        });
+        // D63 dual-write.
+        await mirrorExternalRef(tx, tenantId, 'PRODUCT', upserted.id, {
+          externalId: p.quickbooksItemId,
+          syncStatus: 'SYNCED',
+          lastSyncedAt: now,
         });
 
         if (existing) updated++;

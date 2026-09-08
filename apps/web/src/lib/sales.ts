@@ -68,6 +68,9 @@ export interface CompleteSaleDto {
   orderApprovalToken?: string;
 }
 
+/** What kind of document the customer gets. Mirrors the API's CustomerDocumentKind. */
+export type CustomerDocumentKind = 'RECEIPT' | 'INVOICE';
+
 export interface CompletedSale {
   id: string;
   saleNumber: string;
@@ -148,8 +151,15 @@ export interface SaleListItem {
   lastPaymentAt: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: number;
+  /** External-integration metadata. `null` when the tenant has no accounting provider. */
   quickbooksDocumentType: string | null;
   syncStatus: SyncStatusCode;
+  /**
+   * Server-derived customer document kind, always present. Derived from local
+   * payment state, never from `quickbooksDocumentType`, and never supplied by this
+   * client — the API does not accept one.
+   */
+  documentKind: CustomerDocumentKind;
 }
 
 export interface SalesPage {

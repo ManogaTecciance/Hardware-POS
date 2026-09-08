@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
+import { InventoryTabs } from '@/components/products/inventory-tabs';
 import { SharedSubcategoryLibrary } from '@/components/products/shared-subcategory-library';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -209,6 +210,7 @@ export default function CategoriesPage() {
 
   return (
     <div className="space-y-6">
+      <InventoryTabs />
       <PageHeader
         title="Categories & Subcategories"
         description="Organize the catalog into categories and subcategories."
