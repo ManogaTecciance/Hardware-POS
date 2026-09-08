@@ -58,7 +58,9 @@ import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
 import { outstandingRewards } from '@hardware-pos/shared';
 
-import { stockCap, usePosCart } from '@/lib/pos-cart';
+import { isMeasured, stockCap, usePosCart } from '@/lib/pos-cart';
+import { MeasureNumpad } from '@/components/pos/measure-numpad';
+import { cartLineKey } from '@/lib/cart';
 import { HeldSalesButton, HoldCartButton } from '@/components/pos/held-sales';
 import { resolveScan, type ScanHit } from '@/lib/scan-resolver';
 import { useBarcodeScanner } from '@/lib/use-barcode-scanner';
@@ -100,6 +102,16 @@ export function PosRetailCheckout() {
   const [discountFor, setDiscountFor] = React.useState<CartLineKey | null>(null);
   // D99 (1c.4) — the product whose sizes are being chosen, or null when closed.
   const [pickVariantFor, setPickVariantFor] = React.useState<ClientProduct | null>(null);
+  /**
+   * D113 (`6.3`) — the measured line waiting for a weight.
+   *
+   * Nothing is in the cart while this is set: cancelling adds nothing, because
+   * a half-added line is worse than no line.
+   */
+  const [measureFor, setMeasureFor] = React.useState<{
+    product: ClientProduct;
+    variant: ClientVariant | null;
+  } | null>(null);
   const [pendingApproval, setPendingApproval] = React.useState<PendingLineApproval | null>(null);
   const [orderDiscountOpen, setOrderDiscountOpen] = React.useState(false);
   const [pendingOrderApproval, setPendingOrderApproval] = React.useState<{
@@ -157,6 +169,28 @@ export function PosRetailCheckout() {
   const pageProducts = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   /**
+   * D113 (`6.3`) — **the one place a line enters the cart.**
+   *
+   * Four routes reach the cart: a card tap, the variant picker, a scanned
+   * barcode and a typed code. A measured product must prompt on ALL FOUR, and
+   * the two that would be missed are the scan and the typed code — a barcode
+   * names *which* rice, never *how much*, so scanning must still ask.
+   *
+   * Intercepting at four call sites is `2.12` waiting to happen: four sale-line
+   * renderers, two of them fixed, so the same sale printed correctly from one
+   * endpoint and wrongly from another. So every route calls THIS, and the
+   * decision is made once.
+   */
+  const commitAdd = (product: ClientProduct, variant: ClientVariant | null) => {
+    if (isMeasured(product)) {
+      setMeasureFor({ product, variant });
+      return;
+    }
+    cart.addToCart(product, variant);
+    showToast(variant ? `${product.name} (${variant.name}) added` : `${product.name} added`);
+  };
+
+  /**
    * D99 (1c.4) — the single add-to-cart path.
    *
    * Every route into the cart goes through here — card tap, Enter on search, the
@@ -169,16 +203,13 @@ export function PosRetailCheckout() {
       setPickVariantFor(product);
       return;
     }
-    const variant = quickAddVariant(product);
-    cart.addToCart(product, variant);
-    showToast(variant ? `${product.name} (${variant.name}) added` : `${product.name} added`);
+    commitAdd(product, quickAddVariant(product));
   };
 
   /** Chosen from the picker — always explicit, never a guess. */
   const addChosenVariant = (product: ClientProduct, variant: ClientVariant) => {
-    cart.addToCart(product, variant);
     setPickVariantFor(null);
-    showToast(`${product.name} (${variant.name}) added`);
+    commitAdd(product, variant);
   };
 
   /**
@@ -211,8 +242,9 @@ export function PosRetailCheckout() {
           showToast(`${product.name} (${variant.name}) is out of stock`, 'warning');
           return;
         }
-        cart.addToCart(product, variant);
-        showToast(`${product.name} (${variant.name}) added`);
+        // D113 (`6.3`) — through the seam, so a scanned measured product still
+        // asks for a weight. The code named the size, not the amount.
+        commitAdd(product, variant);
         setQuery('');
         return;
       }
@@ -237,6 +269,7 @@ export function PosRetailCheckout() {
     !!noteFor ||
     !!discountFor ||
     !!pickVariantFor ||
+    !!measureFor ||
     !!pendingApproval ||
     orderDiscountOpen ||
     !!pendingOrderApproval;
@@ -252,8 +285,8 @@ export function PosRetailCheckout() {
     const exact = findByCode(q);
     if (exact) {
       if (exact.variant) {
-        cart.addToCart(exact.product, exact.variant);
-        showToast(`${exact.product.name} (${exact.variant.name}) added`);
+        // D113 (`6.3`) — the same seam as a scan, deliberately.
+        commitAdd(exact.product, exact.variant);
       } else {
         addProduct(exact.product);
       }
@@ -668,13 +701,31 @@ export function PosRetailCheckout() {
                 ) : null}
 
                 <div className="mt-2 flex items-center justify-between">
-                  <QuantityStepper
-                    quantity={item.quantity}
-                    max={stockCap(item.product, item.variant) ?? undefined}
-                    onDecrement={() => cart.changeQty(item.lineKey, -1)}
-                    onIncrement={() => cart.changeQty(item.lineKey, 1)}
-                    onSet={(q) => cart.setQty(item.lineKey, q)}
-                  />
+                  {/*
+                    D113 (`6.3`) — a measured line does not step. ±1 kg of rice is
+                    not what anyone wants, and inventing a smaller increment would
+                    be a guess. Tapping the amount re-opens the numpad, which is
+                    the same way it was entered.
+                  */}
+                  {isMeasured(item.product) ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 tabular-nums"
+                      onClick={() => setMeasureFor({ product: item.product, variant: item.variant })}
+                      aria-label={`Change quantity for ${item.product.name}`}
+                    >
+                      {item.quantity} {item.product.unitOfMeasure ?? ''}
+                    </Button>
+                  ) : (
+                    <QuantityStepper
+                      quantity={item.quantity}
+                      max={stockCap(item.product, item.variant) ?? undefined}
+                      onDecrement={() => cart.changeQty(item.lineKey, -1)}
+                      onIncrement={() => cart.changeQty(item.lineKey, 1)}
+                      onSet={(q) => cart.setQty(item.lineKey, q)}
+                    />
+                  )}
 
                   <div className="flex items-center gap-0.5">
                     <Button
@@ -1151,6 +1202,50 @@ export function PosRetailCheckout() {
         onPick={addChosenVariant}
         onClose={() => setPickVariantFor(null)}
       />
+
+      {/*
+        D113 (`6.3`) — the weight prompt. Opened by `commitAdd`, which every one
+        of the four add paths goes through, so a scan asks for a weight exactly
+        as a card tap does.
+      */}
+      {measureFor ? (
+        <MeasureNumpad
+          open
+          label={
+            measureFor.variant
+              ? `${measureFor.product.name} (${measureFor.variant.name})`
+              : measureFor.product.name
+          }
+          unit={measureFor.product.unitOfMeasure ?? 'units'}
+          initialQuantity={
+            cart.items.find(
+              (it) => it.lineKey === cartLineKey(measureFor.product.id, measureFor.variant?.id ?? null),
+            )?.quantity
+          }
+          max={stockCap(measureFor.product, measureFor.variant) ?? undefined}
+          // The preview is computed by the CART's rule, not by the numpad: one
+          // money engine (D59), and the figure a cashier reads here is the one
+          // the line will carry.
+          preview={(quantity) =>
+            formatMoney(
+              round2((measureFor.variant?.unitPrice ?? measureFor.product.unitPrice ?? 0) * quantity),
+              currency,
+            )
+          }
+          onCancel={() => setMeasureFor(null)}
+          onConfirm={(quantity) => {
+            const { product, variant } = measureFor;
+            cart.addToCart(product, variant);
+            cart.setQty(cartLineKey(product.id, variant?.id ?? null), quantity);
+            setMeasureFor(null);
+            showToast(
+              `${product.name}${variant ? ` (${variant.name})` : ''} — ${quantity} ${
+                product.unitOfMeasure ?? ''
+              }`.trim(),
+            );
+          }}
+        />
+      ) : null}
 
       {discountItem ? (
         <ItemDiscountDialog

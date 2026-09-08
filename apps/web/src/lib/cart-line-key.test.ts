@@ -14,7 +14,7 @@ import {
   type CartItem,
 } from './cart';
 import type { ClientProduct, ClientVariant } from './catalog';
-import { stockCap } from './pos-cart';
+import { isMeasured, stockCap } from './pos-cart';
 
 /**
  * D99 (1c.2) — the cart is keyed by (product, variant), not by product.
@@ -646,5 +646,34 @@ describe('forgonePromotions — a manual discount that displaced a bigger offer'
     expect(forgonePromotions([withDiscount(shirtP, 50), newCartItem(tieP)], [bogoRule])).toEqual(
       [],
     );
+  });
+});
+
+describe('D113 (`6.3`) — isMeasured is read, never inferred', () => {
+  it('reads the flag and nothing else', () => {
+    expect(isMeasured(product({ quantityType: 'DECIMAL' }))).toBe(true);
+    expect(isMeasured(product({ quantityType: 'WHOLE' }))).toBe(false);
+  });
+
+  it('does not guess from the name', () => {
+    // D56 — read a capability, never a proxy. A product called "Rice" that is
+    // sold in sealed 1 kg packets is WHOLE, and a shop selling loose shirts by
+    // the kilo would be DECIMAL. The name says nothing.
+    expect(isMeasured(product({ name: 'Rice', quantityType: 'WHOLE' }))).toBe(false);
+    expect(isMeasured(product({ name: 'Cotton Shirt', quantityType: 'DECIMAL' }))).toBe(true);
+  });
+
+  it('does not guess from the unit either', () => {
+    // A unit left behind by a product switched back to WHOLE (D113b §2) must not
+    // make it measured again.
+    expect(isMeasured(product({ quantityType: 'WHOLE', unitOfMeasure: 'kg' }))).toBe(false);
+  });
+
+  it('the stock cap is decimal-safe for a measured product', () => {
+    // 12.5 kg on the shelf caps a weighed sale at 12.5, not at 12. The cap is
+    // shared with WHOLE products and was never rounded — asserted because `6.3`
+    // now depends on it.
+    const rice = product({ quantityType: 'DECIMAL', unitOfMeasure: 'kg', quantityOnHand: 12.5 });
+    expect(stockCap(rice, null)).toBe(12.5);
   });
 });

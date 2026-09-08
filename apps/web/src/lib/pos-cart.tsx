@@ -68,6 +68,16 @@ export function stockCap(product: ClientProduct, variant: ClientVariant | null =
   return product.type === 'Inventory' ? product.quantityOnHand : null;
 }
 
+/**
+ * D113 (`6.3`) — is this product sold by weight or measure?
+ *
+ * **Read, never inferred** (D56). One predicate so the cart, the till and the
+ * promotion mapper cannot disagree about what "measured" means.
+ */
+export function isMeasured(product: ClientProduct): boolean {
+  return product.quantityType === 'DECIMAL';
+}
+
 interface PosCartValue extends PosCartState {
   /** True once sessionStorage has been read (avoids empty-cart flash on route load). */
   hydrated: boolean;
@@ -155,6 +165,16 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
           const items = s.items
             .map((it) => {
               if (it.lineKey !== lineKey) return it;
+              /*
+               * D113 (`6.3`) — a measured line does not step.
+               *
+               * ±1 kg of rice is not what anyone wants, and inventing a smaller
+               * increment (±0.1?) would be a guess. The till replaces the stepper
+               * with a tap that re-opens the numpad; this is the belt-and-braces
+               * half, so a caller that reaches here anyway cannot round a weight
+               * to the nearest kilo.
+               */
+              if (isMeasured(it.product)) return it;
               // Never let an increment push an Inventory item over its stock.
               const cap = stockCap(it.product, it.variant);
               const next = it.quantity + delta;
@@ -173,10 +193,24 @@ export function PosCartProvider({ children }: { children: React.ReactNode }) {
             ...s,
             items: s.items.map((it) => {
               if (it.lineKey !== lineKey) return it;
-              // Typed quantity: whole number, minimum 1 (removal is via the
-              // trash button), capped at remaining stock for Inventory items.
               const cap = stockCap(it.product, it.variant);
-              let q = Math.max(1, Math.floor(quantity));
+              /*
+               * D113 (`6.3`) — the clamp is CONDITIONAL, not relaxed.
+               *
+               * A WHOLE line keeps flooring to a minimum of 1, byte for byte as
+               * before: you cannot sell half a shirt, and removal is the trash
+               * button rather than a quantity of zero.
+               *
+               * A measured line keeps three decimal places — the precision of
+               * `Decimal(12,3)`, which is grams — and may go below 1, because
+               * 750 g of rice is the ordinary case rather than an edge one. The
+               * floor is 0.001 rather than 0: that is the smallest amount the
+               * column can hold, not an invented minimum (D113b §3), and the
+               * numpad refuses 0 before it ever reaches here.
+               */
+              let q = isMeasured(it.product)
+                ? Math.max(0.001, Math.round(quantity * 1000) / 1000)
+                : Math.max(1, Math.floor(quantity));
               if (cap != null) q = Math.min(q, cap);
               return { ...it, quantity: q };
             }),
