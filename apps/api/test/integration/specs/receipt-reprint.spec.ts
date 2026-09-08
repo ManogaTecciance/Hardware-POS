@@ -158,6 +158,59 @@ describe('a held basket has no receipt', () => {
   });
 });
 
+/**
+ * Requirement 1 (2026-09-08) — the SKU is internal and stays off the bill.
+ *
+ * It used to print under every item name on the 80mm receipt. A customer has no
+ * use for it and the width it costs on an 80mm slip is real.
+ *
+ * The pair of assertions is the point: absent from the PRINTED document, still
+ * present on the product. A test for the absence alone would pass for a change
+ * that had deleted the SKU from the system, which is the opposite of what was
+ * asked.
+ */
+describe('the SKU does not reach the customer bill', () => {
+  it('the product still HAS a SKU', async () => {
+    const product = await prisma.product.findUniqueOrThrow({
+      where: { id: tenant.productAId },
+    });
+
+    expect(product.sku).toBeTruthy();
+  });
+
+  it('and the receipt does not print it', async () => {
+    const product = await prisma.product.findUniqueOrThrow({
+      where: { id: tenant.productAId },
+    });
+    const sale = await paidSale();
+
+    const html = await receiptHtml(sale.id);
+
+    // The line is on the receipt...
+    expect(html).toContain(product.name);
+    // ...and its SKU is not.
+    expect(html).not.toContain(product.sku!);
+  });
+
+  it('still stores the SKU on the receipt RECORD', async () => {
+    /*
+     * The archive is not the document. `toReceiptContent` freezes the line data
+     * as the receipt's permanent record, and dropping the SKU from it would be
+     * a data change wearing a display fix's clothes — a reprint years later
+     * would know less about the sale than the original did.
+     */
+    const product = await prisma.product.findUniqueOrThrow({
+      where: { id: tenant.productAId },
+    });
+    const sale = await paidSale();
+    await receipts.generateCustomer(tenant.tenantId, sale.id, null);
+
+    const receipt = await prisma.receipt.findFirstOrThrow({ where: { saleId: sale.id } });
+
+    expect(JSON.stringify(receipt.content)).toContain(product.sku!);
+  });
+});
+
 describe('a voided receipt is stamped', () => {
   it('prints VOID across a voided sale', async () => {
     const sale = await paidSale();
