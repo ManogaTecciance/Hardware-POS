@@ -78,20 +78,37 @@ export function VariantPickerDialog({
             >
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{v.name}</span>
-                <span
-                  className={cn(
-                    'block text-[11px]',
-                    out ? 'font-medium text-danger' : low ? 'font-medium text-warning' : 'text-muted-foreground',
-                  )}
-                >
-                  {untracked
-                    ? v.sku
-                    : out
+                {/*
+                  The SKU shows ALWAYS, not only when stock is untracked.
+
+                  It used to be `untracked ? v.sku : <stock>` — one slot, two
+                  meanings — so a shop that tracks stock (every LOCAL tenant, which
+                  is every retail tenant) could not see a variant SKU anywhere in
+                  the till. The parent card cannot show one either: a variant
+                  product's parent SKU is a legacy fallback D44 says is not read,
+                  so the read model correctly sends null. Between the two rules the
+                  code an operator had just typed was invisible everywhere.
+
+                  Its own span so the stock keeps its colour coding — an SKU is
+                  not out of stock.
+                */}
+                <span className="block truncate text-[11px] text-muted-foreground">
+                  {v.sku}
+                </span>
+                {untracked ? null : (
+                  <span
+                    className={cn(
+                      'block text-[11px]',
+                      out ? 'font-medium text-danger' : low ? 'font-medium text-warning' : 'text-muted-foreground',
+                    )}
+                  >
+                    {out
                       ? 'Out of stock'
                       : low
                         ? `Low stock — ${v.quantityOnHand} left`
                         : `${v.quantityOnHand} left`}
-                </span>
+                  </span>
+                )}
               </span>
               {/* Per row, because sizes can differ in price and the card shows
                   only the cheapest (`displayPrice`). */}

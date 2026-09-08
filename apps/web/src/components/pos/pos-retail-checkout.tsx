@@ -1048,9 +1048,18 @@ export function PosRetailCheckout() {
                         card has no free space to distribute and the auto margin would
                         collapse to nothing — closing the gap above the button rather than
                         preserving it.
+
+                        The slot now carries the OPTION COUNT for a variant product,
+                        because that is what it can truthfully hold. There is no parent
+                        SKU to show, and a blank line beside neighbours that have one
+                        reads as data lost rather than data absent. The variant SKUs are
+                        in the picker, which is where a variant is chosen.
                       */}
                       <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                        {p.sku ?? '\u00a0'}
+                        {p.sku ??
+                          (p.variants && p.variants.length > 0
+                            ? `${p.variants.length} option${p.variants.length > 1 ? 's' : ''}`
+                            : '\u00a0')}
                       </div>
                       <div className="mt-1.5 flex items-end justify-between gap-1">
                         <span className="text-sm font-semibold text-primary">
