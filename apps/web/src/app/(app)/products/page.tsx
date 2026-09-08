@@ -7,11 +7,11 @@ import {
   CircleCheck,
   CircleOff,
   FileUp,
-  FolderTree,
   PackagePlus,
   Pencil,
   RotateCcw,
   Search,
+  X,
 } from 'lucide-react';
 
 import { ProductImage } from '@/components/product-image';
@@ -30,6 +30,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import { useEffectiveProfile } from '@/lib/platform-profile';
+import { normalizeSearchTerm } from '@/lib/search-term';
 import {
   resolveItemStockPresentation,
   resolveProductManagementPresentation,
@@ -131,7 +132,14 @@ export default function ProductsPage() {
   const [importOpen, setImportOpen] = React.useState(false);
 
   React.useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    /*
+     * The shared normaliser, not a bare `.trim()`. Trimming alone leaves
+     * internal runs intact, so "rice  curry" reached the API with its double
+     * space and matched nothing — the server's `contains` is literal, and the
+     * stored name has one space. Customers and Sales already collapse runs;
+     * this screen was the odd one out.
+     */
+    const t = window.setTimeout(() => setDebouncedSearch(normalizeSearchTerm(search)), 300);
     return () => window.clearTimeout(t);
   }, [search]);
 
@@ -269,10 +277,9 @@ export default function ProductsPage() {
         description={screen.helpText}
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/products/categories" className={buttonVariants({ variant: 'outline' })}>
-              <FolderTree className="h-4 w-4" />
-              Categories
-            </Link>
+            {/* No Categories button here: InventoryTabs above already carries a
+                Categories tab to the same route, and two controls for one
+                destination inches apart just makes the header noisier. */}
             {canManage ? (
               <>
                 <Button variant="outline" onClick={() => setImportOpen(true)}>
@@ -297,8 +304,24 @@ export default function ProductsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name or SKU…"
-            className="pl-10"
+            // The placeholder is not an accessible name — it disappears the
+            // moment anyone types, leaving the field unlabelled.
+            aria-label="Search products"
+            className="pl-10 pr-12"
           />
+          {search !== '' ? (
+            // Same affordance the POS menu browser gives: selecting the text
+            // and deleting it is awkward on a tablet, and clearing is how you
+            // get back to the unfiltered list.
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
         <SearchSelect
           ariaLabel="Filter by category"

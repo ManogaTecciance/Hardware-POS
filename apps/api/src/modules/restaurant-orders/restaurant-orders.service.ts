@@ -532,7 +532,7 @@ function restaurantOrderBaseView(
     source,
     orderNumber: o.orderNumber,
     unifiedStatus: unified,
-    paymentStatus: sale?.paymentStatus ?? null,
+    paymentStatus: sale?.paymentStatus ?? unbilledPaymentStatus(unified),
     customerName: o.takeawayProfile?.customerName ?? null,
     customerPhone: o.takeawayProfile?.customerPhone ?? null,
     contextLabel,
@@ -546,6 +546,33 @@ function restaurantOrderBaseView(
       qty: Number(i.quantity),
     })),
   };
+}
+
+/**
+ * What a restaurant order with no Sale of its own reports as its payment state.
+ *
+ * A Sale is only written at settlement, so an order that is placed, cooked and
+ * handed over but never billed carried NO payment status at all. In the queue
+ * that read as an ambiguous dash, and — the real damage — it made the Unpaid
+ * filter skip exactly the orders somebody still has to chase, because that
+ * filter is an equality test against this field and `null === 'UNPAID'` is
+ * false. "Show me who has not paid" answered with the orders that HAD been
+ * billed, and hid every table still holding the money.
+ *
+ * D53 settled that `UNPAID` means a bill exists and is unpaid. This widens it
+ * to the plain-money reading — nobody has taken the money yet — because that
+ * is the question the queue's Unpaid chip is actually asked. A raised-but-
+ * unpaid bill and a never-billed order are both money owed on this branch
+ * tonight, and the counter chases them the same way.
+ *
+ * CANCELLED and DRAFT stay `null`. Nothing was ever owed on an order that was
+ * called off or never submitted, so badging them Unpaid would park permanent
+ * false debt in the queue. `null` keeps its honest meaning of "no payment
+ * state of ours applies" — which is also what a third-party row returns, since
+ * that money is the platform's to collect and was never ours to report.
+ */
+function unbilledPaymentStatus(unified: UnifiedOrderStatus): 'UNPAID' | null {
+  return unified === 'CANCELLED' || unified === 'DRAFT' ? null : 'UNPAID';
 }
 
 /** The queue-row projection of an ExternalOrder — see restaurantOrderBaseView. */

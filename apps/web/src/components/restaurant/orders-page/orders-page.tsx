@@ -25,6 +25,7 @@ import { OrderDetailDrawer } from './order-detail-drawer';
 import {
   PAYMENT_LABELS,
   PAYMENT_TONES,
+  PAYMENT_UNTRACKED_LABEL,
   UNIFIED_CHANNEL_LABELS,
   UNIFIED_CHANNEL_TONES,
   UNIFIED_SOURCE_LABELS,
@@ -662,13 +663,21 @@ export function OrdersPage({ session, branchId }: Props) {
                     label={UNIFIED_STATUS_LABELS[r.unifiedStatus]}
                     tone={UNIFIED_STATUS_TONES[r.unifiedStatus]}
                   />
+                  {/*
+                    A badge either way. This used to fall back to bare
+                    "payment —" text, which read as broken markup beside the
+                    pills and told a cashier nothing. The absent case is now
+                    rare and specific — third-party (the platform collects) or
+                    cancelled/draft (nothing owed) — because a live unbilled
+                    order reports UNPAID rather than nothing.
+                  */}
                   {r.paymentStatus ? (
                     <StatusBadge
                       label={PAYMENT_LABELS[r.paymentStatus]}
                       tone={PAYMENT_TONES[r.paymentStatus]}
                     />
                   ) : (
-                    <span className="text-xs text-muted-foreground">payment —</span>
+                    <StatusBadge label={PAYMENT_UNTRACKED_LABEL} tone="muted" />
                   )}
                 </div>
                 <span className="text-sm font-bold text-brand-700">

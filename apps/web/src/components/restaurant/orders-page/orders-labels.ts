@@ -58,6 +58,14 @@ export const PAYMENT_LABELS: Record<'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED', 
   REFUNDED: 'Refunded',
 };
 
+/**
+ * Shown where a row carries no payment status of ours: a third-party order
+ * (the platform collects) or a cancelled/draft one (nothing was ever owed).
+ * NOT shown for a live unbilled order — the server reports those `UNPAID`, so
+ * the Unpaid chip finds them.
+ */
+export const PAYMENT_UNTRACKED_LABEL = 'Not tracked';
+
 export const PAYMENT_TONES: Record<'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED', BadgeTone> = {
   UNPAID: 'danger',
   PARTIAL: 'warning',
