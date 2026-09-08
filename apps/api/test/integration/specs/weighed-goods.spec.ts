@@ -41,6 +41,8 @@ import { ProductsModule } from '../../../src/modules/products/products.module';
 import { ProductsService } from '../../../src/modules/products/products.service';
 import { SellableService } from '../../../src/modules/products/sellable.service';
 import { SalesModule } from '../../../src/modules/sales/sales.module';
+import { SalesService } from '../../../src/modules/sales/sales.service';
+import { SettingsService } from '../../../src/modules/settings/settings.service';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
 import { resetDatabase } from '../db-reset';
@@ -50,6 +52,9 @@ let prisma: PrismaClient;
 let testModule: TestingModule;
 let products: ProductsService;
 let sellable: SellableService;
+let sales: SalesService;
+let settings: SettingsService;
+let owner: { id: string; tenantId: string; role: string; activeBranchId: string | null };
 let shop: SeededTenant;
 
 beforeAll(async () => {
@@ -69,6 +74,8 @@ beforeAll(async () => {
   await testModule.init();
   products = testModule.get(ProductsService);
   sellable = testModule.get(SellableService);
+  sales = testModule.get(SalesService);
+  settings = testModule.get(SettingsService);
 });
 
 afterAll(async () => {
@@ -87,6 +94,8 @@ beforeEach(async () => {
       accountingProvider: AccountingProviderKind.NONE,
     },
   });
+  owner = { id: shop.ownerId, tenantId: shop.tenantId, role: 'OWNER', activeBranchId: null };
+  await settings.updateSettings(shop.tenantId, { taxRatePercent: 0 });
 });
 
 /** The shape a client sends; cast because the DTO carries validation only. */
@@ -317,5 +326,105 @@ describe('6.2 — the flag reaches the till', () => {
 
     expect(byId.get(rice.id)!.quantityType).toBe('DECIMAL');
     expect(byId.get(shirt.id)!.quantityType).toBe('WHOLE');
+  });
+});
+
+describe('6.4 — the server charges a measured line the way the applier says', () => {
+  /**
+   * The applier's own behaviour is proven exhaustively in `applier.spec.ts`.
+   * What can only be shown HERE is that `sales.service` actually SETS
+   * `isMeasured` when it builds its promotion context — the caller obligation
+   * D113a names, and the half that a unit test of a pure function cannot reach.
+   */
+  async function riceOnTheShelf(quantity: number) {
+    const rice = await products.create(
+      shop.tenantId,
+      productInput({ name: 'Rice', quantityType: 'DECIMAL', unitOfMeasure: 'kg', unitPrice: 200 }),
+    );
+    await prisma.product.update({
+      where: { id: rice.id },
+      data: { quantityOnHand: quantity },
+    });
+    return rice;
+  }
+
+  it('a BUY_X_GET_Y naming a measured product discounts nothing', async () => {
+    const rice = await riceOnTheShelf(100);
+    await prisma.promotion.create({
+      data: {
+        tenantId: shop.tenantId,
+        name: 'Buy 2 get 1 rice',
+        type: 'BUY_X_GET_Y',
+        buyQuantity: 2,
+        getQuantity: 1,
+        percentageOff: 100,
+        isActive: true,
+        items: { create: [{ productId: rice.id, role: 'BUY', quantity: 2 }] },
+      },
+    });
+
+    const sale = await sales.complete(shop.tenantId, owner as never, {
+      branchId: shop.branchId,
+      registerId: shop.registerId,
+      items: [{ productId: rice.id, quantity: 3 }],
+      payments: [{ method: 'CASH', amount: 600 }],
+    } as never);
+
+    // 3 kg at 200 = 600, undiscounted. Without the caller setting the flag the
+    // applier would have treated 3 kg as three units and given one away.
+    expect(Number(sale.total)).toBe(600);
+    const items = await prisma.saleItem.findMany({ where: { saleId: sale.id } });
+    expect(Number(items[0]!.promotionDiscountAmount)).toBe(0);
+    expect(items[0]!.promotionId).toBeNull();
+  });
+
+  it('POSITIVE CONTROL: a PERCENTAGE promotion still discounts the same line', async () => {
+    // Without this, the assertion above would pass for a server that had stopped
+    // applying promotions to measured products altogether — which is not the
+    // decision. D113a keeps value-based promotions working.
+    const rice = await riceOnTheShelf(100);
+    await prisma.promotion.create({
+      data: {
+        tenantId: shop.tenantId,
+        name: '10% off rice',
+        type: 'PERCENTAGE_DISCOUNT',
+        percentageOff: 10,
+        isActive: true,
+        items: { create: [{ productId: rice.id, role: 'BUNDLE', quantity: 1 }] },
+      },
+    });
+
+    const sale = await sales.complete(shop.tenantId, owner as never, {
+      branchId: shop.branchId,
+      registerId: shop.registerId,
+      items: [{ productId: rice.id, quantity: 3 }],
+      payments: [{ method: 'CASH', amount: 540 }],
+    } as never);
+
+    // 600 less 10% = 540, and the discount is recorded against the line.
+    expect(Number(sale.total)).toBe(540);
+    const items = await prisma.saleItem.findMany({ where: { saleId: sale.id } });
+    expect(Number(items[0]!.promotionDiscountAmount)).toBe(60);
+  });
+
+  it('sells a genuinely fractional quantity, priced per unit of measure', async () => {
+    const rice = await riceOnTheShelf(100);
+
+    const sale = await sales.complete(shop.tenantId, owner as never, {
+      branchId: shop.branchId,
+      registerId: shop.registerId,
+      items: [{ productId: rice.id, quantity: 0.75 }],
+      payments: [{ method: 'CASH', amount: 150 }],
+    } as never);
+
+    // 0.750 × Rs 200/kg = Rs 150. The whole point of the phase, end to end.
+    expect(Number(sale.total)).toBe(150);
+    const items = await prisma.saleItem.findMany({ where: { saleId: sale.id } });
+    expect(items[0]!.quantity.toFixed(3)).toBe('0.750');
+    expect(Number(items[0]!.lineTotal)).toBe(150);
+
+    // And the shelf dropped by three quarters of a kilo, not by one.
+    const after = await prisma.product.findUniqueOrThrow({ where: { id: rice.id } });
+    expect(after.quantityOnHand.toFixed(3)).toBe('99.250');
   });
 });

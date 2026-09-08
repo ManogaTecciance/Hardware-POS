@@ -1213,3 +1213,206 @@ describe('a stackable promotion that partially overlaps keeps its free lines', (
  *    non-stackable winner applying first, so the deleted guard never runs in it.
  *    Both are kept: they cover the rule from opposite sides.
  */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D113a (`6.4`) — a measured line and the four promotion kinds
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A line sold by weight: 0.75 kg of rice at Rs 200/kg. */
+const measured = (id: string, productId: string, unitPrice: number, quantity: number) =>
+  line({
+    id,
+    productId,
+    unitPrice,
+    quantity,
+    lineSubtotal: Math.round(unitPrice * quantity * 100) / 100,
+    manualDiscountAmount: 0,
+    isMeasured: true,
+  });
+
+describe('D113a — measured lines bypass quantity-based promotions', () => {
+  it('PERCENTAGE_DISCOUNT still applies — "10% off all rice" works', () => {
+    const rice = measured('l_rice', 'p_rice', 200, 0.75);
+    const result = applyPromotions({
+      lines: [rice],
+      promotions: [
+        rule({
+          id: 'pr_10',
+          type: 'PERCENTAGE_DISCOUNT',
+          percentageOff: 10,
+          items: [{ productId: 'p_rice', role: 'BUNDLE', quantity: 1 }],
+        }),
+      ],
+    });
+
+    // 0.75 × 200 = 150, 10% of which is 15.
+    expect(byLine(result)).toEqual({ l_rice: 15 });
+  });
+
+  it('FIXED_AMOUNT_DISCOUNT still applies', () => {
+    const rice = measured('l_rice', 'p_rice', 200, 0.75);
+    const result = applyPromotions({
+      lines: [rice],
+      promotions: [
+        rule({
+          id: 'pr_20off',
+          type: 'FIXED_AMOUNT_DISCOUNT',
+          amountOff: 20,
+          items: [{ productId: 'p_rice', role: 'BUNDLE', quantity: 1 }],
+        }),
+      ],
+    });
+
+    expect(byLine(result)).toEqual({ l_rice: 20 });
+  });
+
+  it('BUY_X_GET_Y does NOT apply to a measured line', () => {
+    // 3 kg of rice is not "three units". Without the bypass, `Math.max(1, qty)`
+    // would round 0.75 up to a whole unit for eligibility and a customer buying
+    // 750 g would earn a free bag.
+    const rice = measured('l_rice', 'p_rice', 200, 3);
+    const result = applyPromotions({
+      lines: [rice],
+      promotions: [
+        rule({
+          id: 'pr_bogo',
+          type: 'BUY_X_GET_Y',
+          buyQuantity: 2,
+          getQuantity: 1,
+          percentageOff: 100,
+          items: [{ productId: 'p_rice', role: 'BUY', quantity: 2 }],
+        }),
+      ],
+    });
+
+    expect(result.lines).toEqual([]);
+  });
+
+  it('BUNDLE_FIXED_PRICE does NOT apply to a measured line', () => {
+    const rice = measured('l_rice', 'p_rice', 200, 2);
+    const result = applyPromotions({
+      lines: [rice],
+      promotions: [
+        rule({
+          id: 'pr_bundle',
+          type: 'BUNDLE_FIXED_PRICE',
+          fixedPrice: 300,
+          items: [{ productId: 'p_rice', role: 'BUNDLE', quantity: 2 }],
+        }),
+      ],
+    });
+
+    expect(result.lines).toEqual([]);
+  });
+
+  it('a WHOLE product in the same basket still wins its bundle', () => {
+    // The assertion that makes the two above mean something. Without it they
+    // would pass for an implementation that had broken bundles entirely — the
+    // filter must remove the LINE, not the promotion.
+    const rice = measured('l_rice', 'p_rice', 200, 2);
+    const soap = item('l_soap', 'p_soap', 100, 2);
+
+    const result = applyPromotions({
+      lines: [rice, soap],
+      promotions: [
+        rule({
+          id: 'pr_soap',
+          type: 'BUNDLE_FIXED_PRICE',
+          fixedPrice: 150,
+          items: [{ productId: 'p_soap', role: 'BUNDLE', quantity: 2 }],
+        }),
+      ],
+    });
+
+    // Soap: 200 gross, bundled at 150, so 50 off. Rice untouched.
+    expect(byLine(result)).toEqual({ l_soap: 50 });
+  });
+
+  it('an absent flag behaves exactly as WHOLE', () => {
+    // `isMeasured` is optional because the wire type predates it. A caller that
+    // omits it must get the behaviour that shipped before D113a, byte for byte.
+    const soap = item('l_soap', 'p_soap', 100, 2);
+    expect(soap.isMeasured).toBeUndefined();
+
+    const result = applyPromotions({
+      lines: [soap],
+      promotions: [
+        rule({
+          id: 'pr_bundle',
+          type: 'BUNDLE_FIXED_PRICE',
+          fixedPrice: 150,
+          items: [{ productId: 'p_soap', role: 'BUNDLE', quantity: 2 }],
+        }),
+      ],
+    });
+
+    expect(byLine(result)).toEqual({ l_soap: 50 });
+  });
+
+  it('the reward GATE agrees with the charge — no phantom free item', () => {
+    /*
+     * The case that would be worst to ship. `rewardEntitlements` drives
+     * `outstandingRewards`, which gates `canPay` (4.14). If a measured line
+     * earned an entitlement here while `claimsFor` refused to discount it, the
+     * till would block payment until the cashier added a free item the server
+     * was never going to give — with the customer at the counter.
+     */
+    const rice = measured('l_rice', 'p_rice', 200, 4);
+    const context = {
+      lines: [rice],
+      promotions: [
+        rule({
+          id: 'pr_bogo',
+          type: 'BUY_X_GET_Y',
+          buyQuantity: 2,
+          getQuantity: 1,
+          percentageOff: 100,
+          items: [
+            { productId: 'p_rice', role: 'BUY' as const, quantity: 2 },
+            { productId: 'p_free', role: 'GET' as const, quantity: 1 },
+          ],
+        }),
+      ],
+    };
+
+    /*
+     * `rewardEntitlements` still emits a row, with `earned: 0` — that is what it
+     * does for ANY basket that does not qualify, measured or not, so its presence
+     * is not the bypass failing. **`earned` is where the bypass shows**: 4 kg
+     * against "buy 2" would be 2 without it.
+     */
+    const entitlements = rewardEntitlements(context);
+    expect(entitlements).toHaveLength(1);
+    expect(entitlements[0]!.earned).toBe(0);
+
+    // What actually reaches the cashier: nothing outstanding, so `canPay` is not
+    // blocked, and no discount is charged. The two agree.
+    expect(outstandingRewards(context)).toEqual([]);
+    expect(applyPromotions(context).lines).toEqual([]);
+  });
+
+  it('POSITIVE CONTROL: the same promotion DOES entitle a whole product', () => {
+    // Without this, the assertion above would pass for a reward gate that had
+    // stopped working altogether.
+    const soap = item('l_soap', 'p_soap', 100, 4);
+    const context = {
+      lines: [soap],
+      promotions: [
+        rule({
+          id: 'pr_bogo',
+          type: 'BUY_X_GET_Y',
+          buyQuantity: 2,
+          getQuantity: 1,
+          percentageOff: 100,
+          items: [
+            { productId: 'p_soap', role: 'BUY' as const, quantity: 2 },
+            { productId: 'p_free', role: 'GET' as const, quantity: 1 },
+          ],
+        }),
+      ],
+    };
+
+    expect(rewardEntitlements(context)).toHaveLength(1);
+    expect(rewardEntitlements(context)[0]!.earned).toBe(2);
+  });
+});

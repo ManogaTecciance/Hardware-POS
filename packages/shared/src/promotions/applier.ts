@@ -61,6 +61,19 @@ export interface PromotionCartLine {
    * push the total past a figure nobody approved.
    */
   manualDiscountAmount: number;
+  /**
+   * D113a (`6.4`) — this line is sold by weight or measure.
+   *
+   * `true` makes the line invisible to the two QUANTITY-based promotion kinds
+   * and to those only: "buy 2 get 1 free" on 0.75 kg of rice has no meaning a
+   * customer and a cashier would agree on before an argument. Percentage and
+   * amount-off still apply — "10% off all rice" is exactly how grocers price.
+   *
+   * Same shape as `manualDiscountAmount` above, narrowed to two of the four
+   * kinds. **Optional** because the wire type predates it and an older caller
+   * genuinely omits it; absent means WHOLE, which is what every line was.
+   */
+  isMeasured?: boolean;
 }
 
 /** One product's part in a promotion. */
@@ -459,7 +472,19 @@ export interface RewardEntitlement {
  * possible rewards is a choice for the customer, not for the till.
  */
 export function rewardEntitlements(context: PromotionContext): RewardEntitlement[] {
-  const eligibleLines = context.lines.filter((l) => l.manualDiscountAmount <= 0);
+  /*
+   * D113a (`6.4`) — measured lines are excluded here too, and they have to be.
+   *
+   * This function drives `outstandingRewards`, which gates `canPay` (4.14). It
+   * runs BUY_X_GET_Y logic, so if a measured line could earn an entitlement here
+   * while `claimsFor` refuses to discount it, the till would block payment until
+   * the cashier added a free item the server was never going to give away.
+   *
+   * That is the badge-and-charge disagreement 2.12 and 3.10 both were, in the
+   * one place it would be hardest to diagnose — the customer is at the counter
+   * and the Pay button does not work.
+   */
+  const eligibleLines = countableLines(context.lines).filter((l) => l.manualDiscountAmount <= 0);
   const out: RewardEntitlement[] = [];
 
   for (const rule of context.promotions) {
@@ -520,16 +545,30 @@ function applyBuyXGetY(lines: readonly PromotionCartLine[], rule: PromotionRule)
     .filter((c) => c.discountAmount > 0);
 }
 
+/**
+ * D113a (`6.4`) — the lines a QUANTITY-based promotion may consider.
+ *
+ * A measured line is removed; everything else passes through. Kept as its own
+ * function so the two call sites below cannot drift, and so what it does is
+ * legible from the dispatch.
+ */
+function countableLines(lines: readonly PromotionCartLine[]): readonly PromotionCartLine[] {
+  return lines.some((l) => l.isMeasured) ? lines.filter((l) => !l.isMeasured) : lines;
+}
+
 function claimsFor(lines: readonly PromotionCartLine[], rule: PromotionRule): Claim[] {
   switch (rule.type) {
+    // D113a — value-based, so a measured line is eligible like any other.
     case 'PERCENTAGE_DISCOUNT':
       return applyPercentage(lines, rule);
     case 'FIXED_AMOUNT_DISCOUNT':
       return applyFixedAmount(lines, rule);
+    // D113a — quantity-based, so a measured line is not. "Buy 2 get 1 free" on
+    // 0.75 kg is undefined; these two never see it.
     case 'BUNDLE_FIXED_PRICE':
-      return applyBundle(lines, rule);
+      return applyBundle(countableLines(lines), rule);
     case 'BUY_X_GET_Y':
-      return applyBuyXGetY(lines, rule);
+      return applyBuyXGetY(countableLines(lines), rule);
     default: {
       // `PromotionKind` is total over the Prisma enum, so a new member is a
       // compile error here rather than a promotion that silently never applies.

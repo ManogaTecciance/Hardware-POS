@@ -371,6 +371,8 @@ export function PosRetailCheckout() {
                 quantity: it.quantity,
                 lineSubtotal: line.lineSubtotal,
                 manualDiscountAmount: line.discountAmount,
+                // D113a (`6.4`) — same flag as `cart.ts` and the server.
+                isMeasured: it.product.quantityType === 'DECIMAL',
               };
             }),
             promotions: data.promotionRules,

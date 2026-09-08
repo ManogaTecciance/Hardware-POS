@@ -182,6 +182,9 @@ function priceCart(
       // Precedence lives in the applier: a manually discounted line is invisible
       // to promotions, so it cannot even complete a bundle (D102).
       manualDiscountAmount: line.discountAmount,
+      // D113a (`6.4`) — the till's preview must carry the same flag the server
+      // charges with, or the cashier is shown a discount that never lands.
+      isMeasured: item.product.quantityType === 'DECIMAL',
     })),
     promotions: [...promotionRules],
   });

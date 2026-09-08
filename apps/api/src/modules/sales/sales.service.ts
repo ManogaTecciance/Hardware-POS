@@ -3,6 +3,7 @@ import { Prisma,
   AccountingProviderKind,
   DiscountType,
   PaymentStatus,
+  QuantityType,
   QuickBooksDocumentType,
 } from '@hardware-pos/database';
 import {
@@ -623,6 +624,11 @@ export class SalesService {
         // discounted line is invisible to promotions and cannot complete a
         // bundle. Passing it truthfully is this call site's whole obligation.
         manualDiscountAmount: l.discountAmount,
+        // D113a (`6.4`) — a measured line is invisible to the two
+        // QUANTITY-based promotion kinds. Set on BOTH sides: the till
+        // previews with the same flag, or the cashier is shown a discount
+        // the server refuses.
+        isMeasured: byId.get(l.productId)?.quantityType === QuantityType.DECIMAL,
       })),
       promotions: eligiblePromotions,
     });
