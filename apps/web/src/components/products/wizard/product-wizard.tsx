@@ -154,6 +154,23 @@ export function ProductWizard(props: Props) {
   const [stepIndex, setStepIndex] = React.useState(0);
   const [stepAnimKey, setStepAnimKey] = React.useState(0);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
+  /**
+   * Has this step been submitted yet?
+   *
+   * Errors appear on the first blocked Continue, never while the operator is
+   * still filling the step in — but once shown they must track the state, or a
+   * corrected field keeps its red message until Continue is pressed again and
+   * the operator is left arguing with a stale complaint.
+   */
+  const [attempted, setAttempted] = React.useState(false);
+  /**
+   * Bumped ONLY by a blocked submit. The scroll/focus effect keys on this
+   * rather than on `errors`, which now changes on every keystroke — otherwise
+   * typing in one field would yank the page to another.
+   */
+  const [submitTick, setSubmitTick] = React.useState(0);
+  /** Scroll/focus root for the validation effect below. */
+  const stepRef = React.useRef<HTMLDivElement>(null);
   const [saveState, setSaveState] = React.useState<'idle' | 'saving' | 'saved'>('idle');
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
@@ -283,23 +300,71 @@ export function ProductWizard(props: Props) {
   const currentStep = wizardSteps[Math.min(stepIndex, wizardSteps.length - 1)]!.key;
   const validateCtx = { inventoryMode, businessKind, attributeSchema };
 
-  const goTo = (nextIndex: number) => {
+  /**
+   * `keepErrors` exists for one caller: Save on the Review step, which jumps
+   * back to the earliest failing step and must ARRIVE with the messages
+   * showing. Navigating normally still clears them — errors belong to the step
+   * you were on, not the one you moved to.
+   */
+  const goTo = (nextIndex: number, { keepErrors = false }: { keepErrors?: boolean } = {}) => {
     setStepIndex(nextIndex);
     setStepAnimKey((k) => k + 1);
-    setErrors({});
+    if (!keepErrors) setErrors({});
+    // A step reached normally starts clean; one reached BECAUSE it failed
+    // arrives already submitted, so its messages keep tracking the fixes.
+    setAttempted(keepErrors);
     setSaveError(null);
   };
 
   const onContinue = () => {
     const stepErrors = validateStep(currentStep, state, validateCtx);
+    setAttempted(true);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
+      setSubmitTick((t) => t + 1);
       return;
     }
     if (stepIndex < wizardSteps.length - 1) {
       goTo(stepIndex + 1);
     }
   };
+
+  /**
+   * Bring the first failed field into view whenever validation blocks a move.
+   *
+   * Step 3 on a restaurant tenant runs well past one screen (modifiers,
+   * promotions, kitchen routing, recipe), so a message rendered near the top
+   * left the operator pressing Continue and watching nothing happen. A real
+   * input is preferred because it can take focus — the next keystroke then
+   * lands where the fix is needed — and the step-level alerts that have no
+   * input of their own (`variations-empty`, `pricing-none-enabled`) are the
+   * fallback. `scrollIntoView` is feature-checked: jsdom does not implement it.
+   */
+  React.useEffect(() => {
+    if (submitTick === 0) return;
+    const root = stepRef.current;
+    if (!root) return;
+    const field = root.querySelector<HTMLElement>('[aria-invalid="true"]');
+    const target = field ?? root.querySelector<HTMLElement>('[role="alert"]');
+    if (!target) return;
+    if (typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    field?.focus({ preventScroll: true });
+  }, [submitTick]);
+
+  /**
+   * Once a step has been submitted, its errors follow the state.
+   *
+   * Without this the map is a snapshot from the moment Continue was pressed:
+   * the operator corrects the field, the message stays put, and the only way
+   * to find out whether it worked is to press Continue again. Re-running the
+   * SAME validator the shell submits with keeps the two from disagreeing.
+   */
+  React.useEffect(() => {
+    if (!attempted) return;
+    setErrors(validateStep(currentStep, state, { inventoryMode, businessKind, attributeSchema }));
+  }, [attempted, state, currentStep, inventoryMode, businessKind, attributeSchema]);
 
   const onBack = () => {
     if (stepIndex === 0) {
@@ -310,11 +375,11 @@ export function ProductWizard(props: Props) {
     goTo(stepIndex - 1);
   };
 
-  const onEditFrom = (target: StepKey) => {
+  const onEditFrom = (target: StepKey, options?: { keepErrors?: boolean }) => {
     // Index into the VISIBLE list, not STEP_ORDER — they differ when the
     // attributes step is present (D64).
     const nextIndex = wizardSteps.findIndex((s) => s.key === target);
-    if (nextIndex >= 0) goTo(nextIndex);
+    if (nextIndex >= 0) goTo(nextIndex, options);
   };
 
   // ── Persistence ──────────────────────────────────────────────────────────
@@ -330,7 +395,10 @@ export function ProductWizard(props: Props) {
       const earliest = STEP_ORDER.find(
         (k) => Object.keys(validateStep(k, state, validateCtx)).length > 0,
       );
-      if (earliest) onEditFrom(earliest);
+      // Both state updates batch, so a plain `goTo` here would land on the
+      // failing step having just erased the errors it was sent to show.
+      if (earliest) onEditFrom(earliest, { keepErrors: true });
+      setSubmitTick((t) => t + 1);
       return;
     }
 
@@ -399,6 +467,7 @@ export function ProductWizard(props: Props) {
 
         <div
           key={stepAnimKey}
+          ref={stepRef}
           className="animate-in fade-in slide-in-from-top-1 rounded-2xl border border-border bg-card p-5 motion-reduce:animate-none"
           style={{ animationDuration: '160ms' }}
         >

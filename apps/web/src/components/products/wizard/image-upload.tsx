@@ -6,7 +6,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { type Session } from '@/lib/auth';
-import { uploadProductImagePreCreate } from '@/lib/products-api';
+import { resolveImageUrl, uploadProductImagePreCreate } from '@/lib/products-api';
 
 /**
  * Add Product wizard — image field. Structural twin of the restaurant menu
@@ -108,7 +108,16 @@ export function ImageUpload({ session, value, onChange }: Props) {
   };
 
   const hasImage = !!value;
-  const displayName = uploadedMeta?.name ?? (hasImage ? deriveFilename(value) : null);
+  /*
+   * D86 — `value` is the STORED path (`/uploads/<key>`), which the API serves
+   * from a different origin than the web app. The thumbnail has to resolve it
+   * for the same reason the right-rail preview does, or the operator uploads a
+   * photo and gets an empty grey square back.
+   */
+  const previewSrc = resolveImageUrl(value);
+  // `deriveFilename` parses with `new URL`, which throws on a relative path —
+  // so before this it always fell through to the generic "Image" label.
+  const displayName = uploadedMeta?.name ?? (previewSrc ? deriveFilename(previewSrc) : null);
   const displaySize = uploadedMeta?.size;
 
   if (hasImage) {
@@ -118,7 +127,7 @@ export function ImageUpload({ session, value, onChange }: Props) {
           <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg bg-muted">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={value}
+              src={previewSrc ?? undefined}
               alt=""
               className="h-full w-full object-cover animate-in fade-in motion-reduce:animate-none"
               style={{ animationDuration: '160ms' }}

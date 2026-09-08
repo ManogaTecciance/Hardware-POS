@@ -391,6 +391,56 @@ export const MAX_COMBINATIONS = 500;
 /** Combinations above this threshold require operator confirmation before use. */
 export const COMBINATION_CONFIRM_THRESHOLD = 100;
 
+/** `@MaxLength(80)` on CreateProductDto.sku and CreateVariantInputDto.sku/barcode. */
+export const MAX_SKU_LENGTH = 80;
+
+/** `@MaxLength(200)` on CreateProductDto.name. */
+export const MAX_NAME_LENGTH = 200;
+
+/**
+ * Decimal places of the value the server will parse, not of what was typed.
+ *
+ * `String(Number(x))` normalises `2.50` to `2.5` and `1e-3` to `0.001`, so a
+ * trailing zero is never counted against the operator. Magnitudes small enough
+ * to stay in exponent form after that are past any limit we set, so they are
+ * reported as over — the alternative is parsing `e` notation to prove a number
+ * nobody types is fine.
+ */
+function decimalPlacesOf(raw: string): number {
+  const normalised = String(Number(raw));
+  if (normalised.includes('e') || normalised.includes('E')) return Number.MAX_SAFE_INTEGER;
+  const dot = normalised.indexOf('.');
+  return dot === -1 ? 0 : normalised.length - dot - 1;
+}
+
+/**
+ * An OPTIONAL numeric input, checked against the same rules the DTO applies.
+ *
+ * Empty passes — absence is how the payload builders say "not set". Anything
+ * else has to survive `Number()` as a non-negative value, because that is the
+ * coercion the builders perform on commit: today a pasted word becomes `NaN`
+ * and JSON-serialises to `null` (the entry silently disappears) and a negative
+ * sails through to a `@Min(0)` rejection the operator cannot map back to a
+ * field. `maxDecimals` is passed only where the DTO actually declares
+ * `maxDecimalPlaces` — inventing a cap the server does not enforce would block
+ * saves the API would have accepted.
+ */
+function optionalNumberError(
+  raw: string,
+  label: string,
+  maxDecimals?: number,
+): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return `${label} must be a number.`;
+  if (n < 0) return `${label} cannot be negative.`;
+  if (maxDecimals != null && decimalPlacesOf(trimmed) > maxDecimals) {
+    return `${label} allows at most ${maxDecimals} decimal places.`;
+  }
+  return null;
+}
+
 export function validateStep(
   step: StepKey,
   state: WizardState,
@@ -400,6 +450,12 @@ export function validateStep(
 
   if (step === 'details') {
     if (!state.name.trim()) errors.name = 'Give the product a name.';
+    else if (state.name.trim().length > MAX_NAME_LENGTH) {
+      // The input caps typing at the same number, so this catches the values
+      // that never went through it: a product imported by CSV, a draft
+      // restored from localStorage, or an edit hydrated from an older row.
+      errors.name = `Product name is limited to ${MAX_NAME_LENGTH} characters.`;
+    }
     if (!state.type) errors.type = 'Choose an item type.';
     if (state.description.length > 800) {
       errors.description = 'Description is limited to 800 characters.';
@@ -413,6 +469,10 @@ export function validateStep(
       const n = Number(state.prepMinutes);
       if (!Number.isFinite(n) || n < 0 || n > 360) {
         errors.prepMinutes = 'Preparation time is 0-360 minutes.';
+      } else if (!Number.isInteger(n)) {
+        // The DTO declares `@IsInt()`, so a half-minute is a 400 on commit
+        // rather than a rounding — say so here, next to the field.
+        errors.prepMinutes = 'Preparation time must be a whole number of minutes.';
       }
     }
   }
@@ -431,9 +491,21 @@ export function validateStep(
     if (state.hasVariations) {
       // Each declared dimension needs a name and at least one named option, so
       // the eventual PUT lands with the same shape the DTO accepts.
+      // The server upserts dimensions BY NAME (see ReplaceVariationsDto), so
+      // two dimensions called "Size" are not two dimensions — they are one
+      // fighting itself, and which options survive is a coin toss.
+      const seenDimensions = new Set<string>();
+
       state.variations.forEach((d, di) => {
-        if (!d.name.trim()) {
+        const dimensionName = d.name.trim();
+        if (!dimensionName) {
           errors[`variation-name-${di}`] = 'Name this variation.';
+        } else {
+          const key = dimensionName.toLowerCase();
+          if (seenDimensions.has(key)) {
+            errors[`variation-name-${di}`] = 'Variation names must be unique.';
+          }
+          seenDimensions.add(key);
         }
         const namedOptions = d.options.filter((o) => o.name.trim());
         if (namedOptions.length === 0) {
@@ -467,6 +539,16 @@ export function validateStep(
   }
 
   if (step === 'pricing') {
+    /**
+     * The stock inputs are conditionally rendered, and a value can outlive its
+     * field — type a reorder point, then switch Track stock off (D101), and the
+     * string stays in state with nowhere to show it. Validating it anyway would
+     * block Continue on a message the operator cannot see or clear, so these two
+     * mirror the step's own render conditions exactly.
+     */
+    const showsReorder = state.trackInventory;
+    const showsOpening = ctx.inventoryMode === 'LOCAL' && state.trackInventory;
+
     if (state.hasVariations) {
       const enabled = state.variants.filter((v) => v.enabled);
       if (enabled.length === 0) {
@@ -474,16 +556,41 @@ export function validateStep(
       }
       const skus = new Set<string>();
       enabled.forEach((v, vi) => {
-        if (!v.sku.trim()) errors[`variant-sku-${vi}`] = 'SKU is required.';
+        const sku = v.sku.trim();
+        if (!sku) errors[`variant-sku-${vi}`] = 'SKU is required.';
         else {
-          const key = v.sku.trim().toLowerCase();
+          const key = sku.toLowerCase();
+          // Length loses to uniqueness only in ordering: both are reported
+          // against the same field, and the set is fed either way so a
+          // too-long SKU still counts as a duplicate of its twin.
           if (skus.has(key)) errors[`variant-sku-${vi}`] = 'SKUs must be unique.';
+          else if (sku.length > MAX_SKU_LENGTH) {
+            errors[`variant-sku-${vi}`] = `SKU is limited to ${MAX_SKU_LENGTH} characters.`;
+          }
           skus.add(key);
         }
+
+        if (v.barcode.trim().length > MAX_SKU_LENGTH) {
+          errors[`variant-barcode-${vi}`] = `Barcode is limited to ${MAX_SKU_LENGTH} characters.`;
+        }
+
         const price = Number(v.unitPrice);
         if (v.unitPrice === '' || !Number.isFinite(price) || price < 0) {
           errors[`variant-price-${vi}`] = 'Enter a selling price.';
+        } else if (decimalPlacesOf(v.unitPrice) > 2) {
+          // The variant DTO is stricter than the product one here
+          // (`@IsNumber({ maxDecimalPlaces: 2 })`), so mirror it per-row.
+          errors[`variant-price-${vi}`] = 'Selling price allows at most 2 decimal places.';
         }
+
+        const openq = showsOpening
+          ? optionalNumberError(v.openingQuantity, 'Opening stock', 3)
+          : null;
+        if (openq) errors[`variant-openq-${vi}`] = openq;
+        const reorder = showsReorder
+          ? optionalNumberError(v.reorderLevel, 'Reorder point', 3)
+          : null;
+        if (reorder) errors[`variant-reorder-${vi}`] = reorder;
       });
 
       // Opening branch is only meaningful under LOCAL inventory AND when the
@@ -496,11 +603,28 @@ export function validateStep(
         }
       }
     } else {
-      if (!state.simple.sku.trim()) errors['simple-sku'] = 'SKU is required.';
+      const sku = state.simple.sku.trim();
+      if (!sku) errors['simple-sku'] = 'SKU is required.';
+      else if (sku.length > MAX_SKU_LENGTH) {
+        errors['simple-sku'] = `SKU is limited to ${MAX_SKU_LENGTH} characters.`;
+      }
       const price = Number(state.simple.unitPrice);
       if (state.simple.unitPrice === '' || !Number.isFinite(price) || price < 0) {
         errors['simple-price'] = 'Enter a selling price.';
       }
+      // No decimal cap on these three: `CreateProductDto` declares them as
+      // plain `@IsNumber() @Min(0)`, unlike the variant DTO. Only the checks
+      // the server actually makes are worth blocking a save over.
+      const cost = optionalNumberError(state.simple.costPrice, 'Cost price');
+      if (cost) errors['simple-cost'] = cost;
+      const openq = showsOpening
+        ? optionalNumberError(state.simple.openingQuantity, 'Opening quantity')
+        : null;
+      if (openq) errors['simple-openq'] = openq;
+      const reorder = showsReorder
+        ? optionalNumberError(state.simple.reorderLevel, 'Reorder point')
+        : null;
+      if (reorder) errors['simple-reorder'] = reorder;
     }
 
     // D65 — recipe rows (card D). Every listed component needs a usable

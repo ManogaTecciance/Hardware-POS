@@ -193,9 +193,18 @@ function Row({
 }) {
   return (
     <div className="flex items-start justify-between gap-3 text-xs">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      {/*
+        * Un-truncated rows (Name, Brand) carry raw operator input, so they get
+        * the same treatment as the preview: `min-w-0` lets the flex item drop
+        * below the width of one unbroken token and `break-words` wraps it,
+        * instead of the value running past the card. Short values are
+        * unaffected — they still sit on one right-aligned line.
+        */}
       <span
-        className={`font-medium text-foreground ${truncate ? 'max-w-[60%] truncate' : ''}`}
+        className={`min-w-0 font-medium text-foreground ${
+          truncate ? 'max-w-[60%] truncate' : 'break-words text-right'
+        }`}
         title={truncate ? value : undefined}
       >
         {value}

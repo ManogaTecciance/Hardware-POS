@@ -12,7 +12,12 @@ import type { ProductBusinessKind } from '@/lib/products/product-presentation';
 import { useIsTabletUp } from '@/lib/use-viewport';
 
 import { StepRestaurantAdditions } from './step-restaurant-additions';
-import { variantLabel, type VariantDraft, type WizardState } from './wizard-state';
+import {
+  MAX_SKU_LENGTH,
+  variantLabel,
+  type VariantDraft,
+  type WizardState,
+} from './wizard-state';
 
 /**
  * Add Product wizard — Step 3: Pricing & inventory (D44).
@@ -164,16 +169,17 @@ function SimpleForm({
         />
       </Field>
 
-      <Field label="Cost price" htmlFor="simple-cost">
+      <Field label="Cost price" htmlFor="simple-cost" error={errors['simple-cost']}>
         <MoneyInput
           id="simple-cost"
           value={state.simple.costPrice}
           onChange={(v) => set({ costPrice: v })}
+          invalid={!!errors['simple-cost']}
         />
       </Field>
 
       {isLocal && state.trackInventory ? (
-        <Field label="Opening quantity" htmlFor="simple-openq">
+        <Field label="Opening quantity" htmlFor="simple-openq" error={errors['simple-openq']}>
           <Input
             id="simple-openq"
             type="number"
@@ -183,6 +189,7 @@ function SimpleForm({
             value={state.simple.openingQuantity}
             onChange={(e) => set({ openingQuantity: e.target.value })}
             placeholder="0"
+            aria-invalid={!!errors['simple-openq']}
           />
         </Field>
       ) : null}
@@ -191,7 +198,7 @@ function SimpleForm({
           has neither. Tracked items (retail Inventory, restaurant packaged
           goods) keep the field exactly as it was. */}
       {state.trackInventory ? (
-        <Field label="Reorder point" htmlFor="simple-reorder">
+        <Field label="Reorder point" htmlFor="simple-reorder" error={errors['simple-reorder']}>
           <Input
             id="simple-reorder"
             type="number"
@@ -201,6 +208,7 @@ function SimpleForm({
             value={state.simple.reorderLevel}
             onChange={(e) => set({ reorderLevel: e.target.value })}
             placeholder="Optional"
+            aria-invalid={!!errors['simple-reorder']}
           />
         </Field>
       ) : null}
@@ -341,7 +349,10 @@ function VariantMatrix({
                 const v = state.variants[idx]!;
                 const label = variantLabel(v, state.variations) || 'Unnamed variant';
                 const skuErr = errors[`variant-sku-${rowNumber}`];
+                const barcodeErr = errors[`variant-barcode-${rowNumber}`];
                 const priceErr = errors[`variant-price-${rowNumber}`];
+                const openqErr = errors[`variant-openq-${rowNumber}`];
+                const reorderErr = errors[`variant-reorder-${rowNumber}`];
                 return (
                   <tr key={v.key} className="border-b border-border/60 last:border-none">
                     <td className="min-w-[10rem] whitespace-nowrap p-2 font-medium">{label}</td>
@@ -352,22 +363,22 @@ function VariantMatrix({
                         aria-label={`SKU for ${label}`}
                         aria-invalid={!!skuErr}
                         placeholder="SKU"
+                        maxLength={MAX_SKU_LENGTH}
                         className="min-w-[9rem]"
                       />
-                      {skuErr ? (
-                        <p className="mt-0.5 text-[11px] text-danger" role="alert">
-                          {skuErr}
-                        </p>
-                      ) : null}
+                      <CellError message={skuErr} />
                     </td>
                     <td className="p-2">
                       <Input
                         value={v.barcode}
                         onChange={(e) => updateVariant(idx, { barcode: e.target.value })}
                         aria-label={`Barcode for ${label}`}
+                        aria-invalid={!!barcodeErr}
                         placeholder="Optional"
+                        maxLength={MAX_SKU_LENGTH}
                         className="min-w-[9rem]"
                       />
+                      <CellError message={barcodeErr} />
                     </td>
                     <td className="p-2">
                       <MoneyInput
@@ -376,11 +387,7 @@ function VariantMatrix({
                         ariaLabel={`Selling price for ${label}`}
                         invalid={!!priceErr}
                       />
-                      {priceErr ? (
-                        <p className="mt-0.5 text-[11px] text-danger" role="alert">
-                          {priceErr}
-                        </p>
-                      ) : null}
+                      <CellError message={priceErr} />
                     </td>
                     {isLocal && state.trackInventory ? (
                       <td className="p-2">
@@ -394,9 +401,11 @@ function VariantMatrix({
                             updateVariant(idx, { openingQuantity: e.target.value })
                           }
                           aria-label={`Opening stock for ${label}`}
+                          aria-invalid={!!openqErr}
                           placeholder="0"
                           className="min-w-[6rem] touch-manipulation"
                         />
+                        <CellError message={openqErr} />
                       </td>
                     ) : null}
                     {state.trackInventory ? (
@@ -409,9 +418,11 @@ function VariantMatrix({
                           value={v.reorderLevel}
                           onChange={(e) => updateVariant(idx, { reorderLevel: e.target.value })}
                           aria-label={`Reorder point for ${label}`}
+                          aria-invalid={!!reorderErr}
                           placeholder="Optional"
                           className="min-w-[6rem] touch-manipulation"
                         />
+                        <CellError message={reorderErr} />
                       </td>
                     ) : null}
                   </tr>
@@ -431,7 +442,10 @@ function VariantMatrix({
             const v = state.variants[idx]!;
             const label = variantLabel(v, state.variations) || 'Unnamed variant';
             const skuErr = errors[`variant-sku-${rowNumber}`];
+            const barcodeErr = errors[`variant-barcode-${rowNumber}`];
             const priceErr = errors[`variant-price-${rowNumber}`];
+            const openqErr = errors[`variant-openq-${rowNumber}`];
+            const reorderErr = errors[`variant-reorder-${rowNumber}`];
             return (
               <li
                 key={v.key}
@@ -449,12 +463,9 @@ function VariantMatrix({
                       aria-label={`SKU for ${label}`}
                       aria-invalid={!!skuErr}
                       placeholder="SKU"
+                      maxLength={MAX_SKU_LENGTH}
                     />
-                    {skuErr ? (
-                      <p className="text-[11px] text-danger" role="alert">
-                        {skuErr}
-                      </p>
-                    ) : null}
+                    <CellError message={skuErr} />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -464,8 +475,11 @@ function VariantMatrix({
                       value={v.barcode}
                       onChange={(e) => updateVariant(idx, { barcode: e.target.value })}
                       aria-label={`Barcode for ${label}`}
+                      aria-invalid={!!barcodeErr}
                       placeholder="Optional"
+                      maxLength={MAX_SKU_LENGTH}
                     />
+                    <CellError message={barcodeErr} />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -477,11 +491,7 @@ function VariantMatrix({
                       ariaLabel={`Selling price for ${label}`}
                       invalid={!!priceErr}
                     />
-                    {priceErr ? (
-                      <p className="text-[11px] text-danger" role="alert">
-                        {priceErr}
-                      </p>
-                    ) : null}
+                    <CellError message={priceErr} />
                   </div>
                   {isLocal && state.trackInventory ? (
                     <div className="space-y-1">
@@ -496,9 +506,11 @@ function VariantMatrix({
                         value={v.openingQuantity}
                         onChange={(e) => updateVariant(idx, { openingQuantity: e.target.value })}
                         aria-label={`Opening stock for ${label}`}
+                        aria-invalid={!!openqErr}
                         placeholder="0"
                         className="touch-manipulation"
                       />
+                      <CellError message={openqErr} />
                     </div>
                   ) : null}
                   {state.trackInventory ? (
@@ -514,9 +526,11 @@ function VariantMatrix({
                         value={v.reorderLevel}
                         onChange={(e) => updateVariant(idx, { reorderLevel: e.target.value })}
                         aria-label={`Reorder point for ${label}`}
+                        aria-invalid={!!reorderErr}
                         placeholder="Optional"
                         className="touch-manipulation"
                       />
+                      <CellError message={reorderErr} />
                     </div>
                   ) : null}
                 </div>
@@ -622,6 +636,19 @@ function MoneyInput({
         aria-label={ariaLabel}
       />
     </div>
+  );
+}
+
+/**
+ * The per-cell validation line, shared by the table and the card list so a
+ * variant row blames the same field with the same wording in both layouts.
+ */
+function CellError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p className="mt-0.5 text-[11px] text-danger" role="alert">
+      {message}
+    </p>
   );
 }
 

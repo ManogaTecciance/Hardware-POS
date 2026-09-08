@@ -13,6 +13,7 @@ import type { ProductBusinessKind } from '@/lib/products/product-presentation';
 import { MENU_DIETARY_TAGS } from '@/lib/restaurant/types';
 
 import { ImageUpload } from './image-upload';
+import { MAX_NAME_LENGTH } from './wizard-state';
 import type { RestaurantFoodType, WizardState } from './wizard-state';
 
 /**
@@ -107,13 +108,29 @@ export function StepDetails({
         </p>
       </div>
 
-      <Field label="Product name" htmlFor="product-name" required error={errors.name}>
+      {/* The counter appears only near the ceiling. `maxLength` stops typing
+          dead at the limit, which reads as a broken keyboard unless something
+          says why — but showing "3 / 200" from the first keystroke nags about
+          a limit almost no product name approaches. */}
+      <Field
+        label="Product name"
+        htmlFor="product-name"
+        required
+        error={errors.name}
+        hint={
+          state.name.length >= MAX_NAME_LENGTH * 0.8 ? (
+            <span className={state.name.length >= MAX_NAME_LENGTH ? 'text-warning' : undefined}>
+              {state.name.length} / {MAX_NAME_LENGTH}
+            </span>
+          ) : null
+        }
+      >
         <Input
           id="product-name"
           value={state.name}
           onChange={(e) => onChange({ name: e.target.value })}
           placeholder={isRestaurant ? 'e.g. Mix Kottu' : 'e.g. Milk 200ml'}
-          maxLength={200}
+          maxLength={MAX_NAME_LENGTH}
           autoFocus
           aria-invalid={!!errors.name}
         />
@@ -389,21 +406,34 @@ function Field({
   htmlFor,
   required,
   error,
+  /** Right-aligned note on the label row — a character counter, typically. */
+  hint,
   children,
 }: {
   label: string;
   htmlFor?: string;
   required?: boolean;
   error?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="flex items-center gap-1 text-sm font-medium" htmlFor={htmlFor}>
-        {label}
-        {required ? <span className="text-danger" aria-hidden="true">*</span> : null}
-        {required ? <span className="sr-only"> (required)</span> : null}
-      </label>
+      <div className="flex items-center justify-between gap-2">
+        <label className="flex items-center gap-1 text-sm font-medium" htmlFor={htmlFor}>
+          {label}
+          {required ? <span className="text-danger" aria-hidden="true">*</span> : null}
+          {required ? <span className="sr-only"> (required)</span> : null}
+        </label>
+        {/* Advisory only: the input's own maxLength is what enforces the cap,
+            and a screen reader gets the limit from that, so announcing every
+            keystroke here would be noise. */}
+        {hint ? (
+          <span aria-hidden="true" className="text-[11px] text-muted-foreground">
+            {hint}
+          </span>
+        ) : null}
+      </div>
       {children}
       {error ? (
         <p className="text-xs text-danger" role="alert">
