@@ -145,17 +145,23 @@ export const RETAIL_NAVIGATION: readonly NavGroupSpec[] = [
       // gating the catalogue on it would hide products from a tenant that owns
       // them.
       { href: '/products', label: 'Products', icon: 'Package', permission: Permission.PRODUCT_READ },
-      // Phase 8 (`8.7`, D111) — stock counts. Gated on INVENTORY, unlike
-      // Products above: the catalogue is shared core, but counting a shelf is
-      // meaningless for a tenant whose stock is not tracked here, and the
-      // server refuses it for exactly that reason.
-      {
-        href: '/stock-takes',
-        label: 'Stock count',
-        icon: 'ClipboardCheck',
-        permission: Permission.PRODUCT_MANAGE,
-        module: 'INVENTORY',
-      },
+      /*
+       * `8.7` (D111) put a `Stock count` entry here. **The PO removed it from
+       * the rail on 2026-09-08**, for every domain that reads this list —
+       * RETAIL, HARDWARE and GENERAL.
+       *
+       * Removed from the SHARED list rather than forked out of retail's copy,
+       * by the PO's choice: hardware and general only ever had the entry as a
+       * side effect of Phase 8 adding it here, so this restores the rail they
+       * had before `8.7` rather than inventing a change for them. It also
+       * keeps D99's "reuse; do not fork" intact, and keeps the asserted
+       * `retail rail === hardware rail` equality true.
+       *
+       * **Nothing else is removed.** `/stock-takes` still renders if reached
+       * by URL, `POST /v1/stock-takes` is untouched, and D111 stands: a count
+       * states reality and never touches the oversell guard. Only the rail
+       * entry is gone, so putting it back is this comment in reverse.
+       */
       {
         href: '/suppliers',
         label: 'Suppliers',

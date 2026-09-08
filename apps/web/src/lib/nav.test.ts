@@ -118,10 +118,10 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
       'Quotations',
       'Returns',
       'Products',
-      // `8.7` (D111) — a stock count is a Catalog action, next to the products
-      // it counts. INVENTORY-gated, unlike Products itself: the catalogue is
-      // shared core, but counting a shelf is meaningless without stock tracking.
-      'Stock count',
+      // `8.7` (D111) added a `Stock count` entry here and the **PO removed it
+      // from the rail on 2026-09-08**. Edited on that instruction, not to make
+      // a refactor pass — which is the distinction D16 draws. The screen and
+      // the endpoints are untouched; only the rail entry is gone.
       'Suppliers',
       'Customers',
       'QuickBooks',
@@ -936,12 +936,9 @@ describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
       ['/quotations', Permission.QUOTATION_READ],
       ['/returns', Permission.RETURN_READ],
       ['/products', Permission.PRODUCT_READ],
-      // `8.7` (D111) — writing a stock quantity, not reading a catalogue, so it
-      // takes the WRITE permission its neighbours' read permissions do not
-      // imply. `product:manage` rather than a new `inventory:count`: it is what
-      // already authorises the bulk import to write stock, and D111 records why
-      // no new vocabulary was minted.
-      ['/stock-takes', Permission.PRODUCT_MANAGE],
+      // `/stock-takes` sat here from `8.7` (D111) until the PO removed the rail
+      // entry on 2026-09-08. The screen and its endpoints are unchanged — this
+      // list only describes what the RAIL offers.
       ['/suppliers', Permission.SUPPLIER_READ],
       ['/customers', Permission.CUSTOMER_READ],
       ['/settings', Permission.SETTINGS_MANAGE],
