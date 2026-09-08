@@ -40,6 +40,7 @@ import type {
   SalesSummaryView,
   SectionView,
   SessionDetail,
+  OpenSessionView,
   TableSessionView,
   TakeawayOrderStatus,
   TakeawayView,
@@ -645,7 +646,7 @@ export const tableSessions = {
     );
   },
   listOpen(session: Session, branchId: string) {
-    return api.get<(TableSessionView & { activeOrderId: string | null })[]>(
+    return api.get<OpenSessionView[]>(
       `/restaurant/branches/${branchId}/open-sessions`,
       auth(session),
     );
@@ -707,7 +708,8 @@ export const kitchen = {
   listTickets(
     session: Session,
     branchId: string,
-    status?: KitchenTicketStatus | 'OUTSTANDING' | 'ALL',
+    /** D115 — `CANCELLED` is a pseudo-filter: order-side cancellation. */
+    status?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'ALL',
   ) {
     const query = status && status !== 'ALL' ? `?status=${status}` : '';
     return api.get<KitchenTicketView[]>(
@@ -723,6 +725,14 @@ export const kitchen = {
     );
   },
   /** D68 — kitchen staff saying the food is done. */
+  /** D113 — first tap of the bump bar: QUEUED → Preparing. */
+  start(session: Session, branchId: string, ticketId: string) {
+    return api.post<KitchenTicketView>(
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/start`,
+      undefined,
+      auth(session),
+    );
+  },
   complete(session: Session, branchId: string, ticketId: string) {
     return api.post<KitchenTicketView>(
       `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`,
@@ -805,6 +815,14 @@ export const takeaway = {
     return api.patch<TakeawayView>(
       `/restaurant/takeaway/${profileId}/status`,
       body,
+      auth(session),
+    );
+  },
+  /** D117 — close the session into a Sale (idempotent) WITHOUT handing over. */
+  settle(session: Session, profileId: string) {
+    return api.post<TakeawayView>(
+      `/restaurant/takeaway/${profileId}/settle`,
+      undefined,
       auth(session),
     );
   },
@@ -939,6 +957,12 @@ export interface UnifiedOrdersPage {
   truncated: boolean;
   /** Per-status totals across every page, counted before the status filter. */
   statusCounts: Record<UnifiedOrderStatus, number>;
+  /**
+   * D114 — READY takeaway + third-party rows (never dine-in: that alert is
+   * the floor's). Status-filter independent, like statusCounts — the ready
+   * bell rings whichever tab is open.
+   */
+  readyHandoverCount: number;
 }
 
 export const restaurantOrders = {

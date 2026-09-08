@@ -310,3 +310,55 @@ describe('the request names its page size', () => {
     expect(await screen.findByText('Page 1 of 2')).toBeTruthy();
   });
 });
+
+/*
+ * The Rows-per-page dropdown (PO request) — the customers-list pattern on
+ * the queue. Both boundaries again: the URL the pick writes (bookmarkable,
+ * default elided) and the pageSize the next request carries. The selector's
+ * visibility is gated on the MINIMUM size so choosing a size that fits
+ * everything cannot make the selector itself disappear — only Prev/Next go.
+ */
+describe('the rows-per-page dropdown', () => {
+  it('offers the sizes, and picking one writes the URL and resets to page 1', async () => {
+    currentParams = new URLSearchParams('page=3');
+    render(<OrdersPage session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(list).toHaveBeenCalled());
+
+    const select = screen.getByLabelText('Rows per page') as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['25', '50', '75', '100']);
+
+    fireEvent.change(select, { target: { value: '50' } });
+    const url = String(replace.mock.calls.at(-1)?.[0]);
+    const qs = new URLSearchParams(url.slice(url.indexOf('?') + 1));
+    expect(qs.get('size')).toBe('50');
+    // Resizing re-numbers every page, so the reader starts from 1.
+    expect(qs.get('page')).toBeNull();
+  });
+
+  it('a ?size in the URL drives the request; the default size stays out of both', async () => {
+    currentParams = new URLSearchParams('size=50');
+    const view = render(<OrdersPage session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(requestedQuery()?.pageSize).toBe(50));
+    view.unmount();
+
+    currentParams = new URLSearchParams();
+    render(<OrdersPage session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(requestedQuery()?.pageSize).toBe(25));
+  });
+
+  it('a mangled ?size degrades to the default instead of reaching the server', async () => {
+    currentParams = new URLSearchParams('size=999');
+    render(<OrdersPage session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(requestedQuery()?.pageSize).toBe(25));
+  });
+
+  it('keeps the selector when a bigger size fits everything — only Prev/Next go', async () => {
+    currentParams = new URLSearchParams('size=100');
+    list.mockResolvedValue(pageOf(80, 80, { pageSize: 100 }));
+    render(<OrdersPage session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByLabelText('Rows per page')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /previous/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /next/i })).toBeNull();
+  });
+});

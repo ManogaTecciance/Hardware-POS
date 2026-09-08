@@ -40,6 +40,9 @@ export class KitchenTicketsController {
     return this.service.listTicketsForBranch(tenantId, branchId, parseFilter(status));
   }
 
+  // (D115: `?status=CANCELLED` is a pseudo-filter like OUTSTANDING — see
+  // parseFilter below; cancellation is order-side state, not a ticket status.)
+
   /**
    * D83 — the whole order behind a ticket, for the board's Details view.
    *
@@ -55,6 +58,36 @@ export class KitchenTicketsController {
   ): Promise<KitchenOrderView> {
     try {
       return await this.service.orderForTicket(tenantId, branchId, ticketId);
+    } catch (err) {
+      if (err instanceof KitchenTicketNotFoundError) throw new NotFoundException(err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * D113 — the cook takes the ticket: Preparing. Same permission as
+   * complete; starting is the same kind of claim about the food, one step
+   * earlier. The round and any takeaway profile move with it (service-side),
+   * which is what puts "Preparing" on the Orders queue.
+   */
+  @Post(':ticketId/start')
+  @RequirePermissions(Permission.KITCHEN_STATUS_UPDATE)
+  async start(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('branchId') branchId: string,
+    @Param('ticketId') ticketId: string,
+  ): Promise<KitchenTicketView> {
+    try {
+      const updated = await this.service.startTicket(tenantId, branchId, ticketId);
+      await this.audit.record(tenantId, {
+        userId: actor.id,
+        action: 'KITCHEN_TICKET_STARTED',
+        entityType: 'KitchenTicket',
+        entityId: ticketId,
+        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
+      });
+      return updated;
     } catch (err) {
       if (err instanceof KitchenTicketNotFoundError) throw new NotFoundException(err.message);
       throw err;
@@ -115,12 +148,18 @@ export class KitchenTicketsController {
 }
 
 /**
- * `?status=` accepts a real ticket status or the board's `OUTSTANDING`
- * pseudo-filter. Anything unrecognised means "no filter" rather than an
- * error: a stale bookmark should show the whole board, not a 400.
+ * `?status=` accepts a real ticket status or a board pseudo-filter —
+ * `OUTSTANDING` (D68) and `CANCELLED` (D115, order-side cancellation).
+ * Anything unrecognised means "no filter" rather than an error: a stale
+ * bookmark should show the whole board, not a 400. Only the two pseudo-filters
+ * exclude cancelled orders' tickets; a raw status (`QUEUED`, `IN_PROGRESS`,
+ * …) is exactly that status, cancellation included — the board never sends
+ * one, its lanes all resolve to the pseudo-filters.
  */
-function parseFilter(status?: string): KitchenTicketStatus | 'OUTSTANDING' | undefined {
+function parseFilter(
+  status?: string,
+): KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | undefined {
   if (!status) return undefined;
-  if (status === 'OUTSTANDING') return 'OUTSTANDING';
+  if (status === 'OUTSTANDING' || status === 'CANCELLED') return status;
   return status in KitchenTicketStatus ? (status as KitchenTicketStatus) : undefined;
 }

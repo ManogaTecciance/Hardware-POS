@@ -59,9 +59,10 @@ interface Props {
  *   → Customer capture popup (Skip for dine-in/takeaway, required for delivery)
  *   → Payment popup (COD-only for delivery)
  *   → Server orchestration: takeaway.create (kicks the auto-KOT) →
- *     for dine-in/takeaway: advance to HANDED_OVER (creates Sale) →
- *     collect payment. For delivery: leave the Sale UNPAID and rely on
- *     riders to mark handover later.
+ *     for dine-in/takeaway: settle (creates the Sale, D117 — the order
+ *     stays PLACED and flows the kitchen lifecycle; handover is a later
+ *     human act) → collect payment. For delivery: no Sale yet and rely
+ *     on riders to mark handover later.
  *   → Completion screen with KOT + receipt indicators → New Order resets.
  *
  * What is NOT here (backend gaps flagged in the audit):

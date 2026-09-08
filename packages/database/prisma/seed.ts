@@ -699,7 +699,9 @@ async function seedRestaurant(passwordHash: string) {
       prepMinutes: m.prep ?? null,
       dietaryTags: m.tags ?? [],
       /*
-       * This seed writes Prisma directly, so it must mirror what
+       * D65/D101 — a food-typed row with no Track-stock answer is a prepared
+       * item: availability is the 86 switch, never the count (restaurant
+       * orders move no stock). This seed writes Prisma directly, so it must mirror what
        * `deriveSellableKind` (products.service.ts) would return for these rows:
        * a foodType with no trackStock is a COMPOSED_ITEM. Leaving it to the
        * schema default (STOCK_ITEM) hands the dish to the count branch of

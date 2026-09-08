@@ -491,3 +491,324 @@ describe('D70 — session visibility is scoped to the waiter', () => {
     ).toBe(200);
   });
 });
+
+/*
+ * D113 — Preparing, and everything it moves.
+ *
+ * One flow, every direction asserted through the REAL routes: the start
+ * puts the ticket on IN_PROGRESS (still outstanding — starting is not
+ * bumping), the round follows, and the unified Orders feed says
+ * IN_PROGRESS; the bump makes all three READY; the recall pulls all three
+ * back down. The takeaway test proves the customer-facing profile advances
+ * with the kitchen (PLACED → IN_KITCHEN → READY), retreats only from READY
+ * on a recall, and never reaches HANDED_OVER without the cashier.
+ */
+describe('D113 — start/preparing ripples to the round and the Orders queue', () => {
+  const unifiedFor = async (id: string) => {
+    const res = await http.request<{ items: { id: string; unifiedStatus: string }[] }>(
+      'GET',
+      `/restaurant/branches/${branchId}/orders`,
+      { token: ownerToken() },
+    );
+    return res.data.items.find((o) => o.id === id)?.unifiedStatus;
+  };
+  /** D114 — the counter-owned READY tally the queue's bell rings on. */
+  const readyHandover = async () => {
+    const res = await http.request<{ readyHandoverCount: number }>(
+      'GET',
+      `/restaurant/branches/${branchId}/orders`,
+      { token: ownerToken() },
+    );
+    return res.data.readyHandoverCount;
+  };
+  const verb = (ticketId: string, action: 'start' | 'complete' | 'reopen') =>
+    http.request<TicketView & { status: string }>(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/${action}`,
+      { token: kitchenToken() },
+    );
+
+  it('start → IN_PROGRESS everywhere; bump → READY; recall → back to PENDING', async () => {
+    await sendRound();
+    const ticketId = (await board()).data[0]!.id;
+    expect(await unifiedFor(orderId)).toBe('PENDING');
+
+    const started = await verb(ticketId, 'start');
+    expect(started.data.status).toBe('IN_PROGRESS');
+    // Starting is not bumping: the ticket is still outstanding work…
+    expect((await board('?status=OUTSTANDING')).data.map((t) => t.id)).toEqual([ticketId]);
+    // …and the queue already says the kitchen is on it.
+    expect(await unifiedFor(orderId)).toBe('IN_PROGRESS');
+
+    await verb(ticketId, 'complete');
+    expect(await unifiedFor(orderId)).toBe('READY');
+    // D114's paired NEGATIVE: this is a DINE-IN order — ready, but the
+    // counter's bell tally must not count it. The floor's bell owns it.
+    expect(await readyHandover()).toBe(0);
+
+    // Recall recomputes honestly: the only ticket is queued again, so the
+    // order is plain pending — not stuck on a state the kitchen retracted.
+    await verb(ticketId, 'reopen');
+    expect(await unifiedFor(orderId)).toBe('PENDING');
+  });
+
+  it('start is idempotent, and a stale start never un-completes a bumped ticket', async () => {
+    await sendRound();
+    const ticketId = (await board()).data[0]!.id;
+
+    await verb(ticketId, 'start');
+    const again = await verb(ticketId, 'start');
+    expect(again.data.status).toBe('IN_PROGRESS');
+
+    await verb(ticketId, 'complete');
+    const stale = await verb(ticketId, 'start');
+    expect(stale.data.status).toBe('COMPLETED');
+  });
+
+  it('a takeaway order advances with the kitchen, and handover stays the cashier\'s', async () => {
+    const created = await http.request<{ id: string; orderNumber: string; status: string }>(
+      'POST',
+      `/restaurant/takeaway`,
+      {
+        token: ownerToken(),
+        body: {
+          branchId,
+          customerName: 'Pickup Fixture',
+          idempotencyKey: 'd106-takeaway',
+          items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+        },
+      },
+    );
+    expect(created.data.status).toBe('PLACED');
+    const takeawayTicket = (await board('?status=OUTSTANDING')).data.find(
+      (t) => t.orderNumber === created.data.orderNumber,
+    )!;
+
+    const profileStatus = async () => {
+      const res = await http.request<{ id: string; status: string }[]>(
+        'GET',
+        `/restaurant/takeaway?branchId=${branchId}`,
+        { token: ownerToken() },
+      );
+      return res.data.find((p) => p.id === created.data.id)?.status;
+    };
+
+    await verb(takeawayTicket.id, 'start');
+    expect(await profileStatus()).toBe('IN_KITCHEN');
+    expect(await readyHandover()).toBe(0);
+
+    await verb(takeawayTicket.id, 'complete');
+    expect(await profileStatus()).toBe('READY');
+    // D114's POSITIVE: a takeaway up on the pass is the counter's to hear.
+    expect(await readyHandover()).toBe(1);
+
+    // The recall retracts READY — "your food is ready" stopped being true —
+    // but only down to IN_KITCHEN, never past what the customer was told.
+    await verb(takeawayTicket.id, 'reopen');
+    expect(await profileStatus()).toBe('IN_KITCHEN');
+    expect(await readyHandover()).toBe(0);
+  });
+});
+
+/*
+ * D115 — cancellation reaches the pass. A cancelled takeaway used to keep
+ * its ticket on the board and the kitchen kept cooking it; now the ticket
+ * leaves the working lanes and turns up under the CANCELLED pseudo-filter.
+ * Both directions at every step: present where it must be, absent where it
+ * must not, with the pre-cancel reads as the positive controls.
+ */
+describe('D115 — cancelled work leaves the board and lands in its own lane', () => {
+  const boardAs = (query: string) =>
+    http.request<TicketView[]>(
+      'GET',
+      `/restaurant/branches/${branchId}/kitchen-tickets${query}`,
+      { token: kitchenToken() },
+    );
+
+  const createTakeaway = async (key: string) => {
+    const created = await http.request<{ id: string; orderNumber: string }>(
+      'POST',
+      `/restaurant/takeaway`,
+      {
+        token: ownerToken(),
+        body: {
+          branchId,
+          idempotencyKey: key,
+          items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+        },
+      },
+    );
+    const t = (await boardAs('?status=OUTSTANDING')).data.find(
+      (x) => x.orderNumber === created.data.orderNumber,
+    )!;
+    return { profileId: created.data.id, ticketId: t.id };
+  };
+
+  const cancel = (profileId: string) =>
+    http.request('PATCH', `/restaurant/takeaway/${profileId}/status`, {
+      token: ownerToken(),
+      body: { status: 'CANCELLED' },
+    });
+
+  it('an outstanding ticket disappears from To make and appears under Cancelled', async () => {
+    const { profileId, ticketId } = await createTakeaway('d108-a');
+    // Positive control — on the board before the cancel, in no Cancelled lane.
+    expect((await boardAs('?status=OUTSTANDING')).data.map((t) => t.id)).toContain(ticketId);
+    expect((await boardAs('?status=CANCELLED')).data).toHaveLength(0);
+
+    await cancel(profileId);
+
+    expect((await boardAs('?status=OUTSTANDING')).data.map((t) => t.id)).not.toContain(ticketId);
+    expect((await boardAs('?status=CANCELLED')).data.map((t) => t.id)).toEqual([ticketId]);
+  });
+
+  it('a completed ticket of a cancelled order leaves Done for Cancelled too', async () => {
+    const { profileId, ticketId } = await createTakeaway('d108-b');
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`,
+      { token: kitchenToken() },
+    );
+    expect((await boardAs('?status=COMPLETED')).data.map((t) => t.id)).toContain(ticketId);
+
+    await cancel(profileId);
+
+    expect((await boardAs('?status=COMPLETED')).data.map((t) => t.id)).not.toContain(ticketId);
+    expect((await boardAs('?status=CANCELLED')).data.map((t) => t.id)).toContain(ticketId);
+  });
+});
+
+/*
+ * D117 — money and handover are different instants. The counter settles at
+ * payment time; the order must keep flowing the kitchen lifecycle and the
+ * later handover must REUSE the settled Sale, never mint a second one.
+ * Every step asserts the status the queue derives from, because the bug
+ * this fixes was precisely a fresh order reading "Handed over".
+ */
+describe('D117 — settle creates the Sale without handing over', () => {
+  it('settled order stays in the lifecycle; handover later reuses the same Sale', async () => {
+    const created = await http.request<{ id: string; orderNumber: string; status: string }>(
+      'POST',
+      `/restaurant/takeaway`,
+      {
+        token: ownerToken(),
+        body: {
+          branchId,
+          idempotencyKey: 'd110-settle',
+          items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+        },
+      },
+    );
+    expect(created.data.status).toBe('PLACED');
+
+    const settled = await http.request<{ status: string; finalSaleId: string | null }>(
+      'POST',
+      `/restaurant/takeaway/${created.data.id}/settle`,
+      { token: ownerToken() },
+    );
+    // The money exists…
+    expect(settled.data.finalSaleId).not.toBeNull();
+    // …and the lifecycle was NOT touched: the queue still says Pending.
+    expect(settled.data.status).toBe('PLACED');
+
+    // Idempotent: settling again returns the SAME Sale, not a second one.
+    const again = await http.request<{ finalSaleId: string | null }>(
+      'POST',
+      `/restaurant/takeaway/${created.data.id}/settle`,
+      { token: ownerToken() },
+    );
+    expect(again.data.finalSaleId).toBe(settled.data.finalSaleId);
+
+    // The kitchen still drives a settled order: start → IN_KITCHEN, bump → READY.
+    const t = (await board('?status=OUTSTANDING')).data.find(
+      (x) => x.orderNumber === created.data.orderNumber,
+    )!;
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${t.id}/start`,
+      { token: kitchenToken() },
+    );
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${t.id}/complete`,
+      { token: kitchenToken() },
+    );
+    const rows = await http.request<{ id: string; status: string }[]>(
+      'GET',
+      `/restaurant/takeaway?branchId=${branchId}`,
+      { token: ownerToken() },
+    );
+    expect(rows.data.find((r) => r.id === created.data.id)?.status).toBe('READY');
+
+    // Handover is its own act — and it reuses the settled Sale.
+    const handed = await http.request<{ status: string; finalSaleId: string | null }>(
+      'PATCH',
+      `/restaurant/takeaway/${created.data.id}/status`,
+      { token: ownerToken(), body: { status: 'HANDED_OVER' } },
+    );
+    expect(handed.data.status).toBe('HANDED_OVER');
+    expect(handed.data.finalSaleId).toBe(settled.data.finalSaleId);
+  });
+
+  it('a cancelled order refuses to settle', async () => {
+    const created = await http.request<{ id: string }>('POST', `/restaurant/takeaway`, {
+      token: ownerToken(),
+      body: {
+        branchId,
+        idempotencyKey: 'd110-cancelled',
+        items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+      },
+    });
+    await http.request('PATCH', `/restaurant/takeaway/${created.data.id}/status`, {
+      token: ownerToken(),
+      body: { status: 'CANCELLED' },
+    });
+    const res = await http.request('POST', `/restaurant/takeaway/${created.data.id}/settle`, {
+      token: ownerToken(),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+/*
+ * D112 — "food ready" reaches the floor through open-sessions, not KOT_VIEW.
+ * The bump and the recall are exercised through the real kitchen routes so
+ * the field tracks the ticket's actual lifecycle, and both directions are
+ * asserted: silence before the bump, the id after it, silence again after
+ * the recall — a field that always echoed every ticket id would fail twice.
+ */
+describe('D112 — open-sessions carries the session\'s bumped tickets', () => {
+  const openSessions = () =>
+    http.request<{ id: string; readyTicketIds: string[] }[]>(
+      'GET',
+      `/restaurant/branches/${branchId}/open-sessions`,
+      { token: ownerToken() },
+    );
+
+  it('readyTicketIds is empty before the bump, the ticket id after, empty again on recall', async () => {
+    await sendRound();
+    const ticketId = (await board()).data[0]!.id;
+
+    // NEGATIVE — queued food is not ready food.
+    const before = (await openSessions()).data.find((s) => s.id === sessionId);
+    expect(before?.readyTicketIds).toEqual([]);
+
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`,
+      { token: kitchenToken() },
+    );
+    // POSITIVE — the bump surfaces exactly this ticket on exactly this session.
+    const after = (await openSessions()).data.find((s) => s.id === sessionId);
+    expect(after?.readyTicketIds).toEqual([ticketId]);
+
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/reopen`,
+      { token: kitchenToken() },
+    );
+    // NEGATIVE again — a recalled dish is work to do, not food to run.
+    const recalled = (await openSessions()).data.find((s) => s.id === sessionId);
+    expect(recalled?.readyTicketIds).toEqual([]);
+  });
+});

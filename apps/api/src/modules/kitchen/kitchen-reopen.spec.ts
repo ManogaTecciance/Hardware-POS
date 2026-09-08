@@ -60,7 +60,7 @@ function fullRow(status: 'QUEUED' | 'COMPLETED') {
   };
 }
 
-function makeService(ticketRow: { id: string; status: string } | null) {
+function makeService(ticketRow: { id: string; status: string; roundId?: string } | null) {
   const update = jest.fn().mockResolvedValue(undefined);
   const tx = {
     kitchenTicket: {
@@ -68,6 +68,11 @@ function makeService(ticketRow: { id: string; status: string } | null) {
       update,
       findFirstOrThrow: jest.fn().mockResolvedValue(fullRow('QUEUED')),
     },
+    // D113 — the recall now restates round/takeaway state. A null round makes
+    // that a no-op HERE on purpose: this spec pins the reopen WRITE, and the
+    // ripple is pinned where it can be real — the D113 integration tests in
+    // kitchen-board.spec.ts, against actual rows.
+    orderRound: { findUnique: jest.fn().mockResolvedValue(null) },
   };
   const prisma = {
     $transaction: (fn: (tx: unknown) => unknown) => fn(tx),
@@ -104,6 +109,21 @@ describe('KitchenService.reopenTicket (D100)', () => {
     expect(update).not.toHaveBeenCalled();
     // The view still comes back — the caller cannot tell a no-op from a
     // recall, which is the point of the idempotency mirror.
+    expect(view.id).toBe(TICKET);
+  });
+
+  it('writes nothing for a ticket that is still preparing — recall undoes a bump, not a start (D113)', async () => {
+    // D100 says recall "rewrites the ticket to QUEUED" from COMPLETED. A ticket
+    // the cook has started is not bumped, so there is nothing to take back:
+    // the same idempotent no-op as a never-completed ticket, and it must not
+    // silently reset a Preparing ticket to the back of the queue either.
+    const { service, update } = makeService({ id: TICKET, status: 'IN_PROGRESS' });
+
+    const view = await service.reopenTicket(TENANT, BRANCH, TICKET);
+
+    // `update` untouched is the claim; the read-back stub is fixed at QUEUED, so
+    // the view's status says nothing here and is not asserted.
+    expect(update).not.toHaveBeenCalled();
     expect(view.id).toBe(TICKET);
   });
 

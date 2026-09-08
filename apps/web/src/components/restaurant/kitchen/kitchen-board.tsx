@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Clock, ListTree, RotateCcw, UtensilsCrossed } from 'lucide-react';
+import { Check, ChefHat, Clock, ListTree, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import * as React from 'react';
 
 import { StatusBadge } from '@/components/restaurant/status-badge';
@@ -11,6 +11,7 @@ import { ChipRow } from '@/components/ui/chip-row';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import { kitchen } from '@/lib/restaurant/api';
+import { playNewOrderChime } from '@/lib/restaurant/new-order-chime';
 import {
   KITCHEN_TICKET_STATUS_LABELS,
   KITCHEN_TICKET_STATUS_TONES,
@@ -24,12 +25,33 @@ interface Props {
   branchId: string;
 }
 
-type Filter = 'OUTSTANDING' | 'COMPLETED';
+/*
+ * D115/D116 — three lanes, bump-bar style, each ticket in exactly one: To
+ * make (queued), Preparing (started, D113), Done (bumped). Cancelled work
+ * never renders here at all: the read excludes it (D115), so a mid-cook
+ * cancel simply pulls the card off the board. Cancelling — and reviewing
+ * what was cancelled — is the ORDERS QUEUE's business (D116): the kitchen
+ * decides doneness, never whether an order still exists.
+ */
+type Filter = 'TO_MAKE' | 'PREPARING' | 'COMPLETED';
 
 const FILTERS: { key: Filter; label: string }[] = [
-  { key: 'OUTSTANDING', label: 'To make' },
+  { key: 'TO_MAKE', label: 'To make' },
+  { key: 'PREPARING', label: 'Preparing' },
   { key: 'COMPLETED', label: 'Done' },
 ];
+
+/*
+ * To make and Preparing are client-side views of ONE fetch: they split the
+ * same outstanding list, so switching between them is instant, both counts
+ * are live at once, and the new-ticket chime keeps one baseline across
+ * both (an arrival rings whichever of the two the cook is reading).
+ */
+const FETCH_FOR: Record<Filter, 'OUTSTANDING' | 'COMPLETED'> = {
+  TO_MAKE: 'OUTSTANDING',
+  PREPARING: 'OUTSTANDING',
+  COMPLETED: 'COMPLETED',
+};
 
 /*
  * D100 — age escalation. A ticket's age is the first thing the pass needs
@@ -74,33 +96,70 @@ const URGENCY_TIMER_CLASS: Record<Urgency, string> = {
  * cannot plate a dish it can see but cannot place, so each ticket names its
  * table, its order and its round the way a printed KOT used to.
  *
- * Kitchen staff mark a ticket done when the food is up, and recall it when
- * the bump was wrong (D100). That is the whole write surface; the floor is
- * not theirs and neither is the money.
+ * Kitchen staff start a ticket when they take it (D113 — Preparing), mark
+ * it done when the food is up, and recall it when the bump was wrong
+ * (D100). That is the whole write surface; the floor is not theirs and
+ * neither is the money. Start/done ripple to the round and any takeaway
+ * profile server-side, which is what moves the Orders queue.
  *
  * Polls every 5 s. Shorter cadences read as jitter on a wall-mounted screen;
  * longer ones leave a dish sitting unseen while a table waits. The poll
  * doubles as the age-escalation tick: every refresh re-renders the cards,
- * which is where the timers and colours advance.
+ * which is where the timers and colours advance — and as the chime's watch:
+ * a poll that brings an unseen ticket onto "To make" rings the same
+ * new-order chime the orders queue uses, because a wall-mounted board is
+ * not being stared at between tickets (mainstream KDS units beep).
  */
 export function KitchenBoard({ session, branchId }: Props) {
   const { hasPermission } = useAuth();
-  // Gates BOTH write verbs. D94 grants the till KOT_VIEW alone, so a cashier
+  // Gates every write verb — Start preparing, Mark done and Recall (D113
+  // added the first). D94 grants the till KOT_VIEW alone, so a cashier
   // sees this board with no buttons on it — that contrast is pinned by WS-408.
   const canUpdate = hasPermission(Permission.KITCHEN_STATUS_UPDATE);
 
   const [tickets, setTickets] = React.useState<KitchenTicketView[]>([]);
-  const [filter, setFilter] = React.useState<Filter>('OUTSTANDING');
+  const [filter, setFilter] = React.useState<Filter>('TO_MAKE');
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState<Set<string>>(new Set());
   /** D83 — the ticket whose whole order is being read. */
   const [detailFor, setDetailFor] = React.useState<KitchenTicketView | null>(null);
 
+  /*
+   * Ticket ids seen on the last poll, per filter — the chime's memory (same
+   * rule as the orders queue: null until the first response lands, so opening
+   * the board never dings, and a filter switch re-baselines instead of
+   * ringing for cards that merely became visible). Unlike the queue this
+   * compares IDS, not a total: the list is unpaged so ids are exact, and a
+   * count would stay flat when one ticket is bumped in the same poll that
+   * another arrives — exactly the arrival the pass must hear.
+   */
+  const chimeBaseline = React.useRef<{
+    key: 'OUTSTANDING' | 'COMPLETED';
+    ids: Set<string>;
+  } | null>(null);
+
   const load = React.useCallback(async () => {
+    // D115 — keyed on the FETCH, not the tab: To make ↔ Preparing share the
+    // outstanding list, so flipping between them keeps the baseline and a
+    // genuine arrival rings on either; Done re-baselines as before.
+    const fetchFilter = FETCH_FOR[filter];
     try {
-      setTickets(await kitchen.listTickets(session, branchId, filter));
+      const next = await kitchen.listTickets(session, branchId, fetchFilter);
+      setTickets(next);
       setStatus('ready');
+      const prev = chimeBaseline.current;
+      // Only outstanding work rings: a ticket appearing on Done is someone
+      // bumping, not work arriving. A recall by ANOTHER screen does ring —
+      // it lands on the outstanding list as a ticket the pass has not seen.
+      if (
+        fetchFilter === 'OUTSTANDING' &&
+        prev?.key === fetchFilter &&
+        next.some((t) => !prev.ids.has(t.id))
+      ) {
+        playNewOrderChime();
+      }
+      chimeBaseline.current = { key: fetchFilter, ids: new Set(next.map((t) => t.id)) };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load kitchen tickets');
       setStatus('error');
@@ -161,6 +220,51 @@ export function KitchenBoard({ session, branchId }: Props) {
       'Could not recall this ticket',
     );
 
+  /**
+   * D113 — the first tap: the card STAYS on "To make" (unlike both verbs
+   * above), so instead of the optimistic drop it swaps in the server's
+   * updated ticket — the verb flips to Mark done and the Preparing badge
+   * appears without waiting a poll.
+   */
+  const start = async (ticket: KitchenTicketView) => {
+    setPending((cur) => new Set(cur).add(ticket.id));
+    setError(null);
+    try {
+      const updated = await kitchen.start(session, branchId, ticket.id);
+      setTickets((cur) => cur.map((t) => (t.id === ticket.id ? updated : t)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start this ticket');
+      await load();
+    } finally {
+      setPending((cur) => {
+        const next = new Set(cur);
+        next.delete(ticket.id);
+        return next;
+      });
+    }
+  };
+
+  /*
+   * D115 — the lane the active tab shows, cut from the fetched list. The
+   * queued family (QUEUED + the retired print statuses) is To make; started
+   * tickets are Preparing; Done renders its fetch whole.
+   */
+  const visible =
+    filter === 'TO_MAKE'
+      ? tickets.filter((t) => t.status !== 'IN_PROGRESS')
+      : filter === 'PREPARING'
+        ? tickets.filter((t) => t.status === 'IN_PROGRESS')
+        : tickets;
+  /** Both outstanding lanes' counts are live from the one shared fetch. */
+  const laneCount = (key: Filter): number | null => {
+    if (FETCH_FOR[filter] !== 'OUTSTANDING' || FETCH_FOR[key] !== 'OUTSTANDING') {
+      return key === filter ? visible.length : null;
+    }
+    return key === 'TO_MAKE'
+      ? tickets.filter((t) => t.status !== 'IN_PROGRESS').length
+      : tickets.filter((t) => t.status === 'IN_PROGRESS').length;
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -169,26 +273,33 @@ export function KitchenBoard({ session, branchId }: Props) {
           activeKey={filter}
           className="min-w-0 flex-1"
         >
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setFilter(f.key)}
-              data-active={filter === f.key}
-              className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors ${
-                filter === f.key
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-foreground hover:bg-border'
-              }`}
-            >
-              {f.label}
-              {filter === f.key ? (
-                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary-foreground/20 px-1.5 text-xs">
-                  {tickets.length}
-                </span>
-              ) : null}
-            </button>
-          ))}
+          {FILTERS.map((f) => {
+            const count = laneCount(f.key);
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                data-active={filter === f.key}
+                className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors ${
+                  filter === f.key
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-foreground hover:bg-border'
+                }`}
+              >
+                {f.label}
+                {count !== null ? (
+                  <span
+                    className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs ${
+                      filter === f.key ? 'bg-primary-foreground/20' : 'bg-border'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </ChipRow>
         <span className="shrink-0 text-xs text-muted-foreground">Refreshes every 5 s.</span>
       </div>
@@ -211,12 +322,18 @@ export function KitchenBoard({ session, branchId }: Props) {
             {error ?? 'Could not load kitchen tickets.'}
           </CardContent>
         </Card>
-      ) : tickets.length === 0 ? (
+      ) : visible.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            {filter === 'OUTSTANDING'
+            {filter === 'TO_MAKE'
               ? 'Nothing to make. New tickets appear here as waiters send them.'
-              : 'Nothing completed yet.'}
+              : filter === 'PREPARING'
+                ? canUpdate
+                  ? 'Nothing on the stove. Start a ticket from To make.'
+                  : // D94 — the till reads the board but holds no verb; do not send
+                    // it to a button it does not have.
+                    'Nothing on the stove.'
+                : 'Nothing completed yet.'}
           </CardContent>
         </Card>
       ) : (
@@ -224,12 +341,13 @@ export function KitchenBoard({ session, branchId }: Props) {
         // board is usually a wall-mounted landscape tablet, where two columns
         // of narrow cards wastes half the screen the pass is reading from.
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-          {tickets.map((t) => (
+          {visible.map((t) => (
             <TicketCard
               key={t.id}
               ticket={t}
               canUpdate={canUpdate}
               pending={pending.has(t.id)}
+              onStart={() => void start(t)}
               onComplete={() => void complete(t)}
               onRecall={() => void recall(t)}
               onDetails={() => setDetailFor(t)}
@@ -383,6 +501,7 @@ function TicketCard({
   ticket,
   canUpdate,
   pending,
+  onStart,
   onComplete,
   onRecall,
   onDetails,
@@ -390,11 +509,14 @@ function TicketCard({
   ticket: KitchenTicketView;
   canUpdate: boolean;
   pending: boolean;
+  onStart: () => void;
   onComplete: () => void;
   onRecall: () => void;
   onDetails: () => void;
 }) {
   const done = ticket.status === 'COMPLETED';
+  /** D113 — started but not bumped: the card carries a Preparing badge. */
+  const preparing = ticket.status === 'IN_PROGRESS';
   // Completed tickets stop ageing: the colour answers "how long has this
   // dish been waiting?", which a done dish no longer is.
   const urgency: Urgency = done ? 'fresh' : urgencyOf(ticket.createdAt, new Date());
@@ -423,12 +545,22 @@ function TicketCard({
           ) : (
             // The timer sits where a status badge would, because on the
             // outstanding tab the age IS the status — every badge there read
-            // "To make", which the tab already says.
-            <span
-              className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
-            >
-              {formatElapsed(ticket.createdAt)}
-            </span>
+            // "To make", which the tab already says. D113's Preparing is the
+            // one outstanding state worth a badge, so it rides beside the
+            // timer rather than displacing it: the dish still ages.
+            <div className="flex shrink-0 items-center gap-2">
+              {preparing ? (
+                <StatusBadge
+                  tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
+                  label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
+                />
+              ) : null}
+              <span
+                className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
+              >
+                {formatElapsed(ticket.createdAt)}
+              </span>
+            </div>
           )}
         </div>
 
@@ -485,6 +617,11 @@ function TicketCard({
            * the finger pressing it is wet, gloved, or holding a plate. Recall
            * is deliberately quieter than the bump (outline, not filled): it
            * is the undo, not the job.
+           *
+           * D113 — ONE verb per state, industry bump-bar style: a queued
+           * ticket offers Start preparing, a started one offers Mark done.
+           * Two stacked 48px buttons would halve how many tickets the pass
+           * can see, and the two taps are adjacent in time anyway.
            */}
           {canUpdate ? (
             done ? (
@@ -497,7 +634,7 @@ function TicketCard({
               >
                 Recall
               </Button>
-            ) : (
+            ) : preparing ? (
               <Button
                 className="h-12 w-full text-base"
                 leftIcon={<UtensilsCrossed className="h-5 w-5" />}
@@ -505,6 +642,15 @@ function TicketCard({
                 onClick={onComplete}
               >
                 Mark done
+              </Button>
+            ) : (
+              <Button
+                className="h-12 w-full text-base"
+                leftIcon={<ChefHat className="h-5 w-5" />}
+                isLoading={pending}
+                onClick={onStart}
+              >
+                Start preparing
               </Button>
             )
           ) : null}

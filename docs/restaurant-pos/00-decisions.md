@@ -4510,6 +4510,486 @@ Orders screen still does; every `main` list renders it.
 
 ---
 
+### D111 — the kitchen board rings for tickets it has not seen
+
+PO, 2026-09-04: "i created new order but in restaurant view or cashier
+kitchen view not sounding." The orders queue had a chime since it was
+built; the kitchen board — the screen a kitchen is NOT staring at between
+tickets — had none. Every mainstream KDS beeps on ticket arrival; a
+silent wall-mounted board is a dish nobody starts.
+
+The board now rings the same synthesised two-note chime the orders queue
+uses (`lib/restaurant/new-order-chime.ts` — built for "live queue
+screens", now finally plural), on the same baseline discipline: the first
+load never rings, a filter switch re-baselines instead of ringing for
+cards that merely became visible, and audio stays best-effort (a blocked
+autoplay drops the ding rather than queueing a burst).
+
+Two deliberate differences from the queue's rule:
+
+**Ids, not a total.** The queue compares `total` because its list is
+paged and ids shift between pages. The board is unpaged, so the baseline
+is the id SET, and a poll rings when an unseen id appears — including
+when one ticket is bumped in the same poll another arrives, where a count
+stays flat through exactly the arrival the pass must hear.
+
+**Only "To make" rings.** A new id on the Done tab is someone bumping,
+not work arriving. A ticket appearing on To make because ANOTHER screen
+recalled it does ring: to this pass it is new work regardless of why.
+
+Deliberately NOT gated on `KITCHEN_STATUS_UPDATE`: D94 gives the till
+`KOT_VIEW` alone precisely so a read-only board can hang where food is
+made; a chime keyed to the write permission would silence the one
+mounting that needs it most. Sound follows the screen, not the role —
+the same reason the orders queue rings for whoever watches it.
+
+Paired per D30 in `kitchen-board.render.test.tsx`: silent first load
+with tickets rendered (positive control), ring on an unseen id, silence
+on an unchanged poll, ring on bump+arrival with the count flat, and
+silence across a filter switch and Done-tab growth. Verified live on the
+dev stack: oscillator instrumentation shows 0 notes opening either
+screen and exactly one two-note chime on the poll after a takeaway order
+lands, on both `/kitchen` and `/orders`.
+
+---
+
+### D112 — the floor hears the bump: a food-ready bell on the tables screen
+
+PO, 2026-09-04, closing the loop D111 opened: sounds now travel TO the
+kitchen (order chime) but not back FROM it. Every mainstream expo flow
+has the return signal — the kitchen bumps, the runner is paged, the food
+does not die under the lamp. The waiter-facing half did not exist here.
+
+**The signal path is open-sessions, not the kitchen board.** The waiter
+template deliberately lacks `KOT_VIEW` ("a waiter has no business on the
+kitchen display") and this record does not weaken that: instead
+`GET /open-sessions` — the route that already answers "my tables", D70
+scope and all — now carries `readyTicketIds` per session: the ids of its
+COMPLETED kitchen tickets, resolved by one extra query walking ticket →
+round → order → session. Ids rather than a count or a flag, so the
+client can ring exactly once per NEW bump, and so a recalled ticket
+takes its acknowledgement with it when it leaves the list — a re-bump
+is fresh news and rings again. Asserted through the real routes in
+`kitchen-board.spec.ts`: empty before the bump, the id after, empty
+again after recall.
+
+**The floor plan gets its first live loop.** `/tables` loaded once and
+went stale; it now refreshes SESSIONS every 8 s (visible-tab gated,
+catch-up on return — the orders queue's cadence and manners; 5 s is the
+kitchen's urgency, not the floor's). The furniture (areas, tables) keeps
+its explicit loads: admin-cadence data has no business on a poll.
+
+**A bell, not the chime.** Two taps on one note (E6·E6) against the
+order chime's rise (A5→D6) — distinguishable across a room, which is the
+entire job of a second sound. Same synth module, same autoplay manners
+(first load never rings, blocked audio drops the ding).
+
+**The badge and its acknowledgement.** The ring points at a card:
+"Food ready" with a concierge bell on the table (joined open tables
+included). There is no "served" verb to clear it server-side — carrying
+the plate IS the acknowledgement — so opening the order (View order)
+answers the bell per device, persisted in sessionStorage exactly like
+the POS cart. Another tablet's bell keeps ringing until ITS holder
+looks: serving is whoever carried the plate.
+
+Paired per D30 in `table-floor.ready.render.test.tsx`: first-load
+silence WITH a standing badge (the positive control that separates
+"state to read" from "arrival to announce"), ring+badge on a new bump,
+silence on repeat, ack clearing without reviving, and the
+recall-then-rebump second ring. Verified live: floor open on M5 =
+0 notes; ticket bumped through the kitchen route = one E6·E6 bell
+(instrumented frequencies 1319/1319) and one Food-ready badge inside
+the 8 s window.
+
+Housekeeping under this record: `global-setup.ts` of the integration
+suite spawns `pnpm.cmd` through a shell on win32 — before that, ENOENT
+killed every integration spec on a Windows dev machine before the first
+test.
+
+---
+
+### D113 — the board gets a Preparing state, and the queue follows the kitchen
+
+PO, 2026-09-04: "in kitchen view there is only option as mark done. but
+in there add option to preparing, then done, so when that happen need to
+update orders page according to status change. please do like industry
+pos system handle." Which is exactly the mainstream KDS bump bar: a
+ticket is NEW, someone taps it and it is COOKING, they tap again and it
+is BUMPED — and the order status the rest of the house sees is driven by
+those taps, not by anyone re-typing it.
+
+**One enum value is the whole schema change.** `KitchenTicketStatus`
+gains `IN_PROGRESS` (migration `20260908000000_…`, ALTER TYPE ADD VALUE
+IF NOT EXISTS — additive, no rows, no defaults). The board's OUTSTANDING
+filter already means "not COMPLETED", so a started ticket stays exactly
+where outstanding work belongs. D111's chime baseline diffs ids, not
+statuses, so starting rings nothing.
+
+**The derivation was already waiting.** The Orders queue's
+`unifiedStatusForRestaurantOrder` has mapped round IN_PROGRESS/READY
+since the queue was built — dead branches, because nothing ever moved a
+round. `syncKitchenProgress` now RESTATES the ticket set onto the round
+after every kitchen verb (any started/bumped → IN_PROGRESS, all bumped →
+READY, recall recomputes honestly — DELIVERED and CANCELLED are floor
+verdicts the kitchen never touches), and the queue lights up with no
+change to the queue itself. The unit spec pins the once-dead branches.
+
+**Takeaway advances with the kitchen, forward only.** The profile is
+what the customer was told, so the kitchen moves it
+PLACED → IN_KITCHEN → READY as it works, never backward past that — with
+one exception: a recall retracts READY to IN_KITCHEN, because "your food
+is ready" has stopped being true. It retracts to IN_KITCHEN even if
+nothing is cooking at that moment, never to PLACED. HANDED_OVER stays
+the cashier's alone (it settles the Sale); the manual stepper keeps
+working and the kitchen never overrides a cashier who stepped ahead.
+
+**On the board: one verb per state.** Start preparing (chef hat) on a
+queued card, Mark done on a started one — never both stacked; two 48px
+buttons would halve the tickets a pass can see, and the taps are
+adjacent in time anyway. Starting swaps the card IN PLACE (verb flips,
+a warning-tone Preparing badge joins the age timer, which keeps
+counting from creation); only the bump still drops the card. Start is
+idempotent and a stale start never un-completes a bumped ticket —
+Recall stays the only path down, and recall still lands on QUEUED
+(D100 unchanged): the cook taps Start again if the pan is already on.
+
+WS-408's till contrast now matches "any write verb" (`start preparing|
+mark done`) — the claim was always "the till cannot work the board",
+not the absence of one label. Paired per D30: board render tests pin
+one-verb-per-state both ways plus the in-place flip; a new
+`unified-status.spec.ts` pins the derivation branch by branch;
+integration proves the whole ripple through the real routes (ticket →
+round → unified feed → takeaway profile, up on start/bump and back
+down on recall). Verified live: tapping Start preparing on /kitchen
+flipped the card, /orders showed "Preparing" and then "Ready" on its
+own poll after the bump, and the takeaway profile advanced
+PLACED → IN_KITCHEN → READY untouched by hand.
+
+---
+
+### D114 — the counter hears the handover: a ready bell on the Orders queue
+
+PO, 2026-09-07: when an order goes Ready, the cashier's queue moved the
+row and ticked the Ready tab — silently. Mainstream systems put a sound
+on exactly one slice of readiness: the alert follows **whoever hands
+the food over**. Dine-in readiness pages the floor (D112's bell,
+built); a takeaway or third-party order going READY is the counter's
+news — bag it, call the name or the rider — and the counter heard
+nothing.
+
+**One number from the server.** The queue's envelope gains
+`readyHandoverCount`: READY rows on TAKEAWAY + THIRD_PARTY, tallied in
+the same derivation pass as `statusCounts` — before the status filter,
+after channel/search — and DINE_IN is excluded on purpose: a till that
+dings for every plated table is noise, and that bell already rings
+where the runner is. Counted server-side because the page only sees 25
+rows of whatever tab is open; the tally sees the whole picture.
+
+**The bell rings whichever tab is open.** The page keeps a second
+baseline (keyed on channel|search, NOT status — the tally ignores the
+status tab, so reading "Pending" must not deafen the counter), rings
+`playFoodReadyChime` — the same E6·E6 service bell the floor uses, one
+sound per meaning across the house — only when the count GROWS, and
+re-baselines on filter changes. A falling count (a handover) is silent;
+the next order up rings again. First load never rings: bags already on
+the pass are state to read, not an arrival.
+
+Paired per D30: the polling suite pins silent-first-load-with-ready,
+ring-on-growth with the order chime explicitly NOT firing (total flat —
+the two sounds stay distinguishable), silence on the falling count then
+ring on the next rise, ring across a status tab, re-baseline on a
+channel switch; integration pins the tally through the real routes —
+0 while in kitchen, 1 on the takeaway bump, 0 again on recall, and 0
+for a READY DINE-IN order (the negative that keeps the till quiet for
+the floor's food). Verified live: /orders open on the Pending tab,
+baseline silent; the kitchen bumped RO-000059 and the queue rang
+1319/1319 Hz inside the poll window.
+
+The sound story is now closed on every screen that owns a next move:
+order in → rising chime where it lands (kitchen D111, queue D111);
+food up → service bell where the handover lives (floor D112 for
+dine-in, counter D114 for takeaway/third-party).
+
+---
+
+### D115 — four lanes on the board, and cancellation finally reaches the pass
+
+PO, 2026-09-07: "kitchen add to tabs called preparing and cancelled."
+The board's two tabs become the bump bar's four lanes — **To make ·
+Preparing · Done · Cancelled** — each ticket in exactly one.
+
+**Preparing is a view, not a fetch.** To make and Preparing split the
+one outstanding list client-side (queued family vs IN_PROGRESS), so
+flipping between them is instant, both chips carry live counts at once,
+and D111's chime keeps a single baseline across the pair — keyed on the
+FETCH now, not the tab, so an arrival rings whichever of the two the
+cook is reading. Start moves the card one lane along instead of
+flipping it in place: the D113 flow, now with somewhere to move to.
+
+**Cancelled fixes a real hole.** Tickets have no cancelled status —
+cancellation lives on the order side (today only the takeaway profile
+is ever written; the read also honours a cancelled round or order so a
+future cancel verb lands here for free) — and until now it never
+reached this screen: **the kitchen kept cooking food nobody was coming
+for.** The `CANCELLED` pseudo-filter (a peer of D68's OUTSTANDING)
+collects called-off work at any ticket status, newest first;
+OUTSTANDING and COMPLETED now exclude it, so cancelling pulls the
+ticket off the working lanes mid-cook and Done never celebrates a dish
+that was called off after the bump. The lane's cards are read-only —
+muted, red badge, no age (nobody is waiting), Details only: there is
+nothing left to DO to dead work but see what it was.
+
+Deliberately not yet: a cancellation sound (the lane and its count say
+it; a red klaxon can come if the pilot loses food to unseen cancels),
+and item-level voids on tickets (KitchenTicketItem is a snapshot with
+no link to the order item — schema work for its own record).
+
+Paired per D30: render tests pin the lane split both ways (Start on To
+make / Mark done on Preparing, never both; the started card leaving one
+lane AND arriving in the other), the Cancelled lane's badge + absent
+verbs with Details as the positive control, and the till still naked of
+verbs on both working lanes; integration pins the read through the real
+cancel — on the board before, gone from OUTSTANDING and listed under
+CANCELLED after, and a completed-then-cancelled ticket leaving Done
+too. Verified live: cancelled the leftover RO-000049 takeaway — its
+ticket left To make and sat alone in the Cancelled lane (screenshot),
+chips carrying live counts.
+
+*(Superseded in part by D116, same day: the board's Cancelled LANE was
+removed — the read exclusions and the CANCELLED pseudo-filter stand.)*
+
+---
+
+### D116 — cancelling is the queue's verb, not the kitchen's
+
+PO, 2026-09-07, on seeing D115's lane: "remove cancel from kitchen add
+it to orders page and need option to cancel the order." Which is the
+cleaner division of labour: **the kitchen decides doneness, the counter
+decides whether an order still exists.** The board goes back to three
+lanes — To make · Preparing · Done — and cancelled work simply vanishes
+from it (D115's read exclusions stand unchanged; so does the CANCELLED
+pseudo-filter, unsurfaced, for whatever later wants to list called-off
+work). The strip is pinned as the exact three-label set so a lane
+cannot creep back unnoticed.
+
+**Cancel order lives in the queue's drawer.** For a takeaway row still
+in play — not handed over (a settled Sale is refund territory), not
+completed or already cancelled — the drawer offers a danger-styled
+Cancel order behind a confirm dialog that names the order, the customer
+and the item count. It drives the EXISTING takeaway status machine
+(`PATCH /restaurant/takeaway/:profileId/status`, permission
+`TAKEAWAY_CREATE` — the same hands that create takeaways may cancel
+them) rather than growing a parallel cancel route; the detail view
+gains `takeawayProfileId` so the drawer can address it. On success the
+queue refetches at once (new `onMutated` plumbing) and the kitchen's
+ticket leaves the board on its next poll via D115's read.
+
+Deliberately narrow: **dine-in has no queue-side cancel** — its items
+are voided at the table, where the bill lives, under ORDER_VOID_SENT's
+deliberate restrictions; **third-party rows** belong to the platform
+that sent them. The button is absent, not disabled, where it does not
+apply — the View-bill rule.
+
+Paired per D30: the drawer suite pins eligibility from both sides (a
+live takeaway offers it; handed-over, dine-in, and an unpermitted
+viewer do not), the confirm flow to the exact API call, and backing
+out calling nothing; the board suite pins the exact lane strip.
+Verified live end-to-end: RO-000051 on the kitchen board → cancelled
+from the Orders drawer (confirm dialog screenshot) → row reads
+Cancelled at once → the board no longer shows it.
+
+---
+
+### D117 — payment settles; handover is a hand
+
+PO, 2026-09-07: "i found the bug, when takeaway place it shows handed
+over. but it need to show like other pending, preparing, handed over,
+also no need completed tab hide it." Correct on both counts. The
+counter popup's step 2 was `updateStatus(HANDED_OVER)` — not because
+the bag had crossed the counter, but because handover was the only
+verb that closed the session into a Sale for payment to land on. The
+side effect was the bug: every counter order read "Handed over" for
+its entire cook time, and D113's kitchen-driven statuses could never
+touch it (forward-only stops at what the customer was told).
+
+**Money and handover are different instants.** New
+`POST /restaurant/takeaway/:profileId/settle` closes the session into
+a Sale — totals via the shared calculator, lines via the fulfilment
+projection, the exact block handover used, now extracted as
+`settleSessionIntoSale` and shared — while the profile keeps its
+lifecycle status. Idempotent (an already-CLOSED session returns its
+Sale); refuses a CANCELLED order; same TAKEAWAY_CREATE permission.
+The popup's step 2 becomes settle: the customer pays up front as
+before, the receipt still prints from the Sale (D98 untouched), and
+the order now reads **Pending, paid** — flowing Preparing → Ready as
+the kitchen works (D113), ringing the counter's bell on READY (D114).
+
+**Handover becomes a button.** The queue drawer gains one-tap
+"Mark handed over" beside D116's Cancel (no confirm — it is the
+routine positive act), driving the same status verb, which now REUSES
+the settled Sale rather than minting one. The takeaway workspace's
+stepper still works unchanged for unsettled (waiter-created) orders,
+where handover still creates the Sale.
+
+*PO amendment, same day: the button is offered ONLY on READY rows —
+food the kitchen has not called up cannot be handed to anyone, and a
+skip-the-kitchen button invites exactly the premature "Handed over"
+this record kills. The workspace stepper stays the deliberate escape
+hatch. Pinned both ways in the drawer suite (absent on PENDING and
+IN_PROGRESS with Cancel present as the positive control).*
+
+**No Completed tab.** COMPLETED is the dine-in shell's closed state;
+its rows stay reachable under All Orders and an old
+`?status=COMPLETED` bookmark still filters — the strip now shows the
+lifecycle the counter actually works: Pending → Preparing → Ready →
+Handed over, plus Cancelled.
+
+Paired per D30: integration walks the whole life — placed+settled is
+PLACED with a Sale, settle again returns the SAME Sale, the kitchen
+still advances a settled order, handover reuses the Sale, and a
+cancelled order refuses to settle (400); the drawer suite pins the
+one-tap handover to its exact call and its absence on a handed-over
+row. Verified live: create → settle → pay (the popup's exact calls)
+read PENDING/paid on the queue, Preparing on start, Ready on bump,
+Handed over from the drawer with the Sale id unchanged — and the tab
+strip reads exactly All · Pending · Preparing · Ready · Handed over ·
+Cancelled.
+
+---
+
+> **Corrected 2026-09-08 by [D119](#d119--merging-fixissues-restaurant-how-each-clash-was-decided):**
+> the "manual stepper" named here (and in D113) as the escape hatch was
+> deleted with the `/takeaway` cutover on 2026-08-10; `/takeaway*` redirects
+> to `/pos?mode=takeaway`, which only creates orders. With the drawer's
+> handover offered on READY alone, an unbumped ticket has no hand-over path
+> in the product today — tracked as O9.
+
+### D118 — sound lives in the kitchen alone
+
+PO, 2026-09-07: "remove sound from waiter and cashier, only need
+kitchen staff kitchen." Two days of D111–D114 built a sound per screen;
+the PO ran it and wants one: the kitchen's new-ticket chime stays,
+everything else goes quiet. Their restaurant, their ears — and it is a
+defensible shape: the kitchen is the one station facing AWAY from its
+screen, while the counter and the floor look at theirs.
+
+Removed: the orders queue's arrival chime (D111's second home) and the
+food-ready bell on BOTH the waiter floor (D112) and the queue (D114).
+Kept, deliberately: every VISUAL signal those sounds accompanied — the
+floor's "Food ready" badge with its per-device ack and
+recall-re-badges behaviour, the queue's Ready tab and counts — and the
+server's `readyHandoverCount` tally (integration-tested, one field,
+the bell's whole backend) so re-inviting a sound is a frontend-only
+change. The audio module shrinks to the kitchen chime and remains the
+single home for POS audio.
+
+Pinned as tripwires, not deletions: the polling suite re-runs the
+exact polls that used to ring (total growth, handover-tally growth)
+against a fully-stubbed audio module — including the REMOVED export
+under its old name — and asserts silence with the fetches proven; the
+floor suite keeps every badge behaviour and asserts the ring-poll
+badges without sound. The kitchen board's chime tests are untouched.
+
+### D119 — merging `fix/issues-restaurant`: how each clash was decided
+
+`origin/fix/issues-restaurant` (three commits, 2026-09-07 and 09-08, cut from
+`fix/table-tab` on 09-04 — before that branch's joined-table tabs) was merged
+into `merge/restaurant-changes` after D110. It carries D111–D118: the kitchen
+board's new-ticket chime, the food-ready badge on the tables screen, the
+Preparing state and the bump bar's Start, the ready bell on the orders queue,
+the board's lanes and cancellation reaching the pass, cancelling as the
+queue's verb, payment settling without handing over, and sound living in the
+kitchen alone — plus the product wizard's validation and character limits.
+Five files conflicted.
+
+**Decision numbers, again.** The branch numbered its eight records D104–D111.
+`fix/table-tab` went on to use D104–D106 for the tabs (merged in D110) and this
+branch holds D107–D110, so theirs moved up by seven — D104→D111 … D111→D118 —
+in one commit on the branch's own history, every reference included, the
+migration's comment among them. A probe confirmed `migrate deploy` — the
+production path — does not re-check an applied migration's file, so nothing
+changes for a deploy. `migrate dev`, the development path, does: a developer
+database that applied the migration under its old comment will report it as
+modified and wants a reset (or its `_prisma_migrations` checksum updated) —
+most likely only the branch author's. (The same sed had touched a base64
+image whose bytes happened to spell "D104"; that file was restored before the
+merge.)
+
+**The migration is additive and proven.** `20260908000000_add_kitchen_ticket_in_progress`
+adds one enum value with `ALTER TYPE … ADD VALUE IF NOT EXISTS`; 71 in the
+set. An empty database applies all 71 and reads up to date; a database at
+`main`'s 27, with a customer-account payment seeded between, applies the
+remaining 44, keeps the row, carries the new value, and reads up to date.
+`migrate diff` emits only the D44 FK pair on both, as before (O6).
+
+**The floor plan carries both: several tabs, and the badge.** `fix/table-tab`
+made a table's sessions a LIST (D104: one link per tab, "Add a tab"); this
+branch put a per-device "Food ready" badge on each session (D112, D118: visual
+only) — written against the single-session floor. The union keeps the list:
+each tab is an `OpenSessionView` with its bumped-ticket ids; an arrangement's
+badge counts unanswered bumps across every tab and clears tab by tab as each
+tab's link is opened; a physical table still carries one. The Unreserve
+control their side still rendered on a held member is not carried — D106
+removed it, for the reason it records. Their new render test learned the
+tab's name field.
+
+**Everything else is theirs or a union.** The kitchen ticket's tab name (D104)
+survives their Preparing/lanes edits to the kitchen service; the orders page
+object (D110) survives their filters, counts and cancel; WS-408 keeps the
+seeded ticket and matches either write verb ("Start preparing" or "Mark done");
+the seed keeps both the 86'd dishes and the tabs; the win32 shell line keeps
+its explanation. Route matrix: 290 routes, 202 module-guarded, 88 ungated.
+The wizard's validation and character limits ride along without a record of
+their own, as the Type column did in D110.
+
+**Tests and the catalogue.** Their branch touched one Playwright test
+(WS-408). Nothing else went stale: the labels they renamed are pinned at unit
+level (the board's three lanes, the queue's tabs), and the tablet board test
+now names the Preparing lane too. Their float ready spec covered one physical
+table and no arrangement; the union adds the case it introduced — a joined
+table with two tabs, one bumped: one badge on the arrangement, none on its
+members, cleared tab by tab. The reopen unit spec gains the Preparing case
+(a preparing ticket is not recalled). Their eight records added no catalogue
+rows; eleven are added under KIT, POS, OTBL, UI and PROD. Their `migrate
+dev` note above, and two comments in the takeaway service that still said
+the Sale lands on handover, are corrected.
+
+**What their permissions reach.** The bump bar's Start is gated on
+`KITCHEN_STATUS_UPDATE` like completing, so Kitchen staff hold it and the
+till's read-only board (D94) does not; the chime, though, is a property of
+the screen, not the role — a cashier watching the board hears it. Settle is
+`PAYMENT_COLLECT`. Both reach the Salesperson by reference (D108). O7 (the
+pager) is unchanged by this merge.
+
+**Two consumers D113 did not visit.** The restaurant dashboard's "Kitchen
+queue" tile counted `QUEUED` tickets, which was the whole outstanding set
+until Preparing existed; it now counts `OUTSTANDING`, so a kitchen with every
+ticket on the stove no longer reads zero. The board's empty Preparing lane
+told whoever was looking to "Start a ticket from To make" — the till (D94)
+reads the board without that verb; it now reads "Nothing on the stove." The
+two D118 silence tripwires (orders queue, tables screen) mocked a chime
+module neither screen imports, so a bell rung any other way would have
+passed; they now stub the browser's `AudioContext` and assert it is never
+constructed, with a positive control that the real chime does construct it.
+
+**Open, for a product decision — O9.** D113 and D117 lean on "the takeaway
+workspace's manual stepper" as the escape hatch when the kitchen forgot to
+bump. It was deleted with the `/takeaway` cutover (2026-08-10); the drawer
+offers handover on READY only. Today the only way to hand over an unbumped
+ticket is the API. Refuse, restore a stepper, or offer a confirm-gated "Hand
+over anyway" — a decision, not a merge edit.
+
+**Open, for a product decision — O8.** D116 made cancelling the queue's verb
+and D117 let payment settle a counter order without handing it over. Where
+the two meet, the server's takeaway status write still has no transition
+guard — it never did — so a counter order that has been settled and paid can
+now be cancelled from the queue with its Sale left PAID and no refund. The
+drawer's client-side gate does not cover it either, because a settled order
+no longer sits at HANDED_OVER. Not changed in a merge; recorded for a
+decision (refuse, or refund).
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
@@ -4521,3 +5001,5 @@ Orders screen still does; every `main` list renders it.
 | O5 | Commercial model (per-branch / per-register / per-module) — blocks subscription and entitlement design. | before entitlements |
 | O6 | `InventoryReceiptLine.productVariant`: `RESTRICT` (what the database has since D44) or `SetNull` (what the schema implies)? Until answered, `migrate diff` keeps emitting the FK pair and it keeps being stripped (D110). | next migration |
 | O7 | Should a list's pager hide when the rows fit one page? Their Orders screen does; every `main` list renders it (D110). | UI polish |
+| O8 | Cancelling a counter order that D117 has settled and paid: refuse it, or record the refund? The takeaway status write has no transition guard (D119). | before the next restaurant deploy |
+| O9 | How does the counter hand over a takeaway whose ticket the kitchen never bumped? The stepper D113/D117 named is gone (2026-08-10); handover is offered on READY only (D119). | before the next restaurant deploy |

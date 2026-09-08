@@ -86,8 +86,11 @@ export function RestaurantDashboard({ session }: { session: Session }) {
         // tables are the count. Per-session detail lives on the Tables page.
         const openSessions: TableSessionView[] = [];
 
+        // OUTSTANDING, not QUEUED: since D113 a ticket the cook has started is
+        // IN_PROGRESS, and it is still work the kitchen owes. Counting QUEUED
+        // alone read "Kitchen queue 0" with every ticket on the stove (D119).
         const queuedTickets = hasPermission('kot:view')
-          ? await kitchen.listTickets(session, branchId, 'QUEUED').catch(() => [])
+          ? await kitchen.listTickets(session, branchId, 'OUTSTANDING').catch(() => [])
           : [];
         const takeawayOrders = hasPermission('takeaway:view')
           ? await takeaway.list(session, branchId).catch(() => [])

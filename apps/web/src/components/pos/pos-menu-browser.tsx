@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { resolveImageUrl } from '@/lib/products-api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
 
@@ -433,9 +434,7 @@ export function PosMenuBrowser({ data, loading, onPick, serverQuery, availabilit
                   soldOut ? 'opacity-60' : 'hover:border-primary hover:shadow'
                 }`}
               >
-                <div className="mb-2 flex h-16 items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 text-2xl">
-                  {emojiFor(it.name)}
-                </div>
+                <ItemThumb item={it} />
                 <span className="text-sm font-semibold leading-tight">{it.name}</span>
                 {it.description ? (
                   <span className="mt-1 line-clamp-2 text-xs text-muted-foreground">
@@ -553,10 +552,76 @@ export function PosMenuBrowser({ data, loading, onPick, serverQuery, availabilit
 }
 
 /**
- * A tiny naive emoji picker so item cards get a visual anchor without
- * requiring image uploads. Zero database dependency — the mapping is
- * intentionally shallow and safe (falls back to a plate). When the
- * MenuItem schema gains an `imageUrl` column this whole helper goes away.
+ * The card's visual anchor: the item's own photo when it has one, else the
+ * emoji tile.
+ *
+ * The photo half was missing for as long as this card existed. It was written
+ * against the legacy `MenuItem`, which had no image column, so the emoji was
+ * the only option and the helper below said so. The POS has since moved to
+ * `GET /products/sellable`, which returns `imageUrl`, and the adapter has been
+ * carrying it into `MenuItemView` unread — so an owner who uploaded a photo in
+ * the Products wizard saw it everywhere except the till.
+ *
+ * `resolveImageUrl` is mandatory here (D86): uploads are served from the API
+ * origin, not the web app's, so the stored `/uploads/..` path would 404 if it
+ * reached `<img>` unresolved.
+ *
+ * Falling back on `onError` is not just belt-and-braces. In dev, uploads live
+ * in LocalStack's community image, which keeps no objects across a restart
+ * while `imageUrl` survives in Postgres — a stale URL is the NORMAL state
+ * there, and it must degrade to the emoji rather than leave a broken tile at
+ * the till.
+ *
+ * ## Why a ratio and not a height
+ *
+ * The frame is `aspect-[4/3]`, never a fixed height. A fixed height against a
+ * `w-full` card means the crop ratio changes at every breakpoint: at `h-16` a
+ * ~270px desktop card was a 4.2:1 letterbox showing the middle third of the
+ * photo, while a ~200px tablet card was ~3:1 and showed much more of it. Same
+ * dish, different picture per device. A ratio scales the frame with the card,
+ * so the crop is identical everywhere and the owner can frame a photo once.
+ *
+ * 4:3 is the repo's card ratio — the retail checkout card, the quotation
+ * picker and the wizard preview all use it (`aspect-square` is reserved for
+ * the product-detail hero). It is also what phone cameras shoot by default,
+ * so an owner's photo is usually placed, not cropped.
+ *
+ * Both branches MUST carry the same box. A photo-less item on a ratio frame
+ * beside a photo item on a fixed one would leave every row ragged.
+ */
+function ItemThumb({ item }: { item: MenuItemView }) {
+  const resolved = resolveImageUrl(item.imageUrl);
+  const [failed, setFailed] = React.useState(false);
+
+  // A re-uploaded photo reuses the card; without this the failure sticks.
+  React.useEffect(() => setFailed(false), [resolved]);
+
+  if (resolved && !failed) {
+    return (
+      // `alt=""` on purpose: the name renders directly beneath, so announcing
+      // the photo too would just make a screen reader say it twice.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={resolved}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="mb-2 aspect-[4/3] w-full rounded-lg object-cover"
+      />
+    );
+  }
+
+  return (
+    <div className="mb-2 flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 text-4xl">
+      {emojiFor(item.name)}
+    </div>
+  );
+}
+
+/**
+ * A tiny naive emoji picker so item cards without a photo still get a visual
+ * anchor. Zero database dependency — the mapping is intentionally shallow and
+ * safe (falls back to a plate).
  */
 function emojiFor(name: string): string {
   const n = name.toLowerCase();

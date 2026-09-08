@@ -1,6 +1,6 @@
 'use client';
 
-import { Archive, Building2, DoorOpen, Link2, MoreVertical, Pencil, Plus, Users } from 'lucide-react';
+import { Archive, Building2, ConciergeBell, DoorOpen, Link2, MoreVertical, Pencil, Plus, Users } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -28,6 +28,7 @@ import {
 import { seatsFree } from '@/lib/restaurant/types';
 import type {
   DiningAreaView,
+  OpenSessionView,
   OpenTableView,
   RestaurantTableView,
   TableSessionView,
@@ -45,11 +46,50 @@ interface Snapshot {
   /**
    * D104 — a LIST per table. An arrangement can carry several live tabs at
    * once, and the last-wins `new Map(...)` this replaces made all but one of
-   * them invisible on the floor plan.
+   * them invisible on the floor plan. Each tab is an OpenSessionView, so it
+   * also carries the bumped-ticket ids the food-ready badge reads (D112).
    */
-  sessionsByTableId: Map<string, Array<TableSessionView & { activeOrderId: string | null }>>;
+  sessionsByTableId: Map<string, OpenSessionView[]>;
   /** D49 — live ad-hoc joined tables for this branch. */
   openTables: OpenTableView[];
+}
+
+/**
+ * D112 — "Food ready" acknowledgements survive the trip into the session
+ * screen and back (this component unmounts on navigation), but stay
+ * per-device: serving is whoever carried the plate, so one tablet's ack
+ * must not clear another's bell. Same sessionStorage idiom as the POS cart.
+ */
+const READY_ACK_KEY = 'hpos.tables.readyAck';
+
+/** D104 — every live tab per table, in the order the API listed them. */
+function groupSessionsByTable(rows: OpenSessionView[]): Map<string, OpenSessionView[]> {
+  const byTable = new Map<string, OpenSessionView[]>();
+  for (const s of rows) byTable.set(s.tableId, [...(byTable.get(s.tableId) ?? []), s]);
+  return byTable;
+}
+
+/** D112 — bumped tickets on this tab that this device has not answered. */
+function unansweredReady(s: OpenSessionView, acked: Set<string>): number {
+  return s.readyTicketIds.filter((id) => !acked.has(id)).length;
+}
+
+function readAckedIds(): Set<string> {
+  try {
+    const raw = window.sessionStorage.getItem(READY_ACK_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeAckedIds(ids: Set<string>): void {
+  try {
+    window.sessionStorage.setItem(READY_ACK_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Storage refusing (private mode, quota) costs a lingering badge, nothing more.
+  }
 }
 
 const EMPTY: Snapshot = {
@@ -125,13 +165,51 @@ export function TableFloor({ session, branchId, canManage }: Props) {
     return map;
   }, [state.snapshot.openTables]);
 
+  /*
+   * D112 — "food ready" state per session; D118 (PO) removed the bell that
+   * once rang here — the waiter's signal is now the VISUAL badge alone
+   * (sound lives in the kitchen only). Acked ids are state (they gate
+   * badges, so they must re-render) seeded from sessionStorage.
+   */
+  const [ackedReady, setAckedReady] = React.useState<Set<string>>(() =>
+    typeof window === 'undefined' ? new Set() : readAckedIds(),
+  );
+
+  const absorbOpenSessions = React.useCallback((rows: OpenSessionView[]) => {
+    const allReady = new Set(rows.flatMap((r) => r.readyTicketIds));
+    // Prune acks the server no longer lists: a closed session's tickets are
+    // gone for good, and a RECALLED ticket must badge again when the kitchen
+    // re-bumps it — its id leaves this set, taking the ack with it.
+    setAckedReady((cur) => {
+      const next = new Set([...cur].filter((id) => allReady.has(id)));
+      if (next.size === cur.size) return cur;
+      writeAckedIds(next);
+      return next;
+    });
+  }, []);
+
+  /** The waiter tapped into the table: its badge is answered on this device. */
+  const ackReady = React.useCallback((s: OpenSessionView) => {
+    if (s.readyTicketIds.length === 0) return;
+    setAckedReady((cur) => {
+      const next = new Set(cur);
+      for (const id of s.readyTicketIds) next.add(id);
+      writeAckedIds(next);
+      return next;
+    });
+  }, []);
+
   const load = React.useCallback(async () => {
     try {
       const [areas, openSessionsRaw, liveOpenTables] = await Promise.all([
+        // null, not []: a failed sessions read must not be mistaken for
+        // "no ready tickets" — absorbing an empty list would prune every
+        // acknowledgement and resurrect badges the waiter already answered.
         diningAreas.list(session, branchId, false),
-        tableSessions.listOpen(session, branchId).catch(() => []),
+        tableSessions.listOpen(session, branchId).catch(() => null),
         openTables.list(session, branchId).catch(() => []),
       ]);
+      if (openSessionsRaw) absorbOpenSessions(openSessionsRaw);
       const areaSorted = areas.slice().sort((a, b) => a.position - b.position);
       const lists = await Promise.all(
         areaSorted.map((a) => restaurantTables.list(session, a.id, false).catch(() => [])),
@@ -148,15 +226,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
             ),
         );
       });
-      const sessionsByTableId = new Map<
-        string,
-        Array<TableSessionView & { activeOrderId: string | null }>
-      >();
-      for (const s of openSessionsRaw) {
-        const list = sessionsByTableId.get(s.tableId) ?? [];
-        list.push(s);
-        sessionsByTableId.set(s.tableId, list);
-      }
+      const sessionsByTableId = groupSessionsByTable(openSessionsRaw ?? []);
       setState({
         status: 'ready',
         snapshot: { areas: areaSorted, tablesByArea, sessionsByTableId, openTables: liveOpenTables },
@@ -168,11 +238,53 @@ export function TableFloor({ session, branchId, canManage }: Props) {
         error: err instanceof Error ? err.message : 'Failed to load floor plan',
       });
     }
-  }, [session, branchId]);
+  }, [session, branchId, absorbOpenSessions]);
 
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  /*
+   * D112 — the floor plan's only live loop. It refreshes SESSIONS, not the
+   * furniture: areas and tables change at admin cadence and keep their
+   * explicit loads, but "whose food is up" is worthless stale. 8 s like the
+   * orders queue (5 s is the kitchen's urgency, not the floor's), gated to a
+   * visible tab, with an immediate catch-up on return — a waiter pulling the
+   * tablet out of an apron pocket sees the badges that landed meanwhile.
+   */
+  const refreshSessions = React.useCallback(async () => {
+    try {
+      const rows = await tableSessions.listOpen(session, branchId);
+      absorbOpenSessions(rows);
+      setState((cur) =>
+        cur.status === 'ready'
+          ? {
+              ...cur,
+              snapshot: {
+                ...cur.snapshot,
+                sessionsByTableId: groupSessionsByTable(rows),
+              },
+            }
+          : cur,
+      );
+    } catch {
+      // Keep the last known floor; the next tick retries.
+    }
+  }, [session, branchId, absorbOpenSessions]);
+
+  React.useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void refreshSessions();
+    };
+    const t = setInterval(refreshIfVisible, 8000);
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [refreshSessions]);
 
   const { snapshot, status } = state;
   const visibleAreas =
@@ -258,17 +370,23 @@ export function TableFloor({ session, branchId, canManage }: Props) {
               </p>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                {snapshot.openTables.map((t) => (
-                  <OpenTableCard
-                    key={t.id}
-                    table={t}
-                    sessions={snapshot.sessionsByTableId.get(t.id) ?? []}
-                    canOpen={canOpenTable}
-                    onOpenClick={() => setOpenTarget(t)}
-                    canDissolve={canManageOpenTables}
-                    onDissolve={() => setDissolveTarget(t)}
-                  />
-                ))}
+                {snapshot.openTables.map((t) => {
+                  const tabs = snapshot.sessionsByTableId.get(t.id) ?? [];
+                  return (
+                    <OpenTableCard
+                      key={t.id}
+                      table={t}
+                      sessions={tabs}
+                      // D112 — a joined party's food rings too: unanswered bumps across every tab.
+                      readyCount={tabs.reduce((n, s) => n + unansweredReady(s, ackedReady), 0)}
+                      onViewOrder={ackReady}
+                      canOpen={canOpenTable}
+                      onOpenClick={() => setOpenTarget(t)}
+                      canDissolve={canManageOpenTables}
+                      onDissolve={() => setDissolveTarget(t)}
+                    />
+                  );
+                })}
               </div>
             )}
           </CardContent>
@@ -361,22 +479,27 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                   // the 4-column step is deferred to tab: (900) so landscape
                   // tablets get the denser grid without cramping portrait.
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                    {tables.map((t) => (
-                      <TableCard
-                        key={t.id}
-                        table={t}
-                        // A physical table still carries at most one tab.
-                        session={snapshot.sessionsByTableId.get(t.id)?.[0] ?? null}
-                        canOpen={canOpenTable}
-                        onOpenClick={() => setOpenTarget(t)}
-                        heldBy={heldByTableId.get(t.id) ?? []}
-                        ownsIt={tableOwnsIt(t)}
-                        canEdit={canEditOwnTable}
-                        canArchive={canArchiveOwnTable}
-                        onEdit={() => setEditTable(t)}
-                        onArchive={() => setArchiveTable(t)}
-                      />
-                    ))}
+                    {tables.map((t) => {
+                      // A physical table still carries at most one tab.
+                      const s = snapshot.sessionsByTableId.get(t.id)?.[0] ?? null;
+                      return (
+                        <TableCard
+                          key={t.id}
+                          table={t}
+                          session={s}
+                          readyCount={s ? unansweredReady(s, ackedReady) : 0}
+                          onViewOrder={() => s && ackReady(s)}
+                          canOpen={canOpenTable}
+                          onOpenClick={() => setOpenTarget(t)}
+                          heldBy={heldByTableId.get(t.id) ?? []}
+                          ownsIt={tableOwnsIt(t)}
+                          canEdit={canEditOwnTable}
+                          canArchive={canArchiveOwnTable}
+                          onEdit={() => setEditTable(t)}
+                          onArchive={() => setArchiveTable(t)}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -502,6 +625,8 @@ export function TableFloor({ session, branchId, canManage }: Props) {
 function TableCard({
   table,
   session,
+  readyCount,
+  onViewOrder,
   canOpen,
   onOpenClick,
   heldBy,
@@ -512,7 +637,11 @@ function TableCard({
   onArchive,
 }: {
   table: RestaurantTableView;
-  session: (TableSessionView & { activeOrderId: string | null }) | null;
+  session: OpenSessionView | null;
+  /** D112 — bumped tickets this device has not answered; >0 shows the bell. */
+  readyCount: number;
+  /** Tapping View order answers the badge for this session on this device. */
+  onViewOrder: () => void;
   canOpen: boolean;
   onOpenClick: () => void;
   /** D50 — open tables currently holding this table; empty for every other reason a table is RESERVED. */
@@ -576,6 +705,16 @@ function TableCard({
           <span>Held by {heldBy.map((o) => o.label ?? o.code).join(', ')}</span>
         </p>
       ) : null}
+      {/* D112 — the food-ready badge (D118: visual only — sound lives in
+          the kitchen). Cleared per device by opening the order, not by any
+          server state: serving has no verb here, carrying the plate is the
+          acknowledgement. */}
+      {readyCount > 0 ? (
+        <p className="flex items-center gap-1 text-xs font-semibold text-success">
+          <ConciergeBell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>Food ready</span>
+        </p>
+      ) : null}
       <div className="mt-auto flex gap-2 pt-1">
         {/* `size="md"` (44px) unconditionally — this is the card's primary
             action, and the sm variant (36px) sits just under the touch line
@@ -583,7 +722,9 @@ function TableCard({
             cards without an action don't jitter the grid row. */}
         {session ? (
           <Button asChild size="md" fullWidth variant="secondary">
-            <Link href={`/tables/session/${session.id}`}>View order</Link>
+            <Link href={`/tables/session/${session.id}`} onClick={onViewOrder}>
+              View order
+            </Link>
           </Button>
         ) : isAvailable && canOpen ? (
           <Button
@@ -1316,6 +1457,8 @@ function ArchiveTableDialog({
 function OpenTableCard({
   table,
   sessions,
+  readyCount,
+  onViewOrder,
   canOpen,
   onOpenClick,
   canDissolve,
@@ -1323,7 +1466,11 @@ function OpenTableCard({
 }: {
   table: OpenTableView;
   /** D104 — every live tab on this arrangement, not just the first. */
-  sessions: Array<TableSessionView & { activeOrderId: string | null }>;
+  sessions: OpenSessionView[];
+  /** D112 — see TableCard: unanswered bumped tickets across this arrangement's tabs. */
+  readyCount: number;
+  /** Tapping a tab's link answers the badge for THAT tab on this device. */
+  onViewOrder: (session: OpenSessionView) => void;
   canOpen: boolean;
   onOpenClick: () => void;
   canDissolve: boolean;
@@ -1369,6 +1516,13 @@ function OpenTableCard({
       <p className="text-xs text-muted-foreground">
         Joins {table.members.map((m) => m.label ?? m.code).join(' + ') || '—'}
       </p>
+      {/* D112 — same bell as TableCard; a joined party's food rings too. */}
+      {readyCount > 0 ? (
+        <p className="flex items-center gap-1 text-xs font-semibold text-success">
+          <ConciergeBell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>Food ready</span>
+        </p>
+      ) : null}
       {/* Stacked, not side by side: these cards are one narrow grid cell wide,
           and a second button on the same row overflows into its neighbour. */}
       <div className="mt-auto flex flex-col gap-2 pt-1">
@@ -1386,6 +1540,7 @@ function OpenTableCard({
             <Button key={s.id} asChild size="md" fullWidth variant="secondary">
               <Link
                 href={`/tables/session/${s.id}`}
+                onClick={() => onViewOrder(s)}
                 className="min-w-0 gap-1 px-3"
                 title={`${label} · ${elapsed}`}
               >

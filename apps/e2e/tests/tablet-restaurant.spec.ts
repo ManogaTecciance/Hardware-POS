@@ -240,8 +240,9 @@ test.describe('TAB-ORD — Orders queue tablet layout', () => {
     await page.goto('/orders');
     await page.waitForLoadState('networkidle');
 
-    // The status tabs "All / Pending / Preparing / Ready / Completed / Cancelled"
-    // are the primary filter; "All" is always present.
+    // The status tabs "All Orders / Pending / Preparing / Ready / Handed over /
+    // Cancelled" (D117 removed Completed) are the primary filter. `/^all$/`
+    // matches the channel chip labelled "All", which is always present too.
     const allTab = page.getByRole('button', { name: /^all$/i }).first();
     await expect(allTab).toBeVisible();
     const box = await allTab.boundingBox();
@@ -270,7 +271,9 @@ test.describe('TAB-KIT — Kitchen board tablet layout', () => {
 
     // "To make 9" — the count badge is part of the accessible name, so the
     // anchored `$` in the original never matched.
-    for (const name of [/^to make/i, /^done$/i]) {
+    // Three lanes since D115/D116: To make · Preparing · Done, pinned here so
+    // the browser test names the strip and not just its ends.
+    for (const name of [/^to make/i, /^preparing/i, /^done$/i]) {
       const chip = page.getByRole('button', { name }).first();
       await expect(chip).toBeVisible();
       const box = await chip.boundingBox();

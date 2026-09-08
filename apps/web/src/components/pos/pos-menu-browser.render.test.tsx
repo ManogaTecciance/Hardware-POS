@@ -22,6 +22,7 @@ import * as React from 'react';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { apiOrigin } from '@/lib/products-api';
 import type { PosCatalogueItem } from '@/lib/restaurant/pos-catalogue-api';
 
 import { PosMenuBrowser, type PosBrowserServerQuery } from './pos-menu-browser';
@@ -616,5 +617,92 @@ describe('D101 — sold out at the picker', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The card thumbnail.
+ *
+ * The defect these guard: the card rendered `emojiFor(name)` unconditionally
+ * and never read `imageUrl`, so a photo uploaded in the Products wizard showed
+ * on every product screen and on the RETAIL checkout, but never at the
+ * restaurant till. The emoji is a real fallback, so "an emoji is on screen" is
+ * not by itself a failure — each case therefore asserts the emoji's presence
+ * AND absence explicitly, and a component that hard-coded either branch would
+ * fail one of them.
+ */
+describe('card thumbnail', () => {
+  const PLATE = '🍽️';
+
+  function withPhoto(url: string | null) {
+    return catalogueToMenuData([{ ...item('p1', 'Dosa'), imageUrl: url }]);
+  }
+
+  it('renders the photo, resolved to the API origin, when the item has one', () => {
+    render(<PosMenuBrowser data={withPhoto('/uploads/dosa.jpg')} loading={false} onPick={vi.fn()} />);
+
+    const img = document.querySelector('img');
+    expect(img).not.toBeNull();
+    // D86 — uploads are served by the API, a different origin from the web
+    // app. A raw `/uploads/..` src is exactly the bug: same-origin, so it 404s.
+    expect(img?.getAttribute('src')).toBe(`${apiOrigin()}/uploads/dosa.jpg`);
+    expect(img?.getAttribute('src')).not.toBe('/uploads/dosa.jpg');
+    // The photo REPLACES the emoji tile rather than rendering beside it.
+    expect(screen.queryByText(PLATE)).toBeNull();
+  });
+
+  it('falls back to the emoji tile when the item has no photo', () => {
+    render(<PosMenuBrowser data={withPhoto(null)} loading={false} onPick={vi.fn()} />);
+
+    expect(screen.getByText(PLATE)).toBeTruthy();
+    expect(document.querySelector('img')).toBeNull();
+  });
+
+  it('falls back to the emoji tile when the photo fails to load', () => {
+    // The normal state in dev: LocalStack's community image drops every object
+    // on restart while `imageUrl` survives in Postgres. A broken tile at the
+    // till is not acceptable for what is a routine dev-environment condition.
+    render(<PosMenuBrowser data={withPhoto('/uploads/gone.jpg')} loading={false} onPick={vi.fn()} />);
+
+    const img = document.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(screen.queryByText(PLATE)).toBeNull();
+
+    fireEvent.error(img!);
+
+    expect(screen.getByText(PLATE)).toBeTruthy();
+    expect(document.querySelector('img')).toBeNull();
+  });
+
+  it('does not announce the photo — the name below it is the accessible label', () => {
+    render(<PosMenuBrowser data={withPhoto('/uploads/dosa.jpg')} loading={false} onPick={vi.fn()} />);
+
+    expect(document.querySelector('img')?.getAttribute('alt')).toBe('');
+    // The card is still reachable and still named by its text.
+    expect(screen.getByRole('button', { name: /dosa/i })).toBeTruthy();
+  });
+
+  it('frames photo and emoji in the same 4:3 box, so a mixed row is never ragged', () => {
+    render(<PosMenuBrowser data={withPhoto('/uploads/dosa.jpg')} loading={false} onPick={vi.fn()} />);
+    const photo = document.querySelector('img')!.className;
+    cleanup();
+
+    render(<PosMenuBrowser data={withPhoto(null)} loading={false} onPick={vi.fn()} />);
+    const emoji = screen.getByText(PLATE).className;
+
+    expect(photo).toContain('aspect-[4/3]');
+    expect(emoji).toContain('aspect-[4/3]');
+    /*
+     * The shipped bug, asserted negatively so this cannot pass vacuously: a
+     * FIXED height against a `w-full` card re-crops the photo at every
+     * breakpoint (a wide desktop card showed the middle third, a narrower
+     * tablet card showed most of the dish). Only a ratio keeps the framing
+     * identical across devices — and only the same box on both branches keeps
+     * card heights independent of whether a photo was uploaded.
+     */
+    expect(photo).not.toMatch(/\bh-\d/);
+    expect(emoji).not.toMatch(/\bh-\d/);
   });
 });

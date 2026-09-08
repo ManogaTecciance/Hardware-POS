@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CategoryNode } from '@/lib/products-api';
 
+import { ProductPreview } from './product-preview';
 import { StepDetails } from './step-details';
 import { StepPricingInventory } from './step-pricing-inventory';
 import { StepReview } from './step-review';
@@ -33,6 +34,8 @@ import {
   buildVariantsBatchInput,
   enumerateCombinations,
   initialState,
+  MAX_NAME_LENGTH,
+  MAX_SKU_LENGTH,
   validateStep,
   visibleSteps,
   type StepKey,
@@ -819,6 +822,342 @@ describe('D65 — recipe drafts', () => {
     // Positive control — the same rows, corrected, validate clean.
     s.components = [draft(), draft({ componentProductId: 'p2', wastagePercent: '5' })];
     expect(validateStep('pricing', s, { inventoryMode: 'LOCAL' })).toEqual({});
+  });
+});
+
+/**
+ * Client validation for the fields whose DTO rules the wizard used to ignore.
+ *
+ * Each rule mirrors a real server constraint, so every case is paired: the
+ * value the API would refuse must error HERE, and the value it accepts must
+ * pass. The empty-input positives matter most — these fields are optional, and
+ * a check that fired on '' would turn every one of them into a required field
+ * without anyone noticing.
+ */
+describe('validateStep — DTO-mirroring field rules', () => {
+  /** A clean simple-mode state: only the field under test can be at fault. */
+  const priced = (over: Partial<WizardState['simple']> = {}): WizardState => {
+    const s = initialState();
+    s.simple = { ...s.simple, sku: 'DISH-1', unitPrice: '10', ...over };
+    return s;
+  };
+  const pricing = (s: WizardState) => validateStep('pricing', s, { inventoryMode: 'LOCAL' });
+
+  it('simple mode refuses unusable cost / opening / reorder, and accepts blanks', () => {
+    // Negative — each would either 400 on `@Min(0)` or vanish as NaN on save.
+    expect(pricing(priced({ costPrice: '-1' }))['simple-cost']).toMatch(/negative/i);
+    expect(pricing(priced({ costPrice: 'abc' }))['simple-cost']).toMatch(/must be a number/i);
+    expect(pricing(priced({ openingQuantity: '-2' }))['simple-openq']).toMatch(/negative/i);
+    expect(pricing(priced({ reorderLevel: 'x' }))['simple-reorder']).toMatch(/must be a number/i);
+
+    // Positive — real values pass, and so does the untouched (empty) state.
+    // Without this half the checks above would read as "these are required".
+    expect(pricing(priced({ costPrice: '4.5', openingQuantity: '12', reorderLevel: '3' })))
+      .toEqual({});
+    expect(pricing(priced())).toEqual({});
+  });
+
+  it('caps the product name at the DTO length, at the exact boundary', () => {
+    const named = (name: string) =>
+      validateStep('details', { ...initialState(), name }, { inventoryMode: 'LOCAL' });
+    // 200 is @MaxLength(200) — allowed; 201 is the first refusal.
+    expect(named('N'.repeat(MAX_NAME_LENGTH))).toEqual({});
+    expect(named('N'.repeat(MAX_NAME_LENGTH + 1)).name).toMatch(/200 characters/);
+    // The empty case keeps its own message rather than the length one — the
+    // two must not collapse into each other.
+    expect(named('').name).toMatch(/give the product a name/i);
+  });
+
+  it('shows the name counter only near the cap, and the input enforces it', () => {
+    const withName = (name: string) => {
+      cleanup();
+      render(
+        <StepDetails
+          state={{ ...initialState(), name }}
+          errors={{}}
+          categories={categoryTree}
+          session={noopSession}
+          businessKind="RETAIL"
+          onChange={() => {}}
+        />,
+      );
+      const input = screen.getByLabelText(/product name/i) as HTMLInputElement;
+      return {
+        maxLength: input.maxLength,
+        counter: screen.queryByText(new RegExp(`${name.length} / ${MAX_NAME_LENGTH}`)),
+      };
+    };
+    // The input is what actually stops the typing.
+    expect(withName('Milk').maxLength).toBe(MAX_NAME_LENGTH);
+    // Negative: a short name must not carry a counter — it would nag about a
+    // limit nothing is near.
+    expect(withName('Milk').counter).toBeNull();
+    // Positive: at 80% it appears, so hitting the ceiling is never a surprise.
+    expect(withName('N'.repeat(MAX_NAME_LENGTH * 0.8)).counter).not.toBeNull();
+    expect(withName('N'.repeat(MAX_NAME_LENGTH)).counter).not.toBeNull();
+  });
+
+  it('never blocks on a stock field the step is not showing', () => {
+    // A value can outlive its input: type a reorder point, then turn Track
+    // stock off (D101) and the string stays in state with nowhere to render.
+    // Both halves matter — the guard must silence the HIDDEN field only, or it
+    // would be indistinguishable from having dropped the check altogether.
+    const stale = (trackInventory: boolean, inventoryMode: 'LOCAL' | 'DISABLED') => {
+      const s = priced({ reorderLevel: '-3', openingQuantity: '-9' });
+      s.trackInventory = trackInventory;
+      return validateStep('pricing', s, { inventoryMode });
+    };
+    // Visible → blamed.
+    const shown = stale(true, 'LOCAL');
+    expect(shown['simple-reorder']).toMatch(/negative/i);
+    expect(shown['simple-openq']).toMatch(/negative/i);
+    // Hidden by Track stock → silent, because there is no field to fix.
+    expect(stale(false, 'LOCAL')).toEqual({});
+    // Reorder shows without LOCAL; opening stock does not.
+    const noLocal = stale(true, 'DISABLED');
+    expect(noLocal['simple-reorder']).toMatch(/negative/i);
+    expect(noLocal['simple-openq']).toBeUndefined();
+  });
+
+  it('simple mode caps the SKU at the DTO length, at the exact boundary', () => {
+    // 80 is @MaxLength(80) — allowed; 81 is the first refusal.
+    expect(pricing(priced({ sku: 'S'.repeat(MAX_SKU_LENGTH) }))).toEqual({});
+    expect(pricing(priced({ sku: 'S'.repeat(MAX_SKU_LENGTH + 1) }))['simple-sku']).toMatch(
+      /80 characters/,
+    );
+  });
+
+  it('prep time must be a whole number, separately from the 0-360 range', () => {
+    const prep = (v: string) => {
+      const s = initialState();
+      s.name = 'Kottu';
+      s.foodType = 'FOOD';
+      s.prepMinutes = v;
+      return validateStep('details', s, { inventoryMode: 'LOCAL', businessKind: 'RESTAURANT' });
+    };
+    // Negative: `@IsInt()` on the DTO — a half-minute is a 400, not a rounding.
+    expect(prep('12.5').prepMinutes).toMatch(/whole number/i);
+    // The range message is still its own distinct answer, not swallowed.
+    expect(prep('400').prepMinutes).toMatch(/0-360/);
+    // Positive: a whole number inside the range, and the untouched blank.
+    expect(prep('15').prepMinutes).toBeUndefined();
+    expect(prep('').prepMinutes).toBeUndefined();
+  });
+
+  describe('variations', () => {
+    const twoDimensions = (secondName: string): WizardState => {
+      const s = initialState();
+      s.hasVariations = true;
+      s.variations = [
+        { key: 'd1', name: 'Size', options: [{ key: 'o1', name: 'S' }] },
+        { key: 'd2', name: secondName, options: [{ key: 'o2', name: 'Red' }] },
+      ];
+      return s;
+    };
+    const variations = (s: WizardState) =>
+      validateStep('variations', s, { inventoryMode: 'LOCAL' });
+
+    it('refuses two variations sharing a name — the server upserts by name', () => {
+      // Case-insensitive: "size" and "Size" collide on the same upsert.
+      const errs = variations(twoDimensions('size'));
+      expect(errs['variation-name-1']).toMatch(/unique/i);
+      // The FIRST one is not at fault — blaming both would be noise.
+      expect(errs['variation-name-0']).toBeUndefined();
+      // Positive control: a distinct name validates clean.
+      expect(variations(twoDimensions('Colour'))).toEqual({});
+    });
+
+    it('shows the blank-option error next to the option it blames', () => {
+      // The key has always been produced; nothing rendered it, so a half-filled
+      // option list blocked Continue with no message anywhere on the step.
+      const s = initialState();
+      s.hasVariations = true;
+      s.variations = [
+        { key: 'd1', name: 'Size', options: [{ key: 'o1', name: 'S' }, { key: 'o2', name: '' }] },
+      ];
+      const errs = variations(s);
+      expect(errs['variation-option-0-1']).toMatch(/option needs a name/i);
+
+      render(<StepVariations state={s} errors={errs} onChange={() => {}} />);
+      const shown = screen.getAllByRole('alert').map((n) => n.textContent ?? '');
+      expect(shown.some((t) => /option needs a name/i.test(t))).toBe(true);
+      // Negative control: the filled option is not flagged.
+      const inputs = screen.getAllByPlaceholderText('Option value') as HTMLInputElement[];
+      expect(inputs[0]!.getAttribute('aria-invalid')).not.toBe('true');
+      expect(inputs[1]!.getAttribute('aria-invalid')).toBe('true');
+    });
+  });
+
+  describe('variant rows', () => {
+    /** One enabled variant; `over` puts the field under test out of range. */
+    const withVariant = (over: Partial<WizardState['variants'][number]> = {}): WizardState => {
+      const s = initialState();
+      s.hasVariations = true;
+      s.variations = [
+        { key: 'dim-size', name: 'Size', options: [{ key: 'opt-200', name: '200ml' }] },
+      ];
+      s.variants = [
+        {
+          key: 'v-1',
+          enabled: true,
+          sku: 'COKE-200',
+          barcode: '',
+          unitPrice: '220',
+          costPrice: '',
+          openingQuantity: '',
+          reorderLevel: '',
+          imageUrl: null,
+          isActive: true,
+          optionKeys: ['opt-200'],
+          ...over,
+        },
+      ];
+      return s;
+    };
+
+    it('holds each row to the variant DTO and passes a clean row', () => {
+      // Negative — every one of these is a documented DTO refusal.
+      expect(pricing(withVariant({ sku: 'S'.repeat(81) }))['variant-sku-0']).toMatch(
+        /80 characters/,
+      );
+      expect(pricing(withVariant({ barcode: 'B'.repeat(81) }))['variant-barcode-0']).toMatch(
+        /80 characters/,
+      );
+      // `@IsNumber({ maxDecimalPlaces: 2 })` — stricter than the product DTO.
+      expect(pricing(withVariant({ unitPrice: '10.999' }))['variant-price-0']).toMatch(
+        /2 decimal places/,
+      );
+      expect(pricing(withVariant({ openingQuantity: '-1' }))['variant-openq-0']).toMatch(
+        /negative/i,
+      );
+      expect(pricing(withVariant({ reorderLevel: '1.2345' }))['variant-reorder-0']).toMatch(
+        /3 decimal places/,
+      );
+
+      // Positive — boundary values the server accepts must not be blocked:
+      // 80-char SKU, 2dp price, 3dp reorder, and empty optionals.
+      const clean = withVariant({
+        sku: 'S'.repeat(MAX_SKU_LENGTH),
+        barcode: 'B'.repeat(MAX_SKU_LENGTH),
+        unitPrice: '10.99',
+        openingQuantity: '2.125',
+        reorderLevel: '1.234',
+      });
+      // Seeding stock is what makes the branch required (pre-existing rule) —
+      // answer it so this case isolates the fields under test.
+      clean.openingBranchId = 'br_main';
+      expect(pricing(clean)).toEqual({});
+      expect(pricing(withVariant())).toEqual({});
+    });
+
+    it('still reports duplicate SKUs when one of the pair is also too long', () => {
+      // The length check must not consume the row and hide the collision — the
+      // set is fed regardless of length, so row 1 still sees row 0's key.
+      const s = withVariant({ sku: 'S'.repeat(81) });
+      s.variants.push({ ...s.variants[0]!, key: 'v-2', sku: 'S'.repeat(81) });
+      const errs = pricing(s);
+      expect(errs['variant-sku-0']).toMatch(/80 characters/);
+      expect(errs['variant-sku-1']).toMatch(/unique/i);
+    });
+
+    it('shows the new row errors on screen, in the field they blame', () => {
+      // A validation that blocks Continue with no visible message is worse
+      // than none — prove each new key reaches the matrix.
+      const s = withVariant({ barcode: 'B'.repeat(81), openingQuantity: '-1', reorderLevel: '1.2345' });
+      render(
+        <StepPricingInventory
+          state={s}
+          errors={pricing(s)}
+          branches={branches}
+          showOpeningStock={true}
+          onChange={() => {}}
+        />,
+      );
+      expect(screen.getByLabelText(/barcode for 200ml/i).getAttribute('aria-invalid')).toBe('true');
+      expect(screen.getByLabelText(/opening stock for 200ml/i).getAttribute('aria-invalid')).toBe(
+        'true',
+      );
+      expect(screen.getByLabelText(/reorder point for 200ml/i).getAttribute('aria-invalid')).toBe(
+        'true',
+      );
+      const alerts = screen.getAllByRole('alert').map((n) => n.textContent ?? '');
+      expect(alerts.some((t) => /80 characters/.test(t))).toBe(true);
+      expect(alerts.some((t) => /negative/i.test(t))).toBe(true);
+      expect(alerts.some((t) => /3 decimal places/.test(t))).toBe(true);
+      // Negative control: the untouched SKU and price cells are not flagged.
+      expect(screen.getByLabelText(/sku for 200ml/i).getAttribute('aria-invalid')).not.toBe('true');
+      expect(
+        screen.getByLabelText(/selling price for 200ml/i).getAttribute('aria-invalid'),
+      ).not.toBe('true');
+    });
+  });
+});
+
+describe('ProductPreview — long unbroken values stay in the card', () => {
+  // A name with no space has no break opportunity, so it used to run straight
+  // past the card's edge. jsdom has no layout engine and cannot prove the wrap
+  // itself — the real proof is a browser measurement (0 px overflow at 1280,
+  // 1024 and 820 wide). This pins the MECHANISM so it cannot be dropped
+  // silently, and pairs it with the value actually rendering in full.
+  const LONG = 'Beef Steak34444444444444444444444444444444444444444444444';
+
+  it('renders the whole name and gives it a break-words rule', () => {
+    const s = initialState();
+    s.name = LONG;
+    render(<ProductPreview state={s} categories={categoryTree} currentStepIndex={0} />);
+
+    const name = screen.getByText(LONG);
+    // Positive: the value is shown in full — the fix is wrapping, not clipping.
+    expect(name.textContent).toBe(LONG);
+    expect(name.className).toMatch(/break-words/);
+    // Negative: it must NOT be solved by truncating the operator's input away.
+    expect(name.className).not.toMatch(/\btruncate\b/);
+    expect(name.className).not.toMatch(/line-clamp/);
+  });
+
+  it('D86 — resolves a stored /uploads path against the API origin', () => {
+    // An upload is stored as `/uploads/<key>` and served by the API, a
+    // DIFFERENT origin from the web app. Rendered raw the browser resolved it
+    // against the app's own origin and 404'd, so the preview stayed empty
+    // however many times you uploaded.
+    const s = initialState();
+    s.imageUrl = '/uploads/products/abc.webp';
+    const { container } = render(
+      <ProductPreview state={s} categories={categoryTree} currentStepIndex={0} />,
+    );
+    const src = container.querySelector('img')?.getAttribute('src') ?? '';
+    // Negative: the bare stored path is exactly what was broken.
+    expect(src).not.toBe('/uploads/products/abc.webp');
+    // Positive: absolute, and still pointing at the same stored object.
+    expect(src).toMatch(/^https?:\/\//);
+    expect(src.endsWith('/uploads/products/abc.webp')).toBe(true);
+  });
+
+  it('D86 — leaves an absolute or data URL untouched', () => {
+    // The "Image URL" tab accepts a remote URL, and re-prefixing one would
+    // break it just as surely as not prefixing the stored path.
+    for (const url of ['https://cdn.test/a.png', 'data:image/png;base64,AAAA']) {
+      cleanup();
+      const s = initialState();
+      s.imageUrl = url;
+      const { container } = render(
+        <ProductPreview state={s} categories={categoryTree} currentStepIndex={0} />,
+      );
+      expect(container.querySelector('img')?.getAttribute('src')).toBe(url);
+    }
+  });
+
+  it('wraps the free-text description and brand too, not just the name', () => {
+    const s = initialState();
+    s.name = 'Steak';
+    s.description = 'D'.repeat(120);
+    s.brand = 'B'.repeat(120);
+    render(<ProductPreview state={s} categories={categoryTree} currentStepIndex={0} />);
+
+    expect(screen.getByText('D'.repeat(120)).className).toMatch(/break-words/);
+    // The brand line is "Brand: <value>", so match on the containing element.
+    const brandLine = screen.getByText(/^Brand: B+$/);
+    expect(brandLine.className).toMatch(/break-words/);
   });
 });
 

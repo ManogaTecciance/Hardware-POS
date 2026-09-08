@@ -50,11 +50,13 @@ export type RestaurantOrderChannel = 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
 
 // D68 — PRINTED/REPRINTED/FAILED are retired: no code path produces them,
 // but pre-D68 rows still carry them and the board must render those.
+// D113 — IN_PROGRESS is the board's Preparing state (start → done).
 export type KitchenTicketStatus =
   | 'QUEUED'
   | 'PRINTED'
   | 'REPRINTED'
   | 'FAILED'
+  | 'IN_PROGRESS'
   | 'COMPLETED';
 
 export type KitchenPrintAttemptStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED';
@@ -390,6 +392,17 @@ export interface TableSessionView {
   version: number;
 }
 
+/**
+ * One row of `GET /open-sessions` — the session plus the floor plan's
+ * extras. `readyTicketIds` (D112) are the session's bumped kitchen tickets:
+ * the waiter-safe "food ready" signal (no KOT_VIEW involved; the route is
+ * D70-scoped to the sessions the caller may see).
+ */
+export interface OpenSessionView extends TableSessionView {
+  activeOrderId: string | null;
+  readyTicketIds: string[];
+}
+
 export interface OrderView {
   id: string;
   sessionId: string;
@@ -667,6 +680,12 @@ export interface UnifiedOrderDetail extends UnifiedOrderView {
   } | null;
   payments: { method: PaymentMethod; amount: string; reference: string | null; at: string }[];
   timeline: { at: string; status: UnifiedOrderStatus }[];
+  /**
+   * D116 — the takeaway profile behind this row (null for dine-in and
+   * 3rd-party). The queue's Cancel action drives the existing takeaway
+   * status machine, which is addressed by this id.
+   */
+  takeawayProfileId: string | null;
 }
 
 // ── Reports ─────────────────────────────────────────────────────────────────

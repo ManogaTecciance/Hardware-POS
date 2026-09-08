@@ -29,8 +29,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 document itself scroll. The header stays pinned for every route
                 and `main` owns the only vertical scroll — so a page can either
                 scroll normally or, like POS, claim the full height and manage
-                its own internal scroll regions. */}
-              <div className="flex h-dvh overflow-hidden">
+                its own internal scroll regions.
+
+                `relative` is what makes `overflow-hidden` above actually hold.
+                A static element does not clip absolutely-positioned descendants
+                — their containing block skips past it to the document — so
+                `sr-only` (which is `position: absolute`) sitting below the fold
+                stretched the DOCUMENT's scroll height and let the whole shell,
+                sidebar and header included, scroll off its own edge. It bit the
+                product wizard hardest (548 px of overscroll on /products/new,
+                the restaurant menu-item editor per D45), but `sr-only` is used
+                app-wide, so the lock has to be established here, once. */}
+              <div className="relative flex h-dvh overflow-hidden">
                 <Sidebar />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <Header />

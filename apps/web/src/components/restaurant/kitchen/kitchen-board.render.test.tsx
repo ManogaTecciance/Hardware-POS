@@ -31,16 +31,25 @@ vi.mock('@/lib/auth', () => ({
 }));
 
 const listFn = vi.fn();
+const startFn = vi.fn();
 const completeFn = vi.fn();
 const reopenFn = vi.fn();
 const orderFn = vi.fn();
 vi.mock('@/lib/restaurant/api', () => ({
   kitchen: {
     listTickets: (...args: unknown[]) => listFn(...args),
+    start: (...args: unknown[]) => startFn(...args),
     complete: (...args: unknown[]) => completeFn(...args),
     reopen: (...args: unknown[]) => reopenFn(...args),
     order: (...args: unknown[]) => orderFn(...args),
   },
+}));
+
+// Sound is asserted against the chime module, same as the orders queue's
+// polling suite — jsdom has no AudioContext to listen to.
+const chime = vi.fn();
+vi.mock('@/lib/restaurant/new-order-chime', () => ({
+  playNewOrderChime: () => chime(),
 }));
 
 const { KitchenBoard } = await import('./kitchen-board');
@@ -91,9 +100,11 @@ beforeEach(() => {
   outstandingRows = [];
   doneRows = [];
   listFn.mockReset();
+  startFn.mockReset();
   completeFn.mockReset();
   reopenFn.mockReset();
   orderFn.mockReset();
+  chime.mockReset();
   orderFn.mockImplementation(() => new Promise(() => undefined));
   listFn.mockImplementation((_s: unknown, _b: unknown, filter: unknown) =>
     Promise.resolve(filter === 'COMPLETED' ? doneRows : outstandingRows),
@@ -144,42 +155,137 @@ describe('age escalation (D100)', () => {
 });
 
 describe('the write gate (WS-408 mirrored)', () => {
-  it('shows a full-width Mark done to the kitchen', async () => {
-    outstandingRows = [ticket({ id: 'tk_1' }), ticket({ id: 'tk_2', placeLabel: 'T2' })];
+  it('shows a full-width verb to the kitchen — Start on the To make lane, Mark done on Preparing', async () => {
+    outstandingRows = [
+      ticket({ id: 'tk_1' }),
+      ticket({ id: 'tk_2', placeLabel: 'T2', status: 'IN_PROGRESS' }),
+    ];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
+    // D113/D115 — one verb per state, one lane per ticket.
     await waitFor(() =>
-      expect(screen.getAllByRole('button', { name: /mark done/i })).toHaveLength(2),
-    );
-    // The bump is the whole bottom of the card, not a footer-sized button.
-    for (const btn of screen.getAllByRole('button', { name: /mark done/i })) {
-      expect(btn.className).toContain('w-full');
-    }
-  });
-
-  it('shows the till no verbs at all, while Details still counts the tickets', async () => {
-    canUpdate = false;
-    outstandingRows = [ticket({ id: 'tk_1' }), ticket({ id: 'tk_2', placeLabel: 'T2' })];
-    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
-
-    await waitFor(() =>
-      expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(2),
+      expect(screen.getAllByRole('button', { name: /start preparing/i })).toHaveLength(1),
     );
     expect(screen.queryByRole('button', { name: /mark done/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /start preparing/i }).className).toContain('w-full');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /mark done/i })).toHaveLength(1),
+    );
+    expect(screen.queryByRole('button', { name: /start preparing/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /mark done/i }).className).toContain('w-full');
+  });
+
+  it('shows the till no verbs on either lane, while Details still counts the tickets', async () => {
+    canUpdate = false;
+    outstandingRows = [
+      ticket({ id: 'tk_1' }),
+      ticket({ id: 'tk_2', placeLabel: 'T2', status: 'IN_PROGRESS' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1),
+    );
+    expect(screen.queryByRole('button', { name: /start preparing/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
+    expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /mark done/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /recall/i })).toBeNull();
+  });
+
+  it('an empty Preparing lane does not tell the till to press Start (D94 / D119)', async () => {
+    canUpdate = false;
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await waitFor(() => expect(screen.getByText('Nothing on the stove.')).toBeTruthy());
+    // NEGATIVE — the instruction is for a verb the till does not hold.
+    expect(screen.queryByText(/start a ticket from to make/i)).toBeNull();
+  });
+
+  it('…while the kitchen, holding the verb, is told where to start (positive control)', async () => {
+    canUpdate = true;
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await waitFor(() =>
+      expect(screen.getByText('Nothing on the stove. Start a ticket from To make.')).toBeTruthy(),
+    );
   });
 });
 
 describe('the bump', () => {
   it('sends the completion and drops the card without waiting for the poll', async () => {
-    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T7' })];
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T7', status: 'IN_PROGRESS' })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
     await waitFor(() => expect(screen.getByText('T7')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /mark done/i }));
 
     await waitFor(() => expect(completeFn).toHaveBeenCalledWith(SESSION, 'brn_1', 'tk_1'));
     await waitFor(() => expect(screen.queryByText('T7')).toBeNull());
+  });
+});
+
+/*
+ * D113/D115 — Start preparing moves the card one lane along: it leaves
+ * To make the moment it is tapped and turns up under Preparing with the
+ * badge and the next verb — the bump-bar lane flow, pinned from both lanes
+ * so a card that vanished entirely would fail the second half.
+ */
+describe('start preparing (D113)', () => {
+  it('starting moves the card from To make to the Preparing lane', async () => {
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T7' })];
+    startFn.mockImplementation(() => {
+      const started = ticket({ id: 'tk_1', placeLabel: 'T7', status: 'IN_PROGRESS' });
+      outstandingRows = [started];
+      return Promise.resolve(started);
+    });
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T7')).toBeTruthy());
+    expect(screen.queryByText('Preparing', { selector: 'span' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /start preparing/i }));
+
+    await waitFor(() => expect(startFn).toHaveBeenCalledWith(SESSION, 'brn_1', 'tk_1'));
+    // Gone from To make…
+    await waitFor(() => expect(screen.queryByText('T7')).toBeNull());
+    // …and waiting under Preparing, verb advanced, badge on.
+    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await waitFor(() => expect(screen.getByText('T7')).toBeTruthy());
+    expect(screen.getByRole('button', { name: /mark done/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /start preparing/i })).toBeNull();
+  });
+});
+
+/*
+ * D116 — the board has NO Cancelled lane: cancellation is the Orders
+ * queue's business, and cancelled work simply never reaches this screen
+ * (the server read excludes it — pinned in the integration suite). The tab
+ * strip is asserted as the exact set, because a lane quietly added back
+ * would pass any absence-only check the moment it was renamed.
+ */
+describe('the lane strip (D116)', () => {
+  it('offers exactly To make, Preparing and Done', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T1 · Main')).toBeTruthy());
+
+    const strip = screen.getByRole('group', { name: /filter kitchen tickets/i });
+    const labels = Array.from(strip.querySelectorAll('button')).map((b) =>
+      (b.textContent ?? '').replace(/\d+$/, '').trim(),
+    );
+    expect(labels).toEqual(['To make', 'Preparing', 'Done']);
   });
 });
 
@@ -278,5 +384,106 @@ describe('recall (D100)', () => {
 
     await waitFor(() => expect(screen.getByText('T9')).toBeTruthy());
     expect(screen.queryByRole('button', { name: /recall/i })).toBeNull();
+  });
+});
+
+/*
+ * The new-ticket chime, pinned in pairs like the orders queue's: every ring
+ * case has a silent twin (first load, an unchanged poll, a filter switch),
+ * because a chime wired to "any response" would pass the ring half alone.
+ */
+describe('the new-ticket chime', () => {
+  beforeEach(() => {
+    // Scoped to this suite: the rest of the file runs on real timers.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Let one full 5 s poll interval elapse (and its fetch settle). */
+  async function tickPoll() {
+    await vi.advanceTimersByTimeAsync(5000);
+  }
+
+  it('stays silent on the first load, whatever it brings', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' }), ticket({ id: 'tk_2', placeLabel: 'T2' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // Positive control: the board rendered the tickets it will not ring for.
+    await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
+    expect(chime).not.toHaveBeenCalled();
+  });
+
+  it('rings when a poll brings a ticket the board has not seen', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(listFn).toHaveBeenCalledTimes(1));
+
+    outstandingRows = [...outstandingRows, ticket({ id: 'tk_2', placeLabel: 'T2' })];
+    await tickPoll();
+
+    await waitFor(() => expect(chime).toHaveBeenCalledTimes(1));
+  });
+
+  it('stays silent when the poll returns the same tickets', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(listFn).toHaveBeenCalledTimes(1));
+
+    await tickPoll();
+
+    await waitFor(() => expect(listFn).toHaveBeenCalledTimes(2));
+    expect(chime).not.toHaveBeenCalled();
+  });
+
+  it('rings for an arrival even when a bump lands in the same poll', async () => {
+    // One out, one in: the COUNT is unchanged, which is exactly why the
+    // baseline compares ids — a total-based chime (the orders queue's rule,
+    // forced on it by paging) would sleep through this arrival.
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(listFn).toHaveBeenCalledTimes(1));
+
+    outstandingRows = [ticket({ id: 'tk_2', placeLabel: 'T2' })];
+    await tickPoll();
+
+    await waitFor(() => expect(chime).toHaveBeenCalledTimes(1));
+  });
+
+  it('stays silent across a filter switch and on Done-tab arrivals', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    doneRows = [
+      ticket({
+        id: 'tk_9',
+        status: 'COMPLETED',
+        placeLabel: 'T9',
+        completedAt: minutesAgo(1),
+        completedByName: 'Chef',
+      }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(listFn).toHaveBeenCalledTimes(1));
+
+    // Done shows a ticket this board never listed — visibility, not arrival.
+    fireEvent.click(screen.getByRole('button', { name: /^Done/ }));
+    await waitFor(() => expect(screen.getByText('T9')).toBeTruthy());
+    expect(chime).not.toHaveBeenCalled();
+
+    // A new id on the Done tab is someone bumping, not work arriving.
+    doneRows = [
+      ...doneRows,
+      ticket({
+        id: 'tk_10',
+        status: 'COMPLETED',
+        placeLabel: 'T10',
+        completedAt: minutesAgo(0),
+        completedByName: 'Chef',
+      }),
+    ];
+    await tickPoll();
+
+    await waitFor(() => expect(screen.getByText('T10')).toBeTruthy());
+    expect(chime).not.toHaveBeenCalled();
   });
 });

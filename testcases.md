@@ -134,6 +134,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD-027 | Subcategory library is browser-local (known mock) | Assign shared subcategory, open app in second browser | Assignment absent there — frontend-only adapter until backend lands | N | Not Run |
 | PROD-028 | Sold out is a switch, not a count (D101) | Restaurant owner marks a dish sold out, then available again | `soldOutAt` set then cleared; the POS card greys out and comes back; a repeat 86 keeps the original timestamp | P | Not Run |
 | PROD-029 | The 86 switch refuses stock-governed kinds (D101) | PUT /v1/products/:id/availability on a STOCK_ITEM or a booking kind | 400 `PRODUCT_AVAILABILITY_STOCK_GOVERNED` naming what governs it; a waiter/cashier may 86 a dish but not edit the catalogue | N | Not Run |
+| PROD-030 | Product wizard enforces name and SKU limits | Type past 200 characters in Product name and past 80 in a SKU; leave a variation option blank; give two variations one name | Typing stops at the cap; the counter appears from 160 characters and reads 200 / 200 in the warning colour; a restored draft or an older row over the cap is refused with "Product name is limited to 200 characters." / "SKU is limited to 80 characters."; "Option needs a name."; "Variation names must be unique." | N | Not Run |
 
 ## PIMP — Product Bulk Import
 
@@ -196,6 +197,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | POS-037 | Forward dating blocked in the picker | Try to pick tomorrow | The picker refuses it (max = today) | N | Not Run |
 | POS-038 | Invoice date resets after a completed sale | Complete a backdated sale, start a new one | The selector is back to today | P | Not Run |
 | POS-051 | A sold-out dish cannot be rung up (D101) | Search a dish the seed ships 86'd on the counter POS | The tile is disabled and says sold out; the round refuses the item server-side | N | Not Run |
+| POS-052 | The orders queue is silent; readiness is a count (D114/D118) | Bump a takeaway ticket while the Orders page is open | The Ready tab's count rises and the row moves; no sound plays anywhere but the kitchen | P | Not Run |
+| POS-053 | Cancelling is the queue's verb (D116) | Cancel a takeaway from the Orders page; try to find Cancel on the kitchen board | The order is cancelled through the takeaway status machine and its ticket leaves the pass; the board offers no Cancel | P | Not Run |
+| POS-054 | Payment settles without handing over (D117) | Take payment for a takeaway in the counter popup | The session closes into a Sale (POST /restaurant/takeaway/:profileId/settle, idempotent); the order still reads Pending / Preparing / Ready until Handed over is pressed by a hand | P | Not Run |
+| POS-055 | No Completed tab on the counter's queue (D117) | Open the Orders page as the cashier | Tabs are All Orders · Pending · Preparing · Ready · Handed over · Cancelled; there is no Completed tab — a closed dine-in shell is reachable only under All Orders or an old `?status=COMPLETED` link | N | Not Run |
 
 ## PAY — Payments & Credit
 
@@ -648,13 +653,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | OTBL-022 | One joined table, several tabs (D104) | Open a joined table for one party, then a second tab on the same arrangement with its own name | Both tabs live on the arrangement; the tab name appears on the kitchen ticket, the bill and the floor | P | Not Run |
 | OTBL-023 | A member table is not offered to a second open table (D105) | With M2 and M3 joined and in service, open the New open table picker | M2 and M3 are absent from the picker; AVAILABLE tables only | N | Not Run |
 | OTBL-024 | A joined member is shown, not offered (D106) | Look at a member table on the floor while its arrangement is in service | It reads Reserved with no Unreserve control; releasing it out from under the party is impossible | N | Not Run |
+| OTBL-025 | Food ready shows on the floor, per tab (D112/D104) | Join two tables, open two tabs, bump one tab's ticket | The arrangement's card shows "Food ready"; opening that tab's link clears it on this device while the other tab's link does not; no bell sounds (D118) | P | Not Run |
 
-## KIT — Kitchen Board (D68 / D100)
+## KIT — Kitchen Board (D68 / D100 / D111–D116)
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
 | KIT-001 | Tickets age on the board (D100) | Leave a ticket outstanding past 10 and then 15 minutes | Timer turns amber at 10 min and red at 15 with the card border; completed tickets stop ageing | P | Not Run |
 | KIT-002 | A wrong bump can be taken back (D100) | Mark a ticket done, then Reopen it | It returns to the outstanding tab; POST …/kitchen-tickets/:id/reopen needs the same permission as completing | P | Not Run |
+| KIT-003 | The board rings for a ticket it has not seen (D111) | Place an order while the kitchen board is open; re-poll without new tickets | One chime on arrival, silence on re-polls; the kitchen SCREEN is the only one that sounds — the tables screen and the orders queue stay silent (D118) — whoever is looking at it, the till's read-only board included | P | Not Run |
+| KIT-004 | Start preparing, then done (D113) | Tap Start on a queued ticket, then Mark done | Ticket moves QUEUED → IN_PROGRESS → COMPLETED; the orders queue's unified status follows (Preparing, then Ready); POST …/kitchen-tickets/:id/start needs the same permission as completing | P | Not Run |
+| KIT-005 | Three lanes, each ticket in exactly one (D115/D116) | Read the board with queued, preparing and done tickets | To make · Preparing · Done; a cancelled order's ticket leaves the pass, and there is no Cancel on the board — cancelling belongs to the orders queue | P | Not Run |
+| KIT-006 | Recall lands on To make (D100/D113) | Mark an IN_PROGRESS ticket done, then Reopen; try Reopen on a ticket that is still preparing | Reopen returns a done ticket to To make (QUEUED), never to Preparing; a preparing ticket has no Reopen and the call is a no-op; the till (KOT_VIEW only) sees neither Start nor Mark done | P | Not Run |
 
 ## BSPL — Bill Splitting by Item (D51)
 
@@ -724,6 +734,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | UI-016 | Charts have accessible alternatives | Inspect dashboard charts | Accessible summaries / data-table views present | P | Not Run |
 | UI-024 | The food-service rail names the catalogue "Menu" (D103) | Restaurant owner rail vs Tile Shop rail | Restaurant: Menu with the book icon, href /products, no Inventory; Tile Shop: Products | P | Not Run |
 | UI-025 | The account menu names the role row, not the enum | Sign in as the seeded waiter | Button and menu read "Waiter", never "Cashier"; a session minted before roleName shows the enum spelt for a person | P | Not Run |
+| UI-026 | Sound lives in the kitchen alone (D118) | Sign in as waiter, cashier and kitchen staff; place and bump an order | Only the kitchen board plays a chime; the tables screen and the orders queue are visual only | P | Not Run |
 
 ## SEC — Security
 
@@ -751,19 +762,19 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | AUTH | 15 | CUST | 36 |
 | PERM | 16 | CIMP | 10 |
 | DASH | 24 | SUP | 15 |
-| PROD | 29 | SIMP | 8 |
+| PROD | 30 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
-| POS | 51 | SET | 28 |
+| POS | 55 | SET | 28 |
 | PAY | 41 | DOC | 16 |
 | DISC | 15 | RSV | 16 |
-| MARK | 20 | OTBL | 24 |
+| MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
-| RET | 18 | KIT | 2 |
+| RET | 18 | KIT | 6 |
 | EXC-T | 7 | ADM | 15 |
-| EXC-D | 4 | UI | 25 |
+| EXC-D | 4 | UI | 26 |
 | QUO | 21 | SEC | 12 |
 
-**Total: 559 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — are included, which the previous figure of 481 left out).
+**Total: 570 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — are included, which the previous figure of 481 left out).
 
 ### Notes for automation
 

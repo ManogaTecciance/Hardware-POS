@@ -246,35 +246,50 @@ export function StepVariations({ state, errors, onChange }: Props) {
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-muted-foreground">Options</p>
                     <ul className="space-y-2" role="list">
-                      {dim.options.map((opt) => (
-                        <li
-                          key={opt.key}
-                          className="animate-in fade-in slide-in-from-top-1 flex items-center gap-2 motion-reduce:animate-none"
-                          style={{ animationDuration: '160ms' }}
-                        >
-                          <Input
-                            ref={(el) => {
-                              optionNameRefs.current.set(opt.key, el);
-                            }}
-                            value={opt.name}
-                            onChange={(e) => updateOption(dim.key, opt.key, e.target.value)}
-                            placeholder="Option value"
-                            maxLength={40}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeOption(dim.key, opt.key)}
-                            aria-label={`Remove ${opt.name || 'option'}`}
-                            // touch-target-coarse enlarges the trash icon to
-                            // 44px on tablet — the option list is a stack of
-                            // small inputs and a mis-tap next door can wipe
-                            // the wrong row.
-                            className="rounded-md p-2 text-muted-foreground transition-colors touch-target-coarse hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                      {dim.options.map((opt, oi) => {
+                        // `validateStep` has always produced this key for a
+                        // blank option, but nothing rendered it — so a half-
+                        // filled option list blocked Continue with no message
+                        // anywhere on the step.
+                        const optionError = errors[`variation-option-${di}-${oi}`];
+                        return (
+                          <li
+                            key={opt.key}
+                            className="animate-in fade-in slide-in-from-top-1 motion-reduce:animate-none"
+                            style={{ animationDuration: '160ms' }}
                           >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </li>
-                      ))}
+                            <div className="flex items-center gap-2">
+                              <Input
+                                ref={(el) => {
+                                  optionNameRefs.current.set(opt.key, el);
+                                }}
+                                value={opt.name}
+                                onChange={(e) => updateOption(dim.key, opt.key, e.target.value)}
+                                placeholder="Option value"
+                                maxLength={40}
+                                aria-invalid={!!optionError}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeOption(dim.key, opt.key)}
+                                aria-label={`Remove ${opt.name || 'option'}`}
+                                // touch-target-coarse enlarges the trash icon to
+                                // 44px on tablet — the option list is a stack of
+                                // small inputs and a mis-tap next door can wipe
+                                // the wrong row.
+                                className="rounded-md p-2 text-muted-foreground transition-colors touch-target-coarse hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                            {optionError ? (
+                              <p className="mt-1 text-xs text-danger" role="alert">
+                                {optionError}
+                              </p>
+                            ) : null}
+                          </li>
+                        );
+                      })}
                     </ul>
                     {optionsError ? (
                       <p className="text-xs text-danger" role="alert">
