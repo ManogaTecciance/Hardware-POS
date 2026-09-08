@@ -41,6 +41,11 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     stockState: 'IN_STOCK',
     imageUrl: null,
     taxable: true,
+    // D113 (`6.2`) — required on `ClientProduct`; see the note in
+    // `cart-line-key.test.ts`. This fixture feeds the SCAN path, which `6.3`
+    // must intercept for a measured product.
+    quantityType: 'WHOLE',
+    unitOfMeasure: null,
     variants: [],
     ...over,
   };

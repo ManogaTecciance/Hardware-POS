@@ -24,6 +24,14 @@ export interface ClientVariant {
 
 export type StockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED';
 
+/**
+ * D113 (`6.2`) — mirrors the Prisma `QuantityType` enum.
+ *
+ * Declared here rather than imported: `@hardware-pos/database` is a server
+ * package and the browser cannot load it. Same idiom as `StockState` above.
+ */
+export type ClientQuantityType = 'WHOLE' | 'DECIMAL';
+
 export interface ClientProduct {
   id: string;
   name: string;
@@ -68,6 +76,17 @@ export interface ClientProduct {
    * behaving as it always did rather than silently zero-rating.
    */
   taxable: boolean;
+  /**
+   * D113 (`6.2`) — `'WHOLE'` is sold by the piece, `'DECIMAL'` by weight or
+   * measure.
+   *
+   * What the cart reads to decide whether to open the numpad. Absent on a
+   * response predating the field, and `?? 'WHOLE'` keeps that behaving as it
+   * always did — the same shape `taxable` uses above, for the same reason.
+   */
+  quantityType: ClientQuantityType;
+  /** D113b — `'kg'`, `'L'`. Null for a WHOLE product, which has no unit. */
+  unitOfMeasure: string | null;
   /** D99 — empty for a single-SKU product; the sizes to choose from otherwise. */
   variants: ClientVariant[];
 }
@@ -116,6 +135,9 @@ interface ApiSellableItem {
   hasVariants: boolean;
   /** D101 (3.14); absent on responses predating the field. */
   taxable?: boolean;
+  /** D113 (`6.2`); absent on responses predating the field. */
+  quantityType?: ClientQuantityType;
+  unitOfMeasure?: string | null;
   variants?: {
     id: string;
     sku: string;
@@ -253,6 +275,10 @@ function normalizeApi(item: ApiSellableItem): ClientProduct {
     quantityOnHand: item.availableQuantity != null ? Number(item.availableQuantity) : 0,
     stockState: item.stockState ?? 'UNTRACKED',
     taxable: item.taxable ?? true,
+    // D113 — an older server omits it, and WHOLE is what every product was
+    // before the column existed. Never inferred from the name or the category.
+    quantityType: item.quantityType ?? 'WHOLE',
+    unitOfMeasure: item.unitOfMeasure ?? null,
     imageUrl: item.imageUrl,
     variants: (item.variants ?? [])
       .filter((v) => v.isActive)

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { OrderChannel, Prisma, SellableKind } from '@hardware-pos/database';
+import { OrderChannel, Prisma, QuantityType, SellableKind } from '@hardware-pos/database';
 import { coerceAttributeQueryValue, domainFor } from '@hardware-pos/shared';
 import type { TenantCapabilities } from '@hardware-pos/shared';
 
@@ -86,6 +86,16 @@ export interface SellableItem {
    * on an exempt item the server then charged nothing for.
    */
   taxable: boolean;
+  /**
+   * D113 (`6.2`) — sold by the piece, or by weight/measure.
+   *
+   * The till cannot intercept what it cannot see: without this on the read
+   * model there is no way for the cart to know a numpad is needed. **Read,
+   * never inferred** — no component may guess "this looks like rice" (D56).
+   */
+  quantityType: QuantityType;
+  /** D113b — `"kg"`, `"L"`. Null for a WHOLE product, which has no unit. */
+  unitOfMeasure: string | null;
   variants?: {
     id: string;
     sku: string;
@@ -438,6 +448,8 @@ export class SellableService {
         subcategory: p.subcategory ? { id: p.subcategory.id, name: p.subcategory.name } : null,
         hasVariants: p.hasVariants,
         taxable: p.taxable,
+        quantityType: p.quantityType,
+        unitOfMeasure: p.unitOfMeasure,
         promotions: p.promotionItems
           .map((pi) => validPromotionsById.get(pi.promotionId))
           .filter((v): v is NonNullable<typeof v> => Boolean(v)),

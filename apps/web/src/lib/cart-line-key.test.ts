@@ -42,6 +42,11 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
     stockState: 'IN_STOCK',
     imageUrl: null,
     taxable: true,
+    // D113 (`6.2`) — required on `ClientProduct`, so the compiler names every
+    // fixture that forgets it. Phase 4 lesson 7: a field crossing a wire
+    // should be REQUIRED, because an optional one is dropped in silence.
+    quantityType: 'WHOLE',
+    unitOfMeasure: null,
     variants: [],
     ...over,
   };

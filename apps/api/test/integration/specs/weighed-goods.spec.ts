@@ -39,6 +39,7 @@ import { PlatformModule } from '../../../src/modules/platform/platform.module';
 import { ProvidersModule } from '../../../src/modules/providers/providers.module';
 import { ProductsModule } from '../../../src/modules/products/products.module';
 import { ProductsService } from '../../../src/modules/products/products.service';
+import { SellableService } from '../../../src/modules/products/sellable.service';
 import { SalesModule } from '../../../src/modules/sales/sales.module';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
@@ -48,6 +49,7 @@ import { seedTileShopWithQuickBooks, type SeededTenant } from '../fixtures';
 let prisma: PrismaClient;
 let testModule: TestingModule;
 let products: ProductsService;
+let sellable: SellableService;
 let shop: SeededTenant;
 
 beforeAll(async () => {
@@ -66,6 +68,7 @@ beforeAll(async () => {
   testModule.useLogger(false);
   await testModule.init();
   products = testModule.get(ProductsService);
+  sellable = testModule.get(SellableService);
 });
 
 afterAll(async () => {
@@ -266,5 +269,53 @@ describe('a fractional quantity survives the database', () => {
       where: { productId: rice.id },
     });
     expect(cell.quantityOnHand.toFixed(3)).toBe('1.235');
+  });
+});
+
+describe('6.2 — the flag reaches the till', () => {
+  it('the sellable read model carries quantityType and the unit', async () => {
+    // The till cannot intercept what it cannot see. Without this the cart has no
+    // way to know a numpad is needed, and `6.3` would have to guess from the
+    // product name — which D56 forbids.
+    const rice = await products.create(
+      shop.tenantId,
+      productInput({ name: 'Rice', quantityType: 'DECIMAL', unitOfMeasure: 'kg', unitPrice: 200 }),
+    );
+
+    const page = await sellable.list(shop.tenantId, { page: 1, pageSize: 100 } as never);
+    const item = page.items.find((i) => i.id === rice.id);
+
+    expect(item).toBeDefined();
+    expect(item!.quantityType).toBe('DECIMAL');
+    expect(item!.unitOfMeasure).toBe('kg');
+  });
+
+  it('a whole product reports WHOLE and no unit', async () => {
+    // NEGATIVE control. Without it the assertion above would pass for a read
+    // model that hard-coded DECIMAL, or that reported whatever the last product
+    // happened to be.
+    const shirt = await products.create(shop.tenantId, productInput({ name: 'A Shirt' }));
+
+    const page = await sellable.list(shop.tenantId, { page: 1, pageSize: 100 } as never);
+    const item = page.items.find((i) => i.id === shirt.id);
+
+    expect(item!.quantityType).toBe('WHOLE');
+    expect(item!.unitOfMeasure).toBeNull();
+  });
+
+  it('both kinds arrive in the SAME response, distinguishable', async () => {
+    // The shape the till actually receives: a basket screen shows rice beside
+    // shirts, and each row has to be right on its own.
+    const rice = await products.create(
+      shop.tenantId,
+      productInput({ name: 'Rice', quantityType: 'DECIMAL', unitOfMeasure: 'kg' }),
+    );
+    const shirt = await products.create(shop.tenantId, productInput({ name: 'A Shirt' }));
+
+    const page = await sellable.list(shop.tenantId, { page: 1, pageSize: 100 } as never);
+    const byId = new Map(page.items.map((i) => [i.id, i]));
+
+    expect(byId.get(rice.id)!.quantityType).toBe('DECIMAL');
+    expect(byId.get(shirt.id)!.quantityType).toBe('WHOLE');
   });
 });
