@@ -5,6 +5,7 @@ import {
   RestaurantOrderStatus,
   OrderRoundStatus,
   RestaurantOrderItemStatus,
+  RestaurantTableKind,
   RestaurantTableStatus,
   TableSessionStatus,
   FulfilmentKind,
@@ -13,6 +14,7 @@ import {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { LIVE_SESSION_STATUSES } from '../../common/live-sessions';
 import { DiningService, type OpenTableReleaseSummary } from '../dining/dining.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
 import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
@@ -29,12 +31,15 @@ import {
 } from './dto/table-sessions.dto';
 import {
   BranchNotFoundError,
+  GuestCountRequiredError,
+  OpenTableSeatsExhaustedError,
   OrderNotFoundError,
   RegisterNotFoundError,
   RoundAlreadySubmittedError,
   SessionAlreadyClosedError,
   SessionNotFoundError,
   SessionNotOpenError,
+  TabNameRequiredError,
   TableAlreadyOpenError,
   TableNotFoundError,
   TableReservedForOpenTableError,
@@ -48,6 +53,12 @@ export interface TableSessionView {
   status: TableSessionStatus;
   waiterUserId: string | null;
   guestCount: number | null;
+  /**
+   * D104 — this tab's own name, when an arrangement carries several parties.
+   * Null on every physical table's session and on a lone tab, where the table's
+   * name is already unambiguous.
+   */
+  tabName: string | null;
   openedAt: string;
   closedAt: string | null;
   finalSaleId: string | null;
@@ -177,9 +188,18 @@ export class TableSessionsService {
       });
       if (!branch) throw new BranchNotFoundError();
 
+      /*
+       * D104 — the row lock. Everything below reads the table's live sessions
+       * and then writes one more, so two waiters seating the same table at the
+       * same moment must serialise. Under the pre-D104 one-tab rule the read
+       * was advisory (the loser simply got a second session); with seats being
+       * counted, an unserialised read overfills the arrangement instead. Same
+       * shape as `DiningService.createOpenTable` and the reservation service.
+       */
+      await tx.$queryRaw`SELECT id FROM "RestaurantTable" WHERE id = ${dto.tableId} FOR UPDATE`;
       const table = await tx.restaurantTable.findFirst({
         where: { id: dto.tableId, tenantId, branchId, isActive: true },
-        select: { id: true, status: true },
+        select: { id: true, status: true, kind: true, capacity: true },
       });
       if (!table) throw new TableNotFoundError();
       // D49: a physical table absorbed into an open table must not be seatable
@@ -188,11 +208,48 @@ export class TableSessionsService {
         throw new TableReservedForOpenTableError();
       }
 
-      const openSessionExists = await tx.tableSession.findFirst({
-        where: { tableId: table.id, status: TableSessionStatus.OPEN },
-        select: { id: true },
+      /*
+       * D104 — how many tabs this table may carry, and how many chairs are
+       * left.
+       *
+       * A tab waiting for its bill still occupies its chairs, so BILLING counts
+       * as live here exactly as OPEN does. `LIVE_SESSION_STATUSES` is the one
+       * list; adding a session status later forces a deliberate answer rather
+       * than defaulting it to "not sitting here".
+       */
+      const liveTabs = await tx.tableSession.findMany({
+        where: { tableId: table.id, status: { in: [...LIVE_SESSION_STATUSES] } },
+        select: { id: true, guestCount: true },
       });
-      if (openSessionExists) throw new TableAlreadyOpenError();
+
+      if (table.kind !== RestaurantTableKind.OPEN) {
+        // Unchanged for a physical table: one party, one tab. D104 relaxes this
+        // for arrangements ONLY — a four-top with a party at it is not a thing
+        // two unrelated parties can both be sold.
+        if (liveTabs.length > 0) throw new TableAlreadyOpenError();
+      } else {
+        /*
+         * D104 — several parties may share one arrangement, but they must be
+         * tellable apart. Required only from the SECOND tab: naming a tab that
+         * has no sibling is typing for nothing, and the arrangement's own name
+         * already reads unambiguously while it stands alone.
+         */
+        if (liveTabs.length > 0 && !dto.tabName?.trim()) {
+          throw new TabNameRequiredError();
+        }
+        /*
+         * Seats are enforced only when the operator recorded them. D49 made an
+         * arrangement's capacity optional on purpose — "seating as arranged" is
+         * a real answer — and inventing a limit for those would refuse parties
+         * on a number nobody stated.
+         */
+        if (table.capacity != null) {
+          if (dto.guestCount == null) throw new GuestCountRequiredError();
+          const taken = liveTabs.reduce((n, t) => n + (t.guestCount ?? 0), 0);
+          const seatsFree = table.capacity - taken;
+          if (dto.guestCount > seatsFree) throw new OpenTableSeatsExhaustedError(seatsFree);
+        }
+      }
 
       const sequence = await nextDocumentNumber(tx, tenantId, 'TABLE_SESSION');
       const sessionNumber = `TS-${padSequence(sequence)}`;
@@ -205,13 +262,22 @@ export class TableSessionsService {
           sessionNumber,
           waiterUserId: dto.waiterUserId ?? null,
           guestCount: dto.guestCount ?? null,
+          tabName: dto.tabName?.trim() || null,
           status: TableSessionStatus.OPEN,
         },
       });
-      await tx.restaurantTable.update({
-        where: { id: table.id },
-        data: { status: RestaurantTableStatus.SEATED },
-      });
+      /*
+       * D104 — only the FIRST tab moves the table. The unconditional write this
+       * replaces would drag an arrangement that has been serving for an hour
+       * back from OCCUPIED to SEATED the moment a second party sat down, which
+       * reads on the floor as the kitchen having received nothing.
+       */
+      if (table.status === RestaurantTableStatus.AVAILABLE) {
+        await tx.restaurantTable.update({
+          where: { id: table.id },
+          data: { status: RestaurantTableStatus.SEATED },
+        });
+      }
       return this.sessionToView(session);
     });
   }
@@ -800,6 +866,7 @@ export class TableSessionsService {
       status: row.status,
       waiterUserId: row.waiterUserId,
       guestCount: row.guestCount,
+      tabName: row.tabName,
       openedAt: row.openedAt.toISOString(),
       closedAt: row.closedAt?.toISOString() ?? null,
       finalSaleId: row.finalSaleId,

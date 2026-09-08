@@ -377,7 +377,12 @@ export default function SettingsPage() {
         <WorkspaceTab />
       ) : view.previewKind === 'THERMAL_BILL' ? (
         // D96 — the bill itself, rendered from the template the till prints.
-        <BillPreviewTab docs={docs} timezone={timezone ?? DEFAULT_TIME_ZONE} />
+        <BillPreviewTab
+          docs={docs}
+          set={set}
+          showCalibration={view.showBillCalibration}
+          timezone={timezone ?? DEFAULT_TIME_ZONE}
+        />
       ) : view.previewKind === 'SERVER_A4' ? (
         <PreviewTab docs={docs} />
       ) : (

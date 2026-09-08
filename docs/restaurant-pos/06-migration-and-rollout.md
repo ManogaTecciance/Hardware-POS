@@ -64,6 +64,12 @@ pnpm db:seed
 pnpm dev
 ```
 
+A development database that applied `20260831055102_setup1` (fix/table-tab before
+2026-09-08) has a migration the tree no longer carries: `prisma migrate reset`,
+or delete its `_prisma_migrations` row and restore the constraint as `RESTRICT`
+(D110). `migrate resolve --rolled-back` will not take it — it only accepts a
+migration that failed.
+
 ### Integration tests
 
 ```bash
@@ -125,8 +131,18 @@ docker compose -f docker-compose.prod.yml run --rm --entrypoint sh api -c \
   "pnpm --filter @hardware-pos/database exec tsx prisma/role-authority-report.ts"
 ```
 
+Re-run the same script with `--write` after any change to a template's
+permissions — D101's 86 grant to the Waiter and Cashier templates is the first —
+because `seedTenantRoles` re-applies a built-in row's permissions from the
+template and nothing else does.
+
 A no-profile tenant is seeded as HARDWARE (D57) — run `backfill-pilot-profile.ts`
-first if the profile row is still missing. Users on an enum with no template
+first if the profile row is still missing. The catalogue convergence (D60) is
+likewise an operator step, not a migration: a product row that predates it keeps
+the column default (`sellableKind = STOCK_ITEM`) until
+`prisma/backfill-catalogue-convergence.ts` classifies it, and the 86 switch
+(D101) refuses a STOCK_ITEM — so run that backfill, or confirm it already ran,
+before a restaurant relies on either. Users on an enum with no template
 (MANAGER, ACCOUNTANT, ADMIN) are listed, not linked: re-role them by hand in the
 platform console.
 

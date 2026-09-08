@@ -17,7 +17,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ALL_INVENTORY_MODES,
+  ALL_SELLABLE_KINDS,
   classifiedInventoryModes,
+  classifiedSellableKinds,
+  resolveItemStockPresentation,
   resolveProductManagementPresentation,
   type ProductPresentation,
   type ProfileInventoryState,
@@ -402,5 +405,51 @@ describe('40/41 — the boundaries these tests guard can actually fail', () => {
   it('41 — and the unresolved state is reachable, not dead code', () => {
     // A guard that no input can ever produce protects nothing.
     expect(presentationFor(null).managementMode).toBe('UNRESOLVED');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D101 — per-item stock presentation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('D101 — resolveItemStockPresentation', () => {
+  it('the runtime kind list and the classification table agree exactly', () => {
+    // Same shape as the mode exhaustiveness spec: an exact set both ways, so
+    // a kind added to the union but not classified names itself here.
+    expect(classifiedSellableKinds()).toEqual([...ALL_SELLABLE_KINDS].sort());
+  });
+
+  it('LOCAL splits the kinds: counts, the 86 switch, or nothing', () => {
+    const local = presentationFor('LOCAL');
+    // POSITIVE per class — and the classes differ, so a resolver returning
+    // one constant for everything fails.
+    expect(resolveItemStockPresentation(local, 'STOCK_ITEM')).toBe('QUANTITY');
+    expect(resolveItemStockPresentation(local, 'BUNDLE')).toBe('QUANTITY');
+    expect(resolveItemStockPresentation(local, 'COMPOSED_ITEM')).toBe('AVAILABILITY');
+    expect(resolveItemStockPresentation(local, 'SERVICE')).toBe('AVAILABILITY');
+    expect(resolveItemStockPresentation(local, 'TIME_SLOT')).toBe('NONE');
+    expect(resolveItemStockPresentation(local, 'STAY_UNIT')).toBe('NONE');
+  });
+
+  it('EXTERNAL_CATALOGUE shows counts for EVERY kind — Tile Shop pixels stay put (D16)', () => {
+    const external = presentationFor('QUICKBOOKS');
+    for (const kind of ALL_SELLABLE_KINDS) {
+      expect(resolveItemStockPresentation(external, kind)).toBe('QUANTITY');
+    }
+    // Negative control: the same walk under LOCAL is NOT all-QUANTITY, so
+    // this case cannot pass via a resolver that ignores the mode.
+    const local = presentationFor('LOCAL');
+    const localAnswers = ALL_SELLABLE_KINDS.map((k) => resolveItemStockPresentation(local, k));
+    expect(localAnswers).toContain('AVAILABILITY');
+  });
+
+  it('a mode without stock controls shows NONE for every kind — DISABLED and unresolved alike', () => {
+    for (const state of ['DISABLED', null] as const) {
+      const p = presentationFor(state);
+      expect(p.showStockControls).toBe(false);
+      for (const kind of ALL_SELLABLE_KINDS) {
+        expect(resolveItemStockPresentation(p, kind)).toBe('NONE');
+      }
+    }
   });
 });

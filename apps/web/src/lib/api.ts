@@ -6,7 +6,7 @@
  * the session is cleared and the app returns to the login screen.
  */
 
-import { loadSession, saveSession, type Session } from './session-store';
+import { loadSession, saveSession, type Session, type SessionUser } from './session-store';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
 
@@ -65,6 +65,8 @@ async function doRefresh(): Promise<string | null> {
     interface RefreshPayload {
       token: string;
       refreshToken: string;
+      user?: Omit<SessionUser, 'permissions'>;
+      permissions?: string[];
       branch?: { id: string; name: string } | null;
       register?: { id: string; name: string } | null;
     }
@@ -75,6 +77,20 @@ async function doRefresh(): Promise<string | null> {
       ...session,
       token: data.token,
       refreshToken: data.refreshToken,
+      // Adopt the server's freshly-resolved identity, not just the tokens: a
+      // role rename, a permission change, or a field added since this session
+      // was minted (roleName) would otherwise persist stale until sign-out.
+      ...(data.user
+        ? {
+            user: {
+              ...session.user,
+              ...data.user,
+              permissions:
+                (data.permissions as SessionUser['permissions'] | undefined) ??
+                session.user.permissions,
+            },
+          }
+        : {}),
       // Keep the session's location current (branch/register may be reassigned).
       ...(data.branch !== undefined
         ? { branchId: data.branch?.id ?? null, branchName: data.branch?.name ?? 'No branch assigned' }

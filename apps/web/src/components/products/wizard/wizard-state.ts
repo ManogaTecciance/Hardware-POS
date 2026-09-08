@@ -276,7 +276,13 @@ export function hydrateFromProduct(
     subcategoryId: product.subcategoryId ?? '',
     brand: '',
     description: product.description ?? '',
-    trackInventory: product.type === 'Inventory',
+    // D101 — for a food-typed row the CLASSIFICATION is the stored answer
+    // (`type` is always 'Inventory' on the restaurant wizard, so it cannot
+    // say); retail rows keep the D44 type-driven read.
+    trackInventory:
+      product.foodType != null
+        ? product.sellableKind === 'STOCK_ITEM'
+        : product.type === 'Inventory',
     imageUrl: product.imageUrl ?? '',
     hasVariations,
     variations: variationDrafts,
@@ -584,6 +590,12 @@ export interface ProductCreatePayload {
   prepMinutes?: number | null;
   dietaryTags?: string[];
   /**
+   * D101 — the Track-stock answer. Server-side it decides STOCK_ITEM vs
+   * COMPOSED_ITEM for food-typed items only; retail rows carry it
+   * harmlessly (their `type` already says it).
+   */
+  trackStock: boolean;
+  /**
    * D64 — domain attributes (replace semantics). Present only when the
    * tenant's schema declares fields; a tenant with none never sends the key,
    * so the payload cannot trip the server's unknown-key refusal.
@@ -623,6 +635,9 @@ export function buildCreateInput(
     foodType: state.foodType || null,
     prepMinutes: state.prepMinutes ? Number(state.prepMinutes) || null : null,
     dietaryTags: state.dietaryTags,
+    // D101 — the operator's stock answer travels with every save, so an
+    // edit re-derives the classification from what the wizard now says.
+    trackStock: state.trackInventory,
     // D64 — the whole document, every save (replace semantics), but only for
     // tenants whose domain declares fields at all.
     ...(attributeSchema.length > 0

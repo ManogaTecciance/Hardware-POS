@@ -1,0 +1,30 @@
+# Line endings.
+#
+# Git on Windows is commonly configured with `core.autocrlf=true`, which
+# rewrites checked-out files to CRLF. For anything that only a Windows editor
+# reads that is harmless. For a file executed inside a Linux container it is
+# not: a CRLF script's shebang becomes `#!/bin/bash\r`, the kernel looks for an
+# interpreter literally named `/bin/bash\r`, and the failure is reported as
+#
+#   Error while running script .../01-create-bucket.sh:
+#   [Errno 2] No such file or directory
+#
+# which names the SCRIPT, not the missing interpreter — so it reads as a broken
+# volume mount. That is what silently stopped the LocalStack init hook from
+# creating the uploads bucket, surfacing hours later as "The specified bucket
+# does not exist" on the first logo upload.
+#
+# Normalise to LF in the repository, and force LF on checkout for everything
+# that crosses into a container or is executed by a POSIX shell.
+
+* text=auto
+
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.Dockerfile text eol=lf
+docker-compose*.yml text eol=lf
+*.bash      text eol=lf
+
+# Prisma migrations are applied by the CLI, not a shell, but keeping them LF
+# stops a checkout on Windows from showing every migration as modified.
+*.sql       text eol=lf

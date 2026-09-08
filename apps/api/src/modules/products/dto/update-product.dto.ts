@@ -114,6 +114,15 @@ export class UpdateProductDto {
   foodType?: ProductFoodType;
 
   /**
+   * D101 — Track-stock answer for food-typed items; a provided value joins
+   * `type` / `foodType` as a re-derivation trigger for `sellableKind`.
+   * `undefined` leaves the stored classification alone. See CreateProductDto.
+   */
+  @IsBoolean()
+  @IsOptional()
+  trackStock?: boolean;
+
+  /**
    * D64 — domain attributes. REPLACE semantics when provided (the payload is
    * the whole document — required keys are re-checked); `undefined` leaves
    * the stored document unchanged. See CreateProductDto.

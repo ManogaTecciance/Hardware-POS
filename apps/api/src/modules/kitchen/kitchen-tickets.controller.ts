@@ -18,7 +18,7 @@ import {
 /**
  * D68 — the kitchen board's write surface.
  *
- * Two verbs where Phase 6 had four: read the queue, say the food is done.
+ * Say the food is done, and take it back when the bump was wrong (D100).
  * `mark-printed`, `mark-failed` and `reprint` went with the printers — they
  * described what a device did, and there is no device.
  */
@@ -74,6 +74,34 @@ export class KitchenTicketsController {
       await this.audit.record(tenantId, {
         userId: actor.id,
         action: 'KITCHEN_TICKET_COMPLETED',
+        entityType: 'KitchenTicket',
+        entityId: ticketId,
+        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
+      });
+      return updated;
+    } catch (err) {
+      if (err instanceof KitchenTicketNotFoundError) throw new NotFoundException(err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * D100 — recall. Same permission as complete: whoever may say the food is
+   * done may also say it is not.
+   */
+  @Post(':ticketId/reopen')
+  @RequirePermissions(Permission.KITCHEN_STATUS_UPDATE)
+  async reopen(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('branchId') branchId: string,
+    @Param('ticketId') ticketId: string,
+  ): Promise<KitchenTicketView> {
+    try {
+      const updated = await this.service.reopenTicket(tenantId, branchId, ticketId);
+      await this.audit.record(tenantId, {
+        userId: actor.id,
+        action: 'KITCHEN_TICKET_REOPENED',
         entityType: 'KitchenTicket',
         entityId: ticketId,
         metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },

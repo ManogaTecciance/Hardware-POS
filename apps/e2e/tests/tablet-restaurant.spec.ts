@@ -159,8 +159,13 @@ test.describe('TAB-POS — POS Counter tablet layout', () => {
       // Menu tiles are the buttons that carry a price. Scoped that way
       // because the header's account button also contains a bold span, and a
       // structural selector matched THAT — opening the profile menu instead
-      // of adding anything.
-      const firstTile = page.getByRole('button').filter({ hasText: /LKR/ }).first();
+      // of adding anything. And an ENABLED one: the seed ships three dishes
+      // 86'd (D101), and a sold-out tile is deliberately not clickable, so
+      // "first tile" alone could land on one and wait forever.
+      const firstTile = page
+        .locator('button:not([aria-disabled="true"]):not([disabled])')
+        .filter({ hasText: /LKR/ })
+        .first();
       await expect(firstTile).toBeVisible({ timeout: 20_000 });
       await firstTile.click();
 

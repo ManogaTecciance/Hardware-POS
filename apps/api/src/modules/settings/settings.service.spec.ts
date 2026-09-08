@@ -41,6 +41,61 @@ describe('SettingsService (persistence + merge)', () => {
     expect(s.currency).toBeDefined();
   });
 
+  it('ships the calibrated roll geometry as the default (D99)', () => {
+    const svc = new SettingsService(fakePrisma() as any);
+    const d = svc.getSettings(TENANT).documents;
+    /*
+     * The Xprinter XP-365B's numbers. The LEFT inset is the one that matters:
+     * at 0 the bill printed correctly from Chrome and lost its first
+     * characters from Edge, which re-fits the page against the driver's stock
+     * and takes the overflow off both edges.
+     */
+    expect(d.billPaperWidthMm).toBe(78);
+    expect(d.billLeftInsetMm).toBe(3);
+    expect(d.billRightInsetMm).toBe(5);
+    expect(d.billFitToContent).toBe(true);
+    // NEGATIVE, named: zero on either side is the shape that clipped Edge.
+    expect(d.billLeftInsetMm).toBeGreaterThan(0);
+    expect(d.billRightInsetMm).toBeGreaterThan(0);
+  });
+
+  it('gives an existing tenant the geometry without a backfill (D99)', async () => {
+    /*
+     * No Prisma migration: the settings are a `Json` blob, and the defaults are
+     * merged UNDER whatever a tenant already stored. A workspace configured
+     * before D99 must come back with the geometry on its next read, or every
+     * existing restaurant keeps printing the layout that clipped.
+     */
+    const prisma = fakePrisma();
+    prisma.rows.push({
+      id: 's_legacy',
+      tenantId: TENANT,
+      branchId: null,
+      data: { documents: { companyName: 'Praneetha', accentColor: '#006c68' } },
+    });
+    const svc = new SettingsService(prisma as any);
+    await svc.onModuleInit?.();
+
+    const d = svc.getSettings(TENANT).documents;
+    expect(d.billLeftInsetMm).toBe(3);
+    expect(d.billPaperWidthMm).toBe(78);
+    // …and what the tenant had actually set is still theirs.
+    expect(d.companyName).toBe('Praneetha');
+  });
+
+  it('round-trips a measured geometry without disturbing the rest', async () => {
+    const svc = new SettingsService(fakePrisma() as any);
+    const next = await svc.updateSettings(TENANT, {
+      documents: { billLeftInsetMm: 6, billPaperWidthMm: 58 },
+    });
+    expect(next.documents.billLeftInsetMm).toBe(6);
+    expect(next.documents.billPaperWidthMm).toBe(58);
+    // The inset the operator did NOT touch keeps its value — a merge that
+    // reset the group would pass both assertions above.
+    expect(next.documents.billRightInsetMm).toBe(5);
+    expect(next.documents.showSku).toBe(true);
+  });
+
   it('deep-merges a partial document update and persists it', async () => {
     const prisma = fakePrisma();
     const svc = new SettingsService(prisma as any);

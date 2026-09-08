@@ -7,6 +7,7 @@ import {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { withTabName } from '../../common/place-label';
 
 /** D83 — every item on the order a ticket belongs to, for the kitchen. */
 export interface KitchenOrderView {
@@ -329,6 +330,9 @@ export class KitchenService {
         session: {
           select: {
             waiterUserId: true,
+            // D104 — two parties can share one arrangement, so the tab's name
+            // is what keeps their tickets apart on the pass.
+            tabName: true,
             table: { select: { code: true, area: { select: { name: true } } } },
           },
         },
@@ -374,11 +378,14 @@ export class KitchenService {
       ticketId: ticket.id,
       ticketNumber: ticket.ticketNumber,
       orderNumber: order.orderNumber,
-      placeLabel: table
-        ? table.code === 'WALK-IN'
-          ? 'Takeaway'
-          : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
-        : null,
+      placeLabel: withTabName(
+        table
+          ? table.code === 'WALK-IN'
+            ? 'Takeaway'
+            : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
+          : null,
+        order.session?.tabName ?? null,
+      ),
       waiterName: waiter?.name ?? null,
       placedAt: order.createdAt.toISOString(),
       items: order.items.map((item) => ({
@@ -432,6 +439,48 @@ export class KitchenService {
       return toView(full, await this.waiterNames([full]));
     });
   }
+
+  /**
+   * D100 — recall: pulling a bumped ticket back onto the pass.
+   *
+   * The bump control is optimistic and finger-sized; on a busy pass some
+   * completions are simply wrong, and until now the only remedy was food
+   * that existed on no screen. Reopening clears the completion record
+   * entirely — a recalled ticket is work to do again, and a stale "done by"
+   * name would say otherwise. Mirrors completeTicket's idempotency in the
+   * other direction: recalling a ticket that was never completed returns it
+   * unchanged.
+   */
+  async reopenTicket(
+    tenantId: string,
+    branchId: string,
+    ticketId: string,
+  ): Promise<KitchenTicketView> {
+    return this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.kitchenTicket.findFirst({
+        where: { id: ticketId, tenantId, branchId },
+        select: { id: true, status: true },
+      });
+      if (!ticket) throw new KitchenTicketNotFoundError();
+
+      if (ticket.status === KitchenTicketStatus.COMPLETED) {
+        await tx.kitchenTicket.update({
+          where: { id: ticket.id },
+          data: {
+            status: KitchenTicketStatus.QUEUED,
+            completedAt: null,
+            completedByUserId: null,
+          },
+        });
+      }
+
+      const full = await tx.kitchenTicket.findFirstOrThrow({
+        where: { id: ticketId, tenantId },
+        include: TICKET_INCLUDE,
+      });
+      return toView(full, await this.waiterNames([full]));
+    });
+  }
 }
 
 /** Thrown for a ticket that is not this tenant's, or not in this branch. */
@@ -459,6 +508,8 @@ const TICKET_INCLUDE = {
           session: {
             select: {
               waiterUserId: true,
+              // D104 — see the ticket-detail query above.
+              tabName: true,
               table: { select: { code: true, area: { select: { name: true } } } },
             },
           },
@@ -485,11 +536,14 @@ function toView(
     orderNumber: row.round?.order?.orderNumber ?? null,
     // The synthetic walk-in table backs every counter and takeaway order;
     // the pass wants to read "Takeaway", not a table code nobody can find.
-    placeLabel: table
-      ? table.code === 'WALK-IN'
-        ? 'Takeaway'
-        : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
-      : null,
+    placeLabel: withTabName(
+      table
+        ? table.code === 'WALK-IN'
+          ? 'Takeaway'
+          : `${table.code}${table.area?.name ? ` \u00b7 ${table.area.name}` : ''}`
+        : null,
+      session?.tabName ?? null,
+    ),
     roundNumber: row.round?.roundNumber ?? null,
     waiterName: session?.waiterUserId ? waiterNames.get(session.waiterUserId) ?? null : null,
     items: row.items.map((i) => ({

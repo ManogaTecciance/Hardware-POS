@@ -12,6 +12,12 @@ import { useAuth } from '@/lib/auth';
 import { useSidebar } from '@/lib/sidebar';
 import { cn } from '@/lib/utils';
 
+/** "SALESPERSON" → "Salesperson", "KITCHEN_STAFF" → "Kitchen staff": the enum, spelt for a person. */
+export function enumRoleLabel(role: string): string {
+  const words = role.toLowerCase().replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function initials(name: string): string {
   return name
     .split(' ')
@@ -56,7 +62,15 @@ export function Header() {
             cutover so the header row does not overflow on portrait
             tablet. */}
         <ThemeToggle className="hidden tab:inline-flex" />
-        <ProfileMenu name={session.user.name} role={session.user.role} onLogout={onLogout} />
+        <ProfileMenu
+          name={session.user.name}
+          // The role row's display name, verbatim — "Kitchen staff" is how the
+          // row spells it. The enum is a legacy label that can disagree (a
+          // waiter's enum says CASHIER), and is only re-cased for a session
+          // minted before roleName existed.
+          role={session.user.roleName ?? enumRoleLabel(session.user.role)}
+          onLogout={onLogout}
+        />
       </div>
     </header>
   );
@@ -115,7 +129,7 @@ function ProfileMenu({
         </span>
         <span className="hidden leading-tight sm:block">
           <span className="block text-sm font-medium">{name}</span>
-          <span className="block text-xs capitalize text-muted-foreground">{role.toLowerCase()}</span>
+          <span className="block text-xs text-muted-foreground">{role}</span>
         </span>
         <ChevronDown className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block" aria-hidden />
       </button>
@@ -127,7 +141,7 @@ function ProfileMenu({
         >
           <div className="px-3 py-2.5">
             <p className="truncate text-sm font-semibold">{name}</p>
-            <p className="text-xs capitalize text-muted-foreground">{role.toLowerCase()}</p>
+            <p className="text-xs text-muted-foreground">{role}</p>
           </div>
           {/* Theme toggle lives in the profile menu below the `tab:` cutover
               because the header row itself hides it there — see above. */}

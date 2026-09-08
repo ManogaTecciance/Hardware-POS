@@ -32,6 +32,13 @@ export class OpenSessionDto {
   @IsString() @Length(1, 128) tableId!: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) guestCount?: number;
   @IsOptional() @IsString() @Length(1, 128) waiterUserId?: string;
+  /**
+   * D104 — this tab's own name, when an arrangement carries several parties.
+   * Optional here and required by the SERVICE only once a sibling tab exists:
+   * the invariant is "two live tabs must be distinguishable", which a DTO
+   * cannot see.
+   */
+  @IsOptional() @IsString() @Length(1, 40) tabName?: string;
 }
 
 // ── Item + modifiers to include in a round ───────────────────

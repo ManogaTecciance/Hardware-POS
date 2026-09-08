@@ -132,6 +132,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD-025 | Negative reorder point rejected | reorderLevel −1 | Validation error | N | Not Run |
 | PROD-026 | QB account names shown read-only | Product pulled from QBO with income/expense/asset accounts | Account names displayed, not editable locally | P | Not Run |
 | PROD-027 | Subcategory library is browser-local (known mock) | Assign shared subcategory, open app in second browser | Assignment absent there — frontend-only adapter until backend lands | N | Not Run |
+| PROD-028 | Sold out is a switch, not a count (D101) | Restaurant owner marks a dish sold out, then available again | `soldOutAt` set then cleared; the POS card greys out and comes back; a repeat 86 keeps the original timestamp | P | Not Run |
+| PROD-029 | The 86 switch refuses stock-governed kinds (D101) | PUT /v1/products/:id/availability on a STOCK_ITEM or a booking kind | 400 `PRODUCT_AVAILABILITY_STOCK_GOVERNED` naming what governs it; a waiter/cashier may 86 a dish but not edit the catalogue | N | Not Run |
 
 ## PIMP — Product Bulk Import
 
@@ -193,6 +195,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | POS-036 | Invoice date survives the payment round-trip | Pick a past date, go to Payment, return to the cart | The picked date is still selected | P | Not Run |
 | POS-037 | Forward dating blocked in the picker | Try to pick tomorrow | The picker refuses it (max = today) | N | Not Run |
 | POS-038 | Invoice date resets after a completed sale | Complete a backdated sale, start a new one | The selector is back to today | P | Not Run |
+| POS-051 | A sold-out dish cannot be rung up (D101) | Search a dish the seed ships 86'd on the counter POS | The tile is disabled and says sold out; the round refuses the item server-side | N | Not Run |
 
 ## PAY — Payments & Credit
 
@@ -455,6 +458,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-027 | Available credit explains itself on hover | Hover (or focus) the info icon beside Available credit | Tooltip reads "<used> of <limit> used · <left> left"; for a customer with no limit it reads "<used> used · no limit set" | P | Not Run |
 | CUST-026 | Credit limit column shows a figure or nothing | Customers list with three rows: credit + limit, credit + no limit, credit not allowed | Column is headed "Credit limit"; only the first shows an amount, the other two are blank — the words "No limit" appear nowhere in the table | P | Not Run |
 | CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
+| CUST-035 | Mobile numbers are validated | Enter a malformed number in the customer form and in the POS capture popup | Refused with a message naming the expected shape; a valid local number is accepted and searchable | N | Not Run |
+| CUST-036 | QuickBooks columns only where QuickBooks is on | Compare the customers list and a customer page in the Tile Shop and in the restaurant | Tile Shop: Sync column, QuickBooks badges and detail fields; restaurant: none of them, and no "Not synced" | P | Not Run |
 
 ## CIMP — Customer Bulk Import
 
@@ -570,6 +575,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SET-024 | Dashboard series buckets by shop day | Sales either side of shop midnight | Each lands in its own shop-day column | P | Not Run |
 | SET-025 | Existing businesses backfilled to Sri Lanka | Run migrations on a database predating the timezone field | Every business reads `Asia/Colombo`; one that had chosen another zone keeps it | P | Not Run |
 | SET-026 | A newly provisioned business has a timezone | Provision a tenant, read its settings | `Asia/Colombo` stored, not merely defaulted | P | Not Run |
+| SET-027 | Roll calibration on the Preview tab (D99) | Bills workspace: open Settings → Preview; A4 workspace: same tab | Bills: calibration fields and the test strip are offered, the strip prints the measured geometry; A4: neither appears | P | Not Run |
+| SET-028 | A bill page is never wider than tall (D102) | Clear every document field and the logo, print a bill with one item | The page box is at least as tall as it is wide; nothing prints rotated | N | Not Run |
 
 ## DOC — Documents & Printing
 
@@ -638,6 +645,16 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | OTBL-019 | Held-by indication on the floor | View a shared table's card | Shows "Held by <open tables>"; Unreserve renders only on held tables | P | Passed |
 | OTBL-020 | Picker offers shared tables | Open the create dialog while a table is Reserved by an open table | Table selectable, marked "shared" | P | Passed |
 | OTBL-021 | Occupied tables still refused | Try to join a table with its own live session | 409 naming the code | N | Passed |
+| OTBL-022 | One joined table, several tabs (D104) | Open a joined table for one party, then a second tab on the same arrangement with its own name | Both tabs live on the arrangement; the tab name appears on the kitchen ticket, the bill and the floor | P | Not Run |
+| OTBL-023 | A member table is not offered to a second open table (D105) | With M2 and M3 joined and in service, open the New open table picker | M2 and M3 are absent from the picker; AVAILABLE tables only | N | Not Run |
+| OTBL-024 | A joined member is shown, not offered (D106) | Look at a member table on the floor while its arrangement is in service | It reads Reserved with no Unreserve control; releasing it out from under the party is impossible | N | Not Run |
+
+## KIT — Kitchen Board (D68 / D100)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| KIT-001 | Tickets age on the board (D100) | Leave a ticket outstanding past 10 and then 15 minutes | Timer turns amber at 10 min and red at 15 with the card border; completed tickets stop ageing | P | Not Run |
+| KIT-002 | A wrong bump can be taken back (D100) | Mark a ticket done, then Reopen it | It returns to the outstanding tab; POST …/kitchen-tickets/:id/reopen needs the same permission as completing | P | Not Run |
 
 ## BSPL — Bill Splitting by Item (D51)
 
@@ -694,7 +711,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | UI-003 | System theme mode follows OS | Mode=system, flip OS preference | UI follows live | P | Not Run |
 | UI-004 | Sidebar collapse persists | Collapse, reload | Stays collapsed; icons+tooltips shown | P | Not Run |
 | UI-005 | Mobile nav drawer | <768px, tap header menu button | Drawer opens; closes on route change and Escape | P | Not Run |
-| UI-006 | Header minimal on desktop | ≥768px | No hamburger, no branch/register chips; account menu holds branch/register info | P | Not Run |
+| UI-006 | Header minimal on desktop | ≥768px | No hamburger, no branch/register chips; the account menu shows the person's name and role only (D109) | P | Not Run |
 | UI-007 | No horizontal scroll on core pages | 1024/1280/1440 widths: dashboard, POS, quotation builder, lists | Document never scrolls horizontally | P | Not Run |
 | UI-008 | Tables scroll within cards | Narrow viewport on suppliers/customers/sales | Table scrolls inside card, not the page | P | Not Run |
 | UI-009 | Empty states everywhere | Fresh tenant visits each list | Meaningful empty state + primary action, no spinners stuck | P | Not Run |
@@ -705,6 +722,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | UI-014 | Command palette navigates | Type "sup", pick Suppliers | Route changes; palette closes | P | Not Run |
 | UI-015 | Reduced motion respected | Emulate prefers-reduced-motion | Entrance/chart animations neutralized | P | Not Run |
 | UI-016 | Charts have accessible alternatives | Inspect dashboard charts | Accessible summaries / data-table views present | P | Not Run |
+| UI-024 | The food-service rail names the catalogue "Menu" (D103) | Restaurant owner rail vs Tile Shop rail | Restaurant: Menu with the book icon, href /products, no Inventory; Tile Shop: Products | P | Not Run |
+| UI-025 | The account menu names the role row, not the enum | Sign in as the seeded waiter | Button and menu read "Waiter", never "Cashier"; a session minted before roleName shows the enum spelt for a person | P | Not Run |
 
 ## SEC — Security
 
@@ -729,19 +748,22 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | QUO | 21 |
-| PERM | 15 | CUST | 34 |
-| DASH | 24 | CIMP | 10 |
-| PROD | 27 | SUP | 15 |
-| PIMP | 13 | SIMP | 8 |
-| POS | 50 | QB | 31 |
-| PAY | 41 | SET | 26 |
-| DISC | 15 | DOC | 16 |
-| MARK | 20 | ADM | 14 |
-| SALE | 33 | UI | 23 |
-| RET | 18 | SEC | 12 |
+| AUTH | 15 | CUST | 36 |
+| PERM | 16 | CIMP | 10 |
+| DASH | 24 | SUP | 15 |
+| PROD | 29 | SIMP | 8 |
+| PIMP | 13 | QB | 31 |
+| POS | 51 | SET | 28 |
+| PAY | 41 | DOC | 16 |
+| DISC | 15 | RSV | 16 |
+| MARK | 20 | OTBL | 24 |
+| SALE | 33 | BSPL | 14 |
+| RET | 18 | KIT | 2 |
+| EXC-T | 7 | ADM | 15 |
+| EXC-D | 4 | UI | 25 |
+| QUO | 21 | SEC | 12 |
 
-**Total: 481 test cases** (≈60% positive / 40% negative).
+**Total: 559 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — are included, which the previous figure of 481 left out).
 
 ### Notes for automation
 

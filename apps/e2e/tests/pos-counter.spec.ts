@@ -323,9 +323,12 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
 
     // Server side: the takeaway order appears in the unified Orders read model
     // as TAKEAWAY channel with a paid or partial payment status.
-    const orders = await api.get<
-      Array<{ orderNumber: string; channel: string; paymentStatus: string | null }>
-    >(`/restaurant/branches/${RESTAURANT_SEED.branchId}/orders?channel=TAKEAWAY&limit=20`);
+    // D110 — the orders list is a page object ({ items, total, page, pageSize })
+    // and no longer reads `limit`; page 1 is newest-first, so the order just
+    // placed is on it.
+    const { items: orders } = await api.get<{
+      items: Array<{ orderNumber: string; channel: string; paymentStatus: string | null }>;
+    }>(`/restaurant/branches/${RESTAURANT_SEED.branchId}/orders?channel=TAKEAWAY&pageSize=20`);
     const found = orders.find((o) => o.orderNumber === orderNumber);
     expect(found, `takeaway order ${orderNumber} must appear in /orders`).toBeDefined();
     expect(found?.channel).toBe('TAKEAWAY');
@@ -434,9 +437,10 @@ test.describe('POS-CTR-4 — Delivery COD', () => {
     // (delivery orders through the counter today ride on TAKEAWAY channel
     // — the DELIVERY channel is a future backend enum addition, per the
     // known-limits list).
-    const orders = await api.get<
-      Array<{ orderNumber: string; paymentStatus: string | null }>
-    >(`/restaurant/branches/${RESTAURANT_SEED.branchId}/orders?limit=30`);
+    // Page object, as above (D110).
+    const { items: orders } = await api.get<{
+      items: Array<{ orderNumber: string; paymentStatus: string | null }>;
+    }>(`/restaurant/branches/${RESTAURANT_SEED.branchId}/orders?pageSize=30`);
     const found = orders.find((o) => o.orderNumber === orderNumber);
     expect(found, `delivery order ${orderNumber} must appear in /orders`).toBeDefined();
     // Must not be PAID.

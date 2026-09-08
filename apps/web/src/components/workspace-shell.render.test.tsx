@@ -200,12 +200,13 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     await settle();
     const links = navLinks().join(' | ');
 
-    for (const expected of ['POS', 'Orders', 'Tables', 'Kitchen']) {
+    // D103 — 'Menu' is the products entry's food-service label (href
+    // /products; the legacy /menu route still has no entry — nav.test.ts
+    // pins that by href, which a label substring check here cannot).
+    for (const expected of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu']) {
       expect({ expected, present: links.includes(expected) }).toEqual({ expected, present: true });
     }
-    // `Menu` joins the absent list under D45 — the Restaurant workspace now
-    // authors every sellable item through Products (labelled "Inventory").
-    for (const absent of ['Menu', 'Takeaway', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+    for (const absent of ['Takeaway', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect({ absent, present: links.includes(absent) }).toEqual({ absent, present: false });
     }
   });
@@ -218,11 +219,11 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
     render(<Sidebar />);
     await settle();
-    // Restaurant tenants label the shared product catalogue "Inventory" —
-    // see nav.ts. Tile Shop / retail keeps "Products". If both labels ever
-    // regress to the same string, the sidebar disambiguation is gone.
-    // (D45 removed the Menu entry — Products is the single authoring surface.)
-    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Inventory']) {
+    // D103 — restaurant tenants label the shared product catalogue "Menu";
+    // Tile Shop / retail keeps "Products". If both labels ever regress to
+    // the same string, the sidebar disambiguation is gone. (D45 still holds:
+    // the legacy /menu route has no entry — the label points at /products.)
+    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu']) {
       const link = within(mainNav()).getByRole('link', { name: new RegExp(name, 'i') });
       expect({ name, hasSoon: /soon/i.test(link.textContent ?? '') }).toEqual({
         name,

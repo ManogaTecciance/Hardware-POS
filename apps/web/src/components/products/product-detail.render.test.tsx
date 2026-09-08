@@ -127,6 +127,10 @@ function makeProduct(overrides: Partial<ManagedProduct> = {}): ManagedProduct {
     hasVariants: false,
     averageCost: 155,
     attributes: {},
+    // D101 — a plain tracked retail row; dish cases override these.
+    sellableKind: 'STOCK_ITEM',
+    soldOutAt: null,
+    foodType: null,
     ...overrides,
   };
 }
@@ -241,6 +245,7 @@ describe('ProductDetail — Overview KPIs', () => {
         syncBusy={false}
         onSync={() => {}}
         onReload={() => {}}
+        canSetAvailability={false}
       />,
     );
     // Positive: KPI text is the "Single-variant product" placeholder.
@@ -266,6 +271,7 @@ describe('ProductDetail — Overview KPIs', () => {
         syncBusy={false}
         onSync={() => {}}
         onReload={() => {}}
+        canSetAvailability={false}
       />,
     );
     // Positive: Variants tab appears.
@@ -313,6 +319,7 @@ describe('ProductDetail — Variants tab table', () => {
         syncBusy={false}
         onSync={() => {}}
         onReload={() => {}}
+        canSetAvailability={false}
       />,
     );
 
@@ -356,6 +363,7 @@ describe('ProductDetail — delete permanently 409 handling', () => {
         syncBusy={false}
         onSync={() => {}}
         onReload={() => {}}
+        canSetAvailability={false}
       />,
     );
     fireEvent.click(screen.getByRole('tab', { name: /^variants$/i }));
@@ -403,6 +411,7 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         syncBusy={false}
         onSync={() => {}}
         onReload={() => {}}
+        canSetAvailability={false}
       />,
     );
     expect(screen.getByRole('button', { name: /receive stock/i })).toBeDefined();
@@ -423,6 +432,7 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         syncBusy={false}
         onSync={() => {}}
         onReload={() => {}}
+        canSetAvailability={false}
       />,
     );
     // Negative: the button is not rendered. The page itself still is —
@@ -446,6 +456,7 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         syncBusy={false}
         onSync={() => {}}
         onReload={() => {}}
+        canSetAvailability={false}
       />,
     );
     expect(screen.queryByRole('button', { name: /receive stock/i })).toBeNull();
@@ -474,6 +485,7 @@ describe('ProductDetail — Tabs keyboard behaviour', () => {
         syncBusy={false}
         onSync={() => {}}
         onReload={() => {}}
+        canSetAvailability={false}
       />,
     );
     const overviewTab = screen.getByRole('tab', { name: /^overview$/i });
@@ -496,5 +508,59 @@ describe('ProductDetail — Tabs keyboard behaviour', () => {
     const overviewPanel = panels.find((p) => within(p).queryByText(/at a glance/i));
     expect(overviewPanel).toBeDefined();
     expect(overviewPanel!.hasAttribute('hidden')).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D103 — stock tabs follow the item's stock presentation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ProductDetail — Inventory/Purchases tabs (D101/D103)', () => {
+  it('a dish offers neither Inventory nor Purchases — counts mean nothing for it', () => {
+    render(
+      <ProductDetail
+        session={noopSession}
+        product={makeProduct({ sellableKind: 'COMPOSED_ITEM', foodType: 'FOOD' })}
+        variants={[]}
+        variations={emptyVariations}
+        branches={branches}
+        presentation={localPresentation}
+        hasReceivePermission={true}
+        hasManagePermission={true}
+        canSyncQb={false}
+        syncBusy={false}
+        onSync={() => {}}
+        onReload={() => {}}
+        canSetAvailability={false}
+      />,
+    );
+    expect(screen.queryByRole('tab', { name: /^inventory$/i })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /^purchases$/i })).toBeNull();
+    // Positive control: the tab strip itself is alive — Overview and
+    // History still render, so the negatives are not a missing TabsList.
+    expect(screen.getByRole('tab', { name: /^overview$/i })).toBeDefined();
+    expect(screen.getByRole('tab', { name: /^history$/i })).toBeDefined();
+  });
+
+  it('a tracked stock item keeps both tabs — the gate is the kind, not a removal', () => {
+    render(
+      <ProductDetail
+        session={noopSession}
+        product={makeProduct()}
+        variants={[]}
+        variations={emptyVariations}
+        branches={branches}
+        presentation={localPresentation}
+        hasReceivePermission={true}
+        hasManagePermission={true}
+        canSyncQb={false}
+        syncBusy={false}
+        onSync={() => {}}
+        onReload={() => {}}
+        canSetAvailability={false}
+      />,
+    );
+    expect(screen.getByRole('tab', { name: /^inventory$/i })).toBeDefined();
+    expect(screen.getByRole('tab', { name: /^purchases$/i })).toBeDefined();
   });
 });

@@ -28,7 +28,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 
 /**
  * Remove comments so a rule matches real code, not prose describing it.
@@ -126,7 +126,16 @@ export function collectFiles(
       if (!accept(entry.name)) continue;
       visited += 1;
       if (options.predicate(readFileSync(full, 'utf8'), full)) {
-        matches.push(full.replace(`${root}/`, ''));
+        /*
+         * Posix separators, always. `resolve` returns backslashes on Windows,
+         * so stripping a `${root}/` prefix matched nothing there and every
+         * exact-set assertion in the repo compared repo-relative paths against
+         * absolute ones — six architectural tripwires that failed on any
+         * Windows checkout and could not be read at all. The sets they assert
+         * are written with forward slashes, so the paths must be too.
+         */
+        const rel = relative(root, full).split(sep).join('/');
+        matches.push(rel);
       }
     }
   };

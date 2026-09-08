@@ -7,7 +7,7 @@
  * regression-proofed:
  *
  *   RPW-001 — the Restaurant workspace no longer surfaces a Menu nav
- *             entry, and `/menu` renders the "moved to Products" redirect
+ *             entry (labelled "Menu" since D103), and `/menu` renders the "moved to Products" redirect
  *             card in place of the old MenuBrowser.
  *   RPW-002 — the four-step Restaurant Product Wizard walks end-to-end
  *             (details → pricing → modifiers → review) and lands on the
@@ -43,7 +43,7 @@ async function signInAsRestaurantOwner(page: import('@playwright/test').Page) {
 }
 
 test.describe('RPW — Restaurant Product Wizard (D45)', () => {
-  test('RPW-001 nav shows Inventory but not Menu; /menu renders the redirect card', async ({
+  test('RPW-001 the rail names the catalogue "Menu" at /products; /menu renders the redirect card', async ({
     page,
   }) => {
     await signInAsRestaurantOwner(page);
@@ -53,15 +53,16 @@ test.describe('RPW — Restaurant Product Wizard (D45)', () => {
 
     const mainNav = page.getByRole('navigation', { name: 'Main', exact: true });
 
-    // Positive control: the Products destination is present under its
-    // Restaurant label ("Inventory") — an assertion that the rail did
-    // render at all rather than an empty landmark.
-    await expect(mainNav.getByRole('link', { name: /inventory/i })).toBeVisible();
+    // Positive control: the catalogue destination is present under its
+    // restaurant label — "Menu" since D103 — and it is the Products surface
+    // underneath, not the retired MenuBrowser: the href says so.
+    const menu = mainNav.getByRole('link', { name: 'Menu', exact: true });
+    await expect(menu).toBeVisible();
+    await expect(menu).toHaveAttribute('href', '/products');
 
-    // The removal: no Menu link in the primary rail. Substring-safe: the
-    // check is scoped to the "Main" landmark so a stray "Menu" elsewhere
-    // (e.g. an overflow submenu label) does not leak in.
-    await expect(mainNav.getByRole('link', { name: 'Menu', exact: true })).toHaveCount(0);
+    // NEGATIVE — D45's interim label is gone. Scoped to the "Main" landmark so
+    // a stray word elsewhere does not leak in.
+    await expect(mainNav.getByRole('link', { name: /inventory/i })).toHaveCount(0);
 
     // The redirect card: typed URL to /menu renders the "moved to
     // Products" card, NOT the old MenuBrowser. The card headline copy

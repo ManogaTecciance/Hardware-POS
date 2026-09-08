@@ -958,3 +958,105 @@ describe('wizard-state helpers', () => {
     expect(withOpening.variants[0]!.openingQuantity).toBe(10);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D101 — the restaurant Track-stock switch
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('D101 — restaurant Track stock', () => {
+  function restaurantState(over: Partial<WizardState> = {}): WizardState {
+    return { ...initialState(), foodType: 'FOOD', trackInventory: false, ...over };
+  }
+
+  it('the restaurant Step 1 offers the switch; the retail item-type control stays hidden', () => {
+    function Harness() {
+      const h = useHarness(restaurantState());
+      return (
+        <StepDetails
+          state={h.state}
+          errors={{}}
+          categories={categoryTree}
+          session={noopSession}
+          businessKind="RESTAURANT"
+          onChange={h.patch}
+        />
+      );
+    }
+    render(<Harness />);
+
+    // POSITIVE: the switch is there, off, with the dish wording.
+    const toggle = screen.getByRole('switch', { name: /track stock/i });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(document.body.textContent).toMatch(/no stock count/i);
+
+    // NEGATIVE: restaurant Step 1 still suppresses the retail radiogroup.
+    expect(screen.queryByRole('radiogroup', { name: /item type/i })).toBeNull();
+
+    // Flipping it updates state and the wording flips with it.
+    fireEvent.click(toggle);
+    expect(screen.getByRole('switch', { name: /track stock/i }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    expect(document.body.textContent).toMatch(/each sale reduces the count/i);
+  });
+
+  it('retail Step 1 keeps its own switch and never shows the restaurant wording', () => {
+    render(
+      <StepDetails
+        state={initialState()}
+        errors={{}}
+        categories={categoryTree}
+        session={noopSession}
+        businessKind="RETAIL"
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('switch', { name: /track inventory/i })).toBeTruthy();
+    expect(screen.queryByRole('switch', { name: /^track stock$/i })).toBeNull();
+  });
+
+  it('an untracked dish gets neither opening quantity nor a reorder point on Step 3', () => {
+    render(
+      <StepPricingInventory
+        state={restaurantState()}
+        errors={{}}
+        branches={branches}
+        showOpeningStock={true}
+        // No session on purpose: the Restaurant additions cards fetch their
+        // catalogues, and this spec is about the stock fields alone.
+        businessKind="RESTAURANT"
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/opening quantity/i)).toBeNull();
+    expect(screen.queryByLabelText(/reorder point/i)).toBeNull();
+  });
+
+  it('a tracked packaged good keeps both — the fields follow the answer, not the tenant', () => {
+    render(
+      <StepPricingInventory
+        state={restaurantState({ trackInventory: true })}
+        errors={{}}
+        branches={branches}
+        showOpeningStock={true}
+        // No session on purpose: the Restaurant additions cards fetch their
+        // catalogues, and this spec is about the stock fields alone.
+        businessKind="RESTAURANT"
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/opening quantity/i)).toBeTruthy();
+    expect(screen.getByLabelText(/reorder point/i)).toBeTruthy();
+  });
+
+  it('buildCreateInput carries the answer as trackStock, in both positions', () => {
+    const off = buildCreateInput(restaurantState(), null);
+    expect(off.trackStock).toBe(false);
+
+    const on = buildCreateInput(restaurantState({ trackInventory: true }), null);
+    expect(on.trackStock).toBe(true);
+  });
+});

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PaymentMethod, PaymentStatus, Prisma } from '@hardware-pos/database';
 
+import { withTabName } from '../../common/place-label';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   BillSplitInputDto,
@@ -107,14 +108,22 @@ export class BillingService {
      */
     const session = await this.prisma.tableSession.findFirst({
       where: { finalSaleId: saleId, tenantId },
-      select: { table: { select: { code: true, area: { select: { name: true } } } } },
+      select: {
+        // D104 — the bill names the tab, not just the table: two parties on one
+        // arrangement would otherwise be handed identical headers.
+        tabName: true,
+        table: { select: { code: true, area: { select: { name: true } } } },
+      },
     });
     const table = session?.table ?? null;
-    const placeLabel = table
-      ? table.code === 'WALK-IN'
-        ? 'Takeaway'
-        : `${table.code}${table.area?.name ? ` · ${table.area.name}` : ''}`
-      : null;
+    const placeLabel = withTabName(
+      table
+        ? table.code === 'WALK-IN'
+          ? 'Takeaway'
+          : `${table.code}${table.area?.name ? ` · ${table.area.name}` : ''}`
+        : null,
+      session?.tabName ?? null,
+    );
 
     return this.toView(
       sale,

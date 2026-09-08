@@ -44,6 +44,8 @@ export default function ProductDetailPage() {
   const canManage = hasPermission(Permission.PRODUCT_MANAGE);
   const canReceive = hasPermission(Permission.INVENTORY_RECEIVE);
   const canSyncQb = hasPermission(Permission.QUICKBOOKS_MANAGE);
+  // D101 — the 86 switch has its own permission (the till holds it too).
+  const canSetAvailability = hasPermission(Permission.PRODUCT_AVAILABILITY_SET);
   const { id } = useParams<{ id: string }>();
   const { inventoryMode, status: profileStatus } = useEffectiveProfile();
 
@@ -159,6 +161,7 @@ export default function ProductDetailPage() {
       syncBusy={syncBusy}
       onSync={() => void handleSync()}
       onReload={() => setReloadKey((k) => k + 1)}
+      canSetAvailability={canSetAvailability}
     />
   );
 }

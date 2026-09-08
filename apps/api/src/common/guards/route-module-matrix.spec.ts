@@ -177,6 +177,9 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'DELETE /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'PATCH /products/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // D101 — the 86 switch. SHARED_CORE like the rest of the product surface;
+  // the service refuses kinds whose availability stock or bookings govern.
+  'PUT /products/:id/availability': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'DELETE /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/:id/image': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/:id/sync-to-quickbooks': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
@@ -342,6 +345,9 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // D83 — the whole order behind a ticket, for the board's Details view.
   'GET /restaurant/branches/:branchId/kitchen-tickets/:ticketId/order': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/complete': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  // D100 — recall: a wrong bump reopens on the board; same permission as
+  // completing.
+  'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'POST /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/takeaway/:profileId/status': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
@@ -363,6 +369,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /delivery-hub/external-orders/:externalOrderId': { module: 'ONLINE_ORDERS', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/kds/board': { module: 'KITCHEN_DISPLAY', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/orders': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: B },
+  'GET /restaurant/branches/:branchId/orders/:orderId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: B },
   'POST /restaurant/branches/:branchId/dining-areas': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/branches/:branchId/dining-areas/:areaId': { module: 'DINING', guard: 'ENFORCED', scope: T },
   'DELETE /restaurant/branches/:branchId/dining-areas/:areaId': { module: 'DINING', guard: 'ENFORCED', scope: T },

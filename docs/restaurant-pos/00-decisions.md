@@ -3544,6 +3544,617 @@ field-by-field test only catches the fields somebody thought to list.
 Mutation-proven by deleting the service charge and the packaging charge from
 the map.
 
+### D99 — the roll is measured, not assumed
+
+Report, 2026-09-01: the bill prints correctly from Google Chrome and prints
+with its **left edge cut off** from Microsoft Edge. Same till, same roll, same
+Xprinter XP-365B.
+
+**The mechanism.** `@page { size }` is a request about a page BOX. It says
+nothing about where that box is PLACED on the paper, and the two Chromium
+browsers do not place it the same way: Chrome laid the 78 mm box down at the
+printable origin at 100%, and Edge re-fits and centres it against the driver's
+78.7 mm stock, which splits the overflow between both edges. A layout whose
+only slack is on the right survives one placement policy and not the other.
+
+This is the mirror image of a failure already in this file. D79 recorded
+*"72 mm left a band of white down both sides, because the shorter page was
+centred on 78.7 mm of paper"*. The centring never went away; D80 simply stopped
+noticing it, because at 78 mm there was nothing left over to centre — in
+Chrome.
+
+**The defect was not the value of the inset.** It was that all the slack was on
+one side, and that the number lived in source, where nobody can measure it.
+D73 through D80 is seven rounds of setting these numbers from a laptop and
+posting the result to be photographed. An eighth constant is the same bet with
+a different number.
+
+#### What this supersedes in D80
+
+1. *"Right only. The left edge has always printed cleanly from x=0"* — false
+   in Edge. The text is inset on **both** sides now, by two independent
+   numbers.
+2. *"insetting both sides is the white the PO rejected"* — it is not. That
+   white came from a PAGE narrower than the stock, centred on it. A page equal
+   to the stock, with padding inside it, produces no white to centre. The two
+   were conflated.
+3. *"The inset is a single named constant which the stylesheet interpolates"* —
+   replaced. The correct values are a property of a printer, a driver and a
+   browser together, and are not knowable from source. They are per-workspace
+   settings, defaulting to the XP-365B's 78 / 3 / 5.
+4. The blanket ban on `max-width` — replaced by a narrower rule, below.
+
+#### What D79 and D80 keep, restated
+
+The two numbers are still different things and must not be conflated again.
+The **page** matches the driver's stock, so nothing is ever centred and no
+width is lost before the content starts — that is why the page width is still
+what goes into `@page { size }`, never the content width. The **text** is inset
+from where the head stops. Insets are in millimetres, never pixels: a pixel
+inset stops being a fixed physical margin the moment a browser applies a scale
+factor, which is the family this whole defect belongs to.
+
+Also unchanged: no popup, printed from a hidden iframe, and `window.open`
+asserted never to be called. `@page { margin: 0 }`, for the browser chrome and
+for the gap between pages. No `break-inside: avoid`. Headings printed once. No
+page size for retail receipts (D16). And the right inset stays the LARGER of
+the two, because its clip is a measured property of the print head where the
+left's is browser drift.
+
+#### `max-width` on the body, and the one value it may take
+
+The body is now capped at exactly the page width. When `@page { size }` is
+honoured the cap does nothing. When a browser refuses the size and lays the
+document out on A4 or Letter instead, it stops a monospace bill designed for
+78 mm from spreading across 210 mm and landing past the last printable dot —
+which is a total loss, not a clipped character.
+
+It is safe at that value and at no other. `max-width` narrower than the page,
+plus centring, IS the D79 band of white. So the margin stays `0` and never
+`0 auto`, and both halves are asserted negatively.
+
+#### The document carries its own geometry
+
+`printReceipt` is handed an HTML string. The stylesheet inside it decides how
+wide the text prints; the frame it is written into decides how wide it lays
+out, and the page height written into `@page` is measured from that layout.
+Two numbers, produced in two files, that must agree — and for seven rounds
+they were kept agreeing by hand.
+
+The numbers now travel in the document as `<meta>` and the frame reads them
+back. There is no parameter for a call site to get wrong and no second
+constant to fall behind. It is metadata ABOUT the document, not a page-size
+declaration: the template still declares no `@page { size }` of its own, and
+D77's third position on that is untouched. The two claims are asserted as a
+pair so the distinction cannot erode into one.
+
+**A correction worth writing down, because the obvious fix is wrong.** The
+frame lays out at the PAGE width, not the content width. The body is
+`border-box` at `width: 100%`, so a frame 295 px wide already gives a content
+column of 295 px − 6 mm = 272 px — exactly what a 78 mm page with the same
+padding prints. Narrowing the frame to the content width would subtract the
+insets a second time, wrap more lines, and over-measure the page height. It
+would look like a correction and be a regression, and it is invisible on a
+78 mm roll.
+
+#### Calibration is an operator action
+
+Settings → Documents → Preview now carries **Paper width**, **Left inset**,
+**Right inset**, a fit-to-content switch, and a **Print calibration strip**
+button. The strip prints, in one page:
+
+- a solid bar pulled out to the page's own edges by negative margins equal to
+  the insets — the only element that is not inset, and the one that separates
+  "the page is wider than the stock" from "the insets are too small". Without
+  it those two faults look identical on paper, which is how D79 spent a round
+  narrowing the page when the inset was the problem;
+- a millimetre ruler across the text column, so the first and last legible
+  numerals give both insets directly;
+- edge markers, and the widest line a bill can print (`LKR 1,450,000.00` in the
+  AMOUNT column) — the exact string D80 watched come out as `LKR 1,450.`;
+- the three numbers in force, and **the browser that printed it**. That last
+  one is not decoration: Chrome and Edge disagreeing is the entire defect, and
+  two strips on a counter are otherwise indistinguishable. An unrecognised
+  browser prints an em dash, never a guess (D54) — a strip labelled with the
+  wrong browser would have the operator calibrate the wrong one and stop.
+
+The strip's body rule is byte-identical to the bill's, from the same shared
+function, and that identity is asserted. An instrument laid out differently
+from the document it measures is worse than no instrument.
+
+#### No migration
+
+The four fields land in `TenantSettings.data`, which is `Json`. The service
+merges its defaults UNDER a stored blob, and the web client's cache read
+spreads `DEFAULT_DOCUMENT_PROFILE` under the cached value, so an existing
+tenant and a till holding a stale `localStorage` profile both pick the geometry
+up on the next read with no backfill. Asserted, rather than assumed.
+
+#### D16 and D30
+
+One existing behavioural assertion changed: `thermal-bill.test.ts`'s "fills the
+roll, held off the RIGHT edge only", which is the claim this record reverses.
+It changed because of this decision, not to accommodate a refactor.
+`receipt-print.iframe.test.ts` — including `width:295px` and
+`@page{size:78mm 267mm;margin:0}` — and `bill-print.test.ts` survive
+**unedited**, which is the evidence that the default path is unchanged.
+
+Mutation-proven tripwires added:
+
+- `receipt-print.geometry.test.ts` — that the frame width, the stylesheet and
+  the injected page all come from the document's own geometry. The fixture is
+  58 / 2 / 4, sharing no digit with the defaults, and the proof is written
+  inline: `mmToPx(78) === 295 && mmToPx(78) !== mmToPx(58)`, so a printer that
+  re-hard-coded the old constant could not produce the asserted numbers. The
+  companion case feeds a document with no geometry and asserts the unchanged
+  fallback, so the pair cannot pass by always trusting or always ignoring.
+- `thermal-bill-geometry.test.ts` — that `readBillGeometry` reads the document
+  rather than answering from the defaults, proven with the same fixture.
+- `document-presentation.test.ts` — `showBillCalibration` across all three
+  surfaces, in that file's existing style.
+
+Two other things the tests found while being written, both now fixed: a
+half-written meta set was accepted because `Number(null)` is `0` and `0` is
+finite, which would have silently reported insets of zero — the very layout
+this record removes; and a second fallback for the page width was dead code,
+unreachable given the bounds, so it was replaced by an assertion that the
+bounds keep it unnecessary.
+
+**Verified how:** the strip printed from both browsers on the till, and the
+numbers it produced recorded here.
+
+
+### D100 — the board reads like a kitchen screen, and a bump can be taken back
+
+PO, 2026-09-03: the board's content was right and its ergonomics were not —
+compared against mainstream KDS products, it read like an office web page.
+Four changes, one record, because they are one statement: the kitchen board
+is furniture in a kitchen, not a page in a browser.
+
+**Age escalation.** The big timer sits where the status badge sat — on the
+outstanding tab every badge read "To make", which the tab already says — and
+the ticket turns amber at 10 minutes and red at 15 (timer colour + card
+border). The thresholds are constants, not settings: they follow the
+mainstream KDS defaults, and nobody has asked to tune them. The 5 s poll
+doubles as the timer tick. Completed tickets stop ageing; a done dish is no
+longer waiting.
+
+**The bump is the whole bottom of the card.** `Mark done` was a
+footer-sized button beside Details; the finger pressing it is wet, gloved,
+or holding a plate. It is now full-width and 48px tall. Recall (below) gets
+the same target but an outline variant — it is the undo, not the job.
+
+**Type at arm's length.** Place `text-xl`, items `text-base`, everything
+else one step up from where it was. The board is read from across a pass,
+not from a desk.
+
+**Recall.** `POST …/kitchen-tickets/:ticketId/reopen`, gated on
+`KITCHEN_STATUS_UPDATE` exactly like complete: whoever may say the food is
+done may say it is not. D68's write surface grows its second verb — the
+undo every mainstream KDS carries, because optimistic finger-sized bumps
+are sometimes wrong. Reopening rewrites the ticket to `QUEUED` and CLEARS
+`completedAt`/`completedByUserId` — a recalled ticket is work to do again,
+and a stale "done by" name would say otherwise. Idempotent in mirror image
+of complete: recalling a never-completed ticket writes nothing. Audited as
+`KITCHEN_TICKET_REOPENED`. No migration: `QUEUED` already exists.
+
+D94 is untouched: the till still holds `KOT_VIEW` alone, so it sees neither
+verb, and WS-408's contrast still holds — its selectors (`Mark done`,
+`Details` by accessible name) survived the relayout unchanged.
+`kitchen-board.render.test.tsx` pins the new behaviour in pairs: escalation
+(a late board turns red AND a fresh board carries no warning colour),
+the write gate (no verbs without the permission, Details as the positive
+control), and both verbs' optimistic card drop against api mocks that empty
+their rows — a reload must not resurrect a bumped card.
+
+---
+
+### D101 — Sold out is a switch, not a count
+
+PO, 2026-09-03: the restaurant catalogue behaved like a hardware store's.
+Every item a restaurant authors carried stock fields, and the number in them
+was one nothing maintains — a curry's `quantityOnHand` neither depletes nor
+means anything, yet it rendered as though it did. The mainstream shape
+(Toast, Square) splits availability by what the item IS:
+
+**Prepared items don't count units — they get an 86 switch.** New nullable
+`Product.soldOutAt` (null = available). `PUT /v1/products/:id/availability`
+sets or clears it, gated on the new `PRODUCT_AVAILABILITY_SET` permission —
+held by OWNER/ADMIN/MANAGER and, deliberately, by the food-service Waiter
+and Cashier templates: 86ing the last kottu is a till/floor action in the
+middle of service, not an owner's console visit. The endpoint REFUSES kinds
+whose availability is governed elsewhere (`STOCK_ITEM`/`BUNDLE` by the
+count; `TIME_SLOT`/`STAY_UNIT` by booking calendars) with
+`PRODUCT_AVAILABILITY_STOCK_GOVERNED` — one authority per fact. The flag is
+product-level, not per-branch, because LOCAL inventory already refuses
+multi-branch tenants; when multi-branch food service arrives, this moves to
+a branch satellite with its own decision record.
+
+**Bought-in sellables keep real counts.** The D65 authoring rule
+(`foodType != null → COMPOSED_ITEM`) made a tracked bottled water
+impossible: the restaurant wizard stamps every item with a foodType, so a
+packaged drink classified as a dish, reported UNTRACKED, and depleted
+nothing. The rule gains the operator's own answer: the wizard's Track-stock
+switch (restaurant default OFF — dishes are the common case) now travels as
+`trackStock`, and `foodType != null` derives `STOCK_ITEM` when it is true,
+`COMPOSED_ITEM` otherwise. Update re-derives only when one of the rule's
+inputs (`type`, `foodType`, `trackStock`) is in the patch, so existing rows
+keep their classification until someone actually edits the decision.
+
+**The server refuses a sold-out sale.** `resolveRoundItemInputs` — the ONE
+resolver both intake paths share (dine-in rounds and takeaway, which the
+counter routes every mode through) — now throws `PRODUCT_SOLD_OUT` for a
+sold-out product, next to the existing inactive check. POS greying is
+usability; the refusal is the rule (D31's stance). Out-of-stock STOCK_ITEMs
+are deliberately NOT blocked — oversell stays permitted, unchanged.
+
+**Presentation is per-item, resolved in one place.** The sellable read
+model reports `stockState: 'SOLD_OUT'` (a new state beside UNTRACKED — a
+sold-out dish must not read as OUT, which stock governs). The web resolver
+gains `resolveItemStockPresentation(presentation, sellableKind)`:
+EXTERNAL_CATALOGUE shows counts for every kind (Tile Shop pixels untouched,
+D16); LOCAL splits QUANTITY (STOCK_ITEM/BUNDLE) from AVAILABILITY
+(COMPOSED_ITEM/SERVICE) from NONE (booking kinds); no component compares a
+kind inline. At the POS, sold-out cards grey out and stop adding; a
+long-press (the Square gesture) opens the availability dialog for untracked
+items when the operator holds the permission.
+
+---
+
+### D102 — a page is never wider than it is tall
+
+Report, 2026-09-01, on the D99 delivery: with the bill printing correctly, one
+case was found where it comes out **rotated 90° on the roll** — the words run
+along the paper instead of across it. To reproduce: clear every document field
+(business name, address, phone, email, tax number, footer, bill note) **and**
+the logo, then print a bill with **one** item.
+
+**The mechanism.** `@page { size: W H }` has no separate orientation property.
+The two lengths *are* the orientation: a page box whose width exceeds its
+height **is** a landscape page, and the print pipeline rotates it to suit.
+
+`fitPageToContent` measured the content and declared `size: <paperWidth>mm
+<measuredHeight>mm`. Nothing bounded that height. Its only guard was
+`heightPx <= 0`, and the geometry module's three `min` constants — the page
+width's floor, the inset floor, `minContentMm` — are every one of them about
+the horizontal axis. Strip the header and the bill falls under the paper's own
+width, and the page turns over.
+
+Measured in Chromium at the real 295 px layout width, not estimated:
+
+| document | content | declared page | |
+|---|---|---|---|
+| normal bill, logo and header | ~520 px | 78 × 140 mm | portrait |
+| **stripped bill, one item** | **213 px (56.4 mm)** | **78 × 59 mm** | **landscape** |
+| **calibration strip** | **275 px (72.8 mm)** | **78 × 75 mm** | **landscape** |
+
+**The instrument had the defect it was built to find.** That 78 × 75 mm is not
+a calculation — it is what the D99 calibration strip was observed injecting on
+the live stack the day it shipped. The strip prints through the identical path,
+so the tool for diagnosing the last print bug was quietly carrying the next one.
+
+**The rule.** The declared height is now floored at the paper width plus the
+cutter margin — 80 mm on a 78 mm roll, 60 mm on a 58 mm one. It tracks whatever
+roll the workspace calibrated rather than being another hard-coded 78, and it is
+strictly greater than the width, never equal: a square page is the ambiguous
+case and there is no reason to hand a driver one.
+
+The floor earns its place twice. Orientation is the first reason. The second is
+that a cut needs somewhere to land — the `+2 mm` cutter margin was already
+admitting as much for the bottom of a long bill, and a 50 mm page gives the
+mechanism less paper than the head-to-cutter distance on most 80 mm printers.
+
+The arithmetic moved out of `fitPageToContent` and into `pageHeightMm` in
+`thermal-bill-geometry.ts`, beside the rest of the geometry, with
+`CUTTER_MARGIN_MM` following it. The number that decides which way up the bill
+comes out should not be computed in the middle of DOM code, and it is now
+testable without a browser.
+
+**Cost, stated plainly.** A very short receipt gets up to about 30 mm of blank
+paper before the cut. That is the trade, it is bounded, and it disappears the
+moment a bill has a letterhead or a second line.
+
+**What D77 keeps, untouched.** The fitting is still opt-in and still measured;
+the template still declares no `@page { size }` of its own. Every height failure
+D77 records is a height too **large** — 432 mm and then 223 mm, scaled down by a
+driver that could not honour them — and it drew the right conclusion from them.
+This is the opposite end of the same axis, which nothing in D73–D99 had cause to
+consider. D79's Xprinter dialog is the same story: it states a *Maximum* Length
+and no minimum at all.
+
+**An empty header no longer prints a blank line.** Every row in the header block
+is conditional, but the block itself was not, so a workspace with the logo and
+all four fields cleared got an empty `div` holding the template's own newlines.
+Whitespace in a block still generates a line box, and nothing in that stylesheet
+sets a `font-size` on `body`, so it inherited the browser's 16 px and printed as
+a blank line at the top of the paper. It is emitted only when it has content
+now. Adjacent to the reported bug rather than part of it, and recorded so.
+
+**Why the suite did not catch this, which is the D30 lesson here.** Every
+`@page` assertion in the repository is driven by a fixture whose body reports
+**1000 px** → 267 mm, comfortably portrait. The entire regime below the page
+width had no coverage — not a weak test, no test. A tripwire cannot fail in a
+region no fixture visits, and "all the assertions pass" said nothing about it.
+
+Tripwires added, and mutation-proven inline:
+
+- `thermal-bill-geometry.test.ts` — the rule as a **property**, swept across
+  1…2000 px, requiring `pageHeightMm(g, px) > g.pageWidthMm` for every one,
+  rather than sampling a few heights. Plus the floor tracking a 58 mm and a
+  110 mm roll, asserted negatively against the 78 mm roll's 80 mm so a
+  hard-coded default cannot pass. The mutation proof states the pre-D102
+  arithmetic explicitly — `ceil(pxToMm(213)) + 2 === 59`, and `59 < 78` — because
+  `pageHeightMm(g, 213) === 80` proves nothing unless 213 px is shown to sit in
+  the landscape regime.
+- `receipt-print.geometry.test.ts` — the same claim through the real
+  `printReceipt`, since the pure function could be correct and simply not
+  called. Exact injected set, with the old sideways output named as the
+  negative.
+- `thermal-bill.test.ts` — the header block absent when empty, present the
+  moment one field is filled, so it cannot pass by deleting every letterhead.
+
+**D16.** No existing assertion changed. Every `@page` spec uses the 1000 px
+fixture, which is above the floor, so all of them still pass untouched — which
+is itself the evidence that the normal printing path is unaffected.
+
+**Verified:** the heights above were measured in a real browser rather than
+computed; the reported case reprinted upright on the till.
+
+---
+
+### D103 — the rail entry is called "Menu", because that is what it is
+
+PO, 2026-09-04: after D101 landed, "I can still see the inventory tab."
+Correct on both counts it could mean, and both are fixed under this record.
+
+**The label.** D45 made `/products` the single authoring surface and, when
+it removed the legacy `/menu` nav entry, labelled the food-service rail
+entry "Inventory" so it would read as that surface. It never did: every
+mainstream restaurant POS calls this surface the **Menu** (Toast,
+Lightspeed; Square says Items), and after D101 the word "Inventory" is
+actively wrong — most of what a restaurant authors there deliberately has
+NO inventory. The entry is now labelled **Menu** with a book icon
+(`BookOpen` joins the icon vocabulary). Nothing else moved: the href is
+still `/products`, retail still says "Products", and the D45 rule that the
+legacy `/menu` ROUTE gets no nav entry stands — `nav.test.ts` now pins
+that claim by href, which is the invariant, rather than by the absence of
+a label that legitimately exists again.
+
+**The detail page.** A dish's detail page still offered Inventory and
+Purchases tabs — per-branch counts and GRNs behind two clicks, for an item
+whose D101 stock cell says a count means nothing. Both tabs now render
+only for items whose stock presentation is QUANTITY, the same resolver
+answer that gates the Receive Stock button. Overview and History remain
+for every kind; availability lives on the Overview, where D101 put it.
+
+Paired per D30: the nav spec asserts the Menu label present AND resolving
+to `/products`, `/menu` absent from every workspace's hrefs, and retail
+free of the label; the detail spec asserts a dish hides the two tabs while
+a stock item keeps them.
+
+### D104 — one joined table, several tabs
+
+PO, 2026-09-07, on the open tables shipped by D49/D50: "think I'm going with 3
+friends, the waiter makes a table with join ex M1 and M2 all having 6 seats, we
+want 4, then another two friends come — they also can book that new made group."
+
+D50 already answers *two parties, shared furniture*, but with the multiplicity
+the other way up: **N arrangements over 1 physical table**, each arrangement
+carrying exactly one tab. The PO is describing **1 arrangement carrying N
+tabs** — one named group the floor can keep selling seats on. Both shapes are
+real and they are not substitutes: the first is two unrelated pairs who happened
+to be sat at one four-top, the second is one joined table that is only half
+full.
+
+**The rule changes for `kind = OPEN` only.** `openSession`'s
+one-live-session-per-table check becomes kind-aware: a PHYSICAL table still
+refuses a second session — a four-top with a party at it is not something two
+parties can both be sold — and an arrangement admits as many tabs as it has
+chairs. The integration spec proves the relaxation is scoped by re-asserting the
+physical refusal beside the arrangement's acceptance, and
+`table-sessions.spec.ts`'s "the same table cannot have two open sessions"
+survives untouched because its fixture is a physical table.
+
+**Seats are counted, and the count is refused when it does not fit.** Live tabs
+are `OPEN` or `BILLING` — a party waiting for the bill is still in its chairs
+— and `guestCount` becomes required on an arrangement that HAS a recorded seat
+count. Where the operator wrote "seating as arranged" and left it blank (D49's
+optional `seats`), nothing is enforced: inventing a limit would refuse parties
+on a number nobody stated. The one list of live statuses now lives in
+`common/live-sessions.ts`, because "may another party sit here" and "may this
+arrangement be dissolved" are the same question about the same rows and two
+copies of the answer would drift.
+
+**A tab carries its own name.** Two parties on one arrangement previously
+produced byte-identical kitchen tickets and bill headers — the table's name was
+the whole label. `TableSession.tabName` is composed onto the place label by one
+helper used at all three read surfaces (kitchen board and ticket detail, bill,
+unified order list). It is required from the **second** tab onwards, and only
+then: naming a tab that has no sibling is typing for nothing, and a lone
+arrangement already reads unambiguously.
+
+**Release becomes last-*tab*-out.** This supersedes D49's "the arrangement ends
+with the tab". `releaseOpenTable` now returns without touching memberships,
+`isActive` or any member status while another live session remains on the open
+table; only the last close dissolves the arrangement, after which D50's
+member-level "still held by another open table" logic runs unchanged. The
+ordering inside `closeSession` is load-bearing — it marks its own session
+CLOSED *before* the fulfilment provider asks who is left, so a plain count
+excludes the tab that is closing — and an integration test pins it. The release
+summary gains `remainingTabs`, because "no member was freed" (a shared
+four-top, normal) and "two parties are still sitting here" (nothing happened at
+all) read identically without it.
+
+**In the POS, arrangements live under Open.** D92's partition holds — every
+table on the branch is in exactly one place — and an arrangement's place is
+**Open**, whether or not a party is on it. Deliberately not filed by status like
+a physical table: under this record an arrangement can be occupied AND still
+have chairs, so status would make it flicker between destinations as parties
+come and go, hiding the very table the next party is meant to join. A first pass
+gave them a separate "Joined" chip; the PO wanted them under Open, which is also
+the truer reading of D92. Tapping a group opens a small prompt for the guest
+count and the tab name — physical tables keep their one-tap seat, because that
+is the commonest action in service and a dialog on it would tax every cover to
+serve the rarer case. Occupancy (`liveTabs`, `seatsTaken`) is computed by the
+SERVER on `listOpenTables`: D70 scopes the open-session list to the caller's own
+tabs, so a client adding up what it can see would miss a colleague's party and
+offer seats that are not there.
+
+**Not in scope.** Seat-level assignment (which chair): seats stay a count.
+Moving or merging tabs. Reservations on arrangements — D49 still refuses
+non-PHYSICAL tables. And note the claim "physical tables keep one tab" is about
+`openSession`: takeaway and delivery already insert sessions directly on their
+synthetic WALK-IN / DELIVERY tables and never pass through it, so nothing here
+runs on those paths.
+
+**Migration.** `20260908000000_add_table_session_tab_name`: one nullable TEXT
+column. Purely additive — null on every existing row means "the table's name
+stands alone", which is exactly what those rows already meant, since before this
+record a table could not have a sibling tab to be distinguished from.
+
+**Two assertions were superseded, not accommodated** (D16 forbids the latter):
+`open-tables.service.spec.ts`'s "**always** archives the closing open table" —
+"always" was load-bearing under D49 and is now conditional, replaced by the pair
+(archives when last / leaves it standing when not) — and a POS render assertion
+from the same day that a tap on an arrangement "still resumes rather than seating
+a second session on it".
+
+Paired per D30 throughout, and mutation-proven inline: the render spec's five
+mutations fail 7/4/1/1/1 of its 7 tests (dropping the arrangement fetch kills
+all seven, which is the shape of the original defect — total absence), and the
+integration spec asserts every refusal beside the acceptance that proves the
+server has not simply started saying no.
+
+---
+
+### D105 — a table already inside an open table is not offered to another one
+
+PO, 2026-09-07, immediately after D104 landed: "in the main hall I joined M2
+and M3, then after creating a join table [they still show] in that place" —
+the **New open table** picker was still listing M2 and M3 while the arrangement
+holding them, `minin`, was in service with three tabs and eight guests
+physically at those two tables.
+
+**This narrows D50 to `AVAILABLE` only.** D50 had widened member eligibility by
+exactly one status, admitting `RESERVED` so two unrelated pairs could each hold
+their own arrangement over one free four-top. That widening was sound while an
+arrangement meant exactly ONE tab — "already shared" and "has a party at it"
+were then mutually exclusive, which is what D50's own sentence *"a table with a
+party physically at it is not shareable; a table already shared is"* relies on.
+
+**D104 dissolved that distinction.** Occupancy is recorded on the arrangement,
+never on its members: seating `minin` moves `minin` to OCCUPIED while M2 and M3
+stay `RESERVED`. So after D104 a `RESERVED` row means "held by an arrangement,
+which may or may not be full of people", and neither the service nor the picker
+could tell the two apart from the row alone. The rule was not merely stale — it
+was offering the floor tables that had guests sitting at them.
+
+**Nothing is lost, because D104 replaced the mechanism.** D50's worked example
+is now served better by a second **tab** on the existing arrangement than by a
+second arrangement over the same furniture: one bill each, one named tab each,
+and the physical tables released when the last of those tabs closes. Refusing
+here is how the floor gets pushed onto that route rather than onto a duplicate
+arrangement that no longer buys anything.
+
+**What changes.** `DiningService.createOpenTable`'s eligibility becomes
+`isActive && kind = PHYSICAL && status = AVAILABLE`. The picker's filter
+narrows to match, its "shared" hint goes with the rule that produced it, and
+its copy now names the replacement route instead of promising sharing. The
+existing `MemberTableUnavailableError` is unchanged and its wording — *"it is
+in service, archived, or already part of another open table"* — becomes true
+for the first time.
+
+**What deliberately does NOT change.** No migration and no schema change:
+`OpenTableMember` stays many-to-many. Restoring
+`@@unique([memberTableId])` would need a migration and would reject rows
+already written under D50, and the service is the authority in any case — the
+many-to-many shape simply stops being reachable through the create path. D50's
+member-level last-one-out logic in `releaseOpenTable` stays as written, correct
+and now practically unreachable, because it is what keeps rows created before
+this record honest. `releaseMemberTable` (Unreserve) is untouched and remains
+the escape hatch.
+
+**One assertion was superseded, not accommodated** (D16 forbids the latter):
+`open-tables.service.spec.ts`'s *"D50: a table already RESERVED by another open
+table can be shared"*, which asserted the create RESOLVES. It is now its
+opposite, and `RESERVED` joins the `it.each` refusal table beside SEATED /
+OCCUPIED / BILLING / CLEANING / BLOCKED, which is the tidiest statement of the
+new rule and leaves that test's message assertion untouched.
+
+Paired per D30 in three places, and mutation-proven inline with measured
+counts: the service spec asserts the refusal AND that nothing was written, and
+restoring `|| RESERVED` to the predicate fails 2 of its 22 tests; the picker —
+which had **no test at all** before this record — asserts a free table present
+beside the joined ones absent, and the same restoration fails 2 of its 3; and
+the integration spec refuses a member of an arrangement that is unseated AND
+one that is in service, then proves the same tables become joinable again once
+the last tab closes, which is what stops the pair passing against a server that
+has simply started saying no.
+
+---
+
+### D106 — a joined table is shown, not offered
+
+PO, 2026-09-07: "after the open table, like I join M1 and M3, then under the
+Main Hall section it shows the table with the button Unreserve — I think don't
+show, please. It shows Reserved status, can't click button. I think that is the
+best."
+
+It was more than a preference. Pressing that button is what broke the live
+floor: `minin` was found serving **three tabs and eight guests while holding
+zero tables** — M2 and M3 had been unreserved out from under the party sitting
+on them.
+
+**Why the guard never fired.** `releaseMemberTable` refused when the table had
+its own live session:
+
+    const ownSession = await tx.tableSession.findFirst({
+      where: { tableId: table.id, status: IN_SERVICE_SESSION_STATUSES },
+    });
+    if (ownSession) throw new TableInServiceError();
+
+A joined member never has a session of its own — the tab lives on the OPEN row —
+so the check could not fire for exactly the case it appeared to cover. It read
+like a safety rail and was one only for tables that were not joined.
+
+**Why the permission is withdrawn rather than fixed in place.** D50 allowed this
+deliberately, as the compaction escape hatch: two parties of three shared a
+four-top and a two-top, the first is billed, and the remaining three now fit on
+the four-top alone — only a human can see that. **D105 ended table sharing**, so
+that scenario cannot arise: there is no second arrangement whose departure frees
+furniture the first no longer needs. And **D104** made the failure expensive,
+because an arrangement now carries several tabs and several parties.
+
+**The card keeps its job, which was never the button.** A member table still
+shows the `Reserved` badge and the "Held by …" line naming the arrangement —
+that line is the whole answer to "where did my table go", and it is why the card
+is worth reading. What it no longer has is anything to press. The badge wording
+is unchanged on the PO's say-so, and it is shared with the dashboard and the POS
+picker.
+
+**Recovery was already correct and is now the only route.** Close the tabs — the
+last one releases every member automatically (D104) — or **Dissolve** the
+arrangement, which has always refused while a tab is live. An arrangement nobody
+has sat at yet can still have a member released, which is the honest half of the
+old behaviour and stays.
+
+**Server, not just screen.** Frontend hiding is usability only, so the rule
+moved into the service: `releaseMemberTable` now counts live tabs on the
+**arrangements holding the member** and throws the existing
+`OpenTableInServiceError`. The member's own-session check stays as well — a
+table can be RESERVED and separately mid-service in states this method has no
+business touching. No new error code, no new route, no migration; the endpoint
+and its route-matrix entry are untouched.
+
+Paired per D30 on both sides, and mutation-proven inline with measured counts:
+the floor spec asserts the card's CONTENT and its EMPTY action slot as separate
+tests, and restoring the button fails 1 of those 2; the service spec asserts the
+refusal beside the still-working unseated release, and deleting the holder probe
+fails 1 of its 23 tests and 2 of the 12 integration tests — which also assert
+the membership row and the member's RESERVED status survive the refusal, and
+that the member comes back by itself when the last tab closes.
+
+---
 
 ### D107 — merging `main` into the restaurant branch: how each clash was decided
 
@@ -3785,6 +4396,118 @@ noise under every name. Nothing else changes: the session still carries the
 branch and register for the screens that need them, and the header's own
 branch and register chips were already gone (DASH-015).
 
+### D110 — merging `fix/table-tab`: how each clash was decided
+
+`origin/fix/table-tab` (nine commits, 2026-09-01 to 09-08, branched from the
+restaurant tip `4f0be1b`) was merged into `merge/restaurant-changes` after D107
+had brought `main` in and D108/D109 had landed. It carries D99–D106: roll
+calibration, the kitchen board's ergonomics and ticket recall, the 86 switch,
+print geometry, the "Menu" rail entry, one joined table with several tabs and
+its two follow-ups — plus `roleName` on the session, the customer capture
+popup's address fields, the order detail drawer, the reservation dialog,
+QuickBooks-gated customer screens with mobile-number validation, and a
+portalled tooltip. Ten files conflicted; what follows is every decision that
+was more than "take both".
+
+**Decision numbers.** Both branches appended after D98. Theirs cite D99–D106 in
+code, specs and two migrations; today's three records were newer and cited by
+nothing outside this branch, so they moved up — D99→D107, D100→D108,
+D101→D109 — in one commit before the merge, every reference and anchor
+included. The log now reads in the order the decisions were made.
+
+**The unnamed migration is dropped.** Their branch carried
+`20260831055102_setup1`: a DROP and re-ADD of `InventoryReceiptLine_productVariantId_fkey`
+with `ON DELETE SET NULL`. That is the D44 drift — the migration wrote
+`RESTRICT`, the schema declares the relation without `onDelete` and so means
+`SetNull` — which every feature migration since `20260826` deliberately strips
+from `migrate diff`'s output, and their own tripwire refused to count it: "its
+owner must add a decision record for it or remove it". Removed. Production
+never had it; a developer database that applied it needs a `prisma migrate
+reset` (or its `_prisma_migrations` row deleted and the constraint re-added as
+`RESTRICT`) — `migrate resolve --rolled-back` only takes a migration that
+failed. The drift itself is unchanged and still stripped; whether `RESTRICT`
+or `SetNull` is the intended behaviour for a variant a receipt line still
+references is open (O6).
+
+**Production's migrations are `main`'s, and none was touched.** The merged
+set is 70: this branch's 60, `main`'s 8 and their two, both purely additive
+nullable columns (`Product.soldOutAt`, `TableSession.tabName`) on tables the
+feature migrations create earlier in lexical order. Proven as D107 was: an
+empty database applies all 70 and `migrate status` reads up to date; a database
+at `main`'s 27, with a customer-account payment (`saleId NULL`) seeded in
+between, applies the remaining 43 and keeps the row, holds
+`Sale_tenantId_completedAt_idx` once, and reads up to date. On both, `migrate
+diff` emits exactly the D44 FK pair and nothing else.
+
+**Their role display, our menu.** The account menu shows their
+`roleName` — the role row's name, so a waiter reads "Waiter" rather than the
+CASHIER enum underneath, falling back to the enum for a session minted before
+the field existed — inside D109's two-line menu with no branch or register.
+
+**`main`'s pagination stays.** Both the sales and customers lists conflicted
+between `main`'s one `Pagination` component (D107: "numbered pagination
+everywhere, from one component") and their older hand-rolled pager, which hid
+itself when the total fit the smallest page size. The component won; the
+hide-when-small rule did not survive, and is recorded here as a product
+question rather than silently re-added inside a merge.
+
+**The customers list keeps `main`'s columns and takes their gating.** "Credit
+limit" and "Available credit" (with the hover explanation) stay; the Sync
+column, the QuickBooks badges and the QuickBooks detail fields on the customer
+page render only when the QUICKBOOKS module is enabled, resolved from the
+platform profile (D31) — a restaurant customer no longer sees "Not synced".
+Their commit also dropped the **Type** column (Retail / Wholesale / Credit)
+from the list with no reason given, while leaving the Type filter above it in
+place; the column is restored, since a filter on a value the table does not
+show is the odder state, and `main` still has it. The empty-state `colSpan`
+mirrors the header row in one named constant (six fixed columns plus Sync)
+instead of two scattered literals.
+
+**One tooltip, `main`'s.** Both sides replaced the CSS-only tooltip with a
+portalled one for the same clipping reason. `main`'s follows the trigger on
+scroll, clamps to the viewport edges and guards server rendering; theirs
+dismissed on scroll. `main`'s is kept whole; nothing imported anything else
+from theirs.
+
+**The settings preview takes both props.** Their `set` and `showCalibration`
+(D99's calibration strip lives on the Preview tab) and `main`'s `timezone`
+(a document profile is the settings plus the shop's zone).
+
+**Tests and the catalogue.** Their branch changed nothing under `apps/e2e`,
+so D103's relabel left three Playwright assertions pinning the old rail
+(RPW-001, WS-401, WS-402: "Inventory" present, "Menu" absent); all three now
+assert the D103 rail, positively and negatively. Their seed ships three dishes
+86'd, and the tablet counter spec clicked "the first priced tile", which can
+now be a disabled one; it clicks the first enabled tile. Their orders list
+became a page object (`items`, `total`, `page`, `pageSize`) and stopped
+reading `limit`; the two counter specs that read it as an array (POS-CTR-301,
+POS-CTR-401) now read the page. Those two still fail for an older reason —
+they expect a seeded "Chicken Kottu" with modifiers that no seed has carried
+since before D99 — which is recorded with the other pre-existing browser
+failures rather than fixed here. Their eight decisions
+added no rows to `testcases.md`; rows are added under the existing prefixes,
+and UI-006, which still described the account menu D109 emptied, is corrected.
+The header gains a render test for the two-line menu and the `roleName`
+fallback, which neither D109 nor their change had.
+
+**What their permission reaches.** D101's `PRODUCT_AVAILABILITY_SET` is
+granted to the food-service Waiter and Cashier templates and, through
+`ALL_PERMISSIONS`, to OWNER and ADMIN and MANAGER — and to SALESPERSON, which
+is the owner's set by reference (D108). Their branch never saw that role;
+recorded here the way D107 recorded what `main` never saw.
+
+**Route matrix.** 288 routes, 200 module-guarded, 88 ungated: their three
+(availability, ticket reopen, order detail) and `main`'s two (customer credit,
+marked-paid), totals taken from the spec that checks the document.
+
+**Open, for a product decision — tracked as O6 and O7.** (1) Whether a
+variant still referenced by a receipt line may be deleted with the line's
+reference nulled (`SetNull`, the schema's meaning) or must be refused
+(`RESTRICT`, the database's behaviour); settling it ends the churn with either
+an explicit `onDelete: Restrict` in the schema (no migration) or a named
+migration. (2) Whether the pager should hide when a list fits one page — their
+Orders screen still does; every `main` list renders it.
+
 ---
 
 ## Open decisions
@@ -3796,3 +4519,5 @@ branch and register chips were already gone (DASH-015).
 | O3 | Service-charge tax treatment specifics, to be confirmed with an accountant (D8). | Phase 8 |
 | O4 | Pilot restaurant: which tenant, how many branches, which printers, which channels. | Phase 4 |
 | O5 | Commercial model (per-branch / per-register / per-module) — blocks subscription and entitlement design. | before entitlements |
+| O6 | `InventoryReceiptLine.productVariant`: `RESTRICT` (what the database has since D44) or `SetNull` (what the schema implies)? Until answered, `migrate diff` keeps emitting the FK pair and it keeps being stripped (D110). | next migration |
+| O7 | Should a list's pager hide when the rows fit one page? Their Orders screen does; every `main` list renders it (D110). | UI polish |

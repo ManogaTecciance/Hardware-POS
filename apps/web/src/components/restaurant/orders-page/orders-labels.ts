@@ -1,5 +1,6 @@
 import type { BadgeTone } from '@/lib/restaurant/labels';
 import type {
+  PaymentMethod,
   UnifiedChannel,
   UnifiedOrderStatus,
   UnifiedSource,
@@ -62,4 +63,14 @@ export const PAYMENT_TONES: Record<'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED', B
   PARTIAL: 'warning',
   PAID: 'positive',
   REFUNDED: 'muted',
+};
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  CASH: 'Cash',
+  CARD: 'Card',
+  BANK_TRANSFER: 'Bank transfer',
+  QR_PAYMENT: 'QR payment',
+  CHECK: 'Cheque',
+  STORE_CREDIT: 'Store credit',
+  OTHER: 'Other',
 };

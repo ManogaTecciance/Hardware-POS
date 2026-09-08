@@ -126,34 +126,57 @@ export function StepDetails({
         // Restaurant tenants — every menu item is Inventory in practice and
         // the segmented control adds noise without changing behaviour. The
         // shell still writes `type: 'Inventory'` server-side.
-        <Field label="Category" required error={errors.foodType}>
-          <div
-            role="radiogroup"
-            aria-label="Category"
-            className="grid grid-cols-3 gap-2"
-          >
-            {RESTAURANT_CATEGORIES.map((t) => {
-              const selected = state.foodType === t.value;
-              return (
-                <button
-                  key={t.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => onChange({ foodType: t.value })}
-                  className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors motion-reduce:transition-none ${
-                    selected
-                      ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/30'
-                      : 'border-border bg-surface hover:border-primary hover:bg-brand-100'
-                  }`}
-                >
-                  {t.icon}
-                  {t.label}
-                </button>
-              );
-            })}
+        <>
+          <Field label="Category" required error={errors.foodType}>
+            <div
+              role="radiogroup"
+              aria-label="Category"
+              className="grid grid-cols-3 gap-2"
+            >
+              {RESTAURANT_CATEGORIES.map((t) => {
+                const selected = state.foodType === t.value;
+                return (
+                  <button
+                    key={t.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => onChange({ foodType: t.value })}
+                    className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors motion-reduce:transition-none ${
+                      selected
+                        ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/30'
+                        : 'border-border bg-surface hover:border-primary hover:bg-brand-100'
+                    }`}
+                  >
+                    {t.icon}
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+
+          {/* D101 — what the item IS for stock. Off (a dish) gets the 86
+              availability switch instead of counts; on (a packaged good —
+              bottled water, cans) keeps quantity, low-stock and depletion.
+              This one answer drives the server's STOCK_ITEM/COMPOSED_ITEM
+              classification for food-typed rows. */}
+          <div className="space-y-1.5">
+            <span className="text-sm font-medium">Track stock</span>
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+              <Switch
+                checked={state.trackInventory}
+                onCheckedChange={(v) => onChange({ trackInventory: v })}
+                aria-label="Track stock"
+              />
+              <div className="text-xs text-muted-foreground">
+                {state.trackInventory
+                  ? 'Counted stock — for bought-in items like bottled water. Each sale reduces the count.'
+                  : 'No stock count — kitchen-prepared items. Use "Sold out" on the POS when the kitchen runs out.'}
+              </div>
+            </div>
           </div>
-        </Field>
+        </>
       ) : (
         <Field label="Item type" required error={errors.type}>
           <div role="radiogroup" aria-label="Item type" className="grid grid-cols-1 gap-2 sm:grid-cols-3">

@@ -120,6 +120,9 @@ const product: ManagedProduct = {
   hasVariants: false,
   averageCost: null,
   attributes: {},
+  sellableKind: 'STOCK_ITEM',
+  soldOutAt: null,
+  foodType: null,
 };
 
 const syncProductToQuickBooks = vi.fn().mockResolvedValue(product);

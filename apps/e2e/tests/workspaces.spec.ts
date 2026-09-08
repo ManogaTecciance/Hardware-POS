@@ -159,19 +159,21 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     // Pilot Change 2 rebuild: POS and Orders replaced the standalone Takeaway
     // entry — Takeaway is now a mode inside POS.
     //
-    // D45: `Menu` is intentionally NOT in this list — the Restaurant workspace
-    // authors sellable items via Products (labelled "Inventory" in the rail)
-    // and the runtime POS reads them from `/restaurant/pos-catalogue`.
+    // D45 made `/products` the one authoring surface; D103 named its rail
+    // entry "Menu", because that is what a restaurant calls the thing it
+    // authors there. The runtime POS still reads `/restaurant/pos-catalogue`.
     await signIn(page, RESTAURANT_SEED.owner);
     const flat = await railLinkNames(page);
 
-    for (const expected of ['Dashboard', 'POS', 'Orders', 'Kitchen', 'Tables']) {
+    for (const expected of ['Dashboard', 'POS', 'Orders', 'Kitchen', 'Tables', 'Menu']) {
       expect(flat.join(' | '), `restaurant rail should contain ${expected}`).toContain(expected);
     }
-    // The catalogue destination is labelled "Inventory" in the Restaurant
-    // rail, not "Products" — assert it explicitly so an accidental relabel
-    // to "Products" would still trip a positive control.
-    expect(flat.join(' | '), 'restaurant rail should contain the catalogue link').toContain('Inventory');
+    // NEGATIVE — the two labels it used to carry are gone: "Inventory" (D45's
+    // interim label, wrong after D101 made most of the menu untracked) and
+    // the retail "Products". A relabel back to either fails here by name.
+    for (const gone of ['Inventory', 'Products']) {
+      expect(flat, `restaurant rail should not say ${gone}`).not.toContain(gone);
+    }
   });
 
   test('WS-402 retail-only destinations are absent from the restaurant rail', async ({ page }) => {
@@ -180,13 +182,14 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     // `app/(app)/pos/page.tsx`. The Quotations / Returns / Suppliers /
     // QuickBooks assertion still holds — those remain retail-only.
     //
-    // D45: `Menu` joins the absent list. The `/menu` route file is retained
-    // for support-only access at `?view=legacy`, but the nav entry is gone
-    // for every Restaurant tenant.
+    // D45 removed the legacy MenuBrowser entry; D103 then gave the catalogue
+    // entry the label "Menu" (href `/products`), so "Menu" is present again —
+    // WS-401 asserts it — and is no longer in this list. The legacy `/menu`
+    // route still renders the redirect card (WS-5).
     await signIn(page, RESTAURANT_SEED.owner);
     const flat = await railLinkNames(page);
 
-    for (const absent of ['Menu', 'Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
+    for (const absent of ['Quotations', 'Returns', 'Suppliers', 'QuickBooks']) {
       expect(flat, `restaurant rail should not contain ${absent}`).not.toContain(absent);
     }
   });

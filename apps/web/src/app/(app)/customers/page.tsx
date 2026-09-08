@@ -24,6 +24,8 @@ import {
   type ManagedCustomer,
 } from '@/lib/customers-api';
 import { Permission } from '@/lib/permissions';
+import { isModuleEnabled } from '@/lib/platform-api';
+import { useEffectiveProfile } from '@/lib/platform-profile';
 import { formatMoney } from '@/lib/utils';
 
 
@@ -55,6 +57,12 @@ export default function CustomersPage() {
   const [owingOnly, setOwingOnly] = React.useState(
     () => searchParams.get('hasOutstandingCredit') === 'true',
   );
+  const { profile } = useEffectiveProfile();
+  // Unresolved profile = no QuickBooks affordances, never the legacy default.
+  const quickbooksEnabled = profile ? isModuleEnabled(profile, 'QUICKBOOKS') : false;
+  // The empty-state cells span the header row: six fixed columns plus Sync when
+  // QuickBooks is on. One named place to update when a column is added above.
+  const columnCount = quickbooksEnabled ? 7 : 6;
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -71,7 +79,9 @@ export default function CustomersPage() {
   const [reloadKey, setReloadKey] = React.useState(0);
 
   React.useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    // Collapse internal whitespace runs, not just the ends: the API matches
+    // with a literal `contains`, so "x  x" would otherwise miss "x x".
+    const t = window.setTimeout(() => setDebouncedSearch(search.replace(/\s+/g, ' ').trim()), 300);
     return () => window.clearTimeout(t);
   }, [search]);
 
@@ -148,7 +158,11 @@ export default function CustomersPage() {
     <div className="space-y-6">
       <PageHeader
         title="Customers"
-        description="Manage customers. New customers sync to QuickBooks on their first sale."
+        description={
+          quickbooksEnabled
+            ? 'Manage customers. New customers sync to QuickBooks on their first sale.'
+            : 'Manage customers.'
+        }
         actions={
           canManage ? (
             <div className="flex items-center gap-2">
@@ -172,8 +186,18 @@ export default function CustomersPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name, company, phone, or email…"
-            className="pl-10"
+            className="pl-10 pr-9"
           />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
         <Select
           value={customerType}
@@ -218,20 +242,20 @@ export default function CustomersPage() {
                 <th className="px-4 py-3 font-medium">Phone</th>
                 <th className="px-4 py-3 font-medium">Credit limit</th>
                 <th className="px-4 py-3 font-medium">Available credit</th>
-                <th className="px-4 py-3 font-medium">Sync</th>
+                {quickbooksEnabled ? <th className="px-4 py-3 font-medium">Sync</th> : null}
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={columnCount} className="px-4 py-16 text-center text-muted-foreground">
                     Loading customers…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={columnCount} className="px-4 py-16 text-center text-muted-foreground">
                     No customers found.
                   </td>
                 </tr>
@@ -262,7 +286,9 @@ export default function CustomersPage() {
                     <td className="px-4 py-3 text-muted-foreground">
                       {CUSTOMER_TYPE_LABELS[c.customerType]}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{c.phone ?? '—'}</td>
+                    {/* POS-created customers carry their number in `mobile` (capture popup
+    posts `mobile`), so read it the way the rest of the app does. */}
+                    <td className="px-4 py-3 text-muted-foreground">{c.mobile ?? c.phone ?? '—'}</td>
                     <td className="px-4 py-3">
                       {/* Only a figure earns a place here. A customer with no limit
                           configured has no number to show, so the cell stays empty
@@ -303,13 +329,15 @@ export default function CustomersPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      {c.quickbooksCustomerId ? (
-                        <SyncBadge status="SYNCED" />
-                      ) : (
-                        <SyncBadge status={c.syncStatus} />
-                      )}
-                    </td>
+                    {quickbooksEnabled ? (
+                      <td className="px-4 py-3">
+                        {c.quickbooksCustomerId ? (
+                          <SyncBadge status="SYNCED" />
+                        ) : (
+                          <SyncBadge status={c.syncStatus} />
+                        )}
+                      </td>
+                    ) : null}
                     <td className="px-4 py-3 text-right">
                       {canManage ? (
                         <Link

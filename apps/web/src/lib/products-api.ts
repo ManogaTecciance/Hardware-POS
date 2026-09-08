@@ -61,7 +61,26 @@ export interface ManagedProduct {
    * domain declares none.
    */
   attributes: Record<string, unknown>;
+  /**
+   * D60/D101 — what the item IS for stock purposes. STOCK_ITEM answers to a
+   * count; COMPOSED_ITEM / SERVICE answer to the 86 switch below; the
+   * booking kinds answer to their calendars.
+   */
+  sellableKind: SellableKind;
+  /** D101 — the 86 switch: null = available, a timestamp = sold out since. */
+  soldOutAt: string | null;
+  /** D45 — FOOD / BEVERAGE / DESSERT for restaurant rows, null on retail. */
+  foodType: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null;
 }
+
+/** Web mirror of the Prisma SellableKind enum (D60). */
+export type SellableKind =
+  | 'STOCK_ITEM'
+  | 'COMPOSED_ITEM'
+  | 'SERVICE'
+  | 'BUNDLE'
+  | 'TIME_SLOT'
+  | 'STAY_UNIT';
 
 export interface ProductsPage {
   items: ManagedProduct[];
@@ -112,6 +131,13 @@ export interface ProductInput {
   foodType?: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null;
   prepMinutes?: number | null;
   dietaryTags?: string[];
+  /**
+   * D101 — the restaurant wizard's Track-stock answer. Consulted server-side
+   * only for food-typed items: true = a packaged good the branch counts
+   * (STOCK_ITEM — bottled water), false/absent = a prepared item
+   * (COMPOSED_ITEM). Ignored for retail rows, whose `type` already says it.
+   */
+  trackStock?: boolean;
   /**
    * D64 — domain attributes. REPLACE semantics: when present the object is
    * the whole stored document; omit the key to leave it unchanged. Only sent
@@ -187,7 +213,15 @@ export interface SubcategoryUpdate {
 /** Raw product JSON (decimals arrive as strings). */
 type ApiProduct = Omit<
   ManagedProduct,
-  'unitPrice' | 'costPrice' | 'quantityOnHand' | 'reorderLevel' | 'averageCost' | 'hasVariants'
+  | 'unitPrice'
+  | 'costPrice'
+  | 'quantityOnHand'
+  | 'reorderLevel'
+  | 'averageCost'
+  | 'hasVariants'
+  | 'sellableKind'
+  | 'soldOutAt'
+  | 'foodType'
 > & {
   unitPrice: string | number;
   costPrice: string | number | null;
@@ -195,6 +229,9 @@ type ApiProduct = Omit<
   reorderLevel: string | number | null;
   averageCost?: string | number | null;
   hasVariants?: boolean;
+  sellableKind?: SellableKind;
+  soldOutAt?: string | null;
+  foodType?: 'FOOD' | 'BEVERAGE' | 'DESSERT' | null;
 };
 
 function auth(session: Session): { token: string; tenantId: string } {
@@ -225,6 +262,11 @@ function toManaged(p: ApiProduct): ManagedProduct {
     // them, so read defensively rather than blowing up during rollout.
     hasVariants: p.hasVariants ?? false,
     averageCost: p.averageCost != null ? Number(p.averageCost) : null,
+    // D60/D101 additions, same defensive read. STOCK_ITEM is the schema
+    // default, so it is also the honest fallback.
+    sellableKind: p.sellableKind ?? 'STOCK_ITEM',
+    soldOutAt: p.soldOutAt ?? null,
+    foodType: p.foodType ?? null,
   };
 }
 
@@ -296,6 +338,21 @@ export async function setProductActive(
   isActive: boolean,
 ): Promise<ManagedProduct> {
   return updateProduct(session, id, { isActive });
+}
+
+/**
+ * D101 — the 86 switch. Gated on `product:availability:set` (NOT
+ * product:manage — the till holds it); the server refuses kinds whose
+ * availability stock or bookings govern.
+ */
+export async function setProductAvailability(
+  session: Session,
+  id: string,
+  available: boolean,
+): Promise<ManagedProduct> {
+  return toManaged(
+    await api.put<ApiProduct>(`/products/${id}/availability`, { available }, auth(session)),
+  );
 }
 
 /** Upload a product image (multipart). Returns the updated product. */

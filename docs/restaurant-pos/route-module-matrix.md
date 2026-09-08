@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 285
-- Module-guarded routes: 198
-- Ungated routes: 87
+- Total routes: 288
+- Module-guarded routes: 200
+- Ungated routes: 88
 
 ## How to read the Guard column
 
@@ -207,6 +207,7 @@ reach production unclassified.
 | DELETE | `/products/:id` | SHARED_CORE | shared-core | product:manage |
 | GET | `/products/:id` | SHARED_CORE | shared-core | product:read |
 | PATCH | `/products/:id` | SHARED_CORE | shared-core | product:manage |
+| PUT | `/products/:id/availability` | SHARED_CORE | shared-core | product:availability:set |
 | DELETE | `/products/:id/image` | SHARED_CORE | shared-core | product:manage |
 | POST | `/products/:id/image` | SHARED_CORE | shared-core | product:manage |
 | POST | `/products/:id/sync-to-quickbooks` | QUICKBOOKS | ENFORCED | quickbooks:manage |
@@ -363,6 +364,16 @@ LEGACY `/restaurant/menus…` reads keep their MENU_MANAGEMENT gate unchanged.
 | POST | `/restaurant/bills/:saleId/split-by-items` | TABLE_MANAGEMENT | ENFORCED | bill:split |
 | POST | `/restaurant/bills/:saleId/reopen` | TABLE_MANAGEMENT | ENFORCED | bill:split |
 
+### RestaurantOrdersController
+
+Unified Orders-screen read model (Pilot Change 2 Slice D): the polled list,
+and the per-row detail the drawer fetches.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/restaurant/branches/:branchId/orders` | TABLE_MANAGEMENT | ENFORCED | table:view |
+| GET | `/restaurant/branches/:branchId/orders/:orderId` | TABLE_MANAGEMENT | ENFORCED | table:view |
+
 ### TakeawayController
 
 | Method | Path | Module | Guard | Permission |
@@ -392,6 +403,7 @@ LEGACY `/restaurant/menus…` reads keep their MENU_MANAGEMENT gate unchanged.
 | GET | `/restaurant/branches/:branchId/kitchen-tickets` | KITCHEN | ENFORCED | kot:view |
 | GET | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/order` | KITCHEN | ENFORCED | kot:view |
 | POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/complete` | KITCHEN | ENFORCED | kitchen:status:update |
+| POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen` | KITCHEN | ENFORCED | kitchen:status:update |
 
 ### TableSessionsController
 

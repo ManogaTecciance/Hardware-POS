@@ -12,6 +12,7 @@ import {
   ModifierOptionNotOnItemError,
   ProductInactiveError,
   ProductNotFoundError,
+  ProductSoldOutError,
   ProductVariantInactiveError,
   ProductVariantNotFoundError,
   VariantNotOnProductError,
@@ -152,6 +153,12 @@ export async function resolveRoundItemInputs(
     const product = productMap.get(inputItem.productId!);
     if (!product) throw new ProductNotFoundError();
     if (!product.isActive) throw new ProductInactiveError(product.name);
+    // D101 — POS greying is usability; this refusal is the rule. Sitting in
+    // the SHARED resolver it covers both intake paths (dine-in rounds and
+    // takeaway, which the counter routes every mode through). Out-of-stock
+    // STOCK_ITEMs are deliberately not blocked here — oversell stays
+    // permitted, unchanged.
+    if (product.soldOutAt) throw new ProductSoldOutError(product.name);
 
     let variant: (typeof productVariants)[number] | null = null;
     if (inputItem.productVariantId) {

@@ -767,6 +767,12 @@ model Product {
   /// valid unchanged; the convergence backfill reclassifies Service rows and
   /// D45 restaurant products.
   sellableKind          SellableKind  @default(STOCK_ITEM)
+  /// D101 — the 86 switch: null = available, a timestamp = sold out since
+  /// then. Only meaningful for kinds whose availability no count governs
+  /// (COMPOSED_ITEM / SERVICE — the availability endpoint refuses the rest).
+  /// Product-level, not per-branch, because LOCAL inventory refuses
+  /// multi-branch tenants; a multi-branch future moves this to a satellite.
+  soldOutAt             DateTime?
   /// D45 — Restaurant Product wizard fields. All nullable / defaulted so
   /// Retail (Tile Shop, Hardware) rows stay valid without a backfill.
   /// `foodType` reuses the D41 `MenuItemType` enum to avoid a second
@@ -2503,8 +2509,15 @@ model TableSession {
 
   waiterUserId String?
   guestCount   Int?
-  openedAt     DateTime  @default(now())
-  closedAt     DateTime?
+
+  /// D104 — the tab's own name, when one arrangement carries several parties
+  /// ("minin · Kamal"). Null means the table's name stands alone, which is what
+  /// every row written before D104 means: a table could carry only one tab, so
+  /// nothing ever needed distinguishing from a sibling.
+  tabName String?
+
+  openedAt DateTime  @default(now())
+  closedAt DateTime?
 
   /// Double-close guard. Matches Quotation.convertedSaleId — a session that
   /// has produced a Sale is unique to that Sale row.

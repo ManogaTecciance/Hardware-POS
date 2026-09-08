@@ -9,12 +9,14 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { IsBoolean } from 'class-validator';
 import { Product, ModuleKey } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 import type { Response } from 'express';
@@ -23,6 +25,7 @@ import { RequireModule } from '../../common/decorators/require-module.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
 import { MockSyncSummary } from './products.repository';
@@ -46,12 +49,19 @@ interface UploadedSpreadsheet {
   originalname?: string;
 }
 
+/** D101 — the 86 switch's whole payload: available, or not. */
+export class SetAvailabilityDto {
+  @IsBoolean()
+  available!: boolean;
+}
+
 @Controller('products')
 export class ProductsController {
   constructor(
     private readonly productsService: ProductsService,
     private readonly productsImportService: ProductsImportService,
     private readonly productsReportService: ProductsReportService,
+    private readonly audit: AuditLogService,
   ) {}
 
   @Get()
@@ -167,6 +177,32 @@ export class ProductsController {
   @RequirePermissions(Permission.PRODUCT_MANAGE)
   deactivate(@TenantId() tenantId: string, @Param('id') id: string): Promise<Product> {
     return this.productsService.deactivate(tenantId, id);
+  }
+
+  /**
+   * D101 — 86 a prepared item, or bring it back. Deliberately NOT
+   * PRODUCT_MANAGE: pulling the last kottu off the menu mid-service is a
+   * till/floor action, and the food-service Waiter/Cashier templates hold
+   * exactly this and nothing else of the catalogue's write surface. The
+   * service refuses kinds whose availability another authority governs.
+   */
+  @Put(':id/availability')
+  @RequirePermissions(Permission.PRODUCT_AVAILABILITY_SET)
+  async setAvailability(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SetAvailabilityDto,
+  ): Promise<Product> {
+    const product = await this.productsService.setAvailability(tenantId, id, dto.available);
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: dto.available ? 'PRODUCT_MARKED_AVAILABLE' : 'PRODUCT_MARKED_SOLD_OUT',
+      entityType: 'Product',
+      entityId: id,
+      metadata: { soldOutAt: product.soldOutAt?.toISOString() ?? null },
+    });
+    return product;
   }
 
   /** Upload the POS-side product photo (stored in S3; never sent to QuickBooks). */

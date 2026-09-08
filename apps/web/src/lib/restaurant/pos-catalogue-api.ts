@@ -31,6 +31,13 @@ import type { Session } from '../auth';
 export type PosCatalogueFoodType = 'FOOD' | 'BEVERAGE' | 'DESSERT';
 export type PosCatalogueChannel = 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
 
+/**
+ * D101 — the sellable read model's stock verdict for one item. Counts speak
+ * for tracked items (IN_STOCK/LOW/OUT); the 86 switch speaks for untracked
+ * ones (UNTRACKED/SOLD_OUT). Absent for tenants that track nothing.
+ */
+export type PosCatalogueStockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED' | 'SOLD_OUT';
+
 export interface PosCatalogueVariant {
   id: string;
   sku: string;
@@ -88,18 +95,34 @@ export interface PosCatalogueItem {
   modifierGroups: PosCatalogueModifierGroup[];
   stations: PosCatalogueStation[];
   promotions: PosCataloguePromotion[];
+  /** D101 — null when the tenant tracks no stock at all. */
+  stockState: PosCatalogueStockState | null;
 }
 
 export interface PosCatalogueResponse {
   items: PosCatalogueItem[];
+  /** Rows matching the filter, across every page — not the page length. */
   total: number;
+  /**
+   * Keyset cursor for the next page, or `null` on the last one.
+   *
+   * Forwarded verbatim from the server. Before this existed the client
+   * dropped it, which made the response indistinguishable from a complete
+   * catalogue and silently capped the POS at the server's default page.
+   */
+  nextCursor: string | null;
 }
 
 export interface PosCatalogueQuery {
   branchId: string;
   channel?: PosCatalogueChannel;
   foodType?: PosCatalogueFoodType;
+  /** Server-side match over name, dietary tags and subcategory name. */
   search?: string;
+  /** Page size. The server clamps to 1..200 and defaults to 100. */
+  limit?: number;
+  /** `nextCursor` from the previous page. Omit for the first page. */
+  cursor?: string;
 }
 
 // ── Raw shapes (decimals arrive as strings) ──────────────────────────────────
@@ -150,6 +173,8 @@ interface ApiItem {
   modifierGroups?: ApiModifierGroup[];
   stations?: PosCatalogueStation[];
   promotions: PosCataloguePromotion[];
+  /** D101 — present only when the tenant tracks stock (capability-shaped). */
+  stockState?: PosCatalogueStockState;
 }
 
 interface ApiResponse {
@@ -211,6 +236,7 @@ function toItem(i: ApiItem): PosCatalogueItem {
     modifierGroups: (i.modifierGroups ?? []).map(toModifierGroup),
     stations: i.stations ?? [],
     promotions: i.promotions,
+    stockState: i.stockState ?? null,
   };
 }
 
@@ -231,9 +257,11 @@ export async function fetchPosCatalogue(
   if (query.channel) params.push(`channel=${encodeURIComponent(query.channel)}`);
   if (query.foodType) params.push(`foodType=${encodeURIComponent(query.foodType)}`);
   if (query.search) params.push(`search=${encodeURIComponent(query.search)}`);
+  if (query.limit != null) params.push(`limit=${query.limit}`);
+  if (query.cursor) params.push(`cursor=${encodeURIComponent(query.cursor)}`);
   // D62: the one POS read model. The legacy /restaurant/pos-catalogue alias
   // still answers (with Deprecation headers) until its sunset; this client
   // moved on the day the successor shipped.
   const res = await api.get<ApiResponse>(`/products/sellable?${params.join('&')}`, auth(session));
-  return { items: res.items.map(toItem), total: res.total };
+  return { items: res.items.map(toItem), total: res.total, nextCursor: res.nextCursor ?? null };
 }

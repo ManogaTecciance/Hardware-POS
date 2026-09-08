@@ -4,23 +4,27 @@ import * as React from 'react';
 import { ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 
 import { AreaChip } from '@/components/restaurant/area-chip';
+import {
+  ReservationFormDialog,
+  toDateInputValue,
+} from '@/components/restaurant/calendar/reservation-form-dialog';
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import type { Session } from '@/lib/auth';
-import { fetchCustomers, type ManagedCustomer } from '@/lib/customers-api';
 import { diningAreas, openingHours, reservations, restaurantTables } from '@/lib/restaurant/api';
 import {
   RESERVATION_STATUS_LABELS,
   RESERVATION_STATUS_TONES,
 } from '@/lib/restaurant/labels';
 import { formatHours, resolveHoursForDate } from '@/lib/restaurant/opening-hours';
+import {
+  assignReservationLanes,
+  type LanedReservation,
+} from '@/lib/restaurant/reservation-lanes';
 import type {
   DiningAreaView,
   OpeningHoursView,
@@ -52,8 +56,6 @@ const ROW_HEIGHT_PX = 48;
 const DEFAULT_FIRST_HOUR = 8;
 const DEFAULT_LAST_HOUR = 23;
 
-const DURATION_OPTIONS = [30, 45, 60, 90, 120, 150, 180, 240] as const;
-
 interface Snapshot {
   areas: DiningAreaView[];
   tablesByArea: Map<string, RestaurantTableView[]>;
@@ -61,11 +63,6 @@ interface Snapshot {
 }
 
 const EMPTY: Snapshot = { areas: [], tablesByArea: new Map(), reservations: [] };
-
-/** Local YYYY-MM-DD for `<input type="date">` — NOT toISOString (that is UTC). */
-function toDateInputValue(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 function startOfDay(dateInput: string): Date {
   const [y = 1970, m = 1, d = 1] = dateInput.split('-').map(Number);
@@ -242,12 +239,20 @@ export function ReservationCalendar({
   const trackWidth = slotCount * SLOT_WIDTH_PX;
 
   const byTable = React.useMemo(() => {
-    const map = new Map<string, ReservationView[]>();
+    const grouped = new Map<string, ReservationView[]>();
     for (const r of state.snapshot.reservations) {
-      const list = map.get(r.tableId) ?? [];
+      const list = grouped.get(r.tableId) ?? [];
       list.push(r);
-      map.set(r.tableId, list);
+      grouped.set(r.tableId, list);
     }
+    /*
+     * Overlaps are legal whenever at most one of the blocks still holds the
+     * slot (a cancelled 17:30 under its 17:30 rebooking, a completed lunch
+     * under an evening double-booking of the freed table) — drawn as lanes,
+     * never one block painted over another.
+     */
+    const map = new Map<string, LanedReservation<ReservationView>[]>();
+    for (const [tableId, list] of grouped) map.set(tableId, assignReservationLanes(list));
     return map;
   }, [state.snapshot.reservations]);
 
@@ -484,10 +489,12 @@ export function ReservationCalendar({
                                 style={{ left: nowOffsetPx }}
                               />
                             ) : null}
-                            {(byTable.get(table.id) ?? []).map((r) => (
+                            {(byTable.get(table.id) ?? []).map(({ reservation: r, lane, laneCount }) => (
                               <ReservationBlock
                                 key={r.id}
                                 reservation={r}
+                                lane={lane}
+                                laneCount={laneCount}
                                 windowStart={windowStart}
                                 windowMinutes={windowMinutes}
                                 trackWidth={trackWidth}
@@ -512,6 +519,7 @@ export function ReservationCalendar({
           branchId={branchId}
           tables={allTables}
           areas={state.snapshot.areas}
+          hours={hours}
           defaultDate={dateInput}
           initialTableId={createAt.tableId}
           initialStartAt={createAt.startAt}
@@ -530,6 +538,7 @@ export function ReservationCalendar({
           reservation={manage}
           tables={allTables}
           areas={state.snapshot.areas}
+          hours={hours}
           canManage={canManage}
           onClose={() => setManage(null)}
           onChanged={async () => {
@@ -554,12 +563,16 @@ const BLOCK_TONES: Record<ReservationStatus, string> = {
 
 function ReservationBlock({
   reservation,
+  lane,
+  laneCount,
   windowStart,
   windowMinutes,
   trackWidth,
   onOpen,
 }: {
   reservation: ReservationView;
+  lane: number;
+  laneCount: number;
   windowStart: Date;
   windowMinutes: number;
   trackWidth: number;
@@ -571,6 +584,15 @@ function ReservationBlock({
   const right = Math.min(trackWidth, (endMin / windowMinutes) * trackWidth);
   if (right <= 0 || left >= trackWidth) return null;
 
+  // Blocks that overlap in time split the row instead of painting over each
+  // other (a cancelled slot under its rebooking). Same 6px row padding the
+  // full-height block always had; 2px between lanes.
+  const PAD_Y = 6;
+  const LANE_GAP = 2;
+  const usable = ROW_HEIGHT_PX - PAD_Y * 2;
+  const height = (usable - LANE_GAP * (laneCount - 1)) / laneCount;
+  const top = PAD_Y + lane * (height + LANE_GAP);
+
   return (
     <button
       type="button"
@@ -581,260 +603,15 @@ function ReservationBlock({
       }}
       title={`${reservation.reservationNumber} — ${reservation.customerName}, ${reservation.partySize} pax, ${formatTime(reservation.startAt)}–${formatTime(reservation.endAt)}`}
       className={
-        'absolute top-1.5 z-20 flex h-[calc(100%-12px)] items-center gap-1.5 overflow-hidden rounded-lg border px-2 text-left text-xs font-medium shadow-sm transition-shadow hover:shadow-md ' +
+        'absolute z-20 flex items-center overflow-hidden rounded-lg border text-left text-xs font-medium shadow-sm transition-shadow hover:shadow-md ' +
+        (laneCount > 1 ? 'gap-1 px-1.5 ' : 'gap-1.5 px-2 ') +
         BLOCK_TONES[reservation.status]
       }
-      style={{ left, width: Math.max(right - left, 44) }}
+      style={{ left, width: Math.max(right - left, 44), top, height }}
     >
       <span className="truncate">{reservation.customerName}</span>
       <span className="shrink-0 text-[10px] opacity-70">{reservation.partySize}p</span>
     </button>
-  );
-}
-
-// ── Create / edit dialog ────────────────────────────────────────────────────
-
-function ReservationFormDialog({
-  session,
-  branchId,
-  tables,
-  areas,
-  defaultDate,
-  initialTableId,
-  initialStartAt,
-  existing,
-  onClose,
-  onSaved,
-}: {
-  session: Session;
-  branchId: string;
-  tables: RestaurantTableView[];
-  areas: DiningAreaView[];
-  defaultDate: string;
-  initialTableId?: string;
-  initialStartAt?: Date;
-  existing?: ReservationView;
-  onClose: () => void;
-  onSaved: () => Promise<void> | void;
-}) {
-  const areaName = React.useMemo(
-    () => new Map(areas.map((a) => [a.id, a.name] as const)),
-    [areas],
-  );
-  const existingDuration = existing
-    ? Math.round((new Date(existing.endAt).getTime() - new Date(existing.startAt).getTime()) / 60_000)
-    : null;
-
-  const [tableId, setTableId] = React.useState(existing?.tableId ?? initialTableId ?? tables[0]?.id ?? '');
-  const [customerName, setCustomerName] = React.useState(existing?.customerName ?? '');
-  const [customerPhone, setCustomerPhone] = React.useState(existing?.customerPhone ?? '');
-  const [customerId, setCustomerId] = React.useState<string | null>(existing?.customerId ?? null);
-  const [partySize, setPartySize] = React.useState(existing ? String(existing.partySize) : '2');
-  const [date, setDate] = React.useState(
-    existing ? toDateInputValue(new Date(existing.startAt)) : initialStartAt ? toDateInputValue(initialStartAt) : defaultDate,
-  );
-  const [time, setTime] = React.useState(() => {
-    const source = existing ? new Date(existing.startAt) : initialStartAt;
-    if (!source) return '19:00';
-    return `${String(source.getHours()).padStart(2, '0')}:${String(source.getMinutes()).padStart(2, '0')}`;
-  });
-  const [duration, setDuration] = React.useState(String(existingDuration ?? 90));
-  const [notes, setNotes] = React.useState(existing?.notes ?? '');
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-
-  // Lightweight existing-customer lookup: type ≥2 chars, pick a match to link
-  // it (and snapshot its name/phone); free-text stays the default path.
-  const [customerQuery, setCustomerQuery] = React.useState('');
-  const [matches, setMatches] = React.useState<ManagedCustomer[]>([]);
-  React.useEffect(() => {
-    const q = customerQuery.trim();
-    if (q.length < 2) {
-      setMatches([]);
-      return;
-    }
-    let cancelled = false;
-    const t = window.setTimeout(async () => {
-      try {
-        const page = await fetchCustomers(session, { search: q, pageSize: 6 });
-        if (!cancelled) setMatches(page.items);
-      } catch {
-        if (!cancelled) setMatches([]);
-      }
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-    };
-  }, [customerQuery, session]);
-
-  const startAt = React.useMemo(() => new Date(`${date}T${time}`), [date, time]);
-  const party = Number(partySize);
-  const valid =
-    !!tableId &&
-    customerName.trim().length > 0 &&
-    Number.isInteger(party) &&
-    party >= 1 &&
-    !Number.isNaN(startAt.getTime());
-
-  const submit = async () => {
-    if (!valid || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const body = {
-        tableId,
-        customerId: customerId ?? undefined,
-        customerName: customerName.trim(),
-        customerPhone: customerPhone.trim() || undefined,
-        partySize: party,
-        startAt: startAt.toISOString(),
-        durationMinutes: Number(duration),
-        notes: notes.trim() || undefined,
-      };
-      if (existing) {
-        await reservations.update(session, existing.id, body);
-      } else {
-        await reservations.create(session, branchId, body);
-      }
-      await onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save the reservation');
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title={existing ? `Edit ${existing.reservationNumber}` : 'New reservation'}
-      description={
-        existing ? undefined : 'Book a table for a customer. The slot is held once saved.'
-      }
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void submit()} isLoading={saving} disabled={!valid}>
-            {existing ? 'Save changes' : 'Book table'}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-
-        <div className="space-y-1.5">
-          <Label>Table</Label>
-          <Select value={tableId} onChange={(e) => setTableId(e.target.value)}>
-            {tables.map((t) => (
-              <option key={t.id} value={t.id}>
-                {(t.areaId && areaName.get(t.areaId) ? `${areaName.get(t.areaId)} — ` : '') + (t.label ?? t.code)} ({t.capacity ?? '—'} seats)
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>Find existing customer (optional)</Label>
-          <Input
-            value={customerQuery}
-            onChange={(e) => setCustomerQuery(e.target.value)}
-            placeholder="Search by name or phone…"
-          />
-          {matches.length > 0 ? (
-            <div className="overflow-hidden rounded-xl border border-border">
-              {matches.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-surface-muted"
-                  onClick={() => {
-                    setCustomerId(c.id);
-                    setCustomerName(c.name);
-                    if (c.phone) setCustomerPhone(c.phone);
-                    setCustomerQuery('');
-                    setMatches([]);
-                  }}
-                >
-                  <span>{c.name}</span>
-                  <span className="text-xs text-muted-foreground">{c.phone ?? ''}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {customerId ? (
-            <p className="text-xs text-muted-foreground">
-              Linked to customer record.{' '}
-              <button type="button" className="underline" onClick={() => setCustomerId(null)}>
-                Unlink
-              </button>
-            </p>
-          ) : null}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>Customer name</Label>
-            <Input
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder="Nimal Perera"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Phone</Label>
-            <Input
-              value={customerPhone}
-              onChange={(e) => setCustomerPhone(e.target.value)}
-              placeholder="0771234567"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="space-y-1.5">
-            <Label>Date</Label>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Time</Label>
-            <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} step={300} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Duration</Label>
-            <Select value={duration} onChange={(e) => setDuration(e.target.value)}>
-              {DURATION_OPTIONS.map((m) => (
-                <option key={m} value={m}>
-                  {m < 60 ? `${m} min` : `${m / 60}${m % 60 ? '.5' : ''} h`}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Party size</Label>
-            <Input
-              type="number"
-              min={1}
-              value={partySize}
-              onChange={(e) => setPartySize(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>Notes</Label>
-          <Textarea
-            rows={2}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Window seat, birthday cake at 8…"
-          />
-        </div>
-      </div>
-    </Dialog>
   );
 }
 
@@ -846,6 +623,7 @@ function ManageReservationDialog({
   reservation,
   tables,
   areas,
+  hours,
   canManage,
   onClose,
   onChanged,
@@ -855,6 +633,7 @@ function ManageReservationDialog({
   reservation: ReservationView;
   tables: RestaurantTableView[];
   areas: DiningAreaView[];
+  hours: OpeningHoursView | null;
   canManage: boolean;
   onClose: () => void;
   onChanged: () => Promise<void> | void;
@@ -886,6 +665,7 @@ function ManageReservationDialog({
         branchId={branchId}
         tables={tables}
         areas={areas}
+        hours={hours}
         defaultDate={toDateInputValue(new Date(reservation.startAt))}
         existing={reservation}
         onClose={() => setEditing(false)}
