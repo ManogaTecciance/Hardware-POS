@@ -5924,3 +5924,66 @@ usability only** — the standing rule in `CLAUDE.md`.
 3. **Positive:** creating a `WHOLE` product with no unit **succeeds** — otherwise
    the rule would pass for an implementation that demanded a unit from everyone.
 4. **Positive:** a partial update that mentions neither field leaves both alone.
+
+---
+
+## D113d — a document prints the unit the line was SOLD in
+
+**Status:** accepted, 2026-09-08. **Migration:** yes — `SaleItem.unitOfMeasureSnapshot`
+and `ReturnItem.unitOfMeasureSnapshot`, both nullable. Introduced by `6.5`.
+Extends [D113b §1](#d113b).
+
+### The question
+
+D113b §1 says the unit is what lets "the receipt print `0.750 kg`". A receipt
+renderer has a `SaleItem`, and `unitOfMeasure` is on `Product`. So either the
+renderer joins the product, or the sale line carries the unit.
+
+### The decision
+
+**Snapshot it, like every other thing a document prints.**
+
+`SaleItem` already freezes `productName`, `sku`, `variantSkuSnapshot`,
+`variantNameSnapshot` and `promotionNameSnapshot` at sale time, and D44 states
+why: a document must show what was sold, **at the name it was sold under**. A
+later rename must not rewrite a receipt printed last year.
+
+The unit is the same kind of fact, and the failure mode of joining is worse than
+a wrong name:
+
+> A shop prices saffron per gram, then switches to kilograms. Every historical
+> receipt reprints `0.750 kg` where the customer actually bought **0.750 g** —
+> wrong by a factor of a thousand, on a document someone may be holding.
+
+A snapshot cannot do that. Nullable, because every line written before this
+column existed has no unit and `NULL` is the honest answer — the same contract
+`taxRatePercent` uses (D101), where `NULL` means "not recorded" rather than a
+fabricated default.
+
+### `ReturnItem` gets it too, for the same reason
+
+`3.8` added `taxRatePercent` to both tables in one migration because a credit
+note is a document as much as a receipt is. A refund line printing a bare
+`0.750` while the original receipt says `0.750 kg` is the same defect one
+document over.
+
+### What renders it
+
+**One shared formatter**, `saleLineQuantity`, in `@hardware-pos/shared` beside
+`saleLineLabel`.
+
+`2.12` is the reason: four renderers print a sale line, `1c.7` fixed two of
+them, and the same sale printed correctly from one endpoint and wrongly from
+another. `sale-line-renderers.spec` enumerates all four and fails if one skips
+the shared helper. Three of the four currently format quantity three different
+ways — one of them a ternary whose branches are identical.
+
+A line with no unit renders exactly as it does today, so every existing document
+is unchanged.
+
+### What this does not change
+
+- Any money. The unit is printed, never computed on.
+- The restaurant path: `ProjectedSaleItem` carries only the fields it lists, so a
+  restaurant bill writes `NULL` here and prints what it always printed — the same
+  mechanism that leaves `taxRatePercent` null there (3.16).

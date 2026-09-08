@@ -205,6 +205,8 @@ export interface SaleDetailItem {
    * site has to say which it is.
    */
   variantName: string | null;
+  /** D113d (`6.5`) — the unit this line was SOLD in. Null for a whole product. */
+  unitOfMeasure: string | null;
   /**
    * D101 (3.12) — the tax rate frozen onto this line. Null for a sale written
    * before 3.8; `0` is a real rate (zero-rated or exempt) and means something
@@ -310,6 +312,8 @@ interface ApiSaleDetail {
     productName: string;
     /** D44 snapshot; absent on responses predating variants. */
     variantNameSnapshot?: string | null;
+    /** D113d snapshot; absent on responses predating weighed goods. */
+    unitOfMeasureSnapshot?: string | null;
     /** D101 snapshot; absent on responses predating per-line tax. */
     taxRatePercent?: string | number | null;
     /** D102 snapshots; absent on responses predating 4.4. */
@@ -429,6 +433,10 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       // server has always returned this; the client was dropping it, so a
       // returns clerk could not see which size a past sale was for.
       variantName: it.variantNameSnapshot ?? null,
+      // D113d (`6.5`) — the SNAPSHOT, for the reason above one line up. A
+      // shop repricing saffron from grams to kilograms must not rewrite an
+      // old receipt into one that reads a thousand times larger.
+      unitOfMeasure: it.unitOfMeasureSnapshot ?? null,
       promotionName: it.promotionNameSnapshot ?? null,
       // `?? 0` is absence, not an unknown: the column is NOT NULL DEFAULT 0.
       promotionDiscountAmount: Number(it.promotionDiscountAmount ?? 0),

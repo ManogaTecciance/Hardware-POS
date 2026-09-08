@@ -13,7 +13,13 @@ import { computeCartLines, linePrice } from './cart';
 import type { CompletedSale } from './sales';
 import { getCachedDocumentProfile, type DocumentProfile } from './document-template-service';
 import { formatMoney } from './utils';
-import { saleLineLabel, saleLinePromotionNote, splitLineDiscounts, taxRateLabel } from '@hardware-pos/shared';
+import {
+  saleLineLabel,
+  saleLinePromotionNote,
+  saleLineQuantity,
+  splitLineDiscounts,
+  taxRateLabel,
+} from '@hardware-pos/shared';
 
 export interface ReceiptContext {
   currency: string;
@@ -65,8 +71,11 @@ function clientReceiptHtml(sale: CompletedSale, ctx: ReceiptContext): string {
       const label = saleLineLabel(it.product.name, it.variant?.name ?? null);
       // D102 (4.6) — the offer, under the item, exactly as the other three
       // renderers print it. A free line at 0.00 with no reason reads as an error.
+      // D113d (`6.5`) — the unit beside the amount: `0.75 kg × Rs 200.00`. Read
+      // from the LIVE product like the label above, and for the same reason —
+      // this prints at the moment of sale, so nothing has drifted yet.
       const promo = saleLinePromotionNote(line.promotionName);
-      return `<tr><td>${esc(label)}${promo ? `<br><span class="m">${esc(promo)}</span>` : ''}<br><span class="m">${it.quantity} × ${formatMoney(linePrice(it), ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
+      return `<tr><td>${esc(label)}${promo ? `<br><span class="m">${esc(promo)}</span>` : ''}<br><span class="m">${saleLineQuantity(it.quantity, it.product.unitOfMeasure)} × ${formatMoney(linePrice(it), ctx.currency)}</span></td><td class="r">${formatMoney(line.lineTotal, ctx.currency)}</td></tr>`;
     })
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(sale.saleNumber)}</title>

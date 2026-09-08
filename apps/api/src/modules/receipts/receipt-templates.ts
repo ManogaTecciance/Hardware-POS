@@ -10,7 +10,11 @@ export interface ReceiptLine {
   /** D102 (4.6) — "Promotion: <name>", printed under the item. Null when none. */
   promotionNote: string | null;
   sku: string | null;
-  quantity: number;
+  /**
+   * D113d (`6.5`) — already FORMATTED by `saleLineQuantity`, so `0.75 kg`
+   * reaches the paper as one string. An 80mm receipt has no Unit column.
+   */
+  quantity: string;
   unitPrice: number;
   discountAmount: number;
   lineTotal: number;

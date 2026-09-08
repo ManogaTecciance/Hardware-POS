@@ -7,7 +7,12 @@ import { resolveImageUrl } from '@/lib/products-api';
 import type { SaleDetail } from '@/lib/sales';
 import { formatMoney } from '@/lib/utils';
 import { saleLineLabel, saleLinePromotionNote, splitLineDiscounts } from '@hardware-pos/shared';
-import { taxBreakdownForDocument, taxRateLabel, type TaxableLine } from '@hardware-pos/shared';
+import {
+  saleLineQuantity,
+  taxBreakdownForDocument,
+  taxRateLabel,
+  type TaxableLine,
+} from '@hardware-pos/shared';
 
 /**
  * Native React A4 sale invoice / final bill. Sized 210mm and print-safe:
@@ -180,7 +185,11 @@ export function SaleA4Document({
                   ) : null}
                 </td>
                 {profile.showSku ? <td>{it.sku ?? '—'}</td> : null}
-                <td className="r">{it.quantity}</td>
+                {/*
+                  D113d (`6.5`) — this A4 has no Unit column (the server-rendered
+                  one does), so the unit rides with the quantity: `0.75 kg`.
+                */}
+                <td className="r">{saleLineQuantity(it.quantity, it.unitOfMeasure)}</td>
                 <td className="r">{formatMoney(it.unitPrice)}</td>
                 {profile.showDiscountColumn ? (
                   <td className="r">{it.discountAmount > 0 ? `- ${formatMoney(it.discountAmount)}` : '—'}</td>

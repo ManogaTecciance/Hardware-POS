@@ -13,6 +13,7 @@ import { CustomerReceiptData, renderCustomerReceipt } from './receipt-templates'
 import { QueryPrintJobsDto } from './dto/query-print-jobs.dto';
 import {
   saleLineLabel,
+  saleLineQuantity,
   saleLinePromotionNote,
   splitLineDiscounts,
   taxBreakdownForDocument,
@@ -139,7 +140,10 @@ export class ReceiptsService {
         // free line printed at 0.00 with no reason reads as a pricing error.
         promotionNote: saleLinePromotionNote(it.promotionNameSnapshot),
         sku: it.variantSkuSnapshot ?? it.sku,
-        quantity: Number(it.quantity),
+        // D113d (`6.5`) — through the shared formatter, like `saleLineLabel`
+        // three lines up and for the same reason: four renderers print a sale
+        // line, and 1c.7 fixed two of them.
+        quantity: saleLineQuantity(it.quantity.toString(), it.unitOfMeasureSnapshot),
         unitPrice: Number(it.unitPrice),
         discountAmount: Number(it.discountAmount),
         lineTotal: Number(it.lineTotal),

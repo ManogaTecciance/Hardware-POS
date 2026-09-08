@@ -282,7 +282,10 @@ export class DocumentsService {
       // promotion, so a reprint says what the customer was actually given (D44).
       description: saleLinePromotionNote(it.promotionNameSnapshot),
       quantity: num(it.quantity),
-      unitType: null,
+      // D113d (`6.5`) — the A4 has carried a Unit column since quotations;
+      // a sale line passed `null` into it. It now prints what the line was
+      // sold in, so "0.75" reads as "0.75 kg".
+      unitType: it.unitOfMeasureSnapshot,
       unitPrice: num(it.unitPrice),
       discountAmount: num(it.discountAmount),
       taxAmount: num(it.taxAmount),
@@ -410,7 +413,9 @@ export class DocumentsService {
         sku: it.variantSkuSnapshot ?? it.skuSnapshot,
         description: desc,
         quantity: num(it.returnQuantity),
-        unitType: null,
+        // D113d (`6.5`) — a credit note is a document as much as a receipt is,
+        // which is why 3.8 put `taxRatePercent` on both tables too.
+        unitType: it.unitOfMeasureSnapshot,
         unitPrice: num(it.originalUnitPrice),
         discountAmount: 0,
         taxAmount: num(it.taxAdjustment),

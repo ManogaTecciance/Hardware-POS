@@ -269,6 +269,7 @@ export class ReturnsRepository {
               productVariantId: it.productVariantId,
               variantSkuSnapshot: it.variantSkuSnapshot,
               variantNameSnapshot: it.variantNameSnapshot,
+              unitOfMeasureSnapshot: it.unitOfMeasureSnapshot,
               // D101 (3.11) — what this refund reversed, so a credit note is
               // self-contained and a later rate change cannot rewrite it.
               taxRatePercent: it.taxRatePercent,

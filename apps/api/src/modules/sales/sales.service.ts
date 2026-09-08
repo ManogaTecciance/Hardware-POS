@@ -551,6 +551,10 @@ export class SalesService {
           // not be able to rewrite what this receipt said.
           variantSkuSnapshot: variant?.sku ?? null,
           variantNameSnapshot: variant ? variantDisplayName(variant.optionValues, variant.sku) : null,
+          // D113d — frozen here, so a shop repricing saffron from grams to
+          // kilograms cannot make an old receipt reprint 0.750 kg for what
+          // was actually 0.750 g.
+          unitOfMeasureSnapshot: product.unitOfMeasure ?? null,
           productName: product.name,
           sku: product.sku,
           trackInventory: product.type === 'Inventory',

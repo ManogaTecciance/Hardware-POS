@@ -603,6 +603,8 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
     // D44 — frozen at sale time, so a later rename cannot rewrite this receipt.
     variantSkuSnapshot: line.variantSkuSnapshot,
     variantNameSnapshot: line.variantNameSnapshot,
+    // D113d (`6.5`) — the unit, frozen with the names beside it.
+    unitOfMeasureSnapshot: line.unitOfMeasureSnapshot,
     productName: line.productName,
     sku: line.sku,
     unitPrice: line.unitPrice,

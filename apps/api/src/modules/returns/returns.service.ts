@@ -636,6 +636,9 @@ export class ReturnsService {
         // rename since must not change what the return says came back.
         variantSkuSnapshot: si.variantSkuSnapshot,
         variantNameSnapshot: si.variantNameSnapshot,
+        // D113d — copied from the sale line, never re-read from the product:
+        // a refund must print the unit the customer was charged in.
+        unitOfMeasureSnapshot: si.unitOfMeasureSnapshot,
         // D101 (3.11) — the rate REVERSED, copied from the sale line for the
         // same reason: a rate change between purchase and return must not alter
         // the refund, and a credit note should be self-contained.

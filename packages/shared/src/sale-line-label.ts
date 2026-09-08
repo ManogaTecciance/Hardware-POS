@@ -81,3 +81,39 @@ export function saleLinePromotionNote(
   const name = promotionName?.trim();
   return name ? `Promotion: ${name}` : null;
 }
+
+/**
+ * The quantity printed on a sale or return line — D113d (`6.5`).
+ *
+ * `0.750` with a unit of `kg` becomes `0.75 kg`; `2` with no unit stays `2`.
+ *
+ * ## Why this is shared, like `saleLineLabel` above
+ *
+ * Four renderers print a sale line, and before this they formatted quantity
+ * three different ways — one of them a ternary whose branches were identical.
+ * `2.12` is the record of what that costs: `1c.7` fixed two of the four, so the
+ * same sale printed correctly from one endpoint and wrongly from another.
+ * `sale-line-renderers.spec` enumerates all four and fails if one skips this.
+ *
+ * ## Trailing zeroes go
+ *
+ * The column is `Decimal(12,3)` because loose goods sell by weight, so every
+ * quantity arrives as `2.000` or `0.750`. A shop counting shirts should read
+ * `2`, not `2.000`. The digits are trimmed from the string; nothing is
+ * recomputed and nothing is rounded.
+ *
+ * ## The unit is a SNAPSHOT
+ *
+ * `null` when the line carries none — a whole product, or a line written before
+ * D113d — and the output is then exactly what it was before this existed, which
+ * is what leaves every historical document unchanged.
+ */
+export function saleLineQuantity(
+  quantity: string | number,
+  unitOfMeasure?: string | null,
+): string {
+  const raw = typeof quantity === 'string' ? quantity : String(quantity);
+  const trimmed = raw.includes('.') ? raw.replace(/0+$/, '').replace(/\.$/, '') : raw;
+  const unit = unitOfMeasure?.trim();
+  return unit ? `${trimmed} ${unit}` : trimmed;
+}

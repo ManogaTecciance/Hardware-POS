@@ -84,6 +84,11 @@ export interface ComputedLine {
    */
   variantSkuSnapshot: string | null;
   variantNameSnapshot: string | null;
+  /**
+   * D113d (`6.5`) — the unit this line was sold in, frozen at sale time.
+   * `null` for a WHOLE product, which has no unit.
+   */
+  unitOfMeasureSnapshot: string | null;
   productName: string;
   sku: string | null;
   /** Whether the sale should decrement the product's on-hand stock. */

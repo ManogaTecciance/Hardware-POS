@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import {
   saleLineLabel,
   saleLinePromotionNote,
+  saleLineQuantity,
   splitLineDiscounts,
   taxBreakdownForDocument,
   taxRateLabel,
@@ -94,6 +95,26 @@ describe('every sale-line renderer uses the shared formatter', () => {
     const source = stripComments(sourceOf(file));
 
     expect(referencesIdentifier(source, 'saleLineLabel')).toBe(true);
+  });
+
+  it.each(SALE_LINE_RENDERERS)('$file also prints the unit (D113d, 6.5)', ({ file }) => {
+    /*
+     * Same enumeration, fourth shared rule. Before `6.5` these four formatted a
+     * quantity three different ways — one of them a ternary whose branches were
+     * identical — and none printed the unit, so a weighed line read `0.75` with
+     * nothing to say `0.75` of what.
+     *
+     * Two shapes count, because the documents differ in width: the A4 has a Unit
+     * COLUMN and feeds `unitType`, while an 80mm receipt has no room for one and
+     * puts the unit beside the number via `saleLineQuantity`.
+     */
+    const source = stripComments(sourceOf(file));
+
+    expect(
+      referencesIdentifier(source, 'saleLineQuantity') ||
+        referencesIdentifier(source, 'unitType') ||
+        referencesIdentifier(source, 'unitOfMeasure'),
+    ).toBe(true);
   });
 
   it.each(SALE_LINE_RENDERERS)('$file also uses the shared tax breakdown (3.12)', ({ file }) => {
@@ -361,5 +382,35 @@ describe('the breakdown when rates differ', () => {
     expect(taxRateLabel(18)).toBe('18%');
     expect(taxRateLabel(7.5)).toBe('7.5%');
     expect(taxRateLabel(0)).toBe('0%');
+  });
+});
+
+describe('saleLineQuantity (D113d, 6.5)', () => {
+  it('prints the unit beside the amount', () => {
+    expect(saleLineQuantity('0.750', 'kg')).toBe('0.75 kg');
+  });
+
+  it('trims the trailing zeroes a Decimal(12,3) always carries', () => {
+    // A shop counting shirts should read `2`, not `2.000`.
+    expect(saleLineQuantity('2.000', null)).toBe('2');
+    expect(saleLineQuantity('1.500', 'L')).toBe('1.5 L');
+  });
+
+  it('leaves a line with no unit exactly as it was', () => {
+    // The property that keeps every existing document unchanged. A whole
+    // product, and every line written before D113d, has no unit.
+    expect(saleLineQuantity('3', null)).toBe('3');
+    expect(saleLineQuantity('3', undefined)).toBe('3');
+    expect(saleLineQuantity('3', '   ')).toBe('3');
+  });
+
+  it('never recomputes the number it was given', () => {
+    // 17 significant digits: a `Number()` round trip does not keep this. The
+    // formatter trims a string and appends a word; it does no arithmetic.
+    expect(saleLineQuantity('12345678901234.500', 'kg')).toBe('12345678901234.5 kg');
+  });
+
+  it('does not eat the zeroes of a whole number', () => {
+    expect(saleLineQuantity('100', 'g')).toBe('100 g');
   });
 });

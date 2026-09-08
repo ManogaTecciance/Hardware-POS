@@ -177,6 +177,8 @@ export interface PersistReturnItem {
    */
   variantSkuSnapshot: string | null;
   variantNameSnapshot: string | null;
+  /** D113d (`6.5`) — the unit the ORIGINAL sale line was sold in. */
+  unitOfMeasureSnapshot: string | null;
   /**
    * D101 (3.11) — the tax rate REVERSED, copied from the original SaleItem.
    *
