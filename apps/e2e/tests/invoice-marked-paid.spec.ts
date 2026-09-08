@@ -168,6 +168,45 @@ test.describe('MARK — accounting for a credit invoice', () => {
     expect(page.items.every((s: any) => s.markedPaidAt === null)).toBe(true);
   });
 
+  test('MARK-018 a ticked invoice reads as paid on the sales list', async ({ ownerApi }) => {
+    // The customer page and the sales page must agree about the same invoice.
+    const first = await creditSale(ownerApi);
+    await creditSale(ownerApi, first.customerId);
+    await mark(ownerApi, first.sale.id, true);
+
+    const page = await ownerApi.get(`/sales?page=1&pageSize=50&search=${first.sale.saleNumber}`);
+    const row = page.items.find((s: any) => s.id === first.sale.id);
+    expect(row.markedPaidAt).toBeTruthy();
+
+    // ...and the filters agree with the badge, rather than contradicting it.
+    const paid = await ownerApi.get(
+      `/sales?page=1&pageSize=200&paymentStatus=PAID&customerId=${first.customerId}`,
+    );
+    expect(paid.items.map((s: any) => s.id)).toContain(first.sale.id);
+
+    const credit = await ownerApi.get(
+      `/sales?page=1&pageSize=200&paymentStatus=UNPAID&customerId=${first.customerId}`,
+    );
+    expect(credit.items.map((s: any) => s.id)).not.toContain(first.sale.id);
+  });
+
+  test('MARK-019 a ticked invoice is no longer overdue', async ({ ownerApi }) => {
+    const first = await creditSale(ownerApi);
+    await creditSale(ownerApi, first.customerId);
+    await mark(ownerApi, first.sale.id, true);
+    const page = await ownerApi.get('/sales?page=1&pageSize=200&overdue=true');
+    expect(page.items.map((s: any) => s.id)).not.toContain(first.sale.id);
+  });
+
+  test('MARK-020 the sale detail carries who ticked it', async ({ ownerApi }) => {
+    const first = await creditSale(ownerApi);
+    await creditSale(ownerApi, first.customerId);
+    await mark(ownerApi, first.sale.id, true);
+    const detail = await ownerApi.get(`/sales/${first.sale.id}`);
+    expect(detail.markedPaidAt).toBeTruthy();
+    expect(detail.markedPaidBy?.name).toBeTruthy();
+  });
+
   test('MARK-006 a tick can be undone', async ({ ownerApi }) => {
     const first = await creditSale(ownerApi);
     await creditSale(ownerApi, first.customerId);

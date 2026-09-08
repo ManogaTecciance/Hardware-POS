@@ -35,6 +35,7 @@ const saleInclude = {
   branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
   register: { select: { id: true, name: true, code: true } },
   cashier: { select: { id: true, name: true } },
+  markedPaidBy: { select: { name: true } },
 } as const;
 
 const saleListInclude = {
@@ -96,14 +97,23 @@ export class SalesRepository {
       // by an account settlement. PARTIAL is still accepted on its own for a
       // caller that genuinely wants just those.
       ...(filter.customerId ? { customerId: filter.customerId } : {}),
+      // These mirror what the badge says, or the list would contradict itself:
+      // "Credit" is a sale nobody has accounted for, and "Paid" is one that was
+      // paid at the till, covered when the account cleared, OR ticked off on the
+      // customer page.
       ...(filter.paymentStatus === 'UNPAID'
         ? {
             paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
             creditSettledAt: null,
+            markedPaidAt: null,
           }
         : filter.paymentStatus === 'PAID'
           ? {
-              OR: [{ paymentStatus: 'PAID' as PaymentStatus }, { creditSettledAt: { not: null } }],
+              OR: [
+                { paymentStatus: 'PAID' as PaymentStatus },
+                { creditSettledAt: { not: null } },
+                { markedPaidAt: { not: null } },
+              ],
             }
           : filter.paymentStatus
             ? { paymentStatus: filter.paymentStatus }
@@ -117,9 +127,10 @@ export class SalesRepository {
         ? {
             paymentDueDate: { not: null, lt: filter.overdueAsOf },
             paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
-            // An invoice the customer's account has cleared is not overdue,
-            // whatever its own due date says.
+            // An invoice that has been accounted for is not overdue, whatever
+            // its own due date says.
             creditSettledAt: null,
+            markedPaidAt: null,
             status: 'COMPLETED' as const,
           }
         : {}),

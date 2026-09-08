@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft, FileDown, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
-import { paymentMethodLabel, saleStatusLabel } from '@hardware-pos/shared';
+import { paymentMethodLabel, saleReadsAsPaid, saleStatusLabel } from '@hardware-pos/shared';
 
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { SaleReturnStatusBadge } from '@/components/returns/status-badges';
@@ -137,7 +137,9 @@ export default function SaleDetailPage() {
 
   // A sale covered by an account settlement reads as paid, whatever its own
   // payment status says about what was tendered at the till.
-  const payVariant = sale.creditSettledAt ? 'success' : PAYMENT_STATUS_VARIANT[sale.paymentStatus];
+  const payVariant = saleReadsAsPaid(sale.creditSettledAt, sale.markedPaidAt)
+    ? 'success'
+    : PAYMENT_STATUS_VARIANT[sale.paymentStatus];
   const canRetry = sale.syncStatus === 'FAILED' || sale.syncStatus === 'PENDING';
   const canReturn =
     sale.status === 'COMPLETED' &&
@@ -186,7 +188,7 @@ export default function SaleDetailPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={payVariant}>
-          {saleStatusLabel(sale.paymentStatus, sale.creditSettledAt)}
+          {saleStatusLabel(sale.paymentStatus, sale.creditSettledAt, sale.markedPaidAt)}
         </Badge>
         <SaleReturnStatusBadge status={sale.returnStatus} />
         <SyncBadge status={sale.syncStatus} />

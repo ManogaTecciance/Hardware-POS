@@ -21,7 +21,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
-import { saleStatusLabel } from '@hardware-pos/shared';
+import { saleReadsAsPaid, saleStatusLabel } from '@hardware-pos/shared';
 
 import { useAuth } from '@/lib/auth';
 import { reprintCustomerReceipt } from '@/lib/receipt-print';
@@ -68,9 +68,12 @@ function isCreditSale(s: SaleListItem): boolean {
   return s.paymentDueDate !== null || s.balanceAmount > 0 || s.creditSettledAt !== null;
 }
 
-/** Still owed for: on credit, and the customer's account has not cleared it. */
+/**
+ * Still shown as owed for: on credit, and nobody has accounted for it — neither
+ * the account clearing nor a user ticking it off on the customer page.
+ */
 function isOwed(s: SaleListItem): boolean {
-  return s.balanceAmount > 0 && s.creditSettledAt === null;
+  return s.balanceAmount > 0 && !saleReadsAsPaid(s.creditSettledAt, s.markedPaidAt);
 }
 
 /** Past its due date and still owing — the same rule the API's Overdue filter uses. */
@@ -93,10 +96,10 @@ const STATUS_VARIANT: Record<PaymentStatusCode, 'success' | 'neutral' | 'danger'
  * that invoice and its own figures still say so.
  */
 function PaymentStatusBadge({ sale }: { sale: SaleListItem }) {
-  const settled = sale.creditSettledAt !== null;
+  const settled = saleReadsAsPaid(sale.creditSettledAt, sale.markedPaidAt);
   return (
     <Badge variant={settled ? 'success' : STATUS_VARIANT[sale.paymentStatus]}>
-      {saleStatusLabel(sale.paymentStatus, sale.creditSettledAt)}
+      {saleStatusLabel(sale.paymentStatus, sale.creditSettledAt, sale.markedPaidAt)}
     </Badge>
   );
 }

@@ -243,8 +243,12 @@ GET  /v1/sales?page=1&pageSize=25&syncStatus=FAILED
 #   never one the customer's account has since cleared. PAID means the opposite —
 #   paid at the till, OR covered by an account settlement. PARTIAL on its own still
 #   narrows to exactly those, for a caller that wants them.
-# Each row carries `creditSettledAt`: when set, the sale reads as Paid because the
-#   customer cleared their account, even though nothing was tendered against it.
+# A sale reads as Paid when it was paid at the till, when `creditSettledAt` is set
+#   (the customer cleared their account), OR when `markedPaidAt` is set (a user
+#   accounted for it on the customer page). The paymentStatus/overdue filters
+#   follow the same rule, so a list never contradicts its own badges. None of this
+#   moves money: balanceAmount and the credit aggregation are untouched, and what
+#   the customer owes still comes from recorded payments.
 #   overdue=true keeps only COMPLETED sales whose paymentDueDate has passed and
 #   which still owe money. GET /v1/sales/report accepts the same filters, so an
 #   export always covers exactly the sales the screen was showing.
