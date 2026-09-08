@@ -1,9 +1,16 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { OrderChannel, Prisma, SellableKind } from '@hardware-pos/database';
+import { OrderChannel, Prisma, QuantityType, SellableKind } from '@hardware-pos/database';
 import { coerceAttributeQueryValue, domainFor } from '@hardware-pos/shared';
 import type { TenantCapabilities } from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  aggregateVariantStock,
+  stockStateFor,
+  type StockState,
+  type VariantStockCell,
+} from '../../common/stock-state';
+import { variantDisplayName } from '../../common/variant-display';
 import { isPromotionActive } from '../promotions/promotions.evaluator';
 import { PromotionsRepository } from '../promotions/promotions.repository';
 import { BusinessProfileService } from '../platform/business-profile.service';
@@ -46,20 +53,33 @@ export interface SellableQuery {
 }
 
 export type PriceSource = 'BASE' | 'COLLECTION_OVERRIDE' | 'CHANNEL_OVERRIDE';
-/**
- * D101 — SOLD_OUT is its own state, not OUT: OUT is what a COUNT says about
- * a tracked item, SOLD_OUT is what a PERSON said about an untracked one (the
- * 86 switch). A client that greys both still must not offer "adjust stock"
- * on a dish.
- */
-export type StockState = 'IN_STOCK' | 'LOW' | 'OUT' | 'UNTRACKED' | 'SOLD_OUT';
+// D101's SOLD_OUT and D121's variant rollup share one `StockState`, declared
+// in common/stock-state.ts (D136); re-exported so consumers keep this path.
+export type { StockState };
 
 export interface SellableItem {
   id: string;
   name: string;
+  /**
+   * D120 — the legacy single-SKU identifier, for scanning and typed search.
+   *
+   * **Null for a variant product.** D44 is explicit that once `hasVariants` is
+   * set "the variant rows own price, cost, SKU, barcode… the parent-level
+   * unitPrice / sku / quantityOnHand remain as legacy fallbacks and are not
+   * read." Returning it anyway would hand the till a value the domain says is
+   * meaningless — the same rule `unitPrice` already follows below.
+   */
+  sku: string | null;
   description: string | null;
   imageUrl: string | null;
   sellableKind: SellableKind;
+  /**
+   * The QuickBooks item type — Inventory | NonInventory | Service. Carried so
+   * the till can LABEL an untracked item the way main always has ("Non-
+   * Inventory" is not "Service"); the stock question is answered by
+   * `stockState` alone (D136).
+   */
+  type: string;
   /** Null when variants own the price. Decimal string otherwise. */
   unitPrice: string | null;
   effectivePrice: string | null;
@@ -67,13 +87,45 @@ export interface SellableItem {
   category: { id: string; name: string } | null;
   subcategory: { id: string; name: string } | null;
   hasVariants: boolean;
+  /**
+   * D122 (3.14) — whether this product attracts tax.
+   *
+   * The till needs it to preview the same total the server will charge. 3.10
+   * narrowed the taxable base on the server only, so a cashier was quoted 18%
+   * on an exempt item the server then charged nothing for.
+   */
+  taxable: boolean;
+  /**
+   * D134 (`6.2`) — sold by the piece, or by weight/measure.
+   *
+   * The till cannot intercept what it cannot see: without this on the read
+   * model there is no way for the cart to know a numpad is needed. **Read,
+   * never inferred** — no component may guess "this looks like rice" (D56).
+   */
+  quantityType: QuantityType;
+  /** D134b — `"kg"`, `"L"`. Null for a WHOLE product, which has no unit. */
+  unitOfMeasure: string | null;
   variants?: {
     id: string;
     sku: string;
+    /**
+     * D120 — the scannable code. Only `ProductVariant` has one; `Product` has no
+     * barcode column at all, which is why scanning is inherently a variant-level
+     * operation in this data model.
+     */
+    barcode: string | null;
     name: string;
     unitPrice: string;
     isDefault: boolean;
     isActive: boolean;
+    /**
+     * D120 — this variant's own branch stock, so the till can grey out a size and
+     * cap its stepper. `null` when the tenant does not track stock; `"0.000"`
+     * when the variant has no `BranchInventory` row, which is no stock rather
+     * than unknown (decision 8).
+     */
+    availableQuantity: string | null;
+    stockState: StockState;
   }[];
   // Present only when capabilities.catalogue.preparation.
   prepMinutes?: number | null;
@@ -97,10 +149,49 @@ export interface SellableItem {
   stockState?: StockState;
 }
 
+/**
+ * D123 (4.3) — a promotion in the shape the APPLIER needs, not the badge.
+ *
+ * `SellableItem.promotions` above carries `{ id, name, type, description }`: enough
+ * to show "Buy 2 Get 1" on a tile, and nothing to price it with. The till could
+ * therefore advertise an offer it was unable to apply — which is why 4.4 needs
+ * this, and why the badge shape is left exactly as it was.
+ *
+ * Sent ONCE per response rather than copied onto every participating product. A
+ * bundle rule spans products by nature, so a per-product copy would repeat the
+ * same rule on each of its members and invite two readers to diverge — the
+ * one-rule-many-implementations failure this branch has paid for three times.
+ *
+ * Decimals are STRINGS, like `unitPrice`, `priceDelta` and `availableQuantity`
+ * everywhere else in this payload: JSON numbers cannot carry a Decimal safely.
+ * The client converts once, in `catalog.ts`, on the way into the applier.
+ */
+export interface SellablePromotionRule {
+  id: string;
+  name: string;
+  type: string;
+  fixedPrice: string | null;
+  percentageOff: string | null;
+  amountOff: string | null;
+  /** D126 — the cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT. */
+  minimumSpend: string | null;
+  buyQuantity: number | null;
+  getQuantity: number | null;
+  /** Promotion-to-promotion stacking. Read by 4.4, not by the applier itself. */
+  stackable: boolean;
+  items: { productId: string; role: string; quantity: number }[];
+}
+
 export interface SellableResponse {
   items: SellableItem[];
   total: number;
   nextCursor: string | null;
+  /**
+   * Every promotion eligible for THIS request — same `isPromotionActive` pass
+   * that decides the badges above, so the badge and the price can never disagree
+   * about which promotions are live.
+   */
+  promotionRules: SellablePromotionRule[];
 }
 
 const MAX_LIMIT = 200;
@@ -301,11 +392,38 @@ export class SellableService {
       this.promotions.listForCatalogue(tenantId),
     ]);
 
+    // D120 — one read for every variant on the page, so the till can badge each
+    // size. Keyed by variant; a variant with no row is simply absent, and reads
+    // below as zero (decision 8: variant stock comes from goods receipts).
+    const variantIds = rows.flatMap((p) => p.variants.map((v) => v.id));
+    const variantStock = new Map<string, { qty: Prisma.Decimal; reorderLevel: Prisma.Decimal | null }>();
+    if (variantIds.length > 0) {
+      const cells = await this.prisma.branchInventory.findMany({
+        where: {
+          tenantId,
+          branchId: query.branchId,
+          productVariantId: { in: variantIds },
+        },
+        select: { productVariantId: true, quantityOnHand: true, reorderLevel: true },
+      });
+      for (const cell of cells) {
+        if (cell.productVariantId === null) continue;
+        variantStock.set(cell.productVariantId, {
+          qty: cell.quantityOnHand,
+          reorderLevel: cell.reorderLevel,
+        });
+      }
+    }
+
     const now = new Date();
     const validPromotionsById = new Map<
       string,
       { id: string; name: string; type: string; description: string | null }
     >();
+    // 4.3 — built in the SAME pass as the badges, deliberately. Two loops with
+    // two copies of the eligibility test is how a badge and a price come to
+    // disagree about which promotions are live.
+    const promotionRules: SellablePromotionRule[] = [];
     for (const promo of activePromotions) {
       if (isPromotionActive(promo, { now, branchId: query.branchId, channel: query.channel })) {
         validPromotionsById.set(promo.id, {
@@ -313,6 +431,27 @@ export class SellableService {
           name: promo.name,
           type: promo.type,
           description: promo.description,
+        });
+        promotionRules.push({
+          id: promo.id,
+          name: promo.name,
+          type: promo.type,
+          fixedPrice: promo.fixedPrice?.toString() ?? null,
+          percentageOff: promo.percentageOff?.toString() ?? null,
+          amountOff: promo.amountOff?.toString() ?? null,
+          // D126 — a cart-level promotion carries no PromotionItem rows, and
+          // reaches the till anyway because these rules are built from the
+          // tenant's active promotions rather than from the promotions hanging
+          // off each product.
+          minimumSpend: promo.minimumSpend?.toString() ?? null,
+          buyQuantity: promo.buyQuantity,
+          getQuantity: promo.getQuantity,
+          stackable: promo.stackable,
+          items: promo.items.map((it) => ({
+            productId: it.productId,
+            role: it.role,
+            quantity: it.quantity,
+          })),
         });
       }
     }
@@ -343,32 +482,64 @@ export class SellableService {
       const item: SellableItem = {
         id: p.id,
         name: p.name,
+        // Mirrors the `base` price rule two lines below: a variant product's
+        // parent-level SKU is a legacy fallback D44 says is not read, so the
+        // till is not handed one to match a scan against.
+        sku: p.hasVariants ? null : p.sku,
         description: p.description,
         imageUrl: p.imageUrl,
         sellableKind: p.sellableKind,
+        type: p.type,
         unitPrice: base ? base.toFixed(2) : null,
         effectivePrice: effective ? effective.toFixed(2) : null,
         priceSource,
         category: p.category ? { id: p.category.id, name: p.category.name } : null,
         subcategory: p.subcategory ? { id: p.subcategory.id, name: p.subcategory.name } : null,
         hasVariants: p.hasVariants,
+        taxable: p.taxable,
+        quantityType: p.quantityType,
+        unitOfMeasure: p.unitOfMeasure,
         promotions: p.promotionItems
           .map((pi) => validPromotionsById.get(pi.promotionId))
           .filter((v): v is NonNullable<typeof v> => Boolean(v)),
       };
 
+      // What has no count to answer to. SERVICE and COMPOSED_ITEM by kind
+      // (D101), and — main's rule, 1ba3900 — anything whose QuickBooks type is
+      // not Inventory: the product form, the wizard and the importer force a
+      // NonInventory item's count to 0, nothing ever moves it, and the sale
+      // guard never reads it (`trackInventory: product.type === 'Inventory'`,
+      // sales.service.ts). `sellableKind` cannot stand in for the type here:
+      // deriveSellableKind maps NonInventory to STOCK_ITEM, and the D-migration
+      // that added the column defaulted every legacy Service row to STOCK_ITEM
+      // too. Reading those rows as OUT at zero greyed out on the retail till
+      // what the server would happily sell — the POL-1976 regression main had
+      // already fixed once (D136).
+      const untracked =
+        p.sellableKind === 'SERVICE' ||
+        p.sellableKind === 'COMPOSED_ITEM' ||
+        p.type !== 'Inventory';
+      const countsStock = tracksStock && !untracked;
+
       if (caps.catalogue.variants) {
-        item.variants = p.variants.map((v) => ({
-          id: v.id,
-          sku: v.sku,
-          name:
-            v.optionValues.length > 0
-              ? v.optionValues.map((ov) => ov.option?.name ?? '').join(' / ')
-              : v.sku,
-          unitPrice: v.unitPrice.toFixed(2),
-          isDefault: v.isDefault,
-          isActive: v.isActive,
-        }));
+        item.variants = p.variants.map((v) => {
+          // Same UNTRACKED reasoning as the item level: a tenant that tracks no
+          // stock — or a product that has no count — gets null rather than a
+          // fabricated zero.
+          const cell = variantStock.get(v.id);
+          const qty = cell?.qty ?? new Prisma.Decimal(0);
+          return {
+            id: v.id,
+            sku: v.sku,
+            barcode: v.barcode,
+            name: variantDisplayName(v.optionValues, v.sku),
+            unitPrice: v.unitPrice.toFixed(2),
+            isDefault: v.isDefault,
+            isActive: v.isActive,
+            availableQuantity: countsStock ? qty.toFixed(3) : null,
+            stockState: countsStock ? stockStateFor(qty, cell?.reorderLevel ?? null) : 'UNTRACKED',
+          };
+        });
       }
       if (caps.catalogue.preparation) {
         item.prepMinutes = p.prepMinutes;
@@ -405,20 +576,37 @@ export class SellableService {
         // Phase 8 wires component depletion: restaurant orders have never
         // moved stock (plan D-5), so a dish's quantityOnHand is a number
         // nothing maintains — claiming OUT from it would grey out food the
-        // kitchen is happily cooking.
-        if (p.sellableKind === 'SERVICE' || p.sellableKind === 'COMPOSED_ITEM') {
+        // kitchen is happily cooking. A NonInventory item joins for main's
+        // reason, above.
+        if (untracked) {
           item.availableQuantity = null;
           // D101 — the 86 switch is the ONLY thing that can make an
           // untracked item unavailable; its meaningless count never does.
           item.stockState = p.soldOutAt ? 'SOLD_OUT' : 'UNTRACKED';
+        } else if (p.hasVariants && p.variants.length > 0) {
+          // D120 (1c.6) — stock is tracked by variant, not by product. The
+          // parent's `quantityOnHand` is the D10 rollup mirror; it is maintained
+          // on sale and receipt but it is not the authority, and it had drifted
+          // to 350 against 22 real units on the shelf. Derive from the rows that
+          // are authoritative and leave the mirror alone.
+          //
+          // Not gated on `caps.catalogue.variants`: that capability decides
+          // whether the client is SHOWN the sizes, and how much stock exists is
+          // not a display question.
+          const cells: VariantStockCell[] = p.variants.map((v) => {
+            const cell = variantStock.get(v.id);
+            return {
+              qty: cell?.qty ?? new Prisma.Decimal(0),
+              reorderLevel: cell?.reorderLevel ?? null,
+            };
+          });
+          const rolled = aggregateVariantStock(cells);
+          item.availableQuantity = rolled.quantity.toFixed(3);
+          item.stockState = rolled.state;
         } else {
           const qty = p.quantityOnHand;
           item.availableQuantity = qty.toFixed(3);
-          item.stockState = qty.lessThanOrEqualTo(0)
-            ? 'OUT'
-            : p.reorderLevel && qty.lessThanOrEqualTo(p.reorderLevel)
-              ? 'LOW'
-              : 'IN_STOCK';
+          item.stockState = stockStateFor(qty, p.reorderLevel);
         }
       }
       return item;
@@ -429,6 +617,7 @@ export class SellableService {
       items,
       total,
       nextCursor: rows.length > limit && last ? encodeCursor(last.name, last.id) : null,
+      promotionRules,
     };
   }
 }

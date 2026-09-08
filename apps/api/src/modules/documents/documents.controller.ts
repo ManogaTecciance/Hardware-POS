@@ -68,6 +68,32 @@ export class DocumentsController {
     return { html, format: 'A4' };
   }
 
+  /**
+   * D128 (`7.3`) — the exchange note, from real data.
+   *
+   * Gated on EXCHANGES like the transaction itself. `RETURN_READ` to view, the
+   * same permission the return note uses: an exchange note reveals nothing the
+   * return behind it does not.
+   */
+  @Get('exchanges/:exchangeId')
+  @RequireModule(ModuleKey.EXCHANGES)
+  @RequirePermissions(Permission.RETURN_READ)
+  async exchangeNote(
+    @TenantId() tenantId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('exchangeId') exchangeId: string,
+  ): Promise<{ html: string; format: 'A4' }> {
+    const html = await this.documents.exchangeHtml(tenantId, exchangeId);
+    await this.audit.record(tenantId, {
+      userId: user.id,
+      action: 'exchange.document_printed',
+      entityType: 'Exchange',
+      entityId: exchangeId,
+      metadata: { format: 'A4' },
+    });
+    return { html, format: 'A4' };
+  }
+
   // ── Template preview (sample data) — Settings → Documents ──────
 
   /**

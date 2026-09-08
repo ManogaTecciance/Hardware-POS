@@ -45,6 +45,7 @@ import { baseUserRoleFor, roleTemplatesForBusinessType } from '@hardware-pos/sha
 
 import { BUSINESS_PROFILE_PRESETS } from '../src/business-profile-presets';
 import { linkUsersToRoles, seedTenantRoles, syncPermissionCatalogue } from '../src/seed-roles';
+import { seedClothingPack } from '../src/seed-packs/clothing';
 
 const prisma = new PrismaClient();
 const SALT_ROUNDS = 10;
@@ -77,12 +78,14 @@ function parseArgs(argv: string[]): {
   slug: string;
   branch: string;
   businessType: BusinessType | null;
+  withSamples: boolean;
   users: UserSpec[];
 } {
   let name = '';
   let slug = '';
   let branch = 'Main Branch';
   let businessType: BusinessType | null = null;
+  let withSamples = false;
   const users: UserSpec[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -92,7 +95,8 @@ function parseArgs(argv: string[]): {
       if (v === undefined) fail(`Missing value after ${arg}`);
       return v;
     };
-    if (arg === '--name') name = next();
+    if (arg === '--with-samples') withSamples = true;
+    else if (arg === '--name') name = next();
     else if (arg === '--slug') slug = next();
     else if (arg === '--branch') branch = next();
     else if (arg === '--business-type') {
@@ -150,11 +154,11 @@ function parseArgs(argv: string[]): {
       );
     }
   }
-  return { name, slug, branch, businessType, users };
+  return { name, slug, branch, businessType, withSamples, users };
 }
 
 async function main(): Promise<void> {
-  const { name, slug, branch, businessType, users } = parseArgs(process.argv.slice(2));
+  const { name, slug, branch, businessType, withSamples, users } = parseArgs(process.argv.slice(2));
 
   // Fresh accounts only — never adopt or modify an existing company.
   const existingTenant = await prisma.tenant.findFirst({
@@ -173,6 +177,7 @@ async function main(): Promise<void> {
 
   let roleCount = 0;
   let linkedCount = 0;
+  let pack: { categories: number; products: number; variants: number } | null = null;
   const tenant = await prisma.$transaction(async (tx) => {
     const t = await tx.tenant.create({ data: { name, slug } });
     // Write the shop timezone rather than leaning on the code default, so a new
@@ -201,6 +206,19 @@ async function main(): Promise<void> {
     // creating a tenant rather than a follow-up step someone can forget.
     await syncPermissionCatalogue(tx);
     roleCount = (await seedTenantRoles(tx, t.id, businessType ?? 'HARDWARE')).length;
+
+    // D120 (2.6) — the clothing pack, inside this transaction so a failure leaves
+    // no half-seeded tenant.
+    //
+    // Categories always; sample PRODUCTS only when asked. The reasoning is the
+    // same one three lines above about TenantModule rows: descriptor data lives
+    // in code and a correction reaches everyone, but seeded rows live in the
+    // tenant's database and are frozen. A category is cheap to be wrong about —
+    // rename or delete it. A starter product carries a variant chain, barcodes
+    // and stock rows that a real shop then has to clear out.
+    if (businessType === 'RETAIL') {
+      pack = await seedClothingPack(tx, t.id, b.id, { withSamples });
+    }
 
     const roleIdByKey = new Map(
       (await tx.role.findMany({ where: { tenantId: t.id }, select: { id: true, key: true } })).map(
@@ -252,7 +270,16 @@ async function main(): Promise<void> {
     const pin = user.pin ? ` / PIN ${user.pin}` : '';
     console.log(`    ${user.roleKey.padEnd(18)} ${user.email} / ${user.password}${pin}${note}`);
   }
-  console.log(`  Roles    ${roleCount} seeded · ${linkedCount} of ${users.length} users linked to their role row\n`);
+  console.log(`  Roles    ${roleCount} seeded · ${linkedCount} of ${users.length} users linked to their role row`);
+  if (pack) {
+    console.log(
+      `  Catalog  ${pack.categories} categories, ${pack.products} products, ${pack.variants} variants`,
+    );
+    if (pack.products === 0) {
+      console.log('           (pass --with-samples for starter products)');
+    }
+  }
+  console.log('');
   console.log('\n  Sign in at the web app with the email + password above.');
   console.log('  PINs answer the in-POS approval prompts (discounts, returns).');
 }

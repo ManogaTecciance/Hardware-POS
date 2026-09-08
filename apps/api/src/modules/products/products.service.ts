@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Product, SellableKind, UserRole } from '@hardware-pos/database';
+import { Prisma, Product, QuantityType, SellableKind, UserRole } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
 import { mirrorExternalRef } from '../quickbooks/external-ref';
@@ -22,6 +22,20 @@ import { QueryProductsDto } from './dto/query-products.dto';
 import { SearchProductsDto } from './dto/search-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 
+/**
+ * A product row widened with the facts a variant product's price and SKU
+ * actually live on (D44). `Product` remains structurally a subset, so every
+ * existing consumer of the list endpoints keeps compiling and reading the same
+ * fields.
+ */
+export type ManagedProductView = Product & {
+  /** Active variants. 0 for a legacy single-SKU product. */
+  variantCount: number;
+  /** Cheapest / dearest active variant. Null when there are no variants. */
+  variantPriceMin: number | null;
+  variantPriceMax: number | null;
+};
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -32,13 +46,14 @@ export class ProductsService {
     private readonly attributes: ProductAttributesService,
   ) {}
 
-  async list(tenantId: string, query: QueryProductsDto): Promise<Paginated<Product>> {
+  async list(tenantId: string, query: QueryProductsDto): Promise<Paginated<ManagedProductView>> {
     const [items, total] = await this.productsRepository.listManaged(
       tenantId,
       {
         search: query.search,
         categoryId: query.categoryId,
         subcategoryId: query.subcategoryId,
+        brandId: query.brandId,
         isActive: query.isActive === undefined ? undefined : query.isActive === 'true',
         type: query.type,
         syncStatus: query.syncStatus,
@@ -47,10 +62,10 @@ export class ProductsService {
       query.skip,
       query.take,
     );
-    return paginate(items, total, query.page, query.pageSize);
+    return paginate(await this.withVariantPrices(tenantId, items), total, query.page, query.pageSize);
   }
 
-  async search(tenantId: string, query: SearchProductsDto): Promise<Paginated<Product>> {
+  async search(tenantId: string, query: SearchProductsDto): Promise<Paginated<ManagedProductView>> {
     const [items, total] = await this.productsRepository.advancedSearch(
       tenantId,
       {
@@ -63,7 +78,36 @@ export class ProductsService {
       query.skip,
       query.take,
     );
-    return paginate(items, total, query.page, query.pageSize);
+    return paginate(await this.withVariantPrices(tenantId, items), total, query.page, query.pageSize);
+  }
+
+  /**
+   * Widen a page of products with their active-variant count and price span.
+   *
+   * Purely additive: `unitPrice` and `sku` keep the exact values they had, so a
+   * consumer that never learned about these fields behaves as before. Screens
+   * that show a price for a VARIANT product read the span instead, because D44
+   * makes the parent-level columns meaningless there.
+   *
+   * Variant-less products get `count: 0` and null bounds rather than a span
+   * equal to their own price — "no variants" and "one variant priced the same"
+   * are different facts, and a caller must be able to tell them apart.
+   */
+  private async withVariantPrices(
+    tenantId: string,
+    items: Product[],
+  ): Promise<ManagedProductView[]> {
+    const variantIds = items.filter((p) => p.hasVariants).map((p) => p.id);
+    const summary = await this.productsRepository.variantPriceSummary(tenantId, variantIds);
+    return items.map((p) => {
+      const s = summary.get(p.id);
+      return {
+        ...p,
+        variantCount: s?.count ?? 0,
+        variantPriceMin: s?.min ?? null,
+        variantPriceMax: s?.max ?? null,
+      };
+    });
   }
 
   async getById(tenantId: string, id: string): Promise<Product> {
@@ -79,6 +123,11 @@ export class ProductsService {
     // D64 — the empty document counts as a full document, so a domain with
     // required attributes refuses a create that omits them entirely.
     await this.attributes.assertValidDocument(tenantId, dto.attributes ?? {});
+    // D134c — a measured product must say what it is measured in.
+    assertMeasuredProductNamesItsUnit(
+      dto.quantityType ?? QuantityType.WHOLE,
+      dto.unitOfMeasure,
+    );
     const link = await this.resolveCategoryLink(tenantId, dto.categoryId, dto.subcategoryId);
     const data: Prisma.ProductUncheckedCreateInput = {
       tenantId,
@@ -88,6 +137,13 @@ export class ProductsService {
       description: dto.description ?? null,
       categoryId: link.categoryId ?? null,
       subcategoryId: link.subcategoryId ?? null,
+      // D133 — validated against this tenant, so another tenant's brand id
+      // is refused rather than silently stored as a dangling reference.
+      brandId: await this.resolveBrand(tenantId, dto.brandId),
+      // D134 / D134b — omitted means WHOLE, which is what every product was
+      // before the column existed.
+      quantityType: dto.quantityType ?? QuantityType.WHOLE,
+      unitOfMeasure: dto.unitOfMeasure?.trim() || null,
       unitPrice: dto.unitPrice,
       purchaseDescription: dto.purchaseDescription ?? null,
       costPrice: dto.costPrice ?? null,
@@ -95,6 +151,9 @@ export class ProductsService {
       quantityAsOfDate: dto.quantityAsOfDate ? new Date(dto.quantityAsOfDate) : new Date(),
       reorderLevel: dto.reorderLevel ?? null,
       isActive: dto.isActive ?? true,
+      // D122 (3.13) — absent means taxable. A `false` default here would
+      // zero-rate every product any client created without the field.
+      taxable: dto.taxable ?? true,
       // Pre-uploaded URL from the Add Product wizard (D44); optional in every
       // other flow, which historically calls `POST /products/:id/image` after
       // create.
@@ -151,6 +210,19 @@ export class ProductsService {
       await this.attributes.assertValidDocument(tenantId, dto.attributes);
     }
 
+    /*
+     * D134c — checked against the RESULTING state, not the payload.
+     *
+     * `update` is partial, so a payload-only check would pass the only two
+     * cases worth guarding: turning a product DECIMAL when it has no unit, and
+     * clearing the unit on a product that is already DECIMAL. Each field falls
+     * back to what is stored when the caller did not mention it.
+     */
+    assertMeasuredProductNamesItsUnit(
+      dto.quantityType ?? existing.quantityType,
+      dto.unitOfMeasure !== undefined ? dto.unitOfMeasure : existing.unitOfMeasure,
+    );
+
     const changingStock =
       dto.quantityOnHand !== undefined &&
       Number(dto.quantityOnHand) !== Number(existing.quantityOnHand);
@@ -177,6 +249,28 @@ export class ProductsService {
       description: dto.description,
       categoryId: link.categoryId,
       subcategoryId: link.subcategoryId,
+      // D133 — `undefined` leaves the stored brand alone, an empty string clears
+      // it, and a real id is validated against this tenant. Three different
+      // intentions; a single `?? null` would collapse the first two.
+      ...(dto.brandId !== undefined
+        ? { brandId: dto.brandId ? await this.resolveBrand(tenantId, dto.brandId) : null }
+        : {}),
+      // D134 / D134b — same three-state contract as `brandId` above, with one
+      // difference that cost a 500: **`null` also means clear.**
+      //
+      // `@IsOptional()` skips validation for `null` as well as `undefined`, so a
+      // null reaches here having passed `@IsString()`. `!== undefined` then lets
+      // it through to `.trim()`. The create path one screen up already wrote
+      // `dto.unitOfMeasure?.trim()`; this one did not, so the same field had two
+      // contracts depending on which verb you used.
+      //
+      // Clearing a DECIMAL product's unit is still refused — by D134c above,
+      // against the resulting state, which is where that rule belongs. This line
+      // only decides what "no unit" is spelled as.
+      quantityType: dto.quantityType,
+      ...(dto.unitOfMeasure !== undefined
+        ? { unitOfMeasure: dto.unitOfMeasure?.trim() || null }
+        : {}),
       unitPrice: dto.unitPrice,
       purchaseDescription: dto.purchaseDescription,
       costPrice: dto.costPrice,
@@ -189,6 +283,9 @@ export class ProductsService {
           : undefined,
       reorderLevel: dto.reorderLevel,
       isActive: dto.isActive,
+      // Undefined leaves the stored value alone; only an explicit boolean moves
+      // it, so a partial update cannot make a product exempt by omission.
+      taxable: dto.taxable,
       // Only forward `imageUrl` when the caller actually sent one — the field
       // is otherwise owned by `setImage` / `removeImage`, which take the file
       // path and manage storage.remove(). Skipping `undefined` keeps Prisma
@@ -370,6 +467,25 @@ export class ProductsService {
    * the web form sends `field || null` and @IsOptional lets null through.
    * Returns only the fields that should be written.
    */
+  /**
+   * D133 (`8.9`) — a brand id, checked to belong to this tenant.
+   *
+   * `tenantId` in the predicate is what makes another tenant's brand id a
+   * refusal rather than a dangling reference stored on a product. Same shape as
+   * every other cross-entity check on this service.
+   */
+  private async resolveBrand(tenantId: string, brandId?: string): Promise<string | null> {
+    if (!brandId) return null;
+    const brand = await this.prisma.brand.findFirst({
+      where: { id: brandId, tenantId },
+      select: { id: true },
+    });
+    if (!brand) {
+      throw new BadRequestException(`Brand ${brandId} does not belong to this tenant`);
+    }
+    return brand.id;
+  }
+
   private async resolveCategoryLink(
     tenantId: string,
     categoryInput: string | null | undefined,
@@ -454,4 +570,33 @@ function toCatalogShape(product: Product): ProductCatalogShape {
     isActive: product.isActive,
     externalItemId: product.quickbooksItemId,
   };
+}
+
+/**
+ * D134c — a product sold by weight or measure must say what it is measured in.
+ *
+ * The rule is CONDITIONAL, which is why it lives here and not on the column: it
+ * is mandatory for a `DECIMAL` product and meaningless for a shirt, and a
+ * `NOT NULL` column would demand a unit from every product in every tenant.
+ * Postgres could express it as a CHECK constraint, but Prisma will not model
+ * one — it would live only in raw migration SQL, and the API would still need
+ * its own check to produce a usable 400. One rule, in the place that can state
+ * it.
+ *
+ * Callers pass the RESULTING state, not the payload. `update` is partial, so a
+ * payload-only check passes the only two cases worth guarding.
+ *
+ * The message is written for a shopkeeper adding rice, not for a developer:
+ * `4.19` cost two hours on a promotion that behaved correctly and explained
+ * nothing.
+ */
+export function assertMeasuredProductNamesItsUnit(
+  quantityType: QuantityType,
+  unitOfMeasure: string | null | undefined,
+): void {
+  if (quantityType !== QuantityType.DECIMAL) return;
+  if (unitOfMeasure && unitOfMeasure.trim()) return;
+  throw new BadRequestException(
+    'A product sold by weight or measure needs a unit — for example kg, g or L.',
+  );
 }

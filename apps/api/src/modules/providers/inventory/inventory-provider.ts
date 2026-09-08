@@ -8,7 +8,11 @@ import {
   ReceiveStockLine,
   ReceiveStockLineOutcome,
   StockAdjustment,
+  StockCountLine,
+  StockCountOutcome,
   StockLine,
+  StockMovementMetadata,
+  VariantAvailabilityMap,
 } from '../provider.types';
 
 /**
@@ -71,15 +75,50 @@ export interface InventoryProvider {
   getAvailability(ctx: ProviderContext, productIds: string[]): Promise<AvailabilityMap>;
 
   /**
+   * D120 — on-hand availability for specific variants. **Optional.**
+   *
+   * Optional rather than required because only a provider whose stock is
+   * branch-and-variant scoped can answer it. QuickBooks holds a cache of an
+   * upstream quantity with no variant dimension, and `NoInventoryProvider` has no
+   * quantities at all; forcing either to implement this would mean inventing an
+   * answer. A caller that finds the method absent keeps the product-level check,
+   * which is the correct behaviour for both.
+   *
+   * Read-only, so no transaction client — the same contract as
+   * {@link getAvailability}. It remains a courtesy check: `reduceStock`'s
+   * conditional write is still the authority under concurrency.
+   */
+  getVariantAvailability?(
+    ctx: ProviderContext,
+    variantIds: string[],
+  ): Promise<VariantAvailabilityMap>;
+
+  /**
    * Reduce stock for a completed sale, inside the caller's transaction.
    *
    * Must be safe under concurrency: two simultaneous sales of the last unit must
    * not both succeed.
+   *
+   * ## `metadata` (1a.21)
+   *
+   * Supply it to have the provider append a `StockMovement` for each line it
+   * actually moved. **Omitting it means "I keep my own ledger"** — a real state,
+   * not a forgotten argument: `RoundDepletionService` writes its own
+   * `ORDER_ROUND` rows in the caller and must not get a duplicate from here.
+   *
+   * Optional for exactly that reason. Making it required would change the call
+   * shape of the restaurant path, whose behaviour is deliberately untouched.
+   *
+   * Only `LocalInventoryProvider` writes movements. QuickBooks stock is a cache
+   * of an upstream system whose ledger is not ours to write, and
+   * `NoInventoryProvider` has no stock at all — so neither records anything,
+   * and no service has to ask which mode it is in (D28).
    */
   reduceStock(
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    metadata?: StockMovementMetadata,
   ): Promise<void>;
 
   /**
@@ -92,6 +131,7 @@ export interface InventoryProvider {
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    metadata?: StockMovementMetadata,
   ): Promise<void>;
 
   /**
@@ -144,6 +184,39 @@ export interface InventoryProvider {
     lines: ReceiveStockLine[],
     metadata: { receiptId: string; createdByUserId: string },
   ): Promise<ReceiveStockLineOutcome[]>;
+
+  /**
+   * D132 (`8.7`) — apply a stock COUNT, inside the caller's transaction.
+   *
+   * A count is not an adjustment and not a movement: it is an assertion by an
+   * operator about what is physically on a shelf. So it **sets** the quantity
+   * rather than incrementing it, and it is never refused for going down. The
+   * oversell guard in `reduceStock` is untouched and no count passes through
+   * it — two things that both "change the stock number" are kept apart
+   * because only one of them is a race.
+   *
+   * Distinct from `adjustStock`, which takes a signed delta, writes only
+   * `Product.quantityOnHand`, records no movement, and exists for the bulk
+   * product import. Widening that to serve counts would change what the
+   * import does for every existing tenant.
+   *
+   * Providers that cannot own a count — QuickBooks, where stock is a cache of
+   * an upstream ledger that is not ours to write, and NONE, which has no
+   * stock — **must throw** `ProviderOperationUnavailableError`. A silent
+   * no-op would look like a successful count that moved nothing, leaving a
+   * `StockTake` document with no ledger effect: the state D44 refused for
+   * receipts, for the same reason.
+   *
+   * Returns one outcome per input line, in order, so the caller can write its
+   * `StockTakeLine` rows from what actually happened rather than from what it
+   * asked for.
+   */
+  applyStockCount(
+    tx: Prisma.TransactionClient,
+    ctx: ProviderContext,
+    lines: StockCountLine[],
+    metadata: { stockTakeId: string; countedByUserId: string },
+  ): Promise<StockCountOutcome[]>;
 
   /**
    * Ask the provider to reconcile with its upstream system.

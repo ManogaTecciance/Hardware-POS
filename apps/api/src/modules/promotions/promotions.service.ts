@@ -7,6 +7,7 @@ import { Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { BusinessProfileService } from '../platform/business-profile.service';
 import {
   CreatePromotionDto,
   PROMOTION_TYPES,
@@ -20,7 +21,35 @@ import { PromotionWithItems, PromotionsRepository } from './promotions.repositor
 
 /** The vocabularies the DTO defers to the service. */
 const VALID_DAYS = new Set(['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']);
-const VALID_CHANNELS = new Set(['DINE_IN', 'TAKEAWAY', 'ONLINE']);
+/*
+ * D56 — channels are NOT a fixed list here. This constant used to be
+ * `['DINE_IN','TAKEAWAY','ONLINE']`, which made a retail promotion unsaveable:
+ * 4.9 taught the editor to offer the channels the tenant actually sells on
+ * (`COUNTER` for retail), and the server then rejected the only chip on screen
+ * with "Unknown channel 'COUNTER'". The allowed set is the tenant's
+ * `capabilities.fulfilment.channels`, read from the same resolver the chips use,
+ * so the screen and the server can no longer disagree.
+ *
+ * This is strictly TIGHTER than a blanket four-value list: food service still
+ * accepts exactly its three and nothing else, unchanged.
+ */
+
+/**
+ * `"HH:MM"` → minutes since midnight, or null when it is not that shape.
+ *
+ * Mirrors the evaluator's own reading deliberately: a guard that parsed times
+ * differently from the code it is guarding would pass shapes the evaluator then
+ * treats as empty. Null (unparseable) is left for the DTO's format validation
+ * to report — this guard only answers "is this window empty".
+ */
+function toMinutesOfDay(value: string): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!m) return null;
+  const hours = Number(m[1]);
+  const minutes = Number(m[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
 
 /** Shape returned to controllers (JSON-friendly — Decimals stringified). */
 export interface PromotionView {
@@ -31,6 +60,8 @@ export interface PromotionView {
   fixedPrice: string | null;
   percentageOff: string | null;
   amountOff: string | null;
+  /** D126 — the cart threshold; null when there is none. */
+  minimumSpend: string | null;
   buyQuantity: number | null;
   getQuantity: number | null;
   startsOn: string | null;
@@ -42,7 +73,7 @@ export interface PromotionView {
   channelScope: string[];
   stackable: boolean;
   isActive: boolean;
-  items: { id: string; productId: string; role: string; quantity: number }[];
+  items: { id: string; productId: string; productName: string | null; role: string; quantity: number }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -53,6 +84,7 @@ export class PromotionsService {
     private readonly prisma: PrismaService,
     private readonly repository: PromotionsRepository,
     private readonly audit: AuditLogService,
+    private readonly profiles: BusinessProfileService,
   ) {}
 
   async list(
@@ -106,6 +138,7 @@ export class PromotionsService {
   ): Promise<PromotionView> {
     this.validateTypeShape(dto.type, dto, dto.items);
     this.validateScheduleVocabulary(dto);
+    await this.assertChannelsSellable(tenantId, dto.channelScope);
     await this.assertScope(tenantId, dto.branchScope);
     await this.assertProductsInTenant(tenantId, dto.items.map((i) => i.productId));
 
@@ -121,6 +154,8 @@ export class PromotionsService {
             percentageOff:
               dto.percentageOff != null ? new Prisma.Decimal(dto.percentageOff) : null,
             amountOff: dto.amountOff != null ? new Prisma.Decimal(dto.amountOff) : null,
+            minimumSpend:
+              dto.minimumSpend != null ? new Prisma.Decimal(dto.minimumSpend) : null,
             buyQuantity: dto.buyQuantity ?? null,
             getQuantity: dto.getQuantity ?? null,
             startsOn: dto.startsOn ? new Date(dto.startsOn) : null,
@@ -182,6 +217,7 @@ export class PromotionsService {
     const merged = mergeForValidation(existing, dto);
     this.validateTypeShape(existing.type as PromotionTypeValue, merged.data, merged.items);
     this.validateScheduleVocabulary(dto);
+    await this.assertChannelsSellable(tenantId, dto.channelScope);
     if (dto.branchScope) await this.assertScope(tenantId, dto.branchScope);
     if (dto.items) {
       await this.assertProductsInTenant(
@@ -203,6 +239,8 @@ export class PromotionsService {
                 ? new Prisma.Decimal(dto.percentageOff)
                 : dto.percentageOff,
             amountOff: dto.amountOff != null ? new Prisma.Decimal(dto.amountOff) : dto.amountOff,
+            minimumSpend:
+              dto.minimumSpend != null ? new Prisma.Decimal(dto.minimumSpend) : dto.minimumSpend,
             buyQuantity: dto.buyQuantity,
             getQuantity: dto.getQuantity,
             startsOn: dto.startsOn === undefined ? undefined : dto.startsOn ? new Date(dto.startsOn) : null,
@@ -292,6 +330,7 @@ export class PromotionsService {
       fixedPrice?: number | null;
       percentageOff?: number | null;
       amountOff?: number | null;
+      minimumSpend?: number | null;
       buyQuantity?: number | null;
       getQuantity?: number | null;
     },
@@ -299,6 +338,17 @@ export class PromotionsService {
   ): void {
     if (!PROMOTION_TYPES.includes(type as PromotionTypeValue)) {
       throw new BadRequestException(`Unknown promotion type: ${type}`);
+    }
+
+    /*
+     * D126 — a threshold only means something for money-off. Silently ignoring
+     * it on a bundle would let an operator save "bundle, minimum spend 10,000"
+     * and watch it fire below the threshold with no explanation.
+     */
+    if (data.minimumSpend != null && data.minimumSpend > 0 && type !== 'FIXED_AMOUNT_DISCOUNT') {
+      throw new BadRequestException(
+        `minimumSpend applies only to FIXED_AMOUNT_DISCOUNT, not ${type}.`,
+      );
     }
 
     const roles = items.map((i) => i.role);
@@ -362,12 +412,45 @@ export class PromotionsService {
             'FIXED_AMOUNT_DISCOUNT requires a positive amountOff.',
           );
         }
-        if (buys < 1) {
+        /*
+         * D126 — two legal shapes, told apart by whether products are named:
+         *
+         *   items empty      -> CART-LEVEL: money off the whole order.
+         *   one or more BUY  -> product-scoped, exactly as before.
+         *
+         * The old rule was `buys < 1 -> reject`, which made the cart-level shape
+         * unconfigurable. Anything else is still refused, so a GET or BUNDLE
+         * role cannot be smuggled onto this type by a hand-written body.
+         */
+        if (items.length > 0 && buys !== items.length) {
           throw new BadRequestException(
-            'FIXED_AMOUNT_DISCOUNT requires at least one BUY item.',
+            'FIXED_AMOUNT_DISCOUNT items must all be BUY items, or the list must be empty for a cart-level discount.',
           );
         }
         break;
+      }
+    }
+  }
+
+  /**
+   * D56 — a promotion may only be scoped to a channel this tenant sells on.
+   *
+   * Async, and therefore separate from `validateScheduleVocabulary` (which stays
+   * sync for days and times): the allowed set comes from the effective business
+   * profile, not from a constant.
+   */
+  private async assertChannelsSellable(
+    tenantId: string,
+    channelScope: string[] | undefined,
+  ): Promise<void> {
+    if (!channelScope || channelScope.length === 0) return;
+    const profile = await this.profiles.getEffectiveProfile(tenantId);
+    const allowed = profile.capabilities.fulfilment.channels as readonly string[];
+    for (const c of channelScope) {
+      if (!allowed.includes(c)) {
+        throw new BadRequestException(
+          `Unknown channel '${c}'; expected one of ${allowed.join(', ')}.`,
+        );
       }
     }
   }
@@ -384,15 +467,6 @@ export class PromotionsService {
         }
       }
     }
-    if (dto.channelScope) {
-      for (const c of dto.channelScope) {
-        if (!VALID_CHANNELS.has(c)) {
-          throw new BadRequestException(
-            `Unknown channel '${c}'; expected one of ${[...VALID_CHANNELS].join(', ')}.`,
-          );
-        }
-      }
-    }
     // both-null-or-both-set for the time-of-day pair. Half-open is nonsensical
     // for scheduling ("open until 22:00 with no lower bound" is legal per the
     // evaluator, but the wizard shouldn't be able to save that shape).
@@ -401,6 +475,35 @@ export class PromotionsService {
       throw new BadRequestException(
         'startTime and endTime must both be provided or both omitted.',
       );
+    }
+
+    /*
+     * The window must be able to contain a moment.
+     *
+     * `isPromotionActive` reads the pair as the half-open interval
+     * [start, end): `minutesNow < start || minutesNow >= end` is out. So
+     * `start === end` is empty and `start > end` is empty too — the evaluator
+     * has no overnight wrap. Either shape saves a promotion that is switched on,
+     * looks on in the list, and can NEVER fire on any day.
+     *
+     * Found the hard way: an operator saved 18:00–09:00 expecting an evening
+     * offer and got silence. Rejected at write time so nobody has to work that
+     * out from a cart that simply refuses to discount.
+     *
+     * An overnight window is a real thing to want; it is just not something
+     * this evaluator can express, so promising it here would be a lie. Two
+     * promotions (18:00–23:59 and 00:00–09:00) express it today.
+     */
+    if (timeGiven(dto.startTime) && timeGiven(dto.endTime)) {
+      const start = toMinutesOfDay(dto.startTime as string);
+      const end = toMinutesOfDay(dto.endTime as string);
+      if (start !== null && end !== null && start >= end) {
+        throw new BadRequestException(
+          start === end
+            ? `startTime and endTime are both '${dto.startTime}', so the promotion could never be active. Widen the window, or clear both for all day.`
+            : `startTime '${dto.startTime}' is not before endTime '${dto.endTime}', so the promotion could never be active. This evaluator has no overnight wrap — use two promotions to cover a window that crosses midnight.`,
+        );
+      }
     }
   }
 
@@ -463,6 +566,7 @@ function toView(row: PromotionWithItems): PromotionView {
     fixedPrice: row.fixedPrice ? row.fixedPrice.toFixed(2) : null,
     percentageOff: row.percentageOff ? row.percentageOff.toFixed(2) : null,
     amountOff: row.amountOff ? row.amountOff.toFixed(2) : null,
+    minimumSpend: row.minimumSpend ? row.minimumSpend.toFixed(2) : null,
     buyQuantity: row.buyQuantity,
     getQuantity: row.getQuantity,
     startsOn: row.startsOn ? row.startsOn.toISOString() : null,
@@ -474,7 +578,15 @@ function toView(row: PromotionWithItems): PromotionView {
     channelScope: row.channelScope,
     stackable: row.stackable,
     isActive: row.isActive,
-    items: row.items,
+    // D45 (4.10) — flatten the joined name so the editor never has to render a
+    // cuid. Null when the product was deleted; the client falls back to the id.
+    items: row.items.map((it) => ({
+      id: it.id,
+      productId: it.productId,
+      productName: it.product?.name ?? null,
+      role: it.role,
+      quantity: it.quantity,
+    })),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -493,6 +605,7 @@ function mergeForValidation(
     fixedPrice: number | null;
     percentageOff: number | null;
     amountOff: number | null;
+    minimumSpend: number | null;
     buyQuantity: number | null;
     getQuantity: number | null;
   };
@@ -505,6 +618,7 @@ function mergeForValidation(
       fixedPrice: dto.fixedPrice ?? num(existing.fixedPrice),
       percentageOff: dto.percentageOff ?? num(existing.percentageOff),
       amountOff: dto.amountOff ?? num(existing.amountOff),
+      minimumSpend: dto.minimumSpend ?? num(existing.minimumSpend),
       buyQuantity: dto.buyQuantity ?? existing.buyQuantity,
       getQuantity: dto.getQuantity ?? existing.getQuantity,
     },

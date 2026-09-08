@@ -34,6 +34,12 @@ export type PostAccounting = (
 export type ReduceStock = (
   tx: Prisma.TransactionClient,
   lines: StockLine[],
+  /**
+   * 1a.21 — the sale this reduction belongs to, for the stock ledger's `refId`.
+   * The row is created before `reduceStock` is called, so the id is already in
+   * hand; only this callback type was hiding it. No transaction was reordered.
+   */
+  saleId: string,
 ) => Promise<void>;
 
 /**
@@ -117,6 +123,15 @@ const saleListInclude = {
   markedPaidBy: { select: { name: true } },
   _count: { select: { items: true } },
 } satisfies Prisma.SaleInclude;
+
+/**
+ * D120 — a variant as the sale path needs it: the row plus the option values the
+ * display name is derived from. Declared with `validator` so the include shape
+ * and the type cannot drift apart.
+ */
+export type SaleVariant = Prisma.ProductVariantGetPayload<{
+  include: { optionValues: { include: { option: { select: { name: true } } } } };
+}>;
 
 @Injectable()
 export class SalesRepository {
@@ -235,6 +250,44 @@ export class SalesRepository {
     return this.prisma.sale.findFirst({ where: { id, tenantId }, include: saleInclude });
   }
 
+  /**
+   * `8.8` — every basket currently on hold.
+   *
+   * Newest first: a cashier holding three fitting-room baskets in a row wants
+   * the one they just put down at the top.
+   *
+   * Branch-filtered when a branch is given. A held basket belongs to the till
+   * it was put down at — resuming one from another shop would hand a customer
+   * stock that is not on this shelf.
+   */
+  findHeldSales(tenantId: string, branchId?: string): Promise<SaleWithRelations[]> {
+    return this.prisma.sale.findMany({
+      where: { tenantId, status: 'DRAFT', ...(branchId ? { branchId } : {}) },
+      include: saleInclude,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
+  /**
+   * Discard a held basket.
+   *
+   * `status: 'DRAFT'` in the predicate is the whole safety property: a
+   * completed sale matches zero rows and is not deleted, whatever id is
+   * passed. `deleteMany` rather than `delete` so a miss is a count of zero
+   * the caller can report, not an exception to interpret.
+   *
+   * A draft moves no stock (`createDraft` writes no movement), so there is
+   * nothing to reverse — which is exactly why discarding one can be a delete
+   * rather than a void.
+   */
+  async discardHeldSale(tenantId: string, id: string): Promise<boolean> {
+    const { count } = await this.prisma.sale.deleteMany({
+      where: { id, tenantId, status: 'DRAFT' },
+    });
+    return count > 0;
+  }
+
   findDraftWithItems(tenantId: string, id: string): Promise<SaleWithRelations | null> {
     return this.prisma.sale.findFirst({
       where: { id, tenantId, status: 'DRAFT' },
@@ -244,6 +297,24 @@ export class SalesRepository {
 
   findProductsByIds(tenantId: string, ids: string[]): Promise<Product[]> {
     return this.prisma.product.findMany({ where: { tenantId, id: { in: ids } } });
+  }
+
+  /**
+   * D120 — resolve the variants a cart names.
+   *
+   * `tenantId` in the predicate is what makes another tenant's variant id return
+   * nothing rather than a row, exactly as `findProductsByIds` does. The caller
+   * then reports it as unknown, so the response never distinguishes "does not
+   * exist" from "belongs to someone else".
+   */
+  findVariantsByIds(tenantId: string, ids: string[]): Promise<SaleVariant[]> {
+    return this.prisma.productVariant.findMany({
+      where: { tenantId, id: { in: ids } },
+      // The option values are what `variantDisplayName` turns into "Black / Medium"
+      // for the snapshot frozen onto the sale line. Same include shape as
+      // `sellable.service` uses, so both derive the name from the same data.
+      include: { optionValues: { include: { option: { select: { name: true } } } } },
+    });
   }
 
   branchExists(tenantId: string, branchId: string): Promise<{ id: string } | null> {
@@ -327,6 +398,9 @@ export class SalesRepository {
         orderDiscountAmount: input.computed.orderDiscountAmount,
         orderDiscountReason: input.computed.orderDiscountReason,
         orderDiscountApprovedById: input.computed.orderDiscountApprovedById,
+        promotionOrderDiscountAmount: input.computed.promotionOrderDiscountAmount,
+        promotionOrderId: input.computed.promotionOrderId,
+        promotionOrderNameSnapshot: input.computed.promotionOrderNameSnapshot,
         taxAmount: input.computed.taxAmount,
         total: input.computed.total,
         paidAmount: 0,
@@ -391,7 +465,7 @@ export class SalesRepository {
         },
         include: saleInclude,
       });
-      await reduceStock(tx, toStockLines(input.computed.lines));
+      await reduceStock(tx, toStockLines(input.computed.lines), sale.id);
       await this.postAccountingChecked(postAccounting, tx, sale.id, input);
       return sale;
     });
@@ -437,7 +511,7 @@ export class SalesRepository {
         },
         include: saleInclude,
       });
-      await reduceStock(tx, toStockLines(input.computed.lines));
+      await reduceStock(tx, toStockLines(input.computed.lines), sale.id);
       await this.postAccountingChecked(postAccounting, tx, sale.id, input);
       return sale;
     });
@@ -582,12 +656,28 @@ function orderDiscountData(computed: PersistSaleInput['computed']) {
     orderDiscountAmount: computed.orderDiscountAmount,
     orderDiscountReason: computed.orderDiscountReason,
     orderDiscountApprovedById: computed.orderDiscountApprovedById,
+    // D126 — travels with the order discount because it is one, just an
+    // automatic one. Kept in separate columns so a refund can say which was the
+    // cashier's decision and which the promotion's.
+    promotionOrderDiscountAmount: computed.promotionOrderDiscountAmount,
+    promotionOrderId: computed.promotionOrderId,
+    promotionOrderNameSnapshot: computed.promotionOrderNameSnapshot,
   };
 }
 
 function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleInput {
   return {
     product: { connect: { id: line.productId } },
+    // D120 — `connect` only when a variant was actually sold; a product-level line
+    // must leave the relation unset rather than connect to nothing.
+    ...(line.productVariantId
+      ? { productVariant: { connect: { id: line.productVariantId } } }
+      : {}),
+    // D44 — frozen at sale time, so a later rename cannot rewrite this receipt.
+    variantSkuSnapshot: line.variantSkuSnapshot,
+    variantNameSnapshot: line.variantNameSnapshot,
+    // D134d (`6.5`) — the unit, frozen with the names beside it.
+    unitOfMeasureSnapshot: line.unitOfMeasureSnapshot,
     productName: line.productName,
     sku: line.sku,
     unitPrice: line.unitPrice,
@@ -601,6 +691,23 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
       ? { approvedBy: { connect: { id: line.approvedByUserId } } }
       : {}),
     taxAmount: line.taxAmount,
+    // D122 (3.9) — the frozen rate. Required on ComputedLine, so a new row can
+    // never carry the null that marks a pre-3.8 line.
+    taxRatePercent: line.taxRatePercent,
+    /*
+     * D123 (4.4) — what the applier decided, frozen.
+     *
+     * `lineTotal` above is already net of this; the amount is stored separately
+     * so a receipt can name the offer and Phase 8 can report on it. The name is
+     * a SNAPSHOT because a promotion can be renamed or deleted and a reprint
+     * must still say what the customer was given (D44).
+     *
+     * A return reverses `promotionDiscountAmount × frac` — line-level, like the
+     * product discount and unlike the order discount's basket-weighted share.
+     */
+    promotionDiscountAmount: line.promotionDiscountAmount,
+    promotionId: line.promotionId,
+    promotionNameSnapshot: line.promotionNameSnapshot,
     lineSubtotal: line.lineSubtotal,
     lineTotal: line.lineTotal,
   };
@@ -617,6 +724,9 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
 function toStockLines(lines: ComputedLine[]): StockLine[] {
   return lines.map((line) => ({
     productId: line.productId,
+    // D120 — the real variant now, resolved by `computeCart`. Still null for a
+    // product-level line, which the providers handle as they always have.
+    productVariantId: line.productVariantId,
     productName: line.productName,
     quantity: line.quantity,
     trackInventory: line.trackInventory,

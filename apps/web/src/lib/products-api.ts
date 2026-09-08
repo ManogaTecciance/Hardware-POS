@@ -1,5 +1,6 @@
 import { api, authorizedFetch } from './api';
 import type { Session } from './auth';
+import type { ClientQuantityType } from './catalog';
 
 export type ProductSyncStatus = 'NOT_SYNCED' | 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
 
@@ -41,6 +42,20 @@ export interface ManagedProduct {
   /** POS-side product photo (S3) — never pushed to QuickBooks. */
   imageUrl: string | null;
   isActive: boolean;
+  /** D122 — read back so the edit wizard can round-trip it. */
+  taxable: boolean;
+  /**
+   * D134 (`6.1`) — sold by the piece, or by weight/measure.
+   *
+   * REQUIRED, not optional, for the reason `taxable` above is: the edit
+   * wizard reads this to re-populate its own control, and an optional field
+   * crossing a wire is the one a mapper drops in silence. A product opened
+   * for editing would then be saved back as WHOLE without anyone touching
+   * the control — rice would quietly stop being sold by the kilo.
+   */
+  quantityType: ClientQuantityType;
+  /** D134b — `"kg"`, `"L"`. Null for a WHOLE product, which has no unit. */
+  unitOfMeasure: string | null;
   quickbooksItemId: string | null;
   syncStatus: ProductSyncStatus;
   lastSyncedAt: string | null;
@@ -55,6 +70,21 @@ export interface ManagedProduct {
    * fresh Inventory item until the first receipt lands.
    */
   averageCost: number | null;
+  /**
+   * D44 — active variants, and the span of their prices.
+   *
+   * Once `hasVariants` is true the parent `unitPrice` and `sku` are legacy
+   * fallbacks the schema says are "not read": the variant rows own them. Screens
+   * that showed `unitPrice` were therefore rendering Rs 0.00 against every
+   * variant product. Read these instead — see `variantPriceLabel`.
+   *
+   * `variantCount` is 0 and both bounds are null for a legacy single-SKU product.
+   * Optional so a response predating the aggregate degrades to the old reading
+   * rather than to `undefined` arithmetic.
+   */
+  variantCount?: number;
+  variantPriceMin?: number | null;
+  variantPriceMax?: number | null;
   /**
    * D64 — domain attributes, keyed per the tenant descriptor's attribute
    * schema (`GET /products/attribute-schema`). `{}` for every tenant whose
@@ -94,6 +124,8 @@ export interface ProductsQuery {
   pageSize?: number;
   search?: string;
   categoryId?: string;
+  /** D133 (`8.9`) — everything carrying one label. */
+  brandId?: string;
   subcategoryId?: string;
   isActive?: 'true' | 'false';
   type?: ProductItemType;
@@ -115,6 +147,12 @@ export interface ProductInput {
   quantityAsOfDate?: string | null;
   reorderLevel?: number | null;
   isActive?: boolean;
+  /**
+   * D122 (3.13) — whether the product attracts tax. Omitted means TAXABLE: the
+   * server defaults it to true, so a client that never learned about this field
+   * cannot zero-rate a product by silence.
+   */
+  taxable?: boolean;
   /**
    * URL for a POS-side photo that was pre-uploaded via `POST /products/image`
    * before the product existed (Add Product wizard, D44). Once created, use
@@ -276,6 +314,10 @@ function buildQuery(q: ProductsQuery): string {
   params.set('pageSize', String(q.pageSize ?? 25));
   if (q.search) params.set('search', q.search);
   if (q.categoryId) params.set('categoryId', q.categoryId);
+  // D133 (`8.9`). This builder names every field explicitly, so a new one that
+  // is not listed here is dropped in silence and the filter looks broken rather
+  // than absent — which is exactly what happened on the first pass.
+  if (q.brandId) params.set('brandId', q.brandId);
   if (q.subcategoryId) params.set('subcategoryId', q.subcategoryId);
   if (q.isActive) params.set('isActive', q.isActive);
   if (q.type) params.set('type', q.type);
@@ -421,6 +463,7 @@ export async function downloadProductsReport(
   params.set('format', format);
   if (query.search) params.set('search', query.search);
   if (query.categoryId) params.set('categoryId', query.categoryId);
+  if (query.brandId) params.set('brandId', query.brandId);
   if (query.subcategoryId) params.set('subcategoryId', query.subcategoryId);
   if (query.isActive) params.set('isActive', query.isActive);
   if (query.type) params.set('type', query.type);

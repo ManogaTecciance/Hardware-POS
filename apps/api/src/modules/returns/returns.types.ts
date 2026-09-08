@@ -43,6 +43,14 @@ export interface ReturnableItem {
   purchasedQuantity: number;
   previouslyReturnedQuantity: number;
   availableReturnQuantity: number;
+  /**
+   * D134d (`6.6`) — the unit this line was SOLD in, so the returns screen can
+   * accept 0.5 kg back and label what it is asking for.
+   *
+   * The SNAPSHOT, not the product's current unit: a refund is measured in what
+   * the customer was charged in.
+   */
+  unitOfMeasure: string | null;
   productDiscount: number;
   lineTotal: number;
 }
@@ -71,7 +79,11 @@ export interface ReturnPreviewItem {
   originalUnitPrice: number;
   originalLineSubtotal: number;
   productDiscountAdjustment: number;
+  /** D123 (4.5) — the promotion reversed on this line, `× frac`. */
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  /** D126 — this line's share of a CART-LEVEL promotion, reversed. */
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundableAmount: number;
   returnReason: ReturnReason;
@@ -86,7 +98,11 @@ export interface ReturnPreview {
   items: ReturnPreviewItem[];
   subtotal: number;
   productDiscountAdjustment: number;
+  /** D123 (4.5) — the promotion reversed on this line, `× frac`. */
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  /** D126 — this line's share of a CART-LEVEL promotion, reversed. */
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;
   isFullReturn: boolean;
@@ -146,8 +162,39 @@ export interface ReturnsListFilter {
 export interface PersistReturnItem {
   originalSaleItemId: string;
   productId: string;
+  /**
+   * D120 (1a.20) — the exact variant that was sold, copied from the original
+   * SaleItem rather than named by the client.
+   *
+   * `ReturnItemInputDto` identifies a line by `saleItemId`, so the server
+   * already holds the historical record and never has to trust a caller about
+   * which size is coming back. A client cannot restock a Large against a sale
+   * of a Medium, because it is never asked.
+   *
+   * Required-nullable, not optional: the bug being fixed here was a hardcoded
+   * `productVariantId: null`, and an optional field would let the same thing
+   * happen again silently.
+   */
+  productVariantId: string | null;
   productNameSnapshot: string;
   skuSnapshot: string | null;
+  /**
+   * D44 — copied from the sale line's snapshots, never re-derived from the live
+   * variant. The sale froze "4 inch" at sale time; a rename since must not
+   * change what this return says was handed back.
+   */
+  variantSkuSnapshot: string | null;
+  variantNameSnapshot: string | null;
+  /** D134d (`6.5`) — the unit the ORIGINAL sale line was sold in. */
+  unitOfMeasureSnapshot: string | null;
+  /**
+   * D122 (3.11) — the tax rate REVERSED, copied from the original SaleItem.
+   *
+   * Required-nullable rather than optional: null is a meaningful value here
+   * (the sale predates 3.8), so a construction site must say which it means
+   * rather than getting null by omission.
+   */
+  taxRatePercent: number | null;
   imageUrlSnapshot: string | null;
   originalUnitPrice: number;
   purchasedQuantity: number;
@@ -159,7 +206,11 @@ export interface PersistReturnItem {
   note: string | null;
   originalLineSubtotal: number;
   productDiscountAdjustment: number;
+  /** D123 (4.5) — the promotion reversed on this line, `× frac`. */
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  /** D126 — this line's share of a CART-LEVEL promotion, reversed. */
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundableAmount: number;
 }
@@ -178,7 +229,11 @@ export interface PersistReturnInput {
   notes: string | null;
   subtotal: number;
   productDiscountAdjustment: number;
+  /** D123 (4.5) — the promotion reversed on this line, `× frac`. */
+  promotionDiscountAdjustment: number;
   orderDiscountAdjustment: number;
+  /** D126 — this line's share of a CART-LEVEL promotion, reversed. */
+  promotionOrderDiscountAdjustment: number;
   taxAdjustment: number;
   refundTotal: number;
   refundMethod: PaymentMethod;

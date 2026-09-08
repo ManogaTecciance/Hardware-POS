@@ -1,13 +1,18 @@
 /**
  * CHARACTERISATION — the Exchange A4 document renderer, as it behaves TODAY.
  *
- * Context (see docs/restaurant-pos/00-decisions.md, decision D2): the repository
- * contains an Exchange *document renderer* but no Exchange *transaction* — no
- * Prisma model, migration, API module, route, or permission key. The renderer's
- * own comment says as much.
+ * Context: when this spec was written the repository contained an Exchange
+ * *document renderer* but no Exchange *transaction* — no Prisma model,
+ * migration, API module, route or permission key (decision D2).
  *
- * Decision D2 requires that this renderer, and its current rendering output, be
- * preserved. `documents.preview.spec.ts` already covers the signature chain and
+ * **That changed in Phase 7.** D128 built the transaction, and `7.3` connected
+ * this renderer to it. Two things follow: the rendering output is no longer
+ * merely "preserved" but load-bearing for a real document a customer is handed,
+ * and the tax column now follows the tenant's setting rather than being forced
+ * off — see the note on those tests below.
+ *
+ * D2's requirement that the existing output be preserved still holds for every
+ * assertion NOT explicitly changed by `7.3`. `documents.preview.spec.ts` already covers the signature chain and
  * the invoice-note exclusion for the `'exchange'` preview type; it does NOT cover
  * `buildExchangeDocument` itself. This spec closes that gap so testcases.md rows
  * EXC-D-001…EXC-D-003 are honestly backed by automated coverage rather than
@@ -18,6 +23,7 @@
  */
 
 import { DocumentsService, type ExchangeLine } from './documents.service';
+import type { DocumentSettings } from '../settings/settings.interfaces';
 import { SettingsService } from '../settings/settings.service';
 
 /** Prisma stub — this path never touches the database. */
@@ -29,6 +35,25 @@ const pdfStub = { available: true, htmlToPdf: jest.fn(async () => null) } as any
 function service(): DocumentsService {
   return new DocumentsService(prismaStub, new SettingsService(prismaStub), pdfStub);
 }
+
+/**
+ * `7.3` — a service whose document settings can be driven.
+ *
+ * Needed because the tax column now FOLLOWS the tenant's setting, so proving
+ * it takes both states. The plain `service()` above keeps code defaults.
+ */
+function serviceWithDocs(overrides: Partial<DocumentSettings>): DocumentsService {
+  const base = new SettingsService(prismaStub).getSettings(TENANT);
+  const settings = {
+    getSettings: () => ({ ...base, documents: { ...base.documents, ...overrides } }),
+  } as unknown as SettingsService;
+  return new DocumentsService(prismaStub, settings, pdfStub);
+}
+
+/** Column LABELS. `doc.columns` holds objects, so comparing it to strings
+ *  silently matches nothing — see the note on the tax-column tests below. */
+const labels = (doc: { columns: { label: string }[] }): string[] =>
+  doc.columns.map((c) => c.label);
 
 const TENANT = 'tnt_1';
 const SELLER = 'Fixture Hardware (Pvt) Ltd';
@@ -161,9 +186,29 @@ describe('DocumentsService.buildExchangeDocument', () => {
     expect(net.value).toContain('0.10');
   });
 
-  it('hides the tax and discount columns regardless of tenant settings', () => {
-    // The renderer forces both off — an exchange note has no tax/discount columns.
-    const doc = service().buildExchangeDocument(
+  /**
+   * CHANGED BY DECISION in `7.3`, and the old assertion was VACUOUS.
+   *
+   * It read `expect(doc.columns).not.toContain('Tax')`. `doc.columns` is an
+   * array of `{ label, align }` OBJECTS, so it could never contain the string
+   * `'Tax'` in either state — the assertion passed identically whether the
+   * column was rendered or not. CLAUDE.md names this failure exactly: "a
+   * regular expression fails to match either the valid or the invalid state".
+   *
+   * The behaviour also changed. The renderer forced `showTaxColumn: false`,
+   * written before Phase 3 made tax per-line with snapshots, so an exchange
+   * note showed no tax and did not tie to the money that moved. It now follows
+   * the tenant's setting, exactly as the sale and return notes do.
+   */
+  it('shows the tax column when the tenant shows it, and hides it when not', () => {
+    const shown = serviceWithDocs({ showTaxColumn: true }).buildExchangeDocument(
+      TENANT,
+      SELLER,
+      'EXC-000009',
+      [line('Returned A', 100, 1)],
+      [line('New B', 200, 1)],
+    );
+    const hidden = serviceWithDocs({ showTaxColumn: false }).buildExchangeDocument(
       TENANT,
       SELLER,
       'EXC-000009',
@@ -171,8 +216,60 @@ describe('DocumentsService.buildExchangeDocument', () => {
       [line('New B', 200, 1)],
     );
 
-    expect(doc.columns).not.toContain('Tax');
-    expect(doc.columns).not.toContain('Discount');
+    // Both directions. One of these alone would pass for a renderer that
+    // ignored the setting entirely.
+    expect(labels(shown)).toContain('Tax');
+    expect(labels(hidden)).not.toContain('Tax');
+  });
+
+  it('never shows a per-line discount column, whatever the tenant sets', () => {
+    // Unchanged in `7.3`: an exchange line carries no discount of its own,
+    // because the price it is valued at already has one applied. Asserted on
+    // LABELS this time, so it is capable of failing.
+    const doc = serviceWithDocs({ showDiscountColumn: true }).buildExchangeDocument(
+      TENANT,
+      SELLER,
+      'EXC-000009',
+      [line('Returned A', 100, 1)],
+      [line('New B', 200, 1)],
+    );
+    expect(labels(doc)).not.toContain('Discount');
+    // Non-vacuous: the label list is populated, so 'not.toContain' is a real
+    // claim about a real list rather than an assertion against nothing.
+    expect(labels(doc)).toContain('Line total');
+  });
+
+  it('carries a real per-line tax figure on both sides, as a magnitude', () => {
+    // `7.3` — hardcoded 0 for every line until Phase 7.
+    const doc = serviceWithDocs({ showTaxColumn: true }).buildExchangeDocument(
+      TENANT,
+      SELLER,
+      'EXC-000011',
+      [{ ...line('Returned A', 100, 1), taxAmount: 15 }],
+      [{ ...line('New B', 200, 1), taxAmount: 30 }],
+    );
+    // A magnitude on both sides: the shared row builder renders a non-positive
+    // tax as an em dash, so negating the returning side would erase it. These
+    // fail against the old hardcoded 0, which rendered the same em dash.
+    expect(doc.rows[0]!.cells.some((c) => c.includes('15'))).toBe(true);
+    expect(doc.rows[1]!.cells.some((c) => c.includes('30'))).toBe(true);
+  });
+
+  it('prefers explicit totals over a sum of display lines', () => {
+    // `7.3` — the note must tie to `Return.refundTotal` and `Sale.total`, the
+    // money that actually moved, not to a reconstruction from the rows.
+    const doc = service().buildExchangeDocument(
+      TENANT,
+      SELLER,
+      'EXC-000012',
+      [line('Returned A', 100, 1)],
+      [line('New B', 200, 1)],
+      { returnedTotal: 115, replacementTotal: 230 },
+    );
+    // 230 - 115 = 115, not the 100 the display lines would have given.
+    const due = doc.summary.find((s) => s.label.includes('Balance due'));
+    expect(due).toBeDefined();
+    expect(due!.value).toContain('115');
   });
 
   it('renders with no returned lines (a pure add-on)', () => {

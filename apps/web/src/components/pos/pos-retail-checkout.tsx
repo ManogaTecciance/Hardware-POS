@@ -26,28 +26,55 @@ import { ItemNoteDialog } from '@/components/pos/item-note-dialog';
 import { ManagerApprovalDialog } from '@/components/pos/manager-approval-dialog';
 import { OrderDiscountDialog } from '@/components/pos/order-discount-dialog';
 import { ProductImage } from '@/components/product-image';
+import {
+  VariantPickerDialog,
+  needsVariantChoice,
+  quickAddVariant,
+} from '@/components/pos/variant-picker-dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
 import { productTypeLabel } from '@hardware-pos/shared';
 
 import { Pagination } from '@/components/ui/pagination';
 
 import { useAuth } from '@/lib/auth';
-import { computeLine, computeTotals, type LineDiscount, type OrderDiscount } from '@/lib/cart';
-import { useCheckoutData, type ClientProduct } from '@/lib/catalog';
+import {
+  computeCartLines,
+  computeLine,
+  computeTotals,
+  forgonePromotions,
+  linePrice,
+  type CartLineKey,
+  type LineDiscount,
+  type OrderDiscount,
+} from '@/lib/cart';
+import {
+  displayPrice,
+  useCheckoutData,
+  type ClientProduct,
+  type ClientVariant,
+} from '@/lib/catalog';
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
-import { stockCap, usePosCart } from '@/lib/pos-cart';
-import { scanCandidates, useBarcodeScanner } from '@/lib/use-barcode-scanner';
+import { outstandingRewards } from '@hardware-pos/shared';
+
+import { isMeasured, stockCap, usePosCart } from '@/lib/pos-cart';
+import { MeasureNumpad } from '@/components/pos/measure-numpad';
+import { cartLineKey } from '@/lib/cart';
+import { HeldSalesButton, HoldCartButton } from '@/components/pos/held-sales';
+import { resolveScan, type ScanHit } from '@/lib/scan-resolver';
+import { useBarcodeScanner } from '@/lib/use-barcode-scanner';
 import { cn, formatMoney, round2 } from '@/lib/utils';
 
 const PAGE_SIZES = [20, 30, 40, 50];
 interface PendingLineApproval {
+  /** D120 — which cart line to update. */
+  lineKey: CartLineKey;
+  /** The product the approval is *for* — `/discounts/approve` is product-scoped. */
   productId: string;
   discount: LineDiscount;
   percent: number;
@@ -75,8 +102,20 @@ export function PosRetailCheckout() {
   const [subcategory, setSubcategory] = React.useState('All');
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
-  const [noteFor, setNoteFor] = React.useState<string | null>(null);
-  const [discountFor, setDiscountFor] = React.useState<string | null>(null);
+  const [noteFor, setNoteFor] = React.useState<CartLineKey | null>(null);
+  const [discountFor, setDiscountFor] = React.useState<CartLineKey | null>(null);
+  // D120 (1c.4) — the product whose sizes are being chosen, or null when closed.
+  const [pickVariantFor, setPickVariantFor] = React.useState<ClientProduct | null>(null);
+  /**
+   * D134 (`6.3`) — the measured line waiting for a weight.
+   *
+   * Nothing is in the cart while this is set: cancelling adds nothing, because
+   * a half-added line is worse than no line.
+   */
+  const [measureFor, setMeasureFor] = React.useState<{
+    product: ClientProduct;
+    variant: ClientVariant | null;
+  } | null>(null);
   const [pendingApproval, setPendingApproval] = React.useState<PendingLineApproval | null>(null);
   const [orderDiscountOpen, setOrderDiscountOpen] = React.useState(false);
   const [pendingOrderApproval, setPendingOrderApproval] = React.useState<{
@@ -130,25 +169,78 @@ export function PosRetailCheckout() {
   );
 
   React.useEffect(() => setPage(1), [q, category, subcategory, pageSize]);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageProducts = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   /**
-   * Add a product, or say why it cannot be added.
+   * D134 (`6.3`) — **the one place a line enters the cart.**
    *
-   * The one place the "can this be sold" question is answered for every add
-   * path — tile, scanner and the search box's Enter key. It used to be written
-   * out separately per caller, and Enter had simply been missed, so a product
-   * the tile refused could still be added by typing its SKU and pressing return.
+   * Four routes reach the cart: a card tap, the variant picker, a scanned
+   * barcode and a typed code. A measured product must prompt on ALL FOUR, and
+   * the two that would be missed are the scan and the typed code — a barcode
+   * names *which* rice, never *how much*, so scanning must still ask.
+   *
+   * Intercepting at four call sites is `2.12` waiting to happen: four sale-line
+   * renderers, two of them fixed, so the same sale printed correctly from one
+   * endpoint and wrongly from another. So every route calls THIS, and the
+   * decision is made once.
+   *
+   * The same seam is where "can this be sold" is answered — or the reason it
+   * cannot is said — for every add path. It used to be written out separately
+   * per caller, and Enter had simply been missed, so a product the tile refused
+   * could still be added by typing its SKU and pressing return. Returns whether
+   * the line went in (or is on its way in through the weight prompt), so a
+   * caller clears the search box only when the add actually took.
    */
-  const addToCart = (product: ClientProduct) => {
-    if (stockCap(product) === 0) {
-      showToast(`${product.name} is out of stock`, 'warning');
+  const commitAdd = (product: ClientProduct, variant: ClientVariant | null): boolean => {
+    // Judged against the SIZE when one was chosen (D120): a scanned Medium with
+    // none left is out of stock however many Larges the product still has.
+    const cap = stockCap(product, variant);
+    if (cap != null && cap <= 0) {
+      showToast(
+        `${variant ? `${product.name} (${variant.name})` : product.name} is out of stock`,
+        'warning',
+      );
       return false;
     }
-    cart.addToCart(product);
-    showToast(`${product.name} added`);
+    if (isMeasured(product)) {
+      setMeasureFor({ product, variant });
+      return true;
+    }
+    cart.addToCart(product, variant);
+    showToast(variant ? `${product.name} (${variant.name}) added` : `${product.name} added`);
     return true;
+  };
+
+  /**
+   * D120 (1c.4) — the single add-to-cart path.
+   *
+   * Every route into the cart goes through here — card tap, Enter on search, the
+   * sole-visible-result shortcut — so the quick-add ladder cannot differ between
+   * them. `quickAddVariant` decides whether there is a real choice to make; the
+   * picker opens only when there is.
+   */
+  const addProduct = (product: ClientProduct): boolean => {
+    if (needsVariantChoice(product)) {
+      // A choice is also "needed" when every size is out — `quickAddVariant`
+      // has nothing to hand back — and the picker would then open onto a list
+      // of greyed rows. Refuse here instead, the way `commitAdd` refuses a
+      // size, so a scan or a typed code says so and keeps the query. The
+      // server's verdict rather than the rolled-up count: OUT means every
+      // size is out (1c.6), which is what the card greys on too.
+      if (product.stockState === 'OUT') {
+        showToast(`${product.name} is out of stock`, 'warning');
+        return false;
+      }
+      setPickVariantFor(product);
+      return true;
+    }
+    return commitAdd(product, quickAddVariant(product));
+  };
+
+  /** Chosen from the picker — always explicit, never a guess. */
+  const addChosenVariant = (product: ClientProduct, variant: ClientVariant) => {
+    setPickVariantFor(null);
+    commitAdd(product, variant);
   };
 
   /**
@@ -158,31 +250,41 @@ export function PosRetailCheckout() {
    * URL or JSON are unwrapped by `scanCandidates`, so both 1D barcodes and QR
    * codes resolve through the same path.
    */
-  const findBySku = React.useCallback(
-    (code: string): ClientProduct | undefined => {
-      for (const candidate of scanCandidates(code)) {
-        const key = candidate.toLowerCase();
-        const hit = data.products.find((p) => (p.sku ?? '').trim().toLowerCase() === key);
-        if (hit) return hit;
-      }
-      return undefined;
-    },
+  const findByCode = React.useCallback(
+    (code: string): ScanHit | null => resolveScan(data.products, code),
     [data.products],
   );
 
   /** Add a scanned product, or explain why it couldn't be added. */
   const addByCode = React.useCallback(
     (code: string) => {
-      const product = findBySku(code);
-      if (!product) {
+      const hit = findByCode(code);
+      if (!hit) {
         showToast(`No product found for "${code}"`, 'danger');
         return;
       }
-      if (addToCart(product)) setQuery('');
+      const { product, variant } = hit;
+
+      // D120 (1c.5) — a barcode names ONE size, so a variant match adds it
+      // directly. Opening the picker after a scan would ask a question the code
+      // already answered.
+      //
+      // D134 (`6.3`) — through the seam, so a scanned measured product still
+      // asks for a weight. The code named the size, not the amount. The seam is
+      // also what refuses a size with none left, so the query is cleared only
+      // when the add took.
+      if (variant) {
+        if (commitAdd(product, variant)) setQuery('');
+        return;
+      }
+
+      // A legacy variant-less product: the quick-add ladder resolves to a direct
+      // add, and the product-level stock is the right number to refuse on.
+      if (addProduct(product)) setQuery('');
     },
     // showToast/cart are stable enough for this handler's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [findBySku],
+    [findByCode],
   );
 
   // Hardware scanner works anywhere on the page — no need to focus the search
@@ -190,37 +292,58 @@ export function PosRetailCheckout() {
   const modalOpen =
     !!noteFor ||
     !!discountFor ||
+    !!pickVariantFor ||
+    !!measureFor ||
     !!pendingApproval ||
     orderDiscountOpen ||
     !!pendingOrderApproval;
   useBarcodeScanner({ onScan: addByCode, enabled: !modalOpen });
 
-  // Enter adds an exact SKU match (whole catalog), else the sole visible result.
+  // Enter adds an exact code match (whole catalog), else the sole visible result.
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
-    const exact = findBySku(q);
-    const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
-    if (target && addToCart(target)) setQuery('');
+    // D120 (1c.5) — a typed variant SKU is as specific as a scanned barcode, so
+    // it adds that size rather than falling back to the product and prompting.
+    // The same path as a scan, deliberately: a cashier typing a code a damaged
+    // barcode would have carried must get the same result — including being
+    // refused when it is out of stock, which is when the query stays put.
+    const exact = findByCode(q);
+    if (exact) {
+      const added = exact.variant
+        ? // D134 (`6.3`) — the same seam as a scan, deliberately.
+          commitAdd(exact.product, exact.variant)
+        : addProduct(exact.product);
+      if (added) setQuery('');
+      return;
+    }
+    // No code match: the sole visible result, which may still need a size.
+    if (filtered.length === 1 && addProduct(filtered[0]!)) setQuery('');
   };
 
   // ── discounts ──────────────────────────────────────────────────────────────
-  const handleLineDiscountApply = (productId: string, discount: LineDiscount) => {
-    const item = cart.items.find((it) => it.product.id === productId);
+  const handleLineDiscountApply = (lineKey: CartLineKey, discount: LineDiscount) => {
+    const item = cart.items.find((it) => it.lineKey === lineKey);
     if (!item) return;
+    /*
+     * Deliberately `computeLine`, not `computeCartLines` (4.4). This asks "how
+     * large is this MANUAL discount?" so it can be checked against the cashier's
+     * role limit. Netting a promotion into that percentage would let an approval
+     * limit be dodged by discounting an already-promoted line.
+     */
     const line = computeLine({ ...item, discount });
     const percent = line.lineSubtotal > 0 ? (line.discountAmount / line.lineSubtotal) * 100 : 0;
     if (withinDiscountLimit(discountLimitFor(session!.user.role), percent)) {
-      cart.setLineDiscount(productId, discount);
+      cart.setLineDiscount(lineKey, discount);
       setDiscountFor(null);
     } else {
-      setPendingApproval({ productId, discount, percent });
+      setPendingApproval({ lineKey, productId: item.product.id, discount, percent });
       setDiscountFor(null);
     }
   };
 
   const handleApproveLine = async (managerPin: string, note: string): Promise<string | null> => {
     if (!pendingApproval) return 'No pending discount';
-    const { productId, discount } = pendingApproval;
+    const { lineKey, productId, discount } = pendingApproval;
     const res = await requestDiscountApproval(session!, {
       managerPin,
       productId,
@@ -233,7 +356,7 @@ export function PosRetailCheckout() {
     });
     if (res.approved && res.approvalToken) {
       cart.setLineDiscount(
-        productId,
+        lineKey,
         { ...discount, reason: note || discount.reason },
         res.approvalToken,
         res.approvedByUserId ?? undefined,
@@ -253,7 +376,92 @@ export function PosRetailCheckout() {
     setShopTimeZone(shopTimeZone);
   }, [shopTimeZone, setShopTimeZone]);
 
-  const totals = computeTotals(cart.items, data.settings.taxRatePercent, cart.orderDiscount);
+  const totals = computeTotals(
+    cart.items,
+    data.settings.taxRatePercent,
+    cart.orderDiscount,
+    data.promotionRules,
+  );
+  /*
+   * D123 (4.4) — the list below reads THESE lines, not its own `computeLine`.
+   * A promotion needs the whole basket to resolve, so a per-line call cannot see
+   * it: the rows would show pre-promotion totals under a post-promotion footer,
+   * and the cart would visibly not add up.
+   */
+  /*
+   * D45 (4.11) — the till claims a reward the basket has earned.
+   *
+   * `pendingRewards` reads the SAME `buyXGetYOutcome` the applier prices from,
+   * so a line added here is always a line the applier discounts — never one that
+   * appears and is then charged for.
+   *
+   * Three guards, each for a real failure:
+   *
+   *   • DECLINED. Removing an auto-added line records the promotion, so it is
+   *     not put straight back. Without this the trash button does nothing and
+   *     the cashier cannot get rid of it.
+   *   • ALREADY PRESENT. `addRewardToCart` marks an existing line rather than
+   *     stacking a second, so a cashier who scanned the tie themselves sees the
+   *     badge and one line.
+   *   • VARIANTS. A reward with sizes needs one chosen. The default variant
+   *     (D45) is used when there is one; otherwise nothing is added and the
+   *     cashier is told to pick, because a till guessing a size is worse than a
+   *     till asking.
+   */
+  /*
+   * D45 (4.14) — the cashier adds the reward; the till requires it.
+   *
+   * 4.11–4.13 had the till add the free item itself, and it created more
+   * problems than it solved: which variant to give away, what to do when the
+   * entitlement moved, and an effect that fought its own state. The till now
+   * states what is owed and refuses payment until it is in the basket, which
+   * leaves the choice of product, variant, colour and size where it belongs —
+   * with the person serving the customer.
+   *
+   * No effect and no cart writes: this is derived on every render from the cart
+   * and the rules, so it recalculates when either changes and cannot loop.
+   */
+  const outstanding = React.useMemo(
+    () =>
+      data.promotionRules.length === 0
+        ? []
+        : outstandingRewards({
+            lines: cart.items.map((it) => {
+              const line = computeLine(it);
+              return {
+                id: it.lineKey,
+                productId: it.product.id,
+                unitPrice: linePrice(it),
+                quantity: it.quantity,
+                lineSubtotal: line.lineSubtotal,
+                manualDiscountAmount: line.discountAmount,
+                // D134a (`6.4`) — same flag as `cart.ts` and the server.
+                isMeasured: it.product.quantityType === 'DECIMAL',
+              };
+            }),
+            promotions: data.promotionRules,
+          }),
+    [cart.items, data.promotionRules],
+  );
+
+  /*
+   * Open decision 3 (PO-confirmed) — a manual discount that displaced a LARGER
+   * promotion. Warns; never blocks and never silently swaps to the better one.
+   * The cashier may have every reason to honour the manual price, and a till
+   * that overrides them quietly is a till nobody trusts.
+   */
+  const forgone = React.useMemo(
+    () => forgonePromotions(cart.items, data.promotionRules),
+    [cart.items, data.promotionRules],
+  );
+
+  /** The promotion names the product; the catalogue names the product to a human. */
+  const outstandingLabel = (productId: string) =>
+    data.products.find((p) => p.id === productId)?.name ?? 'promotional item';
+
+  const linesByKey = new Map(
+    computeCartLines(cart.items, data.promotionRules).map((l) => [l.lineKey, l]),
+  );
   const orderBase = round2(totals.subtotal - totals.totalDiscount);
 
   const handleOrderDiscountApply = (discount: OrderDiscount) => {
@@ -295,16 +503,25 @@ export function PosRetailCheckout() {
   const selectedCustomerName =
     cart.addedCustomers.find((c) => c.id === cart.customerId)?.name ?? null;
 
-  const noteItem = cart.items.find((it) => it.product.id === noteFor);
-  const discountItem = cart.items.find((it) => it.product.id === discountFor);
-  const approvalItem = cart.items.find((it) => it.product.id === pendingApproval?.productId);
+  const noteItem = cart.items.find((it) => it.lineKey === noteFor);
+  const discountItem = cart.items.find((it) => it.lineKey === discountFor);
+  const approvalItem = cart.items.find((it) => it.lineKey === pendingApproval?.lineKey);
 
   const currency = data.settings.currency;
   const cartEmpty = cart.items.length === 0;
   // Both are YYYY-MM-DD, so a plain string compare orders them correctly.
   const isBackdated = cart.saleDateValid && cart.saleDate < cart.today;
-  // A half-typed or future date must not reach the payment screen.
-  const canPay = !cartEmpty && !totals.hasStockIssue && cart.saleDateValid;
+  /*
+   * A half-typed or future date must not reach the payment screen.
+   *
+   * D45 (4.14) — nor may an unclaimed reward. The customer is entitled to it
+   * and the cashier has not added it yet, so completing the sale would
+   * short-change them silently. This is a workflow gate on the till, not a
+   * money rule: the server prices whatever it is sent and does not refuse a
+   * sale for a reward the customer declined.
+   */
+  const canPay =
+    !cartEmpty && !totals.hasStockIssue && cart.saleDateValid && outstanding.length === 0;
 
   const goToPayment = () => {
     setCartOpen(false);
@@ -329,6 +546,28 @@ export function PosRetailCheckout() {
           ) : null}
         </div>
         <div className="flex items-center gap-1">
+          {/*
+            `8.8` — hold and resume. A hold is a DRAFT sale: the basket is put
+            down, the stock stays on the shelf, and the existing completion path
+            finishes it later by `saleId`. `Held` shows even with an empty cart —
+            that is precisely when a cashier goes looking for one.
+          */}
+          {!cartEmpty ? (
+            <HoldCartButton
+              session={session!}
+              branchId={session?.branchId ?? null}
+              products={data.products}
+              items={cart.items}
+              customerId={cart.customerId}
+            />
+          ) : null}
+          <HeldSalesButton
+            session={session!}
+            branchId={session?.branchId ?? null}
+            products={data.products}
+            items={cart.items}
+            customerId={cart.customerId}
+          />
           {!cartEmpty ? (
             <Button
               variant="ghost"
@@ -405,6 +644,50 @@ export function PosRetailCheckout() {
         ) : null}
       </div>
 
+      {/* D45 (4.14) — what the customer is owed, and how many are still to come.
+          Named per promotion, because two offers can be outstanding at once. */}
+      {outstanding.length > 0 ? (
+        <div className="mx-4 mb-2 space-y-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2.5">
+          {outstanding.map((r) => (
+            <div key={r.promotionId} className="text-xs">
+              <p className="font-semibold text-primary">🎁 {r.promotionName}</p>
+              <p className="mt-0.5 text-muted-foreground">
+                Add <span className="font-semibold text-foreground">{r.outstanding}</span>{' '}
+                {outstandingLabel(r.productId)}
+                {r.outstanding === 1 ? '' : 's'} to complete this offer.
+              </p>
+            </div>
+          ))}
+          <p className="pt-0.5 text-[11px] font-medium text-primary/80">
+            Payment is unavailable until the offer is complete.
+          </p>
+        </div>
+      ) : null}
+
+      {forgone.length > 0 ? (
+        <div className="mx-4 mb-2 space-y-1.5 rounded-xl border border-warning/40 bg-warning-soft px-3 py-2.5">
+          {forgone.map((f) => (
+            <div key={f.lineKey} className="text-xs">
+              <p className="font-semibold text-warning">
+                ⚠ Your discount on {f.productName} is smaller than its offer
+              </p>
+              <p className="mt-0.5 text-muted-foreground">
+                You took{' '}
+                <span className="font-semibold text-foreground">
+                  {formatMoney(f.manualDiscountAmount, currency)}
+                </span>{' '}
+                off. <span className="font-semibold">{f.promotionName}</span> would have taken{' '}
+                <span className="font-semibold text-foreground">
+                  {formatMoney(f.promotionDiscountAmount, currency)}
+                </span>
+                . A manual discount replaces the offer on that line — remove it to use the offer
+                instead.
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {/* Items — the only scroll region inside the cart */}
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
         {cartEmpty ? (
@@ -414,17 +697,41 @@ export function PosRetailCheckout() {
           </div>
         ) : (
           cart.items.map((item) => {
-            const line = computeLine(item);
+            const line = linesByKey.get(item.lineKey)!;
             return (
-              <div key={item.product.id} className="rounded-xl border border-border bg-card p-2.5">
+              // D120 (1c.6) — keyed by the LINE, not the product. 1c.2 re-keyed the
+              // cart's own map but left this list on `product.id`, so two sizes of
+              // one product were duplicate siblings: React reconciles those by
+              // position, and a note or discount could be applied to the wrong row.
+              <div key={item.lineKey} className="rounded-xl border border-border bg-card p-2.5">
                 <div className="flex items-start gap-2.5">
                   <div className="min-w-0 flex-1">
                     <div className="line-clamp-2 text-sm font-medium leading-tight">
                       {item.product.name}
                     </div>
+                    {/*
+                      D45 (4.13) — badge what the PROMOTION PRICED, not what the
+                      till added. A row at 0.00 reads as a bug unless it is
+                      named, and a cashier who swaps the red tie for a black one
+                      must still see it: their line is discounted by the same
+                      rule, so it carries the same badge.
+                    */}
+                    {line.promotionName ? (
+                      <span
+                        className="mt-1 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
+                        title={line.promotionName}
+                      >
+                        {line.promotionName}
+                      </span>
+                    ) : null}
                     <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
                       <span className="truncate">
-                        {item.product.sku ?? '—'} · {formatMoney(item.product.unitPrice, currency)}
+                        {/* A variant parent's SKU is null by design (D44), so this
+                            slot showed a bare dash on exactly the lines that most
+                            needed identifying. The size is what distinguishes two
+                            otherwise identical rows. */}
+                        {item.variant ? item.variant.name : (item.product.sku ?? '—')} ·{' '}
+                        {formatMoney(linePrice(item), currency)}
                       </span>
                     </div>
                   </div>
@@ -446,7 +753,8 @@ export function PosRetailCheckout() {
                 {line.outOfStock ? (
                   <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-danger">
                     <AlertTriangle className="h-3.5 w-3.5" />
-                    Only {item.product.quantityOnHand} in stock
+                    Only {item.variant?.quantityOnHand ?? item.product.quantityOnHand} in
+                    stock
                   </div>
                 ) : null}
 
@@ -457,20 +765,38 @@ export function PosRetailCheckout() {
                 ) : null}
 
                 <div className="mt-2 flex items-center justify-between">
-                  <QuantityStepper
-                    quantity={item.quantity}
-                    max={stockCap(item.product) ?? undefined}
-                    onDecrement={() => cart.changeQty(item.product.id, -1)}
-                    onIncrement={() => cart.changeQty(item.product.id, 1)}
-                    onSet={(q) => cart.setQty(item.product.id, q)}
-                  />
+                  {/*
+                    D134 (`6.3`) — a measured line does not step. ±1 kg of rice is
+                    not what anyone wants, and inventing a smaller increment would
+                    be a guess. Tapping the amount re-opens the numpad, which is
+                    the same way it was entered.
+                  */}
+                  {isMeasured(item.product) ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 tabular-nums"
+                      onClick={() => setMeasureFor({ product: item.product, variant: item.variant })}
+                      aria-label={`Change quantity for ${item.product.name}`}
+                    >
+                      {item.quantity} {item.product.unitOfMeasure ?? ''}
+                    </Button>
+                  ) : (
+                    <QuantityStepper
+                      quantity={item.quantity}
+                      max={stockCap(item.product, item.variant) ?? undefined}
+                      onDecrement={() => cart.changeQty(item.lineKey, -1)}
+                      onIncrement={() => cart.changeQty(item.lineKey, 1)}
+                      onSet={(q) => cart.setQty(item.lineKey, q)}
+                    />
+                  )}
 
                   <div className="flex items-center gap-0.5">
                     <Button
                       variant="ghost"
                       size="icon"
                       className={cn('h-9 w-9', item.note && 'text-primary')}
-                      onClick={() => setNoteFor(item.product.id)}
+                      onClick={() => setNoteFor(item.lineKey)}
                       aria-label="Add note"
                     >
                       <NotebookPen className="h-4 w-4" />
@@ -479,7 +805,7 @@ export function PosRetailCheckout() {
                       variant="ghost"
                       size="icon"
                       className={cn('h-9 w-9', item.discount && 'text-primary')}
-                      onClick={() => setDiscountFor(item.product.id)}
+                      onClick={() => setDiscountFor(item.lineKey)}
                       aria-label="Add product discount"
                     >
                       <Tag className="h-4 w-4" />
@@ -489,7 +815,7 @@ export function PosRetailCheckout() {
                       size="icon"
                       className="h-9 w-9 text-danger"
                       aria-label="Remove item"
-                      onClick={() => cart.removeItem(item.product.id)}
+                      onClick={() => cart.removeItem(item.lineKey)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -543,6 +869,18 @@ export function PosRetailCheckout() {
             </>
           )}
         </button>
+        {/*
+          * D126 — a cart-level promotion. Named rather than folded into "Order
+          * discount": that row means the cashier's own decision and carries an
+          * approval badge, and putting an automatic promotion under it would
+          * make the badge's absence read as an unapproved manual discount.
+          */}
+        {totals.promotionOrderDiscountAmount > 0 ? (
+          <Row
+            label={totals.promotionOrderName ?? 'Promotion'}
+            value={`-${formatMoney(totals.promotionOrderDiscountAmount, currency)}`}
+          />
+        ) : null}
         <Row
           label={`VAT (${data.settings.taxRatePercent}%)`}
           value={formatMoney(totals.taxAmount, currency)}
@@ -719,14 +1057,22 @@ export function PosRetailCheckout() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2.5">
               {pageProducts.map((p) => {
-                const outOfStock = stockCap(p) === 0;
-                // Low stock only when a reorder point is set and stock is at/below
-                // it — the same rule the products table and dashboard alert use.
-                const lowStock =
-                  p.type === 'Inventory' &&
-                  !outOfStock &&
-                  p.reorderLevel != null &&
-                  p.quantityOnHand <= p.reorderLevel;
+                // D120 (1c.6) — the server's classification, not a threshold
+                // comparison here. For a variant product it is rolled up from the
+                // sizes, so a shirt with no Mediums but plenty of Larges stays
+                // sellable instead of being greyed out by a stale parent number.
+                //
+                // The `reorderLevel` this replaced was mapped to null for every
+                // product by the sellable read model, so the low-stock badge had
+                // been unreachable on this screen since 1c.1. The `stockCap(p)
+                // === 0` test the card used before reads the same way for a
+                // variant-less product; the classification is what also answers
+                // for a product whose stock lives on its sizes.
+                const outOfStock = p.stockState === 'OUT';
+                const lowStock = p.stockState === 'LOW';
+                // More than one sellable option — the card offers the picker
+                // rather than a bare Add, even when a default would quick-add.
+                const hasChoice = p.variants.filter((v) => v.stockState !== 'OUT').length > 1;
                 return (
                   <div
                     key={p.id}
@@ -735,7 +1081,7 @@ export function PosRetailCheckout() {
                   >
                     <button
                       type="button"
-                      onClick={() => addToCart(p)}
+                      onClick={() => addProduct(p)}
                       disabled={outOfStock}
                       aria-label={`Add ${p.name} to cart`}
                       className="relative block text-left disabled:cursor-not-allowed"
@@ -768,14 +1114,40 @@ export function PosRetailCheckout() {
                       <div className="line-clamp-2 min-h-8 text-xs font-medium leading-tight">
                         {p.name}
                       </div>
+                      {/*
+                        The `\u00a0` is load-bearing. A variant product has NO parent SKU —
+                        D44 says the parent-level `sku` is a legacy fallback that is not
+                        read, so the read model sends null — and an empty div collapses to
+                        ZERO height. That shortened the card by one line, so the price and
+                        the action button sat higher than on every neighbouring card.
+
+                        A non-breaking space is exact by construction: it forces one line
+                        box at whatever line-height resolves to. A `min-h-*` constant would
+                        have to be kept matched to the font size by hand, and would be
+                        silently wrong the day either changed.
+
+                        NOT `mt-auto` on the button: every row here is a fixed line, so a
+                        card has no free space to distribute and the auto margin would
+                        collapse to nothing — closing the gap above the button rather than
+                        preserving it.
+
+                        The slot now carries the OPTION COUNT for a variant product,
+                        because that is what it can truthfully hold. There is no parent
+                        SKU to show, and a blank line beside neighbours that have one
+                        reads as data lost rather than data absent. The variant SKUs are
+                        in the picker, which is where a variant is chosen.
+                      */}
                       <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                        {p.sku ?? ''}
+                        {p.sku ??
+                          (p.variants && p.variants.length > 0
+                            ? `${p.variants.length} option${p.variants.length > 1 ? 's' : ''}`
+                            : '\u00a0')}
                       </div>
                       {/* Wraps: "Not tracked" beside a five-figure price overflows a
                           9rem tile, and a truncated price is worse than a wrapped label. */}
                       <div className="mt-1.5 flex flex-wrap items-end justify-between gap-1">
                         <span className="text-sm font-semibold text-primary">
-                          {formatMoney(p.unitPrice, currency)}
+                          {formatMoney(displayPrice(p), currency)}
                         </span>
                         <span
                           className={cn(
@@ -793,16 +1165,22 @@ export function PosRetailCheckout() {
                               : p.quantityOnHand.toLocaleString()}
                         </span>
                       </div>
+                      {/*
+                        D120 (1c.4) — option B. Tapping the card quick-adds the
+                        default size; this button opens the picker instead, so a
+                        cashier selling a Large is never stuck with the default.
+                        A product with one option or none keeps the plain Add.
+                      */}
                       <Button
                         variant={outOfStock ? 'outline' : 'primary'}
                         size="sm"
                         fullWidth
                         disabled={outOfStock}
                         className="mt-2"
-                        onClick={() => addToCart(p)}
-                        leftIcon={outOfStock ? undefined : <Plus className="h-4 w-4" />}
+                        onClick={() => (hasChoice ? setPickVariantFor(p) : addProduct(p))}
+                        leftIcon={outOfStock || hasChoice ? undefined : <Plus className="h-4 w-4" />}
                       >
-                        {outOfStock ? 'Out of Stock' : 'Add'}
+                        {outOfStock ? 'Out of Stock' : hasChoice ? 'Choose option' : 'Add'}
                       </Button>
                     </div>
                   </div>
@@ -888,10 +1266,62 @@ export function PosRetailCheckout() {
           productName={noteItem.product.name}
           initialNote={noteItem.note}
           onSave={(note) => {
-            cart.setNote(noteItem.product.id, note);
+            cart.setNote(noteItem.lineKey, note);
             setNoteFor(null);
           }}
           onClose={() => setNoteFor(null)}
+        />
+      ) : null}
+
+      <VariantPickerDialog
+        open={!!pickVariantFor}
+        product={pickVariantFor}
+        currency={currency}
+        onPick={addChosenVariant}
+        onClose={() => setPickVariantFor(null)}
+      />
+
+      {/*
+        D134 (`6.3`) — the weight prompt. Opened by `commitAdd`, which every one
+        of the four add paths goes through, so a scan asks for a weight exactly
+        as a card tap does.
+      */}
+      {measureFor ? (
+        <MeasureNumpad
+          open
+          label={
+            measureFor.variant
+              ? `${measureFor.product.name} (${measureFor.variant.name})`
+              : measureFor.product.name
+          }
+          unit={measureFor.product.unitOfMeasure ?? 'units'}
+          initialQuantity={
+            cart.items.find(
+              (it) => it.lineKey === cartLineKey(measureFor.product.id, measureFor.variant?.id ?? null),
+            )?.quantity
+          }
+          max={stockCap(measureFor.product, measureFor.variant) ?? undefined}
+          // The preview is computed by the CART's rule, not by the numpad: one
+          // money engine (D59), and the figure a cashier reads here is the one
+          // the line will carry.
+          preview={(quantity) =>
+            formatMoney(
+              round2((measureFor.variant?.unitPrice ?? measureFor.product.unitPrice ?? 0) * quantity),
+              currency,
+            )
+          }
+          onCancel={() => setMeasureFor(null)}
+          onConfirm={(quantity) => {
+            const { product, variant } = measureFor;
+            cart.addToCart(product, variant);
+            cart.setQty(cartLineKey(product.id, variant?.id ?? null), quantity);
+            setMeasureFor(null);
+            showToast(
+              `${product.name}${variant ? ` (${variant.name})` : ''} — ${quantity} ${
+                product.unitOfMeasure ?? ''
+              }`.trim(),
+            );
+          }}
         />
       ) : null}
 
@@ -899,14 +1329,14 @@ export function PosRetailCheckout() {
         <ItemDiscountDialog
           open={!!discountFor}
           productName={discountItem.product.name}
-          unitPrice={discountItem.product.unitPrice}
+          unitPrice={linePrice(discountItem)}
           quantity={discountItem.quantity}
           currency={currency}
           roleLimit={discountLimitFor(session!.user.role)}
           initial={discountItem.discount}
-          onApply={(d) => handleLineDiscountApply(discountItem.product.id, d)}
+          onApply={(d) => handleLineDiscountApply(discountItem.lineKey, d)}
           onClear={() => {
-            cart.setLineDiscount(discountItem.product.id, undefined);
+            cart.setLineDiscount(discountItem.lineKey, undefined);
             setDiscountFor(null);
           }}
           onClose={() => setDiscountFor(null)}

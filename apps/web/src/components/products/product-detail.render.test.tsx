@@ -121,6 +121,10 @@ function makeProduct(overrides: Partial<ManagedProduct> = {}): ManagedProduct {
     inventoryAssetAccount: null,
     imageUrl: null,
     isActive: true,
+    taxable: true,
+    // D134 (`6.1`) — these fixtures stand for ordinary counted stock.
+    quantityType: 'WHOLE',
+    unitOfMeasure: null,
     quickbooksItemId: null,
     syncStatus: 'NOT_SYNCED',
     lastSyncedAt: null,

@@ -29,6 +29,10 @@ import { DocumentsController } from '../../modules/documents/documents.controlle
 import { PaymentsController } from '../../modules/payments/payments.controller';
 import { PlatformController } from '../../modules/platform/platform.controller';
 import { PlatformAdminController } from '../../modules/platform-admin/platform-admin.controller';
+import { AttributeLibraryController } from '../../modules/products/attribute-library/attribute-library.controller';
+import { ExchangesController } from '../../modules/exchanges/exchanges.controller';
+import { BarcodesController } from '../../modules/products/identifiers/barcodes.controller';
+import { LabelsController } from '../../modules/products/identifiers/labels.controller';
 import { ProductAttributeSchemaController } from '../../modules/products/product-attribute-schema.controller';
 import { ProductComponentsController } from '../../modules/products/product-components.controller';
 import { ProductsController } from '../../modules/products/products.controller';
@@ -69,6 +73,8 @@ import { RestaurantOrdersController } from '../../modules/restaurant-orders/rest
 import { ProductImagesController } from '../../modules/products/product-images.controller';
 import { ProductVariantsController } from '../../modules/products/variants/product-variants.controller';
 import { InventoryReceiptsController } from '../../modules/inventory-receipts/inventory-receipts.controller';
+import { StockTakesController } from '../../modules/stock-takes/stock-takes.controller';
+import { BrandsController } from '../../modules/brands/brands.controller';
 // D45 — Restaurant Product wizard merge + Promotions.
 import { ProductModifiersController } from '../../modules/products/product-modifiers.controller';
 import { ProductStationsController } from '../../modules/products/product-stations.controller';
@@ -140,6 +146,8 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   ProductImagesController,
   ProductVariantsController,
   InventoryReceiptsController,
+  StockTakesController,
+  BrandsController,
   // D45 — Restaurant Product wizard merge + Promotions.
   ProductModifiersController,
   ProductStationsController,
@@ -149,6 +157,16 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   SellableController,
   // D64 — Phase 7 attribute schema read.
   ProductAttributeSchemaController,
+  // D125 / D125a — Phase 5 option library. SHARED CORE: any business selling
+  // variants benefits from saying "Size" once, and gating it on a business type
+  // would be the D56 mistake. Permission-gated, not module-gated.
+  AttributeLibraryController,
+  // D128 — Phase 7. The transaction behind the EXCHANGES key D2 reserved.
+  ExchangesController,
+  // D125 Part 3 / D127 — Phase 5 barcode audit + reissue, and label printing.
+  // Also shared core: a barcode is a catalogue concern, not a vertical one.
+  BarcodesController,
+  LabelsController,
   // D65 — Phase 8 recipe junction.
   ProductComponentsController,
   ProductModifierGroupsController,
@@ -227,6 +245,10 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'restaurant-orders',
   // D44 — Product variants + purchase receipts.
   'inventory-receipts',
+  // D132 (`8.7`) — stock takes / cycle counts.
+  'stock-takes',
+  // D133 (`8.9`) — brand as an entity.
+  'brands',
   'product-images',
   'product-variants',
   // D45 — Restaurant Product wizard merge + Promotions.
@@ -241,4 +263,10 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'collection',
   'collection-sections',
   'catalogue-entries',
+  // D125 / D125a / D127 — Phase 5 option library, barcode audit, labels.
+  'attribute-library',
+  'barcodes',
+  'labels',
+  // D128 — Phase 7.
+  'exchanges',
 ];

@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Toast } from '@/components/ui/toast';
 import { type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
+import { variantPriceLabel } from '@hardware-pos/shared';
 import {
   resolveItemStockPresentation,
   resolveProductManagementPresentation,
@@ -221,6 +222,9 @@ export function ProductDetail({
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-4">
+          {/* Raw, not pre-resolved: `ProductImage` maps a server-relative
+              `/uploads/…` path onto the API origin itself (D86), so wrapping
+              it here (as D120 2.14 once did) would only resolve twice. */}
           <ProductImage
             src={product.imageUrl}
             alt={product.name}
@@ -471,6 +475,16 @@ function OverviewTab({
   /** D101 — resolved by the parent; no kind comparison in here. */
   itemStock: ItemStockPresentation;
 }) {
+  /*
+   * D44 — the parent `unitPrice` is 0.00 on a variant product, so the Selling
+   * price KPI read "Rs 0.00" directly above a Variants tab listing real prices.
+   * Derived from the `variants` prop already in scope — the same array
+   * `latestCost` walks — rather than round-tripped through the server. Inactive
+   * variants are excluded so a discontinued colour cannot widen the range.
+   */
+  const activeVariants = variants.filter((v) => v.isActive);
+  const activePrices = activeVariants.map((v) => Number(v.unitPrice));
+
   // Low-stock warning aggregates across variants (matrix) or falls back to the
   // parent's own on-hand for single-variant / legacy products. The threshold is
   // per-variant to respect the operator's per-SKU reorder points, and any hit
@@ -555,7 +569,21 @@ function OverviewTab({
                 label="Average cost"
                 value={product.averageCost != null ? formatMoney(product.averageCost) : '—'}
               />
-              <Kpi label="Selling price" value={formatMoney(product.unitPrice)} />
+              <Kpi
+                label="Selling price"
+                value={variantPriceLabel(
+                  {
+                    hasVariants: product.hasVariants,
+                    unitPrice: product.unitPrice,
+                    sku: product.sku,
+                    variantCount: activeVariants.length,
+                    variantPriceMin: activePrices.length ? Math.min(...activePrices) : null,
+                    variantPriceMax: activePrices.length ? Math.max(...activePrices) : null,
+                  },
+                  formatMoney,
+                )}
+                hint={hasVariants ? 'Range across active variants' : undefined}
+              />
               {itemStock === 'QUANTITY' ? (
                 <Kpi
                   label="Reorder point"

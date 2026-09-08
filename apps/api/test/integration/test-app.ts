@@ -25,6 +25,9 @@ import { BusinessProfileService } from '../../src/modules/platform/business-prof
 import { ProductsModule } from '../../src/modules/products/products.module';
 import { ProductsService } from '../../src/modules/products/products.service';
 import { SyncQueueService } from '../../src/modules/sync/queue/sync-queue.service';
+import { DocumentsModule } from '../../src/modules/documents/documents.module';
+import { ExchangesModule } from '../../src/modules/exchanges/exchanges.module';
+import { ExchangesService } from '../../src/modules/exchanges/exchanges.service';
 import { ReturnsModule } from '../../src/modules/returns/returns.module';
 import { ReturnsRepository } from '../../src/modules/returns/returns.repository';
 import { ReturnsService } from '../../src/modules/returns/returns.service';
@@ -42,6 +45,8 @@ export interface IntegrationApp {
   salesService: SalesService;
   salesRepository: SalesRepository;
   returnsService: ReturnsService;
+  /** D128 (Phase 7) — composes the two services above; owns no money path. */
+  exchangesService: ExchangesService;
   returnsRepository: ReturnsRepository;
   settingsService: SettingsService;
   productsService: ProductsService;
@@ -71,6 +76,9 @@ export async function createIntegrationApp(): Promise<IntegrationApp> {
       AuthModule,
       SalesModule,
       ReturnsModule,
+      ExchangesModule,
+      // 7.3 — the exchange note is rendered from real data here.
+      DocumentsModule,
       ProductsModule,
     ],
   }).compile();
@@ -87,6 +95,7 @@ export async function createIntegrationApp(): Promise<IntegrationApp> {
     salesService: module.get(SalesService),
     salesRepository: module.get(SalesRepository),
     returnsService: module.get(ReturnsService),
+    exchangesService: module.get(ExchangesService),
     returnsRepository: module.get(ReturnsRepository),
     settingsService: module.get(SettingsService),
     productsService: module.get(ProductsService),

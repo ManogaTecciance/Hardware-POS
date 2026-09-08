@@ -221,6 +221,12 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
     // consumers too.
     'modules/table-sessions',
     'modules/takeaway',
+    // D132 — a stock take states reality through a NEW provider method
+    // (`applyStockCount`) rather than a service writing stock, so its module is
+    // a provider consumer by design. Their branch listed its two files among
+    // the offenders but never widened this list, which left its own tripwire
+    // red; recorded in D136.
+    'modules/stock-takes',
   ];
 
   /**
@@ -407,8 +413,51 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
       readFileSync(resolve(PROVIDERS_DIR, 'inventory/local-inventory.provider.ts'), 'utf8'),
     );
     expect(local).toContain('UnsafeMultiBranchInventoryError');
-    // One definition plus one call from each of the four operations.
-    expect((local.match(/assertSingleBranch\(/g) ?? []).length).toBe(5);
+    // The METHODS that guard, as an exact set — D30 prefers a set to a count,
+    // and a count is what made this tripwire fire on a legitimate addition:
+    // D120 (1a.19) added `getVariantAvailability`, a fifth guarded operation, and
+    // 5 became 6 with nothing to say which one was new.
+    const guarded = [...local.matchAll(/async (\w+)\(/g)]
+      .map((m) => m[1]!)
+      // The definition matches its own name; exclude it so the set is CALLERS.
+      .filter((name) => name !== 'assertSingleBranch')
+      .filter((name) => {
+        const start = local.indexOf(`async ${name}(`);
+        return local.slice(start, start + 600).includes('assertSingleBranch(');
+      });
+
+    expect(guarded.sort()).toEqual([
+      'adjustStock',
+      // D132 (`8.7`) — the sixth, and guarded CONDITIONALLY: only a count that
+      // contains a product-level line reaches the helper. A variant count writes
+      // `BranchInventory`, which is already branch-scoped and therefore safe for
+      // a multi-branch tenant; a product-level count writes the single global
+      // `Product.quantityOnHand`, which is exactly what the guard exists for.
+      // The condition is asserted below, because "it calls the helper" would
+      // also be true of an implementation that guarded unconditionally and
+      // refused every multi-branch variant count.
+      'applyStockCount',
+      'getAvailability',
+      // D120 (1a.19) — the fifth guarded operation, and the one whose addition
+      // broke the old count-based form of this assertion.
+      'getVariantAvailability',
+      'reduceStock',
+      'restoreStock',
+    ]);
+    // D132 — the guard inside `applyStockCount` is behind a product-level test,
+    // not unconditional. Without this, the entry above would read as a stronger
+    // claim than the code makes.
+    const countBody = local.slice(
+      local.indexOf('async applyStockCount('),
+      local.indexOf('async applyStockCount(') + 900,
+    );
+    expect(countBody).toContain('l.productVariantId === null');
+    expect(countBody).toContain('applyStockCount requires an explicit branchId');
+    // `receiveStock` is deliberately NOT in that list: it guards the same
+    // condition with an explicit `InvalidBranchContextError` throw rather than
+    // the shared helper. Asserted so the omission reads as a fact about the
+    // code, not as a gap in this test.
+    expect(local).toContain('receiveStock requires an explicit branchId');
     // And the QuickBooks provider must NOT have it — the guard is about the LOCAL
     // authority only, so an identical count in both would mean nothing.
     const quickbooks = stripComments(
@@ -436,6 +485,10 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
       'modules/products/products.module.ts',
       'modules/returns/returns.module.ts',
       'modules/sales/sales.module.ts',
+      // D132 (`8.7`) — stock takes resolve `InventoryProvider.applyStockCount`
+      // rather than writing stock themselves, which is what keeps the writer
+      // set below at two files.
+      'modules/stock-takes/stock-takes.module.ts',
       // D61 — the fulfilment provider axis: the two table-service close
       // paths resolve TableServiceFulfilmentProvider for settlement-line
       // collection and resource release.
@@ -447,7 +500,11 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
   it('only the adopted modules import from the providers directory', () => {
     const offenders = collectFiles(API_SRC, {
       skipDirs: ['providers'],
-      predicate: (content) => importsOf(content).some((spec) => spec.includes('providers/')),
+      // The testkit under providers/ is a source ANALYSER for specs (D30), not a
+      // provider: a spec that borrows it adopts nothing. Excluded by path so a
+      // real provider import from the same file would still count.
+      predicate: (content) =>
+        importsOf(content).some((spec) => spec.includes('providers/') && !spec.includes('providers/testkit')),
     });
 
     expect(offenders).toEqual([
@@ -463,9 +520,9 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
       'modules/products/products.module.ts',
       'modules/products/products.service.ts',
       // D44 — products/variants sub-module. `product-variants.service.ts`
-      // holds InventoryProviderFactory for the opening-stock path; the
-      // contract spec exercises those imports.
-      'modules/products/variants/product-variants.contract.spec.ts',
+      // holds InventoryProviderFactory for the opening-stock path. Its contract
+      // spec used to sit here too; it only borrows the testkit analyser, which
+      // no longer counts as an adoption (see the predicate above).
       'modules/products/variants/product-variants.service.ts',
       'modules/returns/customer-return-document.spec.ts',
       'modules/returns/returns.module.ts',
@@ -476,6 +533,9 @@ describe('Slice 6C-B adopted the sale, return and product paths, and only those'
       'modules/sales/sales.module.ts',
       'modules/sales/sales.repository.ts',
       'modules/sales/sales.service.ts',
+      // D132 (`8.7`) — the count module and the service that drives the port.
+      'modules/stock-takes/stock-takes.module.ts',
+      'modules/stock-takes/stock-takes.service.ts',
       // D61 — fulfilment provider consumers. (round-item-resolution,
       // 2026-08-18: the shared resolver returns the D65 depletion inputs,
       // so it imports the RoundDepletionItem TYPE.)
@@ -576,8 +636,17 @@ describe('the adoption tripwires can actually fail', () => {
     const real = sourceOf('modules/sales/sales.repository.ts');
     expect(referencesIdentifier(real, 'quantityOnHand')).toBe(false);
 
+    // The anchor is asserted before it is used. 1a.21 added a `saleId` argument
+    // to this call and the old literal silently stopped matching, which turned
+    // the mutation into a no-op — the tripwire then failed on `not.toEqual`,
+    // correctly but obscurely. Asserting the anchor first means the next
+    // signature change says WHY it broke instead of looking like a real
+    // regression. The assertion under test is unchanged.
+    const ANCHOR = 'await reduceStock(tx, toStockLines(input.computed.lines), sale.id);';
+    expect(real).toContain(ANCHOR);
+
     const mutated = real.replace(
-      'await reduceStock(tx, toStockLines(input.computed.lines));',
+      ANCHOR,
       'await tx.product.updateMany({ data: { quantityOnHand: { decrement: 1 } } });',
     );
     expect(mutated).not.toEqual(real);
@@ -632,9 +701,13 @@ describe('the adoption tripwires can actually fail', () => {
       resolve(PROVIDERS_DIR, 'inventory/local-inventory.provider.ts'),
       'utf8',
     );
+    const before = (stripComments(real).match(/assertSingleBranch\(/g) ?? []).length;
     const mutated = stripComments(real).replace(/await this\.assertSingleBranch\([^;]+;/g, '');
-    expect((stripComments(real).match(/assertSingleBranch\(/g) ?? []).length).toBe(5);
-    expect((mutated.match(/assertSingleBranch\(/g) ?? []).length).toBeLessThan(5);
+    // Relative, not absolute: the point is that removing the calls is DETECTED,
+    // which is true however many guarded operations exist. Pinning the exact
+    // number here duplicated the assertion above and broke on the same addition.
+    expect(before).toBeGreaterThan(1);
+    expect((mutated.match(/assertSingleBranch\(/g) ?? []).length).toBeLessThan(before);
   });
 });
 
@@ -801,7 +874,7 @@ describe('no Prisma migration was generated by Slices 5 through 6C-A', () => {
       .sort();
   }
 
-  it('the migration set is exactly the 71 listed — the branch’s 60, main’s 8, fix/table-tab’s 2 and fix/issues-restaurant’s 1', () => {
+  it('the migration set is exactly the 84 listed — the branch’s 60, main’s 8, fix/table-tab’s 2, fix/issues-restaurant’s 1 and feature/retail-template’s 13', () => {
     // EXACT SET, not a count: a count cannot tell "the same 20" from "one added and
     // one deleted".
     expect(migrationDirs()).toEqual([
@@ -999,19 +1072,82 @@ describe('no Prisma migration was generated by Slices 5 through 6C-A', () => {
       // column. Purely additive; null (every existing row) means available.
       // Listed before main's three because the list is in disk order.
       '20260907000000_add_product_sold_out_at',
+      // feature/retail-template, D120 / D120a (2.1) — the Retail template returns. `ALTER TYPE
+      // "BusinessType" ADD VALUE IF NOT EXISTS 'RETAIL'` and NOTHING else:
+      // PostgreSQL refuses to use a new enum label in the transaction that adds
+      // it, so anything using the value belongs in a later migration. Creates no
+      // table, alters no column.
+      '20260907000000_add_retail_business_type',
       // main, 2026-09-07 — per-unit fixed discounts on sale and quotation lines,
       // and the marked-paid bookkeeping note on Sale.
       '20260907100000_add_sale_item_discount_basis',
+      // feature/retail-template, D132 (`8.7`) — stock takes. TWO NEW TABLES AND NOTHING ELSE: no column
+      // added to an existing table, no enum widened, no data backfilled. A shop
+      // that never counts is byte-identical to one on the previous migration.
+      // Placed HERE, not appended: the assertion compares a sorted array, and
+      // `prisma migrate dev` names a folder from the wall clock rather than from
+      // the hand-numbered `2026MMDD000000` series the earlier entries use.
+      '20260907111239_stock_take_d111',
+      // feature/retail-template, D133 (`8.9`) — brand as an entity. One new table plus a NULLABLE
+      // `Product.brandId` and its index. Nothing backfilled: every existing
+      // product keeps a NULL brand and behaves identically.
+      '20260907114524_brand_entity_d112',
       '20260907140000_add_quotation_item_discount_basis',
       '20260907160000_add_sale_marked_paid',
       // fix/issues-restaurant, D113 — the KDS Preparing state: one KitchenTicketStatus enum value
       // (ALTER TYPE ADD VALUE IF NOT EXISTS). No rows, defaults or columns.
       '20260908000000_add_kitchen_ticket_in_progress',
+      // feature/retail-template, D122 (3.8) — per-line tax. Three ADD COLUMNs: `Product.taxable`
+      // defaulting true (which is what is already true of every product), plus
+      // nullable rate snapshots on SaleItem and ReturnItem. No new table, no
+      // enum, no backfill — NULL is what lets historical sales keep refunding
+      // by the proportional fallback.
+      '20260908000000_add_per_line_tax',
       // fix/table-tab, D104 — one joined table, several tabs: a nullable
       // TableSession.tabName so two parties sharing one arrangement are
       // tellable apart on the ticket and the bill. Purely additive; null
       // (every existing row) means the table's own name stands alone.
       '20260908000000_add_table_session_tab_name',
+      // feature/retail-template, D134 (`6.1`) — weighed goods. ONE NEW ENUM AND TWO ADDITIVE COLUMNS:
+      // `quantityType` defaulted to WHOLE so every existing product reads as it
+      // did, and a nullable `unitOfMeasure`. Nothing backfilled, no table
+      // rewritten, no other model touched.
+      '20260908040235_weighed_goods_d113',
+      // feature/retail-template, D134d (`6.5`) — the unit a line was SOLD in, frozen onto both document
+      // tables. Two nullable ADD COLUMNs, nothing backfilled: a line with no
+      // unit renders exactly as it did, which is every line written before it.
+      '20260908044811_unit_snapshot_d113d',
+      // feature/retail-template, D123 (4.1) — promotion allocation: four ADD COLUMNs, shipped inert.
+      // Per LINE, not order-level: a BOGO saving belongs to the free item, and
+      // reversing it basket-wide would refund money on an item the customer got
+      // for nothing — the shape 3.11 removed for tax.
+      '20260909000000_add_promotion_line_discount',
+      // feature/retail-template, D124 — `PROMOTIONS` becomes its own module key. One ALTER TYPE, no row
+      // written with the new value, so D120a's two-migration rule does not apply.
+      '20260910000000_add_promotions_module_key',
+      // feature/retail-template, D126 — cart-level FIXED_AMOUNT_DISCOUNT. Six additive columns across
+      // Promotion, Sale, Return and ReturnItem; nothing backfilled, so every
+      // existing row already means what the new columns say.
+      '20260911000000_add_cart_level_promotion',
+      // feature/retail-template, D125 / D125a (5.1) — the tenant option library. Two new tables and two
+      // nullable link columns on the existing per-product rows. Nothing is
+      // backfilled: every existing dimension keeps a NULL link, so a product
+      // that never adopts the library behaves exactly as it did before.
+      '20260912000000_add_attribute_library',
+      // feature/retail-template, D125 Part 3 (5.6) — barcode provenance. One enum, one nullable column,
+      // one unique index. The uniqueness was measured before it was added —
+      // zero duplicates in-tenant and across tenants — so it needs no
+      // remediation, and NULLs are distinct so the 28 variants with no barcode
+      // are untouched.
+      '20260913000000_add_barcode_source',
+      // feature/retail-template, D127 (5.7) — `PrintJob.saleId` widened to nullable so a label sheet can
+      // exist, plus a PRODUCT_LABEL enum value. Widening cannot fail on
+      // existing data and every existing writer still supplies a saleId.
+      '20260914000000_label_print_jobs',
+      // feature/retail-template, D128 (7.1a) — the Exchange link table. One new table, nothing else
+      // touched and nothing backfilled: the transaction has never existed, so
+      // there are no exchanges to migrate.
+      '20260915000000_add_exchange',
     ]);
   });
 
@@ -1043,12 +1179,12 @@ describe('no Prisma migration was generated by Slices 5 through 6C-A', () => {
     // nothing, or having scanned files whose CREATE TABLE statements it cannot
     // parse — in which case the negatives above prove nothing at all.
     expect(scanned).toEqual(dirs);
-    // 71 = the exact-set list above: this branch's 60, main's 8, fix/table-tab's 2
-    // and fix/issues-restaurant's 1. The unnamed `20260831055102_setup1` both of
-    // those branches carried — a re-accepted copy of the D44 FK churn every
-    // migration since has stripped — was dropped in D110, so the disk and the
-    // list agree again.
-    expect(scanned.length).toBe(71);
+    // 84 = the exact-set list above: this branch's 60, main's 8, fix/table-tab's 2,
+    // fix/issues-restaurant's 1 and feature/retail-template's 13 (D120–D135). The
+    // unnamed `20260831055102_setup1` two of those branches carried — a re-accepted
+    // copy of the D44 FK churn every migration since has stripped — was dropped in
+    // D110, so the disk and the list agree.
+    expect(scanned.length).toBe(84);
     expect(createdTables.has('Sale')).toBe(true);
     expect(createdTables.has('Product')).toBe(true);
     expect(createdTables.has('TenantBusinessProfile')).toBe(true);

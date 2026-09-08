@@ -31,13 +31,15 @@ export function ProductPreview({ state, categories, currentStepIndex }: Props) {
   const band = currentStepIndex >= 2 ? priceBand(state) : null;
 
   /*
-   * D86 — an uploaded image is stored as `/uploads/<key>` and served by the
-   * API, which is a DIFFERENT origin from the web app in every deployment
-   * (:4000 vs :3000 locally, api.axlopos.com vs the Amplify host in prod).
-   * Rendered raw, the browser resolved it against the app's own origin and
-   * got a 404, so the preview stayed empty however many times you uploaded.
-   * `resolveImageUrl` is what the product list and the printed bill already
-   * use; blob:/data:/absolute URLs (the "Image URL" tab) pass through.
+   * D86 (and, independently, D120 2.14 on the retail branch — both sides fixed
+   * the same bug the same way) — an uploaded image is stored as
+   * `/uploads/<key>` and served by the API, which is a DIFFERENT origin from
+   * the web app in every deployment (:4000 vs :3000 locally, api.axlopos.com
+   * vs the Amplify host in prod). Rendered raw, the browser resolved it
+   * against the app's own origin and got a 404, so the preview stayed empty
+   * however many times you uploaded. `resolveImageUrl` is what the product
+   * list and the printed bill already use; blob:/data:/absolute URLs (the
+   * "Image URL" tab) pass through.
    */
   const imageSrc = resolveImageUrl(state.imageUrl);
   // A src that fails anyway — a dead remote URL pasted on the URL tab — falls

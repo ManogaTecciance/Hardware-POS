@@ -29,7 +29,12 @@ export class ProductVariantsRepository {
     });
   }
 
-  /** Fetch dimensions + options for the variations tab. */
+  /**
+   * Fetch dimensions + options for the variations tab.
+   *
+   * `5.2` — the mapped library option's `code` comes back with each row, so the
+   * service can resolve the SKU segment without a second query per option.
+   */
   listDimensions(productId: string) {
     return this.prisma.productVariationDimension.findMany({
       where: { productId },
@@ -37,9 +42,33 @@ export class ProductVariantsRepository {
       include: {
         options: {
           orderBy: [{ position: 'asc' }, { name: 'asc' }],
+          include: { attributeOption: { select: { code: true } } },
         },
       },
     });
+  }
+
+  /**
+   * The product's category name, for the SKU's leading segment (`5.3`).
+   *
+   * Derived from the name rather than a `code` column — see `skuCategorySegment`
+   * for why. `null` for an uncategorised product, which composes to `GEN`.
+   */
+  async findCategoryName(productId: string): Promise<string | null> {
+    const row = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { category: { select: { name: true } } },
+    });
+    return row?.category?.name ?? null;
+  }
+
+  /** The product's category id, for a per-category barcode prefix (`5.4`). */
+  async findCategoryId(productId: string): Promise<string | null> {
+    const row = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { categoryId: true },
+    });
+    return row?.categoryId ?? null;
   }
 
   /** Fetch every variant on a product with its option snapshot. */

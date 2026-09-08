@@ -4,13 +4,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InventoryMode, Prisma } from '@hardware-pos/database';
+import { BarcodeSource, InventoryMode, Prisma } from '@hardware-pos/database';
+
+import { resolveOptionCode, type OptionCodeSource } from '@hardware-pos/shared';
 
 import { nextDocumentNumber, padSequence } from '../../../common/document-sequence';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { StorageService } from '../../../common/storage/storage.service';
 import { BusinessProfileService } from '../../platform/business-profile.service';
 import { InventoryProviderFactory } from '../../providers/inventory/inventory-provider.factory';
+import { BarcodeGeneratorService } from '../identifiers/barcode-generator.service';
+import { SkuGeneratorService, type SkuRequest } from '../identifiers/sku-generator.service';
 import { ProductVariantsRepository } from './product-variants.repository';
 import {
   CreateVariantBatchDto,
@@ -33,6 +37,9 @@ export interface VariantView {
   productId: string;
   sku: string;
   barcode: string | null;
+  /** D125 Part 3 (`5.6`) — provenance. NULL means unknown, and unknown is not
+   *  the system's to overwrite. */
+  barcodeSource: BarcodeSource | null;
   unitPrice: string;
   costPrice: string | null;
   averageCost: string | null;
@@ -54,7 +61,22 @@ export interface VariationDimensionView {
   id: string;
   name: string;
   position: number;
-  options: { id: string; name: string; position: number }[];
+  /** D125 — the library definition this dimension is mapped to, if any. */
+  attributeDefinitionId: string | null;
+  options: {
+    id: string;
+    name: string;
+    position: number;
+    /** D125 — the library option this option is mapped to, if any. */
+    attributeOptionId: string | null;
+    /**
+     * `5.2` — the segment this option contributes to a generated SKU, and
+     * where it came from. `null` when the name yields nothing usable and no
+     * library option is mapped.
+     */
+    code: string | null;
+    codeSource: OptionCodeSource | null;
+  }[];
 }
 
 /** JSON-friendly shape for a per-branch inventory row. */
@@ -97,6 +119,8 @@ export class ProductVariantsService {
     private readonly storage: StorageService,
     private readonly businessProfile: BusinessProfileService,
     private readonly inventoryProviders: InventoryProviderFactory,
+    private readonly skus: SkuGeneratorService,
+    private readonly barcodes: BarcodeGeneratorService,
   ) {}
 
   // ── Variations (dimensions + options) ──────────────────────────────────────
@@ -111,7 +135,21 @@ export class ProductVariantsService {
         id: d.id,
         name: d.name,
         position: d.position,
-        options: d.options.map((o) => ({ id: o.id, name: o.name, position: o.position })),
+        attributeDefinitionId: d.attributeDefinitionId,
+        options: d.options.map((o) => {
+          const resolved = resolveOptionCode({
+            name: o.name,
+            libraryCode: o.attributeOption?.code ?? null,
+          });
+          return {
+            id: o.id,
+            name: o.name,
+            position: o.position,
+            attributeOptionId: o.attributeOptionId,
+            code: resolved?.code ?? null,
+            codeSource: resolved?.source ?? null,
+          };
+        }),
       })),
     };
   }
@@ -133,6 +171,10 @@ export class ProductVariantsService {
     // Empty-name / empty-option guards live in DTO decorators; the service is
     // free to trust the shape.
     const requestedDimensionNames = new Set(dto.dimensions.map((d) => d.name));
+
+    // D125 — validate every library link BEFORE opening the transaction, so an
+    // id from another tenant is a clean 400 rather than a half-applied write.
+    await this.assertLibraryLinks(tenantId, dto);
 
     await this.prisma.$transaction(async (tx) => {
       const existingDims = await tx.productVariationDimension.findMany({
@@ -160,6 +202,14 @@ export class ProductVariantsService {
 
       // 2. Upsert dimensions and their options in-order.
       for (const [dIndex, dimReq] of dto.dimensions.entries()) {
+        // `undefined` leaves an existing mapping alone; `null` clears it. A
+        // client that predates the library sends neither and cannot unmap a
+        // product an operator mapped by hand.
+        const dimensionLink =
+          dimReq.attributeDefinitionId === undefined
+            ? {}
+            : { attributeDefinitionId: dimReq.attributeDefinitionId };
+
         const dimension = await tx.productVariationDimension.upsert({
           where: { productId_name: { productId, name: dimReq.name } },
           create: {
@@ -167,8 +217,9 @@ export class ProductVariantsService {
             productId,
             name: dimReq.name,
             position: dimReq.position ?? dIndex,
+            ...dimensionLink,
           },
-          update: { position: dimReq.position ?? dIndex },
+          update: { position: dimReq.position ?? dIndex, ...dimensionLink },
           include: { options: true },
         });
 
@@ -188,6 +239,11 @@ export class ProductVariantsService {
         }
 
         for (const [oIndex, optReq] of dimReq.options.entries()) {
+          const optionLink =
+            optReq.attributeOptionId === undefined
+              ? {}
+              : { attributeOptionId: optReq.attributeOptionId };
+
           await tx.productVariationOption.upsert({
             where: {
               dimensionId_name: { dimensionId: dimension.id, name: optReq.name },
@@ -197,14 +253,92 @@ export class ProductVariantsService {
               dimensionId: dimension.id,
               name: optReq.name,
               position: optReq.position ?? oIndex,
+              ...optionLink,
             },
-            update: { position: optReq.position ?? oIndex },
+            update: { position: optReq.position ?? oIndex, ...optionLink },
           });
         }
       }
     });
 
     return this.listVariations(tenantId, productId);
+  }
+
+  /**
+   * D125 — refuse a library link that does not make sense.
+   *
+   * Three ways it can be wrong, and all three are silent if unchecked because
+   * the columns are nullable and the FKs are `SET NULL`:
+   *
+   *   1. The definition or option belongs to another tenant.
+   *   2. The option belongs to a different definition than the dimension is
+   *      mapped to — "Size / Black", which would generate a nonsense SKU.
+   *   3. An option is mapped while its dimension is not, so nothing says which
+   *      vocabulary the option is speaking.
+   */
+  private async assertLibraryLinks(
+    tenantId: string,
+    dto: ReplaceVariationsDto,
+  ): Promise<void> {
+    const definitionIds = new Set<string>();
+    const optionIds = new Set<string>();
+    for (const dim of dto.dimensions) {
+      if (dim.attributeDefinitionId) definitionIds.add(dim.attributeDefinitionId);
+      for (const opt of dim.options) {
+        if (opt.attributeOptionId) optionIds.add(opt.attributeOptionId);
+      }
+    }
+    if (definitionIds.size === 0 && optionIds.size === 0) return;
+
+    const [definitions, options] = await Promise.all([
+      this.prisma.attributeDefinition.findMany({
+        where: { tenantId, id: { in: [...definitionIds] } },
+        select: { id: true },
+      }),
+      this.prisma.attributeOption.findMany({
+        where: { tenantId, id: { in: [...optionIds] } },
+        select: { id: true, definitionId: true, name: true },
+      }),
+    ]);
+
+    const knownDefinitions = new Set(definitions.map((d) => d.id));
+    for (const id of definitionIds) {
+      if (!knownDefinitions.has(id)) {
+        throw new BadRequestException({
+          code: 'ATTRIBUTE_DEFINITION_NOT_FOUND',
+          message: `Attribute ${id} does not belong to this tenant.`,
+        });
+      }
+    }
+
+    const optionsById = new Map(options.map((o) => [o.id, o]));
+    for (const id of optionIds) {
+      if (!optionsById.has(id)) {
+        throw new BadRequestException({
+          code: 'ATTRIBUTE_OPTION_NOT_FOUND',
+          message: `Attribute option ${id} does not belong to this tenant.`,
+        });
+      }
+    }
+
+    for (const dim of dto.dimensions) {
+      for (const opt of dim.options) {
+        if (!opt.attributeOptionId) continue;
+        if (!dim.attributeDefinitionId) {
+          throw new BadRequestException({
+            code: 'ATTRIBUTE_LINK_INCOMPLETE',
+            message: `Option "${opt.name}" is mapped to the library but its dimension "${dim.name}" is not. Map the dimension first.`,
+          });
+        }
+        const libraryOption = optionsById.get(opt.attributeOptionId)!;
+        if (libraryOption.definitionId !== dim.attributeDefinitionId) {
+          throw new BadRequestException({
+            code: 'ATTRIBUTE_LINK_MISMATCH',
+            message: `Option "${opt.name}" is mapped to "${libraryOption.name}", which belongs to a different attribute than "${dim.name}" is mapped to.`,
+          });
+        }
+      }
+    }
   }
 
   // ── Variants ───────────────────────────────────────────────────────────────
@@ -258,32 +392,37 @@ export class ProductVariantsService {
     for (const d of dimensions) {
       validOptionByDimension.set(d.id, new Set(d.options.map((o) => o.id)));
     }
-    for (const v of dto.variants) {
+    for (const [vIndex, v] of dto.variants.entries()) {
+      // `5.3` — sku is optional now, so a message built from it would read
+      // "Variant undefined ..." for exactly the rows a wizard did not name.
+      // A supplied sku still produces the identical string it always did.
+      const label = v.sku ?? `#${vIndex + 1}`;
+
       // Every dimension must be covered exactly once — otherwise the variant's
       // identity is under-specified and future sales cannot map back to it.
       const seen = new Set<string>();
       for (const ov of v.optionValues) {
         if (seen.has(ov.dimensionId)) {
           throw new BadRequestException(
-            `Variant ${v.sku} lists dimension ${ov.dimensionId} twice`,
+            `Variant ${label} lists dimension ${ov.dimensionId} twice`,
           );
         }
         seen.add(ov.dimensionId);
         const options = validOptionByDimension.get(ov.dimensionId);
         if (!options) {
           throw new BadRequestException(
-            `Variant ${v.sku} references unknown dimension ${ov.dimensionId} for product ${productId}`,
+            `Variant ${label} references unknown dimension ${ov.dimensionId} for product ${productId}`,
           );
         }
         if (!options.has(ov.optionId)) {
           throw new BadRequestException(
-            `Variant ${v.sku} references option ${ov.optionId} that does not belong to dimension ${ov.dimensionId}`,
+            `Variant ${label} references option ${ov.optionId} that does not belong to dimension ${ov.dimensionId}`,
           );
         }
       }
       if (dimensions.length > 0 && seen.size !== dimensions.length) {
         throw new BadRequestException(
-          `Variant ${v.sku} must specify one option per dimension (${dimensions.length} expected, got ${seen.size})`,
+          `Variant ${label} must specify one option per dimension (${dimensions.length} expected, got ${seen.size})`,
         );
       }
     }
@@ -292,11 +431,91 @@ export class ProductVariantsService {
       ? await this.inventoryProviders.forTenant(tenantId)
       : null;
 
+    // `5.6` — a typed barcode is validated by SHAPE, so a supplier's CODE128
+    // alphanumeric passes untouched while a 13-digit claim must carry the right
+    // check digit. Refused here, before anything is written.
+    for (const v of dto.variants) {
+      if (v.barcode) this.barcodes.assertTypedBarcode(v.barcode);
+    }
+
+    // `5.3` — everything generation needs, resolved once outside the loop.
+    const needsSku = dto.variants.some((v) => !v.sku);
+    const categoryName = needsSku ? await this.repo.findCategoryName(productId) : null;
+
+    // `5.4` — the prefix is resolved BEFORE the transaction, so an
+    // unconfigured workspace is a clean refusal rather than a rolled-back
+    // batch. Only when generation was actually asked for: a tenant that types
+    // its own barcodes never has to configure a prefix.
+    const needsBarcode = dto.variants.some((v) => v.generateBarcode === true && !v.barcode);
+    const barcodePrefix = needsBarcode
+      ? await this.barcodes.prefixFor(tenantId, await this.repo.findCategoryId(productId))
+      : null;
+    const optionLookup = new Map<string, { name: string; libraryCode: string | null }>();
+    const dimensionPosition = new Map<string, number>();
+    for (const d of dimensions) {
+      dimensionPosition.set(d.id, d.position);
+      for (const o of d.options) {
+        optionLookup.set(o.id, { name: o.name, libraryCode: o.attributeOption?.code ?? null });
+      }
+    }
+
     const createdIds = await this.prisma.$transaction(async (tx) => {
       const ids: string[] = [];
+
+      // Allocated INSIDE the transaction, so a rolled-back batch burns the
+      // numbers rather than leaving a half-used sequence behind (D125: gaps
+      // are accepted, reuse is not).
+      const generated = new Map<number, string>();
+      if (needsSku) {
+        const targets: Array<{ index: number; request: SkuRequest }> = [];
+        for (const [index, v] of dto.variants.entries()) {
+          if (v.sku) continue;
+          const ordered = [...v.optionValues].sort(
+            (a, b) =>
+              (dimensionPosition.get(a.dimensionId) ?? 0) -
+              (dimensionPosition.get(b.dimensionId) ?? 0),
+          );
+          targets.push({
+            index,
+            request: {
+              options: ordered.map((ov) => optionLookup.get(ov.optionId) ?? { name: '', libraryCode: null }),
+            },
+          });
+        }
+        const results = await this.skus.generateMany(
+          tx,
+          tenantId,
+          categoryName,
+          targets.map((t) => t.request),
+        );
+        targets.forEach((target, i) => generated.set(target.index, results[i].sku));
+      }
+
+      // `5.5` — allocated inside the transaction for the same reason as the
+      // SKU: a rolled-back batch must not leave the sequence advanced.
+      const allocatedBarcodes = new Map<number, string>();
+      if (barcodePrefix) {
+        const indices = dto.variants
+          .map((v, index) => ({ v, index }))
+          .filter(({ v }) => v.generateBarcode === true && !v.barcode)
+          .map(({ index }) => index);
+        const codes = await this.barcodes.allocateMany(
+          tx,
+          tenantId,
+          barcodePrefix,
+          indices.length,
+        );
+        indices.forEach((index, i) => allocatedBarcodes.set(index, codes[i].barcode));
+      }
       const openingReceiptInputs: {
         variantId: string;
         variant: CreateVariantInputDto;
+        /**
+         * The sku as actually written. `5.3` made `variant.sku` optional, and
+         * the receipt line labels itself with the identifier, so it has to read
+         * the value the row carries rather than the one the request asked for.
+         */
+        sku: string;
       }[] = [];
 
       for (const [index, v] of dto.variants.entries()) {
@@ -305,8 +524,16 @@ export class ProductVariantsService {
             data: {
               tenantId,
               productId,
-              sku: v.sku,
-              barcode: v.barcode ?? null,
+              sku: v.sku ?? generated.get(index)!,
+              barcode: v.barcode ?? allocatedBarcodes.get(index) ?? null,
+              // A typed barcode is the supplier's until someone says otherwise;
+              // an allocated one is ours and may be regenerated. Neither is
+              // guessed: a row with no barcode has no source either.
+              barcodeSource: v.barcode
+                ? BarcodeSource.SUPPLIER
+                : allocatedBarcodes.has(index)
+                  ? BarcodeSource.INTERNAL
+                  : null,
               unitPrice: v.unitPrice,
               costPrice: v.costPrice ?? null,
               reorderLevel: v.reorderLevel ?? null,
@@ -332,7 +559,7 @@ export class ProductVariantsService {
           }
 
           if ((v.openingQuantity ?? 0) > 0) {
-            openingReceiptInputs.push({ variantId: created.id, variant: v });
+            openingReceiptInputs.push({ variantId: created.id, variant: v, sku: created.sku });
           }
         } catch (err) {
           throw mapWriteError(err);
@@ -372,7 +599,7 @@ export class ProductVariantsService {
           receiptLineId: string;
         }[];
 
-        for (const { variantId, variant } of openingReceiptInputs) {
+        for (const { variantId, variant, sku } of openingReceiptInputs) {
           const line = await tx.inventoryReceiptLine.create({
             data: {
               tenantId,
@@ -390,8 +617,8 @@ export class ProductVariantsService {
           lines.push({
             productId,
             productVariantId: variantId,
-            productName: variant.sku,
-            variantSku: variant.sku,
+            productName: sku,
+            variantSku: sku,
             quantity: Number(variant.openingQuantity),
             unitCost: Number(variant.costPrice ?? 0),
             receiptLineId: line.id,
@@ -650,6 +877,7 @@ type VariantRow = {
   productId: string;
   sku: string;
   barcode: string | null;
+  barcodeSource: BarcodeSource | null;
   unitPrice: Prisma.Decimal;
   costPrice: Prisma.Decimal | null;
   averageCost: Prisma.Decimal | null;
@@ -672,6 +900,7 @@ function toVariantView(row: VariantRow): VariantView {
     productId: row.productId,
     sku: row.sku,
     barcode: row.barcode,
+    barcodeSource: row.barcodeSource,
     unitPrice: row.unitPrice.toString(),
     costPrice: row.costPrice?.toString() ?? null,
     averageCost: row.averageCost?.toString() ?? null,

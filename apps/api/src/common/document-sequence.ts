@@ -19,7 +19,25 @@ export type DocumentType =
   // D47 — table reservations ("Reservation RSV-000047" over the phone).
   | 'RESERVATION'
   // D49 — auto-assigned codes for open tables ("OPEN-3" on the floor).
-  | 'OPEN_TABLE';
+  | 'OPEN_TABLE'
+  // D125 (Phase 5, 5.3) — per-tenant SKU numbering. Reuses this mechanism
+  // rather than inventing a second one: it is already the repository's proven
+  // answer to concurrent allocation. Gaps are accepted — a rolled-back product
+  // creation burns a number, and a SKU is an identifier, not an audit trail.
+  | 'SKU'
+  // D125 Part 3 (Phase 5, 5.5) — per-tenant in-store EAN-13 numbering. Its own
+  // sequence, not shared with SKU: the two are different identifiers with
+  // different widths, and a shared counter would waste barcode range every time
+  // a SKU was allocated.
+  | 'BARCODE'
+  // D128 (Phase 7, 7.1a) — exchange numbering, `X-000042`, matching `R-` and
+  // `S-`. Its own sequence so an exchange number never collides with the sale
+  // or return it links.
+  | 'EXCHANGE'
+  // D132 (Phase 8, `8.7`) — stock counts, `SC-000042`. Its own sequence for
+  // the same reason as every other: a count number is quoted out loud on the
+  // floor ("the variance on SC-12") and must not collide with a receipt.
+  | 'STOCK_TAKE';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
 type PrismaLike = PrismaService | Prisma.TransactionClient;

@@ -22,8 +22,12 @@ interface Row {
   fixedPrice: number | null;
   percentageOff: number | null;
   amountOff: number | null;
+  /** D126 — optional so existing fixtures stay untouched. */
+  minimumSpend?: number | null;
   buyQuantity: number | null;
   getQuantity: number | null;
+  /** D56 — persisted by the double so a round-trip can be asserted. */
+  channelScope: string[];
   items: { productId: string; role: string; quantity: number }[];
 }
 
@@ -59,8 +63,15 @@ function fakePrisma(seed: { products: string[]; branches?: string[] } = { produc
           fixedPrice: data.fixedPrice != null ? Number(data.fixedPrice) : null,
           percentageOff: data.percentageOff != null ? Number(data.percentageOff) : null,
           amountOff: data.amountOff != null ? Number(data.amountOff) : null,
+          minimumSpend: data.minimumSpend != null ? Number(data.minimumSpend) : null,
           buyQuantity: data.buyQuantity ?? null,
           getQuantity: data.getQuantity ?? null,
+          // D56 — the real column is persisted, so the double must persist it
+          // too (D30: a fixture has to represent the production structure).
+          // Without this, a round-trip assertion on channelScope would read the
+          // hardcoded [] in `promotionRow` and pass for a service that dropped
+          // the scope entirely.
+          channelScope: data.channelScope ?? [],
           items: [],
         };
         promos.push(row);
@@ -130,6 +141,9 @@ function toRepoShape(row: Row): PromotionWithItems {
     fixedPrice: decimalish(row.fixedPrice),
     percentageOff: decimalish(row.percentageOff),
     amountOff: decimalish(row.amountOff),
+    // D126 — the double carries the column so a cart-level promotion is
+    // representable here, not just in the applier's own fixtures.
+    minimumSpend: decimalish(row.minimumSpend ?? null),
     buyQuantity: row.buyQuantity,
     getQuantity: row.getQuantity,
     startsOn: null,
@@ -138,12 +152,15 @@ function toRepoShape(row: Row): PromotionWithItems {
     startTime: null,
     endTime: null,
     branchScope: [],
-    channelScope: [],
+    channelScope: row.channelScope ?? [],
     stackable: false,
     isActive: row.isActive,
     items: row.items.map((i, idx) => ({
       id: `pi_${idx}`,
       productId: i.productId,
+      // 4.10 — the repository joins the product; the double must say so too
+      // (D30: a fixture has to represent the production structure).
+      product: { name: `Product ${i.productId}` },
       role: i.role,
       quantity: i.quantity,
     })),
@@ -156,9 +173,22 @@ function fakeAudit() {
   return { record: jest.fn(async () => ({}) as any) };
 }
 
-function buildService(prismaFake: any, auditFake: any) {
+/**
+ * D56 — the channel vocabulary is the tenant's, not a constant. The double
+ * returns whichever template the test is exercising so retail and food service
+ * can be asserted against each other in one suite.
+ */
+function fakeProfiles(channels: string[] = ['COUNTER']) {
+  return {
+    getEffectiveProfile: jest.fn(async () => ({
+      capabilities: { fulfilment: { channels } },
+    })),
+  };
+}
+
+function buildService(prismaFake: any, auditFake: any, profilesFake: any = fakeProfiles()) {
   const repo = fakeRepository(prismaFake);
-  return new PromotionsService(prismaFake as any, repo, auditFake as any);
+  return new PromotionsService(prismaFake as any, repo, auditFake as any, profilesFake as any);
 }
 
 const TENANT = 'tnt_1';
@@ -296,5 +326,251 @@ describe('PromotionsService — audit trail on toggles', () => {
       'PROMOTION_ACTIVATED',
       'PROMOTION_DELETED',
     ]);
+  });
+});
+
+/**
+ * D56 — a promotion may only be scoped to a channel its tenant sells on.
+ *
+ * ## What was wrong
+ *
+ * `VALID_CHANNELS` was the constant `['DINE_IN','TAKEAWAY','ONLINE']`. Step 4.9
+ * taught the editor to offer `capabilities.fulfilment.channels`, so a retail
+ * shopkeeper was correctly shown a single **Counter** chip — and the server then
+ * refused the only chip on screen with
+ * `Unknown channel 'COUNTER'; expected one of DINE_IN, TAKEAWAY, ONLINE.`
+ * A retail promotion with any channel scope was unsaveable, on every promotion
+ * type. Half the fix shipped; this is the other half.
+ *
+ * ## What makes these assertions non-vacuous (D30)
+ *
+ * The two templates are asserted AGAINST EACH OTHER: retail accepts COUNTER and
+ * rejects DINE_IN, food service does exactly the reverse. Either direction alone
+ * would pass for a service that accepted every channel from everyone — which is
+ * the obvious wrong fix (widening the constant to four values) and is what these
+ * tests exist to rule out.
+ *
+ * The restaurant case is a regression guard, not a new requirement: its allowed
+ * set is byte-identical to the deleted constant.
+ *
+ * MUTATION PROOF (D30 §5) — replacing the capability read with the obvious wrong
+ * fix, a widened constant `['COUNTER','DINE_IN','TAKEAWAY','ONLINE']`:
+ *
+ *   ✗ RETAIL refuses a food-service channel
+ *   ✗ FOOD SERVICE keeps its three, and is not handed COUNTER
+ *   ✗ names the tenant's own channels in the error, not a fixed list
+ *   ✗ PATCH is validated too, not just create
+ *   ✓ RETAIL saves a COUNTER-scoped promotion            (agrees either way)
+ *   ✓ an empty scope ... never consults the profile      (agrees either way)
+ *
+ * Four of six fail; the two that pass are the cases where a widened list and the
+ * capability genuinely agree. Widening the constant would have made the reported
+ * bug go away while quietly letting a restaurant scope a promotion to a retail
+ * counter, so this is the mutation worth proving against.
+ */
+describe('PromotionsService — channels follow the tenant capability (D56)', () => {
+  const RETAIL = ['COUNTER'];
+  const FOOD = ['DINE_IN', 'TAKEAWAY', 'ONLINE'];
+
+  it('RETAIL saves a COUNTER-scoped promotion', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit(), fakeProfiles(RETAIL));
+
+    const view = await svc.create(TENANT, 'usr_1', bundleDto({ channelScope: ['COUNTER'] }));
+
+    // POSITIVE: it saved, and the scope round-tripped rather than being dropped.
+    expect(view.channelScope).toEqual(['COUNTER']);
+    expect(prisma.promos).toHaveLength(1);
+  });
+
+  it('RETAIL refuses a food-service channel', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit(), fakeProfiles(RETAIL));
+
+    await expect(
+      svc.create(TENANT, 'usr_1', bundleDto({ channelScope: ['DINE_IN'] })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    // NEGATIVE: nothing was written on the way to the rejection.
+    expect(prisma.promos).toHaveLength(0);
+  });
+
+  it('FOOD SERVICE keeps its three, and is not handed COUNTER', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit(), fakeProfiles(FOOD));
+
+    // POSITIVE — unchanged for the team that already had this working.
+    const view = await svc.create(
+      TENANT,
+      'usr_1',
+      bundleDto({ channelScope: ['DINE_IN', 'TAKEAWAY'] }),
+    );
+    expect(view.channelScope).toEqual(['DINE_IN', 'TAKEAWAY']);
+
+    // NEGATIVE — a restaurant does not sell at a retail counter. This is the
+    // assertion that fails if anyone "fixes" the bug by widening the constant
+    // to all four channels instead of reading the capability.
+    const prisma2 = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc2 = buildService(prisma2, fakeAudit(), fakeProfiles(FOOD));
+    await expect(
+      svc2.create(TENANT, 'usr_1', bundleDto({ channelScope: ['COUNTER'] })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma2.promos).toHaveLength(0);
+  });
+
+  it('names the tenant’s own channels in the error, not a fixed list', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit(), fakeProfiles(RETAIL));
+
+    // The old message told a retail operator to pick DINE_IN — advice that
+    // would not have worked, since their editor offers no such chip.
+    await expect(
+      svc.create(TENANT, 'usr_1', bundleDto({ channelScope: ['DINE_IN'] })),
+    ).rejects.toThrow('expected one of COUNTER');
+  });
+
+  it('an empty scope means every channel and never consults the profile', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const profiles = fakeProfiles(RETAIL);
+    const svc = buildService(prisma, fakeAudit(), profiles);
+
+    await svc.create(TENANT, 'usr_1', bundleDto({ channelScope: [] }));
+
+    expect(prisma.promos).toHaveLength(1);
+    // Runtime spy rather than source text (D30 §4): an unrestricted promotion
+    // must not pay for a profile lookup it cannot act on.
+    expect(profiles.getEffectiveProfile).not.toHaveBeenCalled();
+  });
+
+  it('PATCH is validated too, not just create', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit(), fakeProfiles(RETAIL));
+    const created = await svc.create(TENANT, 'usr_1', bundleDto({ channelScope: ['COUNTER'] }));
+
+    // The editor saves an edit through PATCH, so a create-only check would have
+    // left the same defect reachable one screen later.
+    await expect(
+      svc.update(TENANT, 'usr_1', created.id, { channelScope: ['ONLINE'] } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+/**
+ * A time window must be able to contain a moment.
+ *
+ * ## What was wrong
+ *
+ * `isPromotionActive` reads `startTime`/`endTime` as the half-open interval
+ * [start, end) and has no overnight wrap, but the only validation was
+ * "both or neither". So two shapes saved cleanly and produced a promotion that
+ * is switched on, reads Active in the list, and can never fire on any day:
+ * `start === end`, and `start > end` — the latter being exactly what an operator
+ * writes meaning "18:00 through 09:00".
+ *
+ * Reported from the field as a bundle that stopped discounting. The window was
+ * 12:56–12:57: a one-minute schedule nobody typed, because Chrome's native
+ * `<input type="time">` inserts the current clock time when its icon is clicked.
+ * That one is legal and stays legal — a flash sale is a real thing to want — and
+ * is warned about in the editor rather than refused here.
+ *
+ * ## What makes these assertions non-vacuous (D30)
+ *
+ * Every rejected window is paired with an accepted one, in the same suite. A
+ * guard that threw on all four would pass every rejection test while making the
+ * ordinary 09:00–17:00 promotion — and the all-day blank pair, which is most of
+ * them — unsaveable. The one-minute window is asserted to SAVE, which is the
+ * assertion that fails if anyone tightens this guard into a duration rule.
+ *
+ * MUTATION PROOF (D30 §5) — three mutations, each actually run:
+ *
+ *   A. Guard removed entirely (the defect as shipped):
+ *        × refuses an empty interval
+ *        × refuses a window that would have to cross midnight
+ *        × guards PATCH as well as create
+ *      3 of 6 fail; the accepted-window cases correctly still pass.
+ *
+ *   B. `>` instead of `>=` — the off-by-one that lets equal times through:
+ *        × refuses an empty interval
+ *      1 of 6. That single test is the only thing standing between an operator
+ *      and a promotion scheduled 12:56–12:56, which is why it is its own case
+ *      rather than folded into the midnight test.
+ *
+ *   C. Over-tightened into a minimum duration (`end - start < 15`) — the
+ *      tempting over-correction, since a one-minute window is what was reported:
+ *        × still SAVES a one-minute window — legal, merely unusual
+ *      1 of 6. This is the direction the fix is most likely to drift, and the
+ *      only test that catches it is the one asserting a permission rather than
+ *      a refusal.
+ */
+describe('PromotionsService — a time window must be able to contain a moment', () => {
+  const withTimes = (startTime: string, endTime: string) =>
+    bundleDto({ startTime, endTime } as Partial<CreatePromotionDto>);
+
+  it('accepts an ordinary window, and all-day', async () => {
+    // POSITIVE, first: the guard must not cost the normal case.
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await svc.create(TENANT, 'usr_1', withTimes('09:00', '17:00'));
+    expect(prisma.promos).toHaveLength(1);
+
+    const prisma2 = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc2 = buildService(prisma2, fakeAudit());
+    await svc2.create(TENANT, 'usr_1', bundleDto());
+    expect(prisma2.promos).toHaveLength(1);
+  });
+
+  it('refuses an empty interval', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await expect(
+      svc.create(TENANT, 'usr_1', withTimes('12:56', '12:56')),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.promos).toHaveLength(0);
+  });
+
+  it('refuses a window that would have to cross midnight, and says what to do', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await expect(svc.create(TENANT, 'usr_1', withTimes('18:00', '09:00'))).rejects.toThrow(
+      'could never be active',
+    );
+    // The message has to name the limitation, not just refuse: an operator who
+    // wants an evening offer needs to know two promotions is the way to get one.
+    await expect(svc.create(TENANT, 'usr_1', withTimes('18:00', '09:00'))).rejects.toThrow(
+      'overnight wrap',
+    );
+    expect(prisma.promos).toHaveLength(0);
+  });
+
+  it('still SAVES a one-minute window — legal, merely unusual', async () => {
+    /*
+     * The exact shape that was reported as a bug. It is not one: a flash sale is
+     * a real thing to want, and the editor warns about it. This assertion is
+     * what fails if the guard is ever tightened into a minimum duration.
+     */
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await svc.create(TENANT, 'usr_1', withTimes('12:56', '12:57'));
+    expect(prisma.promos).toHaveLength(1);
+  });
+
+  it('guards PATCH as well as create', async () => {
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    const created = await svc.create(TENANT, 'usr_1', withTimes('09:00', '17:00'));
+
+    // The field report arrived via an edit, not a create — a create-only guard
+    // would have left the reported path wide open.
+    await expect(
+      svc.update(TENANT, 'usr_1', created.id, { startTime: '18:00', endTime: '09:00' } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('keeps refusing a half-open pair', async () => {
+    // Pre-existing rule, asserted so the new branch cannot swallow it.
+    const prisma = fakePrisma({ products: ['prd_1', 'prd_2'] });
+    const svc = buildService(prisma, fakeAudit());
+    await expect(
+      svc.create(TENANT, 'usr_1', bundleDto({ startTime: '09:00' } as Partial<CreatePromotionDto>)),
+    ).rejects.toThrow('both be provided or both omitted');
   });
 });

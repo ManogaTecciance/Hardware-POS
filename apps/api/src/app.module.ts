@@ -24,6 +24,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { ExchangesModule } from './modules/exchanges/exchanges.module';
 import { ReturnsModule } from './modules/returns/returns.module';
 import { QuotationsModule } from './modules/quotations/quotations.module';
 import { DiscountsModule } from './modules/discounts/discounts.module';
@@ -51,6 +52,8 @@ import { RestaurantReportsModule } from './modules/restaurant-reports/restaurant
 import { DeliveryHubModule } from './modules/delivery-hub/delivery-hub.module';
 import { RestaurantOrdersModule } from './modules/restaurant-orders/restaurant-orders.module';
 import { InventoryReceiptsModule } from './modules/inventory-receipts/inventory-receipts.module';
+import { StockTakesModule } from './modules/stock-takes/stock-takes.module';
+import { BrandsModule } from './modules/brands/brands.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 
 @Module({
@@ -76,6 +79,8 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     SuppliersModule,
     SalesModule,
     ReturnsModule,
+    // D128 (Phase 7) — composes ReturnsModule and SalesModule; owns no money path.
+    ExchangesModule,
     QuotationsModule,
     DiscountsModule,
     PaymentsModule,
@@ -104,6 +109,8 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
     // (via ProvidersModule) so weighted-average cost has one implementation
     // shared with the product-variant wizard's opening-stock path.
     InventoryReceiptsModule,
+    StockTakesModule,
+    BrandsModule,
     // D45 — Scheduled auto-apply promotions (Bundle / BOGO / % / $). Peer of
     // DiscountsModule; DiscountsModule stays authoritative for operator-applied
     // retail line/order discounts at sale time. RestaurantModule re-imports

@@ -103,16 +103,25 @@ const hrefs = (groups: NavGroup[]): string[] => groups.flatMap((g) => g.items.ma
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Tile Shop navigation is behaviourally identical to before Slice 8', () => {
-  it('renders exactly the pre-Slice-8 list, in the pre-Slice-8 order', () => {
+  it('renders the pre-Slice-8 list, in order, plus the Phase 8 additions', () => {
     // The literal list that shipped before this slice. An exact sequence, not a
     // set: a reordered sidebar is a visible change to an existing screen.
+    //
+    // `Reports` was added by `8.2`, deliberately, and sits beside Sales because
+    // both answer "what happened". Everything else keeps its position — the
+    // point of an exact sequence is that an accidental reorder still fails.
     expect(labels(nav('HARDWARE', LEGACY_MODULES))).toEqual([
       'Dashboard',
       'POS',
       'Sales',
+      'Reports',
       'Quotations',
       'Returns',
       'Products',
+      // `8.7` (D132) added a `Stock count` entry here and the **PO removed it
+      // from the rail on 2026-09-08**. Edited on that instruction, not to make
+      // a refactor pass — which is the distinction D16 draws. The screen and
+      // the endpoints are untouched; only the rail entry is gone.
       'Suppliers',
       'Customers',
       'QuickBooks',
@@ -131,17 +140,33 @@ describe('Tile Shop navigation is behaviourally identical to before Slice 8', ()
 
   it('an unregistered business type renders the empty rail, never the retail one (D56/D57)', () => {
     /*
-     * TILE_SHOP and RETAIL were removed from the enum (D57), and the registry
-     * has no fallback (D56) — the `?? RETAIL_NAV` this replaced is exactly
-     * the mechanism that handed HOTEL the wrong screens. A stale value from
-     * an old token or a mis-wired caller gets a visibly empty rail, not a
-     * plausibly wrong retail one.
+     * TILE_SHOP was removed from the enum (D57) and the registry has no
+     * fallback (D56) — the `?? RETAIL_NAV` this replaced is exactly the
+     * mechanism that handed HOTEL the wrong screens. A stale value from an old
+     * token or a mis-wired caller gets a visibly empty rail, not a plausibly
+     * wrong retail one.
+     *
+     * `RETAIL` was a second probe here until D120 brought the template back. It
+     * is registered now, so asserting it renders nothing would assert the
+     * opposite of the truth. `GHOST_TYPE` replaces it — a value that cannot
+     * ever be registered, which is what the probe always meant.
      */
     expect(nav('TILE_SHOP' as never, LEGACY_MODULES)).toEqual([]);
-    expect(nav('RETAIL' as never, LEGACY_MODULES)).toEqual([]);
+    expect(nav('GHOST_TYPE' as never, LEGACY_MODULES)).toEqual([]);
     // Positive counterpart, so the two negatives cannot pass by the resolver
     // returning [] for everything.
     expect(labels(nav('HARDWARE', LEGACY_MODULES)).length).toBeGreaterThan(0);
+  });
+
+  it('D120 — RETAIL is registered, and gets the retail rail', () => {
+    // The counterpart of the probe retired above: the value that used to prove
+    // "unregistered renders nothing" must now prove the opposite, or the change
+    // above would have quietly weakened the suite by one assertion.
+    const retail = labels(nav('RETAIL', LEGACY_MODULES));
+
+    expect(retail.length).toBeGreaterThan(0);
+    // Same rail as HARDWARE — RETAIL_NAVIGATION is shared, not forked (D120).
+    expect(retail).toEqual(labels(nav('HARDWARE', LEGACY_MODULES)));
   });
 
   it('marks nothing as upcoming — every retail destination is built', () => {
@@ -336,15 +361,23 @@ describe('module and permission are both required', () => {
     expect(groups).toContain('Operations');
   });
 
-  it('Operations survives on sale history alone', () => {
+  it('Operations survives on sale history and reporting alone', () => {
     // The consequence of the shared-core classification, stated positively: with
-    // every retail module revoked the section still carries exactly one entry.
+    // every RETAIL module revoked the section still carries the two entries whose
+    // modules are shared core — sale history (no module at all) and Reports
+    // (REPORTING, in SHARED_CORE since before this branch).
     const noRetail = LEGACY_MODULES.filter(
       (m) => !['RETAIL_POS', 'QUOTATIONS', 'RETURNS'].includes(m),
     );
     const operations = nav('HARDWARE', noRetail).find((g) => g.label === 'Operations');
 
-    expect(operations?.items.map((i) => i.label)).toEqual(['Sales']);
+    expect(operations?.items.map((i) => i.label)).toEqual(['Sales', 'Reports']);
+
+    // And revoking REPORTING really does remove it — otherwise the line above
+    // would pass for an entry that ignores its module gate.
+    const alsoNoReporting = noRetail.filter((m) => m !== 'REPORTING');
+    const stripped = nav('HARDWARE', alsoNoReporting).find((g) => g.label === 'Operations');
+    expect(stripped?.items.map((i) => i.label)).toEqual(['Sales']);
   });
 });
 
@@ -926,5 +959,130 @@ describe('D93 — any-of permission gates', () => {
       expect(seen).toEqual([1, 1]);
       expect(seen).not.toContain(3);
     });
+  });
+});
+
+/**
+ * D120 (2.8) — D93 verification for the Retail rail.
+ *
+ * D93's rule: **a rail entry is gated on what the screen can do.** Its failure
+ * was `SALE_CREATE` — a retail permission — gating the restaurant `/pos` entry,
+ * so a permission had become a proxy for "may use the floor screens" and the
+ * proxy had started lying.
+ *
+ * The dangerous direction is fail-open, so the empty-gate case is proven against
+ * the real exported `holdsAnyOf` rather than a local re-expression.
+ */
+describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
+  const RETAIL_MODULES_ALL: ModuleKey[] = [
+    ...SHARED_CORE,
+    ...RETAIL_ONLY.filter((m) => m !== 'QUICKBOOKS'),
+  ];
+
+  it('gates each entry on the permission that names what its screen does', () => {
+    // An exact map, so a future entry gated on a borrowed permission is a
+    // failing test rather than a plausible-looking sidebar. Every pair below is
+    // the screen's OWN capability: /returns on RETURN_READ, not on SALE_CREATE.
+    const gates = nav('RETAIL', RETAIL_MODULES_ALL)
+      .flatMap((g) => g.items)
+      .map((i) => [i.href, i.permission ?? null]);
+
+    expect(gates).toEqual([
+      ['/dashboard', null],
+      ['/pos', Permission.SALE_CREATE],
+      ['/sales', Permission.SALE_READ],
+      ['/reports', Permission.REPORT_READ],
+      ['/quotations', Permission.QUOTATION_READ],
+      ['/returns', Permission.RETURN_READ],
+      ['/products', Permission.PRODUCT_READ],
+      // `/stock-takes` sat here from `8.7` (D132) until the PO removed the rail
+      // entry on 2026-09-08. The screen and its endpoints are unchanged — this
+      // list only describes what the RAIL offers.
+      ['/suppliers', Permission.SUPPLIER_READ],
+      ['/customers', Permission.CUSTOMER_READ],
+      ['/settings', Permission.SETTINGS_MANAGE],
+    ]);
+  });
+
+  it('hides QuickBooks by MODULE, not by withholding a permission', () => {
+    // The retail descriptor omits the QUICKBOOKS module, so the shared rail's
+    // entry never renders. Deleting the entry from RETAIL_NAVIGATION instead
+    // would fork a list Hardware also uses, to remove a line the module gate
+    // already removes.
+    const withoutModule = nav('RETAIL', RETAIL_MODULES_ALL).flatMap((g) => g.items);
+    expect(withoutModule.map((i) => i.href)).not.toContain('/quickbooks');
+
+    // POSITIVE CONTROL: the entry exists and the permission is held — only the
+    // module is missing. Without this the assertion above would pass even if the
+    // entry had been deleted or the permission revoked.
+    const withModule = nav('RETAIL', [...RETAIL_MODULES_ALL, 'QUICKBOOKS']).flatMap((g) => g.items);
+    expect(withModule.map((i) => i.href)).toContain('/quickbooks');
+  });
+
+  it('carries no restaurant destination', () => {
+    const hrefs = nav('RETAIL', RETAIL_MODULES_ALL)
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+
+    for (const restaurantOnly of ['/tables', '/kitchen', '/orders', '/calendar']) {
+      expect(hrefs).not.toContain(restaurantOnly);
+    }
+  });
+
+  it('now CARRIES /reports — 8.2 put a retail screen behind it', () => {
+    // The inverse of the 2.8 assertion this replaces, and the successor that
+    // assertion named. It read "deliberately omits /reports — that screen is
+    // restaurant analytics", because `/reports` rendered `<RestaurantReports>`
+    // and a door onto the wrong room is worse than no door. Its own comment
+    // said the entry "belongs in Phase 8, with a screen behind it".
+    //
+    // `8.2` built that screen and made the route dispatch on the fulfilment
+    // capability, so the door now opens onto the right room. The gate was never
+    // the problem — REPORT_READ and REPORTING were both already held, which is
+    // re-asserted below because it is still what makes this a decision.
+    const hrefs = nav('RETAIL', RETAIL_MODULES_ALL)
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+
+    expect(hrefs).toContain('/reports');
+    expect(ROLE_PERMISSIONS.OWNER).toContain(Permission.REPORT_READ);
+    expect(SHARED_CORE).toContain('REPORTING');
+
+    // Still module-gated: revoke REPORTING and the entry goes, so this is a
+    // real gate rather than an entry that renders unconditionally.
+    const withoutReporting = nav(
+      'RETAIL',
+      RETAIL_MODULES_ALL.filter((m) => m !== 'REPORTING'),
+    )
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+    expect(withoutReporting).not.toContain('/reports');
+  });
+
+  it('a Cashier sees the till and its history, and nothing administrative', () => {
+    const hrefs = nav('RETAIL', RETAIL_MODULES_ALL, 'CASHIER')
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+
+    expect(hrefs).toContain('/pos');
+    expect(hrefs).toContain('/returns');
+    // Settings is SETTINGS_MANAGE, which a cashier does not hold — the gate is
+    // doing the work, not a hardcoded role check.
+    expect(hrefs).not.toContain('/settings');
+    expect(hrefs).not.toContain('/suppliers');
+  });
+
+  it('an empty gate array REFUSES, using the real holdsAnyOf', () => {
+    // D93: the dangerous direction is fail-open. An any-of gate written as
+    // all-of-nothing would put Settings in front of every role. Proven against
+    // the exported function, because the first draft of this proof in D93
+    // compared two local expressions and passed while the real one fell open.
+    const grantsEverything = { hasPermission: () => true };
+
+    expect(holdsAnyOf([], grantsEverything)).toBe(false);
+    // POSITIVE CONTROLS either side, so the assertion cannot pass by the
+    // function refusing everything.
+    expect(holdsAnyOf(undefined, { hasPermission: () => false })).toBe(true);
+    expect(holdsAnyOf([Permission.SALE_CREATE], grantsEverything)).toBe(true);
   });
 });

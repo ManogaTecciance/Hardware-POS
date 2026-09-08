@@ -46,6 +46,14 @@ interface Props {
    * a retail tenant on load. See `resolveBusinessKind` for the derivation.
    */
   businessKind: ProductBusinessKind | null;
+  /**
+   * The tenant's tax rate (3.15), fetched once by the wizard shell.
+   *
+   * `null` is UNRESOLVED, not zero: while it loads, or if the request fails,
+   * the Taxable helper text keeps its rate-free wording rather than asserting
+   * a number. Zero is a real, different fact and reads differently on screen.
+   */
+  taxRatePercent: number | null;
   onChange: (patch: Partial<WizardState>) => void;
 }
 
@@ -91,6 +99,7 @@ export function StepDetails({
   categories,
   session,
   businessKind,
+  taxRatePercent,
   onChange,
 }: Props) {
   const activeCategories = categories.filter((c) => c.isActive);
@@ -108,6 +117,21 @@ export function StepDetails({
         </p>
       </div>
 
+      {/*
+        D120 (2.13, revised 2026-09-02) — the RETAIL arm is neutral; the
+        restaurant arm is left exactly as it was.
+
+        It read `isRestaurant ? 'e.g. Mix Kottu' : 'e.g. Milk 200ml'`, which made
+        every NON-restaurant workspace a grocery — a clothing shop was prompted
+        for milk. A clothing example would only move that problem to the next
+        vertical, so the retail arm is a neutral prompt.
+
+        The first version of this fix deleted the whole conditional on a D56
+        argument, which silently changed the RESTAURANT placeholder too. That
+        argument is ours; their UI stability is theirs, and other developers are
+        working against this file in parallel. The branch stays until removing it
+        is somebody's deliberate decision rather than a side effect of ours.
+      */}
       {/* The counter appears only near the ceiling. `maxLength` stops typing
           dead at the limit, which reads as a broken keyboard unless something
           says why — but showing "3 / 200" from the first keystroke nags about
@@ -129,7 +153,7 @@ export function StepDetails({
           id="product-name"
           value={state.name}
           onChange={(e) => onChange({ name: e.target.value })}
-          placeholder={isRestaurant ? 'e.g. Mix Kottu' : 'e.g. Milk 200ml'}
+          placeholder={isRestaurant ? 'e.g. Mix Kottu' : 'Enter product name'}
           maxLength={MAX_NAME_LENGTH}
           autoFocus
           aria-invalid={!!errors.name}
@@ -339,6 +363,55 @@ export function StepDetails({
           </div>
         </div>
       )}
+
+      {/*
+        D122 (3.13) — the toggle that makes `Product.taxable` reachable.
+
+        Defaults ON, because that is already true of every product: there is no
+        per-product exemption in any tenant's history, so the switch records the
+        existing fact rather than changing it.
+
+        NOT disabled for a Service, unlike Track inventory — a service can
+        legitimately be taxable, and the sale engine handles it either way.
+
+        Shown on every template. Hiding it for food service would need a
+        business-type conditional, which is the scattered comparison D56 exists
+        to end, and a restaurant may legitimately zero-rate an item too.
+
+        The helper text names the EFFECT rather than repeating the label:
+        "Taxable" alone is ambiguous — a shopkeeper can read it as "tax is
+        included in the price". Saying what happens removes that.
+      */}
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">Taxable</span>
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+          <Switch
+            checked={state.taxable}
+            onCheckedChange={(v) => onChange({ taxable: v })}
+            aria-label="Taxable"
+          />
+          {/*
+            3.15 — name the rate rather than alluding to it. Before the tax rate
+            was reachable in Settings there was no number to name and no screen
+            to send anyone to; now there is both.
+
+            Three states, not two. `null` is UNRESOLVED — still loading, or the
+            request failed — and keeps the original wording rather than claiming
+            a rate. A rate of exactly 0 gets its own sentence: it is the honest
+            answer to "I switched Taxable on and nothing was charged", which is
+            otherwise a silent dead end.
+          */}
+          <div className="text-xs text-muted-foreground">
+            {!state.taxable
+              ? 'Zero-rated — no tax is charged on this product.'
+              : taxRatePercent === null
+                ? "Tax applies at this shop's configured rate."
+                : taxRatePercent === 0
+                  ? 'This shop’s tax rate is 0%, so nothing is charged yet. Set it in Settings → Business.'
+                  : `Tax applies at ${taxRatePercent}%.`}
+          </div>
+        </div>
+      </div>
 
       {isRestaurant ? (
         <Field label="Dietary tags">

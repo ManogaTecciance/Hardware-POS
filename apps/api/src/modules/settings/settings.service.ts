@@ -187,6 +187,15 @@ export class SettingsService implements OnModuleInit {
       quotation: { ...current.quotation, ...definedOnly(dto.quotation) },
       documents: this.mergeDocuments(current.documents, dto.documents),
       sharing: { ...current.sharing, ...definedOnly(dto.sharing) },
+      // Explicit, like `documents` above: without it the spread leaks the DTO's
+      // own optional type into AppSettings and `barcodePrefix` widens to
+      // `string | null | undefined`. `label` is merged separately so a partial
+      // geometry update keeps the fields it did not mention.
+      catalogue: {
+        ...current.catalogue,
+        ...definedOnly(dto.catalogue),
+        label: { ...current.catalogue.label, ...definedOnly(dto.catalogue?.label) },
+      },
     };
 
     // Manual upsert on (tenantId, branchId=null): Prisma's compound-unique input
@@ -257,6 +266,11 @@ export class SettingsService implements OnModuleInit {
       quotation: { ...d.quotation, ...(stored.quotation ?? {}) },
       documents: { ...d.documents, ...(stored.documents ?? {}) },
       sharing: { ...d.sharing, ...(stored.sharing ?? {}) },
+      catalogue: {
+        ...d.catalogue,
+        ...(stored.catalogue ?? {}),
+        label: { ...d.catalogue.label, ...(stored.catalogue?.label ?? {}) },
+      },
     };
   }
 
@@ -268,6 +282,29 @@ export class SettingsService implements OnModuleInit {
       taxInclusive: false,
       highDiscountThresholdPercent: 10,
       receiptFooter: 'Thank you for your purchase!',
+      catalogue: {
+        // NULL, deliberately. Allocation refuses until an operator chooses one,
+        // because a prefix picked by default and then changed means reprinting
+        // every label the shop has already produced.
+        barcodePrefix: null,
+        barcodePrefixByCategoryId: {},
+        label: {
+          // 38 x 21 mm, 5 x 13 on A4 — the commonest off-the-shelf sheet.
+          widthMm: 38,
+          heightMm: 21,
+          columns: 5,
+          rows: 13,
+          marginTopMm: 10,
+          marginLeftMm: 5,
+          gapXMm: 2,
+          gapYMm: 0,
+          showProductName: true,
+          showVariantOptions: true,
+          showPrice: true,
+          showSku: false,
+          symbology: 'EAN13',
+        },
+      },
       returns: {
         returnPeriodDays: 30,
         cashierReturnValueLimit: 5000,

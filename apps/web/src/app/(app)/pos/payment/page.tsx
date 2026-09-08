@@ -27,7 +27,15 @@ import { Select } from '@/components/ui/select';
 import { Sheet } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/lib/auth';
-import { computeLine, computeTotals, type CartItem } from '@/lib/cart';
+import {
+  lineLabel,
+  linePrice,
+  computeCartLines,
+  computeTotals,
+  type CartLineTotals,
+  type CartItem,
+  type CartLineKey,
+} from '@/lib/cart';
 import { useCheckoutData } from '@/lib/catalog';
 import { checkCredit } from '@/lib/credit-guard';
 import { fetchCustomerCredit, type CustomerCredit } from '@/lib/customers-api';
@@ -37,6 +45,7 @@ import { printCustomerReceipt, type ReceiptContext } from '@/lib/receipt-print';
 import {
   completeSale,
   saleLocation,
+  toSaleItemPayload,
   type CompletedSale,
   type CompleteSaleDto,
   type PaymentMethodCode,
@@ -80,7 +89,18 @@ export default function PaymentPage() {
     setShopTimeZone(shopTimeZone);
   }, [shopTimeZone, setShopTimeZone]);
 
-  const totals = computeTotals(cart.items, data.settings.taxRatePercent, cart.orderDiscount);
+  const totals = computeTotals(
+    cart.items,
+    data.settings.taxRatePercent,
+    cart.orderDiscount,
+    data.promotionRules,
+  );
+  // Same derivation the totals above used, so the table and the footer cannot
+  // disagree (D123, 4.4).
+  const cartLines = React.useMemo(
+    () => new Map(computeCartLines(cart.items, data.promotionRules).map((l) => [l.lineKey, l])),
+    [cart.items, data.promotionRules],
+  );
   const total = totals.total;
 
   const [mode, setMode] = React.useState<Mode>('CASH');
@@ -307,18 +327,16 @@ export default function PaymentPage() {
         customerId: cart.customerId || undefined,
         saleDate: cart.submittedSaleDate,
         paymentDueDate: needsDueDate ? dueDate : undefined,
-        items: cart.items.map((it) => ({
-          productId: it.product.id,
-          quantity: it.quantity,
-          discountType: it.discount?.type,
-          // Hand-written map: a field left out here is dropped with no type
-          // error, and the server would then recompute a whole-line amount while
-          // the cashier was shown the per-unit one.
-          discountBasis: it.discount?.basis,
-          discountValue: it.discount?.value,
-          discountReason: it.discount?.reason,
-          approvalToken: it.approvalToken,
-        })),
+        // D120 (1c.7) — closes the loop. Everything behind this (variant pricing,
+        // the ownership checks, per-variant depletion and its oversell guard,
+        // the D44 snapshots) was built in 1a and never once reached from the
+        // till, because the payload did not carry the variant id.
+        //
+        // A function rather than a literal so the mapping is testable: the field
+        // is optional on the wire, so forgetting it compiles silently. The same
+        // goes for `discountBasis` — the mapper carries it (D136), and restating
+        // it here would be a second copy of the rule to keep in step.
+        items: cart.items.map(toSaleItemPayload),
         payments,
         orderDiscountType: cart.orderDiscount?.type,
         orderDiscountValue: cart.orderDiscount?.value,
@@ -330,6 +348,9 @@ export default function PaymentPage() {
         currency,
         customerName,
         items: cart.items,
+        // D123 (4.4) — the fallback receipt prices from the live cart, so it
+        // needs the same rules the totals above were derived with.
+        promotionRules: data.promotionRules,
         subtotal: totals.subtotal,
         totalDiscount: totals.totalDiscount,
         orderDiscount: totals.orderDiscountAmount,
@@ -421,6 +442,7 @@ export default function PaymentPage() {
         <div className="hidden min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm tab:flex tab:max-h-full tab:self-start">
           <OrderSummary
             items={cart.items}
+            lines={cartLines}
             totals={totals}
             currency={currency}
             taxRatePercent={data.settings.taxRatePercent}
@@ -832,6 +854,7 @@ export default function PaymentPage() {
         <div className="-mx-6 -my-3 flex h-full min-h-0 flex-col">
           <OrderSummary
             items={cart.items}
+            lines={cartLines}
             totals={totals}
             currency={currency}
             taxRatePercent={data.settings.taxRatePercent}
@@ -853,6 +876,7 @@ export default function PaymentPage() {
  */
 function OrderSummary({
   items,
+  lines,
   totals,
   currency,
   taxRatePercent,
@@ -861,11 +885,18 @@ function OrderSummary({
   hideHeader,
 }: {
   items: CartItem[];
+  /**
+   * D123 (4.4) — priced by `computeCartLines`, the same derivation the footer
+   * uses. Recomputing here with `computeLine` would miss any promotion, since a
+   * promotion needs the whole basket to resolve, and the rows would not add up
+   * to the total printed beneath them.
+   */
+  lines: Map<string, CartLineTotals>;
   totals: ReturnType<typeof computeTotals>;
   currency: string;
   taxRatePercent: number;
   total: number;
-  onChangeQty: (productId: string, delta: number) => void;
+  onChangeQty: (lineKey: CartLineKey, delta: number) => void;
   hideHeader?: boolean;
 }) {
   return (
@@ -893,10 +924,14 @@ function OrderSummary({
           </thead>
           <tbody>
             {items.map((it) => {
-              const line = computeLine(it);
+              const line = lines.get(it.lineKey)!;
               return (
                 <tr
-                  key={it.product.id}
+                  // D120 (1c.8) — keyed by the LINE. Same collision 1c.6 fixed in the
+                  // cart: two sizes of one product were duplicate React siblings
+                  // here, reconciled by position, so a quantity change could land
+                  // on the wrong row.
+                  key={it.lineKey}
                   className="border-b border-border last:border-0 align-middle"
                 >
                   <td className="px-4 py-3">
@@ -904,13 +939,28 @@ function OrderSummary({
                       <div className="min-w-0">
                         <div className="truncate font-medium leading-tight">{it.product.name}</div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {it.product.sku ? `SKU: ${it.product.sku}` : ''}
+                          {/*
+                            D120 (1c.8) — the size, on the last screen before money
+                            changes hands.
+
+                            "Paint Brush 2 inch" hides how bad this was: hardware
+                            names often carry the size already. Clothing does not —
+                            two Cotton Shirt rows at the same price were literally
+                            indistinguishable, and a variant product's SKU is null
+                            by design (D44), so this line rendered empty on exactly
+                            the rows that needed identifying.
+                          */}
+                          {it.variant
+                            ? it.variant.name
+                            : it.product.sku
+                              ? `SKU: ${it.product.sku}`
+                              : ''}
                         </div>
                       </div>
                     </div>
                   </td>
                   <td className="whitespace-nowrap px-3 py-3 text-right">
-                    {formatMoney(it.product.unitPrice, currency)}
+                    {formatMoney(linePrice(it), currency)}
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex items-center justify-center gap-1">
@@ -918,8 +968,8 @@ function OrderSummary({
                         variant="outline"
                         size="icon"
                         className="h-8 w-8 shrink-0"
-                        aria-label={`Decrease ${it.product.name} quantity`}
-                        onClick={() => onChangeQty(it.product.id, -1)}
+                        aria-label={`Decrease ${lineLabel(it)} quantity`}
+                        onClick={() => onChangeQty(it.lineKey, -1)}
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </Button>
@@ -930,8 +980,8 @@ function OrderSummary({
                         variant="outline"
                         size="icon"
                         className="h-8 w-8 shrink-0"
-                        aria-label={`Increase ${it.product.name} quantity`}
-                        onClick={() => onChangeQty(it.product.id, 1)}
+                        aria-label={`Increase ${lineLabel(it)} quantity`}
+                        onClick={() => onChangeQty(it.lineKey, 1)}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </Button>

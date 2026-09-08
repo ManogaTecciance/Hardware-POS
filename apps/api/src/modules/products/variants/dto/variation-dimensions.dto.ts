@@ -32,6 +32,17 @@ export class VariationOptionInputDto {
   @Min(0)
   @IsOptional()
   position?: number;
+
+  /**
+   * D125 — optional link to an `AttributeOption` in the tenant library.
+   *
+   * `null` clears the mapping, omitted leaves it as it is. The two are
+   * deliberately different: a wizard that does not know about the library must
+   * not silently unmap a product an operator has already mapped by hand.
+   */
+  @IsString()
+  @IsOptional()
+  attributeOptionId?: string | null;
 }
 
 export class VariationDimensionInputDto {
@@ -44,6 +55,11 @@ export class VariationDimensionInputDto {
   @Min(0)
   @IsOptional()
   position?: number;
+
+  /** D125 — optional link to an `AttributeDefinition`. Same null/omit rule. */
+  @IsString()
+  @IsOptional()
+  attributeDefinitionId?: string | null;
 
   @IsArray()
   @ArrayNotEmpty()

@@ -24,6 +24,7 @@ export const NAV_ICON_NAMES = [
   'BookOpen',
   'CalendarDays',
   'ChefHat',
+  'ClipboardCheck',
   'FileText',
   'LayoutDashboard',
   'Link2',
@@ -111,6 +112,16 @@ export const RETAIL_NAVIGATION: readonly NavGroupSpec[] = [
       // module either. `RETAIL_POS` governs *taking* a sale, which is a retail
       // workflow.
       { href: '/sales', label: 'Sales', icon: 'ReceiptText', permission: Permission.SALE_READ },
+      // Phase 8 (`8.2`) — retail has carried the REPORTING module since it was
+      // put in SHARED_CORE_MODULES, but had no entry to reach it: `/reports`
+      // existed only on the food-service rail. The module was never the gap.
+      {
+        href: '/reports',
+        label: 'Reports',
+        icon: 'BarChart3',
+        permission: Permission.REPORT_READ,
+        module: 'REPORTING',
+      },
       {
         href: '/quotations',
         label: 'Quotations',
@@ -135,6 +146,23 @@ export const RETAIL_NAVIGATION: readonly NavGroupSpec[] = [
       // gating the catalogue on it would hide products from a tenant that owns
       // them.
       { href: '/products', label: 'Products', icon: 'Package', permission: Permission.PRODUCT_READ },
+      /*
+       * `8.7` (D132) put a `Stock count` entry here. **The PO removed it from
+       * the rail on 2026-09-08**, for every domain that reads this list —
+       * RETAIL, HARDWARE and GENERAL.
+       *
+       * Removed from the SHARED list rather than forked out of retail's copy,
+       * by the PO's choice: hardware and general only ever had the entry as a
+       * side effect of Phase 8 adding it here, so this restores the rail they
+       * had before `8.7` rather than inventing a change for them. It also
+       * keeps D120's "reuse; do not fork" intact, and keeps the asserted
+       * `retail rail === hardware rail` equality true.
+       *
+       * **Nothing else is removed.** `/stock-takes` still renders if reached
+       * by URL, `POST /v1/stock-takes` is untouched, and D132 stands: a count
+       * states reality and never touches the oversell guard. Only the rail
+       * entry is gone, so putting it back is this comment in reverse.
+       */
       {
         href: '/suppliers',
         label: 'Suppliers',

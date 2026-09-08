@@ -11,8 +11,14 @@ import {
   documentPaymentMethods,
   paymentMethodLabel,
   safeTimeZone,
+  saleLineLabel,
+  saleLinePromotionNote,
+  splitLineDiscounts,
+  taxBreakdownForDocument,
+  taxRateLabel,
   type ItemConditionCode,
   type ReturnReasonCode,
+  type TaxableLine,
 } from '@hardware-pos/shared';
 
 import { customerAddressLine } from '../../common/customer-display';
@@ -69,6 +75,13 @@ const returnForDoc = {
 
 type ReturnForDocRow = Prisma.ReturnGetPayload<{ include: typeof returnForDoc }>;
 
+/** D128 (`7.3`) — everything the exchange note needs, in one read. */
+const exchangeForDoc = {
+  return: { include: { items: true } },
+  replacementSale: { include: { items: true } },
+  tenant: { select: { name: true } },
+} satisfies Prisma.ExchangeInclude;
+
 /** A returned or replacement line for the Exchange A4 template. */
 export interface ExchangeLine {
   name: string;
@@ -76,6 +89,28 @@ export interface ExchangeLine {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  /**
+   * `7.3` — the tax this line actually carried.
+   *
+   * Optional so the Settings sample preview, which has no tax to show, keeps
+   * working unchanged. It was hardcoded to 0 for every line until Phase 7:
+   * written before Phase 3 made tax per-line with snapshots, so an exchange
+   * note showed no tax at all and did not tie to the money that moved.
+   */
+  taxAmount?: number;
+}
+
+/**
+ * `7.3` — the real money either leg moved, when the caller knows it.
+ *
+ * Without this the note's net is a sum of DISPLAY lines, which is a
+ * reconstruction of the money rather than the money. `Return.refundTotal` and
+ * `Sale.total` are what the customer was actually handed and actually paid, so
+ * a note built from them cannot disagree with the till.
+ */
+export interface ExchangeTotals {
+  returnedTotal: number;
+  replacementTotal: number;
 }
 
 /** Document types the Settings preview can render with sample data. */
@@ -108,6 +143,48 @@ const SAMPLE_ITEMS: { name: string; sku: string; unit: string; unitPrice: number
 ];
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/**
+ * The taxable net of each line, for the shared allocation (D122, 3.12).
+ *
+ * Line net less its proportional share of the order discount — the same
+ * quantity `computeReturnLine` derives, so the printed rows and a later refund
+ * divide the recorded tax identically.
+ */
+function taxableLinesOf(
+  items: readonly { lineTotal: Prisma.Decimal | number; taxRatePercent: Prisma.Decimal | number | null }[],
+  subtotal: number,
+  totalDiscount: number,
+  orderDiscountAmount: number,
+): TaxableLine[] {
+  const discountedSubtotal = subtotal - totalDiscount;
+  return items.map((it) => {
+    const lineTotal = Number(it.lineTotal);
+    const share =
+      discountedSubtotal > 0 ? (orderDiscountAmount * lineTotal) / discountedSubtotal : 0;
+    return {
+      taxable: lineTotal - share,
+      taxRatePercent: it.taxRatePercent === null ? null : Number(it.taxRatePercent),
+    };
+  });
+}
+
+/** Push the per-rate rows a document should print, if any (3.12). */
+function pushTaxBreakdown(
+  summary: A4SummaryLine[],
+  lines: TaxableLine[],
+  recordedTax: number,
+): void {
+  // Empty for a single-rate sale, a restaurant Sale (no lines) and any sale
+  // predating 3.8 — each of which then renders exactly what it rendered before.
+  for (const row of taxBreakdownForDocument(lines, recordedTax)) {
+    summary.push({
+      label: `Tax @ ${taxRateLabel(row.ratePercent)}`,
+      value: formatCurrency(row.taxAmount),
+      muted: true,
+    });
+  }
+}
 
 @Injectable()
 export class DocumentsService {
@@ -217,11 +294,25 @@ export class DocumentsService {
 
     const lines: DocLine[] = sale.items.map((it, i) => ({
       index: i + 1,
-      name: it.productName,
-      sku: it.sku,
-      description: null,
+      // D44/D120 — identify the SIZE that was sold, from the snapshots frozen at
+      // sale time rather than the live variant. A return is argued from this
+      // paper: printing only "Cotton Shirt" left a clerk no way to tell a
+      // returned Medium from a Large.
+      //
+      // 2.12 moved this from a muted sub-line to the inline form the PO asked
+      // for, and into `saleLineLabel` so all four renderers agree.
+      name: saleLineLabel(it.productName, it.variantNameSnapshot),
+      sku: it.variantSkuSnapshot ?? it.sku,
+      // D123 (4.6) — a line at 0.00 with no explanation reads as a pricing
+      // error. `description` renders as the muted sub-line beneath the name,
+      // which is where 2.12 originally put the size. Snapshot, not the live
+      // promotion, so a reprint says what the customer was actually given (D44).
+      description: saleLinePromotionNote(it.promotionNameSnapshot),
       quantity: num(it.quantity),
-      unitType: null,
+      // D134d (`6.5`) — the A4 has carried a Unit column since quotations;
+      // a sale line passed `null` into it. It now prints what the line was
+      // sold in, so "0.75" reads as "0.75 kg".
+      unitType: it.unitOfMeasureSnapshot,
       unitPrice: num(it.unitPrice),
       discountAmount: num(it.discountAmount),
       // Carried so the bill can show HOW a discount was arrived at; the amount
@@ -237,11 +328,42 @@ export class DocumentsService {
     const paid = num(sale.paidAmount);
     const balance = num(sale.balanceAmount);
     const summary: A4SummaryLine[] = [{ label: 'Subtotal', value: formatCurrency(num(sale.subtotal)) }];
-    if (num(sale.totalDiscount) > 0)
-      summary.push({ label: 'Product discounts', value: `- ${formatCurrency(num(sale.totalDiscount))}`, muted: true });
+    /*
+     * D123 (4.6) — the two discount rows.
+     *
+     * 4.4 folded promotions into `totalDiscount` because the maths requires it,
+     * which left this row printing "Product discounts" for a buy-two-get-one:
+     * the right amount under the wrong name. `splitLineDiscounts` is the single
+     * authority for the division, so all four renderers divide it identically.
+     *
+     * A sale with no promotions yields `{ manual: totalDiscount, promotional: 0 }`
+     * and renders exactly as it always did.
+     */
+    const discountSplit = splitLineDiscounts(
+      // `num` at the boundary: `shared` works in plain numbers so a browser can
+      // import it, and Prisma hands back Decimals.
+      sale.items.map((it) => ({ promotionDiscountAmount: num(it.promotionDiscountAmount) })),
+      num(sale.totalDiscount),
+    );
+    if (discountSplit.manual > 0)
+      summary.push({ label: 'Product discounts', value: `- ${formatCurrency(discountSplit.manual)}`, muted: true });
+    if (discountSplit.promotional > 0)
+      summary.push({ label: 'Promotions', value: `- ${formatCurrency(discountSplit.promotional)}`, muted: true });
     if (num(sale.orderDiscountAmount) > 0)
       summary.push({ label: 'Order discount', value: `- ${formatCurrency(num(sale.orderDiscountAmount))}`, muted: true });
-    if (num(sale.taxAmount) > 0) summary.push({ label: 'Tax / VAT', value: formatCurrency(num(sale.taxAmount)) });
+    if (num(sale.taxAmount) > 0) {
+      pushTaxBreakdown(
+        summary,
+        taxableLinesOf(
+          sale.items,
+          num(sale.subtotal),
+          num(sale.totalDiscount),
+          num(sale.orderDiscountAmount),
+        ),
+        num(sale.taxAmount),
+      );
+      summary.push({ label: 'Tax / VAT', value: formatCurrency(num(sale.taxAmount)) });
+    }
     summary.push({ label: 'Grand total', value: formatCurrency(num(sale.total)), strong: true });
     summary.push({ label: 'Paid', value: formatCurrency(paid) });
     if (balance > 0) summary.push({ label: 'Balance due', value: formatCurrency(balance) });
@@ -322,11 +444,15 @@ export class DocumentsService {
       const desc = [`${reason} · ${condition}`, it.note].filter(Boolean).join(' — ');
       return {
         index: i + 1,
-        name: it.productNameSnapshot,
-        sku: it.skuSnapshot,
+        // 2.12 — returns carry the same snapshots since 1a.20, and a credit note
+        // has exactly the same need as the receipt it reverses.
+        name: saleLineLabel(it.productNameSnapshot, it.variantNameSnapshot),
+        sku: it.variantSkuSnapshot ?? it.skuSnapshot,
         description: desc,
         quantity: num(it.returnQuantity),
-        unitType: null,
+        // D134d (`6.5`) — a credit note is a document as much as a receipt is,
+        // which is why 3.8 put `taxRatePercent` on both tables too.
+        unitType: it.unitOfMeasureSnapshot,
         unitPrice: num(it.originalUnitPrice),
         discountAmount: 0,
         discountNote: null,
@@ -340,8 +466,25 @@ export class DocumentsService {
       summary.push({ label: 'Product discount reversed', value: `- ${formatCurrency(num(ret.productDiscountAdjustment))}`, muted: true });
     if (num(ret.orderDiscountAdjustment) > 0)
       summary.push({ label: 'Order discount reversed', value: `- ${formatCurrency(num(ret.orderDiscountAdjustment))}`, muted: true });
-    if (num(ret.taxAdjustment) > 0)
+    if (num(ret.taxAdjustment) > 0) {
+      // 3.12 — a credit note shows WHICH rates were reversed, for the same
+      // reason the receipt shows which were charged. `ReturnItem.taxRatePercent`
+      // exists from 3.11, so the return groups exactly as the sale did.
+      pushTaxBreakdown(
+        summary,
+        taxableLinesOf(
+          ret.items.map((it) => ({
+            lineTotal: num(it.originalLineSubtotal) - num(it.productDiscountAdjustment),
+            taxRatePercent: it.taxRatePercent,
+          })),
+          num(ret.subtotal),
+          num(ret.productDiscountAdjustment),
+          num(ret.orderDiscountAdjustment),
+        ),
+        num(ret.taxAdjustment),
+      );
       summary.push({ label: 'Tax reversed', value: formatCurrency(num(ret.taxAdjustment)) });
+    }
     summary.push({ label: 'Total refund', value: formatCurrency(num(ret.refundTotal)), strong: true });
     // Labelled, not the raw enum: the return note was printing "BANK_TRANSFER"
     // at a customer while the invoice beside it said "Bank transfer".
@@ -400,9 +543,10 @@ export class DocumentsService {
 
   // ── Exchange A4 (returned + replacement lines → net difference) ──────────────
   //
-  // Exchanges are not yet a first-class transaction in the POS. This renderer is
-  // ready for that feature: pass the returned lines and the replacement lines and
-  // it produces a combined A4 note showing the net amount due / to refund.
+  // `7.4` — exchanges ARE a first-class transaction as of Phase 7 (D128). This
+  // comment used to say they were not, and that the renderer was "ready for"
+  // the feature; `exchangeHtml` below is the feature, and the Settings sample
+  // preview is now the secondary caller rather than the only one.
 
   buildExchangeDocument(
     tenantId: string,
@@ -410,6 +554,7 @@ export class DocumentsService {
     exchangeNumber: string,
     returned: ExchangeLine[],
     replacements: ExchangeLine[],
+    totals?: ExchangeTotals,
   ): A4Document {
     const docs = this.settings.getSettings(tenantId).documents;
     const toDoc = (l: ExchangeLine, i: number, sign: number): DocLine => ({
@@ -422,11 +567,22 @@ export class DocumentsService {
       unitPrice: l.unitPrice,
       discountAmount: 0,
       discountNote: null,
-      taxAmount: 0,
+      // `7.3` — the real tax, as a MAGNITUDE. Hardcoded 0 until Phase 7.
+      //
+      // Not negated on the returning side, unlike the line total: the shared
+      // row builder renders any non-positive tax as an em dash, so a negative
+      // would erase the figure rather than show it as a credit. The direction
+      // of the line is already unambiguous from its negative total and the
+      // "Return:" prefix on its name.
+      taxAmount: l.taxAmount ?? 0,
       lineTotal: sign * l.lineTotal,
     });
-    const returnedTotal = returned.reduce((a, l) => a + l.lineTotal, 0);
-    const replacementTotal = replacements.reduce((a, l) => a + l.lineTotal, 0);
+    // Prefer the money that actually moved. Falling back to a sum of display
+    // lines keeps the Settings sample preview working, where there is no
+    // transaction to read totals from.
+    const returnedTotal = totals?.returnedTotal ?? returned.reduce((a, l) => a + l.lineTotal, 0);
+    const replacementTotal =
+      totals?.replacementTotal ?? replacements.reduce((a, l) => a + l.lineTotal, 0);
     const net = Math.round((replacementTotal - returnedTotal) * 100) / 100;
 
     const lines = [
@@ -448,13 +604,83 @@ export class DocumentsService {
       title: 'Exchange',
       number: exchangeNumber,
       meta: [{ label: 'Date', value: this.date(new Date().toISOString(), this.tz(tenantId)) }],
-      columns: this.columns({ ...docs, showTaxColumn: false, showDiscountColumn: false }),
-      rows: this.rows(lines, { ...docs, showTaxColumn: false, showDiscountColumn: false }),
+      // `7.3` — the TAX column now follows the tenant's setting, exactly as the
+      // sale and return notes do. Forcing it off predates Phase 3 and hid the
+      // one figure that makes the note tie to the money. The DISCOUNT column
+      // stays off: an exchange line carries no per-line discount of its own,
+      // because the price it is valued at already has one applied.
+      columns: this.columns({ ...docs, showDiscountColumn: false }),
+      rows: this.rows(lines, { ...docs, showDiscountColumn: false }),
       summary,
       footerText: docs.footerText,
       signatures: docs.signatureFields,
       ...this.layout(docs, this.tz(tenantId)),
     };
+  }
+
+  // ── Exchange A4 from REAL data (D128, `7.3`) ─────────────────────────────
+
+  /**
+   * Render the note for a real exchange.
+   *
+   * Until Phase 7 the only caller of `buildExchangeDocument` was the Settings
+   * sample preview — D2's "a renderer with no transaction behind it". This is
+   * the transaction behind it.
+   *
+   * The totals come from `Return.refundTotal` and `Sale.total`: what the
+   * customer was actually handed and actually paid. A note built from a sum of
+   * display lines would be a reconstruction of the money, not the money.
+   */
+  async exchangeHtml(tenantId: string, exchangeId: string): Promise<string> {
+    const row = await this.prisma.exchange.findFirst({
+      where: { id: exchangeId, tenantId },
+      include: exchangeForDoc,
+    });
+    if (!row) throw new NotFoundException('Exchange not found');
+
+    const num = (v: Prisma.Decimal | number | null) => (v == null ? 0 : Number(v));
+
+    const returned: ExchangeLine[] = row.return.items.map((it) => ({
+      // 2.12 — the size has to survive onto every document, not most of them.
+      name: saleLineLabel(it.productNameSnapshot, it.variantNameSnapshot),
+      sku: it.variantSkuSnapshot ?? it.skuSnapshot,
+      quantity: num(it.returnQuantity),
+      unitPrice: num(it.originalUnitPrice),
+      lineTotal: num(it.refundableAmount),
+      // 3.11 — the tax this line actually paid, from its snapshot, rather than
+      // a rate recomputed today.
+      taxAmount: num(it.taxAdjustment),
+    }));
+
+    // An exchange whose replacement leg never completed still prints: the
+    // customer has been refunded and is entitled to a note saying so. D128 —
+    // unresolved is its own state, and refusing to render would leave the
+    // operator with nothing to hand over.
+    const replacements: ExchangeLine[] = (row.replacementSale?.items ?? []).map((it) => ({
+      // A SaleItem names its product directly; only the VARIANT is snapshotted
+      // (D44). The return side uses productNameSnapshot because a ReturnItem
+      // snapshots both.
+      name: saleLineLabel(it.productName, it.variantNameSnapshot),
+      sku: it.variantSkuSnapshot ?? it.sku,
+      quantity: num(it.quantity),
+      unitPrice: num(it.unitPrice),
+      lineTotal: num(it.lineTotal),
+      taxAmount: num(it.taxAmount),
+    }));
+
+    return renderA4Document(
+      this.buildExchangeDocument(
+        tenantId,
+        row.tenant.name,
+        row.exchangeNumber,
+        returned,
+        replacements,
+        {
+          returnedTotal: num(row.return.refundTotal),
+          replacementTotal: num(row.replacementSale?.total ?? 0),
+        },
+      ),
+    );
   }
 
   // ── Template preview (sample data, for Settings → Documents) ──────────────

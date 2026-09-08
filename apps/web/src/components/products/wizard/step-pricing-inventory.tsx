@@ -14,6 +14,7 @@ import { useIsTabletUp } from '@/lib/use-viewport';
 import { StepRestaurantAdditions } from './step-restaurant-additions';
 import {
   MAX_SKU_LENGTH,
+  sellingPriceLabel,
   variantLabel,
   type VariantDraft,
   type WizardState,
@@ -34,6 +35,16 @@ interface Props {
   branches: BranchSummary[];
   /** True when the tenant runs on locally-tracked inventory (LOCAL mode). */
   showOpeningStock: boolean;
+  /**
+   * D134e — offer “How is this sold?” at all. RETAIL only: the capability is
+   * off for hardware and every food-service domain, and the shell resolves it
+   * so this component never sees a business type (D31).
+   *
+   * Defaults FALSE, so a caller that has not been updated offers nothing —
+   * the direction that cannot leak a control into a template that did not ask
+   * for one.
+   */
+  showMeasuredGoods?: boolean;
   /**
    * Restaurant vs. Retail. Restaurant tenants get three extra cards
    * (Modifier Groups / Promotions / Availability & Kitchen) rendered below the
@@ -58,6 +69,7 @@ export function StepPricingInventory({
   errors,
   branches,
   showOpeningStock,
+  showMeasuredGoods,
   businessKind,
   session,
   branchId,
@@ -88,6 +100,22 @@ export function StepPricingInventory({
           Opening stock is only supported for locally-managed inventory. Add stock via
           Receive Stock after saving.
         </InfoBanner>
+      ) : null}
+
+      {/*
+        D134 (`6.1`) — above both pricing shapes on purpose. Measure is a
+        property of the product, so it applies whether the price lives on
+        the product or on its variants, and it has to be set BEFORE the
+        price is read: "200" means nothing until you know it is per kilo.
+
+        D134e — and only where the tenant sells by measure. `6.1b` rendered
+        this unconditionally, which put a weighed-goods control in front of
+        every restaurant and hardware workspace: this file is the shared
+        Step 3 for every business type, and it already takes `businessKind`
+        for exactly that reason.
+      */}
+      {showMeasuredGoods ? (
+        <MeasureCard state={state} errors={errors} onChange={onChange} />
       ) : null}
 
       {state.hasVariations ? (
@@ -139,7 +167,7 @@ function SimpleForm({
           id="simple-sku"
           value={state.simple.sku}
           onChange={(e) => set({ sku: e.target.value })}
-          placeholder="e.g. MILK-200"
+          placeholder="Enter SKU (or leave blank to generate)"
           maxLength={80}
           aria-invalid={!!errors['simple-sku']}
         />
@@ -156,7 +184,7 @@ function SimpleForm({
       </Field>
 
       <Field
-        label="Selling price"
+        label={sellingPriceLabel(state)}
         htmlFor="simple-price"
         required
         error={errors['simple-price']}
@@ -336,7 +364,8 @@ function VariantMatrix({
                 </Th>
                 <Th>Barcode</Th>
                 <Th>
-                  Selling price<span className="text-danger">*</span>
+                  {sellingPriceLabel(state)}
+                  <span className="text-danger">*</span>
                 </Th>
                 {/* D101 — stock columns only for tracked items; an untracked
                     dish's variants have no counts to seed or reorder. */}
@@ -483,7 +512,8 @@ function VariantMatrix({
                   </div>
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Selling price<span className="text-danger">*</span>
+                      {sellingPriceLabel(state)}
+                      <span className="text-danger">*</span>
                     </label>
                     <MoneyInput
                       value={v.unitPrice}
@@ -573,6 +603,81 @@ function VariantMatrix({
 }
 
 // ── Small primitives ─────────────────────────────────────────────────────────
+
+/**
+ * D134 (`6.1`) — how this product is sold, and in what unit.
+ *
+ * The gap this closes: `quantityType` shipped on the column, the DTO, the
+ * read model and the till, and there was no way to SET it. A measured
+ * product could only be created by writing to the database directly, which
+ * is how the seeded rice worked and why nothing else could.
+ *
+ * The unit is free text (D134b §1) and the examples are a placeholder, not
+ * a list — a shop selling rope by the foot must not have to wait for us.
+ */
+function MeasureCard({
+  state,
+  errors,
+  onChange,
+}: {
+  state: WizardState;
+  errors: Record<string, string>;
+  onChange: (patch: Partial<WizardState>) => void;
+}) {
+  const measured = state.quantityType === 'DECIMAL';
+
+  return (
+    <div className="grid grid-cols-1 gap-4 rounded-2xl border border-border bg-card p-4 md:grid-cols-2">
+      <Field label="How is this sold?" htmlFor="quantity-type">
+        <Select
+          id="quantity-type"
+          value={state.quantityType}
+          onChange={(e) =>
+            onChange(
+              e.target.value === 'DECIMAL'
+                ? { quantityType: 'DECIMAL' }
+                : // Clearing the unit on the way back to WHOLE keeps the two
+                  // fields from disagreeing: a product sold by the piece that
+                  // still carried "kg" would print "3 kg" for three tins.
+                  { quantityType: 'WHOLE', unitOfMeasure: '' },
+            )
+          }
+        >
+          <option value="WHOLE">By the piece — 1, 2, 3</option>
+          <option value="DECIMAL">By weight or measure — 0.75, 1.5</option>
+        </Select>
+      </Field>
+
+      {measured ? (
+        <Field
+          label="Unit"
+          htmlFor="unit-of-measure"
+          required
+          error={errors['unitOfMeasure']}
+        >
+          <Input
+            id="unit-of-measure"
+            value={state.unitOfMeasure}
+            onChange={(e) => onChange({ unitOfMeasure: e.target.value })}
+            placeholder="kg, g, L, ml, m…"
+            maxLength={12}
+            aria-invalid={!!errors['unitOfMeasure']}
+          />
+        </Field>
+      ) : null}
+
+      <div className="md:col-span-2">
+        <InfoBanner>
+          {measured
+            ? state.unitOfMeasure.trim()
+              ? `The till will ask "How many ${state.unitOfMeasure.trim()}?" and price the amount typed — 0.75 × the price below. Receipts read “0.750 ${state.unitOfMeasure.trim()}”.`
+              : 'Name the unit above, and the price below becomes a price per unit.'
+            : 'Quantity is a whole number and the till adds one at a time. Switch to “by weight or measure” for anything sold loose — rice, dhal, umbalakada.'}
+        </InfoBanner>
+      </div>
+    </div>
+  );
+}
 
 function Field({
   label,

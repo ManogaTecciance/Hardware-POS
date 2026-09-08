@@ -1,7 +1,9 @@
+import { QuantityType } from '@hardware-pos/database';
 import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -60,6 +62,40 @@ export class CreateProductDto {
   @IsOptional()
   subcategoryId?: string;
 
+  /**
+   * D133 (`8.9`) — the brand this product carries.
+   *
+   * Optional forever. Most hardware and grocery products have no brand
+   * worth recording, and requiring one would make every existing product
+   * un-editable until somebody invented a brand for it.
+   */
+  @IsString()
+  @IsOptional()
+  brandId?: string;
+
+  /**
+   * D134 (`6.1`) — sold by the piece, or by weight/measure.
+   *
+   * Omitted means `WHOLE`, which is what every product was before this
+   * existed. A client that has never heard of measured goods keeps working.
+   */
+  @IsEnum(QuantityType)
+  @IsOptional()
+  quantityType?: QuantityType;
+
+  /**
+   * D134b — what the quantity is measured in: `kg`, `g`, `L`.
+   *
+   * **Required when `quantityType` is `DECIMAL`** — enforced in
+   * `ProductsService` against the RESULTING state, not here, because the
+   * rule is conditional on another field and a DTO cannot see the stored row
+   * (D134c).
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(16)
+  unitOfMeasure?: string;
+
   /** Sales price/rate. */
   @IsNumber()
   @Min(0)
@@ -95,6 +131,19 @@ export class CreateProductDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  /**
+   * D122 (3.13) — whether this product attracts tax.
+   *
+   * Optional on the wire, and ABSENT MEANS TAXABLE. The service defaults it to
+   * true, matching the column default and for the same reason: there is no
+   * per-product exemption in any tenant's history, so every product already is
+   * taxable. A client that omits the field must not silently zero-rate a
+   * product.
+   */
+  @IsBoolean()
+  @IsOptional()
+  taxable?: boolean;
 
   /**
    * POS-side product photo, previously uploaded via `POST /products/image` for

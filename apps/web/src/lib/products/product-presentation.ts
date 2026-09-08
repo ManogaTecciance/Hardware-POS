@@ -71,6 +71,28 @@ export function resolveBusinessKind(businessType: BusinessType | null): ProductB
 }
 
 /**
+ * D134e — does this tenant sell things by weight or measure?
+ *
+ * Its own resolver rather than a branch on {@link ProductBusinessKind},
+ * because that kind is a COARSE split whose `RETAIL` covers “hardware, tile
+ * shop, general trade” as well as retail. Weighed goods are a RETAIL
+ * capability and hardware has not asked for them, so the coarse kind cannot
+ * answer this question — it would hand the control to every hardware shop.
+ *
+ * Read from the registry for the reason `resolveBusinessKind` gives above:
+ * the if-chain it replaced had already forgotten HOTEL once, and an if-chain
+ * here would forget the next vertical the same way.
+ *
+ * `false` while the profile is unresolved — a control that appears a beat
+ * after the form loads is worse than one that was never offered, and this is
+ * the same safe default the restaurant chrome takes.
+ */
+export function resolveMeasuredGoods(businessType: BusinessType | null): boolean {
+  if (businessType === null) return false;
+  return domainFor(businessType).capabilities.catalogue.measuredGoods === true;
+}
+
+/**
  * The presentation classes, which are deliberately NOT one-per-`InventoryMode`.
  *
  * `LOCAL` and `DISABLED` share "no external catalogue" but differ on whether stock

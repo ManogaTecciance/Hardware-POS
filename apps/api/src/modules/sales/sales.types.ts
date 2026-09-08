@@ -67,6 +67,8 @@ export interface SalesListFilter {
 /** Normalized cart line coming into the compute pipeline. */
 export interface CartItemInput {
   productId: string;
+  /** D120 — the variant sold, when the client names one. */
+  productVariantId?: string | null;
   quantity: number;
   unitPrice?: number;
   discountType?: DiscountType | null;
@@ -83,6 +85,26 @@ export interface CartItemInput {
 /** A fully computed sale line, ready to persist. */
 export interface ComputedLine {
   productId: string;
+  /**
+   * D120 — the exact variant sold, or null for a product that has none.
+   *
+   * Null is also the answer when a variant product is sold without one being
+   * named: the line then behaves exactly as it did before variants existed, at
+   * product level. Requiring a variant is deferred until the till can supply one.
+   */
+  productVariantId: string | null;
+  /**
+   * D44 — the variant's SKU and display name frozen at sale time, so renaming or
+   * deactivating a variant later cannot rewrite a historical receipt. Null
+   * whenever `productVariantId` is.
+   */
+  variantSkuSnapshot: string | null;
+  variantNameSnapshot: string | null;
+  /**
+   * D134d (`6.5`) — the unit this line was sold in, frozen at sale time.
+   * `null` for a WHOLE product, which has no unit.
+   */
+  unitOfMeasureSnapshot: string | null;
   productName: string;
   sku: string | null;
   /** Whether the sale should decrement the product's on-hand stock. */
@@ -98,6 +120,30 @@ export interface ComputedLine {
   discountReason: string | null;
   approvedByUserId: string | null;
   taxAmount: number;
+  /**
+   * D122 (3.9) — the tax rate this line was charged at, frozen at sale time.
+   *
+   * A number, never null, on every NEW line. `SaleItem.taxRatePercent` is
+   * nullable only so that lines written before 3.8 can be recognised as
+   * historical — that is the signal `3.10` uses to fall back to proportional
+   * refunding. If a new sale could write null the fallback could not tell an old
+   * line from a new untaxed one, so the invariant is enforced here in the type.
+   */
+  taxRatePercent: number;
+  /**
+   * D123 (4.4) — the promotion that claimed this line, if any.
+   *
+   * `promotionDiscountAmount` is ALREADY subtracted from `lineTotal` and is
+   * already inside the sale's `totalDiscount`. It is carried separately so the
+   * receipt can name the offer and Phase 8 can report on it — a mirror, never a
+   * second source of truth (the D121 relationship).
+   *
+   * Mutually exclusive with `discountAmount`: a manual line discount overrides
+   * any promotion on that line, so at most one of the two is non-zero.
+   */
+  promotionDiscountAmount: number;
+  promotionId: string | null;
+  promotionNameSnapshot: string | null;
   lineSubtotal: number;
   lineTotal: number;
 }
@@ -124,6 +170,14 @@ export interface ComputedSale {
   orderDiscountAmount: number;
   orderDiscountReason: string | null;
   orderDiscountApprovedById: string | null;
+  /**
+   * D126 — a cart-level promotion, stored beside the manual order discount
+   * rather than on a line. Unlike the manual figure this does NOT reduce the
+   * taxable base; see `sales.service` for why.
+   */
+  promotionOrderDiscountAmount: number;
+  promotionOrderId: string | null;
+  promotionOrderNameSnapshot: string | null;
   taxAmount: number;
   total: number;
 }

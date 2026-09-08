@@ -2,6 +2,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -12,6 +13,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { QuantityType } from '@hardware-pos/database';
 
 import {
   PRODUCT_FOOD_TYPES,
@@ -50,6 +52,40 @@ export class UpdateProductDto {
   @IsOptional()
   subcategoryId?: string;
 
+  /**
+   * D133 (`8.9`) — the brand this product carries.
+   *
+   * Three states, all meaningful: absent leaves the stored brand alone, `''`
+   * clears it, and an id sets it. A DTO that could only set or clear would make
+   * every partial update from a wizard step wipe the brand.
+   */
+  @IsString()
+  @IsOptional()
+  brandId?: string;
+
+  /**
+   * D134 (`6.1`) — sold by the piece, or by weight/measure.
+   *
+   * Omitted means `WHOLE`, which is what every product was before this
+   * existed. A client that has never heard of measured goods keeps working.
+   */
+  @IsEnum(QuantityType)
+  @IsOptional()
+  quantityType?: QuantityType;
+
+  /**
+   * D134b — what the quantity is measured in: `kg`, `g`, `L`.
+   *
+   * **Required when `quantityType` is `DECIMAL`** — enforced in
+   * `ProductsService` against the RESULTING state, not here, because the
+   * rule is conditional on another field and a DTO cannot see the stored row
+   * (D134c).
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(16)
+  unitOfMeasure?: string;
+
   /** Sales price/rate. */
   @IsNumber()
   @Min(0)
@@ -86,6 +122,15 @@ export class UpdateProductDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  /**
+   * D122 (3.13) — whether this product attracts tax. Undefined leaves the
+   * stored value alone, so a partial update cannot make a product exempt by
+   * omission; only an explicit boolean moves it.
+   */
+  @IsBoolean()
+  @IsOptional()
+  taxable?: boolean;
 
   /** POS-side product photo (D44). See CreateProductDto for context. */
   @IsString()

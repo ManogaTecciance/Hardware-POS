@@ -108,10 +108,39 @@ const G = BranchScopeKind.GLOBAL_PLATFORM;
 
 /** Every route the API serves, classified. 245 entries after D45 — 233 pre-D45
  *  plus 12 new endpoints: 4 SHARED_CORE product-side attachments
- *  (`modifier-groups`, `kitchen-stations`), 7 INVENTORY-gated promotions
- *  endpoints, and 1 RETAIL_POS-gated Restaurant POS Catalogue read. */
+ *  (`modifier-groups`, `kitchen-stations`), 7 PROMOTIONS-gated promotions
+ *  endpoints, and 1 RETAIL_POS-gated Restaurant POS Catalogue read.
+ *
+ *  Phase 5 adds 9 more, all SHARED_CORE: the tenant option library (D125), the
+ *  barcode audit and reissue pass (D125 Part 3) and label printing (D127). None
+ *  is module-gated, deliberately — any business that sells variants benefits
+ *  from saying "Size" once, and a barcode is a catalogue concern rather than a
+ *  vertical one. Gating them on a business type would be the D56 mistake. They
+ *  are permission-gated instead: PRODUCT_READ to look, PRODUCT_MANAGE to write. */
 const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /audit-logs': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // D125 / D125a — the tenant option library (Phase 5, 5.1 / 5.2).
+  'GET /attribute-library': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'GET /attribute-library/:definitionId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /attribute-library': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /attribute-library/:definitionId': {
+    module: 'SHARED_CORE',
+    guard: 'shared-core',
+    scope: T,
+  },
+  'DELETE /attribute-library/:definitionId': {
+    module: 'SHARED_CORE',
+    guard: 'shared-core',
+    scope: T,
+  },
+  // D125 Part 3 — the barcode audit and reissue pass (5.9).
+  'GET /barcodes/audit': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /barcodes/reissue': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // D127 — label rendering and queueing (5.7). Tenant-scoped: the label sheet
+  // is drawn from the catalogue, which is tenant-wide, and the print job the
+  // queue already owns carries its own branch routing.
+  'POST /labels/preview': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /labels/print': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /auth/active-branch': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /auth/accessible-branches': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /auth/login': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
@@ -237,13 +266,13 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // is the module that governs their catalogue admin and is present on
   // every Restaurant / Cafe / Bakery tenant. The prior INVENTORY gate
   // silently denied the whole feature to the target audience.
-  'GET /promotions': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'POST /promotions': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'GET /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'PATCH /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'DELETE /promotions/:id': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'POST /promotions/:id/activate': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
-  'POST /promotions/:id/deactivate': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  'GET /promotions': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'POST /promotions': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'GET /promotions/:id': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'PATCH /promotions/:id': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'DELETE /promotions/:id': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'POST /promotions/:id/activate': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
+  'POST /promotions/:id/deactivate': { module: 'PROMOTIONS', guard: 'ENFORCED', scope: T },
   'GET /public/quotations/:token': { module: 'QUOTATIONS', guard: 'public-no-tenant', scope: G },
   'GET /quickbooks/callback': { module: 'QUICKBOOKS', guard: 'public-no-tenant', scope: G },
   'GET /quickbooks/connect': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
@@ -401,6 +430,19 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /restaurant/modifier-groups': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/modifier-groups/:groupId': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/modifier-groups/:groupId': { module: 'MENU_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  // D128 (Phase 7) — the transaction behind the EXCHANGES key D2 reserved.
+  // Module-gated like RETURNS, and tenant-scoped for the same reason: the
+  // branch is carried on the sale and the return, not on the route.
+  'POST /exchanges': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
+  // D130 — prices the returning leg AS AN EXCHANGE, so the approval verdict the
+  // screen shows is the one the completion will apply. Same module gate and the
+  // same permission pair as the completion: a tenant that may not perform an
+  // exchange has no business pricing one.
+  'POST /exchanges/preview': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
+  // 7.3 — the note, from real data. D2's renderer finally has a transaction.
+  'GET /documents/exchanges/:exchangeId': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
+  'GET /exchanges': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
+  'GET /exchanges/:id': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
   'GET /returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
   'POST /returns': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
   'GET /returns/:id': { module: 'RETURNS', guard: 'ENFORCED', scope: T },
@@ -428,6 +470,29 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /sales/complete': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: B },
   'POST /sales/draft': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: B },
   'GET /sales/report': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  // `8.3`. ENFORCED rather than shared-core, unlike the sale reads above: this
+  // is a report, and reports are gated on REPORTING everywhere else in the app.
+  'GET /sales/reports/by-variant': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  // `8.8` — held baskets. RETAIL_POS, not shared core: holding is part of
+  // TAKING a sale, which is the retail workflow `POST /sales/draft` above is
+  // already gated on.
+  'GET /sales/held': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'DELETE /sales/held/:id': { module: 'RETAIL_POS', guard: 'ENFORCED', scope: T },
+  'GET /sales/reports/ageing': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /sales/reports/margin': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  'GET /sales/reports/tax-by-rate': { module: 'REPORTING', guard: 'ENFORCED', scope: T },
+  // D132 (`8.7`) — a count is an INVENTORY operation; the POST is of one
+  // branch's shelf, the reads span the tenant's count history.
+  'POST /stock-takes': { module: 'INVENTORY', guard: 'ENFORCED', scope: B },
+  'GET /stock-takes': { module: 'INVENTORY', guard: 'ENFORCED', scope: T },
+  'GET /stock-takes/:id': { module: 'INVENTORY', guard: 'ENFORCED', scope: T },
+  // D133 (`8.9`) — brands are catalogue data, and the catalogue is shared
+  // core. Gating them on INVENTORY would hide a tenant's own labels from them
+  // because they do not track stock — the mistake the Products nav entry
+  // already documents.
+  'GET /brands': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'POST /brands': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PATCH /brands/:id': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'PUT /settings': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
   'DELETE /settings/document-profile/logo': { module: 'SETTINGS', guard: 'ENFORCED', scope: T },
@@ -570,6 +635,8 @@ describe('7.6 — every route is classified', () => {
       'RETURNS',
       'EXCHANGES',
       'SUPPLIERS',
+      // D124 — its own key; no module was common to retail and food service.
+      'PROMOTIONS',
       'REPORTING',
       'USERS',
       'BRANCHES',

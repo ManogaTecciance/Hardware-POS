@@ -46,9 +46,44 @@ export interface ProviderContext {
  * Mirrors the fields `sales.repository.decrementStock` already uses:
  * `productId`, `productName` (for the user-facing insufficient-stock message),
  * `quantity`, and `trackInventory` (only `Inventory`-type products move stock).
+ *
+ * D120 — `productVariantId` closes the asymmetry with {@link ReceiveStockLine},
+ * which has carried a variant since goods receipts learned to write
+ * `BranchInventory` per (branch, product, variant). Selling could not say which
+ * variant moved, so a sale reduced a single product-level number and left the
+ * per-variant figures a receipt had written untouched.
+ *
+ * Nullable, not required: a product without variants — loose rice, a service —
+ * is the common case and keeps the existing product-level behaviour. Providers
+ * that do not yet read it are unaffected, which is what lets this land ahead of
+ * the depletion change it exists for.
  */
 export interface StockLine {
   productId: string;
+  /**
+   * The exact variant sold. Absent or null for a product that has none, and a
+   * provider that honours it must still fall back to product-level stock.
+   *
+   * **Optional, and that is a deliberate reversal (2.15).** 1a.4 made it
+   * required-nullable so the compiler would name every construction site — which
+   * worked, and is how the sell path was threaded correctly. But two of those
+   * sites are in `RoundDepletionService`, and its spec asserts the StockLine
+   * shape with an EXACT object match:
+   *
+   *     expect(reduceStock).toHaveBeenCalledWith(tx, ctx, [
+   *       { productId: 'p1', productName: 'Bottled Beer', quantity: 2, trackInventory: true },
+   *     ]);
+   *
+   * An added key fails that assertion even though the behaviour is identical —
+   * `aggregateByVariant` treats absent and null the same, proven in
+   * `stock-state.spec`. So a compile-time convenience for us broke a green test
+   * belonging to a module other developers are working on in parallel.
+   *
+   * Optional restores their call shape byte-for-byte. Our own construction sites
+   * still pass it explicitly; what the compiler no longer does, the sell-path
+   * tests do.
+   */
+  productVariantId?: string | null;
   /** Used verbatim in user-facing errors, exactly as the current code does. */
   productName: string;
   quantity: number;
@@ -68,6 +103,31 @@ export interface StockAdjustment {
   /** Signed: positive adds, negative removes. */
   delta: number;
   trackInventory: boolean;
+}
+
+/**
+ * D132 (`8.7`) — one counted line of a stock take.
+ *
+ * `countedQuantity` is an ASSERTION, not a delta: it is what the operator
+ * says is physically on the shelf. The provider works out the variance.
+ */
+export interface StockCountLine {
+  productId: string;
+  productVariantId: string | null;
+  /** For the error message when a product cannot be counted. */
+  productName: string;
+  countedQuantity: number;
+}
+
+/** What the count found, per line, in input order. */
+export interface StockCountOutcome {
+  productId: string;
+  productVariantId: string | null;
+  /** What the books said at the moment of the count. */
+  expectedQuantity: number;
+  countedQuantity: number;
+  /** `counted - expected`. Negative is shrinkage. */
+  variance: number;
 }
 
 /** What a provider knows about one product's availability. */
@@ -90,6 +150,29 @@ export interface ProductAvailability {
 
 /** Availability keyed by product id. Products the provider did not find are absent. */
 export type AvailabilityMap = ReadonlyMap<string, ProductAvailability>;
+
+/**
+ * D120 — what a provider knows about one variant's availability.
+ *
+ * Deliberately smaller than {@link ProductAvailability}: there is no
+ * `trackInventory` or `isUnlimited` here because those are properties of the
+ * *product* — a Service product has no variants to ask about, and a provider that
+ * imposes no ceiling does not implement variant availability at all.
+ */
+export interface VariantAvailability {
+  productVariantId: string;
+  quantityOnHand: number;
+}
+
+/**
+ * Availability keyed by variant id.
+ *
+ * A variant with no row is **absent**, exactly as an unknown product is absent
+ * from {@link AvailabilityMap}. The caller reads absent as zero, which is D120
+ * decision 8 stated at read time: variant stock is created by goods receipts, so
+ * a variant never received into the branch has none.
+ */
+export type VariantAvailabilityMap = ReadonlyMap<string, VariantAvailability>;
 
 /**
  * Result of asking a provider to synchronise.
@@ -292,4 +375,27 @@ export interface CatalogRefreshOutcome<T = unknown> {
   provider: 'QUICKBOOKS';
   /** Whatever the local refresh reported, passed through untouched. */
   summary: T;
+}
+
+/**
+ * Why a stock movement happened, for the append-only ledger (D44, 1a.21).
+ *
+ * Passed to `reduceStock` / `restoreStock` by a caller that wants the provider to
+ * record the movement. **Omitting it is a meaningful state, not an oversight**:
+ * it says "I maintain my own ledger". `RoundDepletionService` does exactly that —
+ * it writes its own `ORDER_ROUND` rows in the caller, and must not receive a
+ * second row from the provider for the same physical movement.
+ *
+ * That is the whole reason the parameter is optional rather than required. A
+ * required parameter would force every existing caller to supply one, including
+ * the restaurant path, whose behaviour is deliberately unchanged.
+ */
+export interface StockMovementMetadata {
+  /** Constrained to the two reasons this path can produce. */
+  reason: 'SALE' | 'RETURN';
+  /** Typed reference, e.g. 'SALE' | 'RETURN'. */
+  refType: string;
+  /** The sale or return id. Available before the provider call in both cases. */
+  refId: string;
+  createdByUserId: string;
 }

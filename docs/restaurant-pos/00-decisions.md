@@ -1761,6 +1761,11 @@ enums **at runtime**, both directions, no regex.
 
 ### D57 — One business type per template: the pilot is HARDWARE; TILE_SHOP and RETAIL are removed
 
+> **Partly superseded by D120 (2026-08-28).** `RETAIL` returns as its own business
+> type and domain descriptor, for a clothing customer that did not exist in
+> August. The Tile Shop finding below and the `TILE_SHOP` removal **stand
+> unchanged**.
+
 PO decision (2026-08-14): the Hardware template and the Tile Shop are the same
 entity, and there is no Retail template. (Plan §4.8.1; plan-appendix id D71.)
 
@@ -4990,6 +4995,2566 @@ decision (refuse, or refund).
 
 ---
 
+## 2026-08-28 — Retail template
+
+### D120 — the Retail template returns: clothing first, local inventory, one workspace per shop
+
+**Supersedes D57** on its retail half. PO decision, 2026-08-28.
+
+D57 removed `TILE_SHOP` and `RETAIL` from `BusinessType` on 14 August, on the
+finding that the Hardware template and the Tile Shop were the same entity and
+that **there was no Retail template**. That was true of the world it was written
+in: the enum was ten days old, the three retail values carried zero rows, and no
+retail customer existed. *"A transition for ghosts protects nothing."*
+
+What changed is the customer, not the reasoning. A clothing retailer is now in
+scope, with grocery behind it, and a template that does not exist cannot serve
+them. D57 is superseded on its facts rather than corrected on its logic — the
+removal was right, and re-adding is cheap in the direction that matters:
+`ALTER TYPE … ADD VALUE` is additive, so this record needs none of the
+destructive-migration exception D57 had to carve out in
+`provider-contract.spec.ts`.
+
+**`RETAIL` returns; `TILE_SHOP` stays removed.** The Tile Shop finding is
+untouched — it really is a Hardware workspace, and the pilot tenant remains
+classified `HARDWARE`.
+
+#### What a Retail workspace is
+
+A `RETAIL` business type with its own `DomainDescriptor` in
+`packages/shared/src/domains/`, registered in `DOMAIN_REGISTRY` — which is total
+and has no fallback (D56), so the value cannot exist without the descriptor.
+
+- **Providers:** `InventoryMode.LOCAL` + `AccountingProviderKind.NONE`. Retail
+  does not integrate with QuickBooks. This needs no code: both values already
+  exist, and D63's quarantine already assumes tenants that never speak to it.
+- **Modules:** `SHARED_CORE_MODULES` + `RETAIL_MODULES` **minus `QUICKBOOKS`**.
+  `RETAIL_CAPABILITIES` is adopted as-is — it already declares
+  `catalogue.variants` and `collections` true, `fulfilment.kind: IMMEDIATE`,
+  `channels: ['COUNTER']`.
+- **Navigation and permissions** follow D93: a rail entry is gated on what the
+  screen can do. A retail till legitimately holds `SALE_CREATE`; nothing may use
+  it as a proxy for anything else.
+- **Catalogue fields** arrive through `catalogue.attributeSchema` (D64) —
+  description in `attributes`, behaviour in columns. Clothing and grocery each
+  declare their own; neither adds a migration.
+
+#### One workspace per shop
+
+**A Retail workspace serves exactly one shop, with one branch.** A chain of three
+shops is three workspaces.
+
+This is a deliberate acceptance of an existing limit rather than a design
+preference. `LocalInventoryProvider` counts a tenant's active branches and
+**refuses every stock operation when there is more than one** — the guard D10
+describes as protecting against a shared `Product.quantityOnHand` being
+decremented by two shops at once. D10 calls that *"a known architectural defect …
+not an acceptable permanent limitation"* and schedules the fix as Phase 2.5.
+**That fix is not a retail dependency and is not being brought forward.** With one
+branch per workspace the guard is never reached.
+
+What the model gives up, recorded so nobody discovers it in front of a customer:
+stock, catalogue, customers and reporting are per shop; there is no cross-shop
+lookup, no transfer, and no consolidated head-office view. The product-import
+path makes seeding a second shop practical. The first customer who needs one
+number across two shops reopens D10 Phase 2.5.
+
+#### The sellable unit is the variant
+
+Retail sells a size, a pack, a weight — not a style. `ProductVariant` and its
+dimensions already exist, `SaleItem.productVariantId` is already nullable with SKU
+and name snapshots (D44), and goods receipts already write per-variant stock into
+`BranchInventory`.
+
+**The sell path does not.** It aggregates cart lines by `productId` and decrements
+the global `Product.quantityOnHand`, so selling a Medium reduces a shared "shirts"
+number and leaves the Medium count untouched. Per-variant stock accuracy is a
+requirement of this template, and closing that gap is the first implementation
+phase.
+
+Two properties carry forward unchanged: the conditional stock write that prevents
+two tills selling the same last unit — moved, never reimplemented — and the
+`trackInventory` check that keeps non-stocked lines moving no stock.
+
+#### Tax
+
+Per **category** and **global**, resolved most-specific-first, with
+`Product.taxable` honoured as an exemption and the resolved rate **snapshotted
+onto the sale line** so a rate change cannot rewrite an old receipt — the same
+reasoning D44 applies to variant names.
+
+**No price bands.** Considered and rejected: the band-boundary behaviour is
+visible to a shopper whenever a discounted item crosses one, and no confirmed
+format needs them.
+
+Prices are **displayed tax-inclusive**. Storage is unchanged — net, tax and gross
+stay separate; only presentation changes. The inclusive figure is never stored as
+the price, because converting it back to net drifts by a cent at some quantities
+and the receipt would then disagree with the ledger. This finally gives
+`AppSettings.taxInclusive` a meaning; it has been persisted and read by nothing.
+
+Per-line tax replaces the single order-level figure. D8's requirement that tax
+treatment stay tenant-configurable is unaffected.
+
+#### Formats
+
+**Clothing and grocery are the confirmed formats. The clothing pilot ships
+first.** Scales and weighed goods are grocery-only and are not on the clothing
+path.
+
+Further retail formats — pharmacy, electronics — are added as a descriptor and a
+seed pack, never as code. If a third format requires a new table, a DTO change or
+a branch in a service, the mechanism has failed and the mechanism is what gets
+fixed. The one legitimate exception is a format needing genuinely new *behaviour*,
+which is a feature with its own record, gated by a capability.
+
+#### Billing audit: A4 and A8 only
+
+Of the five open items in `hardcoded-audit.md`, the retail work claims **two**:
+
+- **A4** — promotions are surfaced by the POS catalogue and never applied at
+  close. Retail needs working promotions, and the fix lives in a new applier plus
+  the retail sale path.
+- **A8** — reports coerce `Decimal` to float and back, so totals cannot tie to the
+  payment ledger. This is fixed **before** retail reporting is built on the same
+  code, not after.
+
+**A2, A3 and A7 are deliberately not claimed here.** They are restaurant-side
+defects, they contribute nothing to the clothing pilot, and they live in files
+another developer is modifying daily. Ownership of those three is unresolved at
+the time of writing; if they return to this work, that is a separate record
+appended later rather than an edit to this one.
+
+**A4 is larger than "wire up the existing service".** `PromotionsService` is CRUD
+only and the evaluator exports one function answering whether a promotion is
+inside its schedule window. There is no discount calculation anywhere; it must be
+built.
+
+#### Discounts do not stack
+
+**A manual line discount overrides any promotion on that line.** Manual discounts
+carry role-based approval limits; a promotion stacking on top would take the total
+past a figure nobody approved, and the approval would be for one number while the
+customer paid another.
+
+`stackable` continues to govern promotion-against-promotion. The override is per
+line, not per basket.
+
+#### Not in scope
+
+QuickBooks for retail tenants · multi-branch inventory, transfers and branch
+management · price-band tax · schema-per-tenant · migrating Simply POS data,
+which is a reference implementation only.
+
+`ModuleKey.EXCHANGES` remains as D2 left it — a reserved key with an A4 document
+renderer and no transaction. The retail template builds that transaction; until it
+lands, D2's instruction stands and exchange behaviour must not be represented as
+implemented.
+
+> **Superseded 2026-09-07 by [D128b](#d107b).** The transaction landed in Phase 7.
+> The caveat is lifted; read D128b for what "implemented" does and does not mean.
+
+---
+
+## 2026-08-31 — Stock authority for a product with variants
+
+### D121 — stock is tracked by variant id, not product id
+
+**Direction (supervisor, 2026-08-31):** *"Stock should be tracked by product variant
+id, not product id."*
+
+`BranchInventory` already keys on `(branch, product, variant?)` per D44, and both the
+write path (1a) and the per-variant read (1b.1) obeyed this. The **item-level read**
+did not: `sellable.service` set `availableQuantity` and `stockState` from
+`Product.quantityOnHand`.
+
+That column is the D10 rollup mirror. It is maintained on sale and receipt, so it is
+not abandoned — but it is a mirror, and it can drift. It was observed reading
+`350.000` for a product whose four variants held 22 units between them, and the till
+showed the 350.
+
+**Decided.** For a product with `hasVariants` and at least one active variant, the
+item level is **derived from the variant rows**:
+
+- `availableQuantity` — the **sum** across sizes. Deliberately not `null` as `sku` and
+  `unitPrice` are for a variant parent: those are null because using them would be
+  *wrong* (a sale at the parent price is a financial error, a parent-SKU scan is
+  ambiguous), whereas a total misleads nobody once nothing caps by it. The sell cap is
+  `stockCap(product, variant)`, which asks the chosen size.
+- `stockState` — `OUT` only when every size is out; `LOW` when no size is `IN_STOCK`,
+  each size measured against **its own** reorder point.
+
+`Product.quantityOnHand` keeps its D10 role for variant-less products and QuickBooks
+caching, and is still mirrored on write. It is simply **not read** for a product that
+has variants.
+
+The derivation lives on the **server** (`aggregateVariantStock`, beside `stockStateFor`
+in `common/stock-state.ts`), not in the till. D31 makes the server the authority, and
+the alternative put the same rule in `pos-retail-checkout` and `quotation-builder` —
+two copies of one threshold rule, which is how two screens come to disagree.
+
+Not gated on `capabilities.catalogue.variants`: that capability governs whether a
+client is *shown* the sizes. How much stock exists is not a display question.
+
+No migration. Read-model behaviour only.
+
+---
+
+## 2026-09-01 — Applying the RETAIL enum migration
+
+### D120a — `RETAIL` is added in its own migration, and used in a later one
+
+**D120 already authorises this migration.** It says in terms that
+`ALTER TYPE … ADD VALUE` is additive and that the record "needs none of the
+destructive-migration exception D57 had to carve out". Nothing here re-authorises
+it. This entry records **how** it must be applied, because getting that wrong
+fails at apply time rather than at review.
+
+#### The constraint
+
+PostgreSQL is 16.14. Since PG 12, `ALTER TYPE … ADD VALUE` may run inside a
+transaction block — but **the new value cannot be used in the same transaction
+that adds it**. Prisma wraps each migration in a transaction, so a single
+migration that adds `RETAIL` and then references it (a seed, a backfill, a
+`DEFAULT`, a check constraint, a partial index predicate) fails with
+*"unsafe use of new value of enum type"*.
+
+The failure is not a data risk — the transaction rolls back — but it strands a
+migration in a failed state that every developer then has to resolve by hand.
+
+#### Decided
+
+**Two migrations, in order:**
+
+1. **`add_retail_business_type`** — `ALTER TYPE "BusinessType" ADD VALUE 'RETAIL';`
+   and nothing else. No seed, no backfill, no constraint mentioning the value.
+2. **Anything that uses `RETAIL`** — a separate, later migration.
+
+**Written with `IF NOT EXISTS`**, following the closest precedent in this repo —
+the D44 variants migration (`20260812000000`), which uses
+`ALTER TYPE "StockMovementReason" ADD VALUE IF NOT EXISTS 'RECEIPT'`. The older
+auto-generated form (`20260709145818`, `PaymentMethod` → `'QR_PAYMENT'`) omits
+it. Both work; the explicit form is chosen because it is re-runnable against a
+database where the value already exists, which is the state a developer lands in
+after a partially-resolved migration.
+
+Verified on the project's own PostgreSQL 16.14 rather than assumed:
+
+```
+BEGIN; ALTER TYPE t ADD VALUE IF NOT EXISTS 'B'; INSERT INTO … VALUES ('B'); COMMIT;
+  ERROR:  unsafe use of new value "B" of enum type
+  HINT:   New enum values must be committed before they can be used.
+
+-- split across two transactions: succeeds
+-- re-running the ADD VALUE:  NOTICE: enum label "B" already exists, skipping
+```
+
+#### Ordering within the enum
+
+`RETAIL` is appended, not positioned with `BEFORE`/`AFTER`. Enum ordinal order is
+not a display order anywhere in this codebase — the console picker sorts by
+`DomainDescriptor.template.order` (D55), and `BUSINESS_TYPE_VALUES` is used for
+validation messages, not ranking. Appending keeps the migration a pure addition.
+
+#### What this does not do
+
+Adding the value **puts no card in the console picker** and creates no template.
+`WORKSPACE_TEMPLATES` filters `DOMAIN_REGISTRY` through the hand-maintained
+`OFFERED_TEMPLATE_KEYS` allowlist, and `DOMAIN_REGISTRY` is total over
+`BusinessType` — so the enum value without a descriptor is a **compile error**,
+by design (D56).
+
+Practical consequence: the migration and the descriptor land together or the
+build breaks. That is the intended pressure, not an obstacle to work around.
+
+---
+
+## 2026-09-02 — Phase 3 tax: scope, and backwards compatibility
+
+### D122 — per-line tax snapshots; per-category rates wait for grocery
+
+Tech Lead, 2026-09-02. Supersedes nothing; narrows the Phase 3 scope D120
+authorised.
+
+#### What D120 said, and what changed
+
+D120 authorises "per-category and global tax, no price bands, displayed
+tax-inclusive". Building it was scoped as `TaxRate` and `TaxRule` tables with a
+resolution hierarchy.
+
+Two facts, established by reading the code rather than the plan:
+
+1. **The flat-rate engine already works for retail.** `computeDocumentTotals` is
+   shared by sales, quotations and restaurant (D59). Setting a tenant rate on a
+   clothing workspace and selling produced `1,850 → 333 tax → 2,183` with no code
+   written.
+2. **Per-category rates are a grocery requirement, not a clothing one.** Zero-rated
+   staples beside standard-rated goods is what forces a hierarchy. Clothing is
+   uniformly standard-rated, and grocery is parked pending a customer (open
+   decision 12).
+
+#### Decided — option B
+
+Phase 3 narrows to what the clothing pilot needs and what is correct regardless:
+
+- **No `TaxRate` / `TaxRule` tables.** The flat rate stays.
+- **Three additive columns** (below).
+- **Returns stop prorating** and read the per-line snapshot.
+- **Receipts show a tax breakdown.**
+
+Per-category resolution moves to sit **with grocery**, where the requirement
+lives. It stays cheap to add later: the columns below are the hard part, and a
+resolution service writes into them.
+
+The deciding argument is not effort. Building a rate hierarchy means surgery on
+the one engine all three templates share, for a capability the clothing pilot
+cannot demonstrate — and this branch has just spent a day proving it does not
+break the restaurant and hardware teams (2.15). Guessing at a grocer's categories
+before a grocer exists is the same mistake refused for grocery attributes.
+
+#### The three columns
+
+| Table | Column | Type |
+|---|---|---|
+| `Product` | `taxable` | `Boolean @default(true)` |
+| `SaleItem` | `taxRatePercent` | `Decimal? @db.Decimal(5, 2)` |
+| `ReturnItem` | `taxRatePercent` | `Decimal? @db.Decimal(5, 2)` |
+
+No new tables, no enum, no backfill. One migration — **D120a's two-migration rule
+does not apply**, being scoped to `ALTER TYPE … ADD VALUE`, and nothing here adds
+an enum value.
+
+#### Why `taxable` defaults to TRUE
+
+**Because it is already true of every product in the system.** There is no
+per-product exemption anywhere today; tax is one rate on the whole bill, so every
+product is taxed. The column writes down the existing fact rather than changing
+it.
+
+A default of `false` would assert that every product in every tenant is exempt.
+The moment anything read it, a restaurant selling a Rs 2,000 meal would charge
+**Rs 0 tax instead of Rs 360** — silently, across every tenant.
+
+The name misleads, which is why this is recorded: `taxable = true` reads as
+*turning tax on*. It means *this product is subject to whatever rate the tenant
+has configured*, which for a tenant configured at 0% is still zero.
+
+In the first step neither default changes behaviour, because nothing reads the
+column. `true` matters later, and later it means "carry on exactly as before".
+
+#### Why the rate snapshots are NULL, not 0.00
+
+**`0.00` means zero-rated. `NULL` means no rate was recorded.** They are different
+facts and the distinction is load-bearing.
+
+Defaulting to `0.00` would claim every historical sale was zero-rated, and a
+return against one would refund no tax at all. With `NULL`, the returns path reads
+"this line predates per-line tax" and falls back to today's proportional method —
+so **every existing sale keeps refunding exactly as it does now**.
+
+This follows `RestaurantBranchConfig.taxRatePercent`, nullable for the same stated
+reason: *"0 is a meaningful rate and must be distinguishable from unset"*.
+
+#### Why returns must stop prorating
+
+`returns.calc.ts` refunds tax as `saleTax × (line's share of the taxable base)`.
+That is correct **only** while one rate covers the whole bill, and its own comment
+says so: *"Tax was a flat rate on the sale's taxable base."*
+
+The moment rates differ per line it is wrong:
+
+> Rice (0%, Rs 1,000) and soap (18%, Rs 1,000). Total tax Rs 180. The customer
+> returns the rice. Proration refunds `180 × (1000/2000)` = **Rs 90 of tax on a
+> zero-rated item.**
+
+`SaleItem.taxRatePercent` is what makes the correct answer reachable, and
+`ReturnItem.taxRatePercent` records what was reversed so a credit note is
+self-contained and a later rate change cannot alter a past refund. Copied from the
+sale line, never re-resolved — the rule 1a.20 established for variants.
+
+#### Backwards compatibility
+
+Nothing reads the new columns in the schema step. It ships **inert**, the pattern
+`RestaurantBranchConfig.taxRatePercent` used: *"No UI yet, deliberately; the column
+and fallback ship first."*
+
+| Domain | Effect |
+|---|---|
+| Restaurant | none — `taxable` true is today's behaviour, rate columns null and unread |
+| Hardware | none |
+| Retail | none until the resolution logic lands |
+
+---
+
+### D123 — promotions allocate per line, frozen at sale time
+
+Tech Lead, 2026-09-03. Supersedes nothing; scopes Phase 4 (audit item **A4**).
+
+#### The question
+
+Phase 4 builds the discount engine — the models, the four types and the schedule
+exist, but nothing turns a promotion into money. Before writing the applier, one
+question had to be answered: **where does a promotion discount live**, and how is
+it reversed when part of the sale comes back?
+
+Two candidates. Bake it into the line, the way a manual discount already works;
+or hold it as an order-level figure with its own proportional allocation, the way
+the storewide order discount works.
+
+#### Decided — per line, baked into `lineTotal`, frozen at sale time
+
+A promotion reduces the line it applies to. The amount is computed **once, when
+the sale is written**, and never re-derived afterwards. A return reverses it by
+the same `× frac` scaling the per-line manual discount already uses.
+
+**Returns allocate; they do not re-evaluate.** Returning one item of a "2 for 1"
+does not recompute the basket as though the promotion never qualified. This
+follows D122's returns rule directly — *"allocation, not recomputation: a return
+can never refund a different amount of tax than the sale charged"* — and extends
+it from tax to promotions.
+
+#### Why not the order-level shape — the argument that decided it
+
+Two shirts at 1,000 and a tie at 500, tie free under buy-two-get-one. The
+customer pays **2,000** and returns the tie.
+
+Allocating the 500 saving order-wide by line value gives the tie a weight of 500
+against the shirts' 2,000, so the tie absorbs 100 of it:
+
+    refund = 500 (its subtotal) − 100 (its share) = 400
+
+**Rs 400 refunded on an item the customer paid nothing for.**
+
+That is the same defect D122's `3.11` removed — refunding tax on a zero-rated
+line — with the same cause: a basket-wide proportional allocation applied to a
+saving that was never basket-wide. A BOGO discount belongs to the free *item*,
+not to the basket by value.
+
+Per line, the tie carries `promotionDiscountAmount = 500` and `lineTotal = 0`, so
+the refund is `500 − 500 = 0`. Correct, with no special case.
+
+#### Composition order
+
+    unit price × quantity
+      → line discount   (manual OR promotion — never both, see the invariant)
+      → order discount  (computed on the subtotal AFTER the above)
+      → tax             (on the base narrowed by `Product.taxable`, D122)
+
+A promotion therefore **does** reduce the base a storewide order discount is
+computed against. This needs no new logic: `sales.service` already resolves the
+order discount against `subtotal − totalDiscount`, so a promotion inside that
+rollup is inside the base by construction.
+
+#### The invariant: manual and promotion are mutually exclusive per line
+
+A manual line discount **overrides** any promotion on that line, so at most one of
+`discountAmount` and `promotionDiscountAmount` is non-zero on any line. Enforced
+in the applier and pinned by test, not by a database constraint — the repository
+uses neither CHECK constraints nor triggers, and a rule that lives in one place in
+code is easier to prove than one split across both.
+
+Why manual wins: a cashier discounting is acting deliberately, usually under a
+role-based approval limit the system enforces. An automatic promotion stacking on
+top would push the total past a figure nobody approved.
+
+#### Bundle allocation
+
+`BUNDLE_FIXED_PRICE` spans lines, so its saving is distributed **proportionally to
+gross line value, with the largest-remainder method for the final cent**. The
+distribution happens inside the applier, once, at sale time, and is then frozen —
+so the printed rows sum to the printed total and a later reader never re-divides
+it differently.
+
+This is the same reasoning that put the tax breakdown's remainder on the largest
+row rather than letting four renderers each round independently.
+
+#### The four columns
+
+| Table | Column | Type |
+|---|---|---|
+| `SaleItem` | `promotionDiscountAmount` | `Decimal @default(0) @db.Decimal(12, 2)` |
+| `SaleItem` | `promotionId` | `String?` |
+| `SaleItem` | `promotionNameSnapshot` | `String?` |
+| `ReturnItem` | `promotionDiscountAdjustment` | `Decimal @default(0) @db.Decimal(12, 2)` |
+
+All additive, all defaulted or nullable, no backfill, no table rewrite. They ship
+**inert** — nothing reads them until the applier lands.
+
+`promotionNameSnapshot` exists because a promotion can be renamed or deleted after
+the sale, and a reprinted receipt must still name what the customer was given.
+That is D44's snapshot rule applied unchanged.
+
+**`promotionDiscountAmount` is a mirror, not the authority.** `lineTotal` is
+already net of it and is what tax and returns read. The column exists so a
+promotion is separately reportable in Phase 8 without a second source of truth —
+the same relationship D121 records between `Product.quantityOnHand` and the
+per-variant rows.
+
+#### What this buys with no further work
+
+- **Tax follows automatically.** `taxableBase` reads `lineTotal` (D122, 3.14), so
+  a promoted line is taxed on what the customer actually pays.
+- **The returns denominator stays correct.** `computeReturnLine` derives its
+  order-discount base from `sale.subtotal − sale.totalDiscount`, and the promotion
+  is inside `totalDiscount`.
+- **The till and the server agree**, provided the applier lives in
+  `@hardware-pos/shared` and both call it — the rule 3.14 was written to enforce.
+
+#### What this deliberately does not solve
+
+**Bundle breaking.** Return one shirt from a buy-two-get-one and the customer
+keeps a free tie, having paid for one shirt. The shop absorbs the difference.
+
+Re-evaluating the basket would recover it, but the refund would then depend on the
+order items came back in, could be zero, and could produce a debt — a customer
+being told they owe money on a return. We take the loss by default. If the
+business wants protection it must be an **explicit rule an operator can see** —
+refusing or flagging a partial return that breaks a bundle — never a silent
+recomputation.
+
+#### Restaurant impact: none
+
+`ProjectedSaleItem` carries only the fields it lists, so restaurant settlements
+write none of these columns and take the defaults — the same mechanism that leaves
+`taxRatePercent` null there (3.16). Additive and nullable only; no reader may
+assume non-null on `SaleItem`.
+
+---
+
+### D124 — `PROMOTIONS` is its own module key
+
+Tech Lead, 2026-09-03. Corrects the D45 hotfix; unblocks Phase 4 for retail.
+
+#### What was wrong
+
+`/promotions` was gated on `MENU_MANAGEMENT`, a **food-service** module. A retail
+tenant has no such module, so the Promotions screen answered **"Feature not
+available"** — after Phase 4 had built the entire discount engine behind it.
+
+The controller predicted this in its own docblock:
+
+> Gated on `INVENTORY` because … `INVENTORY` is the one module that BOTH
+> Restaurant and Retail tenants carry by default. **Restaurant-only modules like
+> `MENU_MANAGEMENT` would refuse Retail's later use of promotions.**
+
+A later "D45 hotfix" changed the gate to `MENU_MANAGEMENT` anyway, because
+restaurant tenants turned out **not** to carry `INVENTORY`. The hotfix fixed food
+service and caused exactly the failure the docblock warned about. Phase 4 is
+"Retail's later use of promotions".
+
+#### Why neither existing module works
+
+Verified against the module sets rather than assumed:
+
+| Set | Members |
+|---|---|
+| `SHARED_CORE_MODULES` | `CUSTOMERS` `REPORTING` `USERS` `BRANCHES` `SETTINGS` `BRANDING` |
+| `RETAIL_MODULES` | `RETAIL_POS` `INVENTORY` `QUOTATIONS` `RETURNS` `EXCHANGES` `SUPPLIERS` `QUICKBOOKS` |
+| `FOOD_SERVICE_MODULES` | `MENU_MANAGEMENT` `DINING` `TABLE_MANAGEMENT` `TAKEAWAY` `KITCHEN` `RESERVATIONS` |
+
+`INVENTORY` is retail-only. `MENU_MANAGEMENT` is food-service-only. **No module
+common to both governs a catalogue admin surface**, so every choice among the
+existing keys refuses one tenant type. Accepting either module would encode the
+confusion rather than resolve it, and would leave the next reader unable to say
+what actually gates the screen.
+
+#### Decided
+
+**A dedicated `PROMOTIONS` module key**, in both default sets.
+
+Promotions are not a food-service feature that retail borrows, nor an inventory
+feature: they are their own admin surface that both templates own. The key says
+so, and a gate that names the thing it protects needs no comment explaining why
+it names something else.
+
+| Change | Where |
+|---|---|
+| `PROMOTIONS` added to the `ModuleKey` enum | `schema.prisma` + migration |
+| …and to `MODULE_KEY_VALUES` | `packages/shared/src/types/platform.ts` |
+| Added to `FOOD_SERVICE_MODULES` | `domains/modules.ts` |
+| Declared on the RETAIL descriptor, **not** on `RETAIL_MODULES` | `domains/retail.domain.ts` |
+| `@RequireModule(ModuleKey.PROMOTIONS)` | `promotions.controller.ts` |
+
+#### Why retail declares it and food service does not
+
+`HARDWARE` composes its default set from `RETAIL_MODULES`, and
+`platform.constants.spec` pins that set as **byte-equal to
+`LEGACY_TENANT_DEFAULTS`** — the modules a tenant with no business profile falls
+back to. Adding `PROMOTIONS` there would silently widen another team's template
+and the legacy fallback with it, so the RETAIL descriptor declares the module
+instead and `RETAIL_MODULES` is untouched.
+
+`FOOD_SERVICE_MODULES` has no such equality test and food service **must** gain
+the key, because regating the controller would otherwise take away a screen they
+have today.
+
+**Hardware is left as it was, deliberately.** It never had a working Promotions
+screen either — the D45 hotfix gated it on `MENU_MANAGEMENT`, which hardware also
+lacks — so this changes nothing for them. Whether they want it is theirs to
+decide; a `TenantModule` row enables it per tenant in the meantime.
+
+#### No backfill, and no tenant loses the screen
+
+`resolveModules` composes the default set for the business type and **adds**
+explicitly-enabled rows; an explicit row only ever wins as a *revocation*. Its own
+docblock states the consequence: *"a tenant created before a new module shipped
+picks it up without a data migration."*
+
+Checked against live data rather than trusted: of five tenants, four carry no
+`TenantModule` rows at all and one carries twelve. All five gain `PROMOTIONS`
+from the default set, because none of them has an explicit `isEnabled: false` for
+a key that did not exist until now.
+
+#### Migration shape
+
+One statement, `ALTER TYPE "ModuleKey" ADD VALUE IF NOT EXISTS 'PROMOTIONS'`.
+D120a's two-migration rule is about **using** a new enum label in the transaction
+that adds it; nothing here writes a row with the new value, so one migration is
+correct. `IF NOT EXISTS` follows the D44 and D120a precedent.
+
+#### What this does not change
+
+Food service keeps its promotions screen — it gains `PROMOTIONS` in the same
+change, so the hotfix's fix is preserved rather than reverted. No route, screen or
+permission moves; only the module that names the gate.
+
+---
+
+## D126 — a cart-level promotion is an order discount, not a line discount
+
+**Status:** accepted, 2026-09-04. Supersedes nothing. Extends D123.
+
+### The requirement
+
+`FIXED_AMOUNT_DISCOUNT` could only ever mean *"Rs 1,000 off these products"*:
+`validateTypeShape` demanded at least one `BUY` item, and `applyFixedAmount`
+spread `amountOff` across those products' lines. The requirement is the other
+reading — *"Rs 1,000 off the cart once it reaches Rs 10,000"* — which the model
+could not express at all. There was no threshold column, and no way to say
+"applies to the whole basket".
+
+### The decision
+
+Two shapes of the same promotion type, told apart by whether it names products:
+
+| `items` | Meaning | Where the discount lands |
+|---|---|---|
+| non-empty | *"Rs X off these products"* — unchanged | the participating **lines** |
+| **empty** | *"Rs X off the cart"* — new | the **order** |
+
+`Promotion.minimumSpend` is the threshold. NULL means none, which is what every
+row predating this decision means, so the backfill is to do nothing.
+
+### Why the order level, and not `SaleItem`
+
+`SaleItem` holds a single `promotionId` (D123). A cart-level promotion has to
+coexist with the line-level promotions that already claimed those lines, so
+allocating it onto lines would either need a second promotion column per line or
+would displace a line promotion that is already correct.
+
+The order level already solves this exact problem for the **manual** order
+discount — `Sale.orderDiscountAmount` with `Return.orderDiscountAdjustment`
+allocating it back on a refund. A cart-level promotion is the same shape, so it
+gets the same treatment rather than a new mechanism:
+
+```
+Sale.promotionOrderDiscountAmount   +  promotionOrderId  +  promotionOrderNameSnapshot
+Return.promotionOrderDiscountAdjustment
+```
+
+Kept **separate** from the manual columns rather than folded into them: a refund
+has to be able to say which part of a discount was the cashier's decision and
+which was automatic, and `orderDiscountApprovedById` beside the manual figure
+means something that would be a lie next to a promotion.
+
+Like D123's line columns, `promotionOrderId` carries **no foreign key** and the
+name is snapshotted, so deleting a promotion never rewrites a document that has
+already been sold.
+
+### At most one cart-level promotion per sale
+
+There is one set of columns, so the applier picks the single best eligible
+cart-level candidate. This is a real limit, stated rather than hidden: a second
+concurrent cart-level promotion would need a child table and its own decision.
+Line-level promotions are unaffected — any number still apply, one per line.
+
+### What the threshold measures
+
+The **eligible net amount**: line subtotals less any line-level promotion, summed
+over lines that carry no manual discount.
+
+- *Net, not gross* — the threshold is compared against the money this discount
+  would actually reduce. Measuring gross would let a heavily discounted basket
+  clear a threshold it no longer reaches.
+- *Excluding manually discounted lines* — D123 already makes such a line
+  invisible to promotions. A threshold that counted it would be counting money
+  no promotion is allowed to touch.
+
+The discount is capped at that same amount, so a cart-level promotion can never
+drive an order below zero.
+
+### Evaluation order
+
+Line-level promotions resolve first, then the cart-level pass runs against what
+they left. That is what makes the threshold well-defined, and it is why a
+cart-level promotion is **never discarded because a line was claimed** — it does
+not compete for lines at all.
+
+Basket exclusivity (4.4) still governs it: a non-stackable promotion that has
+taken the basket blocks the cart-level pass too, and a non-stackable cart-level
+promotion will not join something already applied.
+
+### Tax is not touched
+
+Confirmed with the PO. The cart-level discount reduces the order total **after**
+tax is computed on the line totals, exactly as the manual order discount has
+always done (3.14). `Rs 12,600 → Rs 1,000 off → Rs 11,600`. No tax-base change,
+no new tax path, one code path for both order-level discounts.
+
+### A cart-level promotion never requires a promotional product
+
+`rewardEntitlements` only produces an entitlement for a rule carrying a `GET`
+item, and `buyXGetYOutcome` returns null for any type other than `BUY_X_GET_Y`.
+So `FIXED_AMOUNT_DISCOUNT` — either shape — cannot create an outstanding reward
+and cannot block payment. That was already true and is now pinned by test.
+
+### BOGO qualifying units are not consumed
+
+Also confirmed with the PO, and recorded here because it was previously implicit.
+`applyBuyXGetY` claims only its **reward** lines; the BUY units that earned the
+reward stay available to other stackable promotions. Two shirts may take a
+percentage discount *and* earn a free tie.
+
+The consequence is deliberate and worth stating plainly: a unit can be counted by
+more than one promotion — a shirt inside a bundle can also count toward a BOGO
+threshold. That is the intended generosity, not an accounting error; each line
+still carries exactly one promotion, so every figure remains persistable and
+refundable.
+
+---
+
+## D125 — the option library, SKU generation, and what to do about the barcodes
+
+**Status:** proposed, 2026-09-04. Covers Phase 5 steps 1-4. Blocks `5.1`.
+
+Every figure below was measured against the pilot database on 2026-09-04, not
+estimated. The catalogue is small (6 retail products, 48 variants), which makes
+the findings *more* alarming rather than less: the drift the plan predicted at 400
+products is already present at six.
+
+---
+
+### Part 1 — A tenant-level option library, ADDED BESIDE the per-product dimensions
+
+#### The evidence
+
+`ProductVariationDimension` is keyed `@@unique([productId, name])` — a dimension
+belongs to one product. With six products the catalogue already contains:
+
+| Dimension name | Products defining it separately |
+|---|---|
+| `Colour` | 4 |
+| `Color` | 1 |
+| `Size` | 6 |
+
+Two spellings of one concept, and `Size` defined six times over five different
+option sets (`1-4 inch`, `30/32/34/36`, `S/M/L/XL`, `XS/M/L`, `13½/15½`). Worse,
+`Colour :: Black/Blue/Red` and `Color :: Black/Blue/Red` are the *same set*
+spelled two ways. Nothing in the model can see that they are the same, so nothing
+can group by colour, filter by size, or generate a stable SKU segment.
+
+#### The decision
+
+Introduce `AttributeDefinition` and `AttributeOption`, scoped to the **tenant**:
+
+    AttributeDefinition   (tenantId, name)        unique per tenant
+    AttributeOption       (definitionId, code)    unique within a definition
+                          + `name`, `position`
+
+and give the existing per-product rows an OPTIONAL link to them:
+
+    ProductVariationDimension.attributeDefinitionId  String?
+    ProductVariationOption.attributeOptionId         String?
+
+**Additive, not a promotion of the existing tables.** The alternative — moving
+`ProductVariationDimension` to tenant scope by dropping `productId` — rewrites the
+key that `ProductVariantOptionValue` already points at, on live variant data, and
+would have to run in the same migration as the backfill. This way the library can
+be populated, reviewed and corrected by an operator *before* anything depends on
+it, and a product that never adopts it keeps working exactly as it does now.
+
+**`code` lives on the option, not the dimension.** It is what SKU generation
+consumes (`BLK`, `30`, `XL`), and it is the reason the library exists at all:
+`Colour/Black` and `Color/Black` cannot produce one SKU segment while they are two
+unrelated rows.
+
+**Migration of existing data is a UI task, not a SQL task.** Eleven dimension rows
+across two tenants is small enough for an operator to map by hand, and the
+`Colour`/`Color` decision is a judgement nobody should make in a migration script.
+The link column stays nullable so the mapping can be done incrementally.
+
+---
+
+### Part 2 — SKU generation reuses `DocumentSequence`
+
+#### The decision
+
+`<CATEGORY>-<SEQ>[-<OPTION CODE>…]`, generated by default and overridable, unique
+per tenant. The sequence comes from the existing `DocumentSequence` table with a
+new `docType` of `SKU`:
+
+    DocumentSequence  @@id([tenantId, docType])
+    nextDocumentNumber(tx, tenantId, 'SKU')   -- INSERT … ON CONFLICT … RETURNING
+
+**No new table and no new concurrency design.** That function is already the
+repository's answer to "two tills allocate a number at the same moment", proven by
+sale, return, quotation, table-session and restaurant-order numbering. Inventing a
+second mechanism for SKUs would be a second thing to get wrong.
+
+**Gaps are accepted.** `nextDocumentNumber` increments inside the transaction, so a
+rolled-back product creation burns a number. A gap-free sequence would need a lock
+held across the whole create, which is exactly the contention the existing design
+avoids. A SKU is an identifier, not an audit trail; nobody counts them.
+
+**Uniqueness is already enforced.** `ProductVariant.sku` carries
+`@@unique([tenantId, sku])` today, so a generated SKU that collides with a
+hand-typed one fails at the database rather than silently duplicating. Generation
+retries on collision rather than assuming the sequence is enough.
+
+---
+
+### Part 3 — Barcodes: the constraint is safe, the existing values are not
+
+#### Measured, not assumed
+
+    48 variants   20 with a barcode   28 null   0 empty strings
+    duplicates within a tenant:  NONE
+    duplicates across tenants:   NONE
+    every barcode: 13 digits, numeric, prefix 2001 or 2990
+
+So `@@unique([tenantId, barcode])` can be added **cleanly, with no remediation
+step and no backfill**. That was the open question blocking this record, and the
+answer is that there is nothing to clean up.
+
+#### The finding that was not expected
+
+**18 of the 20 existing barcodes have an invalid EAN-13 check digit.**
+
+The algorithm was verified against four published EAN-13 codes and three
+deliberately corrupted ones before this was believed.
+
+    2001000000015   INVALID   BRSH-1IN
+    2001000000022   INVALID   BRSH-2IN-V
+    2990001000000   INVALID   TSHIRT-S-BLACK
+    2990001000001   valid     TSHIRT-S-WHITE   <- valid by coincidence
+
+The two that pass do so by accident: a sequential counter lands on the correct
+check digit about one time in ten. There are two different generators here
+(`2001…` and `2990…`), and neither computes a check digit.
+
+**Why it matters.** These are 13 numeric digits beginning with `2`, which is the
+GS1 range reserved for in-store use — so the *prefix* choice is right. But any
+scanner or label renderer that validates the check digit will reject them, and a
+`EAN-13` barcode image cannot even be rendered from an invalid payload. Phase 5
+step 5 renders labels as `CODE128 / EAN-13`; that step would have failed on 18 of
+20 rows, and the cause would have looked like a rendering bug.
+
+#### The decision
+
+1. **Generate barcodes with a correct EAN-13 check digit**, from
+   `nextDocumentNumber(tx, tenantId, 'BARCODE')` plus a per-tenant prefix.
+2. **A configurable prefix map per tenant**, set during workspace setup. The plan
+   already records the sequencing constraint — *configured before any allocation,
+   or the tenant reprints every label* — and this record adopts it as binding.
+3. **Reissue the 18 invalid codes.** They are unprinted pilot data: 20 variants
+   across two development tenants, nothing in a customer's hands. The cost is a
+   backfill script now versus a label reprint later.
+4. **Validate on write.** A barcode that is 13 numeric digits must carry a correct
+   check digit, refused at the DTO. Supplier barcodes that are genuinely not
+   EAN-13 (CODE128 alphanumerics) are accepted as-is — the rule keys on shape, not
+   on origin, so it cannot reject a valid supplier code.
+
+**Supplier vs internal stays a flag, not a separate column.** A variant carries one
+barcode; where it came from is provenance. `barcodeSource: SUPPLIER | INTERNAL`
+answers "may I regenerate this?", which is the only question the system actually
+asks of it.
+
+---
+
+### What this does not decide
+
+- **Label geometry** (step 6) — the settings blob is JSON and already scoped
+  `(tenantId, branchId)`, so it needs no migration and no decision.
+- **Label rendering** (step 5) — a new `PrintJobType` on the existing queue. Blocked
+  on Part 3 being done first, for the reason above.
+- **Whether `Colour` or `Color` wins.** An operator's call, made in the UI.
+
+---
+
+## D125a — two nullable columns D125 did not model: `categoryId` and `swatchHex`
+
+**Status:** accepted, 2026-09-07. Extends [D125](#d104), supersedes nothing.
+Ships with the `5.1` migration.
+
+D125 modelled `AttributeDefinition (tenantId, name)` and
+`AttributeOption (definitionId, code, name, position)`. Two requirements that
+are already written down elsewhere have no home in that shape, and both cost
+nothing today and a migration over live variant data later.
+
+### 1. `AttributeDefinition.categoryId String?` — bind a scale to a category
+
+`04-format-packs.md` §3 is explicit: *"Bind scales to categories so Footwear
+offers 24–46 and Apparel offers XS–XXXL. This is the one idea worth taking from
+Simply POS, and it is what makes a 400-product catalogue tractable."*
+`PROGRESS.md` carries it into the step itself — `5.1` reads *"tenant-level
+attribute/option library, **category-bound**"*. D125's model has no category,
+so the requirement had nowhere to be written.
+
+**Nullable, and a BINDING HINT rather than identity.** An unbound definition
+(`Colour`) applies to every category; a bound one (`Size — footwear`) is what
+the picker offers under Footwear. The hint narrows what a screen suggests; it
+never decides what is legal, so a product may still adopt any definition.
+
+**`categoryId` is deliberately NOT in the unique key.** `@@unique([tenantId,
+name])` stands exactly as D125 wrote it. Adding the category would look more
+correct and would be wrong: Postgres treats NULLs as distinct in a unique
+index, so `(tenantId, NULL, 'Size')` is insertable twice and the library
+silently re-acquires the duplication it exists to remove. Two scales therefore
+carry two names — which is how `04-format-packs` §3 already writes them, in the
+same table that asked for the binding.
+
+**`ON DELETE SET NULL`.** Deleting a category unbinds its scales; it does not
+delete a library other categories may also be using. Cascade here would let a
+routine category tidy-up destroy the `Size` scale every apparel product points
+at.
+
+### 2. `AttributeOption.swatchHex String?` — the colour picker's swatch
+
+`04-format-packs.md` §3 asks for it by name: *"Colour — named values with a
+swatch. `swatchHex` for the picker."*
+
+**Nullable, because only a colour scale has one** — `Size :: XL` has no colour —
+and because a colour with no swatch yet is still a usable option. `#RRGGBB`,
+validated at the DTO against a shared pure function so the server's rule and
+the form's live preview cannot drift apart, which is the `4.15` / `4.21` /
+`4.22` failure this phase is explicitly guarding against.
+
+**A hex string, not a named palette.** A palette would be a third table to
+seed, migrate and localise, and it would still have to answer "what if the
+shop's teal is not our teal". The picker needs a colour to draw; the shop
+already knows which one.
+
+### Why both now rather than when they are consumed
+
+Neither field has a consumer in `5.1`. Both are added anyway, because the
+alternative is a second migration over `AttributeOption` rows that products,
+variants and generated SKUs will by then depend on. Two nullable columns in a
+table that is empty on the day it ships cost one line of SQL each; the same two
+columns after `5.3` cost a coordinated deploy. This is the same reasoning D123
+used to ship `4.1`'s four columns inert, three steps before anything wrote to
+them.
+
+### What this does not change
+
+- **D125 stands unamended.** The additive shape, the nullable links, the
+  `DocumentSequence` decision for SKUs, and all three barcode findings are
+  untouched. D125a adds two columns to the tables D125 defined.
+- **Whether `Colour` or `Color` wins** is still an operator's call in the UI.
+- **Category binding is not enforcement.** Nothing refuses a product that
+  adopts a scale bound to another category; `5.1` ships the column and the
+  picker hint, not a rule.
+
+---
+
+## D127 — a label print job has no sale, so `PrintJob.saleId` becomes nullable
+
+**Status:** accepted, 2026-09-07. Required by Phase 5 step `5.7`. Touches a
+table the restaurant and hardware modules both write to, which is why it gets a
+record rather than riding along inside the step.
+
+### The problem
+
+The Phase 5 plan says label rendering is *"a new `PrintJobType` on the existing
+queue, reusing the existing print-job queue and print agents"*. That reuse is
+right — the queue, the agent polling, the `PENDING → PRINTED → FAILED`
+lifecycle and the retry behaviour all already exist and are in production use.
+
+But `PrintJob.saleId` is `String`, **required**, with a cascading FK to `Sale`.
+Every job the system has ever created belongs to a sale: a customer receipt, a
+warehouse picking slip, a return receipt. A sheet of shelf labels belongs to no
+sale at all — it is printed from the catalogue, often for stock that has not
+been sold and may never be.
+
+### What was rejected
+
+**A separate `LabelPrintJob` table.** It would duplicate the status lifecycle,
+the agent's polling query, the retry logic and the print-agent registration —
+four things that are correct today and would then exist twice. The second copy
+is where they drift. This is the same argument D124 made for `PROMOTIONS` and
+the same one D125 Part 2 made for reusing `DocumentSequence`.
+
+**A synthetic sale.** Inventing a `Sale` row so a label job has something to
+point at would put fictional rows in the table every report, every Z-reading and
+every tax reconciliation reads. Not seriously considered, recorded so nobody
+proposes it later.
+
+### The decision
+
+1. **`PrintJob.saleId` becomes `String?`**, FK `ON DELETE CASCADE` unchanged for
+   the rows that have one.
+2. **`PrintJobType` gains `PRODUCT_LABEL`.**
+3. **No existing row changes.** Every current job keeps its `saleId`; the column
+   simply stops being mandatory for new kinds of job.
+
+### Why this is safe for the restaurant and hardware modules
+
+Measured against the code, not assumed:
+
+- Every existing writer — `receipts.service`, `returns.service` — passes a
+  `saleId` and continues to. Nothing about their behaviour changes.
+- Every existing reader filters by `saleId` **optionally**
+  (`QueryPrintJobsDto.saleId?`), so a job without one is simply not returned by
+  a sale-scoped query. That is the correct answer, not a gap.
+- Widening a column from `NOT NULL` to nullable cannot fail on existing data and
+  cannot lose any.
+
+The one real risk is a consumer that reads `job.saleId` and assumes a string.
+The compiler names every such site the moment the client is regenerated, which
+is the check that makes this a safe widening rather than a hopeful one.
+
+### What this does not decide
+
+- **Label geometry** — `5.8`, and it needs no migration: the settings blob is
+  JSON and already scoped `(tenantId, branchId)`.
+- **Whether a label job is branch-scoped.** It inherits whatever the queue
+  already does. If shelf labels turn out to need a branch the queue does not
+  carry, that is a separate change with its own evidence.
+
+---
+
+## D125b — a correction to D125 Part 2: a rollback does not burn a sequence number
+
+**Status:** accepted, 2026-09-07. Corrects one factual claim in
+[D125](#d104) Part 2. **The decision D125 made is unchanged**; only its stated
+reason was wrong.
+
+### What D125 said
+
+> **Gaps are accepted.** `nextDocumentNumber` increments inside the transaction,
+> so a rolled-back product creation burns a number.
+
+### What is actually true
+
+Measured during `5.3`, against a real Postgres, in
+`sku-generation.spec.ts`:
+
+A rolled-back batch burns **nothing**. `nextDocumentNumber` is an
+`INSERT … ON CONFLICT DO UPDATE … RETURNING` executed inside the caller's
+transaction, so it rolls back exactly like every other statement in it. In the
+observed case the `DocumentSequence` row did not even survive at zero — it was
+never committed, so the next allocation started again at 1.
+
+The reasoning in D125 confused "increments inside the transaction" with
+"increments outside the caller's control". The first is true and is precisely
+why a rollback undoes it.
+
+### Where the gaps really come from
+
+**The collision retry.** Generation allocates a number, composes the SKU, and
+finds the composed string already taken by a hand-typed one. It abandons that
+number and allocates the next. The abandoned number is gone for good, and that
+write commits — so this is a real, permanent gap. Asserted directly: after one
+such retry the sequence sits at 2 with a single generated variant.
+
+The same is true of `BARCODE` allocation (`5.5`), which uses the identical
+mechanism.
+
+### Why the decision stands anyway
+
+D125 accepted gaps in order to avoid holding a lock across a whole product
+creation. That trade-off is unaffected: the retry still must not reuse an
+abandoned number, because a reused barcode would eventually reissue an
+identifier already on a printed label. A SKU is an identifier, not an audit
+trail, and nobody reconciles them.
+
+### Why this is recorded rather than quietly fixed
+
+The claim is load-bearing for anyone reasoning about whether these sequences can
+be made gap-free. Someone reading D125 would conclude that gaps are unavoidable
+because of rollbacks and stop there; the truth is that rollbacks are clean and
+the retry is the only source, which is a much smaller and more tractable
+surface. Both behaviours are now pinned by tests, so a future change to
+`nextDocumentNumber` that made rollbacks leaky would fail rather than silently
+vindicate the old wording.
+
+### What this does not change
+
+- The `DocumentSequence` decision itself, its concurrency argument, or the
+  `SKU` / `BARCODE` doc types.
+- Anything in D125 Parts 1 or 3.
+
+---
+
+## D125c — the barcode unique constraint already existed, and `IF NOT EXISTS` hid it
+
+**Status:** accepted, 2026-09-07. Corrects [D125](#d104) Part 3. Found by a
+`pnpm db:migrate` that failed against the developer database.
+
+### What D125 Part 3 said
+
+> So `@@unique([tenantId, barcode])` can be added **cleanly, with no remediation
+> step and no backfill**. That was the open question blocking this record, and
+> the answer is that there is nothing to clean up.
+
+The investigation measured duplicates — correctly, and found none. It never
+asked the prior question: **is the constraint already there?**
+
+### What is actually true
+
+It has been there since **D44**, 12 August. `20260812000000_add_product_variants_and_purchase_receipts`
+creates it:
+
+```sql
+CREATE UNIQUE INDEX "ProductVariant_tenantId_barcode_key"
+    ON "ProductVariant"("tenantId", "barcode")
+    WHERE "barcode" IS NOT NULL;
+```
+
+A **partial** unique index. Prisma cannot express a partial index, which is
+precisely why it is not declared in `schema.prisma` — the same situation as
+`ProductVariant.isDefault`, whose own comment says so in as many words.
+
+### The failure this caused
+
+Two mistakes compounded.
+
+**1. `@@unique([tenantId, barcode])` in the schema created permanent drift.**
+Prisma models that as a FULL unique index. It sees the partial one, decides the
+full one is missing, and generates a corrective migration — **on every
+`migrate dev`, forever**. That is what happened: Prisma wrote a new migration
+containing one `CREATE UNIQUE INDEX` and it died with `42P07 relation already
+exists`, leaving a failed row in `_prisma_migrations` that blocked all further
+migrations on the developer database.
+
+**2. `CREATE UNIQUE INDEX IF NOT EXISTS` in the `5.6` migration was a silent
+no-op.** `IF NOT EXISTS` keys on the NAME. The name was taken, so the statement
+did nothing — and reported success. The migration appeared to work on every
+database it ran against, including a from-scratch replay, because the D44
+migration had already created the index the tests then observed.
+
+**This is the hazard of `IF NOT EXISTS` on a named object:** it protects against
+re-running the same statement, and it silently accepts a *different* object that
+happens to share the name. It converts "this already exists differently" —
+which should be loud — into "fine".
+
+### The decision
+
+1. **`@@unique([tenantId, barcode])` is NOT declared in `schema.prisma`**, with
+   a comment recording that D44's partial index is the real constraint and why
+   Prisma cannot model it. Verified: `migrate diff --from-migrations
+   --to-schema-datamodel` now reports *"This is an empty migration."*
+2. **The `5.6` migration is left exactly as it is.** It is already applied on
+   two databases and its checksum is recorded; editing it would fail every
+   future `migrate deploy` with a modified-migration error. Its index statement
+   is a harmless no-op on any database, because D44 always runs first.
+3. **No data or index changes.** The two forms are behaviourally identical here:
+   Postgres treats NULLs as distinct in a plain unique index too, so the 28
+   variants with no barcode are unaffected either way. There is nothing to
+   migrate.
+4. **The test now proves WHICH index does the work** — it asserts the
+   `indexdef`, including the `WHERE (barcode IS NOT NULL)` predicate, and the
+   raw `P2002` from the database rather than only the service's friendly 409.
+   The previous assertion was `rejects.toBeDefined()`, which would have passed
+   for any error at all and is why this was not caught earlier.
+
+### The rule this leaves behind
+
+**Before adding a constraint, check whether it exists — in the migrations, not
+only in the data.** D125's investigation was thorough about the rows and silent
+about the schema, and the two mistakes above are both downstream of that one
+missing question.
+
+**Prefer a plain `CREATE UNIQUE INDEX` in a migration over `IF NOT EXISTS`**,
+unless the statement genuinely needs to be re-runnable. A name collision should
+fail loudly at migrate time, which is the cheapest place to find it.
+
+### What this does not change
+
+- D125 Parts 1 and 2, D125a, D125b, and everything in Part 3 about check digits,
+  the reissue pass and `barcodeSource`. Those stand unaltered.
+- The measured finding that **18 of 20 pilot barcodes are invalid**. Still true,
+  still the reason `5.9` exists.
+
+---
+
+## D128 — an exchange is a link between a return and a sale, not a third money path
+
+**Status:** accepted, 2026-09-07. Covers Phase 7 (`7.1a`–`7.5`). Carries the
+migration mandate for the `Exchange` model.
+
+### The problem
+
+`ModuleKey.EXCHANGES` has been a reserved key with an A4 document renderer and no
+workflow since the Phase 0 audit recorded it in **D2**. It is already present in
+`RETAIL_MODULES`, so a retail tenant can reach an exchange document today for a
+transaction that cannot happen.
+
+Everything an exchange needs already exists: the return path allocates promotions
+per line and refunds the tax each line actually paid (D123, `3.11`), the sale path
+prices and charges, stock has moved at variant grain in both directions since
+Phase 1 (`1a.20`, `1c.6`), `payments` is an array and the till offers Split
+Payment, and `STORE_CREDIT` is both a tender and a refund method that QuickBooks
+already maps to a credit memo.
+
+What is missing is the thing that joins them.
+
+### The decision
+
+**An exchange is a RETURN followed by a SALE, settled through store credit.**
+
+```
+1. Return the Medium   → refundMethod = STORE_CREDIT, value R
+2. Sell the Large      → tender STORE_CREDIT for R, plus (P − R) by any method
+3. If P < R            → the balance is refunded on the return leg instead
+```
+
+`ExchangeService` orchestrates and records. It computes no prices, moves no stock,
+touches no tax and writes no payment of its own.
+
+### Why it is composed rather than atomic
+
+`ReturnsRepository` and `SalesRepository` each open their **own** `$transaction`
+and neither service accepts an external one. Making an exchange atomic would mean
+refactoring the two money paths that the restaurant and hardware modules both
+depend on — the largest blast radius available on this branch, spent on a rare
+edge.
+
+**The failure mode is recoverable, and it is what the money already means.** If
+the replacement sale fails after the return has committed, the customer holds
+store credit worth exactly what they handed back. Nothing is lost, nothing is
+double-counted, and the operator retries the replacement. That is also how a shop
+would handle it at the counter.
+
+**Composition is what makes it correct, not merely cheap.** A bespoke exchange
+transaction would have to re-implement promotion allocation, tax snapshots, stock
+movement and QuickBooks document typing — four rules that are right today. The
+second copy is where they drift, which is the lesson `2.12` and `4.15` each taught
+at a cost.
+
+### The model, and why each field is shaped as it is
+
+    Exchange
+      tenantId, branchId          ownership, matching Return and Sale
+      exchangeNumber              `X-000042`, from DocumentSequence 'EXCHANGE'
+      originalSaleId              the sale being exchanged against
+      returnId                    the return leg — REQUIRED
+      replacementSaleId           the sale leg — NULLABLE
+      createdByUserId
+      idempotencyKey              nullable, unique per tenant
+
+**`replacementSaleId` is nullable, deliberately.** The return commits first, so
+there is a real interval in which an exchange exists with no replacement. A
+required column would make the row unwritable until both legs succeeded, which
+destroys the recoverable state this record just chose. Unresolved is its own
+state (D28/D31), and here it is the state the operator retries from.
+
+**No `status` enum.** The nullable `replacementSaleId` already answers the only
+question anyone asks — is the replacement done? A second field encoding the same
+fact is a second thing to keep in step. Added later if a real third state appears.
+
+**No line table.** An exchange owns no lines. The returned lines belong to the
+`Return`, the replacement lines belong to the `Sale`, and both already snapshot
+what they need. A line table here would be a third copy of facts that are already
+recorded twice, and it would be the copy nobody updates.
+
+**`DocumentSequence` with docType `EXCHANGE`**, `X-` prefix, matching `R-` and
+`S-`. Same mechanism as SKU and BARCODE in Phase 5, and the same accepted
+consequence: the collision-free allocation is worth the occasional gap (D125b).
+
+### Idempotency
+
+`@@unique([tenantId, idempotencyKey])`, the shape `Sale` and `Return` already use.
+A replayed request returns the existing exchange rather than refunding twice.
+This matters more here than elsewhere: an exchange moves money in two directions,
+and a duplicate would refund a customer for goods they kept.
+
+### What this does not change
+
+- **Nothing in Returns, Sales, Payments, Stock, Tax, Promotions or QuickBooks.**
+  The orchestration calls the existing services and reacts to their results.
+- **Return approval rules apply unchanged.** No exchange-specific bypass: a
+  non-good-condition or over-limit return still requires approval, because the
+  goods coming back are the same goods either way.
+- **The replacement is priced at today's terms** — current promotions, current
+  tax rate — while the returned line keeps its frozen snapshot. This falls out of
+  composition rather than being chosen. A customer swapping M→L may therefore pay
+  more or less than they originally did; the PO confirmed this reading.
+
+### What this does change, outside the new model
+
+`DocumentsService.buildExchangeDocument` hardcodes `taxAmount: 0` and passes
+`showTaxColumn: false`. It was written before Phase 3 made tax per-line with
+snapshots, so an exchange note would show no tax and **would not tie to the money
+that actually moved**. Corrected in `7.3`, narrowly.
+
+---
+
+## D128a — an exchange settles GROSS, not through store credit
+
+**Status:** accepted, 2026-09-07. Supersedes the settlement mechanism in
+[D128](#d107); everything else in that record stands.
+
+### What D128 said
+
+> 1. Return the Medium → refundMethod = STORE_CREDIT, value R
+> 2. Sell the Large → tender STORE_CREDIT for R, plus (P − R) by any method
+
+### Why it cannot work
+
+`ReturnsService.validateRefundMethod` refuses a store-credit refund unless the
+original sale has a **saved, non-walk-in customer**:
+
+```ts
+if (!sale.customerId || sale.customer?.customerType === 'WALK_IN') {
+  throw new BadRequestException(
+    'Store credit requires a saved customer; convert the walk-in customer first');
+}
+```
+
+That rule is correct. Store credit is a liability held against an account, and a
+walk-in has no account to hold it. But **a clothing shop swapping a Medium for a
+Large at the counter is almost always a walk-in**, so D128's settlement would
+have failed for the common case — and only for the common case, which is the
+worst kind of failure to ship.
+
+Found by the `7.1b` tests, all nine of which failed on it. The design read
+plausibly on paper and did not survive contact with an existing rule.
+
+### The decision
+
+**The money moves twice and nets at the drawer.**
+
+```
+1. Return the Medium   → refunded by `refundMethod`, default CASH, value R
+2. Sell the Large      → paid in full by the caller's own tenders, value P
+```
+
+For an even swap the customer is handed R and pays P where R = P, so nothing
+leaves their pocket and the drawer nets to zero. For an upgrade they are out
+(P − R); for a downgrade they are up (R − P). The `Exchange` read model reports
+`netDifference = P − R`, which is exactly what the A4 note prints as *"Balance
+due from customer"* or *"Refund to customer"*.
+
+### Why this over the alternatives
+
+Three options were put to the PO, who chose this one.
+
+**Rejected — exempt store credit created inside an exchange.** A narrow carve-out
+in `validateRefundMethod`, on the argument that credit created and consumed in
+one operation never outlives it and so is not a liability. Defensible, and about
+five lines. Rejected because it changes an existing money-path rule for the sake
+of a mechanism that gross settlement does not need.
+
+**Rejected — require a saved customer for exchanges.** No code change anywhere,
+but it puts a customer-creation step in front of every counter size-swap.
+
+**Chosen — gross settlement.** It needs **no change to any existing money path**,
+which was the hard constraint on this phase. It is also what actually happens
+physically: the shop hands money back and takes money for a different item.
+
+### What follows from it
+
+- `refundMethod` is a caller field defaulting to `CASH`, passed straight to
+  `ReturnsService`. Every one of its rules still applies, including the cap that
+  a cash refund cannot exceed what was paid on the original sale, and store
+  credit remains available for a saved customer who wants it.
+- `payments` must cover the replacement **in full**, exactly as for any other
+  sale. `SalesService` validates them against the total it computed; the
+  exchange service asserts nothing about the money.
+- The recoverable state is unchanged in substance and better in practice: if the
+  replacement fails, the customer has already been refunded and the operator can
+  ring the replacement up as an ordinary sale.
+
+### A consequence worth stating plainly
+
+**A single-line sale exchanged in full always requires manager approval.**
+`Full-sale return` is an existing approval trigger, and a customer who bought one
+shirt and swaps the size is returning the whole sale. D128 chose to leave return
+approval rules unchanged, so this follows from that choice rather than from
+gross settlement — but it is the shape most exchanges will take in a clothing
+shop, and the till has to handle it. Recorded as a Phase 7 limitation.
+
+---
+
+## D128b — D2's "exchanges are not implemented" caveat is lifted
+
+**Status:** accepted, 2026-09-07. Phase 7 step `7.4`. A status change, not a new
+decision.
+
+### What stood until now
+
+The Phase 0 audit (**D2**) recorded `ModuleKey.EXCHANGES` as a reserved key with
+an A4 document renderer and no transaction, and this log carried the instruction:
+
+> `ModuleKey.EXCHANGES` remains as D2 left it — a reserved key with an A4
+> document renderer and no transaction. The retail template builds that
+> transaction; **until it lands, D2's instruction stands and exchange behaviour
+> must not be represented as implemented.**
+
+### It has landed
+
+- `Exchange` model and migration — **D128**, `7.1a`
+- `ExchangesService` / `ExchangesController`, `POST /exchanges` — `7.1b`
+- Stock proven to move on both variants, once — `7.2`
+- The A4 note rendered from a real exchange, carrying real tax — `7.3`
+
+So the caveat is lifted, and the three places that repeated it are corrected:
+the renderer's own comment, the characterisation spec's premise, and this entry.
+
+### What "implemented" does and does not mean here
+
+Stated precisely, because the caveat existed to stop exchanges being oversold.
+
+**It does mean:** a completed sale can be exchanged for a different variant, the
+money moves both ways and nets at the drawer, both stock figures move exactly
+once, a replay cannot double-refund, and the customer can be handed a note whose
+Balance Due is the figure the till actually took.
+
+**It does not mean:**
+
+- **Anything has been verified by hand.** The supervisor deferred manual UI
+  verification to a single pass after all phases. Every Phase 4 defect that
+  reached a screen was found by using the app, not by a green suite.
+- **Multi-line, cross-branch, or cross-sale exchanges.** Out of scope for the
+  thin slice by agreement; none is load-bearing for the phase gate.
+- **That a single-line exchange is frictionless.** `Full-sale return` is an
+  existing approval trigger, so a customer who bought one shirt and swaps the
+  size needs a manager PIN every time. That follows from D128's choice to leave
+  return-approval rules unchanged. It is the commonest shape of clothing
+  exchange, and the PO may want it revisited — see D128a.
+
+---
+
+## D129 — A8 is handed to the restaurant team; retail adopts the rule instead
+
+**Status:** accepted, 2026-09-07. Phase 8 step `8.1`. Amends the scope recorded
+in **D120** and in `05-testing-and-governance.md` §7, which both claim A8 for the
+retail template.
+
+### What the plan assumed
+
+The PO settled the billing audit on 2026-08-28: *"we own A4 and A8"*, and the
+governance document drew a conclusion from it —
+
+> Excluding [A2, A3, A7] means **no phase in this plan edits a restaurant file.**
+
+**That conclusion is false for A8**, and nobody noticed because nobody opened the
+file until Phase 8's pre-work.
+
+### What is actually there
+
+| Report service | Float-money sites |
+|---|---|
+| `sales/sales-report.service.ts` | 0 |
+| `products/products-report.service.ts` | 0 |
+| `dashboard/dashboard.service.ts` | 0 |
+| `restaurant-reports/restaurant-reports.service.ts` | **15** |
+
+**A8 exists only in the restaurant module.** Every retail report is already
+`Decimal`-clean, so there is nothing on our side to fix.
+
+### The decision
+
+1. **A8 is handed to the restaurant team**, documented in
+   `Docs/Implementation/RT-02-report-money-handover.md`.
+2. **Retail adopts the rule A8 stands for**, as a tripwire over its own report
+   services: no retail report may coerce a money `Decimal` to a JavaScript
+   number. Mutation-proven, so a future report that reintroduces the pattern
+   fails on the branch.
+3. **The audit row stays OPEN.** It is not fixed, and marking it otherwise would
+   be false. It has changed owner, not state.
+
+### Why not simply fix it
+
+Three standing constraints, any one of which is sufficient:
+
+- The PO's *"do not touch the restaurant module"*, restated repeatedly.
+- The developer's own constraint about parallel work in other repositories —
+  and `fix/issues-restaurant` has commits from today.
+- The governance guarantee above, which the retail branch has honoured through
+  seven phases and which is worth more than one mechanical refactor.
+
+The counter-argument — that the PO explicitly assigned A8 — is real, and is why
+this is a record rather than a silent omission. The assignment was made from an
+audit row, not from the file. Given the file, the assignment cannot be executed
+without breaking three other commitments.
+
+### A correction to the audit, which changes the urgency
+
+The audit's impact reads *"Report totals will not tie out to the payment
+ledger."* **Measured on 2026-09-07: they do tie out.**
+
+| Test | Samples | Disagreements |
+|---|---|---|
+| Sum 2dp money, round to 2dp | 400,000 | 0 |
+| Sum 3dp quantities, round to 3dp | 600,000 | 0 |
+| Accumulate `0.01` ten million times | 1 | 0 |
+
+IEEE-754 doubles carry ~15–16 significant decimal digits; summing 2dp values and
+emitting a 2dp figure is exact far beyond any realistic report. The file also
+contains **no division**, and D59 already permits a number boundary *"where every
+engine output is a 2dp figure"*.
+
+**Where it does break is division**, and that was measured too — an average over
+`183.17, 145.76` is `164.47` exactly and `164.46` in float; three orders of
+`0.615` average to `0.62` exactly and `0.61` in float. The obvious next
+restaurant reports — average order value, margin percentage — are divisions.
+
+So A8 is a **consistency defect with a real future failure mode**, not a current
+mis-statement. Recorded here because handing over an overstated claim would have
+cost the restaurant team an afternoon disproving it and, reasonably, some trust
+in everything else we send them.
+
+### Why the tripwire is the honest half
+
+The PO asked retail to own A8. Retail cannot fix the file, but it can guarantee
+the defect does not spread into the nine reports Phase 8 is about to write —
+which is where new float money would otherwise appear. That is the part of the
+assignment we can actually discharge, and it is enforced rather than promised.
+
+### What this does not change
+
+- **D120 stands unamended.** It claimed A4 and A8 and said why the other three
+  were absent. A4 shipped in Phase 4. This record amends only where A8 is done,
+  by whom, and on what evidence.
+- **A2, A3 and A7 remain not ours.**
+- Nothing in the restaurant module is modified by this branch.
+
+---
+
+## D130 — an exchange waives the full-sale-return approval, and only that one
+
+**Status:** accepted, 2026-09-07. Supersedes one sentence of [D128](#d107).
+No migration.
+
+### What D128 decided, and why it was wrong in practice
+
+> **Return approval rules apply unchanged.** No exchange-specific bypass: a
+> non-good-condition or over-limit return still requires approval, because the
+> goods coming back are the same goods either way.
+
+Sound reasoning, and the Phase 7 tests then showed what it costs. `Full-sale
+return` is an approval trigger, and **a customer who bought one shirt and swaps
+the size is returning the whole sale**. So every single-line exchange — the
+commonest shape in a clothing shop — demanded a manager PIN. Recorded as a Phase
+7 limitation with the note *"probably not what a shop wants"*; the PO confirmed
+on 2026-09-07 that it is not.
+
+### The decision
+
+**Inside an exchange, the `Full-sale return` trigger does not fire. Every other
+trigger still does.**
+
+The waived trigger exists because a full-sale return means the customer walks out
+with the entire sale refunded and the shop holds the goods. In an exchange they
+walk out with **replacement goods**, and the money largely nets at the drawer.
+The condition the trigger detects is simply not present.
+
+**Still requiring a manager, unchanged:**
+
+| Trigger | Why it survives |
+|---|---|
+| Damaged / opened / defective goods | An exchange does not change what came back |
+| Outside the return period | Nor how old it is |
+| Cashier over their value limit | Nor who is authorised for how much |
+| Refund method differs from the original payment | Money leaving by a different route |
+| Cash refund on a non-cash sale | Same |
+| Credit customer | Their account is still affected |
+| `Other` reason | Still unexplained |
+
+### How it is plumbed, and why not through the DTO
+
+`withinExchange` is an **option on the service method**, not a field on
+`CreateReturnDto`:
+
+```ts
+returns.complete(tenantId, actor, dto, idempotencyKey, { withinExchange: true })
+```
+
+A DTO field would let any caller of `POST /returns` assert it and skip the check
+— an approval bypass reachable from the public API by writing one extra line of
+JSON. Only `ExchangesService` can set this, and it always does.
+
+### What proves it is narrow
+
+Four integration assertions, and the second is the one that matters:
+
+1. An ordinary size swap completes with **no approval token at all**.
+2. **The same return, outside an exchange, still demands a manager.** Without
+   this, *"the exchange worked"* would also pass for an implementation that had
+   simply switched the trigger off for everyone.
+3. A **damaged-goods** exchange is still refused without approval.
+4. That same damaged-goods exchange **completes once approved** — so the refusal
+   is a gate, not a dead end.
+
+### What this does not change
+
+- Every other part of D128 and D128a: composition over atomicity, gross
+  settlement, the nullable `replacementSaleId`, idempotency.
+- Standalone returns, which behave exactly as they did.
+- The restaurant and hardware modules. `RETURNS` is retail-gated, and the flag
+  defaults to `false`, so a caller that does not set it sees the old behaviour
+  byte for byte.
+
+---
+
+## D131 — margin is costed at today's average, and the report says so
+
+**Status:** accepted, 2026-09-07. No migration. Introduced by `8.5`.
+
+### The question
+
+`ProductVariant.averageCost` is maintained by every goods receipt — a weighted
+average across every branch, refreshed on each receive — and until `8.5` no
+report read it. A shop could see what it sold and never what it made on it.
+
+The question `8.5` had to answer is not "how do we compute margin", it is **which
+cost a historical sale is costed at**.
+
+### What was decided
+
+**Margin is `revenue − (quantity × the unit cost as it stands TODAY)`, and every
+surface that shows it says that in words.**
+
+`averageCost` moves. A sale from March costed today is only right if nothing has
+been received since; a shop buying into a falling market will see its March
+margin flattered, and one buying into a rising market will see it understated.
+That is a real limitation, not a rounding detail.
+
+### The alternative, and why it is not this phase
+
+Costing a historical sale exactly means **freezing the unit cost onto `SaleItem`
+at sale time** — a new column, a migration, a decision record, and a change to
+the sale write path that every existing tenant runs through. It is the right
+long-term answer and it is deliberately not being done here, for three reasons:
+
+1. It could not answer for sales already taken. Every sale in the pilot database
+   would still have to be costed at today's average, so the report needs this
+   behaviour regardless.
+2. `8.5`'s scope is "read the cost that already exists". Changing how sales are
+   written is a different piece of work with a different blast radius, and the
+   standing constraint is not to disturb paths that hardware and restaurant
+   tenants run through.
+3. The approximation is close to exact for the shops this template targets,
+   whose costs move slowly.
+
+**Revisit when** a client reports margins that do not match their own books, or
+when stock valuation (a related, larger piece) is picked up.
+
+### An unknown cost is not a zero cost
+
+A variant nothing has ever been received against has `averageCost = NULL`. The
+row's cost, margin and margin percentage are all `null`; the row is excluded from
+the totals; and the excluded rows are counted and their revenue reported
+separately, so a reader can see how much of the period the totals do not cover.
+
+Costing NULL as zero would report a **100% margin** on that row — the most
+flattering possible number, arrived at by accident. This is the same principle as
+D28/D31's *unresolved is its own state*, applied to money.
+
+### A variant never reads its parent's cost
+
+Once `hasVariants` is true, `Product.unitPrice`, `Product.costPrice` and
+`Product.averageCost` are legacy columns the schema states are not read, holding
+whatever they held before the product gained variants. **D44** is the record of
+what happens when a screen reads them anyway: the products list priced every
+variant product at `Rs 0.00`.
+
+A margin report reading a stale parent cost would be the same defect one column
+over, and worse — it produces a *plausible* margin instead of an obvious zero. So
+a variant line is costed from the variant or not at all; only a line sold without
+a variant reads the product.
+
+Each row reports which cost it used — `VARIANT_AVERAGE`, `LATEST_PURCHASE`,
+`PRODUCT_AVERAGE` or `UNKNOWN` — rather than presenting one figure as though
+every part of it were equally solid.
+
+### What this does not change
+
+- No column, table or migration.
+- The receipt path. `averageCost` is still written only by
+  `inventory-receipts.service`, exactly as before.
+- The restaurant and hardware modules. This is a new read on a gated retail
+  report route.
+
+---
+
+## D132 — a stock take states reality; it is not a guarded movement
+
+**Status:** accepted, 2026-09-07. **Migration:** yes — `StockTake`,
+`StockTakeLine`. Introduced by `8.7`.
+
+### The question
+
+Every shop counts its stock. Until now this system had no way to record that a
+shelf holds four when the books say six: the only stock writes were a sale
+(guarded), a return, a receipt, and a bulk-import adjustment.
+
+### The decision, in one line
+
+**A count is an assertion of reality by an operator, and the system records it
+rather than arguing with it.**
+
+Concretely:
+
+1. It **sets** the branch's quantity to the counted figure. It does not decrement
+   and it is not refused for going down. Refusing a count because it disagrees
+   with the books would leave the books wrong and the shelf uncounted.
+2. It **writes a `StockMovement`** for every line whose count differed, reason
+   `ADJUSTMENT`, so the correction is as auditable as a sale.
+3. It **never touches the oversell guard.** `reduceStock`'s conditional
+   `updateMany({ where: { quantityOnHand: { gte } } })` is untouched, and no
+   count path passes through it. Two things that look similar — "change the
+   stock number" — are kept apart because only one of them is a race.
+
+### Why a new provider method, not a service writing stock
+
+`InventoryProvider.adjustStock` already exists and is documented for exactly this
+("a stocktake correction is an assertion of reality by an operator"). It could
+not be used as it stands: `LocalInventoryProvider.adjustStock` writes
+`Product.quantityOnHand` only — no branch, no variant, no `StockMovement`. It is
+the legacy bulk-import path, and widening it would change what the product import
+does to every existing tenant.
+
+Writing the stock directly from a new service was the other option, and it is
+forbidden: *"stock movement lives in exactly one layer — the providers, and
+nowhere else"* is an architectural tripwire with an exact file set, and D28/D31
+put the routing decision in a provider rather than in conditionals inside a
+service.
+
+So `8.7` adds **`applyStockCount`** to the provider interface, exactly as D44
+added `receiveStock`:
+
+- `LocalInventoryProvider` implements it.
+- `QuickBooksInventoryProvider` and `NoInventoryProvider` **throw**
+  `ProviderOperationUnavailableError`. A silent no-op would look like a
+  successful count that never moved anything — the same "document with no ledger
+  effect" state D44 refused for receipts. QuickBooks stock is a cache of an
+  upstream system whose ledger is not ours to write; `NONE` has no stock to
+  count.
+
+### Why the document is immutable and has no status
+
+A `StockTake` row is a count that HAPPENED. There is no `DRAFT`, no `POSTED`, no
+`status` column at all — a counting session that can be saved and resumed is a
+different feature, and a status field with one legal value is the "reserved key
+with nothing behind it" shape D2 recorded and Phase 7 spent a step undoing.
+Adding a status later is a migration; adding it now is a promise.
+
+The same reasoning gives the line its snapshots: `productNameSnapshot` and
+`variantNameSnapshot` are frozen at count time (D44), so a rename cannot rewrite
+what was counted.
+
+### What a variance is worth
+
+Each line carries `unitCost` and `varianceValue`, both nullable, resolved by the
+same rule as D131 — the variant's own average, then its latest purchase, and for
+a variant-less line the product's. **Null, not zero, when nothing has ever been
+received**: a shrinkage report that valued unknown stock at zero would say a
+missing item cost the shop nothing.
+
+### Authorisation
+
+`INVENTORY` module, and **`product:manage`** — no new permission was minted.
+
+`product:manage` is the permission that already authorises writing stock
+quantities: the bulk product import does exactly that today. It is held by Owner,
+Admin and Manager, which is the set a count needs, and a cashier does not hold
+it.
+
+D44 minted `inventory:receive` rather than reusing `product:manage`, and the
+argument it made — a floor manager who receives stock need not also be able to
+edit the catalogue — applies equally to counting. It is not being acted on now
+because no tenant has asked for that split, and vocabulary added in advance of a
+need is vocabulary nobody can remove. **`inventory:count` is the natural next
+step** the first time a client wants a counter who is not a catalogue editor.
+
+### What this does not change
+
+- The sale path, the return path, the receipt path: byte for byte.
+- `adjustStock`, which the product import still calls, unchanged.
+- Restaurant and hardware tenants. `applyStockCount` is reachable only through a
+  new `INVENTORY`-gated route, and the restaurant module has no caller.
+
+---
+
+## D133 — brand is an entity, not a string on a product
+
+**Status:** accepted, 2026-09-07. **Migration:** yes — `Brand`, plus a nullable
+`Product.brandId`. Introduced by `8.9`.
+
+### The question was settled in advance
+
+D64 (`2.4`) chose the clothing attribute schema and deliberately left brand out
+of it, recording why:
+
+> **Why `brand` is absent.** It is a **column eventually** (Phase 8 — "brand as
+> an entity"): filtered and reported on, and free text will not survive real
+> data. Declaring it here now would mean migrating tenants' stored strings into
+> an entity later. Leaving it out costs nothing today.
+
+`8.9` is that entity. The prediction has been paid off rather than revisited, and
+no tenant has a stored brand string to migrate — which is exactly the outcome
+D64 was buying.
+
+### Why an entity rather than a validated string
+
+The test D64 states for attribute-vs-dimension does not apply here, because brand
+is neither. The test that does apply is **what happens to the data over a year**:
+
+- A free-text brand gives `Nike`, `nike`, `NIKE ` and `Nkie` as four brands. A
+  buyer's "how did Nike do this season" then answers three quarters of the
+  question, and nothing in the system can tell them so.
+- An enum in the attribute schema would be worse: `attributeSchema` is a
+  per-DOMAIN list in code, and brands are per-TENANT data. Every shop would
+  share one list, and adding a brand would be a deployment.
+
+So: a row per tenant per brand, referenced by id.
+
+### The link is nullable, and stays nullable
+
+`Product.brandId` is `String?` with `onDelete: SetNull`.
+
+**Nullable** because most products in a hardware or grocery catalogue have no
+brand worth recording, and a required link would make every existing product
+un-editable until someone invented a brand for it. "Unbranded" is not a brand; it
+is the absence of one, and null is how the schema says that (D28/D31 —
+*unresolved is its own state*).
+
+**`SetNull`** because retiring a brand must never delete a product. A shop that
+stops stocking a label still sold those garments, and the sale lines that
+reference them are history.
+
+### Archived, not deleted
+
+A brand is deactivated (`isActive: false`) rather than removed. Deleting one
+would silently unlink every product that used it, and the products are the
+records that matter. Archived brands stay readable so an old product still shows
+what it was, and are filtered out of the pickers where a new choice is made.
+
+### What `8.9` does NOT do
+
+- **No markdown pricing.** Open question 6, answered by the PO on 2026-09-07:
+  *"absolutely still no"*. Scheduled percentage promotions (Phase 4) already
+  cover the selling behaviour; what is given up is the *was / now* pair on a
+  shelf label and a "how much did we lose to markdowns" report. Deferred, not
+  rejected. **`8.9` carries its migration alone**, exactly as the phase plan
+  says.
+- **No brand on a sale line.** A sale line snapshots the product NAME (D44); it
+  does not snapshot a brand id, and reporting resolves the brand from the product
+  as it stands today — the same choice, for the same reason, that `8.3` makes
+  about product names.
+
+### What this does not change
+
+- Every existing product, which keeps `brandId = NULL` and behaves identically.
+- The restaurant and hardware modules: one new table, one nullable column, and a
+  `PRODUCT_*`-permissioned route set that no restaurant screen calls.
+
+---
+
+## D134 — weighed goods are a software prompt, not a hardware integration
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Migration
+required when built (`Product.quantityType`). Unblocks the **weighed-goods** part
+of Phase 6; the rest of that phase stays parked (see the end of this record).
+
+### The decision
+
+A product declares how it is measured. A cashier selling a measured product is
+asked for the measurement. Nothing else changes.
+
+```
+Product.quantityType : WHOLE | DECIMAL     default WHOLE
+```
+
+| Scenario | Flag | Behaviour |
+|---|---|---|
+| Cashier taps a shirt | `WHOLE` | Quantity 1 goes straight into the cart. No interruption |
+| Cashier taps "Rice, Rs 200/kg" | `DECIMAL` | The cart addition is intercepted; a numpad asks for the weight. `0.750` is entered, read off an ordinary offline scale |
+
+The line is then a normal line of quantity `0.750`, and every existing rule —
+pricing, tax, stock depletion, returns — applies to it unchanged.
+
+### Why this is the right shape
+
+Digital-scale drivers and variable-measure barcode decoding are both real work
+with real vendor variation, and neither is needed to sell rice. A shop already
+owns a scale; the cashier can already read it. The system's job is to accept the
+number, not to acquire it.
+
+It also fails safe. A tenant that never sets `DECIMAL` on anything is running the
+code that exists today, byte for byte.
+
+### What was verified before accepting this, and what it changes
+
+The premise "the backend foundation already supports this math" was checked
+against the code rather than assumed. **It holds** — and one part of the
+surrounding story does not.
+
+**Confirmed:**
+
+| Claim | Evidence |
+|---|---|
+| Quantities are `Decimal(12,3)` throughout | `SaleItem.quantity`, `BranchInventory.quantityOnHand`, `StockMovement.delta`, `ReturnItem.quantity`, `InventoryReceiptLine.quantityReceived` — all `@db.Decimal(12, 3)`. Three places is grams |
+| The API already accepts a fractional quantity | `SaleItemInputDto.quantity` is `@IsNumber() @IsPositive()` — **not** `@IsInt()`. A `0.750` posted today is accepted and stored |
+| Returns carry no whole-number assumption | No `IsInt` and no flooring in the returns DTOs or `returns.calc` |
+| Nothing collides with the new column | `Product` has no unit-of-measure, weight or scale field to conflict with |
+
+**Corrected — and this is the part worth carrying forward:**
+
+> **Phase 6's weighed-goods work was never blocked by hardware. It is blocked by
+> the till.**
+
+`apps/web/src/lib/pos-cart.tsx` clamps every typed quantity to a whole number:
+
+```ts
+let q = Math.max(1, Math.floor(quantity));   // setQty
+```
+
+and the `+`/`−` stepper moves in units of one (`changeQty(lineKey, ±1)`). A
+cashier who types `0.750` today gets `1`. So the work this decision authorises is
+**frontend work on the cart**, not backend work and not driver work — which is a
+smaller, better-understood job than the plan implied, but it is not nothing, and
+the schema being ready does not make it free.
+
+### The rule that must not be broken when this is built
+
+**The numpad must not compute the price.** It collects a quantity; the line total
+is computed where every other line total is computed.
+
+This branch has paid for that lesson twice: `2.12` (four sale-line renderers, two
+of them fixed, so the same sale printed differently from different endpoints) and
+`3.10` (the till quoted 18% on an item the server then zero-rated). D59 says one
+money engine. A weighed line is the easiest place in the system to grow a second
+one, because `0.750 × 200` looks too simple to be worth centralising.
+
+### Open sub-question — promotions on a measured line
+
+**Not decided here. It needs an answer before this is built.**
+
+`packages/shared/src/promotions/applier.ts` counts in whole units:
+
+```ts
+times  = Math.floor(quantityOf(lines, productId) / perBundle);
+earned = Math.floor(buyPool / buyQty) * getQty;
+req.set(it.productId, (req.get(it.productId) ?? 0) + Math.max(1, it.quantity));
+```
+
+"Buy 2, get 1 free" on 0.75 kg of rice has no defined meaning, and
+`Math.max(1, it.quantity)` quietly rounds a 0.75 kg line **up** to one unit for
+eligibility — so a customer buying 750 g today would count as a whole unit toward
+a bundle. That is not a bug against current data, because no product can be
+fractional yet; it becomes one the day this decision is implemented.
+
+Three readings, in the order I would recommend them:
+
+1. **Quantity-based promotions do not apply to `DECIMAL` products.** Percentage
+   and fixed-amount promotions still do. Simplest, hardest to get subtly wrong,
+   and matches how most grocers actually price ("10% off all rice", not "buy 2 kg
+   get 1 kg").
+2. Quantity promotions apply on whole units only, fractions ignored.
+3. Quantity promotions apply pro-rata.
+
+**Whoever picks needs to say so in a follow-up record**, and the applier needs a
+test either way — a promotion that silently treats 0.75 kg as one unit is exactly
+the kind of thing that ships green.
+
+### Scope — what this does and does not unblock
+
+**Unblocked:** selling by weight or measure. A grocer can price rice per kilo and
+sell 750 g of it.
+
+**Still parked, unchanged:**
+
+- Per-category tax rates (`3.1`–`3.3`) — zero-rated staples beside standard-rated
+  goods. A separate requirement with its own migration.
+- The grocery `attributeSchema` (was `2.5`) — still closed rather than open:
+  Q12 resolved *do not split `RETAIL`*, so a grocery tenant would be shown the
+  clothing schema. Needs a grocery customer to say what a grocer records.
+- Variable-measure barcode decoding (`21`/`22` prefixes) — genuinely a hardware/
+  vendor concern, and **this decision is what makes it optional rather than
+  prerequisite**. A shop can operate with the numpad and adopt scale labels later.
+- Footwear size scales — unrelated, still needs a local retailer.
+
+**Phase 6 is therefore not "unblocked" as a whole.** One of its four parked items
+now has an implementation path that needs no hardware; the other three are
+untouched.
+
+### What must be true of the implementation
+
+Recorded now so the sprint does not re-litigate it:
+
+1. **`quantityType` defaults to `WHOLE`** on the column, so every existing row —
+   restaurant, hardware, retail — reads as it does today with no backfill.
+2. **The flag is read, never inferred.** No component may guess "this looks like
+   rice". Same rule as D56: read a capability, never a business type.
+3. **The server does not trust the client's arithmetic.** It already recomputes
+   every line; a `DECIMAL` line changes no part of that.
+4. **The prompt is cancellable**, and cancelling adds nothing to the cart. A
+   half-added line is worse than no line.
+5. **`0` is refused, not accepted as an empty line.** `@IsPositive()` already
+   refuses it server-side; the numpad should refuse it sooner.
+6. **Stock, returns and reports need no change** — they are already `Decimal`.
+   `8.3`'s `formatReportQuantity` already renders `0.750` as `0.75`, which was
+   written for loose goods before this decision existed.
+
+---
+
+## D134a — a measured product is invisible to quantity-based promotions
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Closes the
+open sub-question in [D134](#d113). No migration of its own.
+
+### The decision
+
+**Option 1**, chosen by the PO:
+
+| Promotion kind | Applies to a `DECIMAL` product? |
+|---|---|
+| `BUY_X_GET_Y` | **No** |
+| `BUNDLE_FIXED_PRICE` | **No** |
+| `PERCENTAGE_DISCOUNT` | **Yes** |
+| `FIXED_AMOUNT_DISCOUNT` | **Yes** *(both line-level and cart-level)* |
+
+"10% off all rice" works. "Buy 2 get 1 free" on rice does not exist.
+
+### Why
+
+"Buy 2, get 1 free" on 0.75 kg has no meaning that a customer and a cashier
+would agree on before an argument. The other two readings — whole units only,
+and pro-rata — are both defensible and both surprising, and a promotion that
+surprises a customer at the till costs more than one that never fires.
+
+It also matches how grocers price in practice: percentage and amount-off on
+weighed goods, bundles on packaged ones.
+
+### Where it goes, and the shape it must take
+
+`claimsFor` in `packages/shared/src/promotions/applier.ts` is already a single
+dispatch on `rule.type`. The bypass belongs there — the two quantity-based
+branches see a filtered line list, the other two see the full one.
+
+**`PromotionCartLine` must carry the flag.** It currently holds `productId`,
+`unitPrice`, `quantity`, `lineSubtotal` and `manualDiscountAmount` and nothing
+else, so the applier cannot know a product is measured unless it is told. There
+is a proven precedent for exactly this shape: `manualDiscountAmount` non-zero
+already makes a line invisible to promotions (D123). This is the same idea,
+narrowed to two of the four kinds.
+
+**Both callers must set it.** The till builds a `PromotionCartLine` for the badge
+and the server builds one for the charge. If only one sets the flag, the cashier
+is shown a discount the server refuses — which is `2.12` and `3.10` again, and
+this branch has paid for that lesson twice. A test must assert the two agree.
+
+### The latent rounding this makes safe
+
+`applier.ts` currently does:
+
+```ts
+req.set(it.productId, (req.get(it.productId) ?? 0) + Math.max(1, it.quantity));
+```
+
+which rounds a fractional line **up to one whole unit** for bundle eligibility.
+Harmless today because no product can be fractional. With D134 shipped and
+without this bypass, 750 g of rice would count as a whole unit toward "buy 2 get
+1 free" — a customer getting a free bag for buying one and a half.
+
+**The bypass is what makes that line safe, not a fix to it.** Leave it: it is
+correct defence for a caller that forgets the flag, and a test should prove a
+measured line never reaches it.
+
+### What must be tested (D30)
+
+Both directions, or the assertion is worth nothing:
+
+1. **Positively** — a `PERCENTAGE_DISCOUNT` DOES discount a 0.75 kg line.
+2. **Negatively** — a `BUY_X_GET_Y` naming that product yields no claim on it.
+3. A **whole** product in the same basket still wins its bundle, so the filter
+   removes the measured line and not the promotion.
+4. The till's preview and the server's charge agree on the same basket.
+
+---
+
+## D134b — the measured-product contract: unit, switching, and entry bounds
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Closes
+`6.1-Q1`, `Q3` and `Q4` from the Phase 6 plan, and records the approved scope
+(`Q5`, `Q7`). Extends [D134](#d113); no migration of its own beyond the column in
+§1.
+
+### 1. A measured product names its unit *(Q1 — yes)*
+
+```prisma
+model Product {
+  quantityType   QuantityType @default(WHOLE)   // D134
+  unitOfMeasure  String?                        // D134b
+}
+```
+
+**Same migration as `quantityType`.** Adding it later would mean a second
+migration *and* re-editing every measured product a shop had already set up.
+
+**Free text — `kg`, `g`, `L`, `m`, `ft`.** Nothing computes on it; it is printed,
+exactly like `material` in the clothing attribute schema. A controlled list would
+be a guess about a market nobody in this project has met, which is the mistake
+`2.6` refused to make about UK-versus-EU footwear scales.
+
+It is what lets the numpad ask *"How many kg?"* rather than *"How many?"*, the
+receipt print `0.750 kg`, and a shelf label read `Rs 200/kg`.
+
+**Nullable at the column**, because a `WHOLE` product has no unit and a required
+column would demand one for every shirt in every tenant.
+
+> **New sub-question this creates — `6.1-Q2`.** Should `unitOfMeasure` be
+> **required when `quantityType` is `DECIMAL`**? A measured product without one
+> prints `0.750` and asks *"How many?"*, which is the state the field exists to
+> prevent.
+>
+> **Recommendation: enforce it in the service, not in the column.** The database
+> cannot express "required only when another column has a particular value"
+> without a check constraint Prisma will not model, and the same rule then has to
+> exist in the API anyway. One rule, in the place that can state it.
+
+### 2. Switching `WHOLE` ⇄ `DECIMAL` is allowed, and warns *(Q3)*
+
+**Allowed.** A shop that flags something wrongly on its first day must be able to
+correct it, and blocking the change would trap them.
+
+**Warned, because stored quantities are NOT converted.** `quantityOnHand: 100`
+meant a hundred pieces yesterday; after the switch it means a hundred kilograms.
+Historical sale lines keep whatever integer quantity they were sold at. Nothing is
+corrupted and nothing is migrated — the *meaning* of stored numbers changes, and
+only a person can say whether that is right.
+
+**The warning must be specific and must name the counts**, on the screen where
+the change is made:
+
+> *"This product has **100** on hand and **14** recorded sales. Changing how it is
+> measured does not convert them — 100 will now read as 100 kg."*
+
+**No conversion factor is applied, ever.** Converting would require knowing how
+much one piece weighed, which nobody can supply and the system has never
+recorded.
+
+### 3. Entry bounds at the numpad *(Q4)*
+
+| Bound | Rule | Why |
+|---|---|---|
+| **Decimals** | **Maximum 3** | The column is `Decimal(12,3)`. A fourth place is silently truncated by the database, so it must be refused where the operator can still see it |
+| **Minimum** | **None beyond "greater than zero"** | 5 g of saffron is a real sale. `@IsPositive()` already refuses `0` server-side; the numpad refuses it sooner |
+| **Maximum** | **Existing stock, via `stockCap`** | Already decimal-safe and already the rule for every other line. No invented ceiling |
+
+### 4. Approved scope *(Q5, Q7)*
+
+**Track A only.** Steps `6.1`–`6.6`. Weighed goods, end to end.
+
+**Track B — per-category tax — is deferred again**, and this is the record of why
+it is safe to defer:
+
+> **Zero-rated staples beside standard-rated goods already work today**, per
+> product, end to end: `Product.taxable` (exposed in the wizard, `3.13`), the
+> tenant rate (`3.15`), `taxableBase` removing exempt lines and their share of the
+> order discount (`3.10`), the per-line snapshot of `0` (`3.9`), returns reading
+> that snapshot (`3.11`) and the receipt breaking it down (`3.12`).
+>
+> The only capability Track B genuinely adds is **two different non-zero rates**
+> in one basket. No customer has asked for it, and building it would edit
+> `computeDocumentTotals` — the one money engine the restaurant module shares,
+> which no phase in this plan has touched in eight phases.
+
+**Track C — the grocery attribute schema — is deferred with the sprint**, but its
+approach is now settled: see **D135**.
+
+---
+
+## D135 — a tenant picks its catalogue attribute pack
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Migration
+required when built (`TenantBusinessProfile.cataloguePack`). Answers `Q6`;
+implements Phase 6 step `6.10`.
+
+### The problem
+
+`ProductAttributesService.schemaForTenant` resolves **one schema per business
+type**:
+
+```ts
+const profile = await this.profiles.getEffectiveProfile(tenantId);
+return domainFor(profile.businessType).catalogue.attributeSchema;
+```
+
+The `RETAIL` descriptor declares one list, and it is the clothing one —
+`material`, `fit`, `careInstructions`, `gender`, `season`. Clothing and grocery
+are both `RETAIL`, and **Q12 resolved: do not split `RETAIL`**.
+
+So a grocer is asked for **Fit** and **Season**, and `validateAttributes` refuses
+`allergens` as an unknown key. Not a missing feature — an actively wrong one.
+
+### The decision
+
+**A domain may declare named attribute packs; a tenant selects one.**
+
+```ts
+readonly catalogue: {
+  /** Used when a tenant has selected nothing. Unchanged for every domain today. */
+  readonly attributeSchema: readonly AttributeField[];
+  /** Named alternatives. Absent for a domain with only one. */
+  readonly attributePacks?: Readonly<Record<string, readonly AttributeField[]>>;
+};
+```
+
+`RETAIL` declares `attributeSchema` as the clothing list **byte for byte as it is
+now**, plus `attributePacks: { clothing, grocery }`.
+
+Stored as **one nullable column**, `TenantBusinessProfile.cataloguePack String?`.
+
+**Nullable is the safety property.** `NULL` means "use the default", so every
+existing tenant — clothing, hardware, restaurant, every domain — resolves exactly
+as it does today with no backfill. Only a tenant that explicitly selects a pack
+sees anything different.
+
+The resolver becomes:
+
+```ts
+const domain = domainFor(profile.businessType);
+return (profile.cataloguePack && domain.catalogue.attributePacks?.[profile.cataloguePack])
+    ?? domain.catalogue.attributeSchema;
+```
+
+The pack is chosen at workspace creation — the console already asks which
+template — or later in Settings.
+
+### Why not split the business type
+
+Because `businessType` drives far more than catalogue fields, and clothing and
+grocery are identical in all of it:
+
+| What `businessType` decides | Clothing vs grocery |
+|---|---|
+| Modules enabled | same |
+| Navigation | same |
+| Capabilities | same |
+| Role templates | same |
+| POS workspace | same |
+| Console template card | same |
+| **Catalogue attribute fields** | **different** |
+
+Splitting duplicates six identical things to vary the seventh, costs an enum
+migration and D120a's two-migration dance, and re-opens a decision the PO has
+already made (Q12). The pack targets the one row that differs.
+
+### Why not merge the two lists
+
+A clothing shop would be asked for **Allergens** and a grocer for **Fit**. It is
+the cheapest option and therefore the one that will look tempting under sprint
+pressure; it is recorded here as rejected so it does not get re-proposed.
+
+### Two traps, both required in the build
+
+**1. Switching a tenant's pack strands their stored attributes.**
+`validateAttributes` refuses unknown keys, so a product holding `fit: 'Slim'`
+fails its next full write once the tenant moves to the grocery pack. Same
+mechanism D64 documents for removing a field, new trigger. **The build must
+either refuse the switch once products carry attributes, or make it an explicit
+operation with a warning naming the count** — the same shape D134b requires for
+switching a product's measurement.
+
+**2. A pack is a commitment, not a sketch.** Removing a field later strands
+whatever tenants stored under it. D64 says this of the schema and it is equally
+true of a pack.
+
+### What this does NOT decide
+
+**The grocery pack's field list.** `04-format-packs.md` §4 drafts
+`countryOfOrigin · allergens · storageInstructions · nutritionPer100g`, and that
+draft needs a real grocer before it is committed to — for exactly the reason
+`2.5` was parked.
+
+**Brand is not in it.** `04` listed brand as a grocery attribute; **D133** made it
+an entity, so it is a column with a filter and a report, not a text field.
+
+---
+
+## D134c — a measured product must name its unit, enforced in the service
+
+**Status:** accepted, 2026-09-07. **Planning only — no code written.** Closes
+`6.1-Q2`, the sub-question [D134b §1](#d113b) opened. No migration; no change to
+the column.
+
+### The decision
+
+**A product whose `quantityType` is `DECIMAL` must carry a non-empty
+`unitOfMeasure`. The rule lives in `ProductsService`, not in the column.**
+
+`Product.unitOfMeasure` stays `String?` — nullable — exactly as D134b §1
+declared it.
+
+### Why not the column
+
+The requirement is **conditional**: mandatory for a `DECIMAL` product, meaningless
+for a `WHOLE` one. A `NOT NULL` column would demand a unit of measure for every
+shirt, every service line and every restaurant menu item in every tenant.
+
+Postgres could express it as a `CHECK` constraint, but Prisma will not model one,
+so it would live only in raw migration SQL — invisible to the schema, invisible to
+the client, and reported to a user as a constraint-violation string rather than a
+sentence. And the API would still need its own check to produce a usable 400, so
+the rule would exist twice with only one of the two readable.
+
+**One rule, in the place that can state it.**
+
+### Where it goes
+
+`ProductsService.create` and `ProductsService.update`, beside
+`assertValidDocument` (D64 attributes) and `resolveBrand` (D133) — the service
+already owns exactly this kind of cross-field validation.
+
+**It must be checked against the RESULTING state, not the payload.** `update` is
+partial (D133 relies on that: absent leaves a brand alone, `''` clears it), so
+both of these must be refused:
+
+| Request | Existing row | Result |
+|---|---|---|
+| `{ quantityType: 'DECIMAL' }` | `unitOfMeasure: null` | **refused** — turning a product into a measured one without saying in what |
+| `{ unitOfMeasure: '' }` | `quantityType: DECIMAL` | **refused** — removing the unit from a measured product |
+| `{ name: 'Rice' }` | `DECIMAL`, `'kg'` | allowed — a partial update that touches neither |
+| `{ quantityType: 'WHOLE' }` | `unitOfMeasure: null` | allowed — a whole product needs no unit |
+
+A check against the payload alone passes the first two, which are the only cases
+worth guarding.
+
+### The message matters
+
+`"A product sold by weight or measure needs a unit — for example kg, g or L."`
+
+Not `"unitOfMeasure is required"`. The person reading it is a shopkeeper adding
+rice, and `4.19` cost two hours on a promotion that behaved correctly and
+explained nothing.
+
+### The client asks too, and is not the authority
+
+The product wizard should require the field once `DECIMAL` is chosen, so the
+operator is never allowed to reach a refusal they could have been shown. That is
+usability; the server's refusal is what makes it true. **Frontend hiding is
+usability only** — the standing rule in `CLAUDE.md`.
+
+### What must be tested (D30 — both directions)
+
+1. **Negative:** creating a `DECIMAL` product with no unit is refused.
+2. **Negative:** clearing the unit on an existing `DECIMAL` product is refused.
+3. **Positive:** creating a `WHOLE` product with no unit **succeeds** — otherwise
+   the rule would pass for an implementation that demanded a unit from everyone.
+4. **Positive:** a partial update that mentions neither field leaves both alone.
+
+---
+
+## D134d — a document prints the unit the line was SOLD in
+
+**Status:** accepted, 2026-09-08. **Migration:** yes — `SaleItem.unitOfMeasureSnapshot`
+and `ReturnItem.unitOfMeasureSnapshot`, both nullable. Introduced by `6.5`.
+Extends [D134b §1](#d113b).
+
+### The question
+
+D134b §1 says the unit is what lets "the receipt print `0.750 kg`". A receipt
+renderer has a `SaleItem`, and `unitOfMeasure` is on `Product`. So either the
+renderer joins the product, or the sale line carries the unit.
+
+### The decision
+
+**Snapshot it, like every other thing a document prints.**
+
+`SaleItem` already freezes `productName`, `sku`, `variantSkuSnapshot`,
+`variantNameSnapshot` and `promotionNameSnapshot` at sale time, and D44 states
+why: a document must show what was sold, **at the name it was sold under**. A
+later rename must not rewrite a receipt printed last year.
+
+The unit is the same kind of fact, and the failure mode of joining is worse than
+a wrong name:
+
+> A shop prices saffron per gram, then switches to kilograms. Every historical
+> receipt reprints `0.750 kg` where the customer actually bought **0.750 g** —
+> wrong by a factor of a thousand, on a document someone may be holding.
+
+A snapshot cannot do that. Nullable, because every line written before this
+column existed has no unit and `NULL` is the honest answer — the same contract
+`taxRatePercent` uses (D122), where `NULL` means "not recorded" rather than a
+fabricated default.
+
+### `ReturnItem` gets it too, for the same reason
+
+`3.8` added `taxRatePercent` to both tables in one migration because a credit
+note is a document as much as a receipt is. A refund line printing a bare
+`0.750` while the original receipt says `0.750 kg` is the same defect one
+document over.
+
+### What renders it
+
+**One shared formatter**, `saleLineQuantity`, in `@hardware-pos/shared` beside
+`saleLineLabel`.
+
+`2.12` is the reason: four renderers print a sale line, `1c.7` fixed two of
+them, and the same sale printed correctly from one endpoint and wrongly from
+another. `sale-line-renderers.spec` enumerates all four and fails if one skips
+the shared helper. Three of the four currently format quantity three different
+ways — one of them a ternary whose branches are identical.
+
+A line with no unit renders exactly as it does today, so every existing document
+is unchanged.
+
+### What this does not change
+
+- Any money. The unit is printed, never computed on.
+- The restaurant path: `ProjectedSaleItem` carries only the fields it lists, so a
+  restaurant bill writes `NULL` here and prints what it always printed — the same
+  mechanism that leaves `taxRatePercent` null there (3.16).
+
+### D136 — merging `feature/retail-template`: how each clash was decided
+
+`origin/feature/retail-template` (99 commits, 2026-08-28 to 09-08, cut from
+the restaurant tip `4f0be1b`) was merged into `merge/restaurant-changes` after
+D119. It brings the Retail vertical: the `RETAIL` business type and its
+clothing domain (D120), stock tracked by variant (D121), per-line tax (D122),
+promotions (D123, D124, D126), the option library, barcodes and labels (D125,
+D127), exchanges (D128–D130), reports, stock takes and brands (D131–D133),
+weighed goods (D134) and attribute packs (D135). Twenty-six files conflicted.
+What follows is every decision that was more than "take both".
+
+**Decision numbers, a third time.** The branch numbered its records D99–D114
+with a–e sub-records; this branch already held D99–D119. Theirs moved up by
+twenty-one — D99→D120 … D114→D135, sub-letters kept, anchors and migration
+comments included — in one commit on the branch's own history. The first
+pass missed D105–D109 (a pattern that covered 100–104 and 110–114 and skipped
+the middle); the branch commit was amended and the merge re-pointed at it, so
+the merge's second parent carries the whole renumber. Three migration
+DIRECTORIES keep their old numbers in their names — `…_stock_take_d111`,
+`…_brand_entity_d112`, `…_weighed_goods_d113`, `…_unit_snapshot_d113d` —
+because a migration's directory name is its identity in `_prisma_migrations`
+and none has been applied anywhere yet only by luck; their header comments
+say D132, D133 and D134.
+
+**Production's migrations are `main`'s, and none was touched.** Their
+thirteen migrations are all additive: two enum values (`RETAIL`,
+`PROMOTIONS` — each added in its own migration so a later one may use it,
+D120a), nullable or defaulted columns on `Product`, `SaleItem`, `ReturnItem`
+and `PrintJob` (`saleId` becomes nullable for label jobs, D127 — the D68
+`SET NOT NULL` runs first in lexical order, then this), and seven new tables.
+The merged set is 84. Proven as before: an empty database applies all 84 and
+reads up to date; a database at `main`'s 27, with a customer-account payment
+and a legacy product seeded between, applies the remaining 57, keeps both rows
+(the product reads `taxable = true`, `quantityType = WHOLE`, no brand), holds
+`Sale_tenantId_completedAt_idx` once and reads up to date; `migrate diff`
+emits only the D44 FK pair (O6). Two names are created twice in the whole
+set and both are a drop-and-re-add inside one migration; the barcode unique
+index is created `IF NOT EXISTS` by D125c on top of D44's, harmlessly.
+
+**The clothing Retail template is Owner + Cashier.** Their descriptor took
+`HARDWARE_ROLE_TEMPLATES`, which meant Owner + Cashier when written. D108 has
+since made that list Owner, Salesperson, Cashier with the Salesperson
+hardware-only; the descriptor now takes `GENERAL_ROLE_TEMPLATES`, which is
+exactly the two it wanted. Whether a clothing shop should also offer a
+Salesperson is a product question (O10), not something a merge decides.
+
+**Their own tripwire was red, and is green.** The providers-adoption spec on
+their branch listed the stock-take module among the adopters but never
+widened `ADOPTED_PATHS`, and three of their specs import from the providers
+directory — one to pin the LOCAL provider's rollup rule, two to borrow the
+testkit's source analyser. The spec now treats a `providers/testkit` import
+as what it is (an analyser, not an adoption), `modules/stock-takes` is an
+adopted path (D132 designed it as a provider consumer), and the rollup spec
+lives beside the provider it pins, where the scan does not look.
+
+**Unions.** `Sale` gains their two exchange relations beside `main`'s
+`markedPaidBy` and the tabs' `billSplits`; the sales module imports both
+`CreditModule` and `PromotionsModule`; the products module keeps one
+`SettingsModule` import with both reasons; `sellable.service` keeps the 86
+switch's `SOLD_OUT` state and gains their variant-grain rollup branch; the
+retail receipt template imports both the credit/timezone helpers and
+`taxRateLabel`; `provision-tenant.ts` keeps D108's role validation and linking
+and gains their clothing pack and `--with-samples`; the integration harness
+runs Prisma through `node` (their fix) — no shell, no `.cmd`; `.gitattributes`
+keeps the superset (`text=auto` plus the LF rules, theirs was the `*.sh` line
+alone). The remaining ten files — the retail till and its cart, the payment
+page, the product wizard and detail page, the document renderer and the
+settings page — are unions worked file by file; their outcomes and the doubts
+they raised are listed in the merge commit and below.
+
+**The ten worked files.** Each union was resolved by one agent and checked
+by another, adversarially, against both parents; what follows is what the
+check changed or could not settle.
+
+- *The retail till, its cart and the payment page.* A line is priced from the
+  size it names (`linePrice`) and discounted per unit or per line as `main`
+  says (2026-09-07), so `computeDiscount` takes the quantity; the cap is
+  `stockCap(product, variant)` in `cart.ts`, re-exported from the cart store
+  so the stepper and the warning still read one function. `setQty` keeps
+  their conditional clamp (a measured line floors at 0.001, D134) and
+  `main`'s "floor last" order, so a cap of 0 leaves a line visibly short
+  instead of clearing its warning. The one place the stock guard runs is
+  `commitAdd`, judged against the chosen size; a scanned product whose every
+  size is out is refused before the picker opens (both parents refused it,
+  the first union let it through). The manager-approval dialog says which
+  basis it is approving. `noteItem` looked its line up by product id against
+  a line key — their latent bug; fixed. The payment page maps lines through
+  the sale mapper, which now carries `discountBasis` and is pinned to; the
+  page no longer states the basis a second time.
+- *The product wizard and the detail page.* The union of both `WizardState`
+  shapes; their `taxRatePercent` prop reaches the three `<StepDetails>` renders
+  `main` had added without it (`null` — unresolved, which is what those tests
+  are not about). Their `resolveImageUrl` wrap on the detail page's two
+  `<ProductImage>` sites was dropped as a no-op: the component resolves the
+  URL itself and neither side had touched it.
+- *The document renderer.* One import list; the discount note and per-line tax
+  amount both render; the shop-timezone date sits beside their columns.
+- *The settings page.* Timezone and tax rate are two dirty flags and one
+  `PUT`; the tax-rate render test's fixture gained the timezone field.
+
+**A regression `main` had already fixed once, caught by the check.** Their
+till reads the ONE read model (D101), and the read model decided "has a
+count" from `sellableKind` alone. `deriveSellableKind` maps a QuickBooks
+NonInventory item to `STOCK_ITEM`, and the migration that added the column
+left every legacy Service row there too — so on the merged till a Tile Shop
+NonInventory item at its placeholder 0 read `OUT`, was greyed out, and
+blocked the cart it was in: POL-1976 again (`main` 1ba3900). The read model
+now says UNTRACKED for anything whose type is not Inventory, which is the
+sale guard's own rule (`trackInventory: product.type === 'Inventory'`); the
+item carries its `type` so the tile can still say "Non-Inventory" rather
+than "Service" (D16); both directions are pinned server- and client-side.
+The held-basket mapper had the same silent drop as the sale mapper and now
+IS the sale mapper plus the note.
+
+**Counts and catalogue.** The route matrix reads 316 routes, 216 guarded,
+100 open (their 309/210/99 plus the tabs' and the queue's routes); its
+per-controller tables were already fifteen controllers behind the registry
+before this merge and are left as they were — the totals are what the spec
+enforces. The catalogue gained forty-three rows for D120–D135 (their branch
+wrote none) — PROD, POS, SET, DOC, two new sections (STK, RPT) and the
+Exchange rows, whose "not implemented" banner D128 has made false; EXC-T-005
+stays blocked because retail runs no accounting provider. Writing them found
+four records ahead of their code: D135's pack selector (planning only),
+D134b's switching warning, D120's tax-inclusive display (`taxInclusive` is
+stored and read by nothing) and D125's dimension-to-library mapping screen;
+and two screens reachable only by URL (`/stock-takes`, `/products/barcodes`).
+
+**Left as found.** Twelve `no-unused-vars` warnings in the API — eleven on
+this branch before the merge, one theirs (`replacementValue` in the exchange
+service); the cart store's hydrate effect reads `shopTz` outside its
+dependency list, identical on both parents; prettier drift on lines each
+side authored. None was introduced here.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
@@ -5003,3 +7568,4 @@ decision (refuse, or refund).
 | O7 | Should a list's pager hide when the rows fit one page? Their Orders screen does; every `main` list renders it (D110). | UI polish |
 | O8 | Cancelling a counter order that D117 has settled and paid: refuse it, or record the refund? The takeaway status write has no transition guard (D119). | before the next restaurant deploy |
 | O9 | How does the counter hand over a takeaway whose ticket the kitchen never bumped? The stepper D113/D117 named is gone (2026-08-10); handover is offered on READY only (D119). | before the next restaurant deploy |
+| O10 | Should the clothing Retail template (D120) offer the Salesperson, the hardware-only owner-equivalent of D108? It seeds Owner + Cashier today (D136). | before the first Retail workspace |

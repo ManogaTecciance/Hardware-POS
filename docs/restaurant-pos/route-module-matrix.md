@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 290
-- Module-guarded routes: 202
-- Ungated routes: 88
+- Total routes: 316
+- Module-guarded routes: 216
+- Ungated routes: 100
 
 ## How to read the Guard column
 
@@ -232,6 +232,76 @@ drives the wizard's generic attributes step and the server-side validator.
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
 | GET | `/products/attribute-schema` | SHARED_CORE | shared-core | product:read |
+
+### ExchangesController
+
+D128 (Phase 7): return one variant, issue another, settle the difference. The
+transaction behind the `EXCHANGES` key **D2** reserved in the Phase 0 audit —
+until now a module key with an A4 renderer and no workflow.
+
+Gated on `EXCHANGES`, which retail carries and food service deliberately does not
+(D2). Writes require **both** `return:create` and `sale:create`, because an
+exchange really does both: requiring only one would let somebody who may not take
+returns cause a refund through the side door.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| POST | `/exchanges` | EXCHANGES | ENFORCED | return:create + sale:create |
+| POST | `/exchanges/preview` | EXCHANGES | ENFORCED | return:create + sale:create |
+| GET | `/exchanges` | EXCHANGES | ENFORCED | return:read |
+| GET | `/exchanges/:id` | EXCHANGES | ENFORCED | return:read |
+
+The A4 note lives on `DocumentsController` with the other documents:
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/documents/exchanges/:exchangeId` | EXCHANGES | ENFORCED | return:read |
+
+### AttributeLibraryController
+
+D125 / D125a (Phase 5, `5.1` / `5.2`): the tenant option library — Size and
+colour scales defined once and shared by every product that adopts them.
+
+**Shared core, deliberately.** Any business selling variants benefits from
+saying "Size" once, and gating it on a business type would be the D56 mistake —
+read a capability, never a business type. A tenant that never creates a
+definition sees an empty list, which is a real answer rather than a denial.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/attribute-library` | SHARED_CORE | shared-core | product:read |
+| GET | `/attribute-library/:definitionId` | SHARED_CORE | shared-core | product:read |
+| POST | `/attribute-library` | SHARED_CORE | shared-core | product:manage |
+| PATCH | `/attribute-library/:definitionId` | SHARED_CORE | shared-core | product:manage |
+| DELETE | `/attribute-library/:definitionId` | SHARED_CORE | shared-core | product:manage |
+
+### BarcodesController
+
+D125 Part 3 (Phase 5, `5.9`): the barcode audit and reissue pass. Sequenced
+before label rendering, because an EAN-13 symbol cannot be produced from a
+payload with a wrong check digit — 18 of the pilot's 20 codes.
+
+The read is `product:read`: anyone who can browse the catalogue may see that it
+has a problem. The reissue is `product:manage`, because it rewrites identifiers.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/barcodes/audit` | SHARED_CORE | shared-core | product:read |
+| POST | `/barcodes/reissue` | SHARED_CORE | shared-core | product:manage |
+
+### LabelsController
+
+D127 (Phase 5, `5.7`): render and queue a sheet of product labels as a
+`PRODUCT_LABEL` print job — the only job type with no sale behind it.
+
+Two endpoints rather than one: `preview` returns the HTML to look at, `print`
+queues it. Printing is the irreversible half, so it is a deliberate second
+action. Both report which variants could not be drawn rather than omitting them.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| POST | `/labels/preview` | SHARED_CORE | shared-core | product:manage |
+| POST | `/labels/print` | SHARED_CORE | shared-core | product:manage |
 
 ### ProductComponentsController
 
@@ -552,6 +622,28 @@ administrator role, or builds its own, keeps working.
 | POST | `/sales/complete` | RETAIL_POS | ENFORCED | sale:create |
 | POST | `/sales/draft` | RETAIL_POS | ENFORCED | sale:create |
 | GET | `/sales/report` | SHARED_CORE | shared-core | sale:read |
+| GET | `/sales/held` | RETAIL_POS | ENFORCED | sale:read |
+| DELETE | `/sales/held/:id` | RETAIL_POS | ENFORCED | sale:create |
+| GET | `/sales/reports/ageing` | REPORTING | ENFORCED | report:read |
+| GET | `/sales/reports/by-variant` | REPORTING | ENFORCED | report:read |
+| GET | `/sales/reports/margin` | REPORTING | ENFORCED | report:read |
+| GET | `/sales/reports/tax-by-rate` | REPORTING | ENFORCED | report:read |
+
+### BrandsController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| GET | `/brands` | SHARED_CORE | shared-core | product:read |
+| POST | `/brands` | SHARED_CORE | shared-core | product:manage |
+| PATCH | `/brands/:id` | SHARED_CORE | shared-core | product:manage |
+
+### StockTakesController
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| POST | `/stock-takes` | INVENTORY | ENFORCED | product:manage |
+| GET | `/stock-takes` | INVENTORY | ENFORCED | product:read |
+| GET | `/stock-takes/:id` | INVENTORY | ENFORCED | product:read |
 
 ### SettingsController
 

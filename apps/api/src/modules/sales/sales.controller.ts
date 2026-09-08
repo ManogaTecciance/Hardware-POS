@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ModuleKey } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 import type { Response } from 'express';
@@ -16,6 +27,9 @@ import { MarkSalePaidDto } from './dto/mark-sale-paid.dto';
 import { QuerySalesDto } from './dto/query-sales.dto';
 import { QuerySalesReportDto } from './dto/query-sales-report.dto';
 import { SalesReportService } from './sales-report.service';
+import { RetailReportsService } from './retail-reports.service';
+import { QueryRetailReportDto, toReportRange } from './dto/query-retail-report.dto';
+import { QueryAgeingReportDto } from './dto/query-ageing-report.dto';
 import { SaleWithRelations } from './sales.repository';
 import { SalesService } from './sales.service';
 import { SaleListItem } from './sales.types';
@@ -25,6 +39,7 @@ export class SalesController {
   constructor(
     private readonly salesService: SalesService,
     private readonly salesReportService: SalesReportService,
+    private readonly retailReports: RetailReportsService,
   ) {}
 
   @Post('draft')
@@ -76,6 +91,101 @@ export class SalesController {
     res.setHeader('Content-Type', report.contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${report.filename}"`);
     res.send(report.buffer);
+  }
+
+  /**
+   * `8.3` — what sold, by product and by size.
+   *
+   * Declared before `:id`, like `report` above, or the literal segment is
+   * captured as a sale id.
+   *
+   * Gated on `REPORTING`, not on `RETAIL_POS`: this is a report, and every
+   * other report route in the app (`/dashboard/*`, `/restaurant/reports/*`)
+   * carries the same module. It also makes the sidebar honest — `8.2` hides
+   * `/reports` when REPORTING is absent, and frontend hiding is usability
+   * only; the server has to be the one that refuses.
+   *
+   * Tenant-wide, like the `GET /sales/report` beside it. A per-branch reading
+   * is a different question and would need its own parameter and its own
+   * tests; inventing one here would ship a filter nothing has exercised.
+   */
+  @Get('reports/by-variant')
+  @RequireModule(ModuleKey.REPORTING)
+  @RequirePermissions(Permission.REPORT_READ)
+  salesByVariant(@TenantId() tenantId: string, @Query() query: QueryRetailReportDto) {
+    return this.retailReports.salesByVariant(tenantId, toReportRange(query));
+  }
+
+  /**
+   * `8.4` — how much tax was charged at each rate.
+   *
+   * Same gate and the same tenant-wide reading as `by-variant` above.
+   */
+  @Get('reports/tax-by-rate')
+  @RequireModule(ModuleKey.REPORTING)
+  @RequirePermissions(Permission.REPORT_READ)
+  taxByRate(@TenantId() tenantId: string, @Query() query: QueryRetailReportDto) {
+    return this.retailReports.taxByRate(tenantId, toReportRange(query));
+  }
+
+  /**
+   * `8.5` — what the goods that sold actually earned.
+   *
+   * Costed at TODAY'S weighted average, which is an approximation for a
+   * historical sale — D131. The response says which cost each row used and
+   * which rows have no cost at all, rather than presenting one figure as if
+   * every part of it were equally solid.
+   */
+  @Get('reports/margin')
+  @RequireModule(ModuleKey.REPORTING)
+  @RequirePermissions(Permission.REPORT_READ)
+  margin(@TenantId() tenantId: string, @Query() query: QueryRetailReportDto) {
+    return this.retailReports.margin(tenantId, toReportRange(query));
+  }
+
+  /**
+   * `8.6` — what is sitting on the shelf and not moving.
+   *
+   * Not a date range: an age, measured back from a moment. Ninety days by
+   * default, inclusive of the boundary.
+   */
+  @Get('reports/ageing')
+  @RequireModule(ModuleKey.REPORTING)
+  @RequirePermissions(Permission.REPORT_READ)
+  ageing(@TenantId() tenantId: string, @Query() query: QueryAgeingReportDto) {
+    return this.retailReports.ageing(tenantId, {
+      thresholdDays: query.thresholdDays,
+      asOf: query.asOf ? new Date(query.asOf) : undefined,
+    });
+  }
+
+  /**
+   * `8.8` — the baskets currently on hold.
+   *
+   * Declared before `:id`, like the reports above, or `held` is captured as a
+   * sale id.
+   *
+   * `RETAIL_POS`-gated, unlike the sale READS beside it: holding a basket is
+   * part of taking a sale, not part of looking one up, and a tenant without
+   * the retail till has no baskets to hold.
+   */
+  @Get('held')
+  @RequireModule(ModuleKey.RETAIL_POS)
+  @RequirePermissions(Permission.SALE_READ)
+  listHeld(
+    @TenantId() tenantId: string,
+    @Query('branchId') branchId?: string,
+  ): Promise<SaleWithRelations[]> {
+    return this.salesService.listHeld(tenantId, branchId);
+  }
+
+  /** `8.8` — discard a held basket. A draft moved no stock, so nothing unwinds. */
+  @Delete('held/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireModule(ModuleKey.RETAIL_POS)
+  @RequirePermissions(Permission.SALE_CREATE)
+  discardHeld(@TenantId() tenantId: string, @Param('id') id: string): Promise<void> {
+    return this.salesService.discardHeld(tenantId, id);
   }
 
   @Get(':id')

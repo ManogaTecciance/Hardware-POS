@@ -36,15 +36,44 @@ export class VariantOptionValueInputDto {
 }
 
 export class CreateVariantInputDto {
+  /**
+   * D125 (`5.3`) — OMIT to have one generated, send a value to override it.
+   *
+   * Optional here and only here. The general rule from Phase 4 is that a field
+   * crossing a wire should be required, because an optional one can be dropped
+   * by a mapper without the compiler noticing. This field is different in kind:
+   * its absence is a REQUEST ("generate one for me"), not a missing value, and
+   * a dropped `sku` produces a generated identifier rather than a silent blank.
+   */
   @IsString()
   @IsNotEmpty()
   @MaxLength(80)
-  sku!: string;
+  @IsOptional()
+  sku?: string;
 
+  /**
+   * A barcode the operator typed — usually the supplier's, printed on the box.
+   *
+   * Validated by SHAPE (`5.6`): 13 digits is a claim to be an EAN-13 and must
+   * carry the correct check digit; anything else is accepted as printed.
+   */
   @IsString()
   @IsOptional()
   @MaxLength(80)
   barcode?: string;
+
+  /**
+   * `5.5` — ask for an in-store EAN-13 to be allocated for this variant.
+   *
+   * Opt-in rather than automatic, and deliberately not the same shape as
+   * `sku`'s "omit to generate". A missing SKU is unusable, so generating one is
+   * always right. A missing barcode is ordinary — most variants never carry one
+   * — and allocating unasked would burn range and commit the tenant to a prefix
+   * before anyone chose it. Ignored when `barcode` is supplied.
+   */
+  @IsBoolean()
+  @IsOptional()
+  generateBarcode?: boolean;
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)

@@ -157,6 +157,7 @@ export class ReturnsService {
         purchasedQuantity: purchased,
         previouslyReturnedQuantity: previously,
         availableReturnQuantity: round3(Math.max(0, purchased - previously)),
+        unitOfMeasure: it.unitOfMeasureSnapshot,
         productDiscount: Number(it.discountAmount),
         lineTotal: Number(it.lineTotal),
       };
@@ -165,7 +166,23 @@ export class ReturnsService {
 
   // ── preview ────────────────────────────────────────────────────────────────
 
-  async preview(tenantId: string, actor: AuthenticatedUser, dto: PreviewReturnDto): Promise<ReturnPreview> {
+  /**
+   * D130 — `options` are what the SERVER may set, never the client, exactly
+   * as on `complete` below. A `PreviewReturnDto` field would let any caller
+   * of `POST /returns/preview` assert it; only `ExchangesService` can reach
+   * this.
+   *
+   * A preview grants nothing on its own, so the flag could not open a bypass
+   * here — but it decides whether the operator is ASKED for a PIN, and a
+   * preview that disagrees with the completion is the defect this parameter
+   * exists to remove. Keeping both paths on one rule is the point.
+   */
+  async preview(
+    tenantId: string,
+    actor: AuthenticatedUser,
+    dto: PreviewReturnDto,
+    options: { withinExchange?: boolean } = {},
+  ): Promise<ReturnPreview> {
     const sale = await this.loadSale(tenantId, dto.originalSaleId);
     const settings = this.settingsService.getSettings(tenantId);
     const computed = this.computeReturn(sale, dto.items);
@@ -177,6 +194,7 @@ export class ReturnsService {
       refundMethod,
       settings.returns,
       actor.role,
+      options.withinExchange === true,
     );
 
     // The same provider the completion will use, resolved from the same evidence,
@@ -189,7 +207,9 @@ export class ReturnsService {
       items: computed.previewItems,
       subtotal: computed.totals.subtotal,
       productDiscountAdjustment: computed.totals.productDiscountAdjustment,
+      promotionDiscountAdjustment: computed.totals.promotionDiscountAdjustment,
       orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
+      promotionOrderDiscountAdjustment: computed.totals.promotionOrderDiscountAdjustment,
       taxAdjustment: computed.totals.taxAdjustment,
       refundTotal: computed.totals.refundTotal,
       isFullReturn: computed.isFullReturn,
@@ -245,11 +265,20 @@ export class ReturnsService {
 
   // ── complete (create the return atomically) ────────────────────────────────
 
+  /**
+   * D130 — options the SERVER may set, never the client.
+   *
+   * `withinExchange` waives one approval trigger (see `evaluateApproval`).
+   * It is a parameter rather than a `CreateReturnDto` field on purpose: a
+   * field would let any caller of `POST /returns` assert it and skip the
+   * check. Only `ExchangesService` can reach this.
+   */
   async complete(
     tenantId: string,
     actor: AuthenticatedUser,
     dto: CreateReturnDto,
     idempotencyKey: string | null,
+    options: { withinExchange?: boolean } = {},
   ): Promise<ReturnWithRelations> {
     const key = dto.idempotencyKey ?? idempotencyKey;
 
@@ -267,8 +296,23 @@ export class ReturnsService {
     const settings = this.settingsService.getSettings(tenantId);
     const computed = this.computeReturn(sale, dto.items);
     const refundTotal = computed.totals.refundTotal;
-    if (refundTotal <= 0) {
-      throw new BadRequestException('Refund total must be greater than zero');
+    /*
+     * D123 (4.5) — NEGATIVE is refused; ZERO is a real return.
+     *
+     * This guard was `<= 0` when a zero refund could only come from a degenerate
+     * input. Promotions made zero legitimate: a customer returning a free
+     * buy-two-get-one item is owed nothing, but the goods still come back and the
+     * stock must still be restored. Refusing it would leave the item unreturnable
+     * and its stock permanently lost — a worse outcome than the case the guard was
+     * written for.
+     *
+     * Nothing is opened up by this. An empty return is already impossible:
+     * `ReturnItemInputDto.returnQuantity` carries `@IsPositive()`, so the quantity
+     * is validated before this line runs. What remains refused is a NEGATIVE
+     * refund, which is money flowing the wrong way and never correct.
+     */
+    if (refundTotal < 0) {
+      throw new BadRequestException('Refund total cannot be negative');
     }
 
     this.validateRefundMethod(sale, dto.refundMethod, refundTotal, settings.returns);
@@ -280,6 +324,7 @@ export class ReturnsService {
       dto.refundMethod,
       settings.returns,
       actor.role,
+      options.withinExchange === true,
     );
     const approvedByUserId = requiresApproval
       ? await this.verifyApprovalToken(tenantId, dto.originalSaleId, refundTotal, dto.approvalToken, reasons)
@@ -309,8 +354,17 @@ export class ReturnsService {
     // change `inventoryMode` once stock has moved.
     const inventory = await this.inventoryProviders.forTenant(tenantId);
     const restockLines = eligibleRestockLines(computed.persistItems);
-    const restoreStock: RestoreStock = (tx, lines) =>
-      inventory.restoreStock(tx, { tenantId, branchId: sale.branchId }, lines);
+    const restoreStock: RestoreStock = (tx, lines, returnId) =>
+      inventory.restoreStock(tx, { tenantId, branchId: sale.branchId }, lines, {
+        // 1a.21 — the counterpart of the SALE row. `lines` has already been
+        // filtered to those that actually restock, so a DAMAGED item that is
+        // refunded but not resold produces no ledger entry, which is correct: no
+        // stock moved.
+        reason: 'RETURN',
+        refType: 'RETURN',
+        refId: returnId,
+        createdByUserId: actor.id,
+      });
 
     let created: ReturnWithRelations;
     try {
@@ -328,7 +382,10 @@ export class ReturnsService {
           notes: dto.notes?.trim() || null,
           subtotal: computed.totals.subtotal,
           productDiscountAdjustment: computed.totals.productDiscountAdjustment,
+          promotionDiscountAdjustment: computed.totals.promotionDiscountAdjustment,
           orderDiscountAdjustment: computed.totals.orderDiscountAdjustment,
+          promotionOrderDiscountAdjustment:
+            computed.totals.promotionOrderDiscountAdjustment,
           taxAdjustment: computed.totals.taxAdjustment,
           refundTotal,
           refundMethod: dto.refundMethod,
@@ -460,11 +517,45 @@ export class ReturnsService {
 
     // The recorded sale.taxAmount is the authoritative tax the customer paid; the
     // calc allocates that amount proportionally (it is 0 when tax was disabled).
+    /*
+     * D122 (3.11) — the weight that allocates the sale's recorded tax.
+     *
+     * Σ over EVERY sale line of `lineTaxable × rate`, where `lineTaxable` is the
+     * line net less its proportional share of the order discount — the same
+     * quantity `computeReturnLine` derives, so numerator and denominator are
+     * built the same way and the shares provably sum to 1.
+     *
+     * Computed over ALL lines, not just the ones being returned: a share must
+     * mean the same thing whether the customer brings back one item or every
+     * item, which is what makes a sequence of partial returns reconcile.
+     *
+     * Null when the sale predates 3.8 — one line without a rate makes the whole
+     * weight unusable, which is correct: those sales fall back wholesale to the
+     * proportional method they were refunded by before.
+     */
+    const discountedSubtotalAll = Number(sale.subtotal) - Number(sale.totalDiscount);
+    const anyLineMissingRate = sale.items.some((it) => it.taxRatePercent === null);
+    const taxWeightTotal = anyLineMissingRate
+      ? null
+      : sale.items.reduce((acc, it) => {
+          const lineTotal = Number(it.lineTotal);
+          const orderDiscountShare =
+            discountedSubtotalAll > 0
+              ? (Number(sale.orderDiscountAmount) * lineTotal) / discountedSubtotalAll
+              : 0;
+          return acc + (lineTotal - orderDiscountShare) * Number(it.taxRatePercent);
+        }, 0);
+
     const saleSnapshot = {
       subtotal: Number(sale.subtotal),
       totalDiscount: Number(sale.totalDiscount),
       orderDiscountAmount: Number(sale.orderDiscountAmount),
+      // D126 — allocated back by the same weighting as the manual order
+      // discount. Deliberately NOT added into `taxWeightTotal` above: the sale
+      // did not reduce tax for it, so the refund must not either.
+      promotionOrderDiscountAmount: Number(sale.promotionOrderDiscountAmount ?? 0),
       taxAmount: Number(sale.taxAmount),
+      taxWeightTotal,
     };
 
     const previewItems: ReturnPreviewItem[] = [];
@@ -519,7 +610,17 @@ export class ReturnsService {
           unitPrice: Number(si.unitPrice),
           purchasedQuantity: purchased,
           discountAmount: Number(si.discountAmount),
+          // D123 (4.5) — reversed line-level, `× frac`, like the product
+          // discount above and not like the order discount's weighted share.
+          // `?? 0` is defence in depth, not a NULL/0 distinction: the column is
+          // NOT NULL DEFAULT 0, so absent can only mean zero. Without it a row
+          // missing the field yields `Number(undefined)` = NaN, which would
+          // propagate silently into a refund total — the worst failure mode
+          // available here.
+          promotionDiscountAmount: Number(si.promotionDiscountAmount ?? 0),
           lineTotal: Number(si.lineTotal),
+          // Null means this line predates 3.8 — the fallback signal.
+          taxRatePercent: si.taxRatePercent === null ? null : Number(si.taxRatePercent),
         },
         qty,
       );
@@ -534,7 +635,9 @@ export class ReturnsService {
         originalUnitPrice: line.originalUnitPrice,
         originalLineSubtotal: line.originalLineSubtotal,
         productDiscountAdjustment: line.productDiscountAdjustment,
+        promotionDiscountAdjustment: line.promotionDiscountAdjustment,
         orderDiscountAdjustment: line.orderDiscountAdjustment,
+        promotionOrderDiscountAdjustment: line.promotionOrderDiscountAdjustment,
         taxAdjustment: line.taxAdjustment,
         refundableAmount: line.refundableAmount,
         returnReason: input.returnReason,
@@ -545,8 +648,24 @@ export class ReturnsService {
       persistItems.push({
         originalSaleItemId: si.id,
         productId,
+        // D120 (1a.20) — the variant comes from the SALE, never from the caller.
+        // `ReturnItemInputDto` names a `saleItemId`, so the server already holds
+        // the historical record; a client cannot restock a size other than the
+        // one that was sold, because it is never asked which.
+        productVariantId: si.productVariantId,
         productNameSnapshot: si.productName,
         skuSnapshot: si.sku,
+        // D44 — copied, not re-derived. The sale froze these at sale time; a
+        // rename since must not change what the return says came back.
+        variantSkuSnapshot: si.variantSkuSnapshot,
+        variantNameSnapshot: si.variantNameSnapshot,
+        // D134d — copied from the sale line, never re-read from the product:
+        // a refund must print the unit the customer was charged in.
+        unitOfMeasureSnapshot: si.unitOfMeasureSnapshot,
+        // D122 (3.11) — the rate REVERSED, copied from the sale line for the
+        // same reason: a rate change between purchase and return must not alter
+        // the refund, and a credit note should be self-contained.
+        taxRatePercent: si.taxRatePercent === null ? null : Number(si.taxRatePercent),
         imageUrlSnapshot: null,
         originalUnitPrice: line.originalUnitPrice,
         purchasedQuantity: purchased,
@@ -558,7 +677,9 @@ export class ReturnsService {
         note: input.note?.trim() || null,
         originalLineSubtotal: line.originalLineSubtotal,
         productDiscountAdjustment: line.productDiscountAdjustment,
+        promotionDiscountAdjustment: line.promotionDiscountAdjustment,
         orderDiscountAdjustment: line.orderDiscountAdjustment,
+        promotionOrderDiscountAdjustment: line.promotionOrderDiscountAdjustment,
         taxAdjustment: line.taxAdjustment,
         refundableAmount: line.refundableAmount,
       });
@@ -610,12 +731,22 @@ export class ReturnsService {
   }
 
   /** Which triggers demand manager approval for this return (spec §6). */
+  /**
+   * Which triggers demand manager approval for this return (spec §6).
+   *
+   * `withinExchange` (D130) waives EXACTLY ONE of them — `Full-sale return`.
+   * Every other trigger still applies: damaged goods, outside the return
+   * period, a cashier over their limit, a credit customer, a refund method
+   * the sale was not paid with. Those are about the goods and the money, and
+   * an exchange changes neither.
+   */
   private evaluateApproval(
     sale: SaleForReturn,
     computed: ComputedReturn,
     refundMethod: PaymentMethod,
     settings: ReturnType<SettingsService['getSettings']>['returns'],
     actorRole: UserRole,
+    withinExchange = false,
   ): { requiresApproval: boolean; reasons: string[] } {
     const reasons: string[] = [];
     const refundTotal = computed.totals.refundTotal;
@@ -641,7 +772,12 @@ export class ReturnsService {
     if (refundMethod === 'CASH' && !originalMethods.has('CASH')) {
       reasons.push('Cash refund requested for a non-cash sale');
     }
-    if (computed.isFullReturn) {
+    // D130 — a full-sale return is a manager's business because the customer
+    // walks out with the whole sale refunded. In an exchange they walk out
+    // with replacement goods instead, and the money largely nets at the
+    // drawer. A one-shirt size swap returns the whole sale by definition, so
+    // leaving this trigger on meant a PIN for EVERY counter exchange.
+    if (computed.isFullReturn && !withinExchange) {
       reasons.push('Full-sale return');
     }
     if (sale.customer?.customerType === 'CREDIT') {
@@ -845,6 +981,11 @@ function eligibleRestockLines(items: PersistReturnItem[]): StockLine[] {
     .filter((it) => it.itemCondition === 'GOOD' && it.stockDisposition === 'RETURN_TO_STOCK')
     .map((it) => ({
       productId: it.productId,
+      // D120 (1a.20) — threaded now that 1c.7 lets a sale record a variant.
+      // Hardcoding null here meant a returned Medium credited the customer,
+      // bumped the product total, and never went back on the shelf: the variant
+      // row stayed down and the D10 mirror drifted up with every return.
+      productVariantId: it.productVariantId,
       productName: it.productNameSnapshot,
       quantity: Number(it.returnQuantity),
       trackInventory: true,

@@ -37,6 +37,9 @@ import {
   type PromotionType,
 } from '@/lib/products/promotions-api';
 import { type ManagedProduct } from '@/lib/products-api';
+import { describeTimeWindow } from '@/lib/products/promotion-schedule';
+import { useEffectiveProfile } from '@/lib/platform-profile';
+import { cn } from '@/lib/utils';
 
 /**
  * Promotion editor (D45 — Promotions admin).
@@ -80,6 +83,7 @@ const DAY_LABELS: Record<PromotionDayOfWeek, string> = {
 };
 
 const CHANNEL_LABELS: Record<PromotionChannel, string> = {
+  COUNTER: 'Counter',
   DINE_IN: 'Dine-in',
   TAKEAWAY: 'Takeaway',
   ONLINE: 'Online',
@@ -92,6 +96,7 @@ interface EditorState {
   fixedPrice: string;
   percentageOff: string;
   amountOff: string;
+  minimumSpend: string;
   buyQuantity: string;
   getQuantity: string;
   startsOn: string;
@@ -113,6 +118,7 @@ function emptyState(type: PromotionType = 'BUNDLE_FIXED_PRICE'): EditorState {
     fixedPrice: '',
     percentageOff: '',
     amountOff: '',
+    minimumSpend: '',
     buyQuantity: '1',
     getQuantity: '1',
     startsOn: '',
@@ -135,6 +141,7 @@ function fromPromotion(p: Promotion): EditorState {
     fixedPrice: p.fixedPrice != null ? String(p.fixedPrice) : '',
     percentageOff: p.percentageOff != null ? String(p.percentageOff) : '',
     amountOff: p.amountOff != null ? String(p.amountOff) : '',
+    minimumSpend: p.minimumSpend != null ? String(p.minimumSpend) : '',
     buyQuantity: p.buyQuantity != null ? String(p.buyQuantity) : '1',
     getQuantity: p.getQuantity != null ? String(p.getQuantity) : '1',
     startsOn: p.startsOn?.slice(0, 10) ?? '',
@@ -149,6 +156,11 @@ function fromPromotion(p: Promotion): EditorState {
       productId: i.productId,
       role: i.role,
       quantity: String(i.quantity ?? 1),
+      // 4.10 — without this the edit screen rendered the raw cuid: `name` is
+      // only set when a product comes from the picker, and the row falls back
+      // to `productId`. Creating showed "Shirt"; editing the same promotion
+      // showed "cmtldj0ta0003q4bs27ibki2q".
+      name: i.productName ?? undefined,
     })),
   };
 }
@@ -160,6 +172,22 @@ export function PromotionEditor({
   successHref = '/products/promotions',
 }: Props) {
   const router = useRouter();
+  /*
+   * D56 (4.9) — the channels THIS tenant sells on, from the resolver.
+   *
+   * `capabilities.fulfilment.channels` already answers this per template —
+   * `['COUNTER']` for retail, `['DINE_IN','TAKEAWAY','ONLINE']` for food service
+   * — and this editor used to hardcode the food-service three. A retail
+   * shopkeeper was offered Dine-in / Takeaway / Online, and picking any of them
+   * scoped the promotion to a channel their till never sends, so
+   * `isPromotionActive` refused it and the offer silently never fired.
+   *
+   * Unresolved is its own state (D31): while the profile loads, no chips render
+   * rather than a guessed list. An empty scope already means "every channel", so
+   * a promotion saved in that moment is unrestricted, never mis-restricted.
+   */
+  const { profile } = useEffectiveProfile();
+  const channels = (profile?.capabilities.fulfilment.channels ?? []) as PromotionChannel[];
   const searchParams = useSearchParams();
   const linkProductId = searchParams?.get('linkProductId') ?? null;
   const isEdit = !!promotionId;
@@ -234,6 +262,11 @@ export function PromotionEditor({
     setState((prev) => ({ ...prev, ...p }));
   }, []);
 
+  const scheduleNotice = React.useMemo(
+    () => describeTimeWindow(state.startTime, state.endTime),
+    [state.startTime, state.endTime],
+  );
+
   const dirty = React.useMemo(
     () => JSON.stringify(state) !== initialSnapshotRef.current,
     [state],
@@ -300,7 +333,15 @@ export function PromotionEditor({
 
   const validate = (): string | null => {
     if (!state.name.trim()) return 'Give the promotion a name.';
-    if (state.items.length === 0) return 'Add at least one product.';
+    /*
+     * D126 — an EMPTY product list is how a FIXED_AMOUNT_DISCOUNT declares
+     * itself cart-level, so the blanket "add at least one product" no longer
+     * holds for that type. Every other type still needs its products, and the
+     * server re-checks all of it per type either way.
+     */
+    if (state.items.length === 0 && state.type !== 'FIXED_AMOUNT_DISCOUNT') {
+      return 'Add at least one product.';
+    }
     if (state.type === 'BUNDLE_FIXED_PRICE' && !state.fixedPrice) {
       return 'Bundle promotions need a fixed price.';
     }
@@ -340,6 +381,12 @@ export function PromotionEditor({
           : null,
       amountOff:
         state.type === 'FIXED_AMOUNT_DISCOUNT' && state.amountOff ? Number(state.amountOff) : null,
+      // D126 — only meaningful for money-off; the server rejects it elsewhere,
+      // so send null rather than leaving a stale value from a type switch.
+      minimumSpend:
+        state.type === 'FIXED_AMOUNT_DISCOUNT' && state.minimumSpend
+          ? Number(state.minimumSpend)
+          : null,
       buyQuantity: state.type === 'BUY_X_GET_Y' ? Number(state.buyQuantity) || 1 : null,
       getQuantity: state.type === 'BUY_X_GET_Y' ? Number(state.getQuantity) || 1 : null,
       startsOn: state.startsOn || null,
@@ -574,6 +621,25 @@ export function PromotionEditor({
               value={state.amountOff}
               onChange={(v) => patch({ amountOff: v })}
             />
+            <label className="block pt-2 text-sm font-medium" htmlFor="promo-min-spend">
+              Minimum spend
+            </label>
+            <MoneyInput
+              id="promo-min-spend"
+              value={state.minimumSpend}
+              onChange={(v) => patch({ minimumSpend: v })}
+            />
+            <p className="text-xs text-muted-foreground">
+              {/*
+                * D126 — the two shapes of this promotion type, said where the
+                * operator decides between them. Leaving Products empty is the
+                * ONLY way to get a whole-cart discount, and nothing else on the
+                * screen would tell them that.
+                */}
+              Leave <span className="font-medium">Products</span> empty for a whole-cart
+              discount. Add products to take the amount off those products only. Blank
+              minimum spend means no threshold.
+            </p>
           </div>
         ) : null}
 
@@ -593,7 +659,9 @@ export function PromotionEditor({
           </div>
           {state.items.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-muted-foreground">
-              No products added yet.
+              {state.type === 'FIXED_AMOUNT_DISCOUNT'
+                ? 'No products — this discount applies to the whole cart.'
+                : 'No products added yet.'}
             </p>
           ) : (
             <ul className="space-y-2">
@@ -697,6 +765,26 @@ export function PromotionEditor({
           </div>
         </div>
 
+        {/*
+          * A window that can never contain a moment, or one so short it is
+          * almost certainly a mis-click. Said here, beside the fields, rather
+          * than as a save error — and the short-window case is a warning, not a
+          * block, because a flash sale is a real thing to want.
+          */}
+        {scheduleNotice ? (
+          <p
+            role={scheduleNotice.level === 'error' ? 'alert' : 'status'}
+            className={cn(
+              'rounded-lg border p-2.5 text-xs',
+              scheduleNotice.level === 'error'
+                ? 'border-danger/40 bg-danger-soft text-danger'
+                : 'border-warning/40 bg-warning-soft text-warning',
+            )}
+          >
+            {scheduleNotice.message}
+          </p>
+        ) : null}
+
         <div>
           <span className="text-sm font-medium">Days of week</span>
           <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Days of week">
@@ -725,7 +813,7 @@ export function PromotionEditor({
         <div>
           <span className="text-sm font-medium">Channel</span>
           <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Channels">
-            {PROMOTION_CHANNELS.map((c) => {
+            {channels.map((c) => {
               const active = state.channelScope.includes(c);
               return (
                 <button
@@ -786,9 +874,25 @@ export function PromotionEditor({
             onCheckedChange={(v) => patch({ stackable: v })}
             aria-label="Allow stacking with other promotions"
           />
-          <div className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Stackable</span> — allow this promotion to
-            combine with other applicable promotions on the same order.
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Stackable</span> — allow this promotion
+              to combine with other applicable promotions on the same order.
+            </p>
+            {/*
+              * The old text stopped at the line above, and an operator read it as
+              * "these two offers will both apply". They will not if they share a
+              * product: one line carries one promotion, because `SaleItem` holds a
+              * single `promotionId`. The engine gives the basket to whichever saves
+              * more, so the toggle changes nothing for an overlapping pair — which
+              * looks exactly like a broken switch. Say so here rather than let the
+              * next person work it out from a cart that will not budge.
+              */}
+            <p>
+              Only affects promotions covering <span className="font-medium">different</span>{' '}
+              products. A single item can never carry two promotions — where two overlap, the one
+              that discounts more applies and the other is skipped.
+            </p>
           </div>
         </div>
       </section>
@@ -832,6 +936,8 @@ export function PromotionEditor({
           session={session}
           onSelect={addProduct}
           onBack={() => setProductPickerOpen(false)}
+          title="Add a product to this promotion"
+          description="Pick the product this promotion applies to. Its role and quantity are set on the row once it is added."
         />
       ) : null}
 

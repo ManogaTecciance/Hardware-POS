@@ -8,9 +8,12 @@ import {
   ProviderContext,
   ProviderSyncOutcome,
   ReceiveStockLine,
+  StockCountLine,
+  StockCountOutcome,
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
+  StockMovementMetadata,
 } from '../provider.types';
 import { InventoryProvider } from './inventory-provider';
 
@@ -73,6 +76,8 @@ export class NoInventoryProvider implements InventoryProvider {
     _tx: Prisma.TransactionClient,
     _ctx: ProviderContext,
     _lines: StockLine[],
+    // 1a.21 — accepted and ignored: this tenant tracks no stock at all.
+    _metadata?: StockMovementMetadata,
   ): Promise<void> {
     return Promise.resolve();
   }
@@ -82,6 +87,8 @@ export class NoInventoryProvider implements InventoryProvider {
     _tx: Prisma.TransactionClient,
     _ctx: ProviderContext,
     _lines: StockLine[],
+    // 1a.21 — accepted and ignored: this tenant tracks no stock at all.
+    _metadata?: StockMovementMetadata,
   ): Promise<void> {
     return Promise.resolve();
   }
@@ -113,6 +120,22 @@ export class NoInventoryProvider implements InventoryProvider {
     return Promise.reject(
       new ProviderOperationUnavailableError(this.name, 'receiveStock'),
     );
+  }
+
+  /**
+   * D132 — refused, loudly.
+   *
+   * There is no stock to count. A tenant with inventory tracking off has no
+   * shelf figure to correct, so a count would be a document about nothing —
+   * worse than an error, because it would look like it had worked.
+   */
+  applyStockCount(
+    _tx: Prisma.TransactionClient,
+    _ctx: ProviderContext,
+    _lines: StockCountLine[],
+    _metadata: { stockTakeId: string; countedByUserId: string },
+  ): Promise<StockCountOutcome[]> {
+    return Promise.reject(new ProviderOperationUnavailableError(this.name, 'applyStockCount'));
   }
 
   /** Nothing to synchronise, and it says so rather than reporting a success. */

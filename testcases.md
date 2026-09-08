@@ -12,6 +12,9 @@ has a stable ID for traceability into automated Playwright specs.
   seeded user since 2026-08-17. Salesperson is owner-equivalent — every gate
   the owner clears must open for it too — and, since D108, is linked to the
   hardware template's `SALESPERSON` role row and offered by no other template.
+  The Retail template (D120) staffs Owner and Cashier only (`GENERAL_ROLE_TEMPLATES`,
+  no Salesperson); PROD-031…047, EXC-T-008…012, STK-* and RPT-* assume a provisioned
+  `RETAIL` tenant unless stated.
 
 Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [DASH](#dash--dashboards) · [PROD](#prod--products--categories) ·
@@ -26,6 +29,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [DOC](#doc--documents--printing) · [RSV](#rsv--table-reservations--calendar-d47) ·
 [OTBL](#otbl--open-tables-d49d50) ·
 [BSPL](#bspl--bill-splitting-by-item-d51) ·
+[STK](#stk--stock-takes-d132) · [RPT](#rpt--retail-reports-d129d131) ·
 [ADM](#adm--administration--multi-tenancy) ·
 [UI](#ui--theme-layout--responsiveness) · [SEC](#sec--security)
 
@@ -135,6 +139,23 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD-028 | Sold out is a switch, not a count (D101) | Restaurant owner marks a dish sold out, then available again | `soldOutAt` set then cleared; the POS card greys out and comes back; a repeat 86 keeps the original timestamp | P | Not Run |
 | PROD-029 | The 86 switch refuses stock-governed kinds (D101) | PUT /v1/products/:id/availability on a STOCK_ITEM or a booking kind | 400 `PRODUCT_AVAILABILITY_STOCK_GOVERNED` naming what governs it; a waiter/cashier may 86 a dish but not edit the catalogue | N | Not Run |
 | PROD-030 | Product wizard enforces name and SKU limits | Type past 200 characters in Product name and past 80 in a SKU; leave a variation option blank; give two variations one name | Typing stops at the cap; the counter appears from 160 characters and reads 200 / 200 in the warning colour; a restored draft or an older row over the cap is refused with "Product name is limited to 200 characters." / "SKU is limited to 80 characters."; "Option needs a name."; "Variation names must be unique." | N | Not Run |
+| PROD-031 | Retail template provisions with the clothing categories (D120) | Run `provision-tenant.ts --business-type RETAIL` without `--with-samples`; log in as the new owner | Profile is `LOCAL` inventory + `NONE` accounting; no QuickBooks rail entry; categories are exactly Menswear, Womenswear, Kidswear, Footwear, Accessories in that order and Footwear has no size scale; zero products; the only roles offered are Owner and Cashier | P | Not Run |
+| PROD-032 | Clothing sample pack builds the whole variant chain (D120) | Provision RETAIL with `--with-samples`; open Cotton T-Shirt and Denim Jeans; run provisioning again | T-Shirt has Size S/M/L/XL × Colour Black/White/Navy = 12 variants named from their options (M / Black), not from the SKU `TSHIRT-M-BLACK`, with M / Black the single default; Jeans has waist 30/32/34/36 with 32 default; every variant has its own branch stock row (10 / 6) and a distinct barcode; the parent price is 0 because variants own the price; the second run adds nothing | P | Not Run |
+| PROD-033 | A variant product's stock is the sum of its sizes (D121) | Product with four active variants holding 22 units between them while `Product.quantityOnHand` reads 350; GET /v1/products/sellable | `availableQuantity` is `22.000`, derived from the variant rows, never the 350 mirror; `stockState` is OUT only when every size is out, LOW when no size is IN_STOCK (each size against its own reorder point), otherwise IN_STOCK | P | Not Run |
+| PROD-034 | The sell cap asks the chosen size, not the total (D121) | In POS pick the Medium (2 on hand) of a shirt whose siblings hold 10; type 3; then POST /sales/complete with quantity 3 for that variant | Till clamps the line to 2; the server refuses "Insufficient stock for <product>" and moves nothing — a sibling with plenty of stock does not rescue an oversold size; the same wording as the product path | N | Not Run |
+| PROD-035 | Option library definitions carry codes and swatches (D125/D125a) | Open /products/attributes (URL) → New attribute "Colour": options Black `BLK` #000000, Navy `NVY` #1F2A44, "All categories"; Save; add a second "Colour"; add options `black` and `BLACK`; enter swatch `red` | First saves and lists its options in declared order with 0 products mapped; the duplicate name is 409 `ATTRIBUTE_DEFINITION_EXISTS` "An attribute named "Colour" already exists for this tenant." (another tenant may use the name); `black`/`BLACK` refused 400 `ATTRIBUTE_OPTION_DUPLICATE` naming both names and the one code they normalise to; the swatch reads "Use #RRGGBB, for example #1A1A1A." | N | Not Run |
+| PROD-036 | Mapping a dimension to the library is optional and additive (D125) | PUT /v1/products/:id/variations with `attributeDefinitionId` on Size and `attributeOptionId` on each option; leave a second product unmapped; then link an option to a different definition than its dimension, and to another tenant's definition | Links round-trip on GET; omitting the field leaves a mapping alone and `null` clears it; the unmapped product sells and prices exactly as before; both bad links are refused; the library page shows the definition as used by 1 product and its Delete reads "Unmap it from every product before deleting it." | P | Not Run |
+| PROD-037 | A mapped library entry cannot be retired (D125) | DELETE /v1/attribute-library/:id while a dimension points at it; PATCH its `options` dropping one a product option uses; unmap, then delete | 409 `ATTRIBUTE_DEFINITION_IN_USE` naming the dimension and option counts; 409 `ATTRIBUTE_OPTION_IN_USE` naming the option and how many product options use it; after unmapping the delete is 204 and the products keep their own dimensions (FK is SET NULL, guarded by the service) | N | Not Run |
+| PROD-038 | SKU is generated when omitted, one sequence number per variant (D125) | POST /v1/products/:id/variants:batch for a product in category Apparel, rows omitting `sku`, one option mapped to library code `BLK`; then a batch where one row types `MY-SKU` and its neighbour omits it; then a batch whose generated value collides with a hand-typed SKU | Generated SKUs read `APPAREL-<SEQ>-BLK`, each variant with its own sequence number; the typed SKU is kept and its neighbour still generated; the collision is retried onto the next number, never duplicated (`@@unique([tenantId, sku])`); a second tenant starts at 1 | P | Not Run |
+| PROD-039 | Barcode allocation needs a prefix; a typed code is validated by shape (D125) | Retail tenant with no prefix: create a variant leaving Barcode blank; set In-store barcode prefix `2001` on /products/barcodes and retry; then type `2990001000000` (wrong check digit) and `ABC-123-XYZ` | Blank is refused 400 `BARCODE_PREFIX_NOT_CONFIGURED` "No barcode prefix is configured for this workspace…"; after the prefix a 13-digit EAN-13 under `2001` with a valid check digit is issued as `barcodeSource` INTERNAL; a prefix outside the GS1 in-store range is `BARCODE_PREFIX_INVALID`; the 13-digit code is refused `BARCODE_CHECK_DIGIT_INVALID` "…is 13 digits but its check digit is wrong…"; the Code 128 value is accepted as typed; the same barcode on a second variant is refused as a duplicate | N | Not Run |
+| PROD-040 | Barcode audit lists only the problems (D125) | Open /products/barcodes (URL) on a tenant holding a valid EAN-13, an invalid-check-digit one and a supplier CODE128 | Summary shows scanned, "With a barcode" and "Wrong check digit" counts; only the `INVALID_CHECK_DIGIT` row is listed with SKU, product and source ("Predates provenance tracking" when null); the CODE128 is counted, not listed; a clean catalogue reads "Every barcode checks out." | P | Not Run |
+| PROD-041 | Reissue is explicit and never touches a supplier code (D125) | POST /v1/barcodes/reissue with one INTERNAL invalid variant; then a selection that includes a SUPPLIER row; then `variantIds: []`; then a variant with no barcode | The internal row gets a fresh valid EAN-13 under the tenant prefix and the audit log records the OLD value; the mixed selection is refused wholesale 400 `SUPPLIER_BARCODE` and nothing changes; the empty list is `NO_VARIANTS_SELECTED` (there is no "fix everything"); the bare variant is `NOTHING_TO_REISSUE` | N | Not Run |
+| PROD-042 | Brand is a per-tenant entity (D133) | POST /v1/brands "Nike"; again with " Nike "; rename it to "Nike Inc"; set a product's brand; reload the products list and filter | The second is 400 `There is already a brand called "Nike"` (trimmed); the rename shows on every product because the link is an id; the products list shows a "Filter by brand" picker only once a brand exists and `GET /v1/products?brandId=` returns that label only; `productCount` says how many carry it; another tenant may also create "Nike" | P | Not Run |
+| PROD-043 | Brands archive, never delete (D133) | PATCH /v1/brands/:id `isActive:false`; GET /v1/brands then `?includeArchived=true`; open a product that carried it; PATCH `isActive:true`; PATCH a product with a brand id from another tenant | Archived brand is absent from the default list and the wizard picker, present with includeArchived; the product still shows it (link kept, no DELETE route exists); restore works through the same route; the foreign brand id is 400 "Brand … does not belong to this tenant"; on a product, an absent `brandId` leaves the brand alone and `""` clears it | P | Not Run |
+| PROD-044 | A measured product must name its unit (D134/D134c) | Retail wizard → Pricing: choose "By weight or measure — 0.75, 1.5", leave Unit blank, Save; then enter `kg`; then create a "By the piece" product; open the wizard on a hardware or restaurant tenant | Blank is refused "A product sold by weight or measure needs a unit — for example kg, g or L."; with `kg` the helper reads `The till will ask "How many kg?" and price the amount typed…`; the piece product needs no unit and sends `unitOfMeasure: null`; the control is absent where `catalogue.measuredGoods` is off | N | Not Run |
+| PROD-045 | Switching WHOLE ⇄ DECIMAL is allowed and converts nothing (D134b) | PATCH /v1/products/:id `{quantityType:"DECIMAL"}` on a product with no stored unit; again with `unitOfMeasure:"kg"`; PATCH `{unitOfMeasure:""}` on it; PATCH `{name:"Rice"}`; PATCH back to WHOLE | First refused 400 (same message as PROD-044); second accepted; clearing the unit while DECIMAL is refused; the name-only update leaves both fields alone; back to WHOLE keeps the stored unit and 100 on hand stays 100 — no quantity is converted | P | Not Run |
+| PROD-046 | Retail catalogue attributes are the clothing pack (D64/D135) | Retail wizard → Attributes; then PUT /v1/products/:id with `attributes: { allergens: "nuts" }` | Fields offered are Material, Fit (Regular/Slim/Relaxed/Oversized), Care instructions, Gender (Men/Women/Unisex/Boys/Girls), Season, all optional; `allergens` is refused as an unknown key — every RETAIL tenant resolves the clothing list because the D135 pack selector is not built yet | P | Not Run |
+| PROD-047 | The Taxable toggle names the tenant rate (D122) | Retail wizard → Details with the tenant rate at 18%: Taxable on; Taxable off; set the rate to 0 in Settings → Business and reopen | Helper reads "Tax applies at 18%." / "Zero-rated — no tax is charged on this product." / "This shop's tax rate is 0%, so nothing is charged yet. Set it in Settings → Business."; a product saved with Taxable off is untaxed on a real sale and its line records `taxRatePercent` 0.00 | P | Not Run |
 
 ## PIMP — Product Bulk Import
 
@@ -201,6 +222,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | POS-053 | Cancelling is the queue's verb (D116) | Cancel a takeaway from the Orders page; try to find Cancel on the kitchen board | The order is cancelled through the takeaway status machine and its ticket leaves the pass; the board offers no Cancel | P | Not Run |
 | POS-054 | Payment settles without handing over (D117) | Take payment for a takeaway in the counter popup | The session closes into a Sale (POST /restaurant/takeaway/:profileId/settle, idempotent); the order still reads Pending / Preparing / Ready until Handed over is pressed by a hand | P | Not Run |
 | POS-055 | No Completed tab on the counter's queue (D117) | Open the Orders page as the cashier | Tabs are All Orders · Pending · Preparing · Ready · Handed over · Cancelled; there is no Completed tab — a closed dine-in shell is reachable only under All Orders or an old `?status=COMPLETED` link | N | Not Run |
+| POS-056 | Each sale line snapshots the rate it was charged (D122) | Tenant rate 18%; sell one taxable product and one with Taxable off, with a 10% order discount; change the rate to 20%; reopen the sale | Tax is charged only on the taxable line and the exempt line's share of the order discount leaves the base too; `SaleItem.taxRatePercent` is 18.00 on the taxable line and 0.00 (never null) on the exempt one; after the rate change the old sale still reads 18.00 | P | Not Run |
+| POS-057 | A promotion's saving sits on the free line and is frozen (D123) | Active "buy 2 shirts get 1 tie free"; ring 2 shirts at 1,000 and 1 tie at 500; complete; rename then delete the promotion and reopen the sale; ring the basket again with a manual 10% line discount on the tie | Total 2,000 with tax on 2,000; the tie carries `promotionDiscountAmount` 500, `lineTotal` 0, `promotionId` and `promotionNameSnapshot`; the sale still names the promotion after rename/delete; with the manual discount the badge leaves the tie, the till warns which promotion "would have taken" what, and at most one of `discountAmount` / `promotionDiscountAmount` is non-zero on the line; till preview and server total agree | P | Not Run |
+| POS-058 | A cart-level amount off is an order discount (D126) | FIXED_AMOUNT_DISCOUNT "Rs 1,000 off" with an empty item list and `minimumSpend` 10,000; ring 12,600 of goods; then a 9,000 basket; then try the same promotion with a non-BUY item, and `minimumSpend` on a PERCENTAGE_DISCOUNT | 12,600 → 11,600: the footer shows the discount under the promotion's own name, not under "Order discount"; tax is unchanged (computed before it); `Sale.promotionOrderDiscountAmount` 1,000 with `promotionOrderNameSnapshot`; the 9,000 basket gets nothing; the threshold is measured after line promotions and excludes manually discounted lines; creation is refused "FIXED_AMOUNT_DISCOUNT items must all be BUY items, or the list must be empty for a cart-level discount." and "minimumSpend applies only to FIXED_AMOUNT_DISCOUNT, not PERCENTAGE_DISCOUNT." | P | Not Run |
+| POS-059 | Cart lines are keyed by variant (D120/D121) | Add a shirt's Medium, then its Large, then Medium again; tap a product with an `isDefault` size; tap one whose default is sold out | Two lines (Medium ×2, Large ×1), never one line of 3; the default size quick-adds without the "Choose an option" dialog; a sold-out default opens the picker with that size reading "Out of stock"; a product with one sellable option adds it without asking | P | Not Run |
+| POS-060 | Weighed goods ask for the amount (D134/D134b) | Rice: DECIMAL, unit kg, Rs 200/kg, 5 kg on hand; tap the card; type `0.750`; then try `0`, a fourth decimal place, and `6` | "How many kg?" opens with "Line total:" Rs 150.00 computed by the cart, not the keypad; Add is disabled at 0; the fourth decimal is ignored; 6 reads "Only 5 kg in stock."; Cancel adds nothing; the confirmed line is 0.750 kg, the server stores 0.750 exactly and the receipt prints `0.75 kg` | P | Not Run |
+| POS-061 | Quantity promotions ignore a measured line (D134a) | BUY_X_GET_Y naming Rice and a PERCENTAGE_DISCOUNT on Rice; ring 0.75 kg beside two shirts inside a bundle | The BOGO yields no claim on the rice and no reward is asked for; the percentage discount applies to it; the shirts still win their bundle; till preview and server charge agree | N | Not Run |
 
 ## PAY — Payments & Credit
 
@@ -368,22 +395,31 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 ## EXC — Exchanges
 
-> **Status: the Exchange A4 document renderer exists; the Exchange transaction does not.**
+> **Status: the Exchange transaction exists (D128, Phase 7). D2's "not implemented" caveat is lifted (D128b).**
 >
-> `DocumentsService.buildExchangeDocument` renders a combined returned +
-> replacement A4 note, and `'exchange'` is a valid document-preview type. There is
-> no Exchange Prisma model, migration, API module, route, permission key, or UI
-> flow — the renderer's own comment says so: *"Exchanges are not yet a first-class
-> transaction in the POS."*
+> An `Exchange` row links a **return leg** (`returnId`, required) and a **replacement
+> sale leg** (`replacementSaleId`, nullable) against an `originalSaleId`, numbered
+> `X-000001` from `DocumentSequence`. `POST /v1/exchanges` (module `EXCHANGES`,
+> permissions `return:create` **and** `sale:create`) runs the return through
+> `ReturnsService`, then drafts and completes the replacement through `SalesService`;
+> it computes no prices, moves no stock and writes no payment of its own — the two
+> legs do. Settlement is **gross** (D128a): the return refunds by `refundMethod`
+> (default CASH) and `payments` must cover the replacement in full, so an even swap
+> nets to zero at the drawer. The legs are not one transaction: if the replacement
+> fails the exchange stays open with `replacementSaleId` null and the customer
+> already refunded (D128). Inside an exchange the `Full-sale return` approval trigger
+> is waived and no other (D130). The screen is `/exchanges/new?saleId=`, reached from
+> a completed sale's detail page; integration coverage is
+> `apps/api/test/integration/specs/exchanges.spec.ts`.
 >
-> `EXC-D-*` (document) cases are live and covered by
-> `apps/api/src/modules/documents/documents.preview.spec.ts`, plus `SET-013` and
-> `DOC-014`. They are the Tile Shop exchange regression.
+> `EXC-D-*` (document) cases remain the Tile Shop A4 regression, covered by
+> `apps/api/src/modules/documents/documents.preview.spec.ts` plus `SET-013` and
+> `DOC-014`; since `7.3` the note carries real per-line tax instead of a hard-coded 0.
 >
-> `EXC-T-*` (transaction) cases are **Blocked — feature not implemented**. They are
-> listed for traceability only and must not be counted as coverage.
-> Exchanges remain a shared-platform feature for Tile Shop / Hardware tenants and
-> are excluded from the Restaurant profile (`EXCHANGES` module key hidden).
+> Out of scope by decision: QuickBooks for retail tenants (D120 —
+> `AccountingProviderKind.NONE`), so EXC-T-005 stays blocked; multi-line, cross-branch
+> and cross-sale exchanges (D128b). Exchanges remain excluded from the Restaurant
+> profile (`EXCHANGES` is not in `FOOD_SERVICE_MODULES`).
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
@@ -391,13 +427,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | EXC-D-002 | Returned lines are negative, replacements positive | Preview an exchange with both line kinds | Returned lines prefixed "Return:" and negated; replacements prefixed "New:" | P | Passed |
 | EXC-D-003 | Exchange document honours letterhead settings | Change logo/accent/margins, re-preview | Exchange doc reflects the same document settings as invoice/quotation | P | Passed |
 | EXC-D-004 | Signature blocks present on the exchange doc | Preview exchange | Same signature chain as other document types (see DOC-014) | P | Passed |
-| EXC-T-001 | Create an exchange transaction | — | — | P | Blocked — feature not implemented |
-| EXC-T-002 | Exchange adjusts stock for returned and replacement items | — | — | P | Blocked — feature not implemented |
-| EXC-T-003 | Exchange with a net amount due collects payment | — | — | P | Blocked — feature not implemented |
-| EXC-T-004 | Exchange with a net refund issues a refund | — | — | P | Blocked — feature not implemented |
-| EXC-T-005 | Exchange pushes the correct QuickBooks document(s) | — | — | P | Blocked — feature not implemented |
-| EXC-T-006 | Exchange requires a permission (`exchange:create`) | — | — | N | Blocked — feature not implemented |
-| EXC-T-007 | Exchange is hidden for Restaurant tenants | — | — | N | Blocked — feature not implemented |
+| EXC-T-001 | Create an exchange transaction | Completed sale of one Medium → sale detail → Exchange (`/exchanges/new?saleId=`) → choose the returned item, choose the Large at the same price as replacement → Complete exchange | 201 from POST /v1/exchanges with `exchangeNumber` X-000001, `returnedValue` = `replacementValue`, `netDifference` 0 and `complete` true; a Return R-… and a Sale S-… exist and are linked; the page reads "Both legs completed." with "Refunded to customer" and "Charged for replacement"; GET /v1/exchanges lists it and another tenant cannot read it by id | P | Not Run |
+| EXC-T-002 | Exchange adjusts stock for returned and replacement items | Medium and Large both at 10; exchange one Medium for one Large; replay the identical request with the same `Idempotency-Key` | Medium 11 and Large 9, each moved exactly once with its own `StockMovement`; the replay returns the SAME exchange (same id and number), refunds nothing again and moves no stock; the body field `idempotencyKey` behaves like the header | P | Not Run |
+| EXC-T-003 | Exchange with a net amount due collects payment | Returned Medium 1,000, replacement Large 1,500, `payments` CASH 1,500, `refundMethod` left default | The return refunds 1,000 CASH and the sale is paid 1,500 in full — gross settlement (D128a), never netted through store credit; `netDifference` 500 and the page reads "Customer paid extra"; a `payments` total short of the replacement is refused by the sale path exactly as an ordinary sale | P | Not Run |
+| EXC-T-004 | Exchange with a net refund issues a refund | Returned 1,500, replacement 1,000, CASH 1,000; then repeat on a walk-in sale with `refundMethod` STORE_CREDIT | 1,500 refunded on the return leg, 1,000 charged, `netDifference` −500 and "Customer got back"; the store-credit attempt is refused "Store credit requires a saved customer…" and a cash refund can never exceed what the original sale paid — the return leg keeps every ReturnsService rule | P | Not Run |
+| EXC-T-005 | Exchange pushes the correct QuickBooks document(s) | — | Premise contradicted by D120/D128: retail tenants run `AccountingProviderKind.NONE` and `ExchangesService` writes nothing accounting-side; the legs are an ordinary Return and Sale, so any QuickBooks behaviour belongs to RET-014/RET-015 and QB-*, not to an exchange case | P | Blocked — out of scope (D120/D128) |
+| EXC-T-006 | Exchange requires a permission (`exchange:create`) | POST /v1/exchanges as a role holding `return:create` but not `sale:create`, then the reverse; open a completed sale as each | 403 both ways — D128 mints no `exchange:create`; the route requires BOTH `RETURN_CREATE` and `SALE_CREATE`, and the sale detail shows the Exchange button only to a user holding both ("You need permission to take returns and to make sales." otherwise) | N | Not Run |
+| EXC-T-007 | Exchange is hidden for Restaurant tenants | Restaurant tenant: POST /v1/exchanges, POST /v1/exchanges/preview and /exchanges/new by URL | 403 "Feature not available" on every route (`EXCHANGES` is absent from `FOOD_SERVICE_MODULES`); no Exchange button on any restaurant screen; a retail tenant with an explicit `EXCHANGES` revocation is refused the same way | N | Not Run |
+| EXC-T-008 | A size swap needs no manager PIN (D130) | Sale of ONE shirt; exchange it for another size as owner or cashier with no approval token | POST /v1/exchanges/preview reports `requiresApproval` false and the completion succeeds without a token although the whole sale is being returned | P | Not Run |
+| EXC-T-009 | The waiver is scoped to exchanges (D130) | The same single-line sale: POST /v1/returns/preview, then complete a standalone full return without a token; then POST /v1/returns with an extra `withinExchange: true` field | Preview lists the reason "Full-sale return"; completion is 403 `ReturnApprovalRequired` "This return requires manager approval"; the extra field is not a DTO field and changes nothing — only `ExchangesService` can set the flag | N | Not Run |
+| EXC-T-010 | Every other trigger still fires inside an exchange (D130) | Exchange where the returned item's condition is DAMAGED; then approve with a manager PIN (POST /returns/approve) and retry with the token | First refused 403 with reason "A returned item is damaged, opened, or used" and the page asks for a manager PIN; with the token the same exchange completes; outside-period, over-limit, credit-customer and refund-method triggers behave the same | N | Not Run |
+| EXC-T-011 | A failed replacement leaves a recoverable exchange (D128) | Complete with a `replacementItems` variant id that is not this tenant's | The request fails, but the exchange row exists with `replacementSaleId` null, `complete` false, `replacementValue` and `netDifference` null; the return has already refunded the customer; the returned size is back on the shelf and the replacement never moved; the page reads "The replacement did not complete." and the operator can ring the replacement up as an ordinary sale | N | Not Run |
+| EXC-T-012 | The exchange note ties to the money that moved (D128) | Print the A4 note for an upgrade exchange (1,000 → 1,500) and for a downgrade | Note carries the X-number, "Return:" rows negated and "New:" rows positive with a real per-line tax figure on both sides, and "Balance due from customer" 500.00 read from `Return.refundTotal` and `Sale.total`, not summed from display rows; the downgrade reads "Refund to customer"; an exchange with no replacement still renders | P | Not Run |
 
 ## QUO — Quotations
 
@@ -582,6 +623,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SET-026 | A newly provisioned business has a timezone | Provision a tenant, read its settings | `Asia/Colombo` stored, not merely defaulted | P | Not Run |
 | SET-027 | Roll calibration on the Preview tab (D99) | Bills workspace: open Settings → Preview; A4 workspace: same tab | Bills: calibration fields and the test strip are offered, the strip prints the measured geometry; A4: neither appears | P | Not Run |
 | SET-028 | A bill page is never wider than tall (D102) | Clear every document field and the logo, print a bill with one item | The page box is at least as tall as it is wide; nothing prints rotated | N | Not Run |
+| SET-029 | Tax rate lives on Settings → Business (D122) | Settings → Business → "Tax rate (%)": enter 12.5, Save; then 250; then clear the field; then 0 | 12.5 is sent as a number in PUT /v1/settings `taxRatePercent` and the wizard helper (PROD-047) reads 12.5%; 250 and the empty field are refused "Enter a number between 0 and 100." / "Tax rate must be a number between 0 and 100." with no API call; 0 saves as a real rate; Save stays disabled until something changes; food-service tenants get the field too | P | Not Run |
+| SET-030 | Barcode prefix and label geometry are workspace settings (D125) | /products/barcodes → "Barcode and label setup": In-store barcode prefix `2001`, width/height/columns/rows/margins/gaps, Symbology "EAN-13 (prints the barcode)", tick Product name, Size / colour, Price, SKU; Save; reopen; issue one barcode, then edit the prefix | "Barcode and label settings saved." and every value persists under `catalogue`; POST /v1/labels/preview lays cells out at the saved geometry with exactly the ticked lines; once a code has been issued the form warns that changing the prefix means reprinting every label; a tenant that types its own barcodes never has to set a prefix | P | Not Run |
+| SET-031 | Promotions is gated on its own module key (D124) | Retail tenant: /products/promotions and GET /v1/promotions; restaurant tenant: the same; a tenant with an explicit `TenantModule` PROMOTIONS `isEnabled:false`; a hardware tenant | Retail and food service both reach the screen — PROMOTIONS is in both default sets, so no tenant needed a data migration; the revoked tenant gets 403 "Feature not available" on every /promotions route; hardware sees it only with an explicit enabling row | P | Not Run |
 
 ## DOC — Documents & Printing
 
@@ -603,6 +647,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DOC-014 | Signature chain on every doc type | Open quotation, invoice, return, exchange | All four blocks present on each | P | Passed |
 | DOC-015 | Signature row fits A4 width | Print a document with signature fields on | Four equal columns on one row, no wrap or overflow | P | Not Run |
 | DOC-016 | Uploaded signature/stamp fit their column | Upload a wide signature image, print | Image scales to column width, does not overlap "Checked by" | P | Not Run |
+| DOC-017 | A label sheet is a print job with no sale (D127) | POST /v1/labels/preview then /v1/labels/print with `labels:[{variantId, quantity:12}]`, `copies:2`; GET /v1/print-jobs, then `?saleId=<a sale>`; reprint a receipt | Preview returns HTML with 12 cells and an empty `skipped`; print queues a `PRODUCT_LABEL` job with `saleId` null, `copies` 2, status PENDING, that a print agent can mark printed; it is absent from the sale-scoped query; the receipt job still carries its `saleId` and behaves as before | P | Not Run |
+| DOC-018 | Unprintable labels are reported, never silently dropped (D125/D127) | Print labels for a variant with a wrong-check-digit EAN-13, one with no barcode, one valid, and one from another workspace; then a sheet of only unprintable ones | `skipped` names each with a reason: "…is not a valid EAN-13 — most likely a wrong check digit. Reissue it under Barcodes before printing." / "No barcode. Generate one before printing EAN-13 labels." / "That variant does not belong to this workspace."; the valid one prints; the all-unprintable sheet is refused 400 `NO_PRINTABLE_LABELS` and no job is queued | N | Not Run |
+| DOC-019 | Receipt and invoice show the tax breakdown and the promotion (D122/D123) | Print the A4 invoice and thermal receipt for a sale with an 18% line, a zero-rated line and a BOGO free tie; then for a sale where every line shares one rate | Every renderer names the line "Cotton T-Shirt (M — Navy)"; the tax breakdown lists "18%" and "0%" rows summing exactly to the recorded tax and is absent for the single-rate sale; the tie line reads "Promotion: <name>" and the summary shows "Promotions" separately from the manual discount; both documents agree | P | Not Run |
+| DOC-020 | A return document refunds the tax the line paid (D122) | Return the zero-rated line, then the taxable line, of the mixed sale above; print each return document; also return a line from a sale predating per-line rates | The zero-rated refund carries no tax and the taxable one carries its full share — no proration between them; `ReturnItem.taxRatePercent` stores the reversed rate and a rate change between sale and return alters nothing; the pre-snapshot sale falls back to proportional refunding unchanged | P | Not Run |
 
 ## RSV — Table Reservations & Calendar (D47)
 
@@ -685,6 +733,24 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | BSPL-013 | Amount-based splitting still works | Use "By amount" | Existing even/arbitrary split unchanged | P | Not Run |
 | BSPL-014 | Permission gate | Role without bill:split | No split controls; POST 403 | N | Not Run |
 
+## STK — Stock takes (D132)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| STK-001 | A count sets the shelf figure, down or up (D132) | Open /stock-takes by URL (the rail entry was removed 2026-09-08) as Owner; pick the branch; add a Medium with books 10 counted 4, a Large with books 6 counted 8, and a line counted equal to the books; Post | 201 with `countNumber` SC-000001; Medium is now 4 and Large 8 — the drop is never refused; each varianced line writes a `StockMovement` reason ADJUSTMENT referencing the count; the matched line writes none; a count of only matched lines reads "Every line matched the books. Nothing was corrected, and nothing was written to the stock ledger." | P | Not Run |
+| STK-002 | A count is immutable, numbered and idempotent (D132) | Post the same form twice with one `idempotencyKey`; post a second count; rename a counted product; sell the counted Medium down to 0 and try to sell one more | One StockTake and one correction; numbers run SC-000001, SC-000002 per tenant; `productNameSnapshot` still shows the old name under Previous counts; there is no edit or delete — a recount is a new count; the sale path still refuses the oversell, so the count never touched the guard | P | Not Run |
+| STK-003 | A variance is valued at today's cost or not at all (D131/D132) | Count a variant that has been received (`averageCost` set) short by 2, and a variant nothing has been received against short by 1 | The first line has `unitCost` and `varianceValue` = −2 × cost; the second has both null and is counted in `unvaluedLines`; the document `varianceValue` excludes it rather than valuing it at zero; a variant never reads its parent product's cost | P | Not Run |
+| STK-004 | Count refusals (D132) | POST /v1/stock-takes as a Cashier; as Owner with `lines: []`; a negative `countedQuantity`; the same product and variant twice; a branch of another tenant; then on a QuickBooks-inventory tenant | Cashier gets 403 (needs `product:manage`) but may still GET the history; 400 for the empty list and the negative count; 400 "The same product and variant appears twice in this count"; 400 "Branch … does not belong to this tenant"; the QuickBooks tenant gets 400 "Stock counts are not available for this tenant: stock is not held locally…" and nothing is written | N | Not Run |
+
+## RPT — Retail reports (D129/D131)
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| RPT-001 | Margin is costed at today's average and says so (D131) | Sell a variant at 1,000 whose `averageCost` is 600; Reports → Margin (GET /v1/sales/reports/margin); receive more of it at a new cost; reload | Row: revenue 1000.00, cost 600.00, margin 400.00, 40.00%, `costSource` VARIANT_AVERAGE; after the receipt the same sale reads against the new average; the screen states "Cost is the weighted average as it stands today, not the cost on the day of the sale."; rows sort thinnest margin first and a loss shows as a loss | P | Not Run |
+| RPT-002 | An unknown cost is unknown, never a 100% margin (D131) | Sell a variant nothing has ever been received against; open Margin | The row shows "—" for cost, margin and percent with `costSource` UNKNOWN and sorts last; totals exclude it and the note "… no recorded cost … not included in the totals above" names the revenue left out; a variant-less line falls to PRODUCT_AVERAGE or LATEST_PURCHASE, a variant never to its parent | N | Not Run |
+| RPT-003 | Tax by rate ties to what was charged (D122) | Sales with 18% and zero-rated lines and an order discount; Reports → Tax by rate; include a sale predating per-line rates | Rows "18%" and "0%" whose `tax` sums exactly to the tax the sales recorded, taxable base net of the order discount; the pre-snapshot sale appears as an unattributed row and `hasUnattributed` is said on screen rather than guessed at; total tax agrees with Sales by variant | P | Not Run |
+| RPT-004 | Retail reports are money-exact and gated (D129) | Compare Sales by variant totals with the payment ledger for the period; call each /v1/sales/reports/* as a Cashier; send `to` earlier than `from` | Every money figure is a 2dp string that ties to the cent — no float drift; the cashier gets 403 (`report:read`, module REPORTING); the reversed range is refused 400, never swapped | P | Not Run |
+
 ## ADM — Administration & Multi-Tenancy
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
@@ -762,19 +828,20 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | AUTH | 15 | CUST | 36 |
 | PERM | 16 | CIMP | 10 |
 | DASH | 24 | SUP | 15 |
-| PROD | 30 | SIMP | 8 |
+| PROD | 47 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
-| POS | 55 | SET | 28 |
-| PAY | 41 | DOC | 16 |
+| POS | 61 | SET | 31 |
+| PAY | 41 | DOC | 20 |
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
 | RET | 18 | KIT | 6 |
-| EXC-T | 7 | ADM | 15 |
+| EXC-T | 12 | ADM | 15 |
 | EXC-D | 4 | UI | 26 |
 | QUO | 21 | SEC | 12 |
+| STK | 4 | RPT | 4 |
 
-**Total: 570 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — are included, which the previous figure of 481 left out).
+**Total: 613 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

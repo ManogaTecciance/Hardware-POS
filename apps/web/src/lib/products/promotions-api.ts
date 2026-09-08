@@ -26,7 +26,15 @@ export type PromotionItemRole = 'BUY' | 'GET' | 'BUNDLE';
 
 export type PromotionDayOfWeek = 'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN';
 
-export type PromotionChannel = 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
+/**
+ * D56 (4.9) — every channel `OrderChannel` has, not the food-service three.
+ *
+ * `COUNTER` is the channel a RETAIL till sells on — `catalog.ts` and
+ * `sales.service` both send it — and it was missing here. A retail shopkeeper
+ * ticking "Dine-in" scoped their promotion to a channel their tenant never uses,
+ * so `isPromotionActive` refused it and the offer silently never fired.
+ */
+export type PromotionChannel = 'COUNTER' | 'DINE_IN' | 'TAKEAWAY' | 'ONLINE';
 
 export const PROMOTION_DAYS_OF_WEEK: PromotionDayOfWeek[] = [
   'MON',
@@ -38,13 +46,28 @@ export const PROMOTION_DAYS_OF_WEEK: PromotionDayOfWeek[] = [
   'SUN',
 ];
 
-export const PROMOTION_CHANNELS: PromotionChannel[] = ['DINE_IN', 'TAKEAWAY', 'ONLINE'];
+/**
+ * Every channel the enum has. NOT what an editor should offer — a template shows
+ * only the channels its own `capabilities.fulfilment.channels` declares (D56).
+ * Kept for typing and for tests that need the full set.
+ */
+export const PROMOTION_CHANNELS: PromotionChannel[] = [
+  'COUNTER',
+  'DINE_IN',
+  'TAKEAWAY',
+  'ONLINE',
+];
 
 // ── Views ────────────────────────────────────────────────────────────────────
 
 export interface PromotionItem {
   id: string;
   productId: string;
+  /**
+   * 4.10 — the product's current name, joined by the server. Null when the
+   * product has been deleted, and absent on a response predating the join.
+   */
+  productName?: string | null;
   role: PromotionItemRole;
   quantity: number;
 }
@@ -58,6 +81,8 @@ export interface Promotion {
   fixedPrice: number | null;
   percentageOff: number | null;
   amountOff: number | null;
+  /** D126 — cart threshold for a cart-level FIXED_AMOUNT_DISCOUNT; null = none. */
+  minimumSpend: number | null;
   buyQuantity: number | null;
   getQuantity: number | null;
   startsOn: string | null;
@@ -79,6 +104,12 @@ export interface Promotion {
 interface ApiPromotionItem {
   id: string;
   productId: string;
+  /**
+   * 4.10 — joined by the server so the editor never renders a cuid. Declared
+   * here because the wire shape is what `toItem` is allowed to read: leaving it
+   * out silently dropped the name even though every other layer carried it.
+   */
+  productName?: string | null;
   role: PromotionItemRole;
   quantity: string | number;
 }
@@ -92,6 +123,7 @@ interface ApiPromotion {
   fixedPrice: string | number | null;
   percentageOff: string | number | null;
   amountOff: string | number | null;
+  minimumSpend?: string | number | null;
   buyQuantity: string | number | null;
   getQuantity: string | number | null;
   startsOn: string | null;
@@ -116,6 +148,11 @@ function toItem(i: ApiPromotionItem): PromotionItem {
   return {
     id: i.id,
     productId: i.productId,
+    // `productName` is optional on both sides, so omitting it here type-checked
+    // cleanly while throwing the server's join away — the edit screen fell back
+    // to the raw cuid. Null (product deleted) is preserved as null; a response
+    // predating the join stays undefined.
+    productName: i.productName,
     role: i.role,
     quantity: Number(i.quantity),
   };
@@ -131,6 +168,7 @@ function toPromotion(p: ApiPromotion): Promotion {
     fixedPrice: p.fixedPrice != null ? Number(p.fixedPrice) : null,
     percentageOff: p.percentageOff != null ? Number(p.percentageOff) : null,
     amountOff: p.amountOff != null ? Number(p.amountOff) : null,
+    minimumSpend: p.minimumSpend != null ? Number(p.minimumSpend) : null,
     buyQuantity: p.buyQuantity != null ? Number(p.buyQuantity) : null,
     getQuantity: p.getQuantity != null ? Number(p.getQuantity) : null,
     startsOn: p.startsOn,
@@ -163,6 +201,7 @@ export interface PromotionCreateInput {
   fixedPrice?: number | null;
   percentageOff?: number | null;
   amountOff?: number | null;
+  minimumSpend?: number | null;
   buyQuantity?: number | null;
   getQuantity?: number | null;
   startsOn?: string | null;

@@ -31,6 +31,8 @@ export type PostReturnAccounting = (
 export type RestoreStock = (
   tx: Prisma.TransactionClient,
   lines: StockLine[],
+  /** 1a.21 — the return this restock belongs to, for the ledger's `refId`. */
+  returnId: string,
 ) => Promise<void>;
 
 /** A return with everything the detail screen and receipt need. */
@@ -241,6 +243,7 @@ export class ReturnsRepository {
           subtotal: input.subtotal,
           productDiscountAdjustment: input.productDiscountAdjustment,
           orderDiscountAdjustment: input.orderDiscountAdjustment,
+          promotionOrderDiscountAdjustment: input.promotionOrderDiscountAdjustment,
           taxAdjustment: input.taxAdjustment,
           refundTotal: input.refundTotal,
           refundMethod: input.refundMethod,
@@ -254,6 +257,22 @@ export class ReturnsRepository {
             create: input.items.map((it) => ({
               originalSaleItemId: it.originalSaleItemId,
               productId: it.productId,
+              // D120 (1a.20) — these three columns have existed since D44 built
+              // them and had never been written.
+              //
+              // The scalar FK, not `productVariant: { connect }`: `productId` is
+              // set as a scalar here, which puts this nested create into Prisma's
+              // *unchecked* shape, and that shape accepts foreign keys rather than
+              // relations. The connect form typechecked only because it was
+              // spread from a conditional — a spread suppresses excess-property
+              // checking — and failed at runtime.
+              productVariantId: it.productVariantId,
+              variantSkuSnapshot: it.variantSkuSnapshot,
+              variantNameSnapshot: it.variantNameSnapshot,
+              unitOfMeasureSnapshot: it.unitOfMeasureSnapshot,
+              // D122 (3.11) — what this refund reversed, so a credit note is
+              // self-contained and a later rate change cannot rewrite it.
+              taxRatePercent: it.taxRatePercent,
               productNameSnapshot: it.productNameSnapshot,
               skuSnapshot: it.skuSnapshot,
               imageUrlSnapshot: it.imageUrlSnapshot,
@@ -267,7 +286,12 @@ export class ReturnsRepository {
               note: it.note,
               originalLineSubtotal: it.originalLineSubtotal,
               productDiscountAdjustment: it.productDiscountAdjustment,
+              // D123 (4.5) — the promotion reversed on this line. Stored beside
+              // the other two adjustments so a credit note is self-contained.
+              promotionDiscountAdjustment: it.promotionDiscountAdjustment,
               orderDiscountAdjustment: it.orderDiscountAdjustment,
+              // D126 — this line's share of the cart-level promotion.
+              promotionOrderDiscountAdjustment: it.promotionOrderDiscountAdjustment,
               taxAdjustment: it.taxAdjustment,
               refundableAmount: it.refundableAmount,
             })),
@@ -310,7 +334,7 @@ export class ReturnsRepository {
       // in; where the stock lives is decided by the tenant's `InventoryProvider`.
       // The `type: 'Inventory'` predicate that kept Service products out lives in
       // the provider, unchanged.
-      await restoreStock(tx, input.restockLines);
+      await restoreStock(tx, input.restockLines, created.id);
 
       // Per-sale return-status roll-up (recomputed from the fresh line states).
       const saleItems = await tx.saleItem.findMany({

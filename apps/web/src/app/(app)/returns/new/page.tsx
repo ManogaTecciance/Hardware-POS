@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
+import { MeasureNumpad } from '@/components/pos/measure-numpad';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
@@ -79,6 +80,8 @@ export default function NewReturnPage() {
   const [step, setStep] = React.useState<Step>(saleId ? 'select' : 'find');
   const [elig, setElig] = React.useState<ReturnEligibility | null>(null);
   const [items, setItems] = React.useState<ReturnableItem[]>([]);
+  /** D134 (`6.6`) — the measured line whose return amount is being typed. */
+  const [measureFor, setMeasureFor] = React.useState<ReturnableItem | null>(null);
   const [preview, setPreview] = React.useState<ReturnPreview | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -153,7 +156,12 @@ export default function NewReturnPage() {
       draft.removeSelection(it.saleItemId);
     } else {
       draft.setSelection(it.saleItemId, {
-        returnQuantity: Math.min(1, it.availableReturnQuantity) || 1,
+        // D134 (`6.6`) — a measured line starts at everything that is left,
+        // because "one kilo" is not a sensible default for something sold by
+        // weight. The clerk adjusts it through the numpad.
+        returnQuantity: it.unitOfMeasure
+          ? it.availableReturnQuantity
+          : Math.min(1, it.availableReturnQuantity) || 1,
         returnReason: 'WRONG_PRODUCT',
         itemCondition: 'GOOD',
         stockDisposition: 'RETURN_TO_STOCK',
@@ -161,10 +169,28 @@ export default function NewReturnPage() {
     }
   };
 
+  /**
+   * D134 (`6.6`) — the last integer clamp in the app.
+   *
+   * `Math.max(1, …)` made returning 0.5 kg of rice impossible: a customer who
+   * bought 750 g and brought half of it back could only be refunded for a
+   * whole kilo or nothing. `ReturnItem.quantity` has been `Decimal(12,3)` all
+   * along, so this was a UI floor over a server that was always ready.
+   *
+   * A whole line still steps by one and still floors at one; a measured line
+   * is set through the numpad instead, exactly as it was entered at the till.
+   */
   const changeQty = (it: ReturnableItem, delta: number) => {
     const cur = draft.selections[it.saleItemId]?.returnQuantity ?? 0;
     const next = Math.max(1, Math.min(it.availableReturnQuantity, cur + delta));
     draft.setSelection(it.saleItemId, { returnQuantity: next });
+  };
+
+  /** A measured line: the amount is typed, never stepped. */
+  const setMeasuredQty = (it: ReturnableItem, quantity: number) => {
+    const capped = Math.min(it.availableReturnQuantity, Math.round(quantity * 1000) / 1000);
+    draft.setSelection(it.saleItemId, { returnQuantity: capped });
+    setMeasureFor(null);
   };
 
   const setCondition = (saleItemId: string, condition: ItemConditionCode) => {
@@ -284,27 +310,47 @@ export default function NewReturnPage() {
                           </div>
                         </div>
                         {sel ? (
-                          <div className="flex items-center gap-1">
+                          it.unitOfMeasure ? (
+                            /*
+                              D134 (`6.6`) — a measured line is typed, not stepped.
+                              ±1 kg is not what a returns clerk means, and the same
+                              numpad the till used to enter it is the least
+                              surprising way to change it.
+                            */
                             <Button
                               variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => changeQty(it, -1)}
-                              aria-label="Decrease"
+                              size="sm"
+                              className="h-8 tabular-nums"
+                              onClick={() => setMeasureFor(it)}
+                              aria-label={`Change return quantity for ${it.productName}`}
                             >
-                              <Minus className="h-4 w-4" />
+                              {sel.returnQuantity} {it.unitOfMeasure}
                             </Button>
-                            <span className="w-8 text-center text-sm font-medium">{sel.returnQuantity}</span>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => changeQty(it, 1)}
-                              aria-label="Increase"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => changeQty(it, -1)}
+                                aria-label="Decrease"
+                              >
+                                <Minus className="h-4 w-4" />
+                              </Button>
+                              <span className="w-8 text-center text-sm font-medium">
+                                {sel.returnQuantity}
+                              </span>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => changeQty(it, 1)}
+                                aria-label="Increase"
+                              >
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )
                         ) : null}
                       </div>
                     );
@@ -558,6 +604,22 @@ export default function NewReturnPage() {
           }
         }}
       />
+
+      {/*
+        D134 (`6.6`) — the same keypad the till used to weigh it. A returns clerk
+        taking back half a bag of rice types the amount rather than stepping it.
+      */}
+      {measureFor ? (
+        <MeasureNumpad
+          open
+          label={measureFor.productName}
+          unit={measureFor.unitOfMeasure ?? 'units'}
+          initialQuantity={draft.selections[measureFor.saleItemId]?.returnQuantity}
+          max={measureFor.availableReturnQuantity}
+          onCancel={() => setMeasureFor(null)}
+          onConfirm={(quantity) => setMeasuredQty(measureFor, quantity)}
+        />
+      ) : null}
     </div>
   );
 }

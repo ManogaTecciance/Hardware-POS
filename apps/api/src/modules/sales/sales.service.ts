@@ -5,13 +5,24 @@ import {
   DiscountBasis,
   DiscountType,
   PaymentStatus,
+  QuantityType,
   QuickBooksDocumentType,
 } from '@hardware-pos/database';
-import { CURRENCY_SYMBOL, type Paginated } from '@hardware-pos/shared';
+import {
+  CURRENCY_SYMBOL,
+  applyPromotions,
+  taxableBase,
+  type Paginated,
+  type PromotionRule,
+} from '@hardware-pos/shared';
+
+import { isPromotionActive } from '../promotions/promotions.evaluator';
+import { PromotionsRepository, type PromotionWithItems } from '../promotions/promotions.repository';
 
 import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
 import { computeDocumentLine, discountAmountOf } from '../../common/money/document-totals';
+import { variantDisplayName } from '../../common/variant-display';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { DiscountsService, ORDER_DISCOUNT_KEY } from '../discounts/discounts.service';
 import { CreditService } from '../credit/credit.service';
@@ -36,6 +47,7 @@ import {
 } from './sales.repository';
 import {
   CartItemInput,
+  ComputedLine,
   ComputedSale,
   OrderDiscountInput,
   PersistSaleInput,
@@ -50,6 +62,36 @@ function requireProductId(productId: string | null, saleItemId: string): string 
   return productId;
 }
 
+/**
+ * D123 (4.4) — the Decimal → number boundary for promotions, in one place.
+ *
+ * `shared` carries no runtime dependency on Prisma, so the applier works in
+ * plain numbers with cent rounding. `catalog.ts` performs the mirror-image
+ * conversion from the wire strings, so both callers hand the applier the same
+ * shape and the same values.
+ */
+function toPromotionRule(p: PromotionWithItems): PromotionRule {
+  return {
+    id: p.id,
+    name: p.name,
+    type: p.type as PromotionRule['type'],
+    fixedPrice: p.fixedPrice === null ? null : Number(p.fixedPrice),
+    percentageOff: p.percentageOff === null ? null : Number(p.percentageOff),
+    amountOff: p.amountOff === null ? null : Number(p.amountOff),
+    // D126 — the cart threshold. Null on every rule written before D126, which
+    // the applier reads as "no threshold".
+    minimumSpend: p.minimumSpend === null ? null : Number(p.minimumSpend),
+    buyQuantity: p.buyQuantity,
+    getQuantity: p.getQuantity,
+    stackable: p.stackable,
+    items: p.items.map((it) => ({
+      productId: it.productId,
+      role: it.role as PromotionRule['items'][number]['role'],
+      quantity: it.quantity,
+    })),
+  };
+}
+
 @Injectable()
 export class SalesService {
   constructor(
@@ -59,6 +101,7 @@ export class SalesService {
     private readonly credit: CreditService,
     private readonly accountingProviders: AccountingProviderFactory,
     private readonly inventoryProviders: InventoryProviderFactory,
+    private readonly promotions: PromotionsRepository,
   ) {}
 
   async list(tenantId: string, query: QuerySalesDto): Promise<Paginated<SaleListItem>> {
@@ -118,6 +161,35 @@ export class SalesService {
   }
 
   /**
+   * `8.8` — the baskets currently on hold.
+   *
+   * A hold IS a draft. `SaleStatus.DRAFT` and `createDraft` have existed since
+   * Phase 1 with no flow on top of them: nothing listed drafts, nothing
+   * discarded one, and `complete({ saleId })` — the resume — had no caller.
+   * `8.8` is those three, not a new concept.
+   */
+  listHeld(tenantId: string, branchId?: string): Promise<SaleWithRelations[]> {
+    return this.salesRepository.findHeldSales(tenantId, branchId);
+  }
+
+  /**
+   * Discard a held basket.
+   *
+   * Refuses anything that is not a DRAFT — including a completed sale whose id
+   * someone pasted — by finding no row rather than by checking first and
+   * deleting second, which two simultaneous requests could both pass.
+   */
+  async discardHeld(tenantId: string, id: string): Promise<void> {
+    const discarded = await this.salesRepository.discardHeldSale(tenantId, id);
+    if (!discarded) {
+      // One message for "no such sale" and "that sale is completed": telling
+      // them apart would confirm the existence of a sale to someone who only
+      // guessed its id.
+      throw new NotFoundException(`No held sale ${id}`);
+    }
+  }
+
+  /**
    * Complete a sale (12-step pipeline): validate cart & prices, check stock,
    * compute totals/discounts/tax, then persist the sale, items, payments, and an
    * outbound QuickBooks sync job. Works one-shot (cart in body) or by finishing a
@@ -143,6 +215,9 @@ export class SalesService {
         // lines were written by this module with a product, so a null here is
         // corruption, not a state — fail the completion rather than sell air.
         productId: requireProductId(it.productId, it.id),
+        // D120 — a draft line already carries the variant chosen when the draft was
+        // built; completing it must sell the same one, not fall back to product level.
+        productVariantId: it.productVariantId,
         quantity: Number(it.quantity),
         discountType: it.discountType,
         discountBasis: it.discountBasis,
@@ -266,8 +341,17 @@ export class SalesService {
     // performs the reduction, inside the repository's transaction. The conditional
     // write it contains — not the read above — is what prevents two concurrent sales
     // from both taking the last unit.
-    const reduceStock: ReduceStock = (tx, lines) =>
-      inventory.reduceStock(tx, { tenantId, branchId }, lines);
+    const reduceStock: ReduceStock = (tx, lines, saleId) =>
+      inventory.reduceStock(tx, { tenantId, branchId }, lines, {
+        // 1a.21 — supplying metadata is what asks the provider to append the
+        // stock ledger row. Only the Local provider records anything; QuickBooks
+        // stock is a cache of an upstream ledger and NONE has no stock, so this
+        // service never asks which mode it is in (D28).
+        reason: 'SALE',
+        refType: 'SALE',
+        refId: saleId,
+        createdByUserId: actor.id,
+      });
 
     return dto.saleId
       ? this.salesRepository.completeDraft(tenantId, dto.saleId, persist, postAccounting, reduceStock)
@@ -354,6 +438,18 @@ export class SalesService {
     const ids = [...new Set(items.map((i) => i.productId))];
     const products = await this.salesRepository.findProductsByIds(tenantId, ids);
     const byId = new Map(products.map((p) => [p.id, p]));
+
+    // D120 — resolve every named variant in one read, mirroring the product fetch
+    // above. A cart that names no variant does no query at all, so the ordinary
+    // single-SKU sale costs exactly what it did before.
+    const variantIds = [
+      ...new Set(items.map((i) => i.productVariantId).filter((v): v is string => Boolean(v))),
+    ];
+    const variants = variantIds.length
+      ? await this.salesRepository.findVariantsByIds(tenantId, variantIds)
+      : [];
+    const variantById = new Map(variants.map((v) => [v.id, v]));
+
     const settings = this.settingsService.getSettings(tenantId);
 
     // Availability comes from the provider, not from the product row. For
@@ -364,8 +460,20 @@ export class SalesService {
     // write remains the authority under concurrency.
     const availability = await inventory.getAvailability({ tenantId, branchId }, ids);
 
-    const lines = await Promise.all(
-      items.map(async (item) => {
+    // D120 — the same courtesy, at variant grain. Without it the two checks
+    // disagree: the product total is 10 across four sizes, so the read passes, and
+    // then `reduceStock` finds 0 on the Medium's row and refuses with the terser
+    // transactional message. Optional on the provider — QuickBooks and DISABLED
+    // cannot answer it, and for them the product-level check above is the right one.
+    const variantAvailability =
+      variantIds.length > 0 && inventory.getVariantAvailability
+        ? await inventory.getVariantAvailability({ tenantId, branchId }, variantIds)
+        : null;
+
+    const lines: ComputedLine[] = await Promise.all(
+      // Annotated so the `promotionId: null` seeds below widen to `string |
+      // null`; the basket pass writes into them a few lines further down.
+      items.map(async (item): Promise<ComputedLine> => {
         const product = byId.get(item.productId);
         if (!product) {
           throw new BadRequestException(`Unknown product ${item.productId}`);
@@ -373,7 +481,29 @@ export class SalesService {
         if (!product.isActive) {
           throw new BadRequestException(`Product ${product.name} is inactive`);
         }
-        const cachedPrice = Number(product.unitPrice);
+        // D120 — resolve and vet the variant before any money is computed from it.
+        const variant = item.productVariantId ? (variantById.get(item.productVariantId) ?? null) : null;
+        if (item.productVariantId && !variant) {
+          // Unknown id and another tenant's id give the same message on purpose:
+          // the response must not reveal that a variant exists elsewhere.
+          throw new BadRequestException(`Unknown variant ${item.productVariantId}`);
+        }
+        if (variant && variant.productId !== product.id) {
+          // Without this a client could pair a cheap variant with a dear product
+          // and pay the variant's price for the wrong thing.
+          throw new BadRequestException(
+            `Variant ${variant.sku} does not belong to ${product.name}`,
+          );
+        }
+        if (variant && !variant.isActive) {
+          throw new BadRequestException(`Variant ${variant.sku} is inactive`);
+        }
+
+        // A variant owns its price outright; the product price is NOT a fallback.
+        // `ProductVariant.unitPrice` is non-nullable, and `sellable.service`
+        // reports a variant product's own price as null for exactly this reason —
+        // `??` here would let a variant priced at 0 silently charge the product's.
+        const cachedPrice = variant ? Number(variant.unitPrice) : Number(product.unitPrice);
         if (item.unitPrice != null && round2(item.unitPrice) !== round2(cachedPrice)) {
           throw new BadRequestException(
             `Price for ${product.name} has changed; refresh the product cache`,
@@ -386,14 +516,32 @@ export class SalesService {
         // product, which the `!product` guard above has already excluded.
         const stock = availability.get(product.id);
         if (stock && !stock.isUnlimited && stock.quantityOnHand !== null) {
-          const onHand = stock.quantityOnHand;
-          if (quantity > onHand) {
-            // Wording preserved verbatim — this is the message the POS surfaces and
-            // the Slice 3 characterisation spec asserts. Note it is deliberately
-            // NOT the same string `reduceStock` throws; both are unchanged.
-            throw new BadRequestException(
-              `Insufficient stock for ${product.name} (on hand ${onHand}, requested ${quantity})`,
-            );
+          if (variant && variantAvailability) {
+            // D120 — a variant line is checked against its own row. Absent means no
+            // row, which is no stock (decision 8), so it reads as zero rather than
+            // falling back to the product total: the product may hold plenty across
+            // its other sizes while this one has none.
+            const onHand = variantAvailability.get(variant.id)?.quantityOnHand ?? 0;
+            if (quantity > onHand) {
+              // Names the variant, unlike the product-level message below. The
+              // cashier is looking at a four-size product and needs to know which
+              // size is short; the wording below is asserted verbatim by existing
+              // specs and must not move.
+              const label = variantDisplayName(variant.optionValues, variant.sku);
+              throw new BadRequestException(
+                `Insufficient stock for ${product.name} (${label}) (on hand ${onHand}, requested ${quantity})`,
+              );
+            }
+          } else {
+            const onHand = stock.quantityOnHand;
+            if (quantity > onHand) {
+              // Wording preserved verbatim — this is the message the POS surfaces and
+              // the Slice 3 characterisation spec asserts. Note it is deliberately
+              // NOT the same string `reduceStock` throws; both are unchanged.
+              throw new BadRequestException(
+                `Insufficient stock for ${product.name} (on hand ${onHand}, requested ${quantity})`,
+              );
+            }
           }
         }
 
@@ -437,6 +585,15 @@ export class SalesService {
 
         return {
           productId: product.id,
+          productVariantId: variant?.id ?? null,
+          // D44 — frozen here, at sale time. A later rename or deactivation must
+          // not be able to rewrite what this receipt said.
+          variantSkuSnapshot: variant?.sku ?? null,
+          variantNameSnapshot: variant ? variantDisplayName(variant.optionValues, variant.sku) : null,
+          // D134d — frozen here, so a shop repricing saffron from grams to
+          // kilograms cannot make an old receipt reprint 0.750 kg for what
+          // was actually 0.750 g.
+          unitOfMeasureSnapshot: product.unitOfMeasure ?? null,
           productName: product.name,
           sku: product.sku,
           trackInventory: product.type === 'Inventory',
@@ -448,20 +605,113 @@ export class SalesService {
           discountAmount,
           discountReason: item.discountReason ?? null,
           approvedByUserId,
+          // Still 0. Splitting the order-level tax across lines is per-line
+          // COMPUTATION, which is parked with grocery (D122). 3.9 records the
+          // rate; it does not change a single figure.
           taxAmount: 0,
+          /*
+           * D122 (3.9) — the rate this line was charged at, frozen now.
+           *
+           * `taxable` defaults true, so for every existing product this is the
+           * tenant rate — exactly what the order-level arithmetic below already
+           * applies. Writing it down changes no money.
+           *
+           * An exempt product and a tenant configured at 0% BOTH snapshot 0.00,
+           * and that is correct rather than a conflation: the column records
+           * WHAT WAS CHARGED, and both charged nothing. Whether that was because
+           * the product is exempt or because the tenant taxes nothing is a
+           * question `Product.taxable` still answers, by joining. Recorded here
+           * because two paths reaching the same value looks like a bug to
+           * whoever reads it next.
+           *
+           * Never null on a new line. Null on `SaleItem.taxRatePercent` means
+           * "written before 3.8", which is the signal 3.10 uses to fall back to
+           * proportional refunding — so a new sale must never produce one.
+           */
+          taxRatePercent: product.taxable ? settings.taxRatePercent : 0,
+          // Filled by the basket pass below — a promotion needs every line to
+          // resolve, so it cannot be decided inside this per-line map.
+          promotionDiscountAmount: 0,
+          promotionId: null,
+          promotionNameSnapshot: null,
           lineSubtotal,
           lineTotal: computedLine.lineTotal.toNumber(),
         };
       }),
     );
 
+    /*
+     * D123 (4.4) — promotions, as a BASKET pass.
+     *
+     * It cannot live in the loop above: a bundle spans lines and a BOGO counts
+     * across them. It runs after, and folds its answer back into each line.
+     *
+     * Eligibility reuses the badge path's own read — `listForCatalogue` +
+     * `isPromotionActive` — so the offer a customer sees on the till and the
+     * price charged here cannot disagree about what is live. `COUNTER` is the
+     * channel `catalog.ts` sends; omitting it would make a channel-scoped
+     * promotion apply on the till and NOT here, since the evaluator refuses a
+     * scoped promotion when the context names no channel.
+     */
+    const eligiblePromotions = (await this.promotions.listForCatalogue(tenantId))
+      .filter((p) => isPromotionActive(p, { now: new Date(), branchId, channel: 'COUNTER' }))
+      .map(toPromotionRule);
+
+    const promotionResult = applyPromotions({
+      lines: lines.map((l, i) => ({
+        id: String(i),
+        productId: l.productId,
+        unitPrice: l.unitPrice,
+        quantity: l.quantity,
+        lineSubtotal: l.lineSubtotal,
+        // Precedence (D123) is enforced inside the applier: a manually
+        // discounted line is invisible to promotions and cannot complete a
+        // bundle. Passing it truthfully is this call site's whole obligation.
+        manualDiscountAmount: l.discountAmount,
+        // D134a (`6.4`) — a measured line is invisible to the two
+        // QUANTITY-based promotion kinds. Set on BOTH sides: the till
+        // previews with the same flag, or the cashier is shown a discount
+        // the server refuses.
+        isMeasured: byId.get(l.productId)?.quantityType === QuantityType.DECIMAL,
+      })),
+      promotions: eligiblePromotions,
+    });
+
+    for (const won of promotionResult.lines) {
+      const line = lines[Number(won.lineId)];
+      if (!line) continue;
+      line.promotionDiscountAmount = won.discountAmount;
+      line.promotionId = won.promotionId;
+      line.promotionNameSnapshot = won.promotionName;
+      // The promotion reduces the LINE, which is what makes tax follow with no
+      // tax code: `taxableBase` reads `lineTotal`.
+      line.lineTotal = new Prisma.Decimal(line.lineTotal)
+        .minus(won.discountAmount)
+        .toDecimalPlaces(2)
+        .toNumber();
+    }
+
     // D59: sums and tax in Decimal. Line figures are 2dp, so these sums are
     // exact; sum2's float accumulation could drift a hair below a half.
     const subtotal = lines
       .reduce((acc, l) => acc.plus(l.lineSubtotal), new Prisma.Decimal(0))
       .toNumber();
+    /*
+     * D123 (4.4) — every LINE-level reduction, manual and promotional.
+     *
+     * It has to be both. `discountedSubtotal` is derived from this and must
+     * equal Σ lineTotal; if a promotion reduced the lines but not this sum, the
+     * order discount would be computed on money the customer never owed and the
+     * tax base would drift with it. `returns.calc` reads the stored figure as
+     * its denominator for the same reason.
+     *
+     * The two are mutually exclusive per line, so this never double-counts.
+     */
     const totalDiscount = lines
-      .reduce((acc, l) => acc.plus(l.discountAmount), new Prisma.Decimal(0))
+      .reduce(
+        (acc, l) => acc.plus(l.discountAmount).plus(l.promotionDiscountAmount),
+        new Prisma.Decimal(0),
+      )
       .toNumber();
     // Order-level discount applies to the subtotal AFTER per-line discounts.
     const discountedSubtotal = new Prisma.Decimal(subtotal).minus(totalDiscount).toNumber();
@@ -472,12 +722,55 @@ export class SalesService {
       orderDiscountInput,
     );
 
-    const taxableD = new Prisma.Decimal(discountedSubtotal).minus(orderDiscount.amount);
+    /*
+     * D122 (3.10, extracted to `shared` in 3.14) — `Product.taxable` narrows
+     * the taxable base.
+     *
+     * The rule itself lives in `@hardware-pos/shared` because the TILL has to
+     * preview the same figure. 3.10 narrowed the base here only, so a cashier
+     * was quoted 18% on an exempt item the server then charged nothing for —
+     * the retail twin of audit item A2. One implementation, two callers.
+     */
+    const taxBase = new Prisma.Decimal(
+      taxableBase(
+        lines.map((l) => ({
+          lineTotal: l.lineTotal,
+          taxable: byId.get(l.productId)?.taxable !== false,
+        })),
+        discountedSubtotal,
+        orderDiscount.amount,
+      ),
+    );
+
     const taxAmount =
       settings.taxRatePercent > 0
-        ? taxableD.mul(settings.taxRatePercent).div(100).toDecimalPlaces(2).toNumber()
+        ? taxBase.mul(settings.taxRatePercent).div(100).toDecimalPlaces(2).toNumber()
         : 0;
-    const total = taxableD.plus(taxAmount).toNumber();
+    // The TOTAL still starts from the full discounted subtotal: an exempt line is
+    // untaxed, not unsold.
+    /*
+     * D126 — a cart-level promotion, capped so it can never exceed what is left
+     * to pay after the manual order discount.
+     *
+     * DELIBERATELY NOT in `taxableBase` above, which is where the MANUAL order
+     * discount is. Confirmed with the PO: tax is computed as it always was and
+     * this discount comes off afterwards. The asymmetry is intentional and is
+     * the reason it is applied here, three lines below the tax, rather than
+     * folded into `orderDiscount` where it would silently change tax on every
+     * sale that carries one.
+     */
+    const promotionOrderDiscountAmount = promotionResult.orderPromotion
+      ? Math.min(
+          promotionResult.orderPromotion.discountAmount,
+          new Prisma.Decimal(discountedSubtotal).minus(orderDiscount.amount).toNumber(),
+        )
+      : 0;
+
+    const total = new Prisma.Decimal(discountedSubtotal)
+      .minus(orderDiscount.amount)
+      .minus(promotionOrderDiscountAmount)
+      .plus(taxAmount)
+      .toNumber();
 
     return {
       lines,
@@ -488,6 +781,13 @@ export class SalesService {
       orderDiscountAmount: orderDiscount.amount,
       orderDiscountReason: orderDiscount.reason,
       orderDiscountApprovedById: orderDiscount.approvedById,
+      promotionOrderDiscountAmount,
+      promotionOrderId: promotionOrderDiscountAmount > 0
+        ? (promotionResult.orderPromotion?.promotionId ?? null)
+        : null,
+      promotionOrderNameSnapshot: promotionOrderDiscountAmount > 0
+        ? (promotionResult.orderPromotion?.promotionName ?? null)
+        : null,
       taxAmount,
       total,
     };
@@ -694,6 +994,10 @@ export function toSaleListItem(row: SaleListRow): SaleListItem {
 function toCartItem(dto: SaleItemInputDto): CartItemInput {
   return {
     productId: dto.productId,
+    // D120 — forward the variant. Omitting it here would type-check cleanly and
+    // silently drop every variant the till sent, since the field is optional on
+    // both sides.
+    productVariantId: dto.productVariantId ?? null,
     quantity: dto.quantity,
     unitPrice: dto.unitPrice,
     discountType: dto.discountType,

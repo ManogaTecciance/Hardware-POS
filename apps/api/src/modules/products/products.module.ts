@@ -1,4 +1,14 @@
 import { MenuModule } from '../menu/menu.module';
+import { SettingsModule } from '../settings/settings.module';
+import { AttributeLibraryController } from './attribute-library/attribute-library.controller';
+import { AttributeLibraryRepository } from './attribute-library/attribute-library.repository';
+import { AttributeLibraryService } from './attribute-library/attribute-library.service';
+import { BarcodeAuditService } from './identifiers/barcode-audit.service';
+import { BarcodeGeneratorService } from './identifiers/barcode-generator.service';
+import { BarcodesController } from './identifiers/barcodes.controller';
+import { LabelPrintService } from './identifiers/label-print.service';
+import { LabelsController } from './identifiers/labels.controller';
+import { SkuGeneratorService } from './identifiers/sku-generator.service';
 import { ProductAttributeSchemaController } from './product-attribute-schema.controller';
 import { ProductComponentsController } from './product-components.controller';
 import { ProductComponentsService } from './product-components.service';
@@ -12,7 +22,6 @@ import { Module } from '@nestjs/common';
 
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { ProvidersModule } from '../providers/providers.module';
-import { SettingsModule } from '../settings/settings.module';
 import { ProductImagesController } from './product-images.controller';
 import { ProductModifiersController } from './product-modifiers.controller';
 import { ProductModifiersService } from './product-modifiers.service';
@@ -46,15 +55,31 @@ import { ProductVariantsService } from './variants/product-variants.service';
   // AuditLogModule is imported for D45: the Product ↔ ModifierGroup and
   // Product ↔ KitchenStation attachment endpoints record a mutation audit
   // event so the wizard's changes are traceable per-tenant.
-  // SettingsModule: the products report cuts business days on the shop's
-  // timezone (main, 2026-09-01), which it reads from SettingsService.
-  imports: [ProvidersModule, AuditLogModule, PromotionsModule, PlatformModule, MenuModule, SettingsModule],
+  // SettingsModule, twice over: the products report cuts business days on the
+  // shop's timezone (main, 2026-09-01), and the barcode prefix map (D125 Part 3)
+  // lives in the settings blob and is read FRESH rather than from the 30-second
+  // cache — a stale prefix would issue codes under the wrong range.
+  imports: [
+    ProvidersModule,
+    AuditLogModule,
+    PromotionsModule,
+    PlatformModule,
+    MenuModule,
+    SettingsModule,
+  ],
   controllers: [
     // Static /products/* routes FIRST: they must register before
     // ProductsController's GET /products/:id, or ':id' captures the segment
     // ('sellable', 'attribute-schema').
     SellableController,
     ProductAttributeSchemaController,
+    // D125 — the tenant option library. Its own root path, so it does not
+    // compete with ProductsController's GET /products/:id.
+    AttributeLibraryController,
+    // D125 Part 3 / D127 — barcode audit + reissue (5.9) and label printing
+    // (5.7). Their own root paths, so no /products/:id capture.
+    BarcodesController,
+    LabelsController,
     ProductsController,
     ProductImagesController,
     ProductVariantsController,
@@ -77,6 +102,12 @@ import { ProductVariantsService } from './variants/product-variants.service';
     ProductModifiersService,
     ProductStationsService,
     ProductAttributesService,
+    AttributeLibraryService,
+    AttributeLibraryRepository,
+    SkuGeneratorService,
+    BarcodeGeneratorService,
+    BarcodeAuditService,
+    LabelPrintService,
     ProductComponentsService,
     SellableService,
   ],

@@ -5,8 +5,11 @@ import { CreditModule } from '../credit/credit.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { SettingsModule } from '../settings/settings.module';
 import { SyncModule } from '../sync/sync.module';
+import { PromotionsModule } from '../promotions/promotions.module';
+
 import { SalesController } from './sales.controller';
 import { SalesReportService } from './sales-report.service';
+import { RetailReportsService } from './retail-reports.service';
 import { SalesRepository } from './sales.repository';
 import { SalesService } from './sales.service';
 
@@ -20,9 +23,9 @@ import { SalesService } from './sales.service';
  * the retry/requeue paths that Slice 6A does not touch.
  */
 @Module({
-  imports: [SettingsModule, DiscountsModule, SyncModule, ProvidersModule, CreditModule],
+  imports: [SettingsModule, DiscountsModule, SyncModule, ProvidersModule, CreditModule, PromotionsModule],
   controllers: [SalesController],
-  providers: [SalesService, SalesRepository, SalesReportService],
+  providers: [SalesService, SalesRepository, SalesReportService, RetailReportsService],
   exports: [SalesService],
 })
 export class SalesModule {}

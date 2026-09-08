@@ -9,11 +9,18 @@ import { cn } from '@/lib/utils';
 /**
  * Inventory tab bar (D45).
  *
- * Sits at the top of `/products`, `/products/categories` and
- * `/products/promotions` so the four surfaces read as one Inventory area
- * rather than three unrelated screens. Each tab is a plain `<Link>` — routing
- * lives with Next, not with local state — so a mid-list refresh, back button
- * or shareable URL all behave correctly.
+ * Sits at the top of `/products`, `/products/categories`,
+ * `/products/promotions`, `/products/attributes` and `/products/barcodes` so
+ * the surfaces read as one Inventory area rather than several unrelated
+ * screens.
+ *
+ * The two Phase 5 tabs are here rather than in the main rail because
+ * `nav.test.ts` asserts the retail rail as an EXACT sequence, mutation-proven,
+ * and D16 forbids editing an existing behavioural assertion to accommodate new
+ * work. They are also catalogue sub-surfaces, which is what this bar is for.
+ *
+ * Each tab is a plain `<Link>` — routing lives with Next, not with local state
+ * — so a mid-list refresh, back button or shareable URL all behave correctly.
  *
  * "Stock" and "Purchases" are surfaced as placeholder tabs with a matching
  * disabled state, per the D45 note. Placing them here rather than hiding them
@@ -33,6 +40,9 @@ const TABS: Tab[] = [
   { href: '/products', label: 'Products', matchPrefixes: ['/products/new'] },
   { href: '/products/categories', label: 'Categories' },
   { href: '/products/promotions', label: 'Promotions' },
+  // Phase 5 — D125 / D125a.
+  { href: '/products/attributes', label: 'Attributes' },
+  { href: '/products/barcodes', label: 'Barcodes' },
   // Stock + Purchases are placeholder tabs — the wording sets expectations,
   // the disabled state prevents an operator following a dead route. When the
   // dedicated pages ship, flip `disabled` off and add real `href`s.

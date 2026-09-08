@@ -9,3 +9,4 @@ export * from './hardware.domain.js';
 export * from './food-service.domain.js';
 export * from './hotel.domain.js';
 export * from './general.domain.js';
+export * from './retail.domain.js';

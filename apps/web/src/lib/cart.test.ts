@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeDiscount, computeLine, computeTotals, stockCap, type CartItem } from './cart';
+import {
+  computeDiscount,
+  computeLine,
+  computeTotals,
+  newCartItem,
+  stockCap,
+  type CartItem,
+} from './cart';
 import type { ClientProduct } from './catalog';
 
 /**
@@ -26,8 +33,10 @@ function product(over: Partial<ClientProduct> = {}): ClientProduct {
   } as ClientProduct;
 }
 
+// A line the way `newCartItem` makes one: keyed by (product, no variant). The
+// cap these tests are about reads the PRODUCT's count when there is no variant.
 const line = (over: Partial<ClientProduct>, quantity: number): CartItem => ({
-  product: product(over),
+  ...newCartItem(product(over), null),
   quantity,
 });
 
@@ -120,7 +129,7 @@ describe('the cart-wide stock gate behind the Pay button', () => {
  */
 describe('a fixed discount per unit vs per line', () => {
   const threeAtAThousand = (basis?: 'LINE' | 'UNIT'): CartItem => ({
-    product: product({ unitPrice: 1000 }),
+    ...newCartItem(product({ unitPrice: 1000 }), null),
     quantity: 3,
     discount: { type: 'FIXED', value: 100, ...(basis ? { basis } : {}) },
   });
@@ -147,7 +156,7 @@ describe('a fixed discount per unit vs per line', () => {
     // A negative line would pay money out through the proportional reversal a
     // return performs.
     const line = computeLine({
-      product: product({ unitPrice: 1000 }),
+      ...newCartItem(product({ unitPrice: 1000 }), null),
       quantity: 3,
       discount: { type: 'FIXED', value: 2000, basis: 'UNIT' },
     });
@@ -158,7 +167,7 @@ describe('a fixed discount per unit vs per line', () => {
   it('ignores the basis on a percentage', () => {
     // A percentage is already the same figure per unit and per line.
     const line = computeLine({
-      product: product({ unitPrice: 1000 }),
+      ...newCartItem(product({ unitPrice: 1000 }), null),
       quantity: 3,
       discount: { type: 'PERCENTAGE', value: 10, basis: 'UNIT' },
     });
@@ -168,7 +177,7 @@ describe('a fixed discount per unit vs per line', () => {
   it('is the same either way at a quantity of one', () => {
     const one = (basis: 'LINE' | 'UNIT') =>
       computeLine({
-        product: product({ unitPrice: 1000 }),
+        ...newCartItem(product({ unitPrice: 1000 }), null),
         quantity: 1,
         discount: { type: 'FIXED', value: 100, basis },
       }).discountAmount;
@@ -179,7 +188,7 @@ describe('a fixed discount per unit vs per line', () => {
     // round2(33.333 * 3) = 100.00, but round2(33.333) * 3 = 99.99. A cent of
     // disagreement with the server makes the sale complete as part-paid.
     const line = computeLine({
-      product: product({ unitPrice: 1000 }),
+      ...newCartItem(product({ unitPrice: 1000 }), null),
       quantity: 3,
       discount: { type: 'FIXED', value: 33.333, basis: 'UNIT' },
     });

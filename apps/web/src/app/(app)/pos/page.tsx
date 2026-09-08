@@ -15,7 +15,7 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
 /**
  * POS route — dispatches on the tenant's business type.
  *
- * Retail (Tile Shop / Hardware / Retail) → existing `PosRetailCheckout`,
+ * Retail (Hardware / Retail) → existing `PosRetailCheckout`,
  * untouched.
  *
  * Restaurant / Cafe / Bakery → the counter POS workspace.

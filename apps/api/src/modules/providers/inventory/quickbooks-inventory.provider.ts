@@ -12,9 +12,12 @@ import {
   ProviderContext,
   ProviderSyncOutcome,
   ReceiveStockLine,
+  StockCountLine,
+  StockCountOutcome,
   ReceiveStockLineOutcome,
   StockAdjustment,
   StockLine,
+  StockMovementMetadata,
 } from '../provider.types';
 import { InventoryProvider } from './inventory-provider';
 import { aggregate, readAvailability } from './local-inventory.provider';
@@ -77,6 +80,9 @@ export class QuickBooksInventoryProvider implements InventoryProvider {
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    // 1a.21 — accepted and ignored. Stock here is a cache of an upstream system
+    // (QuickBooks) or absent entirely, so there is no local ledger to append to.
+    _metadata?: StockMovementMetadata,
   ): Promise<void> {
     for (const [productId, { name, qty }] of aggregate(lines)) {
       const res = await tx.product.updateMany({
@@ -100,6 +106,9 @@ export class QuickBooksInventoryProvider implements InventoryProvider {
     tx: Prisma.TransactionClient,
     ctx: ProviderContext,
     lines: StockLine[],
+    // 1a.21 — accepted and ignored. Stock here is a cache of an upstream system
+    // (QuickBooks) or absent entirely, so there is no local ledger to append to.
+    _metadata?: StockMovementMetadata,
   ): Promise<void> {
     for (const [productId, { qty }] of aggregate(lines)) {
       await tx.product.updateMany({
@@ -154,6 +163,23 @@ export class QuickBooksInventoryProvider implements InventoryProvider {
     return Promise.reject(
       new ProviderOperationUnavailableError(this.name, 'receiveStock'),
     );
+  }
+
+  /**
+   * D132 — refused, loudly.
+   *
+   * QuickBooks owns the stock. `quantityOnHand` here is a CACHE of an upstream
+   * figure, so writing a counted quantity into it would be overwritten by the
+   * next pull and would never reach the system of record. The correction belongs
+   * in QuickBooks; saying so is more useful than silently doing nothing.
+   */
+  applyStockCount(
+    _tx: Prisma.TransactionClient,
+    _ctx: ProviderContext,
+    _lines: StockCountLine[],
+    _metadata: { stockTakeId: string; countedByUserId: string },
+  ): Promise<StockCountOutcome[]> {
+    return Promise.reject(new ProviderOperationUnavailableError(this.name, 'applyStockCount'));
   }
 
   /**

@@ -35,7 +35,7 @@ import {
   ProductsImportService,
 } from './products-import.service';
 import { ProductsReportService } from './products-report.service';
-import { ProductsService } from './products.service';
+import { ManagedProductView, ProductsService } from './products.service';
 import { CommitImportDto } from './dto/commit-import.dto';
 import { QueryProductsReportDto } from './dto/query-products-report.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -66,7 +66,10 @@ export class ProductsController {
 
   @Get()
   @RequirePermissions(Permission.PRODUCT_READ)
-  list(@TenantId() tenantId: string, @Query() query: QueryProductsDto): Promise<Paginated<Product>> {
+  list(
+    @TenantId() tenantId: string,
+    @Query() query: QueryProductsDto,
+  ): Promise<Paginated<ManagedProductView>> {
     return this.productsService.list(tenantId, query);
   }
 
@@ -76,7 +79,7 @@ export class ProductsController {
   search(
     @TenantId() tenantId: string,
     @Query() query: SearchProductsDto,
-  ): Promise<Paginated<Product>> {
+  ): Promise<Paginated<ManagedProductView>> {
     return this.productsService.search(tenantId, query);
   }
 

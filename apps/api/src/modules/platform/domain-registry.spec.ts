@@ -48,8 +48,11 @@ describe('the registry is total, and answers with complete descriptors', () => {
      */
     const loose = DOMAIN_REGISTRY as Record<string, DomainDescriptor | undefined>;
     expect(loose['TILE_SHOP']).toBeUndefined();
-    expect(loose['RETAIL']).toBeUndefined();
     expect(loose['SOMETHING_NEW']).toBeUndefined();
+    // `RETAIL` was a probe here until D120 brought the template back. It is now a
+    // registered value, so using it to prove "unknown answers undefined" would
+    // assert the opposite of the truth — the probe was retired, not the rule.
+    expect(loose['RETAIL']).toBeDefined();
     // POSITIVE CONTROL: a registered value is found.
     expect(loose['HARDWARE']).toBeDefined();
   });
@@ -130,12 +133,27 @@ describe('the Salesperson is one domain’s role (D108)', () => {
 });
 
 describe('workspace templates derive from the registry (D55/D56)', () => {
-  it('offers exactly the three templates, in order, with the canonical types', () => {
+  it('offers exactly the four templates, in order, with the canonical types', () => {
+    // D120 (2.9) — RETAIL joins the allowlist. An exact ordered set rather than a
+    // count, per D30: this fails if a template is added, removed, reordered, or
+    // bound to the wrong business type.
     expect(WORKSPACE_TEMPLATES.map((t) => [t.key, t.businessType])).toEqual([
       ['HARDWARE', 'HARDWARE'],
       ['RESTAURANT', 'RESTAURANT'],
       ['HOTEL', 'HOTEL'],
+      ['RETAIL', 'RETAIL'],
     ]);
+  });
+
+  it('every offered template has a distinct order, so the picker cannot tie', () => {
+    // The sort is `a.template.order - b.template.order`; equal values fall back
+    // to registry insertion order, which reads as deliberate until someone
+    // reorders the registry and the picker silently changes. RETAIL was written
+    // as order 2 first — colliding with RESTAURANT — and this is what would have
+    // caught it.
+    const orders = WORKSPACE_TEMPLATES.map((t) => domainFor(t.businessType).template.order);
+
+    expect(new Set(orders).size).toBe(orders.length);
   });
 
   it('GENERAL exists as a domain but is deliberately not offered', () => {

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { PlatformModule } from '../platform/platform.module';
 import { PromotionsController } from './promotions.controller';
 import { PromotionsRepository } from './promotions.repository';
 import { PromotionsService } from './promotions.service';
@@ -14,7 +15,9 @@ import { PromotionsService } from './promotions.service';
  * lets the Restaurant POS Catalogue reuse its list/evaluation entry points.
  */
 @Module({
-  imports: [AuditLogModule],
+  // PlatformModule supplies BusinessProfileService, which D56 channel
+  // validation reads. It imports only AuditLogModule, so there is no cycle.
+  imports: [AuditLogModule, PlatformModule],
   controllers: [PromotionsController],
   providers: [PromotionsService, PromotionsRepository],
   exports: [PromotionsService, PromotionsRepository],

@@ -23,9 +23,67 @@ export interface AppSettings {
   documents: DocumentSettings;
   /** Email / WhatsApp share configuration. */
   sharing: SharingSettings;
+
+  /**
+   * D125 Part 3 (`5.4`) and Phase 5 step `5.8` — barcode prefixes and label
+   * geometry. Both live in the settings blob rather than columns, so neither
+   * needs a migration and the shape can evolve per format pack.
+   */
+  catalogue: CatalogueSettings;
 }
 
 /** Quotation defaults. Owner/Admin tune these; the quotation service reads them. */
+/**
+ * D125 Part 3 — the barcode prefix map, and Phase 5 `5.8` — label geometry.
+ *
+ * ## The sequencing constraint, which is binding
+ *
+ * The prefix must be configured BEFORE any barcode is allocated, or the tenant
+ * reprints every label it has produced. `barcodePrefix` is therefore `null` by
+ * default and allocation REFUSES while it is null — an unconfigured tenant gets
+ * a refusal that says what to configure, not a default that quietly commits it
+ * to a prefix nobody chose.
+ */
+export interface CatalogueSettings {
+  /**
+   * The tenant's in-store EAN-13 prefix — 2 to 6 digits, starting `02` or
+   * `20`-`29` (the GS1 range reserved for a shop's own codes). `null` until
+   * configured, which is a refusal, not a default.
+   */
+  barcodePrefix: string | null;
+  /**
+   * Per-category overrides, keyed by `ProductCategory.id`. Optional and
+   * usually empty: a shop needs one prefix. It exists because a shop that
+   * franchises or splits its ranges has no other place to say so.
+   */
+  barcodePrefixByCategoryId: Record<string, string>;
+  /** `5.8` — label geometry, per tenant and (via the settings row) per branch. */
+  label: LabelSettings;
+}
+
+/**
+ * Physical label geometry. Millimetres throughout — a label is a physical
+ * object and every sheet a shop buys is specified in mm.
+ */
+export interface LabelSettings {
+  widthMm: number;
+  heightMm: number;
+  /** Labels across one sheet; 1 for a roll printer. */
+  columns: number;
+  rows: number;
+  marginTopMm: number;
+  marginLeftMm: number;
+  gapXMm: number;
+  gapYMm: number;
+  /** What the label carries besides the symbol. */
+  showProductName: boolean;
+  showVariantOptions: boolean;
+  showPrice: boolean;
+  showSku: boolean;
+  /** The symbology to render. */
+  symbology: 'EAN13' | 'CODE128';
+}
+
 export interface QuotationSettings {
   /** Days a new quotation stays valid by default. */
   defaultValidityDays: number;
