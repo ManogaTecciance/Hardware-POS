@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Building2, ChevronDown, LogOut, MonitorSmartphone, PanelLeft } from 'lucide-react';
+import { ChevronDown, LogOut, PanelLeft } from 'lucide-react';
 import * as React from 'react';
 
 import { CommandPalette } from '@/components/command-palette';
@@ -56,29 +56,26 @@ export function Header() {
             cutover so the header row does not overflow on portrait
             tablet. */}
         <ThemeToggle className="hidden tab:inline-flex" />
-        <ProfileMenu
-          name={session.user.name}
-          role={session.user.role}
-          branch={session.branchName}
-          register={session.registerName}
-          onLogout={onLogout}
-        />
+        <ProfileMenu name={session.user.name} role={session.user.role} onLogout={onLogout} />
       </div>
     </header>
   );
 }
 
+/*
+ * D101 — the menu names the person and their role, and nothing else. It used
+ * to list the branch and the register underneath; the PO asked for both to go
+ * (2026-09-08): a menu about the account is not where the till's location
+ * belongs, and on a one-branch shop the two lines were noise under every name.
+ * The session still carries both for the screens that need them.
+ */
 function ProfileMenu({
   name,
   role,
-  branch,
-  register,
   onLogout,
 }: {
   name: string;
   role: string;
-  branch: string;
-  register: string;
   onLogout: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -131,16 +128,6 @@ function ProfileMenu({
           <div className="px-3 py-2.5">
             <p className="truncate text-sm font-semibold">{name}</p>
             <p className="text-xs capitalize text-muted-foreground">{role.toLowerCase()}</p>
-            <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-              <p className="flex items-center gap-1.5">
-                <Building2 className="h-3.5 w-3.5" aria-hidden />
-                {branch}
-              </p>
-              <p className="flex items-center gap-1.5">
-                <MonitorSmartphone className="h-3.5 w-3.5" aria-hidden />
-                {register}
-              </p>
-            </div>
           </div>
           {/* Theme toggle lives in the profile menu below the `tab:` cutover
               because the header row itself hides it there — see above. */}

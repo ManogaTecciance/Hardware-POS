@@ -3772,6 +3772,19 @@ while the owner's 2222 can; a real salesperson is given a PIN like any other
 user. The seed comment now states the difference instead of claiming the
 credentials mirror the owner's.
 
+### D101 — the account menu names the person and their role, nothing else
+
+**Decision (PO, 2026-09-08).** The menu behind the profile button in the
+header shows the user's name and role. The two lines beneath them — the branch
+("Main Dining") and the register ("Counter 1") — are removed.
+
+**Why.** The menu is about the account: who is signed in, what they are, and
+the way out. The till's location is a property of the session, not of the
+person, and on a one-branch, one-register shop the two lines were the same
+noise under every name. Nothing else changes: the session still carries the
+branch and register for the screens that need them, and the header's own
+branch and register chips were already gone (DASH-015).
+
 ---
 
 ## Open decisions
