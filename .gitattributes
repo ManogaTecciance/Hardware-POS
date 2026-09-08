@@ -1,0 +1,26 @@
+# Shell scripts are always LF, on every platform.
+#
+# Git already stores them that way, so Linux and CI have never seen a problem.
+# `core.autocrlf=true` — the usual setting on a Windows checkout — rewrites them
+# to CRLF in the WORKING TREE, and two of these scripts are executed straight
+# out of the working tree by Docker. A `\r` on the shebang makes the kernel look
+# for an interpreter literally named `/bin/bash\r`, and the error it reports is
+# `No such file or directory` naming the script — which reads as a missing file
+# rather than a corrupt one, and sends you looking in the wrong place.
+#
+#   - `docker/localstack/ready.d/01-create-bucket.sh` is bind-mounted into
+#     LocalStack. It failed on every container start for eleven days; the only
+#     symptom was a 500 on product image upload, saying the uploads bucket did
+#     not exist — from a part of the app that has nothing to do with Docker.
+#     That is the exact failure the script's own header predicted, arriving by
+#     a route it did not anticipate.
+#   - `apps/api/docker-entrypoint.sh` is the API image's `ENTRYPOINT` and the
+#     Dockerfile has no `dos2unix` step. It has been safe only because the
+#     image is built on Linux; it would fail identically if ever built here.
+#
+# `eol=lf` takes precedence over `core.autocrlf`, so nobody has to configure
+# anything locally for this to be right.
+#
+# Scoped to `*.sh` deliberately. A blanket `* text=auto` would renormalise the
+# whole tree and collide with every branch currently open in other repos.
+*.sh text eol=lf
