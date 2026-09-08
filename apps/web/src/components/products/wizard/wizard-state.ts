@@ -11,6 +11,7 @@
 
 import { validateAttributes, type AttributeField } from '@hardware-pos/shared';
 
+import type { ClientQuantityType } from '@/lib/catalog';
 import type { ProductBusinessKind } from '@/lib/products/product-presentation';
 import type { ManagedProduct, ProductItemType } from '@/lib/products-api';
 import type {
@@ -94,6 +95,26 @@ export interface WizardState {
    * tenant's history.
    */
   taxable: boolean;
+  /**
+   * D113 (`6.1`) — sold by the piece, or by weight/measure.
+   *
+   * Top-level rather than inside `simple`, because it is a fact about the
+   * PRODUCT and not about one pricing shape: rice is sold by the kilo
+   * whether or not it also comes in Samba and Basmathi. A variant product
+   * carries it on the parent and every variant inherits it.
+   */
+  quantityType: ClientQuantityType;
+  /**
+   * D113b — what the quantity is measured IN: "kg", "g", "L", "m".
+   *
+   * Free text, deliberately (D113b §1): nothing computes on it, it is
+   * printed. A fixed dropdown was the original Phase 6 scope and D113
+   * reduced it to one field precisely so a shop selling by the cubit is
+   * not blocked on us adding a row.
+   *
+   * `''` here, `null` on the wire — an empty string is what an input holds.
+   */
+  unitOfMeasure: string;
   imageUrl: string;
 
   // Step 2 — Variations
@@ -189,6 +210,10 @@ export function initialState(): WizardState {
     description: '',
     trackInventory: true,
     taxable: true,
+    // WHOLE, like the column default (D113): a new product behaves exactly
+    // as products did before this field existed.
+    quantityType: 'WHOLE',
+    unitOfMeasure: '',
     imageUrl: '',
     hasVariations: false,
     variations: [],
@@ -287,6 +312,11 @@ export function hydrateFromProduct(
     // Round-trips on edit. `?? true` guards a response from an API that predates
     // the field, which must not silently flip a product to exempt.
     taxable: product.taxable ?? true,
+    // Round-trips on edit, same as `taxable`. `?? 'WHOLE'` guards a response
+    // from an API predating the field, which must not silently convert a
+    // measured product into a counted one on the next save.
+    quantityType: product.quantityType ?? 'WHOLE',
+    unitOfMeasure: product.unitOfMeasure ?? '',
     imageUrl: product.imageUrl ?? '',
     hasVariations,
     variations: variationDrafts,
@@ -471,6 +501,14 @@ export function validateStep(
   }
 
   if (step === 'pricing') {
+    // D113c — a measured product MUST name its unit. The server refuses it
+    // too, and the server is the authority; this is here so the operator
+    // finds out beside the field rather than as a toast after Save.
+    if (state.quantityType === 'DECIMAL' && !state.unitOfMeasure.trim()) {
+      errors['unitOfMeasure'] =
+        'Name the unit this is sold in — for example kg, g or L.';
+    }
+
     if (state.hasVariations) {
       const enabled = state.variants.filter((v) => v.enabled);
       if (enabled.length === 0) {
@@ -524,6 +562,24 @@ export function validateStep(
   }
 
   return errors;
+}
+
+/**
+ * D113 (`6.1`) — "Selling price", or "Selling price (per kg)".
+ *
+ * The operator's actual question was "where do I enter a weight price" — so
+ * the price field has to SAY it is per kilo, or the number is ambiguous the
+ * moment the product is measured.
+ *
+ * One function, three call sites: the simple form, the variant table header
+ * and the variant list. `2.12` is the standing reason — the same value
+ * labelled independently in N places becomes N different labels.
+ */
+export function sellingPriceLabel(state: WizardState): string {
+  const unit = state.unitOfMeasure.trim();
+  return state.quantityType === 'DECIMAL' && unit
+    ? `Selling price (per ${unit})`
+    : 'Selling price';
 }
 
 /** D65 — drafts → the PUT body (percent → 0–1 rate). Validated above. */
@@ -585,6 +641,10 @@ export interface ProductCreatePayload {
   isActive: boolean;
   /** D101 (3.13) — always sent, so the value the operator saw is what is stored. */
   taxable: boolean;
+  /** D113 (`6.1`) — always sent, for the same reason `taxable` is. */
+  quantityType: ClientQuantityType;
+  /** D113b — null when the product is sold by the piece. */
+  unitOfMeasure: string | null;
   imageUrl?: string | null;
   /**
    * D45 — Restaurant fields. Emitted for every tenant; Retail tenants send
@@ -631,6 +691,13 @@ export function buildCreateInput(
     // Always sent, so the value the operator saw is the value stored. The server
     // also defaults it (`dto.taxable ?? true`) for clients that omit it.
     taxable: state.taxable,
+    quantityType: state.quantityType,
+    // Null rather than '' when sold by the piece: the column is nullable and
+    // NULL is the honest reading of "this has no unit". An empty string would
+    // be a unit whose name happens to be blank, and `saleLineQuantity` would
+    // print a trailing space on every receipt.
+    unitOfMeasure:
+      state.quantityType === 'DECIMAL' ? state.unitOfMeasure.trim() || null : null,
     imageUrl: imageUrl || null,
     // D45 — Restaurant fields. `foodType` sent as null when empty so a
     // Retail create (which never surfaces the picker) explicitly clears

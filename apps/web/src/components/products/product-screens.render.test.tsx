@@ -113,6 +113,9 @@ const product: ManagedProduct = {
   imageUrl: null,
   isActive: true,
   taxable: true,
+  // D113 (`6.1`) — these fixtures stand for ordinary counted stock.
+  quantityType: 'WHOLE',
+  unitOfMeasure: null,
   // A perfectly valid local product: never reached QuickBooks, and under LOCAL or
   // DISABLED never will. This is the row that must not be styled as a fault.
   quickbooksItemId: null,

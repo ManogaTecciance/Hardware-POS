@@ -1,5 +1,6 @@
 import { api, authorizedFetch } from './api';
 import type { Session } from './auth';
+import type { ClientQuantityType } from './catalog';
 
 export type ProductSyncStatus = 'NOT_SYNCED' | 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
 
@@ -43,6 +44,18 @@ export interface ManagedProduct {
   isActive: boolean;
   /** D101 — read back so the edit wizard can round-trip it. */
   taxable: boolean;
+  /**
+   * D113 (`6.1`) — sold by the piece, or by weight/measure.
+   *
+   * REQUIRED, not optional, for the reason `taxable` above is: the edit
+   * wizard reads this to re-populate its own control, and an optional field
+   * crossing a wire is the one a mapper drops in silence. A product opened
+   * for editing would then be saved back as WHOLE without anyone touching
+   * the control — rice would quietly stop being sold by the kilo.
+   */
+  quantityType: ClientQuantityType;
+  /** D113b — `"kg"`, `"L"`. Null for a WHOLE product, which has no unit. */
+  unitOfMeasure: string | null;
   quickbooksItemId: string | null;
   syncStatus: ProductSyncStatus;
   lastSyncedAt: string | null;

@@ -64,6 +64,9 @@ const singleVariantProduct: ManagedProduct = {
   imageUrl: null,
   isActive: true,
   taxable: true,
+  // D113 (`6.1`) — these fixtures stand for ordinary counted stock.
+  quantityType: 'WHOLE',
+  unitOfMeasure: null,
   quickbooksItemId: null,
   syncStatus: 'NOT_SYNCED',
   lastSyncedAt: null,

@@ -12,7 +12,12 @@ import type { ProductBusinessKind } from '@/lib/products/product-presentation';
 import { useIsTabletUp } from '@/lib/use-viewport';
 
 import { StepRestaurantAdditions } from './step-restaurant-additions';
-import { variantLabel, type VariantDraft, type WizardState } from './wizard-state';
+import {
+  sellingPriceLabel,
+  variantLabel,
+  type VariantDraft,
+  type WizardState,
+} from './wizard-state';
 
 /**
  * Add Product wizard — Step 3: Pricing & inventory (D44).
@@ -85,6 +90,14 @@ export function StepPricingInventory({
         </InfoBanner>
       ) : null}
 
+      {/*
+        D113 (`6.1`) — above both pricing shapes on purpose. Measure is a
+        property of the product, so it applies whether the price lives on
+        the product or on its variants, and it has to be set BEFORE the
+        price is read: "200" means nothing until you know it is per kilo.
+      */}
+      <MeasureCard state={state} errors={errors} onChange={onChange} />
+
       {state.hasVariations ? (
         <VariantMatrix
           state={state}
@@ -151,7 +164,7 @@ function SimpleForm({
       </Field>
 
       <Field
-        label="Selling price"
+        label={sellingPriceLabel(state)}
         htmlFor="simple-price"
         required
         error={errors['simple-price']}
@@ -321,7 +334,8 @@ function VariantMatrix({
                 </Th>
                 <Th>Barcode</Th>
                 <Th>
-                  Selling price<span className="text-danger">*</span>
+                  {sellingPriceLabel(state)}
+                  <span className="text-danger">*</span>
                 </Th>
                 {isLocal ? <Th>Opening stock</Th> : null}
                 <Th>Reorder</Th>
@@ -458,7 +472,8 @@ function VariantMatrix({
                   </div>
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Selling price<span className="text-danger">*</span>
+                      {sellingPriceLabel(state)}
+                      <span className="text-danger">*</span>
                     </label>
                     <MoneyInput
                       value={v.unitPrice}
@@ -546,6 +561,81 @@ function VariantMatrix({
 }
 
 // ── Small primitives ─────────────────────────────────────────────────────────
+
+/**
+ * D113 (`6.1`) — how this product is sold, and in what unit.
+ *
+ * The gap this closes: `quantityType` shipped on the column, the DTO, the
+ * read model and the till, and there was no way to SET it. A measured
+ * product could only be created by writing to the database directly, which
+ * is how the seeded rice worked and why nothing else could.
+ *
+ * The unit is free text (D113b §1) and the examples are a placeholder, not
+ * a list — a shop selling rope by the foot must not have to wait for us.
+ */
+function MeasureCard({
+  state,
+  errors,
+  onChange,
+}: {
+  state: WizardState;
+  errors: Record<string, string>;
+  onChange: (patch: Partial<WizardState>) => void;
+}) {
+  const measured = state.quantityType === 'DECIMAL';
+
+  return (
+    <div className="grid grid-cols-1 gap-4 rounded-2xl border border-border bg-card p-4 md:grid-cols-2">
+      <Field label="How is this sold?" htmlFor="quantity-type">
+        <Select
+          id="quantity-type"
+          value={state.quantityType}
+          onChange={(e) =>
+            onChange(
+              e.target.value === 'DECIMAL'
+                ? { quantityType: 'DECIMAL' }
+                : // Clearing the unit on the way back to WHOLE keeps the two
+                  // fields from disagreeing: a product sold by the piece that
+                  // still carried "kg" would print "3 kg" for three tins.
+                  { quantityType: 'WHOLE', unitOfMeasure: '' },
+            )
+          }
+        >
+          <option value="WHOLE">By the piece — 1, 2, 3</option>
+          <option value="DECIMAL">By weight or measure — 0.75, 1.5</option>
+        </Select>
+      </Field>
+
+      {measured ? (
+        <Field
+          label="Unit"
+          htmlFor="unit-of-measure"
+          required
+          error={errors['unitOfMeasure']}
+        >
+          <Input
+            id="unit-of-measure"
+            value={state.unitOfMeasure}
+            onChange={(e) => onChange({ unitOfMeasure: e.target.value })}
+            placeholder="kg, g, L, ml, m…"
+            maxLength={12}
+            aria-invalid={!!errors['unitOfMeasure']}
+          />
+        </Field>
+      ) : null}
+
+      <div className="md:col-span-2">
+        <InfoBanner>
+          {measured
+            ? state.unitOfMeasure.trim()
+              ? `The till will ask "How many ${state.unitOfMeasure.trim()}?" and price the amount typed — 0.75 × the price below. Receipts read “0.750 ${state.unitOfMeasure.trim()}”.`
+              : 'Name the unit above, and the price below becomes a price per unit.'
+            : 'Quantity is a whole number and the till adds one at a time. Switch to “by weight or measure” for anything sold loose — rice, dhal, umbalakada.'}
+        </InfoBanner>
+      </div>
+    </div>
+  );
+}
 
 function Field({
   label,
