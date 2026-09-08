@@ -38,7 +38,7 @@ interface Props {
   state: WizardState;
   errors: Record<string, string>;
   /**
-   * D104 — the tenant's attribute library, fetched by the shell.
+   * D125 — the tenant's attribute library, fetched by the shell.
    *
    * Defaults to empty, and empty means the free-text fields this step has
    * always had. That is what keeps a tenant with no library — every hardware
@@ -131,7 +131,7 @@ export function StepVariations({
 
   /*
    * The attributes this product may use: the ones bound to its category, plus
-   * every unbound scale (D104a — `categoryId` is a binding hint, and an unbound
+   * every unbound scale (D125a — `categoryId` is a binding hint, and an unbound
    * `Colour` applies everywhere).
    *
    * Recomputed from `state.categoryId`, so changing the category in Step 1
@@ -334,7 +334,7 @@ export function StepVariations({
                       </label>
                       {libraryInUse ? (
                         /*
-                          D104 — the scales an operator already defined, not a box
+                          D125 — the scales an operator already defined, not a box
                           asking them to retype one. Names come from the library, so
                           nothing here is hard-coded and a new attribute appears
                           without a code change.

@@ -7,7 +7,7 @@
  * cliff at a full return: refund 99% of a sale and its status stayed
  * `COMPLETED` and the receipt reprinted; refund the last 1% and the status
  * became `REFUNDED` and the receipt was gone. **Every exchange crossed that
- * cliff** — a size swap returns the whole sale by definition (D109) — so after
+ * cliff** — a size swap returns the whole sale by definition (D130) — so after
  * any exchange the original receipt became unreachable.
  *
  * The sale happened and money moved; the receipt is the record of it. A

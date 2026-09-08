@@ -343,14 +343,14 @@ describe('D134c — the unit is required for a measured product', () => {
 });
 
 /**
- * D113e — the server is the authority, not the hidden control.
+ * D134e — the server is the authority, not the hidden control.
  *
  * The wizard stopped offering "How is this sold?" outside RETAIL, but hiding is
  * usability: a direct `POST /v1/products` could still make a hardware product
  * DECIMAL, and hardware runs the retail till, so a numpad would have appeared
  * for it. CLAUDE.md is explicit that the server must refuse what the UI hides.
  */
-describe('D113e — measured goods are refused where the domain does not offer them', () => {
+describe('D134e — measured goods are refused where the domain does not offer them', () => {
   async function becomeHardware() {
     await prisma.tenantBusinessProfile.updateMany({
       where: { tenantId: shop.tenantId },
@@ -409,7 +409,7 @@ describe('D113e — measured goods are refused where the domain does not offer t
   it('does NOT brick a product that is already measured', async () => {
     /*
      * The reason this guard reads the INCOMING value and not the resulting
-     * state, unlike D113c's unit check one describe up.
+     * state, unlike D134c's unit check one describe up.
      *
      * A row can be DECIMAL in a domain that no longer offers it — created
      * before the capability existed, or before the workspace changed type. If

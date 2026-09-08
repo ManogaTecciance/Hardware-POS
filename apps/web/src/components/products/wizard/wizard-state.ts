@@ -51,7 +51,7 @@ export interface VariationDraft {
   key: string;
   name: string;
   /**
-   * D104 — the attribute-library definition this dimension was chosen from.
+   * D125 — the attribute-library definition this dimension was chosen from.
    *
    * Three states, and they are all different:
    *  - `undefined` — never mapped by this wizard. The payload OMITS the key,
@@ -66,7 +66,7 @@ export interface VariationDraft {
 }
 
 /**
- * The library attributes offered for one category (D104a).
+ * The library attributes offered for one category (D125a).
  *
  * A definition bound to this category, **plus every unbound one** — the
  * schema is explicit that `categoryId` is a binding HINT and that “an unbound

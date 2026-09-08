@@ -108,7 +108,7 @@ export class ReceiptsService {
    * at a full return: refund 99% of a sale and its status stayed `COMPLETED`
    * and the receipt reprinted; refund the last 1% and the status became
    * `REFUNDED` and the receipt was gone. **And every exchange crossed it** —
-   * a size swap returns the whole sale by definition (D109), so after any
+   * a size swap returns the whole sale by definition (D130), so after any
    * exchange the original receipt became unreachable.
    *
    * The sale happened; the receipt is the record of it, and a customer or an

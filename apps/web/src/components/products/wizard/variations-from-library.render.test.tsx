@@ -2,7 +2,7 @@
  * Requirement 2 (2026-09-08) — a product's variations come from the tenant's
  * attribute library, not from an operator retyping "Size" and "Small".
  *
- * The library (D104/D104a), the nullable links on `ProductVariationDimension`
+ * The library (D125/D125a), the nullable links on `ProductVariationDimension`
  * and `ProductVariationOption`, and the PUT contract that accepts them all
  * shipped in Phase 5. The wizard simply never used any of it: `VariationDraft`
  * had nowhere to hold an id, so `buildVariationsPayload` could not send one.
@@ -78,7 +78,7 @@ const LIBRARY: AttributeDefinition[] = [
     id: 'def_material',
     name: 'Material',
     position: 3,
-    // Unbound: D104a says an unbound definition applies everywhere.
+    // Unbound: D125a says an unbound definition applies everywhere.
     categoryId: null,
     categoryName: null,
     linkedDimensionCount: 0,
@@ -138,7 +138,7 @@ describe('which attributes a category offers', () => {
     expect(names).not.toContain('Grit');
   });
 
-  it('offers unbound attributes everywhere (D104a)', () => {
+  it('offers unbound attributes everywhere (D125a)', () => {
     // `categoryId` is a binding HINT, and the schema is explicit that an
     // unbound scale applies to every category. Filtering on equality alone
     // would hide exactly the shared scales the library exists to share.

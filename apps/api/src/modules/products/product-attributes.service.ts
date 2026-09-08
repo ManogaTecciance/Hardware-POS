@@ -19,7 +19,7 @@ export class ProductAttributesService {
   constructor(private readonly profiles: BusinessProfileService) {}
 
   /**
-   * D113e — refuse a measured product from a domain that does not sell by
+   * D134e — refuse a measured product from a domain that does not sell by
    * measure. RETAIL declares `catalogue.measuredGoods`; hardware, food
    * service and general do not.
    *
@@ -31,7 +31,7 @@ export class ProductAttributesService {
    *
    * ## Why this checks the INCOMING value, not the resulting state
    *
-   * D113c's unit check reads the resulting state, because leaving a product
+   * D134c's unit check reads the resulting state, because leaving a product
    * measured-with-no-unit is invalid however you arrive there. This one is
    * the opposite: it must not brick a row that already exists. A hardware
    * tenant that acquired a DECIMAL product before this guard — the pilot has

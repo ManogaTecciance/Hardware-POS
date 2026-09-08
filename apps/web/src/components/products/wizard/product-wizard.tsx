@@ -183,7 +183,7 @@ export function ProductWizard(props: Props) {
   const [categories, setCategories] = React.useState<CategoryNode[]>(props.categories ?? []);
   const [branches, setBranches] = React.useState<BranchSummary[]>([]);
   /*
-   * D104 — the tenant's attribute library, so Step 2 can offer the scales an
+   * D125 — the tenant's attribute library, so Step 2 can offer the scales an
    * operator has already defined instead of asking them to retype "Size" and
    * "Small" on every product. Fetched by the SHELL and passed down, the same
    * way `branches` and the attribute schema are.
