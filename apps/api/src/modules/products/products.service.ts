@@ -122,6 +122,10 @@ export class ProductsService {
     // D64 — the empty document counts as a full document, so a domain with
     // required attributes refuses a create that omits them entirely.
     await this.attributes.assertValidDocument(tenantId, dto.attributes ?? {});
+    // D113e — and only a domain that sells by measure may ask for one. The
+    // wizard hides the control for everyone else; hiding is usability, and
+    // this is the authority that makes it true of the API as well.
+    await this.attributes.assertMeasuredGoodsAllowed(tenantId, dto.quantityType);
     // D113c — a measured product must say what it is measured in.
     assertMeasuredProductNamesItsUnit(
       dto.quantityType ?? QuantityType.WHOLE,
@@ -219,6 +223,11 @@ export class ProductsService {
       dto.quantityType ?? existing.quantityType,
       dto.unitOfMeasure !== undefined ? dto.unitOfMeasure : existing.unitOfMeasure,
     );
+    // D113e — `dto.quantityType`, NOT the resulting state. The rule is “you
+    // may not ASSERT measured here”: a row that is already DECIMAL in a
+    // domain without the capability must stay editable, including the edit
+    // that switches it back to WHOLE.
+    await this.attributes.assertMeasuredGoodsAllowed(tenantId, dto.quantityType);
 
     const changingStock =
       dto.quantityOnHand !== undefined &&

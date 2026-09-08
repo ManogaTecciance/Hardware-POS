@@ -342,6 +342,121 @@ describe('D113c — the unit is required for a measured product', () => {
   });
 });
 
+/**
+ * D113e — the server is the authority, not the hidden control.
+ *
+ * The wizard stopped offering "How is this sold?" outside RETAIL, but hiding is
+ * usability: a direct `POST /v1/products` could still make a hardware product
+ * DECIMAL, and hardware runs the retail till, so a numpad would have appeared
+ * for it. CLAUDE.md is explicit that the server must refuse what the UI hides.
+ */
+describe('D113e — measured goods are refused where the domain does not offer them', () => {
+  async function becomeHardware() {
+    await prisma.tenantBusinessProfile.updateMany({
+      where: { tenantId: shop.tenantId },
+      data: { businessType: BusinessType.HARDWARE },
+    });
+  }
+
+  it('refuses a DECIMAL product in a hardware workspace', async () => {
+    await becomeHardware();
+
+    await expect(
+      products.create(
+        shop.tenantId,
+        productInput({ name: 'Rope', quantityType: 'DECIMAL', unitOfMeasure: 'm' }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('POSITIVE CONTROL — the identical create succeeds for retail', async () => {
+    // Without this the refusal above would pass for a guard that refused every
+    // measured product everywhere, which would break the feature outright.
+    const rope = await products.create(
+      shop.tenantId,
+      productInput({ name: 'Rope', quantityType: 'DECIMAL', unitOfMeasure: 'm' }),
+    );
+
+    const row = await prisma.product.findUniqueOrThrow({ where: { id: rope.id } });
+    expect(row.quantityType).toBe(QuantityType.DECIMAL);
+  });
+
+  it('leaves an ordinary WHOLE create alone in a hardware workspace', async () => {
+    // The guard must be invisible to the templates it protects. A hardware shop
+    // creating hammers must not notice that this rule exists.
+    await becomeHardware();
+
+    const hammer = await products.create(shop.tenantId, productInput({ name: 'Hammer' }));
+
+    const row = await prisma.product.findUniqueOrThrow({ where: { id: hammer.id } });
+    expect(row.quantityType).toBe(QuantityType.WHOLE);
+  });
+
+  it('refuses turning an existing product DECIMAL', async () => {
+    await becomeHardware();
+    const hammer = await products.create(shop.tenantId, productInput({ name: 'Hammer' }));
+
+    await expect(
+      products.update(
+        shop.tenantId,
+        hammer.id,
+        { quantityType: 'DECIMAL', unitOfMeasure: 'kg' } as never,
+        'OWNER' as never,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('does NOT brick a product that is already measured', async () => {
+    /*
+     * The reason this guard reads the INCOMING value and not the resulting
+     * state, unlike D113c's unit check one describe up.
+     *
+     * A row can be DECIMAL in a domain that no longer offers it — created
+     * before the capability existed, or before the workspace changed type. If
+     * the guard read the resulting state, every edit to that row would be
+     * refused, including the edit that fixes it. The operator would be locked
+     * out of their own data by a rule meant to protect them.
+     */
+    const rice = await products.create(
+      shop.tenantId,
+      productInput({ name: 'Rice', quantityType: 'DECIMAL', unitOfMeasure: 'kg' }),
+    );
+    await becomeHardware();
+
+    // An unrelated edit still works.
+    await products.update(
+      shop.tenantId, rice.id, { name: 'Old Rice' } as never, 'OWNER' as never,
+    );
+    let row = await prisma.product.findUniqueOrThrow({ where: { id: rice.id } });
+    expect(row.name).toBe('Old Rice');
+    expect(row.quantityType).toBe(QuantityType.DECIMAL);
+
+    // And so does the edit that puts it right.
+    await products.update(
+      shop.tenantId, rice.id, { quantityType: 'WHOLE' } as never, 'OWNER' as never,
+    );
+    row = await prisma.product.findUniqueOrThrow({ where: { id: rice.id } });
+    expect(row.quantityType).toBe(QuantityType.WHOLE);
+  });
+
+  it('refuses a food-service workspace too, not only hardware', async () => {
+    // The capability is absent from every domain but retail. Asserting one
+    // other domain proves the rule reads the registry rather than naming
+    // HARDWARE in an if.
+    await prisma.tenantBusinessProfile.updateMany({
+      where: { tenantId: shop.tenantId },
+      data: { businessType: BusinessType.RESTAURANT },
+    });
+
+    await expect(
+      products.create(
+        shop.tenantId,
+        productInput({ name: 'Soup', quantityType: 'DECIMAL', unitOfMeasure: 'L' }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
 describe('a fractional quantity survives the database', () => {
   it('stores 0.750 exactly, at three decimal places', async () => {
     // `Decimal(12,3)` is the whole reason D113 needs no schema work beyond the
