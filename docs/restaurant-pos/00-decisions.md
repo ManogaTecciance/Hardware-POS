@@ -4457,11 +4457,11 @@ column, the QuickBooks badges and the QuickBooks detail fields on the customer
 page render only when the QUICKBOOKS module is enabled, resolved from the
 platform profile (D31) — a restaurant customer no longer sees "Not synced".
 Their commit also dropped the **Type** column (Retail / Wholesale / Credit)
-from the list with no reason given, while leaving the Type filter above it in
-place; the column is restored, since a filter on a value the table does not
-show is the odder state, and `main` still has it. The empty-state `colSpan`
-mirrors the header row in one named constant (six fixed columns plus Sync)
-instead of two scattered literals.
+from the list. The merge restored it for want of a stated reason; the PO
+confirmed the same day that the removal was intentional, so it is gone
+again — the Type filter above the list stays, as their branch left it. The
+empty-state `colSpan` mirrors the header row in one named constant (five
+fixed columns plus Sync) instead of two scattered literals.
 
 **One tooltip, `main`'s.** Both sides replaced the CSS-only tooltip with a
 portalled one for the same clipping reason. `main`'s follows the trigger on

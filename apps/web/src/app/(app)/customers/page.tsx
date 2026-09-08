@@ -60,9 +60,9 @@ export default function CustomersPage() {
   const { profile } = useEffectiveProfile();
   // Unresolved profile = no QuickBooks affordances, never the legacy default.
   const quickbooksEnabled = profile ? isModuleEnabled(profile, 'QUICKBOOKS') : false;
-  // The empty-state cells span the header row: six fixed columns plus Sync when
+  // The empty-state cells span the header row: five fixed columns plus Sync when
   // QuickBooks is on. One named place to update when a column is added above.
-  const columnCount = quickbooksEnabled ? 7 : 6;
+  const columnCount = quickbooksEnabled ? 6 : 5;
 
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -238,7 +238,6 @@ export default function CustomersPage() {
             <thead>
               <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Customer</th>
-                <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">Phone</th>
                 <th className="px-4 py-3 font-medium">Credit limit</th>
                 <th className="px-4 py-3 font-medium">Available credit</th>
@@ -282,9 +281,6 @@ export default function CustomersPage() {
                           Inactive
                         </Badge>
                       ) : null}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {CUSTOMER_TYPE_LABELS[c.customerType]}
                     </td>
                     {/* POS-created customers carry their number in `mobile` (capture popup
     posts `mobile`), so read it the way the rest of the app does. */}
