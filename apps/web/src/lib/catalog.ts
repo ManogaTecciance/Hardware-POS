@@ -1,6 +1,6 @@
 'use client';
 
-import { DEFAULT_CURRENCY } from '@hardware-pos/shared';
+import { DEFAULT_CURRENCY, DEFAULT_TIME_ZONE } from '@hardware-pos/shared';
 import * as React from 'react';
 
 import { api } from './api';
@@ -42,6 +42,12 @@ export interface CatalogCategory {
 export interface PosSettings {
   currency: string;
   taxRatePercent: number;
+  /**
+   * Shop timezone. The POS needs it because the API judges an invoice date
+   * against the SHOP's calendar day — a till whose browser is a day ahead would
+   * otherwise offer a date the server rejects.
+   */
+  timezone: string;
 }
 
 interface ApiProduct {
@@ -70,7 +76,11 @@ interface ApiCategory {
   subcategories?: ApiSubcategory[];
 }
 
-const DEFAULT_SETTINGS: PosSettings = { currency: DEFAULT_CURRENCY, taxRatePercent: 0 };
+const DEFAULT_SETTINGS: PosSettings = {
+  currency: DEFAULT_CURRENCY,
+  taxRatePercent: 0,
+  timezone: DEFAULT_TIME_ZONE,
+};
 
 export interface CheckoutData {
   loading: boolean;

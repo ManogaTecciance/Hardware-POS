@@ -21,6 +21,7 @@ import * as React from 'react';
 
 import { buttonVariants } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
+import { formatSaleStamp } from '@/lib/dates';
 import type { Session } from '@/lib/auth';
 import { buildShiftSummary, paymentStatusMeta } from '@/lib/dashboard/adapters';
 import { firstNameOf, greetingFor } from '@/lib/dashboard/roles';
@@ -365,10 +366,7 @@ function RecentSalesCard({ data }: { data: ReturnType<typeof useDashboardData> }
         <ul className="divide-y divide-border">
           {data.recentSales.slice(0, 7).map((s) => {
             const meta = paymentStatusMeta(s.paymentStatus, s.returnStatus);
-            const time = new Date(s.createdAt).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            });
+            const time = formatSaleStamp(s.completedAt ?? s.createdAt);
             return (
               <li key={s.id}>
                 <Link

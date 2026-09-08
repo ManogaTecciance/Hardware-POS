@@ -4,6 +4,8 @@ import { api } from './api';
 import type { Session } from './auth';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
+/** What a FIXED amount is measured against. Absent reads as the line as a whole. */
+export type DiscountBasis = 'LINE' | 'UNIT';
 
 function auth(session: Session): { token: string; tenantId: string } {
   return { token: session.token, tenantId: session.user.tenantId };
@@ -25,6 +27,7 @@ export interface QuotationItemView {
   unitPrice: number;
   discountType: DiscountType | null;
   discountValue: number | null;
+  discountBasis: DiscountBasis;
   discountAmount: number;
   taxAmount: number;
   lineSubtotal: number;
@@ -134,6 +137,8 @@ export interface QuotationItemInput {
   unitPrice?: number;
   discountType?: DiscountType;
   discountValue?: number;
+  /** Whether a FIXED amount is per unit or for the line. Absent = the line. */
+  discountBasis?: DiscountBasis;
   itemNote?: string;
 }
 

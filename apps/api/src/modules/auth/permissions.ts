@@ -40,10 +40,13 @@ export enum Permission {
 
 const ALL_PERMISSIONS: Permission[] = Object.values(Permission);
 
-/** Role → permissions. Owner/Admin manage everything. */
+/** Role → permissions. Owner/Admin/Salesperson manage everything. */
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   OWNER: ALL_PERMISSIONS,
   ADMIN: ALL_PERMISSIONS,
+  // Salesperson is defined as an owner-equivalent role: same permission set,
+  // same discount ceiling, same admin-level overrides.
+  SALESPERSON: ALL_PERMISSIONS,
   MANAGER: [
     Permission.SALE_CREATE,
     Permission.SALE_READ,
@@ -101,4 +104,19 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 
 export function roleHasPermission(role: UserRole, permission: Permission): boolean {
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
+}
+
+/**
+ * Roles with unrestricted, owner-level authority. Beyond holding every
+ * `Permission`, these bypass the operational guard-rails that still bind a
+ * manager — overriding QuickBooks-managed stock, re-converting an already
+ * converted quotation, and so on.
+ *
+ * Keep this the ONLY place that answers "is this an owner-level role", so a new
+ * role never has to be remembered at each call site.
+ */
+export const ADMIN_LEVEL_ROLES: readonly UserRole[] = ['OWNER', 'ADMIN', 'SALESPERSON'];
+
+export function isAdminLevelRole(role: UserRole): boolean {
+  return ADMIN_LEVEL_ROLES.includes(role);
 }

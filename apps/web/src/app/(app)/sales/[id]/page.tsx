@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation';
 import * as React from 'react';
 import { ArrowLeft, FileDown, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
+import { paymentMethodLabel, saleReadsAsPaid, saleStatusLabel } from '@hardware-pos/shared';
+
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { SaleReturnStatusBadge } from '@/components/returns/status-badges';
 import { Badge } from '@/components/ui/badge';
@@ -17,25 +19,23 @@ import { fetchSaleReturns, type ReturnDetail } from '@/lib/returns';
 import { fetchSale, retrySaleSync, type PaymentStatusCode, type SaleDetail } from '@/lib/sales';
 import { formatMoney } from '@/lib/utils';
 
-const PAYMENT_STATUS: Record<
-  PaymentStatusCode,
-  { label: string; variant: 'success' | 'warning' | 'neutral' | 'danger' }
-> = {
-  PAID: { label: 'Paid', variant: 'success' },
-  PARTIAL: { label: 'Partially paid', variant: 'warning' },
-  UNPAID: { label: 'Credit / Unpaid', variant: 'danger' },
-  REFUNDED: { label: 'Refunded', variant: 'neutral' },
+// Wording comes from PAYMENT_STATUS_LABELS so the detail page and the list can
+// never word the same sale differently; only the colour is local.
+const PAYMENT_STATUS_VARIANT: Record<PaymentStatusCode, 'success' | 'neutral' | 'danger'> = {
+  PAID: 'success',
+  PARTIAL: 'danger',
+  UNPAID: 'danger',
+  REFUNDED: 'neutral',
 };
 
-const METHOD_LABEL: Record<string, string> = {
-  CASH: 'Cash',
-  CARD: 'Card',
-  BANK_TRANSFER: 'Bank Transfer',
-  QR_PAYMENT: 'QR Payment',
-  CHECK: 'Cheque',
-  STORE_CREDIT: 'Store Credit',
-  OTHER: 'Other',
-};
+/** A due date reads as a day; the time of day on it means nothing. */
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-LK', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  });
+}
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-LK', {
@@ -58,18 +58,26 @@ export default function SaleDetailPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
+  const loadedOnce = React.useRef(false);
 
   React.useEffect(() => {
     if (!session || !id) return;
     let cancelled = false;
-    setLoading(true);
+    // Only the FIRST load blanks the page. Recording a payment refetches through
+    // this same effect, and replacing the whole sale with "Loading sale…" for a
+    // moment is a poor way to show someone the row they just added.
+    if (!loadedOnce.current) setLoading(true);
     setError(null);
     fetchSale(session, id)
       .then((s) => !cancelled && setSale(s))
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load sale');
       })
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => {
+        if (cancelled) return;
+        loadedOnce.current = true;
+        setLoading(false);
+      });
     // Prior returns for the "Returns" section (best-effort; may be empty).
     fetchSaleReturns(session, id)
       .then((r) => !cancelled && setReturns(r))
@@ -127,7 +135,11 @@ export default function SaleDetailPage() {
     );
   }
 
-  const pay = PAYMENT_STATUS[sale.paymentStatus];
+  // A sale covered by an account settlement reads as paid, whatever its own
+  // payment status says about what was tendered at the till.
+  const payVariant = saleReadsAsPaid(sale.creditSettledAt, sale.markedPaidAt)
+    ? 'success'
+    : PAYMENT_STATUS_VARIANT[sale.paymentStatus];
   const canRetry = sale.syncStatus === 'FAILED' || sale.syncStatus === 'PENDING';
   const canReturn =
     sale.status === 'COMPLETED' &&
@@ -175,7 +187,9 @@ export default function SaleDetailPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={pay.variant}>{pay.label}</Badge>
+        <Badge variant={payVariant}>
+          {saleStatusLabel(sale.paymentStatus, sale.creditSettledAt, sale.markedPaidAt)}
+        </Badge>
         <SaleReturnStatusBadge status={sale.returnStatus} />
         <SyncBadge status={sale.syncStatus} />
         {sale.quickbooksDocumentType ? (
@@ -252,27 +266,9 @@ export default function SaleDetailPage() {
                   <span>{formatMoney(sale.balanceAmount)}</span>
                 </div>
               ) : null}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Payments</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              {sale.payments.length === 0 ? (
-                <p className="text-muted-foreground">No payments recorded (credit sale).</p>
-              ) : (
-                sale.payments.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      {METHOD_LABEL[p.method] ?? p.method}
-                      {p.reference ? ` · ${p.reference}` : ''}
-                    </span>
-                    <span className="font-medium">{formatMoney(p.amount)}</span>
-                  </div>
-                ))
-              )}
+              {sale.paymentDueDate ? (
+                <Row label="Payment due" value={formatDay(sale.paymentDueDate)} />
+              ) : null}
             </CardContent>
           </Card>
 
@@ -301,6 +297,68 @@ export default function SaleDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* Payments received — full width under the items, because on a credit sale
+          this is a history to read across (when, how, how much), not a figure to
+          glance at. The Summary card keeps the totals. */}
+      <Card className="overflow-hidden">
+        <CardHeader>
+          <CardTitle>Payments received</CardTitle>
+        </CardHeader>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
+                <th className="px-4 py-3 font-medium">Date &amp; time</th>
+                <th className="px-4 py-3 font-medium">Method</th>
+                <th className="px-4 py-3 font-medium">Reference</th>
+                <th className="px-4 py-3 text-right font-medium">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sale.payments.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                    {sale.creditSettledAt
+                      ? 'Nothing was tendered here — covered when the customer settled their account.'
+                      : sale.balanceAmount > 0
+                        ? 'Nothing received yet — this sale is on the customer\u2019s credit account.'
+                        : 'No payments recorded.'}
+                  </td>
+                </tr>
+              ) : (
+                sale.payments.map((p) => (
+                  <tr key={p.id} className="border-b border-border last:border-0">
+                    {/* Date and time both: two instalments on one day are only
+                        told apart by the time they came in. */}
+                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                      {formatDateTime(p.createdAt)}
+                    </td>
+                    <td className="px-4 py-3">{paymentMethodLabel(p.method)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{p.reference ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
+                      {formatMoney(p.amount)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            {sale.payments.length > 1 ? (
+              // Only earns its row once there is more than one payment to add up.
+              <tfoot>
+                <tr className="border-t border-border bg-muted/50">
+                  <td className="px-4 py-3 font-medium" colSpan={3}>
+                    Total received
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
+                    {formatMoney(sale.paidAmount)}
+                  </td>
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+        </div>
+      </Card>
 
       {/* Returns against this sale */}
       {returns.length > 0 ? (
@@ -336,7 +394,7 @@ export default function SaleDetailPage() {
                     </td>
                     <td className="px-4 py-3 text-right">{r.items.length}</td>
                     <td className="px-4 py-3 text-right font-medium">{formatMoney(r.refundTotal)}</td>
-                    <td className="px-4 py-3">{r.refundMethod ? METHOD_LABEL[r.refundMethod] ?? r.refundMethod : '—'}</td>
+                    <td className="px-4 py-3">{r.refundMethod ? paymentMethodLabel(r.refundMethod) : '—'}</td>
                     <td className="px-4 py-3">{r.createdBy?.name ?? '—'}</td>
                     <td className="px-4 py-3">{r.approvedBy?.name ?? '—'}</td>
                     <td className="px-4 py-3">
@@ -356,6 +414,7 @@ export default function SaleDetailPage() {
           </div>
         </Card>
       ) : null}
+
     </div>
   );
 }

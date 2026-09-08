@@ -16,10 +16,18 @@
  * or full customer contact fields — those are sourced from the session/profile
  * here. When the sales API exposes them per-sale, read them from the sale.
  */
+import { DEFAULT_TIME_ZONE, safeTimeZone } from '@hardware-pos/shared';
+
 import { fetchSettings, type DocumentSettings } from './settings-api';
 import type { Session } from './session-store';
 
-export type DocumentProfile = DocumentSettings;
+/**
+ * Everything needed to render a printed document, including the shop timezone
+ * its dates are stated in. Deliberately NOT the viewer's zone: an invoice is a
+ * business record, so a reprint — or the customer's emailed copy opened abroad —
+ * must carry the same date as the original.
+ */
+export type DocumentProfile = DocumentSettings & { timezone: string };
 
 /** Branch / register / cashier + business fallback for a printed sale document. */
 export interface SaleDocumentMeta {
@@ -33,6 +41,7 @@ const LS_KEY = 'hpos.documentProfile';
 
 /** Mock default used only when neither the API nor a cached profile is available. */
 export const DEFAULT_DOCUMENT_PROFILE: DocumentProfile = {
+  timezone: DEFAULT_TIME_ZONE,
   companyName: null,
   addressLine: null,
   phone: null,
@@ -80,8 +89,12 @@ function writeCache(profile: DocumentProfile): void {
 export async function getDocumentProfile(session: Session): Promise<DocumentProfile> {
   try {
     const settings = await fetchSettings(session);
-    writeCache(settings.documents);
-    return settings.documents;
+    const profile: DocumentProfile = {
+      ...settings.documents,
+      timezone: safeTimeZone(settings.timezone),
+    };
+    writeCache(profile);
+    return profile;
   } catch {
     return readCache() ?? DEFAULT_DOCUMENT_PROFILE;
   }

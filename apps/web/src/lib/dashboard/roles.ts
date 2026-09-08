@@ -8,7 +8,7 @@ export type DashboardVariant = 'admin' | 'cashier';
  * Central role → dashboard resolver. Keep this the ONLY place that maps roles to
  * a dashboard variant so no component hard-codes role-name checks.
  *
- * - OWNER / ADMIN / MANAGER / ACCOUNTANT → the analytical Admin dashboard
+ * - OWNER / ADMIN / SALESPERSON / MANAGER / ACCOUNTANT → the analytical Admin dashboard
  * - CASHIER → the operational Cashier dashboard
  *
  * Pure and side-effect free so it is trivially unit-testable.
@@ -33,9 +33,3 @@ export function greetingFor(hour: number): string {
 export function firstNameOf(fullName: string): string {
   return fullName.trim().split(/\s+/)[0] || fullName;
 }
-
-// TODO(test): once a JS test runner is configured in apps/web, cover:
-//   resolveDashboardVariant('OWNER')   === 'admin'
-//   resolveDashboardVariant('ADMIN')   === 'admin'
-//   resolveDashboardVariant('MANAGER') === 'admin'
-//   resolveDashboardVariant('CASHIER') === 'cashier'

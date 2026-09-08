@@ -23,6 +23,18 @@ async function main(): Promise<void> {
     create: { id: TENANT_ID, name: 'Demo Hardware Store', slug: 'demo' },
   });
 
+  // Pin the shop timezone explicitly, matching what provisioning and the
+  // backfill migration do, so a seeded tenant is not the odd one out.
+  const existingSettings = await prisma.tenantSettings.findFirst({
+    where: { tenantId: tenant.id, branchId: null },
+    select: { id: true },
+  });
+  if (!existingSettings) {
+    await prisma.tenantSettings.create({
+      data: { tenantId: tenant.id, branchId: null, data: { timezone: 'Asia/Colombo' } },
+    });
+  }
+
   const branch = await prisma.branch.upsert({
     where: { id: BRANCH_ID },
     update: {},
@@ -56,6 +68,18 @@ async function main(): Promise<void> {
       name: 'Accountant',
       email: 'accountant@hardwarepos.test',
       role: UserRole.ACCOUNTANT,
+      passwordHash: password123,
+      pinHash: null,
+      branchId: null,
+    },
+    {
+      // Owner-equivalent role, so it mirrors the owner's credentials exactly:
+      // email + password, no PIN. A 4-digit PIN is a weak credential for an
+      // account holding every permission, and `POST /auth/pin-login` is public.
+      id: 'usr_salesperson',
+      name: 'Salesperson',
+      email: 'salesperson@hardwarepos.test',
+      role: UserRole.SALESPERSON,
       passwordHash: password123,
       pinHash: null,
       branchId: null,
@@ -141,6 +165,7 @@ async function main(): Promise<void> {
   console.log('Login users:');
   console.log('  Owner       owner@hardwarepos.test / password123');
   console.log('  Accountant  accountant@hardwarepos.test / password123');
+  console.log('  Salesperson salesperson@hardwarepos.test / password123');
   console.log('  Manager     PIN 2222  (x-tenant-id: ' + tenant.id + ')');
   console.log('  Cashier     PIN 1111  (x-tenant-id: ' + tenant.id + ')');
   /* eslint-enable no-console */

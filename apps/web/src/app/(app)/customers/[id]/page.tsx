@@ -3,8 +3,11 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as React from 'react';
-import { ArrowLeft, Pencil, RefreshCw } from 'lucide-react';
+import { ArrowLeft, HandCoins, Pencil, RefreshCw } from 'lucide-react';
 
+import { CustomerCreditHistory } from '@/components/customers/customer-credit-history';
+import { CustomerInvoices } from '@/components/customers/customer-invoices';
+import { RecordPaymentDialog } from '@/components/customers/record-payment-dialog';
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -13,7 +16,11 @@ import { useAuth } from '@/lib/auth';
 import {
   CUSTOMER_TYPE_LABELS,
   fetchCustomer,
+  fetchCustomerCredit,
+  fetchCustomerPayments,
   syncCustomerToQuickBooks,
+  type AccountPayment,
+  type CustomerCredit,
   type ManagedCustomer,
 } from '@/lib/customers-api';
 import { Permission } from '@/lib/permissions';
@@ -28,8 +35,16 @@ export default function CustomerDetailPage() {
   const [customer, setCustomer] = React.useState<ManagedCustomer | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  // Kept apart from `error`: that one means "the page could not load" and
+  // replaces the whole view. A sync that fails should leave the customer on
+  // screen and say so, not blank the page.
+  const [syncError, setSyncError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
+  const [credit, setCredit] = React.useState<CustomerCredit | null>(null);
+  const [payments, setPayments] = React.useState<AccountPayment[]>([]);
+  const [payOpen, setPayOpen] = React.useState(false);
+  const canRecordPayment = hasPermission(Permission.PAYMENT_CREATE);
 
   React.useEffect(() => {
     if (!session || !id) return;
@@ -37,8 +52,19 @@ export default function CustomerDetailPage() {
     setLoading(true);
     fetchCustomer(session, id)
       .then((c) => !cancelled && setCustomer(c))
-      .catch((err: unknown) => !cancelled && setError(err instanceof Error ? err.message : 'Could not load customer'))
+      .catch(
+        (err: unknown) =>
+          !cancelled && setError(err instanceof Error ? err.message : 'Could not load customer'),
+      )
       .finally(() => !cancelled && setLoading(false));
+    // Best-effort: the credit position and its history are extra detail, and a
+    // failure to read them must not blank a page that otherwise loaded.
+    fetchCustomerCredit(session, id)
+      .then((c) => !cancelled && setCredit(c))
+      .catch(() => !cancelled && setCredit(null));
+    fetchCustomerPayments(session, id)
+      .then((p) => !cancelled && setPayments(p))
+      .catch(() => !cancelled && setPayments([]));
     return () => {
       cancelled = true;
     };
@@ -47,11 +73,12 @@ export default function CustomerDetailPage() {
   const handleSync = async () => {
     if (!session || !customer) return;
     setBusy(true);
+    setSyncError(null);
     try {
       await syncCustomerToQuickBooks(session, customer.id);
       setReloadKey((k) => k + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sync failed');
+      setSyncError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setBusy(false);
     }
@@ -62,11 +89,16 @@ export default function CustomerDetailPage() {
   if (error || !customer) {
     return (
       <div className="space-y-4">
-        <Link href="/customers" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
+        <Link
+          href="/customers"
+          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+        >
           <ArrowLeft className="h-4 w-4" /> Back to customers
         </Link>
         <Card>
-          <CardContent className="py-16 text-center text-sm text-danger">{error ?? 'Customer not found'}</CardContent>
+          <CardContent className="py-16 text-center text-sm text-danger">
+            {error ?? 'Customer not found'}
+          </CardContent>
         </Card>
       </div>
     );
@@ -74,9 +106,17 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="space-y-6">
+      {syncError ? (
+        <Card>
+          <CardContent className="py-3 text-sm text-danger">{syncError}</CardContent>
+        </Card>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <Link href="/customers" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
+          <Link
+            href="/customers"
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
             <ArrowLeft className="h-4 w-4" /> Back to customers
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight">{customer.name}</h1>
@@ -92,6 +132,12 @@ export default function CustomerDetailPage() {
               Sync to QuickBooks
             </Button>
           ) : null}
+          {canRecordPayment && credit && credit.outstanding > 0 ? (
+            <Button onClick={() => setPayOpen(true)} disabled={busy}>
+              <HandCoins className="h-4 w-4" />
+              Record payment
+            </Button>
+          ) : null}
           {canManage ? (
             <Link href={`/customers/${customer.id}/edit`} className={buttonVariants()}>
               <Pencil className="h-4 w-4" />
@@ -102,7 +148,11 @@ export default function CustomerDetailPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {customer.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}
+        {customer.isActive ? (
+          <Badge variant="success">Active</Badge>
+        ) : (
+          <Badge variant="danger">Inactive</Badge>
+        )}
         {customer.quickbooksCustomerId ? (
           <Badge variant="primary">QuickBooks-linked</Badge>
         ) : (
@@ -125,7 +175,10 @@ export default function CustomerDetailPage() {
             <Detail label="Fax" value={customer.fax ?? '—'} />
             <Detail label="Website" value={customer.website ?? '—'} />
             <Detail label="Resale number" value={customer.resaleNumber ?? '—'} />
-            <Detail label="QuickBooks customer ID" value={customer.quickbooksCustomerId ?? 'Not synced'} />
+            <Detail
+              label="QuickBooks customer ID"
+              value={customer.quickbooksCustomerId ?? 'Not synced'}
+            />
           </CardContent>
         </Card>
 
@@ -146,6 +199,15 @@ export default function CustomerDetailPage() {
                   : '—'
               }
             />
+            {credit ? (
+              <>
+                <Detail label="Outstanding on account" value={formatMoney(credit.outstanding)} />
+                <Detail
+                  label="Available credit"
+                  value={credit.available != null ? formatMoney(Math.max(0, credit.available)) : '—'}
+                />
+              </>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -191,9 +253,34 @@ export default function CustomerDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {session ? (
+        <CustomerInvoices
+          session={session}
+          customerId={customer.id}
+          outstanding={credit?.outstanding ?? 0}
+          canMark={canRecordPayment}
+          onChanged={() => setReloadKey((k) => k + 1)}
+        />
+      ) : null}
+
+      <CustomerCreditHistory payments={payments} outstanding={credit?.outstanding ?? 0} />
+
+      {session && credit ? (
+        <RecordPaymentDialog
+          session={session}
+          customerId={customer.id}
+          customerName={customer.name}
+          outstanding={credit.outstanding}
+          open={payOpen}
+          onClose={() => setPayOpen(false)}
+          onRecorded={() => setReloadKey((k) => k + 1)}
+        />
+      ) : null}
     </div>
   );
 }
+
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (

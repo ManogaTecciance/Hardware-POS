@@ -36,6 +36,8 @@ export interface SaleItemPayload {
   quantity: number;
   unitPrice?: number;
   discountType?: DiscountType;
+  /** Whether a FIXED amount is per unit or for the line. Absent = the line. */
+  discountBasis?: 'LINE' | 'UNIT';
   discountValue?: number;
   discountReason?: string;
   approvalToken?: string;
@@ -51,6 +53,13 @@ export interface CompleteSaleDto {
   branchId: string;
   registerId?: string;
   customerId?: string;
+  /** Invoice date as `YYYY-MM-DD`. Omitted = now; the API rejects a future date. */
+  saleDate?: string;
+  /**
+   * When payment is expected, as `YYYY-MM-DD`. Required when the payments do not
+   * cover the total; the API rejects it on a fully paid sale.
+   */
+  paymentDueDate?: string;
   items: SaleItemPayload[];
   payments: SalePaymentPayload[];
   orderDiscountType?: DiscountType;
@@ -124,6 +133,19 @@ export interface SaleListItem {
   balanceAmount: number;
   paymentStatus: PaymentStatusCode;
   paymentMethods: PaymentMethodCode[];
+  /** When payment is expected. Null on a fully paid sale — the column stays blank. */
+  paymentDueDate: string | null;
+  /**
+   * When the customer's credit account was cleared, covering this invoice.
+   * Credit is settled per account, so this — not the invoice's own paidAmount —
+   * is what makes a credit sale read as Paid.
+   */
+  creditSettledAt: string | null;
+  /** When a user ticked this invoice off as paid, and who. Moves no money. */
+  markedPaidAt: string | null;
+  markedPaidByName: string | null;
+  /** When the most recent payment was received. Null when none has been. */
+  lastPaymentAt: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: number;
   quickbooksDocumentType: string | null;
@@ -145,6 +167,10 @@ export interface SalesQuery {
   syncStatus?: SyncStatusCode;
   dateFrom?: string;
   dateTo?: string;
+  /** Only this customer's invoices. */
+  customerId?: string;
+  /** Only sales past their due date that still owe money. */
+  overdue?: 'true';
 }
 
 /** Detailed sale (matches the API `SaleWithRelations`, decimals as strings). */
@@ -156,6 +182,8 @@ export interface SaleDetailItem {
   quantity: number;
   discountType: DiscountType | null;
   discountValue: number | null;
+  /** Whether a FIXED amount came off each unit or the line as a whole. */
+  discountBasis: 'LINE' | 'UNIT';
   discountAmount: number;
   discountReason: string | null;
   lineSubtotal: number;
@@ -168,6 +196,8 @@ export interface SaleDetailPayment {
   amount: number;
   reference: string | null;
   syncStatus: SyncStatusCode;
+  /** When the payment was received, as an ISO instant. */
+  createdAt: string;
 }
 
 export interface SaleCustomerContact {
@@ -201,6 +231,13 @@ export interface SaleDetail {
   paidAmount: number;
   balanceAmount: number;
   paymentStatus: PaymentStatusCode;
+  /** When payment is expected. Null on a sale that was settled in full. */
+  paymentDueDate: string | null;
+  /** When the customer's credit account was cleared, covering this invoice. */
+  creditSettledAt: string | null;
+  /** When a user accounted for this invoice on the customer page, and who. */
+  markedPaidAt: string | null;
+  markedPaidByName: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: number;
   quickbooksDocumentType: string | null;
@@ -232,6 +269,10 @@ interface ApiSaleDetail {
   paidAmount: string | number;
   balanceAmount: string | number;
   paymentStatus: PaymentStatusCode;
+  paymentDueDate: string | null;
+  creditSettledAt: string | null;
+  markedPaidAt: string | null;
+  markedPaidBy: { name: string } | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: string | number;
   quickbooksDocumentType: string | null;
@@ -246,6 +287,7 @@ interface ApiSaleDetail {
     quantity: string | number;
     discountType: DiscountType | null;
     discountValue: string | number | null;
+    discountBasis: 'LINE' | 'UNIT';
     discountAmount: string | number;
     discountReason: string | null;
     lineSubtotal: string | number;
@@ -257,6 +299,7 @@ interface ApiSaleDetail {
     amount: string | number;
     reference: string | null;
     syncStatus: SyncStatusCode;
+    createdAt: string;
   }>;
 }
 
@@ -269,6 +312,8 @@ function buildQuery(q: SalesQuery): string {
   if (q.syncStatus) params.set('syncStatus', q.syncStatus);
   if (q.dateFrom) params.set('dateFrom', q.dateFrom);
   if (q.dateTo) params.set('dateTo', q.dateTo);
+  if (q.overdue) params.set('overdue', q.overdue);
+  if (q.customerId) params.set('customerId', q.customerId);
   return params.toString();
 }
 
@@ -296,6 +341,7 @@ export async function downloadSalesReport(
   if (query.syncStatus) params.set('syncStatus', query.syncStatus);
   if (query.dateFrom) params.set('dateFrom', query.dateFrom);
   if (query.dateTo) params.set('dateTo', query.dateTo);
+  if (query.overdue) params.set('overdue', query.overdue);
 
   const res = await authorizedFetch(`/sales/report?${params.toString()}`, session);
   if (!res.ok) {
@@ -341,6 +387,10 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
     paidAmount: Number(s.paidAmount),
     balanceAmount: Number(s.balanceAmount),
     paymentStatus: s.paymentStatus,
+    paymentDueDate: s.paymentDueDate ?? null,
+    creditSettledAt: s.creditSettledAt ?? null,
+    markedPaidAt: s.markedPaidAt ?? null,
+    markedPaidByName: s.markedPaidBy?.name ?? null,
     returnStatus: s.returnStatus,
     returnedAmount: Number(s.returnedAmount),
     quickbooksDocumentType: s.quickbooksDocumentType,
@@ -355,6 +405,7 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       quantity: Number(it.quantity),
       discountType: it.discountType,
       discountValue: it.discountValue != null ? Number(it.discountValue) : null,
+      discountBasis: it.discountBasis ?? 'LINE',
       discountAmount: Number(it.discountAmount),
       discountReason: it.discountReason,
       lineSubtotal: Number(it.lineSubtotal),
@@ -366,8 +417,23 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
       amount: Number(p.amount),
       reference: p.reference,
       syncStatus: p.syncStatus,
+      createdAt: p.createdAt,
     })),
   };
+}
+
+/**
+ * Tick a credit invoice off as paid, or clear the tick.
+ *
+ * A bookkeeping note: it records who and when, and moves no money. The API
+ * refuses the last uncovered invoice on an account while the account still owes.
+ */
+export async function setSaleMarkedPaid(
+  session: Session,
+  id: string,
+  marked: boolean,
+): Promise<void> {
+  await api.post(`/sales/${id}/marked-paid`, { marked }, auth(session));
 }
 
 /** Retry the QuickBooks push for a completed sale. */

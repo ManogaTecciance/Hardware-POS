@@ -1,9 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { CURRENCY_CODE, CURRENCY_LOCALE, CURRENCY_SYMBOL } from '@hardware-pos/shared';
+import {
+  CURRENCY_CODE,
+  CURRENCY_LOCALE,
+  CURRENCY_SYMBOL,
+  dayInTimeZone,
+  formatDateInTimeZone,
+  formatDateTimeInTimeZone,
+  safeTimeZone,
+} from '@hardware-pos/shared';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 
 import { QuerySalesReportDto } from './dto/query-sales-report.dto';
+import { SettingsService } from '../settings/settings.service';
 import { SalesRepository } from './sales.repository';
 import { toSaleListItem } from './sales.service';
 import { SaleListItem } from './sales.types';
@@ -30,6 +39,8 @@ interface ReportData {
   rows: SaleListItem[];
   summary: ReportSummary;
   totalMatching: number;
+  /** Shop timezone every date in this report is rendered in. */
+  timezone: string;
   generatedAt: Date;
   dateFrom?: Date;
   dateTo?: Date;
@@ -45,27 +56,31 @@ function fmtMoney(n: number): string {
   return money.format(n);
 }
 
-function fmtDateTime(d: Date): string {
-  return d.toLocaleString(CURRENCY_LOCALE, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+/**
+ * The report is a document, so its dates read in the SHOP's timezone rather than
+ * the server's or the requester's — the same figures must describe the same days
+ * whoever exports them.
+ */
+function fmtDateTime(d: Date, tz: string): string {
+  return formatDateTimeInTimeZone(d, tz, CURRENCY_LOCALE);
 }
 
-function fmtDate(d: Date): string {
-  return d.toLocaleDateString(CURRENCY_LOCALE, { year: 'numeric', month: 'short', day: '2-digit' });
+function fmtDate(d: Date, tz: string): string {
+  return formatDateInTimeZone(d, tz, CURRENCY_LOCALE);
 }
 
 @Injectable()
 export class SalesReportService {
-  constructor(private readonly salesRepository: SalesRepository) {}
+  constructor(
+    private readonly salesRepository: SalesRepository,
+    private readonly settings: SettingsService,
+  ) {}
 
   async generate(tenantId: string, query: QuerySalesReportDto): Promise<GeneratedReport> {
     const data = await this.buildData(tenantId, query);
-    const stamp = data.generatedAt.toISOString().slice(0, 10);
+    // The shop's day, not UTC's — a report pulled at 02:00 Colombo would
+    // otherwise be filed under the previous day while its header says today.
+    const stamp = dayInTimeZone(data.generatedAt, data.timezone);
     if (query.format === 'xlsx') {
       return {
         buffer: await this.renderXlsx(data),
@@ -89,6 +104,10 @@ export class SalesReportService {
         search: query.search?.trim() || undefined,
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        // Exported from a filtered screen, the report must cover the same sales
+        // the screen was showing — an overdue export that quietly widened to
+        // every sale would be worse than no export.
+        overdueAsOf: query.overdue === 'true' ? new Date() : undefined,
       },
       0,
       MAX_REPORT_ROWS,
@@ -111,11 +130,13 @@ export class SalesReportService {
     if (query.paymentStatus) filters.push(`Payment: ${query.paymentStatus}`);
     if (query.syncStatus) filters.push(`Sync: ${query.syncStatus}`);
     if (query.search?.trim()) filters.push(`Search: "${query.search.trim()}"`);
+    if (query.overdue === 'true') filters.push('Overdue payments only');
 
     return {
       rows,
       summary,
       totalMatching,
+      timezone: safeTimeZone(this.settings.getSettings(tenantId).timezone),
       generatedAt: new Date(),
       dateFrom: query.dateFrom,
       dateTo: query.dateTo,
@@ -124,9 +145,11 @@ export class SalesReportService {
   }
 
   private rangeLabel(data: ReportData): string {
-    if (data.dateFrom && data.dateTo) return `${fmtDate(data.dateFrom)} – ${fmtDate(data.dateTo)}`;
-    if (data.dateFrom) return `From ${fmtDate(data.dateFrom)}`;
-    if (data.dateTo) return `Until ${fmtDate(data.dateTo)}`;
+    const tz = data.timezone;
+    if (data.dateFrom && data.dateTo)
+      return `${fmtDate(data.dateFrom, tz)} – ${fmtDate(data.dateTo, tz)}`;
+    if (data.dateFrom) return `From ${fmtDate(data.dateFrom, tz)}`;
+    if (data.dateTo) return `Until ${fmtDate(data.dateTo, tz)}`;
     return 'All time';
   }
 
@@ -138,7 +161,7 @@ export class SalesReportService {
     const ws = wb.addWorksheet('Sales report');
 
     ws.addRow([`Sales Report — ${this.rangeLabel(data)}`]).font = { bold: true, size: 14 };
-    ws.addRow([`Generated ${fmtDateTime(data.generatedAt)} · Amounts in ${CURRENCY_CODE}`]);
+    ws.addRow([`Generated ${fmtDateTime(data.generatedAt, data.timezone)} · Amounts in ${CURRENCY_CODE}`]);
     if (data.filters.length > 0) ws.addRow([`Filters: ${data.filters.join(' · ')}`]);
     if (data.totalMatching > data.rows.length) {
       const note = ws.addRow([
@@ -173,7 +196,10 @@ export class SalesReportService {
     for (const r of data.rows) {
       ws.addRow([
         r.saleNumber,
-        r.completedAt ?? r.createdAt,
+        // Excel has no timezone concept and reads a JS Date's UTC fields, so a
+        // raw Date here would show UTC while the PDF shows shop time. Write the
+        // already-formatted shop-zone string so both exports agree.
+        fmtDateTime(r.completedAt ?? r.createdAt, data.timezone),
         r.customerName ?? 'Walk-in customer',
         r.cashierName ?? '',
         r.status,
@@ -276,7 +302,7 @@ export class SalesReportService {
         .fontSize(9)
         .fillColor('#4b5563')
         .text(
-          `Generated ${fmtDateTime(data.generatedAt)} · Amounts in ${CURRENCY_CODE} (${CURRENCY_SYMBOL})` +
+          `Generated ${fmtDateTime(data.generatedAt, data.timezone)} · Amounts in ${CURRENCY_CODE} (${CURRENCY_SYMBOL})` +
             (data.filters.length > 0 ? ` · ${data.filters.join(' · ')}` : ''),
         );
       if (data.totalMatching > data.rows.length) {
@@ -297,7 +323,7 @@ export class SalesReportService {
         const y = doc.y;
         const cells = [
           r.saleNumber,
-          fmtDateTime(r.completedAt ?? r.createdAt),
+          fmtDateTime(r.completedAt ?? r.createdAt, data.timezone),
           r.customerName ?? 'Walk-in customer',
           r.cashierName ?? '—',
           String(r.itemCount),

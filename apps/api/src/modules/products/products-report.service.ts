@@ -1,10 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { CURRENCY_CODE, CURRENCY_LOCALE, CURRENCY_SYMBOL } from '@hardware-pos/shared';
+import {
+  CURRENCY_CODE,
+  CURRENCY_LOCALE,
+  CURRENCY_SYMBOL,
+  dayInTimeZone,
+  formatDateTimeInTimeZone,
+  safeTimeZone,
+} from '@hardware-pos/shared';
 import { Product } from '@hardware-pos/database';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import { ProductsRepository } from './products.repository';
 import { QueryProductsReportDto } from './dto/query-products-report.dto';
 
@@ -45,6 +53,8 @@ interface ReportData {
   rows: ReportRow[];
   summary: ReportSummary;
   totalMatching: number;
+  /** Shop timezone every date in this report is rendered in. */
+  timezone: string;
   generatedAt: Date;
   filters: string[];
 }
@@ -56,14 +66,9 @@ const money = new Intl.NumberFormat(CURRENCY_LOCALE, {
 
 const fmtMoney = (n: number): string => money.format(n);
 
-function fmtDateTime(d: Date): string {
-  return d.toLocaleString(CURRENCY_LOCALE, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+/** Reports are documents: their dates read in the SHOP's zone, not the server's. */
+function fmtDateTime(d: Date, tz: string): string {
+  return formatDateTimeInTimeZone(d, tz, CURRENCY_LOCALE);
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -78,11 +83,12 @@ export class ProductsReportService {
   constructor(
     private readonly productsRepository: ProductsRepository,
     private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
   ) {}
 
   async generate(tenantId: string, query: QueryProductsReportDto): Promise<GeneratedReport> {
     const data = await this.buildData(tenantId, query);
-    const stamp = data.generatedAt.toISOString().slice(0, 10);
+    const stamp = dayInTimeZone(data.generatedAt, data.timezone);
     if (query.format === 'xlsx') {
       return {
         buffer: await this.renderXlsx(data),
@@ -157,7 +163,14 @@ export class ProductsReportService {
     if (query.syncStatus) filters.push(`Sync: ${query.syncStatus}`);
     if (query.isActive) filters.push(query.isActive === 'true' ? 'Active only' : 'Inactive only');
 
-    return { rows, summary, totalMatching, generatedAt: new Date(), filters };
+    return {
+      rows,
+      summary,
+      totalMatching,
+      timezone: safeTimeZone(this.settings.getSettings(tenantId).timezone),
+      generatedAt: new Date(),
+      filters,
+    };
   }
 
   private toRow(p: Product, categoryName: Map<string, string>): ReportRow {
@@ -186,7 +199,7 @@ export class ProductsReportService {
     const ws = wb.addWorksheet('Stock report');
 
     ws.addRow(['Stock Report']).font = { bold: true, size: 14 };
-    ws.addRow([`Generated ${fmtDateTime(data.generatedAt)} · Amounts in ${CURRENCY_CODE}`]);
+    ws.addRow([`Generated ${fmtDateTime(data.generatedAt, data.timezone)} · Amounts in ${CURRENCY_CODE}`]);
     if (data.filters.length > 0) ws.addRow([`Filters: ${data.filters.join(' · ')}`]);
     if (data.totalMatching > data.rows.length) {
       const note = ws.addRow([
@@ -306,7 +319,7 @@ export class ProductsReportService {
         .fontSize(9)
         .fillColor('#4b5563')
         .text(
-          `Generated ${fmtDateTime(data.generatedAt)} · Amounts in ${CURRENCY_CODE} (${CURRENCY_SYMBOL})` +
+          `Generated ${fmtDateTime(data.generatedAt, data.timezone)} · Amounts in ${CURRENCY_CODE} (${CURRENCY_SYMBOL})` +
             (data.filters.length > 0 ? ` · ${data.filters.join(' · ')}` : ''),
         );
       if (data.totalMatching > data.rows.length) {

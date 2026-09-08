@@ -13,13 +13,14 @@ import {
   QuickBooksReturnDocumentType,
   UserRole,
 } from '@hardware-pos/database';
-import type { Paginated } from '@hardware-pos/shared';
+import { safeTimeZone, type Paginated } from '@hardware-pos/shared';
 
 import { round2 } from '../../common/money';
 import { paginate } from '../../common/pagination';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { AuthService } from '../auth/auth.service';
 import { Permission, roleHasPermission } from '../auth/permissions';
+import { formatReceiptDateTime } from '../receipts/receipt-templates';
 import { SettingsService } from '../settings/settings.service';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
 import { computeReturnLine, sumReturnTotals, type ComputedReturnLine } from './returns.calc';
@@ -594,7 +595,9 @@ export class ReturnsService {
     userId: string,
   ): Promise<{ printJobId: string; html: string }> {
     const settings = this.settingsService.getSettings(tenantId);
-    const html = renderReturnReceipt(this.toReceiptData(ret, settings.receiptFooter));
+    const html = renderReturnReceipt(
+      this.toReceiptData(ret, settings.receiptFooter, safeTimeZone(settings.timezone)),
+    );
     const job = await this.repo.createReceiptPrintJob({
       tenantId,
       saleId: ret.originalSaleId,
@@ -605,7 +608,7 @@ export class ReturnsService {
     return { printJobId: job.id, html };
   }
 
-  private toReceiptData(ret: ReturnWithRelations, footer: string): ReturnReceiptData {
+  private toReceiptData(ret: ReturnWithRelations, footer: string, tz: string): ReturnReceiptData {
     const documentTypeLabel =
       ret.quickbooksDocumentType === 'CREDIT_MEMO' ? 'Credit Memo' : 'Refund Receipt';
     const remaining = round2(Number(ret.originalSale.total) - Number(ret.originalSale.returnedAmount));
@@ -615,7 +618,7 @@ export class ReturnsService {
       registerName: ret.register?.name ?? null,
       returnNumber: ret.returnNumber,
       originalSaleNumber: ret.originalSale.saleNumber,
-      dateTime: (ret.completedAt ?? ret.createdAt).toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
+      dateTime: formatReceiptDateTime(ret.completedAt ?? ret.createdAt, tz),
       documentType: documentTypeLabel,
       customerName: ret.customer?.name ?? null,
       cashierName: ret.createdBy?.name ?? null,

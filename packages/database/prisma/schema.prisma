@@ -27,6 +27,7 @@ enum UserRole {
   ADMIN
   OWNER
   ACCOUNTANT
+  SALESPERSON
 }
 
 enum PaymentMethod {
@@ -57,6 +58,20 @@ enum SyncStatus {
 enum DiscountType {
   PERCENTAGE
   FIXED
+}
+
+/// What a FIXED discount amount is measured against on a sale line.
+///
+/// A separate field rather than a third `DiscountType`, because an ORDER-level
+/// discount has no units — the whole-cart discount reuses `DiscountType`, and a
+/// `FIXED_PER_UNIT` member there would validate and persist while meaning
+/// nothing. PERCENTAGE ignores this entirely: a percentage is already the same
+/// per unit and per line.
+enum DiscountBasis {
+  /// The amount comes off the line once.
+  LINE
+  /// The amount comes off every unit — `value × quantity`.
+  UNIT
 }
 
 enum CustomerType {
@@ -311,6 +326,7 @@ model User {
   branch             Branch?             @relation(fields: [branchId], references: [id])
   customRole         Role?               @relation(fields: [roleId], references: [id])
   sales              Sale[]
+  salesMarkedPaid    Sale[]               @relation("SaleMarkedPaidBy")
   payments           Payment[]
   approvedDiscounts  SaleItem[]          @relation("DiscountApprover")
   auditLogs          AuditLog[]
@@ -431,38 +447,38 @@ model ProductSubcategory {
 /// and reorder point. `isActive` and the sync columns are system fields
 /// (QBO items have active status too; soft-delete keeps sale history intact).
 model Product {
-  id               String     @id @default(cuid())
-  tenantId         String
-  quickbooksItemId String?
-  name             String
+  id                    String     @id @default(cuid())
+  tenantId              String
+  quickbooksItemId      String?
+  name                  String
   /// QuickBooks item type: Inventory | NonInventory | Service.
-  type             String     @default("Inventory")
-  sku              String?
+  type                  String     @default("Inventory")
+  sku                   String?
   /// Sales description — appears on sales forms and receipts.
-  description      String?
-  categoryId       String?
-  subcategoryId    String?
-  unitPrice        Decimal    @default(0) @db.Decimal(12, 2)
+  description           String?
+  categoryId            String?
+  subcategoryId         String?
+  unitPrice             Decimal    @default(0) @db.Decimal(12, 2)
   /// QBO income account name (auto-resolved on sync; read-only in the UI).
-  incomeAccount    String?
+  incomeAccount         String?
   /// Purchase description — what vendors see on purchase forms.
-  purchaseDescription String?
-  costPrice        Decimal?   @db.Decimal(12, 2)
+  purchaseDescription   String?
+  costPrice             Decimal?   @db.Decimal(12, 2)
   /// QBO expense account name (auto-resolved on sync; read-only in the UI).
-  expenseAccount   String?
-  quantityOnHand   Decimal    @default(0) @db.Decimal(12, 3)
+  expenseAccount        String?
+  quantityOnHand        Decimal    @default(0) @db.Decimal(12, 3)
   /// The date the quantity on hand was counted (QBO InvStartDate).
-  quantityAsOfDate DateTime?
-  reorderLevel     Decimal?   @db.Decimal(12, 3)
+  quantityAsOfDate      DateTime?
+  reorderLevel          Decimal?   @db.Decimal(12, 3)
   /// QBO inventory asset account name (auto-resolved; read-only in the UI).
   inventoryAssetAccount String?
   /// POS-side product photo (S3/LocalStack) — never pushed to QuickBooks.
-  imageUrl         String?
-  isActive         Boolean    @default(true)
-  lastSyncedAt     DateTime?
-  syncStatus       SyncStatus @default(NOT_SYNCED)
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  imageUrl              String?
+  isActive              Boolean    @default(true)
+  lastSyncedAt          DateTime?
+  syncStatus            SyncStatus @default(NOT_SYNCED)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
 
   tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   category       ProductCategory?    @relation(fields: [categoryId], references: [id])
@@ -528,6 +544,7 @@ model Customer {
   sales      Sale[]
   returns    Return[]
   quotations Quotation[]
+  payments   Payment[]
 
   @@unique([tenantId, quickbooksCustomerId])
   @@index([tenantId])
@@ -559,6 +576,26 @@ model Sale {
   paidAmount                Decimal                 @default(0) @db.Decimal(12, 2)
   balanceAmount             Decimal                 @default(0) @db.Decimal(12, 2)
   paymentStatus             PaymentStatus           @default(UNPAID)
+  /// When payment is expected on a credit/partial sale. Null on a fully paid
+  /// sale, which owes nothing — the sales list leaves the column blank rather
+  /// than inventing a date.
+  paymentDueDate            DateTime?
+  /// When the customer's credit account was cleared, covering this invoice.
+  ///
+  /// Credit is settled per account: every credit sale stays outstanding until the
+  /// customer owes nothing, and then all of them are covered at once. This records
+  /// that moment WITHOUT claiming money was tendered against this invoice —
+  /// paidAmount and balanceAmount stay true to what actually happened at the till,
+  /// which is what the printed bill, the refund guard and QuickBooks read.
+  creditSettledAt           DateTime?
+  /// When a user ticked this invoice off as paid on the customer's page, and who
+  /// did. A bookkeeping note only: it moves no money and does not change what the
+  /// customer owes — `balanceAmount` and the credit aggregation are untouched.
+  /// The last uncovered invoice on an account cannot be ticked off while the
+  /// account still owes, so the books can never be made to read clear without the
+  /// payments to back it.
+  markedPaidAt              DateTime?
+  markedPaidByUserId        String?
   returnStatus              SaleReturnStatus        @default(NOT_RETURNED)
   returnedAmount            Decimal                 @default(0) @db.Decimal(12, 2)
   quickbooksDocumentType    QuickBooksDocumentType?
@@ -573,6 +610,7 @@ model Sale {
   branch    Branch     @relation(fields: [branchId], references: [id])
   register  Register?  @relation(fields: [registerId], references: [id])
   cashier   User       @relation(fields: [cashierId], references: [id])
+  markedPaidBy User?   @relation("SaleMarkedPaidBy", fields: [markedPaidByUserId], references: [id])
   customer  Customer?  @relation(fields: [customerId], references: [id])
   items     SaleItem[]
   payments  Payment[]
@@ -588,6 +626,17 @@ model Sale {
   @@index([customerId])
   @@index([syncStatus])
   @@index([createdAt])
+  // Sales history, the PDF report and every dashboard window filter and order on
+  // the business date, which backdating decouples from createdAt. Composite
+  // because every one of those queries is already tenant-scoped.
+  @@index([tenantId, completedAt])
+  // The overdue filter asks for "due before today and still owing", so the due
+  // date is a tenant-scoped range scan.
+  @@index([tenantId, paymentDueDate])
+  // "What does this customer still owe" is a tenant+customer scan over the
+  // sales credit has not yet cleared.
+  @@index([tenantId, customerId, creditSettledAt])
+  @@index([tenantId, customerId, completedAt])
 }
 
 model SaleItem {
@@ -601,6 +650,10 @@ model SaleItem {
   discountId       String?
   discountType     DiscountType?
   discountValue    Decimal?         @db.Decimal(12, 2)
+  /// Whether `discountValue` was per unit or for the line. Only meaningful with
+  /// a FIXED discount. `discountAmount` remains the money actually taken off —
+  /// this records how it was arrived at, so a bill can justify it.
+  discountBasis    DiscountBasis    @default(LINE)
   discountAmount   Decimal          @default(0) @db.Decimal(12, 2)
   discountReason   String?
   approvedByUserId String?
@@ -622,26 +675,44 @@ model SaleItem {
   @@index([productId])
 }
 
+/// Money received. Exactly one of `saleId` or `customerId` is set — a database
+/// CHECK enforces it — and which one says what kind of payment this is:
+///   · `saleId`     — tendered at the till against that sale, at the moment of sale.
+///   · `customerId` — received against the customer's credit account, later.
+/// Credit is settled per ACCOUNT, not per invoice, so an account payment is
+/// deliberately not attached to any one sale.
 model Payment {
   id                  String        @id @default(cuid())
   tenantId            String
-  saleId              String
+  saleId              String?
+  customerId          String?
   receivedByUserId    String?
   amount              Decimal       @db.Decimal(12, 2)
   method              PaymentMethod
   reference           String?
   quickbooksPaymentId String?
   syncStatus          SyncStatus    @default(NOT_SYNCED)
+  /// When this account payment was consumed by clearing the account. Set on the
+  /// payments that closed a balance, so the next cycle starts from zero instead
+  /// of subtracting them forever. Null on a till payment and on money still
+  /// working against an open balance.
+  settledAt           DateTime?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
-  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  sale       Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  receivedBy User?  @relation(fields: [receivedByUserId], references: [id])
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sale       Sale?     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  // Restrict, not SetNull: a payment with neither a sale nor a customer is money
+  // belonging to nobody, and deleting a customer must not silently rewrite what
+  // their account was settled with.
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  receivedBy User?     @relation(fields: [receivedByUserId], references: [id])
 
   @@index([tenantId])
   @@index([saleId])
   @@index([syncStatus])
+  // The customer's credit history and its unsettled-total, both newest-first.
+  @@index([tenantId, customerId, createdAt])
 }
 
 model Discount {
@@ -1047,6 +1118,10 @@ model QuotationItem {
   unitPrice           Decimal       @db.Decimal(12, 2)
   discountType        DiscountType?
   discountValue       Decimal?      @db.Decimal(12, 2)
+  /// Whether `discountValue` was per unit or for the line. Only meaningful with a
+  /// FIXED discount. Carried into the sale on conversion, so a quotation is not
+  /// re-priced by becoming an invoice.
+  discountBasis       DiscountBasis @default(LINE)
   discountAmount      Decimal       @default(0) @db.Decimal(12, 2)
   taxAmount           Decimal       @default(0) @db.Decimal(12, 2)
   lineSubtotal        Decimal       @db.Decimal(12, 2)
@@ -1118,7 +1193,7 @@ enum SupplierQbStatus {
 /// fields; QuickBooks remains the accounting master (live A/P balance, bills,
 /// payments are never stored here — only the entered opening balance).
 model Supplier {
-  id       String  @id @default(cuid())
+  id       String @id @default(cuid())
   tenantId String
 
   // ── QuickBooks Vendor template fields ──

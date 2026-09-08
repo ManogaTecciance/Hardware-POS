@@ -48,6 +48,12 @@ export interface DocumentSettings {
 
 export interface AppSettings {
   currency: string;
+  /**
+   * Shop IANA timezone. Datetimes are stored in UTC everywhere; this is the zone
+   * printed DOCUMENTS state their dates in, so an invoice reads the same for
+   * everyone. On-screen datetimes use the viewer's own browser timezone.
+   */
+  timezone: string;
   taxRatePercent: number;
   taxInclusive: boolean;
   highDiscountThresholdPercent: number;
@@ -61,6 +67,7 @@ export interface AppSettings {
 /** A partial settings update; only the groups/fields present are changed. */
 export interface UpdateSettingsInput {
   currency?: string;
+  timezone?: string;
   taxRatePercent?: number;
   taxInclusive?: boolean;
   highDiscountThresholdPercent?: number;

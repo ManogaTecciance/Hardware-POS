@@ -155,17 +155,41 @@ export class Api {
   /** Complete a simple cash sale for the given lines. */
   async completeSale(
     items: Array<{ productId: string; quantity: number }>,
-    opts: { customerId?: string; payments?: Array<{ method: string; amount: number; reference?: string }> } = {},
+    opts: {
+      customerId?: string;
+      payments?: Array<{ method: string; amount: number; reference?: string }>;
+      /** Backdate the invoice (YYYY-MM-DD). Omitted keeps the "dated now" default path. */
+      saleDate?: string;
+      /** Required by the API whenever the payments leave a balance. */
+      paymentDueDate?: string;
+    } = {},
   ): Promise<any> {
     // Server computes totals; a preview tells us what to tender for exact cash.
     const preview = await this.post('/sales/complete', {
       branchId: 'brn_dev',
       registerId: 'reg_dev',
       customerId: opts.customerId,
+      // Only sent when asked, so existing callers keep covering the default.
+      ...(opts.saleDate ? { saleDate: opts.saleDate } : {}),
+      ...(opts.paymentDueDate ? { paymentDueDate: opts.paymentDueDate } : {}),
       items,
       payments: opts.payments ?? [{ method: 'CASH', amount: 10_000_000 }],
     });
     return preview;
+  }
+
+  /** `YYYY-MM-DD` for `days` ago in local time — the shape the POS date picker sends. */
+  static daysAgo(days: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${month}-${day}`;
+  }
+
+  /** `YYYY-MM-DD` for `days` from now — a payment due date a credit sale can carry. */
+  static daysAhead(days: number): string {
+    return Api.daysAgo(-days);
   }
 
   /** Total for a cart via the quotation preview endpoint (same pricing engine). */
@@ -178,6 +202,7 @@ export class Api {
 export const SEED = {
   owner: { email: 'owner@hardwarepos.test', password: 'password123' },
   accountant: { email: 'accountant@hardwarepos.test', password: 'password123' },
+  salesperson: { email: 'salesperson@hardwarepos.test', password: 'password123' },
   managerPin: '2222',
   cashierPin: '1111',
   tenantId: 'tnt_dev',

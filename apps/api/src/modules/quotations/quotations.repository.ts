@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DiscountType, Prisma, QuotationStatus } from '@hardware-pos/database';
+import { DiscountBasis, DiscountType, Prisma, QuotationStatus } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
@@ -18,6 +18,7 @@ export interface PersistQuotationLine {
   unitPrice: number;
   discountType: DiscountType | null;
   discountValue: number | null;
+  discountBasis: DiscountBasis;
   discountAmount: number;
   taxAmount: number;
   lineSubtotal: number;
@@ -207,6 +208,9 @@ export class QuotationsRepository {
       unitPrice: line.unitPrice,
       discountType: line.discountType,
       discountValue: line.discountValue,
+      // Prisma makes a defaulted column optional in its create input, so leaving
+      // this out would compile and quietly persist LINE on every row.
+      discountBasis: line.discountBasis,
       discountAmount: line.discountAmount,
       taxAmount: line.taxAmount,
       lineSubtotal: line.lineSubtotal,

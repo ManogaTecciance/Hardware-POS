@@ -16,8 +16,8 @@
  * omitted (or left empty, as in "ROLE::1234") a random one is generated and
  * printed once at the end — record it immediately. The optional PIN (4–6
  * digits) feeds the in-POS approval prompts: any user whose role carries the
- * approve permission (owner, admin, manager) can answer a "manager PIN"
- * request with their own PIN.
+ * approve permission (owner, admin, salesperson, manager) can answer a
+ * "manager PIN" request with their own PIN.
  */
 import { randomBytes } from 'node:crypto';
 
@@ -26,6 +26,8 @@ import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 const SALT_ROUNDS = 10;
+/** Sri Lanka — where the business trades, and the zone its documents are dated in. */
+const SHOP_TIME_ZONE = 'Asia/Colombo';
 
 interface UserSpec {
   name: string;
@@ -117,6 +119,13 @@ async function main(): Promise<void> {
 
   const tenant = await prisma.$transaction(async (tx) => {
     const t = await tx.tenant.create({ data: { name, slug } });
+    // Write the shop timezone rather than leaning on the code default, so a new
+    // business is pinned the same way the backfilled ones are. Partial blob: the
+    // settings service merges it over defaults, so every other field still
+    // tracks its default.
+    await tx.tenantSettings.create({
+      data: { tenantId: t.id, branchId: null, data: { timezone: SHOP_TIME_ZONE } },
+    });
     const b = await tx.branch.create({
       data: { tenantId: t.id, name: branch, code: 'MAIN' },
     });

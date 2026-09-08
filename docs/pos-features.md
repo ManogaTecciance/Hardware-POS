@@ -12,10 +12,14 @@
 - **Cart** — add / edit / remove line items
 - **Product-wise manual discount** — per-line discounts
 - **Manager PIN approval** — required for high discounts
+- **Invoice date** — date a sale to when it actually happened (shop timezone); forward dating blocked
 - **Customer selection** — attach a customer to a sale
 - **Payment** — capture payment(s)
-- **Receipt print** — print / reprint receipts
-- **Sales history** — view past sales
+- **Payment due date** — required when a sale leaves a balance; never before the invoice date
+- **Record payment received** — settle a credit sale later, in full or in instalments
+- **Available credit** — each customer's limit minus what they currently owe
+- **Receipt print** — print / reprint receipts (payment method and due date appear on the bill)
+- **Sales history** — view past sales, with an overdue filter
 - **QuickBooks sync status** — see per-sale sync state
 - **Sync log and retry** — inspect and retry failed syncs
 

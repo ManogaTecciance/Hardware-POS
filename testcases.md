@@ -7,12 +7,16 @@ has a stable ID for traceability into automated Playwright specs.
 - **Status**: `Not Run` → `Pass` / `Fail` / `Blocked` / `Automated` (update as
   cases are executed manually or scripted)
 - Unless stated otherwise, cases assume the seeded demo tenant and the roles:
-  Owner (email login), Manager, Cashier, Accountant.
+  Owner (email login), Salesperson (email login), Manager, Cashier,
+  Accountant. Salesperson is owner-equivalent — every gate the owner
+  clears must open for it too.
 
 Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [DASH](#dash--dashboards) · [PROD](#prod--products--categories) ·
 [PIMP](#pimp--product-bulk-import) · [POS](#pos--point-of-sale) ·
-[PAY](#pay--payments--credit) · [SALE](#sale--sales-history) ·
+[PAY](#pay--payments--credit) · [DISC](#disc--discount-basis) ·
+[MARK](#mark--accounting-for-a-credit-invoice) ·
+[SALE](#sale--sales-history) ·
 [RET](#ret--returns--refunds) · [QUO](#quo--quotations) ·
 [CUST](#cust--customers) · [CIMP](#cimp--customer-bulk-import) ·
 [SUP](#sup--suppliers-vendors) · [SIMP](#simp--vendor-bulk-import) ·
@@ -55,12 +59,18 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PERM-007 | Cashier cannot see gross profit card | Cashier dashboard | No Gross Profit KPI (REPORT_READ gated) | P | Not Run |
 | PERM-008 | API rejects missing permissions consistently | Call representative manage endpoints per role matrix | 403 for each disallowed role | N | Not Run |
 | PERM-009 | User management requires USER_MANAGE | Cashier calls GET /v1/users | 403 | N | Not Run |
+| PERM-010 | Salesperson has owner-level user management | Salesperson calls GET /v1/users | 200 with the tenant's users | P | Not Run |
+| PERM-011 | Salesperson may permanently delete a supplier | Salesperson opens supplier profile, deletes | Delete succeeds where a manager gets 403 | P | Not Run |
+| PERM-012 | Salesperson may manage products | POST /v1/products with salesperson token | Product created | P | Not Run |
+| PERM-013 | Salesperson reaches owner-only QuickBooks routes | Salesperson calls GET /v1/quickbooks/connect | Not 403 (role gate allows owner-level roles) | P | Not Run |
+| PERM-014 | Salesperson nav matches the owner's | Log in as salesperson | Same nav entries as PERM-001 | P | Not Run |
+| PERM-015 | Salesperson discount needs no approval | Apply a 50% line discount as salesperson | Accepted with no manager PIN prompt (unlimited ceiling) | P | Not Run |
 
 ## DASH — Dashboards
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
-| DASH-001 | Admin KPI band shows 5 cards | Owner opens dashboard | Net Sales, Gross Profit, Transactions, Total Inventory Value, Open Quotations | P | Not Run |
+| DASH-001 | Admin KPI band shows 5 cards | Owner opens dashboard | Net Sales, Gross Profit, Credit Receivable, Total Inventory Value, Open Quotations | P | Automated |
 | DASH-002 | KPI cards on one row at laptop width | 1280×800 viewport, sidebar expanded | All 5 cards share one row | P | Not Run |
 | DASH-003 | KPI row unaffected by sidebar collapse | Collapse sidebar at 1280×800 | Still one row | P | Not Run |
 | DASH-004 | Millions render compactly | Inventory value ≥ Rs. 1,000,000 | Shown as `Rs. X.XXXXmil` (≤4 decimals, zeros trimmed) | P | Not Run |
@@ -80,6 +90,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DASH-018 | Top categories/products ranked correctly | Known sales mix in window | Ranked by amount; units and sale counts correct | P | Not Run |
 | DASH-019 | "Today" boundary respected | Sale completed yesterday (server-local midnight) | Excluded from today's Net Sales / Transactions | P | Not Run |
 | DASH-020 | Cashier register health card | Cashier dashboard | QuickBooks health + expected cash consistent with shift summary | P | Not Run |
+| DASH-021 | Receivable card counts every unsettled balance | Read /dashboard/stats, complete a credit sale, read again | `outstandingReceivable` rises by exactly the sale total | P | Automated |
+| DASH-022 | An account payment comes off the receivable at once | Part-pay an account, then clear it | The receivable drops by the part payment immediately, and by the full amount once cleared | P | Automated |
+| DASH-023 | Receivable is not windowed | Switch the dashboard range (Today → 1Y) | Credit Receivable is unchanged — money owed does not stop being owed at midnight | P | Not Run |
+| DASH-024 | Receivable card deep-links to who owes | Click Credit Receivable | Customers page opens filtered to customers with credit outstanding | P | Not Run |
 
 ## PROD — Products & Categories
 
@@ -168,6 +182,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | POS-031 | Hold sale as draft | Create draft via POST /sales/draft with cart lines | Draft persisted; stock NOT decremented | P | Not Run |
 | POS-032 | Complete a held draft | Complete the draft later | Stock decremented exactly once; sale gets final S-number | P | Not Run |
 | POS-033 | Draft re-validates stock at completion | Stock sells out after drafting; complete draft | 400 insufficient stock; nothing partial | N | Not Run |
+| POS-034 | Invoice date selector position and default | Open POS, view the cart panel | A date selector sits directly above the customer dropdown, pre-filled with today | P | Not Run |
+| POS-035 | Backdate a sale from the cart | Set the invoice date to an earlier day | Field shows the picked date and a "Backdated" marker | P | Not Run |
+| POS-036 | Invoice date survives the payment round-trip | Pick a past date, go to Payment, return to the cart | The picked date is still selected | P | Not Run |
+| POS-037 | Forward dating blocked in the picker | Try to pick tomorrow | The picker refuses it (max = today) | N | Not Run |
+| POS-038 | Invoice date resets after a completed sale | Complete a backdated sale, start a new one | The selector is back to today | P | Not Run |
 
 ## PAY — Payments & Credit
 
@@ -180,7 +199,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-005 | Partial payment for credit customer | creditAllowed customer, pay half | Sale COMPLETED/PARTIAL with balance | P | Not Run |
 | PAY-006 | Credit sale (pay later) | creditAllowed customer, zero tender | COMPLETED/UNPAID with full balance | P | Not Run |
 | PAY-007 | Credit blocked for non-credit customer | Balance>0 with creditAllowed=false | 400 "not approved for credit…" | N | Not Run |
-| PAY-008 | Credit blocked without customer | Balance>0, no customer selected | Rejected (credit needs a saved customer) | N | Not Run |
+| PAY-008 | Credit blocked without customer | Balance>0, no customer selected | Rejected naming the missing customer (checked before the due date) | N | Automated |
 | PAY-009 | Credit limit enforced | Outstanding + new balance > creditLimit | 400 with limit / outstanding / remaining figures | N | Not Run |
 | PAY-010 | Credit exactly at limit allowed | New balance = remaining limit | Sale completes | P | Not Run |
 | PAY-011 | Null credit limit = unlimited | creditAllowed, creditLimit null, huge balance | Sale completes | P | Not Run |
@@ -191,10 +210,86 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PAY-016 | Zero-total sale disallowed | Empty cart complete attempt | Blocked client- and server-side | N | Not Run |
 | PAY-017 | Bank transfer / QR / cheque with reference | Pay via each method with a reference string | Method + reference stored and visible on sale detail | P | Not Run |
 | PAY-018 | Cash tender below total blocked (non-credit) | Walk-in, tender < total | Cannot complete the sale | N | Not Run |
-| PAY-019 | Settle credit sale with POST /payments | Record payment {saleId, method, amount} against UNPAID sale | Balance reduces; PARTIAL→PAID when it reaches zero | P | Not Run |
-| PAY-020 | Settlement frees credit headroom | Settle a sale, then retry a previously over-limit credit sale | Now allowed — outstanding recomputed from balances | P | Not Run |
-| PAY-021 | Overpayment on settlement rejected | Payment amount > remaining balance | 400 | N | Not Run |
-| PAY-022 | Payment against a PAID sale rejected | POST /payments on a settled sale | 400 | N | Not Run |
+| PAY-019 | Part payment settles no invoice | Two credit sales for one customer, pay half the account | Account balance drops; BOTH invoices still read Credit — not even the oldest is settled | P | Automated |
+| PAY-020 | Clearing the account pays every invoice on it | Pay the full account balance | All invoices outstanding at that moment flip to Paid together | P | Automated |
+| PAY-021 | Overpayment on the account rejected | Payment greater than the account balance | 400; balance unchanged | N | Automated |
+| PAY-022 | Payment against a cleared account rejected | POST /payments for a customer who owes nothing | 400 "nothing outstanding" | N | Automated |
+| PAY-023 | Due date required when a balance remains | Complete a credit/partial sale with no `paymentDueDate` | 400; message names the due date | N | Automated |
+| PAY-024 | Due date rejected on a fully paid sale | Complete a fully paid sale carrying a `paymentDueDate` | 400 — nothing is outstanding to fall due | N | Automated |
+| PAY-025 | Due date stored on the sale | Complete on credit with a due date, read the sale | `paymentDueDate` returned as given | P | Automated |
+| PAY-026 | Due date before the invoice date rejected | `paymentDueDate` earlier than `saleDate` | 400 | N | Automated |
+| PAY-027 | Instalments each kept as their own record | Two part payments against one account | Two Payment rows with their own date/time, method and reference, neither attached to a sale | P | Automated |
+| PAY-034 | Credit warning appears as the order grows | Credit customer, raise a quantity in the payment page order summary until the total passes their limit | Warning appears live with available vs needed; Complete Payment disables — without pressing it. The credit panel is the ONLY place it is stated; no duplicate in the footer notice | P | Not Run |
+| PAY-035 | Credit warning clears when payment covers it | With the warning showing, switch to Partial and enter enough to bring the balance under the limit | Warning clears; Complete Payment re-enables | P | Not Run |
+| POS-046 | Non-stock-tracked products are marked on the card | Browse the POS grid | Cards carry a neutral badge and caption naming the item type — "Non-Inventory" or "Service" — worded exactly as the products list and product page do, not a red Out of Stock | P | Not Run |
+| POS-047 | Per-unit fixed discount toggle | Item discount dialog, pick Fixed amount | An "Off the line" / "Off each unit" toggle appears; picking Percentage hides it | P | Not Run |
+| POS-048 | Per-unit preview shows the arithmetic | 3 × Rs. 1,000, Rs. 100 off each unit | Preview reads "(Rs. 100.00 × 3)" and -Rs. 300.00 before Apply | P | Not Run |
+| POS-049 | Reopening keeps the basis | Apply a per-unit discount, reopen the dialog | Still on "Off each unit" with the same amount | P | Not Run |
+| POS-050 | Per-unit crosses the approval limit sooner | Cashier applies an amount that is within limit whole-line but over it per unit | Button changes to "Request approval"; the manager dialog names the per-unit amount | N | Not Run |
+| POS-041 | Non-stock-tracked products are sellable | Add a NonInventory or Service product (e.g. POL-1976) to the cart | No "Only 0 in stock" warning, no cart-wide stock banner, and Proceed to Payment is enabled | P | Not Run |
+| POS-042 | One untracked item does not block a mixed cart | Cart with an in-stock Inventory item and a NonInventory item | Checkout proceeds; the untracked line raises no warning | P | Not Run |
+| POS-043 | Sold-out Inventory is still blocked | Add an Inventory product at 0 on hand | "Only 0 in stock", cart banner shown, Payment blocked | N | Not Run |
+| POS-044 | Enter in search honours the stock guard | Type a sold-out Inventory SKU in the search box and press Enter | Refused with an "is out of stock" toast, same as the tile and the scanner | N | Not Run |
+| POS-045 | A sold-out line cannot be typed down to zero | With an Inventory line whose stock hit 0 elsewhere, type a new quantity | Quantity stays at 1 and the line stays flagged; Payment stays blocked and no zero-quantity line is sent | N | Not Run |
+| POS-039 | Customer can be chosen on the payment page | Open /pos/payment with no customer, pick one from the dropdown above Amount Due | Selection sticks, the header names them, and the credit panel appears for a credit sale — without going back to the cart | P | Not Run |
+| POS-040 | Clearing the customer on the payment page | Pick a customer, then clear the selection | Reverts to Walk-in customer; the credit panel disappears and the credit-sale guard reappears | P | Not Run |
+| PAY-036 | Non-credit customer flagged up front | Select a customer with creditAllowed false, choose Credit | "not approved for credit" shown immediately, not on submit | N | Not Run |
+| PAY-037 | Unlimited customer is never blocked | creditAllowed with creditLimit null, large credit sale | No warning; sale completes | P | Not Run |
+| PAY-038 | Credit unreadable does not block selling | Break /customers/{id}/credit (offline), take a credit sale | Non-blocking notice; Complete Payment still enabled; server enforces on completion | N | Not Run |
+| PAY-028 | Due date required in the POS | Choose Credit/Partial at checkout, leave the due date blank | Complete Payment stays disabled and names the missing due date | N | Not Run |
+| PAY-029 | Due date field hidden on a fully paid sale | Choose Cash for the full amount | No due-date field shown; none sent | P | Not Run |
+| PAY-030 | Record payment from the customer page | Customer detail → Record payment, amount/method/reference | New row in the Credit history table with its date and time; the account figures update in place | P | Not Run |
+| PAY-041 | No Record payment on the sale detail | Open a credit sale | No Record payment button — credit is settled on the customer's account | P | Not Run |
+| PAY-039 | Payment history is a full-width table under the items | Open a credit sale that has instalments | "Payments received" table sits below the item table with Date & time / Method / Reference / Amount, one row per instalment, and a Total received row once there is more than one | P | Not Run |
+| PAY-040 | Payment history states an unpaid credit sale | Open a credit sale with nothing received | Table shows "Nothing received yet — this sale is entirely on credit." | P | Not Run |
+| PAY-031 | Payment method printed on the bill | Open the A4 bill for a card sale, then for a credit sale | "Method: Card"; a sale taken on credit reads "Credit"; a part payment reads "Cash, Credit"; the due date is printed | P | Not Run |
+| PAY-032 | Bill updates to the real method once settled | Record a bank transfer settling a credit sale, reprint the A4 bill | Method now reads "Bank transfer" — Credit is gone | P | Not Run |
+| PAY-033 | Thermal receipt states credit too | Print the thermal receipt for a part-paid credit sale | Payment lines read "Cash <paid>" and "Credit <balance>", labelled not raw codes | P | Not Run |
+
+## DISC — Discount basis
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| DISC-010 | Whole-line fixed discount | 3 × Rs. 1,000, Rs. 100 off the line | Rs. 100 off; line Rs. 2,900 | P | Automated |
+| DISC-011 | Per-unit fixed discount | Same with basis UNIT | Rs. 300 off; line Rs. 2,700; basis stored | P | Automated |
+| DISC-012 | Omitted basis stays whole-line | Complete with no discountBasis | Treated as LINE — every pre-existing sale keeps its meaning | P | Automated |
+| DISC-013 | Per-unit percentage refused | PERCENTAGE with basis UNIT | 400 "must be a fixed amount" | N | Automated |
+| DISC-014 | Per-unit cannot drive a line negative | Rs. 5,000/unit off a Rs. 1,000 item | Line floors at 0; never negative | N | Automated |
+| DISC-015 | Order discount unaffected | Per-unit line discount plus a fixed cart discount | Cart discount taken once, not multiplied | P | Automated |
+| DISC-017 | Quotation honours a per-unit line discount | Quote 3 × Rs. 1,000 with Rs. 100 off each unit | Rs. 300 off; line Rs. 2,700; basis stored on the revision | P | Automated |
+| DISC-018 | Conversion charges what was quoted | Convert a per-unit quotation to a sale | Sale total equals the quoted grand total; the sale line keeps basis UNIT | P | Automated |
+| DISC-019 | Per-unit percentage refused on a quotation | PERCENTAGE with basis UNIT | 400 | N | Automated |
+| DISC-020 | Basis survives a revision | Revise a per-unit quotation without touching its lines | The revision keeps per-unit and the same grand total | P | Not Run |
+| DISC-021 | Cart and bill say which kind | Apply each kind in the POS, print the bill | Cart chip reads "off each unit" / "off the line"; the bill shows "(Rs. 100.00 × 3)" only for per-unit | P | Not Run |
+| DISC-023 | Printed A4 invoice says which kind | Print the A4 bill (/print/sales/{id}) for a per-unit discounted sale | Discount cell reads "- Rs. 300.00 (Rs. 100.00 × 3)"; a whole-line discount reads just the amount | P | Not Run |
+| DISC-024 | Thermal receipt says which kind | Print the thermal receipt for the same sale | Discount cell reads "-Rs. 300.00 (Rs. 100.00/u)" | P | Not Run |
+| DISC-022 | Quotation document says which kind | Print a quotation with a per-unit line | Discount cell shows "- Rs. 300.00 (Rs. 100.00 × 3)" | P | Not Run |
+| DISC-016 | Approval cannot be re-scoped | Approve Rs. 100 off the line, then submit it as per-unit | Refused — the token is bound to the basis | N | Not Run |
+
+## MARK — Accounting for a credit invoice
+
+| ID | Test Case | Steps | Expected Result | Type | Status |
+|---|---|---|---|---|---|
+| MARK-001 | Ticking records who and when | Customer page → Invoices → Mark paid on one of two credit invoices | Row shows the timestamp and the user's name | P | Automated |
+| MARK-002 | Ticking moves no money | Same, then re-read the account | Outstanding, the sale's balance and its payment status are all unchanged | P | Automated |
+| MARK-003 | Last uncovered invoice is blocked | Tick the first of two, then try the second | 400 naming the last invoice; the button is disabled with the reason on hover | N | Automated |
+| MARK-004 | A lone credit invoice cannot be ticked | Customer with exactly one credit invoice | Refused — it is both first and last | N | Automated |
+| MARK-005 | Paying settles what was left | Clear the account after ticking one of two | Both invoices are settled; no second tick needed | P | Automated |
+| MARK-015 | Clearing accounts for every invoice left | Two credit invoices, neither ticked, then clear the account | Both show Accounted for, stamped with the settlement time and the person who took the payment | P | Automated |
+| MARK-016 | An earlier tick keeps its owner | Manager ticks one, owner then clears the account | The ticked one keeps the manager's name and time; the other is stamped with the owner's | P | Automated |
+| MARK-017 | A part payment accounts for nothing | Pay half the account | No invoice gains an Accounted for value | N | Automated |
+| MARK-006 | A tick can be undone | Undo on a ticked invoice | markedPaidAt cleared | P | Automated |
+| MARK-007 | A till-paid sale cannot be ticked | Mark a fully paid cash sale | 400 — nothing to account for | N | Automated |
+| MARK-008 | The list is scoped to the customer | Two customers with credit invoices | Each page shows only its own | P | Automated |
+| MARK-010 | Blocked button explains itself on hover | Hover the disabled Mark paid on the last invoice | Tooltip names the outstanding amount and why it is blocked | P | Not Run |
+| MARK-011 | No undo once accounted for | Mark an invoice paid | The action column shows no button afterwards; the tick stands | P | Not Run |
+| MARK-012 | Invoices table pages and searches | Customer with more than 10 invoices; search an invoice number | Pages of 10 with Previous/Next; search narrows to matching invoices | P | Not Run |
+| MARK-013 | Last-invoice rule survives paging | Customer whose only unaccounted invoice is on page 2 | The rule still applies to it — the count is taken across the account, not the page | N | Not Run |
+| MARK-014 | Credit history pages and searches | Customer with more than 10 payments; search a method or reference | Pages of 10; search matches date, method, reference and amount | P | Not Run |
+| MARK-018 | A ticked invoice reads Paid on the sales page | Tick one of two invoices, open the sales list | The badge reads Paid there too; the Credit filter excludes it and the Paid filter includes it | P | Automated |
+| MARK-019 | A ticked invoice is no longer overdue | Tick an overdue invoice, apply an overdue query | It is not returned | P | Automated |
+| MARK-020 | Sale detail shows who ticked it | Open the sale after ticking | Badge reads Paid; markedPaidBy carries the user | P | Automated |
+| MARK-009 | Invoices table matches the sales page | Compare a customer's rows with /sales filtered to them | Same sales, same totals, same payment badges | P | Not Run |
 
 ## SALE — Sales History
 
@@ -211,6 +306,28 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE-009 | Cashier sees only permitted actions | Cashier opens sale detail | No admin-only actions (e.g. retry-sync if QB-gated) | P | Not Run |
 | SALE-010 | Sales report endpoint | GET /sales/report for a date range | Aggregates match the underlying sales; filters respected | P | Not Run |
 | SALE-011 | Manual per-sale sync | POST /sales/:id/sync on a NOT_SYNCED sale | Queued and pushed like the automatic path | P | Not Run |
+| SALE-012 | Sale with no date is dated now | Complete a sale without `saleDate` | `completedAt` is the current time | P | Not Run |
+| SALE-013 | Past date stored as the sale date | Complete with `saleDate` 10 days ago | `completedAt` falls on the picked day | P | Not Run |
+| SALE-014 | Future sale date rejected | Complete with `saleDate` = tomorrow | 400; no sale created | N | Not Run |
+| SALE-015 | Rejected date moves no stock | Complete with a future `saleDate` | Stock unchanged; no sale row, no sync job | N | Not Run |
+| SALE-016 | Stock moves today for a backdated sale | Complete dated 45 days ago | Stock decremented now, not on the picked date | P | Not Run |
+| SALE-017 | Backdated sale lists under its invoice date | Filter the sales history by the picked day, then by today | Present in the first, absent from the second | P | Not Run |
+| SALE-018 | Backdated sale prints its invoice date | Open the A4 bill for a backdated sale | Document date is the picked date | P | Not Run |
+| SALE-019 | QuickBooks filed under the invoice date | Sync a backdated sale | QBO document `TxnDate` equals the picked day | P | Not Run |
+| SALE-020 | Quotation conversion is not backdated | Convert a quotation to a sale | Sale is dated now; no backdating on this path | P | Not Run |
+| SALE-021 | Overdue filter returns only sales past due and owing | `GET /sales?overdue=true` with one overdue and one not-yet-due credit sale | Overdue one present, the other absent; every row still owes money | P | Automated |
+| SALE-022 | Settling drops a sale from the overdue filter | Record a full payment on an overdue sale, re-query | No longer returned | P | Automated |
+| SALE-023 | Sales list reports the last payment received | Part-pay a credit sale, read the list row | `lastPaymentAt` set; `paymentDueDate` returned | P | Automated |
+| SALE-024 | Due column blank for a fully paid sale | Cash sale in the sales list | Due column shows "—", not an invented date | P | Not Run |
+| SALE-028 | Credit filter excludes account-settled sales | Filter by Credit with one owing and one account-settled sale | Only the owing one is returned | P | Automated |
+| SALE-032 | Paid filter includes account-settled sales | Filter by Paid after clearing an account | The covered sales are returned | P | Automated |
+| SALE-033 | Settled sales report when their account cleared them | Read a covered sale from the list | creditSettledAt is set | P | Automated |
+| SALE-029 | PARTIAL still narrows via the API | GET /sales?paymentStatus=PARTIAL | Only the part-paid sale — the enum still discriminates for API callers | P | Automated |
+| SALE-031 | Sales list has no Items column | Open the sales list | Columns are Sale, Date, Customer, Cashier, Total, Due, Payment, Last payment, Sync, Actions — no item count | P | Not Run |
+| SALE-030 | Credit reads as "Credit" everywhere | A sale on credit; check the sales list, the sale detail badge and the dashboard recent sales | All read "Credit" — no "Partially paid", no "Credit / Unpaid" | P | Not Run |
+| SALE-027 | Total is red while a sale is owed for | Sales list with one credit and one cash sale | Credit sale's Total is red; the paid one is not; there is no Balance column | P | Not Run |
+| SALE-025 | Last payment blank for a counter sale | Cash sale in the sales list | Last payment column shows "—" (the sale never ran on credit) | P | Not Run |
+| SALE-026 | Overdue export matches an overdue query | Request the report with overdue=true | Export covers exactly those sales and names the filter. NOTE: the sales page no longer offers an Overdue control; the API filter remains for reports and callers | P | Not Run |
 
 ## RET — Returns & Refunds
 
@@ -239,6 +356,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
+| QUO-021 | Per-unit discount toggle in the builder | New quotation, set a line discount to Rs. | An "Off the line" / "Off each unit" pair appears; the line total and its hint follow the choice | P | Not Run |
 | QUO-001 | Build quotation | Add products, set customer, save draft | Draft created with server-computed totals | P | Not Run |
 | QUO-002 | Unit price read-only after add | Inspect line editor | Price displayed as text, not editable | P | Not Run |
 | QUO-003 | Line total = qty × price − discount | Set qty 3 + 10% discount | Line "Total (3 × Rs. x)" matches server preview | P | Not Run |
@@ -276,8 +394,28 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-010 | List search across fields | Search by phone fragment / company | Matching rows | P | Not Run |
 | CUST-011 | Type + active filters | CREDIT + Active | Intersection only | P | Not Run |
 | CUST-012 | Legacy address preserved | Pre-migration customer | Old single-line address appears in Street | P | Not Run |
-| CUST-013 | Sync single customer to QuickBooks | Profile → Sync to QuickBooks | Queued; status chip transitions; QB id stored | P | Not Run |
+| CUST-013 | Sync single customer to QuickBooks | Profile → Sync to QuickBooks | Customer pushed to QuickBooks and the returned id stored | P | Not Run |
 | CUST-014 | Walk-in behavior preserved | Sale without customer, then store-credit return | Return blocked per RET-009 | P | Not Run |
+| CUST-015 | Sync to QuickBooks stores a real id | Profile → Sync to QuickBooks on a POS-created customer | `quickbooksCustomerId` populated; status SYNCED | P | Not Run |
+| CUST-016 | Sync while disconnected fails clearly | Same action with QuickBooks disconnected | Error names the disconnection; no id written; status not left claiming success | N | Not Run |
+| CUST-017 | Available credit = limit − outstanding | Credit customer with a limit and one unpaid sale | List row shows limit minus what is owed | P | Automated |
+| CUST-018 | No limit shows nothing, not zero | Credit customer with `creditLimit` null | `availableCredit` is null; the column renders "—" | P | Automated |
+| CUST-019 | Settling releases the credit again | Record a full payment on that customer's sale | Outstanding 0; available back to the full limit | P | Automated |
+| CUST-020 | Filter to customers with credit outstanding | `hasOutstandingCredit=true` with one owing and one settled customer | Only the owing customer returned | P | Automated |
+| CUST-022 | Credit endpoint reports the till's figures | GET /customers/{id}/credit for a customer with one unpaid sale | creditAllowed, creditLimit, outstanding and available all match the sale | P | Automated |
+| CUST-023 | No limit reports null available | Same for a customer with creditLimit null | `creditLimit` and `available` are both null, not 0 | P | Automated |
+| CUST-024 | Shown figure equals enforced figure | Sell exactly the available headroom, then one unit more | The exact-headroom sale completes; one more is 400 "Credit limit exceeded" | P | Automated |
+| CUST-025 | Credit refusal visible before the sale | GET credit for a customer with creditAllowed false | `creditAllowed: false` — the till says so up front | P | Automated |
+| CUST-028 | A part payment releases credit at once | Pay half a customer's account | Outstanding and available credit both move immediately, though no invoice is settled | P | Automated |
+| CUST-029 | Credit history lists account payments | Customer page after two payments that clear the account | Both listed newest-first and marked as having cleared the balance | P | Automated |
+| CUST-030 | Payments cannot be listed unfiltered | GET /payments with no saleId or customerId | 400 — never the whole tenant's payments | N | Automated |
+| CUST-031 | Whole customer row opens the customer | Click anywhere in a row — a blank cell, the type, the phone | Customer detail opens | P | Not Run |
+| CUST-032 | Row click respects what it lands on | Click the name link, the Edit link, and the credit info icon | Each does its own thing; no double navigation | P | Not Run |
+| CUST-033 | Selecting text in a row is not a click | Drag to select a phone number, release | Nothing navigates; the text stays selected | N | Not Run |
+| CUST-034 | Modifier-click opens a new tab | Ctrl/Cmd-click or middle-click a row | Customer opens in a new tab; the list stays put | P | Not Run |
+| CUST-027 | Available credit explains itself on hover | Hover (or focus) the info icon beside Available credit | Tooltip reads "<used> of <limit> used · <left> left"; for a customer with no limit it reads "<used> used · no limit set" | P | Not Run |
+| CUST-026 | Credit limit column shows a figure or nothing | Customers list with three rows: credit + limit, credit + no limit, credit not allowed | Column is headed "Credit limit"; only the first shows an amount, the other two are blank — the words "No limit" appear nowhere in the table | P | Not Run |
+| CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
 
 ## CIMP — Customer Bulk Import
 
@@ -356,6 +494,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | QB-023 | Retry from sync log | POST /quickbooks/retry/:syncLogId on a FAILED row | Entity re-pushed; log updated | P | Not Run |
 | QB-024 | Vendor search filters server-side | Type a term in the mapping drawer | Result list narrowed by DisplayName match | P | Not Run |
 | QB-025 | Credit settlement pushed as QBO Payment | Settle a credit (invoice) sale | Payment created in QuickBooks against the invoice | P | Not Run |
+| QB-026 | Credit sale for a POS-created customer syncs | Add a customer at the till, make a credit sale, sync | Customer created in QuickBooks; Invoice carries its CustomerRef; no 6560 | P | Not Run |
+| QB-027 | Re-sync creates no second QuickBooks customer | Retry the sync of QB-026's sale | Same customer id reused; QuickBooks customer list unchanged | P | Not Run |
+| QB-028 | Existing QuickBooks customer is adopted, not duplicated | Create a POS customer whose name already exists in QuickBooks, then sell to them | Local record links to the existing QuickBooks customer | P | Not Run |
+| QB-029 | Sales Receipt names its customer | Cash sale with a customer attached, then sync | Sales Receipt in QuickBooks shows the customer (previously blank) | P | Not Run |
+| QB-030 | Walk-in cash sale still syncs | Cash sale with no customer | Sales Receipt created with no CustomerRef; no customer invented | P | Not Run |
+| QB-031 | Name clashing with a vendor reports clearly | Customer named the same as an existing QuickBooks vendor | Sync fails with a message naming the clash, not a raw 6240 | N | Not Run |
 
 ## SET — Settings
 
@@ -377,6 +521,16 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SET-014 | Invoice note escapes HTML | Enter `<script>alert(1)</script> A & B` | Rendered as literal text, no script execution | N | Passed |
 | SET-015 | Invoice note length capped | Submit a note over 500 characters | Validation error, not persisted | N | Not Run |
 | SET-016 | Existing tenant gets the new field | Load settings for a tenant saved before this field existed | Defaults merged in, note blank, no crash | P | Passed |
+| SET-017 | Shop timezone is settable | Settings → Business → change Timezone, Save | Value persists across reload (not silently discarded) | P | Not Run |
+| SET-018 | Invalid timezone rejected | PUT /v1/settings with `timezone: "Not/AZone"` | 400 with a validation message | N | Not Run |
+| SET-019 | Documents follow the shop timezone | Set shop tz, open an invoice from a device in another tz | Invoice date/time is the shop's, not the device's | P | Not Run |
+| SET-020 | Screens follow the device timezone | Change the device timezone, reload the sales list | Times shift to the device zone; documents do not | P | Not Run |
+| SET-021 | Receipt and invoice agree | Print the A4 bill and thermal receipt for one sale | Both state the same date and time | P | Not Run |
+| SET-022 | Report exports agree | Export the sales report as PDF and XLSX | Both show the same date/time strings | P | Not Run |
+| SET-023 | Dashboard day runs shop midnight to midnight | Complete a sale at 02:00 shop time; check "Today" | Counted for that shop day, not the previous one | P | Not Run |
+| SET-024 | Dashboard series buckets by shop day | Sales either side of shop midnight | Each lands in its own shop-day column | P | Not Run |
+| SET-025 | Existing businesses backfilled to Sri Lanka | Run migrations on a database predating the timezone field | Every business reads `Asia/Colombo`; one that had chosen another zone keeps it | P | Not Run |
+| SET-026 | A newly provisioned business has a timezone | Provision a tenant, read its settings | `Asia/Colombo` stored, not merely defaulted | P | Not Run |
 
 ## DOC — Documents & Printing
 
@@ -422,6 +576,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
+| UI-021 | Pagination is numbered everywhere | Open sales, products, customers, quotations, returns, suppliers, the POS grid and both customer-page tables | Every footer shows numbered pages with the current one highlighted — no bare Previous/Next anywhere | P | Not Run |
+| UI-022 | Page numbers collapse on long lists | A list of 40+ pages | Shows 1 … current-1 current current+1 … last; the first and last stay reachable and the row keeps its width | P | Not Run |
+| UI-023 | Rows per page only where it applies | Compare a list page with the quotations and suppliers lists | Rows-per-page appears where the size is adjustable and is absent where it is fixed; the range still shows | P | Not Run |
+| UI-017 | Tooltips are not clipped by their table | Hover a tooltip in the sales, products, customers or invoices table | The bubble shows in full above the row, not trimmed to the cell or the card | P | Not Run |
+| UI-018 | Tooltip follows the page as it scrolls | Hover a tooltip, then scroll the table or the page | It stays with its trigger, or goes away — never stranded mid-screen | P | Not Run |
+| UI-019 | Tooltip on a disabled control | Hover the disabled Mark paid on a customer's last invoice | Reason is shown; the button is still not clickable | P | Not Run |
+| UI-020 | Tooltip near a viewport edge | Hover a tooltip on the first row and on the rightmost column | Flips below at the top; never runs off the side | P | Not Run |
 | UI-001 | Dark mode toggles instantly | Toggle theme | All surfaces/tokens switch (not just scrollbar) | P | Not Run |
 | UI-002 | Theme persists across reload | Set dark, reload | No flash of wrong theme (pre-paint script) | P | Not Run |
 | UI-003 | System theme mode follows OS | Mode=system, flip OS preference | UI follows live | P | Not Run |
@@ -462,18 +623,19 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 14 |
-| PERM | 9 | CIMP | 10 |
-| DASH | 20 | SUP | 15 |
-| PROD | 27 | SIMP | 8 |
-| PIMP | 13 | QB | 25 |
-| POS | 33 | SET | 9 |
-| PAY | 22 | DOC | 11 |
-| SALE | 11 | ADM | 14 |
-| RET | 18 | UI | 16 |
-| QUO | 20 | SEC | 12 |
+| AUTH | 15 | QUO | 21 |
+| PERM | 15 | CUST | 34 |
+| DASH | 24 | CIMP | 10 |
+| PROD | 27 | SUP | 15 |
+| PIMP | 13 | SIMP | 8 |
+| POS | 50 | QB | 31 |
+| PAY | 41 | SET | 26 |
+| DISC | 15 | DOC | 16 |
+| MARK | 20 | ADM | 14 |
+| SALE | 33 | UI | 23 |
+| RET | 18 | SEC | 12 |
 
-**Total: 322 test cases** (≈60% positive / 40% negative).
+**Total: 481 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 
@@ -483,3 +645,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
   script as fixtures; QB-* cases need a QuickBooks sandbox connection and are
   best tagged `@quickbooks` so they can be excluded from CI without secrets.
 - Concurrency cases (PAY-014, PAY-015) are API-level tests, not browser tests.
+- Credit-management cases are automated API-level in
+  `apps/e2e/tests/credit-management.spec.ts` (28 cases); the remaining ones in those groups
+  are browser cases still to be scripted. Credit is settled per CUSTOMER ACCOUNT, so any new
+  case must exercise `POST /payments {customerId}` — there is no per-invoice settlement.

@@ -5,6 +5,7 @@ import { CalendarDays, Check, ChevronDown } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { isValidYmd } from '@/lib/dates';
 import { cn } from '@/lib/utils';
 
 export type DateRangePreset = 'ALL' | 'TODAY' | 'WEEK' | 'MONTH' | 'YEAR' | 'CUSTOM';
@@ -23,16 +24,6 @@ const PRESETS: { key: Exclude<DateRangePreset, 'CUSTOM'>; label: string }[] = [
   { key: 'MONTH', label: 'This month' },
   { key: 'YEAR', label: 'This year' },
 ];
-
-/**
- * A well-formed calendar day: strictly YYYY-MM-DD with a 4-digit year. Date
- * inputs happily emit 5–6-digit years mid-typing, which produce absurd
- * timestamps the API (rightly) rejects — treat those as "not set".
- */
-export function isValidYmd(v: string | undefined): v is string {
-  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
-  return !Number.isNaN(Date.parse(`${v}T00:00:00`));
-}
 
 /** Resolve the selection to inclusive ISO bounds for the API. */
 export function resolveDateRange(value: DateRangeValue): { dateFrom?: string; dateTo?: string } {

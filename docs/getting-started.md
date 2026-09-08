@@ -33,7 +33,8 @@ pnpm db:seed
 
 The seed creates the demo tenant with branch `brn_dev` / register `reg_dev`, ten products, and
 these logins: `owner@hardwarepos.test` / `password123` (Owner), `accountant@hardwarepos.test` /
-`password123`, Manager PIN `2222`, Cashier PIN `1111`.
+`password123`, `salesperson@hardwarepos.test` / `password123` (Salesperson),
+Manager PIN `2222`, Cashier PIN `1111`.
 
 ## Running in development
 

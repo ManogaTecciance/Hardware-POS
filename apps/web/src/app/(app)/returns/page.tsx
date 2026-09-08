@@ -9,6 +9,7 @@ import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { ReturnStatusBadge } from '@/components/returns/status-badges';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth';
@@ -17,7 +18,6 @@ import { formatMoney } from '@/lib/utils';
 import type { ReturnStatusCode } from '@hardware-pos/shared';
 import type { SyncStatusCode } from '@/lib/sales';
 
-const PAGE_SIZES = [20, 30, 40, 50];
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('en-LK', {
@@ -207,38 +207,13 @@ export default function ReturnsPage() {
         </div>
       </Card>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <span>Rows per page</span>
-          <Select
-            className="w-auto"
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-          >
-            {PAGE_SIZES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="flex items-center gap-3">
-          <span>
-            {from}–{to} of {total}
-          </span>
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            Prev
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </Button>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
     </div>
   );
 }

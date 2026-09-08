@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import {
+  dayInTimeZone,
+  daysInWindow,
+  lastNDaysInTimeZone,
+  safeTimeZone,
+} from '@hardware-pos/shared';
 
+import { SettingsService } from '../settings/settings.service';
 import { DashboardRepository } from './dashboard.repository';
 import {
   DashboardStats,
@@ -11,52 +18,65 @@ import {
   ShiftSummary,
 } from './dashboard.types';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Default window: the last 7 days including today (local midnights). */
-function defaultRange(): { from: Date; to: Date } {
-  const to = new Date();
-  to.setHours(24, 0, 0, 0);
-  const from = new Date(to.getTime() - 7 * DAY_MS);
-  return { from, to };
-}
-
-function resolveRange(from?: Date, to?: Date): { from: Date; to: Date } {
-  const def = defaultRange();
+/**
+ * Default window: the last 7 days including today, cut on the SHOP's midnights.
+ *
+ * The shop's day is the unit the business reckons in — it is the day printed on
+ * the invoice and filed in QuickBooks — so "today's sales" must run from one
+ * local midnight to the next. Cutting on the server's midnight instead would, on
+ * a UTC host serving a Colombo shop, report 05:30-to-05:30.
+ */
+function resolveRange(tz: string, from?: Date, to?: Date): { from: Date; to: Date } {
+  const def = lastNDaysInTimeZone(7, tz);
   return { from: from ?? def.from, to: to ?? def.to };
 }
 
-/** The equal-length window immediately before [from, to). */
+/** The equal-length window immediately before [from, to), for period-on-period deltas. */
 function previousWindow(from: Date, to: Date): { from: Date; to: Date } {
   const span = to.getTime() - from.getTime();
   return { from: new Date(from.getTime() - span), to: from };
 }
 
-/** Distribute bucketed sums over the window's days (zero-filled). */
+/**
+ * Distribute bucketed sums over the window's days (zero-filled).
+ *
+ * Indexed by the shop's calendar day rather than by dividing elapsed
+ * milliseconds: a day is not always 24 hours long, so arithmetic on a fixed
+ * DAY_MS silently mis-slots every bucket after a DST transition.
+ */
 function zeroFilledSeries(
   buckets: { bucket: Date; value: number }[],
   from: Date,
   to: Date,
+  tz: string,
 ): number[] {
-  const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / DAY_MS));
-  const series = new Array<number>(days).fill(0);
+  const byDay = new Map<string, number>();
   for (const b of buckets) {
-    const idx = Math.floor((new Date(b.bucket).getTime() - from.getTime()) / DAY_MS);
-    if (idx >= 0 && idx < days) series[idx] = (series[idx] ?? 0) + b.value;
+    const day = dayInTimeZone(new Date(b.bucket), tz);
+    byDay.set(day, (byDay.get(day) ?? 0) + b.value);
   }
-  return series;
+  return daysInWindow(from, to, tz).map((day) => byDay.get(day) ?? 0);
 }
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly dashboardRepository: DashboardRepository) {}
+  constructor(
+    private readonly dashboardRepository: DashboardRepository,
+    private readonly settings: SettingsService,
+  ) {}
+
+  /** The zone the business reckons its days in. */
+  private tz(tenantId: string): string {
+    return safeTimeZone(this.settings.getSettings(tenantId).timezone);
+  }
 
   getStats(tenantId: string): Promise<DashboardStats> {
-    return this.dashboardRepository.getStats(tenantId);
+    return this.dashboardRepository.getStats(tenantId, this.tz(tenantId));
   }
 
   async summary(tenantId: string, fromIn?: Date, toIn?: Date): Promise<DashboardSummary> {
-    const { from, to } = resolveRange(fromIn, toIn);
+    const tz = this.tz(tenantId);
+    const { from, to } = resolveRange(tz, fromIn, toIn);
     const prev = previousWindow(from, to);
 
     const [cur, prv, profit, prevProfit, buckets] = await Promise.all([
@@ -64,10 +84,10 @@ export class DashboardService {
       this.dashboardRepository.rangeTotals(tenantId, prev.from, prev.to),
       this.dashboardRepository.rangeGrossProfit(tenantId, from, to),
       this.dashboardRepository.rangeGrossProfit(tenantId, prev.from, prev.to),
-      this.dashboardRepository.salesSeries(tenantId, from, to, 'day'),
+      this.dashboardRepository.salesSeries(tenantId, from, to, 'day', tz),
     ]);
 
-    const salesSeries = zeroFilledSeries(buckets, from, to);
+    const salesSeries = zeroFilledSeries(buckets, from, to, tz);
     // The per-day sales curve doubles as the spark direction for the other
     // KPIs; only Net Sales charts absolute per-day values today.
     return {
@@ -91,8 +111,9 @@ export class DashboardService {
     toIn?: Date,
     interval: 'day' | 'hour' = 'day',
   ): Promise<SeriesPoint[]> {
-    const { from, to } = resolveRange(fromIn, toIn);
-    const rows = await this.dashboardRepository.salesSeries(tenantId, from, to, interval);
+    const tz = this.tz(tenantId);
+    const { from, to } = resolveRange(tz, fromIn, toIn);
+    const rows = await this.dashboardRepository.salesSeries(tenantId, from, to, interval, tz);
     return rows.map((r) => ({ bucket: new Date(r.bucket).toISOString(), value: r.value }));
   }
 
@@ -102,7 +123,8 @@ export class DashboardService {
     toIn?: Date,
     cashierId?: string,
   ): Promise<PaymentMethodTotal[]> {
-    const { from, to } = resolveRange(fromIn, toIn);
+    const tz = this.tz(tenantId);
+    const { from, to } = resolveRange(tz, fromIn, toIn);
     return this.dashboardRepository.paymentMethodTotals(tenantId, from, to, cashierId);
   }
 
@@ -112,7 +134,8 @@ export class DashboardService {
     toIn?: Date,
     limit = 5,
   ): Promise<RankedCategory[]> {
-    const { from, to } = resolveRange(fromIn, toIn);
+    const tz = this.tz(tenantId);
+    const { from, to } = resolveRange(tz, fromIn, toIn);
     return this.dashboardRepository.topCategories(tenantId, from, to, limit);
   }
 
@@ -123,15 +146,14 @@ export class DashboardService {
     limit = 5,
     cashierId?: string,
   ): Promise<RankedProduct[]> {
-    const { from, to } = resolveRange(fromIn, toIn);
+    const tz = this.tz(tenantId);
+    const { from, to } = resolveRange(tz, fromIn, toIn);
     return this.dashboardRepository.topProducts(tenantId, from, to, limit, cashierId);
   }
 
-  /** The requesting cashier's activity since local midnight. */
+  /** The requesting cashier's activity over the shop's current day. */
   async shiftSummary(tenantId: string, cashierId: string): Promise<ShiftSummary> {
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const now = new Date(startOfToday.getTime() + DAY_MS);
+    const { from: startOfToday, to: now } = lastNDaysInTimeZone(1, this.tz(tenantId));
 
     const [methods, startedAt, refunds, totals] = await Promise.all([
       this.dashboardRepository.paymentMethodTotals(tenantId, startOfToday, now, cashierId),

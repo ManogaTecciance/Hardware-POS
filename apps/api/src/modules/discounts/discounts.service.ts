@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { DiscountType, UserRole } from '@hardware-pos/database';
+import { DiscountBasis, DiscountType, UserRole } from '@hardware-pos/database';
 
 import { AuthService } from '../auth/auth.service';
 import { Permission, roleHasPermission } from '../auth/permissions';
@@ -22,6 +22,8 @@ export interface ResolveApprovalInput {
   actorRole: UserRole;
   productId: string;
   discountType: DiscountType;
+  /** Whether the amount is per unit or for the line; part of what was approved. */
+  discountBasis: DiscountBasis;
   discountValue: number;
   /** Effective discount as a percentage of the line subtotal. */
   effectivePercent: number;
@@ -64,6 +66,7 @@ export class DiscountsService {
       tenantId,
       productId: dto.productId,
       discountType: dto.discountType,
+      discountBasis: dto.discountBasis ?? 'LINE',
       discountValue: dto.discountValue,
       approvedByUserId: approver.id,
       approverRole: approver.role,
@@ -93,6 +96,10 @@ export class DiscountsService {
         payload.tenantId === input.tenantId &&
         payload.productId === input.productId &&
         payload.discountType === input.discountType &&
+        // Without this, an approval for a whole-line amount could be spent on a
+        // per-unit one: every other field still matches, and for a role with no
+        // limit the percentage re-check below waves it through.
+        (payload.discountBasis ?? 'LINE') === input.discountBasis &&
         Number(payload.discountValue) === Number(input.discountValue);
       if (matches && limitCovers(getRoleDiscountLimit(payload.approverRole), input.effectivePercent)) {
         return payload.approvedByUserId;

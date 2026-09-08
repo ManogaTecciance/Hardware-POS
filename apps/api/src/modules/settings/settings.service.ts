@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
-import { DEFAULT_CURRENCY } from '@hardware-pos/shared';
+import { DEFAULT_CURRENCY, DEFAULT_TIME_ZONE, safeTimeZone } from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
@@ -51,6 +51,7 @@ export class SettingsService implements OnModuleInit {
       ...current,
       ...pickDefined(dto, [
         'currency',
+        'timezone',
         'taxRatePercent',
         'taxInclusive',
         'highDiscountThresholdPercent',
@@ -120,6 +121,10 @@ export class SettingsService implements OnModuleInit {
     return {
       ...d,
       ...stored,
+      // Guarded on read as well as write: a zone that a hand-edited row or an
+      // older runtime's ICU cannot resolve would otherwise reach every document
+      // formatter and throw there instead of here.
+      timezone: safeTimeZone(stored.timezone),
       returns: { ...d.returns, ...(stored.returns ?? {}) },
       quotation: { ...d.quotation, ...(stored.quotation ?? {}) },
       documents: { ...d.documents, ...(stored.documents ?? {}) },
@@ -130,6 +135,7 @@ export class SettingsService implements OnModuleInit {
   private defaults(): AppSettings {
     return {
       currency: DEFAULT_CURRENCY,
+      timezone: DEFAULT_TIME_ZONE,
       taxRatePercent: 0,
       taxInclusive: false,
       highDiscountThresholdPercent: 10,
@@ -142,6 +148,7 @@ export class SettingsService implements OnModuleInit {
         requireApprovalForNonGoodCondition: true,
         requireApprovalForOtherReason: false,
         quickbooksRefundReceiptDepositAccountRef: null,
+        quickbooksRefundDepositAccountRefs: {},
       },
       quotation: {
         defaultValidityDays: 14,

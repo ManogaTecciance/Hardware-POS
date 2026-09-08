@@ -6,7 +6,7 @@ import { SalePaymentInputDto } from '../../sales/dto/sale-payment.dto';
 /**
  * Convert an accepted quotation into a sale. With no payments the sale is an
  * unpaid INVOICE (requires a customer); with payments it is a receipt/partial
- * sale. `override` lets an owner/admin re-convert a quotation that already has a
+ * sale. `override` lets an owner-level role re-convert a quotation that already has a
  * linked sale (guards against accidental duplicate conversion).
  */
 export class ConvertQuotationDto {

@@ -12,7 +12,8 @@
     "lint": "eslint \"src/**/*.ts\"",
     "test": "jest --passWithNoTests",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "seed:qbo": "tsx scripts/seed-quickbooks-sandbox.ts"
+    "seed:qbo": "tsx scripts/seed-quickbooks-sandbox.ts",
+    "probe:invstart": "tsx scripts/probe-inventory-start-date.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",

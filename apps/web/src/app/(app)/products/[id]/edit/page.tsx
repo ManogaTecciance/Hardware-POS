@@ -8,7 +8,7 @@ import { ArrowLeft } from 'lucide-react';
 import { ProductForm } from '@/components/products/product-form';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
-import { Permission } from '@/lib/permissions';
+import { isAdminLevelRole, Permission } from '@/lib/permissions';
 import { fetchCategoryTree, fetchProduct, type CategoryNode, type ManagedProduct } from '@/lib/products-api';
 
 export default function EditProductPage() {
@@ -68,7 +68,7 @@ export default function EditProductPage() {
           session={session}
           categories={categories}
           product={product}
-          isAdmin={session.user.role === 'OWNER' || session.user.role === 'ADMIN'}
+          isAdmin={isAdminLevelRole(session.user.role)}
         />
       )}
     </div>

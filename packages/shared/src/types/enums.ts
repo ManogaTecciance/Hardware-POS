@@ -5,11 +5,18 @@
  * the browser and the server without pulling in TypeScript `enum` runtime code.
  */
 
-/** Staff roles. Managers can approve high discounts via manager PIN. */
+/**
+ * Staff roles — mirrors the `UserRole` enum in packages/database. Managers can
+ * approve high discounts via manager PIN; Owner, Admin and Salesperson are
+ * owner-level roles that hold every permission with no discount ceiling.
+ */
 export const UserRole = {
   Cashier: 'CASHIER',
   Manager: 'MANAGER',
   Admin: 'ADMIN',
+  Owner: 'OWNER',
+  Accountant: 'ACCOUNTANT',
+  Salesperson: 'SALESPERSON',
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 

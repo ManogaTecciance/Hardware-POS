@@ -3,9 +3,15 @@ import { Prisma, PrintJob, Receipt } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
+import { safeTimeZone } from '@hardware-pos/shared';
+
 import { SettingsService } from '../settings/settings.service';
 import { ReceiptsRepository, SaleForReceipt } from './receipts.repository';
-import { CustomerReceiptData, renderCustomerReceipt } from './receipt-templates';
+import {
+  CustomerReceiptData,
+  formatReceiptDateTime,
+  renderCustomerReceipt,
+} from './receipt-templates';
 import { QueryPrintJobsDto } from './dto/query-print-jobs.dto';
 
 export interface CustomerReceiptResult {
@@ -31,7 +37,12 @@ export class ReceiptsService {
     const sale = await this.loadCompletedSale(tenantId, saleId);
     const settings = this.settingsService.getSettings(tenantId);
 
-    const receiptData = this.toCustomerReceiptData(sale, settings.currency, settings.receiptFooter);
+    const receiptData = this.toCustomerReceiptData(
+      sale,
+      settings.currency,
+      settings.receiptFooter,
+      safeTimeZone(settings.timezone),
+    );
     const receipt = await this.receiptsRepository.upsertReceipt(
       sale.id,
       `RCP-${sale.saleNumber}`,
@@ -105,11 +116,12 @@ export class ReceiptsService {
     sale: SaleForReceipt,
     currency: string,
     footer: string,
+    tz: string,
   ): CustomerReceiptData {
     return {
       storeName: sale.tenant.name,
       saleNumber: sale.saleNumber,
-      dateTime: this.formatDateTime(sale.completedAt ?? sale.createdAt),
+      dateTime: formatReceiptDateTime(sale.completedAt ?? sale.createdAt, tz),
       documentType: sale.quickbooksDocumentType,
       customerName: sale.customer?.name ?? null,
       currency,
@@ -119,6 +131,8 @@ export class ReceiptsService {
         quantity: Number(it.quantity),
         unitPrice: Number(it.unitPrice),
         discountAmount: Number(it.discountAmount),
+        discountBasis: it.discountBasis,
+        discountValue: it.discountValue != null ? Number(it.discountValue) : null,
         lineTotal: Number(it.lineTotal),
       })),
       subtotal: Number(sale.subtotal),
@@ -136,9 +150,5 @@ export class ReceiptsService {
 
   private toReceiptContent(data: CustomerReceiptData): Prisma.InputJsonValue {
     return { ...data } as unknown as Prisma.InputJsonValue;
-  }
-
-  private formatDateTime(date: Date): string {
-    return date.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   }
 }

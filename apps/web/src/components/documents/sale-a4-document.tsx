@@ -5,6 +5,12 @@ import * as React from 'react';
 import type { DocumentProfile, SaleDocumentMeta } from '@/lib/document-template-service';
 import { resolveImageUrl } from '@/lib/products-api';
 import type { SaleDetail } from '@/lib/sales';
+import {
+  documentPaymentMethods,
+  formatDateInTimeZone,
+  formatDateTimeInTimeZone,
+} from '@hardware-pos/shared';
+
 import { formatMoney } from '@/lib/utils';
 
 /**
@@ -22,25 +28,20 @@ const MARGIN_PADDING: Record<DocumentProfile['marginStyle'], string> = {
 };
 const LOGO_HEIGHT: Record<DocumentProfile['logoSize'], number> = { SMALL: 40, MEDIUM: 56, LARGE: 78 };
 
-const PAYMENT_LABELS: Record<string, string> = {
-  CASH: 'Cash',
-  CARD: 'Card',
-  BANK_TRANSFER: 'Bank Transfer',
-  QR_PAYMENT: 'QR Payment',
-  CHECK: 'Cheque',
-  STORE_CREDIT: 'Store Credit',
-  OTHER: 'Other',
-};
-
-function formatDateTime(iso: string | null): string {
+/**
+ * Dates on this invoice are stated in the SHOP's timezone, not the viewer's.
+ * The stored value is a UTC instant; rendering it in whatever zone the printer
+ * happens to sit in would let the same invoice carry two different dates —
+ * unacceptable for a document that is filed as a business record.
+ */
+function formatDateTime(iso: string | null, tz: string): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeInTimeZone(new Date(iso), tz);
+}
+
+/** A due date is a day; the end-of-day instant it is stored as is not news. */
+function formatDate(iso: string, tz: string): string {
+  return formatDateInTimeZone(new Date(iso), tz);
 }
 
 export function SaleA4Document({
@@ -70,7 +71,9 @@ export function SaleA4Document({
     profile.taxNumber ? `Tax/VAT: ${profile.taxNumber}` : null,
   ].filter(Boolean) as string[];
 
-  const paymentMethods = sale.payments.map((p) => PAYMENT_LABELS[p.method] ?? p.method).join(', ');
+  // "Credit" while a balance remains; the real method(s) once it is settled —
+  // the same rule the thermal receipt and the server-rendered PDF follow.
+  const paymentMethods = documentPaymentMethods(sale.payments, sale.balanceAmount);
   const paymentRefs = sale.payments.map((p) => p.reference).filter(Boolean).join(', ');
 
   return (
@@ -113,7 +116,7 @@ export function SaleA4Document({
           <div className="a4-meta-list">
             <div>
               <span className="a4-k">Date</span>
-              {formatDateTime(sale.completedAt ?? sale.createdAt)}
+              {formatDateTime(sale.completedAt ?? sale.createdAt, profile.timezone)}
             </div>
             <div>
               <span className="a4-k">Branch</span>
@@ -127,6 +130,12 @@ export function SaleA4Document({
               <span className="a4-k">Cashier</span>
               {meta.cashierName}
             </div>
+            {sale.paymentDueDate ? (
+              <div>
+                <span className="a4-k">Payment due</span>
+                {formatDate(sale.paymentDueDate, profile.timezone)}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -152,7 +161,19 @@ export function SaleA4Document({
                 <td className="r">{it.quantity}</td>
                 <td className="r">{formatMoney(it.unitPrice)}</td>
                 {profile.showDiscountColumn ? (
-                  <td className="r">{it.discountAmount > 0 ? `- ${formatMoney(it.discountAmount)}` : '—'}</td>
+                  // A per-unit discount shows its arithmetic: the amount taken is
+                  // larger than the figure agreed per item, and the customer
+                  // should be able to check it. Whole-line prints as it always
+                  // has, so no past invoice changes appearance.
+                  <td className="r">
+                    {it.discountAmount > 0
+                      ? `- ${formatMoney(it.discountAmount)}${
+                          it.discountBasis === 'UNIT' && it.discountValue != null
+                            ? ` (${formatMoney(it.discountValue)} × ${it.quantity})`
+                            : ''
+                        }`
+                      : '—'}
+                  </td>
                 ) : null}
                 <td className="r">{formatMoney(it.lineTotal)}</td>
               </tr>
@@ -181,7 +202,7 @@ export function SaleA4Document({
           <div className="a4-block">
             <h4>Payment</h4>
             <p>
-              Method: {paymentMethods || '—'}
+              Method: {paymentMethods}
               {paymentRefs ? ` · Ref: ${paymentRefs}` : ''} · Status: {sale.paymentStatus}
             </p>
           </div>
@@ -216,7 +237,7 @@ export function SaleA4Document({
         {/* Footer */}
         <div className="a4-foot">
           {profile.footerText || 'Thank you for your business!'}
-          <span className="a4-gen">Generated {formatDateTime(new Date().toISOString())}</span>
+          <span className="a4-gen">Generated {formatDateTime(new Date().toISOString(), profile.timezone)}</span>
         </div>
         {profile.billNote ? <div className="a4-billnote">{profile.billNote}</div> : null}
       </div>

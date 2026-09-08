@@ -12,10 +12,13 @@ import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
 import { Input } from '@/components/ui/input';
 import { SearchSelect } from '@/components/ui/search-select';
 import { Select } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
+import { productTypeLabel } from '@hardware-pos/shared';
+
 import { useAuth } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import {
@@ -33,7 +36,6 @@ import {
 import { cn, formatMoney } from '@/lib/utils';
 import { resolveImageUrl } from '@/lib/products-api';
 
-const PAGE_SIZES = [20, 30, 40, 50];
 
 function isLowStock(p: ManagedProduct): boolean {
   return p.type === 'Inventory' && p.reorderLevel != null && p.quantityOnHand <= p.reorderLevel;
@@ -328,7 +330,7 @@ export default function ProductsPage() {
                             {p.name}
                           </Link>
                           <div className="text-xs text-muted-foreground">
-                            {p.type === 'NonInventory' ? 'Non-Inventory' : p.type}
+                            {productTypeLabel(p.type)}
                           </div>
                         </div>
                       </div>
@@ -411,46 +413,14 @@ export default function ProductsPage() {
       </Card>
 
       {/* Pagination */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span>Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="w-auto"
-          >
-            {PAGE_SIZES.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-muted-foreground">
-            {total === 0 ? '0' : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)}`} of{' '}
-            {total}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        disabled={loading}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
       {session ? (
         <ImportProductsDialog
           session={session}

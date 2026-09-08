@@ -11,5 +11,6 @@
 export * from './constants.js';
 export * from './money.js';
 export * from './returns.js';
+export * from './time.js';
 export * from './quotations.js';
 export * from './types/index.js';

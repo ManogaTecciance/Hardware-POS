@@ -1,4 +1,5 @@
 import {
+  DiscountBasis,
   DiscountType,
   PaymentMethod,
   PaymentStatus,
@@ -27,6 +28,15 @@ export interface SaleListItem {
   balanceAmount: number;
   paymentStatus: PaymentStatus;
   paymentMethods: PaymentMethod[];
+  /** When payment is expected. Null on a fully paid sale — the column stays blank. */
+  paymentDueDate: Date | null;
+  /** When an account settlement covered this invoice; null while it is on credit. */
+  creditSettledAt: Date | null;
+  /** When a user ticked this invoice off as paid, and who. Moves no money. */
+  markedPaidAt: Date | null;
+  markedPaidByName: string | null;
+  /** When the most recent payment was received. Null when none has been. */
+  lastPaymentAt: Date | null;
   returnStatus: SaleReturnStatus;
   returnedAmount: number;
   quickbooksDocumentType: QuickBooksDocumentType | null;
@@ -40,6 +50,10 @@ export interface SalesListFilter {
   search?: string;
   dateFrom?: Date;
   dateTo?: Date;
+  /** Only sales past their due date that still owe money. */
+  overdueAsOf?: Date;
+  /** Only this customer's sales — the customer page's invoice list. */
+  customerId?: string;
 }
 
 /** Normalized cart line coming into the compute pipeline. */
@@ -48,6 +62,8 @@ export interface CartItemInput {
   quantity: number;
   unitPrice?: number;
   discountType?: DiscountType | null;
+  /** Whether a FIXED amount is per unit or for the line. Absent = LINE. */
+  discountBasis?: DiscountBasis | null;
   discountValue?: number | null;
   discountReason?: string | null;
   /** Fresh approval token (one-shot completion). */
@@ -67,6 +83,8 @@ export interface ComputedLine {
   unitPrice: number;
   quantity: number;
   discountType: DiscountType | null;
+  /** Whether the FIXED amount was per unit or for the line. */
+  discountBasis: DiscountBasis;
   discountValue: number | null;
   discountAmount: number;
   discountReason: string | null;
@@ -115,6 +133,10 @@ export interface PersistSaleInput {
   branchId: string;
   registerId?: string | null;
   customerId?: string | null;
+  /** Invoice date — the user-chosen sale date, or now. Stored as `completedAt`. */
+  saleDate: Date;
+  /** When payment is expected. Null on a fully paid sale. */
+  paymentDueDate: Date | null;
   computed: ComputedSale;
   payments: PaymentInput[];
   paidAmount: number;

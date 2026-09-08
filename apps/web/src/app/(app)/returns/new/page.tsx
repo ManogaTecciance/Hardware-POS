@@ -643,7 +643,9 @@ function FindSaleStep({ onPick }: { onPick: (saleId: string) => void }) {
                   <div className="font-medium">{s.saleNumber}</div>
                   <div className="text-xs text-muted-foreground">
                     {s.customerName ?? 'Walk-in'} · {formatMoney(s.total)} ·{' '}
-                    {new Date(s.createdAt).toLocaleDateString('en-LK')}
+                    {/* Invoice date, so this matches the bill in the customer's
+                        hand and the order the list is now sorted in. */}
+                    {new Date(s.completedAt ?? s.createdAt).toLocaleDateString('en-LK')}
                   </div>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => onPick(s.id)}>

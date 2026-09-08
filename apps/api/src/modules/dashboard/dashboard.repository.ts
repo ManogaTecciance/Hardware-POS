@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
 
+import { lastNDaysInTimeZone } from '@hardware-pos/shared';
+
+import { CreditService } from '../credit/credit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStats } from './dashboard.types';
 
@@ -8,7 +11,10 @@ const COMPLETED = 'COMPLETED' as const;
 
 @Injectable()
 export class DashboardRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly credit: CreditService,
+  ) {}
 
   /** Net sales + transaction count for a completed-sales window. */
   async rangeTotals(
@@ -48,16 +54,30 @@ export class DashboardRepository {
     return Number(rows[0]?.profit ?? 0);
   }
 
-  /** Daily (or hourly) net-sales buckets for charts/sparklines. */
+  /**
+   * Daily (or hourly) net-sales buckets for charts/sparklines, cut on the SHOP's
+   * clock rather than the database session's.
+   *
+   * `completedAt` is a `timestamp` holding a UTC wall clock, so the double
+   * `AT TIME ZONE` is doing two different jobs: the first reads the naive value
+   * back as a real UTC instant, the second re-expresses that instant as local
+   * wall-clock time in `tz`. Truncating there gives the shop's day, and the
+   * trailing `AT TIME ZONE` converts the bucket label back to an instant so the
+   * API hands out a UTC value like everything else.
+   */
   async salesSeries(
     tenantId: string,
     from: Date,
     to: Date,
     interval: 'day' | 'hour',
+    tz: string,
   ): Promise<{ bucket: Date; value: number }[]> {
     const unit = interval === 'hour' ? 'hour' : 'day';
     return this.prisma.$queryRaw<{ bucket: Date; value: number }[]>(Prisma.sql`
-      SELECT date_trunc(${unit}, s."completedAt") AS bucket,
+      SELECT (
+               date_trunc(${unit}, s."completedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})
+                 AT TIME ZONE ${tz}
+             ) AS bucket,
              COALESCE(SUM(s.total), 0)::float AS value
       FROM "Sale" s
       WHERE s."tenantId" = ${tenantId}
@@ -170,14 +190,18 @@ export class DashboardRepository {
     return Number(agg._sum.amount ?? 0);
   }
 
-  async getStats(tenantId: string): Promise<DashboardStats> {
-    // "Today" is the API server's local midnight.
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+  async getStats(tenantId: string, tz: string): Promise<DashboardStats> {
+    // "Today" is the shop's calendar day — midnight to midnight where the shop
+    // trades, not where the server happens to run.
+    const { from: startOfToday, to: endOfToday } = lastNDaysInTimeZone(1, tz);
 
-    const [todayAgg, productsCached, pendingSyncs, inventoryRows] = await Promise.all([
+    const [todayAgg, productsCached, pendingSyncs, receivable, inventoryRows] = await Promise.all([
       this.prisma.sale.aggregate({
-        where: { tenantId, status: 'COMPLETED', completedAt: { gte: startOfToday } },
+        where: {
+          tenantId,
+          status: 'COMPLETED',
+          completedAt: { gte: startOfToday, lt: endOfToday },
+        },
         _sum: { total: true },
         _count: { _all: true },
       }),
@@ -185,6 +209,14 @@ export class DashboardRepository {
       this.prisma.sale.count({
         where: { tenantId, status: 'COMPLETED', syncStatus: { not: 'SYNCED' } },
       }),
+      // Receivable is a running balance, deliberately unbounded by the day
+      // window above: money owed does not stop being owed at midnight.
+      //
+      // Asked of CreditService rather than aggregated here, so the dashboard tile,
+      // the customers list and the credit-limit guard cannot drift apart — this
+      // query used to be a second copy of the rule and missed account payments
+      // entirely the moment credit moved to the customer.
+      this.credit.totalReceivable(tenantId),
       // Column-by-column product of qty × cost needs raw SQL (no aggregate for it).
       // Items without a cost price contribute nothing rather than a fake value.
       this.prisma.$queryRaw<Array<{ value: number; stocked: number }>>`
@@ -200,6 +232,7 @@ export class DashboardRepository {
       todayTransactions: todayAgg._count._all,
       productsCached,
       pendingSyncs,
+      outstandingReceivable: receivable,
       inventoryValue: Number(inventoryRows[0]?.value ?? 0),
       stockedProducts: Number(inventoryRows[0]?.stocked ?? 0),
     };

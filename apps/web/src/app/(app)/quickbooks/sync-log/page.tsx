@@ -20,6 +20,7 @@ const TYPE_LABEL: Record<string, string> = {
   SALE_PUSH: 'Sale push',
   RETURN_PUSH: 'Return push',
   CUSTOMER_PULL: 'Customer pull',
+  CUSTOMER_PUSH: 'Customer push',
   VENDOR_PULL: 'Vendor pull',
   CONNECTION: 'Connection',
 };

@@ -15,6 +15,7 @@ import {
 import { SupplierTable } from '@/components/suppliers/supplier-table';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
 import { useAuth } from '@/lib/auth';
 import { deriveSupplierAccess } from '@/lib/suppliers/access';
 import { fetchSuppliers } from '@/lib/suppliers/suppliers-api';
@@ -173,32 +174,13 @@ export default function SuppliersPage() {
       )}
 
       {!error && !showEmpty ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <span className="text-muted-foreground">
-            {total === 0
-              ? '0'
-              : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)}`}{' '}
-            of {total}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
+        <Pagination
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={total}
+          disabled={loading}
+          onPageChange={setPage}
+        />
       ) : null}
 
       {session ? (

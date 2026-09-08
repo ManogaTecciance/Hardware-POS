@@ -7,6 +7,11 @@ export interface DashboardStats {
   todayTransactions: number;
   productsCached: number;
   pendingSyncs: number;
+  /**
+   * Everything the shop is currently owed. A running balance, not a windowed
+   * figure — it is deliberately unaffected by the dashboard's date range.
+   */
+  outstandingReceivable: number;
   /** Stock on hand valued at cost across active Inventory products. */
   inventoryValue: number;
   /** Active Inventory products with stock on hand. */
@@ -14,9 +19,13 @@ export interface DashboardStats {
 }
 
 /** Raw stats JSON (Prisma Decimal totals may arrive as strings). */
-type ApiDashboardStats = Omit<DashboardStats, 'todaySalesTotal' | 'inventoryValue'> & {
+type ApiDashboardStats = Omit<
+  DashboardStats,
+  'todaySalesTotal' | 'inventoryValue' | 'outstandingReceivable'
+> & {
   todaySalesTotal: string | number;
   inventoryValue: string | number;
+  outstandingReceivable: string | number;
 };
 
 export async function fetchDashboardStats(session: Session): Promise<DashboardStats> {
@@ -27,6 +36,7 @@ export async function fetchDashboardStats(session: Session): Promise<DashboardSt
   return {
     ...s,
     todaySalesTotal: Number(s.todaySalesTotal),
+    outstandingReceivable: Number(s.outstandingReceivable ?? 0),
     inventoryValue: Number(s.inventoryValue ?? 0),
   };
 }

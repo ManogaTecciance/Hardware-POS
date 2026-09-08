@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, Product } from '@hardware-pos/database';
+import { PaymentStatus, Prisma, Product } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
@@ -22,7 +22,8 @@ export type SaleListRow = Prisma.SaleGetPayload<{
   include: {
     customer: { select: { name: true } };
     cashier: { select: { name: true } };
-    payments: { select: { method: true } };
+    payments: { select: { method: true; createdAt: true } };
+    markedPaidBy: { select: { name: true } };
     _count: { select: { items: true } };
   };
 }>;
@@ -34,12 +35,14 @@ const saleInclude = {
   branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
   register: { select: { id: true, name: true, code: true } },
   cashier: { select: { id: true, name: true } },
+  markedPaidBy: { select: { name: true } },
 } as const;
 
 const saleListInclude = {
   customer: { select: { name: true } },
   cashier: { select: { name: true } },
-  payments: { select: { method: true } },
+  payments: { select: { method: true, createdAt: true } },
+  markedPaidBy: { select: { name: true } },
   _count: { select: { items: true } },
 } satisfies Prisma.SaleInclude;
 
@@ -58,16 +61,77 @@ export class SalesRepository {
     skip: number,
     take: number,
   ): Promise<[SaleListRow[], number]> {
+    // Sales are filtered and ordered by their BUSINESS date, not the row's
+    // creation timestamp: a backdated sale must appear in the period it was
+    // dated to, which is what the list and the PDF report both display. Drafts
+    // have no `completedAt`, so they fall back to `createdAt`.
+    const businessDate: Prisma.SaleWhereInput['AND'] =
+      filter.dateFrom || filter.dateTo
+        ? [
+            {
+              OR: [
+                {
+                  completedAt: {
+                    ...(filter.dateFrom ? { gte: filter.dateFrom } : {}),
+                    ...(filter.dateTo ? { lte: filter.dateTo } : {}),
+                  },
+                },
+                {
+                  completedAt: null,
+                  createdAt: {
+                    ...(filter.dateFrom ? { gte: filter.dateFrom } : {}),
+                    ...(filter.dateTo ? { lte: filter.dateTo } : {}),
+                  },
+                },
+              ],
+            },
+          ]
+        : [];
+
     const where: Prisma.SaleWhereInput = {
       tenantId,
       ...(filter.syncStatus ? { syncStatus: filter.syncStatus } : {}),
-      ...(filter.paymentStatus ? { paymentStatus: filter.paymentStatus } : {}),
-      ...(filter.dateFrom || filter.dateTo
+      // UNPAID means "still on credit": every sale the list shows as Credit, so
+      // both wholly unpaid and part-paid, and never one the customer's account
+      // has since cleared. PAID means the opposite — paid at the till, or covered
+      // by an account settlement. PARTIAL is still accepted on its own for a
+      // caller that genuinely wants just those.
+      ...(filter.customerId ? { customerId: filter.customerId } : {}),
+      // These mirror what the badge says, or the list would contradict itself:
+      // "Credit" is a sale nobody has accounted for, and "Paid" is one that was
+      // paid at the till, covered when the account cleared, OR ticked off on the
+      // customer page.
+      ...(filter.paymentStatus === 'UNPAID'
         ? {
-            createdAt: {
-              ...(filter.dateFrom ? { gte: filter.dateFrom } : {}),
-              ...(filter.dateTo ? { lte: filter.dateTo } : {}),
-            },
+            paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+            creditSettledAt: null,
+            markedPaidAt: null,
+          }
+        : filter.paymentStatus === 'PAID'
+          ? {
+              OR: [
+                { paymentStatus: 'PAID' as PaymentStatus },
+                { creditSettledAt: { not: null } },
+                { markedPaidAt: { not: null } },
+              ],
+            }
+          : filter.paymentStatus
+            ? { paymentStatus: filter.paymentStatus }
+            : {}),
+      // Kept in AND so the date clause's OR cannot collide with the search OR.
+      ...(businessDate.length ? { AND: businessDate } : {}),
+      // Overdue: the due date has passed and money is still owed. A settled sale
+      // is never overdue whatever its date, and one with no due date — a sale
+      // paid in full at the till — is not owed at all, so it cannot be late.
+      ...(filter.overdueAsOf
+        ? {
+            paymentDueDate: { not: null, lt: filter.overdueAsOf },
+            paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+            // An invoice that has been accounted for is not overdue, whatever
+            // its own due date says.
+            creditSettledAt: null,
+            markedPaidAt: null,
+            status: 'COMPLETED' as const,
           }
         : {}),
       ...(filter.search
@@ -83,7 +147,11 @@ export class SalesRepository {
       this.prisma.sale.findMany({
         where,
         include: saleListInclude,
-        orderBy: { createdAt: 'desc' },
+        // Newest business date first. Drafts have no business date yet; they
+        // surface at the top rather than the bottom because a draft is a held
+        // sale someone is meant to come back to, and burying it past the last
+        // page of history would hide it entirely.
+        orderBy: [{ completedAt: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }],
         skip,
         take,
       }),
@@ -124,36 +192,39 @@ export class SalesRepository {
     });
   }
 
-  /**
-   * A customer's credit terms plus how much they currently owe (sum of unpaid
-   * balances on their completed sales). Used to enforce the credit limit before
-   * a new credit/partial sale is accepted.
-   */
-  async getCustomerCredit(
-    tenantId: string,
-    customerId: string,
-  ): Promise<{ creditAllowed: boolean; creditLimit: number | null; outstanding: number } | null> {
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: customerId, tenantId },
-      select: { creditAllowed: true, creditLimit: true },
-    });
-    if (!customer) return null;
 
-    const agg = await this.prisma.sale.aggregate({
+  /**
+   * How many OTHER invoices on this customer's account are still uncovered and
+   * unticked — i.e. would remain visible as owed if `exceptSaleId` were ticked.
+   */
+  countUnmarkedCredit(tenantId: string, customerId: string, exceptSaleId: string): Promise<number> {
+    return this.prisma.sale.count({
       where: {
         tenantId,
         customerId,
+        id: { not: exceptSaleId },
         status: 'COMPLETED',
-        paymentStatus: { in: ['UNPAID', 'PARTIAL'] },
+        paymentStatus: { in: ['UNPAID', 'PARTIAL'] as PaymentStatus[] },
+        creditSettledAt: null,
+        markedPaidAt: null,
       },
-      _sum: { balanceAmount: true },
     });
+  }
 
-    return {
-      creditAllowed: customer.creditAllowed,
-      creditLimit: customer.creditLimit != null ? Number(customer.creditLimit) : null,
-      outstanding: agg._sum.balanceAmount != null ? Number(agg._sum.balanceAmount) : 0,
-    };
+  /** Tick an invoice off, or clear the tick. Touches no money. */
+  setMarkedPaid(
+    tenantId: string,
+    saleId: string,
+    mark: { at: Date; byUserId: string } | null,
+  ): Promise<SaleWithRelations> {
+    return this.prisma.sale.update({
+      where: { id: saleId },
+      data: {
+        markedPaidAt: mark?.at ?? null,
+        markedPaidByUserId: mark?.byUserId ?? null,
+      },
+      include: saleInclude,
+    });
   }
 
   // ── writes ─────────────────────────────────────────────────────────────────
@@ -210,7 +281,8 @@ export class SalesRepository {
           customerId: input.customerId ?? null,
           saleNumber,
           status: 'COMPLETED',
-          completedAt: new Date(),
+          completedAt: input.saleDate,
+          paymentDueDate: input.paymentDueDate,
           subtotal: input.computed.subtotal,
           totalDiscount: input.computed.totalDiscount,
           ...orderDiscountData(input.computed),
@@ -252,7 +324,8 @@ export class SalesRepository {
         where: { id: saleId },
         data: {
           status: 'COMPLETED',
-          completedAt: new Date(),
+          completedAt: input.saleDate,
+          paymentDueDate: input.paymentDueDate,
           customerId: input.customerId ?? null,
           subtotal: input.computed.subtotal,
           totalDiscount: input.computed.totalDiscount,
@@ -388,6 +461,7 @@ function toSaleItemCreate(line: ComputedLine): Prisma.SaleItemCreateWithoutSaleI
     unitPrice: line.unitPrice,
     quantity: line.quantity,
     discountType: line.discountType,
+    discountBasis: line.discountBasis,
     discountValue: line.discountValue,
     discountAmount: line.discountAmount,
     discountReason: line.discountReason,

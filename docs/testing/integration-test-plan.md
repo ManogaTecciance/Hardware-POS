@@ -98,6 +98,9 @@ The cart is client-side; the server equivalent is a **draft** sale.
 | ID | Request | Expected |
 | --- | --- | --- |
 | I-08-1 | `POST /v1/sales/complete` CASH = total | 201; `paymentStatus=PAID`, `balanceAmount=0`, `quickbooksDocumentType=SALES_RECEIPT`, `syncStatus=PENDING`. |
+| I-08-4 | Complete with a past `saleDate` | 201; `completedAt` falls on the picked day; stock still decremented in the same transaction. |
+| I-08-5 | Complete with a future `saleDate` | 400; no Sale row and no SyncJob created; stock unchanged. |
+| I-08-6 | Sales history is filtered by the invoice date | A backdated sale is returned for its picked day and absent from today's range. |
 | I-08-2 | SyncJob enqueued | One `SyncJob` (`SALES_SYNC`,`PENDING`) + `SyncLog` (`SALE/OUTBOUND/PENDING`) in the same tx. |
 | I-08-3 | Payment row | `method=CASH`, `syncStatus=NOT_SYNCED`. |
 
@@ -116,6 +119,33 @@ The cart is client-side; the server equivalent is a **draft** sale.
 | I-10-2 | Credit sale paid = 0 | `UNPAID` → `INVOICE`. |
 | I-10-3 | INVOICE without customer | 400. |
 | I-10-4 | Split payment lines | `paidAmount` = Σ lines; each `Payment` persisted. |
+
+## 10a. Credit management (due dates, settlement, receivables)
+
+Automated end-to-end in `apps/e2e/tests/credit-management.spec.ts`.
+
+| ID | Request | Expected |
+| --- | --- | --- |
+| I-10a-1 | Complete leaving a balance, no `paymentDueDate` | 400, message names the due date. |
+| I-10a-2 | Complete fully paid **with** a `paymentDueDate` | 400. |
+| I-10a-3 | Complete on credit with a due date | 201; `GET /sales/{id}` returns it. |
+| I-10a-4 | Due date before the invoice date | 400. |
+| I-10a-5 | `GET /sales?overdue=true` | Only COMPLETED sales past due and still owing. |
+| I-10a-6 | Settle an overdue sale, re-query | The sale drops out of the overdue filter. |
+| I-10a-7 | `POST /payments {customerId}` part payment | Account balance drops; NO invoice settled, not even the oldest. |
+| I-10a-8 | Pay the rest | Every sale outstanding at that moment gets `creditSettledAt`; `salesSettled` reports the count. |
+| I-10a-9 | Payment over the account balance | 400; balance unchanged. |
+| I-10a-10 | Payment against a cleared account | 400 "nothing outstanding". |
+| I-10a-18 | A sale after settlement | Starts a fresh balance; the covered sales stay settled. |
+| I-10a-19 | Settlement and the invoice figures | `paidAmount`/`balanceAmount`/payment rows unchanged — only `creditSettledAt` is written. |
+| I-10a-20 | Consumed payments | Retired via `Payment.settledAt`, so they are not subtracted from the next balance. |
+| I-10a-11 | Sales list row after a payment | `lastPaymentAt` set; `paymentDueDate` returned. |
+| I-10a-12 | Customers list for a credit customer | `outstandingCredit` = owed; `availableCredit` = limit − owed. |
+| I-10a-13 | Customer with `creditLimit: null` | `availableCredit` is **null**, not 0. |
+| I-10a-14 | Settle, then re-read the customer | Outstanding 0; available back to the full limit. |
+| I-10a-15 | `GET /customers?hasOutstandingCredit=true` | Only customers who currently owe. |
+| I-10a-16 | `GET /dashboard/stats` before/after a credit sale | `outstandingReceivable` rises by the sale total. |
+| I-10a-17 | `GET /dashboard/stats` after settlement | It falls back by the same amount. |
 
 ## 11. Receipt print
 
@@ -142,7 +172,7 @@ Precondition: connected; a fully-paid sale (I-08-1); stub records created docs.
 
 ## 13. QuickBooks Invoice + Payment sync (credit / partial)
 
-Precondition: connected; customer with a `QuickBooksMapping (CUSTOMER)`; a partial sale (I-10-1).
+Precondition: connected; a customer with `Customer.quickbooksCustomerId` set (or deliberately unset, to exercise create-on-miss); a partial sale (I-10-1).
 
 | ID | Request | Expected |
 | --- | --- | --- |
@@ -170,15 +200,17 @@ Use the stub's "force N failures" control. Worker disabled → drive the queue v
 
 Run the same protected request as each role; assert allow/deny.
 
-| ID | Endpoint | Owner | Admin | Manager | Cashier | Accountant |
-| --- | --- | --- | --- | --- | --- | --- |
-| I-15-1 | `POST /sales/complete` (`sale:create`) | ✅ | ✅ | ✅ | ✅ | ❌ 403 |
-| I-15-2 | `POST /discounts/approve` (`sale:create`) | ✅ | ✅ | ✅ | ✅ | ❌ |
-| I-15-3 | `POST /quickbooks/sync-products` (`quickbooks:manage`) | ✅ | ✅ | ❌ | ❌ | ❌ |
-| I-15-4 | `POST /quickbooks/sync-sale/:id` (`quickbooks:manage`) | ✅ | ✅ | ❌ | ❌ | ❌ |
-| I-15-5 | `GET /sync/logs` (`sync:read`) | ✅ | ✅ | ❌ | ❌ | ✅ |
-| I-15-6 | `POST /sync/sales/:id/retry` (`sync:read`) | ✅ | ✅ | ❌ | ❌ | ✅ |
-| I-15-7 | `GET /quickbooks/connect` (`@Roles OWNER/ADMIN`) | ✅ | ✅ | ❌ | ❌ | ❌ |
+Salesperson is an owner-equivalent role, so its column must match Owner's on every row.
+
+| ID | Endpoint | Owner | Admin | Salesperson | Manager | Cashier | Accountant |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I-15-1 | `POST /sales/complete` (`sale:create`) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ 403 |
+| I-15-2 | `POST /discounts/approve` (`sale:create`) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| I-15-3 | `POST /quickbooks/sync-products` (`quickbooks:manage`) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| I-15-4 | `POST /quickbooks/sync-sale/:id` (`quickbooks:manage`) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| I-15-5 | `GET /sync/logs` (`sync:read`) | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| I-15-6 | `POST /sync/sales/:id/retry` (`sync:read`) | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| I-15-7 | `GET /quickbooks/connect` (`@Roles OWNER/ADMIN/SALESPERSON`) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | I-15-8 | No / invalid JWT on any protected route | 401 for all. |
 | I-15-9 | Cross-tenant read (token tnt_dev, id from another tenant) | 404 (tenant-scoped), never leaks. |
 

@@ -5,6 +5,7 @@ import * as React from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  CalendarDays,
   Clock,
   FileText,
   NotebookPen,
@@ -31,6 +32,10 @@ import { ChipRow } from '@/components/ui/chip-row';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Toast, type ToastTone } from '@/components/ui/toast';
+import { productTypeLabel } from '@hardware-pos/shared';
+
+import { Pagination } from '@/components/ui/pagination';
+
 import { useAuth } from '@/lib/auth';
 import { computeLine, computeTotals, type LineDiscount, type OrderDiscount } from '@/lib/cart';
 import { useCheckoutData, type ClientProduct } from '@/lib/catalog';
@@ -120,9 +125,22 @@ export default function PosPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageProducts = filtered.slice((page - 1) * pageSize, page * pageSize);
 
+  /**
+   * Add a product, or say why it cannot be added.
+   *
+   * The one place the "can this be sold" question is answered for every add
+   * path — tile, scanner and the search box's Enter key. It used to be written
+   * out separately per caller, and Enter had simply been missed, so a product
+   * the tile refused could still be added by typing its SKU and pressing return.
+   */
   const addToCart = (product: ClientProduct) => {
+    if (stockCap(product) === 0) {
+      showToast(`${product.name} is out of stock`, 'warning');
+      return false;
+    }
     cart.addToCart(product);
     showToast(`${product.name} added`);
+    return true;
   };
 
   /**
@@ -152,13 +170,7 @@ export default function PosPage() {
         showToast(`No product found for "${code}"`, 'danger');
         return;
       }
-      if (product.type === 'Inventory' && product.quantityOnHand <= 0) {
-        showToast(`${product.name} is out of stock`, 'warning');
-        return;
-      }
-      cart.addToCart(product);
-      showToast(`${product.name} added`);
-      setQuery('');
+      if (addToCart(product)) setQuery('');
     },
     // showToast/cart are stable enough for this handler's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -180,10 +192,7 @@ export default function PosPage() {
     if (e.key !== 'Enter') return;
     const exact = findBySku(q);
     const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
-    if (target) {
-      addToCart(target);
-      setQuery('');
-    }
+    if (target && addToCart(target)) setQuery('');
   };
 
   // ── discounts ──────────────────────────────────────────────────────────────
@@ -208,6 +217,9 @@ export default function PosPage() {
       managerPin,
       productId,
       discountType: discount.type,
+      // The manager is approving THIS scope: an approval for an amount off the
+      // line is not an approval for the same amount off every unit.
+      discountBasis: discount.basis,
       discountValue: discount.value,
       reason: note || discount.reason,
     });
@@ -224,6 +236,14 @@ export default function PosPage() {
     }
     return res.reason ?? 'Not approved';
   };
+
+  // Keep the cart's notion of "today" on the shop's calendar, so the invoice-date
+  // picker can never offer a day the API will reject.
+  const shopTimeZone = data.settings.timezone;
+  const { setShopTimeZone } = cart;
+  React.useEffect(() => {
+    setShopTimeZone(shopTimeZone);
+  }, [shopTimeZone, setShopTimeZone]);
 
   const totals = computeTotals(cart.items, data.settings.taxRatePercent, cart.orderDiscount);
   const orderBase = round2(totals.subtotal - totals.totalDiscount);
@@ -273,7 +293,10 @@ export default function PosPage() {
 
   const currency = data.settings.currency;
   const cartEmpty = cart.items.length === 0;
-  const canPay = !cartEmpty && !totals.hasStockIssue;
+  // Both are YYYY-MM-DD, so a plain string compare orders them correctly.
+  const isBackdated = cart.saleDateValid && cart.saleDate < cart.today;
+  // A half-typed or future date must not reach the payment screen.
+  const canPay = !cartEmpty && !totals.hasStockIssue && cart.saleDateValid;
 
   const goToPayment = () => {
     setCartOpen(false);
@@ -322,6 +345,35 @@ export default function PosPage() {
             </Button>
           ) : null}
         </div>
+      </div>
+
+      {/* Invoice date — never scrolls. Sits above the customer picker so the
+          date is settled before the sale is built. Defaults to today; `max`
+          blocks forward dating in the picker, and the API rejects it too. */}
+      <div className="shrink-0 border-b border-border px-4 py-3">
+        <label
+          htmlFor={inSheet ? 'sale-date-sheet' : 'sale-date'}
+          className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground"
+        >
+          <CalendarDays className="h-3.5 w-3.5" aria-hidden />
+          Invoice date
+          {isBackdated ? (
+            <span className="rounded-full bg-warning-soft px-2 py-0.5 text-[10px] font-semibold text-warning">
+              Backdated
+            </span>
+          ) : null}
+        </label>
+        <Input
+          id={inSheet ? 'sale-date-sheet' : 'sale-date'}
+          type="date"
+          className="mt-1 h-11"
+          value={cart.saleDate}
+          max={cart.today}
+          // Stored verbatim, including the empty value a date input emits while
+          // a segment is half-typed. Validity gates the Payment button instead,
+          // so the field never snaps back under the user mid-edit.
+          onChange={(e) => cart.setSaleDate(e.target.value)}
+        />
       </div>
 
       {/* Customer — never scrolls */}
@@ -501,6 +553,13 @@ export default function PosPage() {
           </div>
         ) : null}
 
+        {cart.hydrated && !cart.saleDateValid ? (
+          <div className="flex items-center gap-1.5 rounded-lg bg-danger-soft px-3 py-2 text-xs font-medium text-danger">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Enter an invoice date of today or earlier.
+          </div>
+        ) : null}
+
         <Button
           size="lg"
           fullWidth
@@ -652,7 +711,7 @@ export default function PosPage() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2.5">
               {pageProducts.map((p) => {
-                const outOfStock = p.type === 'Inventory' && p.quantityOnHand <= 0;
+                const outOfStock = stockCap(p) === 0;
                 // Low stock only when a reorder point is set and stock is at/below
                 // it — the same rule the products table and dashboard alert use.
                 const lowStock =
@@ -687,6 +746,14 @@ export default function PosPage() {
                         <span className="absolute right-1.5 top-1.5 rounded-md bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold text-warning">
                           Low Stock
                         </span>
+                      ) : stockCap(p) === null ? (
+                        // Names the item type, which is the actual reason there is
+                        // no quantity — the same wording the products list and the
+                        // product page use. Neutral, not a warning: these sell
+                        // freely, and the badge is here to explain, not to alarm.
+                        <span className="absolute right-1.5 top-1.5 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                          {productTypeLabel(p.type)}
+                        </span>
                       ) : null}
                     </button>
                     <div className="flex flex-1 flex-col p-2.5">
@@ -696,7 +763,9 @@ export default function PosPage() {
                       <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                         {p.sku ?? ''}
                       </div>
-                      <div className="mt-1.5 flex items-end justify-between gap-1">
+                      {/* Wraps: "Not tracked" beside a five-figure price overflows a
+                          9rem tile, and a truncated price is worse than a wrapped label. */}
+                      <div className="mt-1.5 flex flex-wrap items-end justify-between gap-1">
                         <span className="text-sm font-semibold text-primary">
                           {formatMoney(p.unitPrice, currency)}
                         </span>
@@ -706,10 +775,11 @@ export default function PosPage() {
                             outOfStock ? 'font-medium text-danger' : 'text-muted-foreground',
                           )}
                         >
-                          {p.type !== 'Inventory'
-                            ? p.type === 'Service'
-                              ? 'Service'
-                              : '—'
+                          {/* Nothing here for an untracked item — the badge on the
+                              image already names the type, and saying it twice on
+                              one card is noise. */}
+                          {stockCap(p) === null
+                            ? null
                             : outOfStock
                               ? 'Out'
                               : p.quantityOnHand.toLocaleString()}
@@ -736,48 +806,15 @@ export default function PosPage() {
 
         {/* Pagination footer — stays pinned below the scroll region */}
         {!data.loading && filtered.length > 0 ? (
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border pt-2.5 text-sm">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="hidden md:inline">
-                Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} of{' '}
-                {filtered.length.toLocaleString()} products
-              </span>
-              <span className="hidden sm:inline md:hidden">Per page</span>
-              <Select
-                value={String(pageSize)}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                className="w-auto"
-                aria-label="Products per page"
-              >
-                {PAGE_SIZES.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                Prev
-              </Button>
-              <span className="px-2 tabular-nums text-muted-foreground">
-                {page} / {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+          <Pagination
+            className="shrink-0 border-t border-border pt-2.5"
+            page={page}
+            pageSize={pageSize}
+            total={filtered.length}
+            pageSizes={PAGE_SIZES}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         ) : null}
       </section>
 
@@ -917,8 +954,18 @@ function Row({ label, value, accent }: { label: string; value: string; accent?: 
   );
 }
 
+/**
+ * How a discount reads on the cart line and in the manager-approval dialog.
+ *
+ * A per-unit amount says so: the manager is being asked to approve the money
+ * actually coming off, not the figure that was typed.
+ */
 function formatDiscountLabel(discount: LineDiscount | OrderDiscount, currency: string): string {
-  return discount.type === 'PERCENTAGE'
-    ? `${discount.value}% off`
-    : `${formatMoney(discount.value, currency)} off`;
+  if (discount.type === 'PERCENTAGE') return `${discount.value}% off`;
+  const amount = formatMoney(discount.value, currency);
+  // Only a line discount has a basis; the cart-level one has no units. Both
+  // kinds say which they are, so a chip is never ambiguous about how much is
+  // actually coming off.
+  if (!('basis' in discount)) return `${amount} off`;
+  return discount.basis === 'UNIT' ? `${amount} off each unit` : `${amount} off the line`;
 }

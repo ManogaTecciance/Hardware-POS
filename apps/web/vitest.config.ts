@@ -11,6 +11,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // Point at the source, not the built dist: otherwise a stale build makes
+      // the shared timezone specs quietly test yesterday's code.
+      '@hardware-pos/shared': fileURLToPath(
+        new URL('../../packages/shared/src/index.ts', import.meta.url),
+      ),
     },
   },
   test: {

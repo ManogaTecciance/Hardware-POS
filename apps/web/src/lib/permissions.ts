@@ -1,6 +1,6 @@
 /** Roles and permissions, mirrored from the API for client-side UI gating. */
 
-export type UserRole = 'OWNER' | 'ADMIN' | 'MANAGER' | 'CASHIER' | 'ACCOUNTANT';
+export type UserRole = 'OWNER' | 'ADMIN' | 'SALESPERSON' | 'MANAGER' | 'CASHIER' | 'ACCOUNTANT';
 
 export const Permission = {
   SALE_CREATE: 'sale:create',
@@ -40,6 +40,9 @@ const ALL: Permission[] = Object.values(Permission);
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   OWNER: ALL,
   ADMIN: ALL,
+  // Salesperson is an owner-equivalent role: same permissions, same discount
+  // ceiling, same admin-level overrides.
+  SALESPERSON: ALL,
   MANAGER: [
     Permission.SALE_CREATE,
     Permission.SALE_READ,
@@ -105,6 +108,7 @@ export function permissionsForRole(role: UserRole): Permission[] {
 export const ROLE_DISCOUNT_LIMIT_PERCENT: Record<UserRole, number | null> = {
   OWNER: null,
   ADMIN: null,
+  SALESPERSON: null,
   MANAGER: 15,
   CASHIER: 0,
   ACCOUNTANT: 0,
@@ -112,6 +116,20 @@ export const ROLE_DISCOUNT_LIMIT_PERCENT: Record<UserRole, number | null> = {
 
 export function discountLimitFor(role: UserRole): number | null {
   return ROLE_DISCOUNT_LIMIT_PERCENT[role];
+}
+
+/**
+ * Roles with unrestricted, owner-level authority — mirrored from the API's
+ * `ADMIN_LEVEL_ROLES`. Beyond holding every permission, these bypass the
+ * operational guard-rails that still bind a manager (e.g. editing stock on a
+ * QuickBooks-managed product).
+ *
+ * Keep this the ONLY place the UI asks "is this an owner-level role".
+ */
+export const ADMIN_LEVEL_ROLES: readonly UserRole[] = ['OWNER', 'ADMIN', 'SALESPERSON'];
+
+export function isAdminLevelRole(role: UserRole): boolean {
+  return ADMIN_LEVEL_ROLES.includes(role);
 }
 
 /** True when `limit` (null = unlimited) permits a discount of `percent`. */

@@ -11,6 +11,7 @@ export const ROLE_DISCOUNT_LIMIT_PERCENT: Record<UserRole, number | null> = {
   MANAGER: 15,
   ADMIN: null,
   OWNER: null,
+  SALESPERSON: null,
 };
 
 export function getRoleDiscountLimit(role: UserRole): number | null {

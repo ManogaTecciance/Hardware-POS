@@ -135,7 +135,7 @@ export class ProductsController {
     return this.productsImportService.commit(tenantId, user.role, dto.rows);
   }
 
-  /** Refresh the product cache from a mock QuickBooks pull. Owner/admin only. */
+  /** Refresh the product cache from a mock QuickBooks pull. Owner-level roles only. */
   @Post('sync/mock')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(Permission.QUICKBOOKS_MANAGE)

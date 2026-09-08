@@ -3,6 +3,8 @@
 import * as React from 'react';
 import { AlertTriangle, ImageIcon, RotateCcw, Save, Upload } from 'lucide-react';
 
+import { availableTimeZones, DEFAULT_TIME_ZONE, timeZoneOffsetLabel } from '@hardware-pos/shared';
+
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -29,6 +31,27 @@ import {
 } from '@/lib/settings-api';
 
 const TABS = ['Business', 'Branding', 'Layout', 'Preview'] as const;
+
+/**
+ * Every zone the runtime knows, grouped by region for a navigable `<select>`.
+ *
+ * The list is not curated: the API accepts any valid IANA zone, so shipping a
+ * shortlist here would only make the UI narrower than the thing behind it. A
+ * native select gives grouping and type-ahead for free, so 400+ entries stay
+ * usable — type "col" to reach Asia/Colombo.
+ */
+function groupedTimeZones(): { region: string; zones: string[] }[] {
+  const byRegion = new Map<string, string[]>();
+  for (const tz of availableTimeZones()) {
+    const region = tz.includes('/') ? tz.slice(0, tz.indexOf('/')) : 'Other';
+    const list = byRegion.get(region) ?? [];
+    list.push(tz);
+    byRegion.set(region, list);
+  }
+  return [...byRegion.entries()]
+    .map(([region, zones]) => ({ region, zones }))
+    .sort((a, b) => a.region.localeCompare(b.region));
+}
 type Tab = (typeof TABS)[number];
 
 const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
@@ -44,6 +67,8 @@ export default function SettingsPage() {
 
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [docs, setDocs] = React.useState<DocumentSettings | null>(null);
+  // Top-level, not part of `documents` — hence its own state and dirty check.
+  const [timezone, setTimezone] = React.useState<string | null>(null);
   const [tab, setTab] = React.useState<Tab>('Business');
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -63,6 +88,7 @@ export default function SettingsPage() {
         if (!active) return;
         setSettings(s);
         setDocs(s.documents);
+        setTimezone(s.timezone);
       })
       .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to load settings'))
       .finally(() => active && setLoading(false));
@@ -71,7 +97,10 @@ export default function SettingsPage() {
     };
   }, [session]);
 
-  const dirty = !!settings && !!docs && JSON.stringify(settings.documents) !== JSON.stringify(docs);
+  const dirty =
+    !!settings &&
+    !!docs &&
+    (JSON.stringify(settings.documents) !== JSON.stringify(docs) || settings.timezone !== timezone);
 
   const set = <K extends keyof DocumentSettings>(key: K, value: DocumentSettings[K]) =>
     setDocs((d) => (d ? { ...d, [key]: value } : d));
@@ -81,9 +110,13 @@ export default function SettingsPage() {
     setSaving(true);
     setError(null);
     try {
-      const next = await updateSettings(session, { documents: docs });
+      const next = await updateSettings(session, {
+        documents: docs,
+        ...(timezone && timezone !== settings?.timezone ? { timezone } : {}),
+      });
       setSettings(next);
       setDocs(next.documents);
+      setTimezone(next.timezone);
       showToast('Settings saved');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save settings');
@@ -100,6 +133,7 @@ export default function SettingsPage() {
       const next = await resetSettings(session);
       setSettings(next);
       setDocs(next.documents);
+      setTimezone(next.timezone);
       showToast('Settings reset to defaults');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not reset settings');
@@ -113,7 +147,12 @@ export default function SettingsPage() {
     // Keep any unsaved non-asset edits; only refresh the asset URLs from server.
     setDocs((d) =>
       d
-        ? { ...d, logoUrl: next.documents.logoUrl, signatureUrl: next.documents.signatureUrl, stampUrl: next.documents.stampUrl }
+        ? {
+            ...d,
+            logoUrl: next.documents.logoUrl,
+            signatureUrl: next.documents.signatureUrl,
+            stampUrl: next.documents.stampUrl,
+          }
         : next.documents,
     );
   };
@@ -140,7 +179,10 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Documents & Printing" description="Business letterhead, branding and A4 template settings." />
+        <PageHeader
+          title="Documents & Printing"
+          description="Business letterhead, branding and A4 template settings."
+        />
         <p className="py-16 text-center text-sm text-muted-foreground">Loading settings…</p>
       </div>
     );
@@ -149,7 +191,10 @@ export default function SettingsPage() {
   if (!docs) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Documents & Printing" description="Business letterhead, branding and A4 template settings." />
+        <PageHeader
+          title="Documents & Printing"
+          description="Business letterhead, branding and A4 template settings."
+        />
         <div className="flex items-center gap-2 rounded-xl bg-danger-soft px-4 py-3 text-sm font-medium text-danger">
           <AlertTriangle className="h-4 w-4" /> {error ?? 'Could not load settings.'}
         </div>
@@ -212,7 +257,13 @@ export default function SettingsPage() {
       ) : null}
 
       {tab === 'Business' ? (
-        <BusinessTab docs={docs} set={set} disabled={!canManage} />
+        <BusinessTab
+          docs={docs}
+          set={set}
+          disabled={!canManage}
+          timezone={timezone ?? DEFAULT_TIME_ZONE}
+          onTimezone={setTimezone}
+        />
       ) : tab === 'Branding' ? (
         <BrandingTab
           docs={docs}
@@ -241,7 +292,9 @@ export default function SettingsPage() {
               Reset to defaults
             </Button>
             <div className="flex items-center gap-2">
-              {dirty ? <span className="text-xs text-muted-foreground">Unsaved changes</span> : null}
+              {dirty ? (
+                <span className="text-xs text-muted-foreground">Unsaved changes</span>
+              ) : null}
               <Button
                 leftIcon={<Save className="h-4 w-4" />}
                 onClick={save}
@@ -284,27 +337,93 @@ function Field({
   );
 }
 
-function BusinessTab({ docs, set, disabled }: { docs: DocumentSettings; set: SetFn; disabled: boolean }) {
+function BusinessTab({
+  docs,
+  set,
+  disabled,
+  timezone,
+  onTimezone,
+}: {
+  docs: DocumentSettings;
+  set: SetFn;
+  disabled: boolean;
+  timezone: string;
+  onTimezone: (tz: string) => void;
+}) {
+  // Built once: 419 zones and their offsets are stable for the life of the page.
+  const zoneGroups = React.useMemo(groupedTimeZones, []);
   return (
     <Card className="max-w-3xl">
       <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
+        <Field
+          label="Timezone"
+          hint="Dates on invoices, receipts and reports are stated in this zone, so a document reads the same for everyone. On-screen times follow each user's own device."
+          full
+        >
+          <Select value={timezone} disabled={disabled} onChange={(e) => onTimezone(e.target.value)}>
+            {/* A zone saved before this runtime knew it would otherwise vanish
+                from the select and silently read as the first option. */}
+            {zoneGroups.every((g) => !g.zones.includes(timezone)) ? (
+              <option value={timezone}>{timezone}</option>
+            ) : null}
+            {zoneGroups.map((g) => (
+              <optgroup key={g.region} label={g.region}>
+                {g.zones.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz.includes('/') ? tz.slice(tz.indexOf('/') + 1).replace(/_/g, ' ') : tz} (
+                    {timeZoneOffsetLabel(tz)})
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </Select>
+        </Field>
         <Field label="Business name" hint="Falls back to your account name when blank." full>
-          <Input value={docs.companyName ?? ''} disabled={disabled} onChange={(e) => set('companyName', e.target.value)} placeholder="Hardware POS" />
+          <Input
+            value={docs.companyName ?? ''}
+            disabled={disabled}
+            onChange={(e) => set('companyName', e.target.value)}
+            placeholder="Hardware POS"
+          />
         </Field>
         <Field label="Address" full>
-          <Textarea value={docs.addressLine ?? ''} disabled={disabled} onChange={(e) => set('addressLine', e.target.value)} placeholder="No. 42, Galle Road, Colombo 03" />
+          <Textarea
+            value={docs.addressLine ?? ''}
+            disabled={disabled}
+            onChange={(e) => set('addressLine', e.target.value)}
+            placeholder="No. 42, Galle Road, Colombo 03"
+          />
         </Field>
         <Field label="Phone">
-          <Input value={docs.phone ?? ''} disabled={disabled} onChange={(e) => set('phone', e.target.value)} placeholder="+94 11 234 5678" />
+          <Input
+            value={docs.phone ?? ''}
+            disabled={disabled}
+            onChange={(e) => set('phone', e.target.value)}
+            placeholder="+94 11 234 5678"
+          />
         </Field>
         <Field label="Email">
-          <Input value={docs.email ?? ''} disabled={disabled} onChange={(e) => set('email', e.target.value)} placeholder="hello@yourshop.lk" />
+          <Input
+            value={docs.email ?? ''}
+            disabled={disabled}
+            onChange={(e) => set('email', e.target.value)}
+            placeholder="hello@yourshop.lk"
+          />
         </Field>
         <Field label="Tax / VAT number">
-          <Input value={docs.taxNumber ?? ''} disabled={disabled} onChange={(e) => set('taxNumber', e.target.value)} placeholder="134567890-7000" />
+          <Input
+            value={docs.taxNumber ?? ''}
+            disabled={disabled}
+            onChange={(e) => set('taxNumber', e.target.value)}
+            placeholder="134567890-7000"
+          />
         </Field>
         <Field label="Footer / thank-you line" hint="Printed at the bottom of every document." full>
-          <Input value={docs.footerText} disabled={disabled} onChange={(e) => set('footerText', e.target.value)} />
+          <Input
+            value={docs.footerText}
+            disabled={disabled}
+            onChange={(e) => set('footerText', e.target.value)}
+          />
         </Field>
         <Field
           label="Invoice note"
@@ -368,11 +487,23 @@ function AssetRow({
         }}
       />
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" disabled={disabled} leftIcon={<Upload className="h-4 w-4" />} onClick={() => inputRef.current?.click()}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          leftIcon={<Upload className="h-4 w-4" />}
+          onClick={() => inputRef.current?.click()}
+        >
           {resolved ? 'Replace' : 'Upload'}
         </Button>
         {resolved ? (
-          <Button variant="ghost" size="sm" className="text-danger hover:bg-danger-soft hover:text-danger" disabled={disabled} onClick={() => onRemove(asset)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-danger hover:bg-danger-soft hover:text-danger"
+            disabled={disabled}
+            onClick={() => onRemove(asset)}
+          >
             Remove
           </Button>
         ) : null}
@@ -398,9 +529,30 @@ function BrandingTab({
     <div className="max-w-3xl space-y-4">
       <Card>
         <CardContent className="space-y-3 p-6">
-          <AssetRow label="Business logo" url={docs.logoUrl} asset="logo" disabled={disabled} onUpload={onUpload} onRemove={onRemove} />
-          <AssetRow label="Authorized signature" url={docs.signatureUrl} asset="signature" disabled={disabled} onUpload={onUpload} onRemove={onRemove} />
-          <AssetRow label="Company stamp / seal" url={docs.stampUrl} asset="stamp" disabled={disabled} onUpload={onUpload} onRemove={onRemove} />
+          <AssetRow
+            label="Business logo"
+            url={docs.logoUrl}
+            asset="logo"
+            disabled={disabled}
+            onUpload={onUpload}
+            onRemove={onRemove}
+          />
+          <AssetRow
+            label="Authorized signature"
+            url={docs.signatureUrl}
+            asset="signature"
+            disabled={disabled}
+            onUpload={onUpload}
+            onRemove={onRemove}
+          />
+          <AssetRow
+            label="Company stamp / seal"
+            url={docs.stampUrl}
+            asset="stamp"
+            disabled={disabled}
+            onUpload={onUpload}
+            onRemove={onRemove}
+          />
         </CardContent>
       </Card>
       <Card>
@@ -415,19 +567,34 @@ function BrandingTab({
                 className="h-11 w-14 cursor-pointer rounded-xl border border-border bg-surface disabled:opacity-50"
                 aria-label="Accent colour"
               />
-              <Input value={docs.accentColor} disabled={disabled} onChange={(e) => set('accentColor', e.target.value)} className="font-mono" />
+              <Input
+                value={docs.accentColor}
+                disabled={disabled}
+                onChange={(e) => set('accentColor', e.target.value)}
+                className="font-mono"
+              />
             </div>
           </Field>
           <div />
           <Field label="Logo alignment">
-            <Select value={docs.logoAlignment} disabled={disabled} onChange={(e) => set('logoAlignment', e.target.value as DocumentSettings['logoAlignment'])}>
+            <Select
+              value={docs.logoAlignment}
+              disabled={disabled}
+              onChange={(e) =>
+                set('logoAlignment', e.target.value as DocumentSettings['logoAlignment'])
+              }
+            >
               <option value="LEFT">Left</option>
               <option value="CENTER">Center</option>
               <option value="RIGHT">Right</option>
             </Select>
           </Field>
           <Field label="Logo size">
-            <Select value={docs.logoSize} disabled={disabled} onChange={(e) => set('logoSize', e.target.value as DocumentSettings['logoSize'])}>
+            <Select
+              value={docs.logoSize}
+              disabled={disabled}
+              onChange={(e) => set('logoSize', e.target.value as DocumentSettings['logoSize'])}
+            >
               <option value="SMALL">Small</option>
               <option value="MEDIUM">Medium</option>
               <option value="LARGE">Large</option>
@@ -463,20 +630,40 @@ function ToggleRow({
   );
 }
 
-function LayoutTab({ docs, set, disabled }: { docs: DocumentSettings; set: SetFn; disabled: boolean }) {
+function LayoutTab({
+  docs,
+  set,
+  disabled,
+}: {
+  docs: DocumentSettings;
+  set: SetFn;
+  disabled: boolean;
+}) {
   return (
     <div className="max-w-3xl space-y-4">
       <Card>
         <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
           <Field label="Margins">
-            <Select value={docs.marginStyle} disabled={disabled} onChange={(e) => set('marginStyle', e.target.value as DocumentSettings['marginStyle'])}>
+            <Select
+              value={docs.marginStyle}
+              disabled={disabled}
+              onChange={(e) =>
+                set('marginStyle', e.target.value as DocumentSettings['marginStyle'])
+              }
+            >
               <option value="COMPACT">Compact</option>
               <option value="STANDARD">Standard</option>
               <option value="SPACIOUS">Spacious</option>
             </Select>
           </Field>
           <Field label="Paper size" hint="A4 is the default for printed documents.">
-            <Select value={docs.defaultPaperSize} disabled={disabled} onChange={(e) => set('defaultPaperSize', e.target.value as DocumentSettings['defaultPaperSize'])}>
+            <Select
+              value={docs.defaultPaperSize}
+              disabled={disabled}
+              onChange={(e) =>
+                set('defaultPaperSize', e.target.value as DocumentSettings['defaultPaperSize'])
+              }
+            >
               <option value="A4">A4 (210 × 297 mm)</option>
               <option value="THERMAL_80">Thermal 80mm</option>
             </Select>
@@ -486,12 +673,44 @@ function LayoutTab({ docs, set, disabled }: { docs: DocumentSettings; set: SetFn
       <Card>
         <CardContent className="p-6">
           <div className="mb-1 text-sm font-semibold">Show on documents</div>
-          <ToggleRow label="Product SKU column" checked={docs.showSku} disabled={disabled} onChange={(v) => set('showSku', v)} />
-          <ToggleRow label="Discount column" checked={docs.showDiscountColumn} disabled={disabled} onChange={(v) => set('showDiscountColumn', v)} />
-          <ToggleRow label="Tax / VAT column" checked={docs.showTaxColumn} disabled={disabled} onChange={(v) => set('showTaxColumn', v)} />
-          <ToggleRow label="Customer tax number" checked={docs.showCustomerTaxNumber} disabled={disabled} onChange={(v) => set('showCustomerTaxNumber', v)} />
-          <ToggleRow label="Signature area" hint="Authorized + customer signature lines." checked={docs.signatureFields} disabled={disabled} onChange={(v) => set('signatureFields', v)} />
-          <ToggleRow label="Page numbers" hint="Print “Page X of Y” on multi-page bills." checked={docs.showPageNumbers} disabled={disabled} onChange={(v) => set('showPageNumbers', v)} />
+          <ToggleRow
+            label="Product SKU column"
+            checked={docs.showSku}
+            disabled={disabled}
+            onChange={(v) => set('showSku', v)}
+          />
+          <ToggleRow
+            label="Discount column"
+            checked={docs.showDiscountColumn}
+            disabled={disabled}
+            onChange={(v) => set('showDiscountColumn', v)}
+          />
+          <ToggleRow
+            label="Tax / VAT column"
+            checked={docs.showTaxColumn}
+            disabled={disabled}
+            onChange={(v) => set('showTaxColumn', v)}
+          />
+          <ToggleRow
+            label="Customer tax number"
+            checked={docs.showCustomerTaxNumber}
+            disabled={disabled}
+            onChange={(v) => set('showCustomerTaxNumber', v)}
+          />
+          <ToggleRow
+            label="Signature area"
+            hint="Authorized + customer signature lines."
+            checked={docs.signatureFields}
+            disabled={disabled}
+            onChange={(v) => set('signatureFields', v)}
+          />
+          <ToggleRow
+            label="Page numbers"
+            hint="Print “Page X of Y” on multi-page bills."
+            checked={docs.showPageNumbers}
+            disabled={disabled}
+            onChange={(v) => set('showPageNumbers', v)}
+          />
         </CardContent>
       </Card>
     </div>
@@ -537,7 +756,11 @@ function PreviewTab({ docs }: { docs: DocumentSettings }) {
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">
           <Label>Document type</Label>
-          <Select value={type} onChange={(e) => setType(e.target.value as PreviewDocumentType)} className="w-56">
+          <Select
+            value={type}
+            onChange={(e) => setType(e.target.value as PreviewDocumentType)}
+            className="w-56"
+          >
             {PREVIEW_TYPES.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
@@ -547,7 +770,11 @@ function PreviewTab({ docs }: { docs: DocumentSettings }) {
         </div>
         <div className="space-y-1.5">
           <Label>Sample rows</Label>
-          <Select value={String(lineCount)} onChange={(e) => setLineCount(Number(e.target.value))} className="w-32">
+          <Select
+            value={String(lineCount)}
+            onChange={(e) => setLineCount(Number(e.target.value))}
+            className="w-32"
+          >
             {[3, 6, 12, 30, 60].map((n) => (
               <option key={n} value={n}>
                 {n} {n >= 30 ? '(multi-page)' : ''}

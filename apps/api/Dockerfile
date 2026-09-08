@@ -44,7 +44,12 @@ COPY . .
 # turbo builds deps first (^build): shared -> database (prisma generate + tsc) -> api
 RUN pnpm turbo run build --filter=@hardware-pos/api
 
+# TZ=UTC makes "every datetime is stored in UTC" an invariant of the image rather
+# than an accident of the host. Nothing user-facing depends on the process zone:
+# screens render in the viewer's browser zone and documents in the shop timezone
+# from settings.
 ENV NODE_ENV=production \
+    TZ=UTC \
     API_PORT=4000 \
     UPLOAD_DIR=/data/uploads
 EXPOSE 4000

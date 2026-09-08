@@ -6,13 +6,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DiscountType, QuotationStatus } from '@hardware-pos/database';
-import type { Paginated, QuotationStatusCode } from '@hardware-pos/shared';
+import { DiscountBasis, DiscountType, QuotationStatus } from '@hardware-pos/database';
+import {
+  parseDay,
+  safeTimeZone,
+  todayInTimeZone,
+  zonedTimeToUtc,
+  type Paginated,
+  type QuotationStatusCode,
+} from '@hardware-pos/shared';
 
 import { customerAddressLine } from '../../common/customer-display';
 import { paginate } from '../../common/pagination';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
+import { isAdminLevelRole } from '../auth/permissions';
 import { SettingsService } from '../settings/settings.service';
 import { CompleteSaleDto } from '../sales/dto/complete-sale.dto';
 import { SalesService } from '../sales/sales.service';
@@ -60,6 +68,7 @@ interface ResolvedLine {
   unitPrice: number;
   discountType: DiscountType | null;
   discountValue: number | null;
+  discountBasis: DiscountBasis;
   itemNote: string | null;
   availabilityStatus: string | null;
 }
@@ -115,7 +124,7 @@ export class QuotationsService {
       createdByUserId: actor.id,
       status: dto.status === 'SENT' ? 'SENT' : 'DRAFT',
       issueDate: new Date(),
-      validUntil: this.resolveValidUntil(dto.validUntil, app.quotation.defaultValidityDays),
+      validUntil: this.resolveValidUntil(dto.validUntil, app.quotation.defaultValidityDays, app.timezone),
       notes: dto.notes ?? null,
       termsAndConditions: dto.termsAndConditions ?? app.quotation.defaultTermsAndConditions ?? null,
       shareToken: this.newShareToken(),
@@ -198,7 +207,7 @@ export class QuotationsService {
       row.currentRevisionNumber,
       {
         customerId: dto.customerId,
-        validUntil: dto.validUntil !== undefined ? this.resolveValidUntil(dto.validUntil, app.quotation.defaultValidityDays) : undefined,
+        validUntil: dto.validUntil !== undefined ? this.resolveValidUntil(dto.validUntil, app.quotation.defaultValidityDays, app.timezone) : undefined,
         notes: dto.notes,
         termsAndConditions: dto.termsAndConditions,
       },
@@ -243,7 +252,7 @@ export class QuotationsService {
       changedByUserId: actor.id,
       changeReason: dto.changeReason ?? null,
       customerId: dto.customerId,
-      validUntil: dto.validUntil !== undefined ? this.resolveValidUntil(dto.validUntil, app.quotation.defaultValidityDays) : undefined,
+      validUntil: dto.validUntil !== undefined ? this.resolveValidUntil(dto.validUntil, app.quotation.defaultValidityDays, app.timezone) : undefined,
       notes: dto.notes ?? row.notes,
       termsAndConditions: dto.termsAndConditions ?? row.termsAndConditions,
       totals,
@@ -304,7 +313,7 @@ export class QuotationsService {
       createdByUserId: actor.id,
       status: 'DRAFT',
       issueDate: new Date(),
-      validUntil: this.resolveValidUntil(undefined, app.quotation.defaultValidityDays),
+      validUntil: this.resolveValidUntil(undefined, app.quotation.defaultValidityDays, app.timezone),
       notes: row.notes,
       termsAndConditions: row.termsAndConditions,
       shareToken: this.newShareToken(),
@@ -375,10 +384,10 @@ export class QuotationsService {
       throw new BadRequestException('A cancelled quotation cannot be converted');
     }
     if (row.convertedSaleId) {
-      const isAdmin = actor.role === 'OWNER' || actor.role === 'ADMIN';
+      const isAdmin = isAdminLevelRole(actor.role);
       if (!dto.override || !isAdmin) {
         throw new ConflictException(
-          'This quotation has already been converted to a sale. An owner/admin can override.',
+          'This quotation has already been converted to a sale. Someone with owner-level access can override.',
         );
       }
     }
@@ -404,6 +413,8 @@ export class QuotationsService {
       );
     }
 
+    // No `saleDate`: converting a quotation creates a sale dated now. Backdating
+    // is a POS-cart action only — deliberately not exposed on this path.
     const saleDto: CompleteSaleDto = {
       branchId,
       registerId: dto.registerId,
@@ -414,6 +425,11 @@ export class QuotationsService {
         unitPrice: this.num(it.unitPrice),
         discountType: (it.discountType as DiscountType | null) ?? undefined,
         discountValue: it.discountValue != null ? this.num(it.discountValue) : undefined,
+        // The line with no compiler backstop: SaleItemInputDto.discountBasis is
+        // optional and the sale defaults it to LINE, so dropping it here would
+        // convert a per-unit quotation into a sale priced at the whole-line
+        // amount — quoted at one number, invoiced at another, silently.
+        discountBasis: it.discountBasis,
       })),
       payments,
       orderDiscountType: (row.quotationDiscountType as DiscountType | null) ?? undefined,
@@ -516,6 +532,7 @@ export class QuotationsService {
           unitPrice,
           discountType: (item.discountType as DiscountType | undefined) ?? null,
           discountValue: item.discountValue ?? null,
+          discountBasis: this.resolveDiscountBasis(item),
           itemNote: item.itemNote ?? null,
           availabilityStatus,
         };
@@ -541,6 +558,7 @@ export class QuotationsService {
         unitPrice: item.unitPrice,
         discountType: (item.discountType as DiscountType | undefined) ?? null,
         discountValue: item.discountValue ?? null,
+        discountBasis: this.resolveDiscountBasis(item),
         itemNote: item.itemNote ?? null,
         availabilityStatus: null,
       };
@@ -562,6 +580,9 @@ export class QuotationsService {
       unitPrice: this.num(it.unitPrice),
       discountType: it.discountType,
       discountValue: it.discountValue != null ? this.num(it.discountValue) : null,
+      // Revisions and duplicates recreate their rows from scratch, so a dropped
+      // basis here would not go stale — it would silently reprice the quotation.
+      discountBasis: it.discountBasis,
       itemNote: it.itemNote,
       availabilityStatus: it.availabilityStatus,
     }));
@@ -578,6 +599,7 @@ export class QuotationsService {
         quantity: r.quantity,
         discountType: r.discountType,
         discountValue: r.discountValue,
+        discountBasis: r.discountBasis,
       })),
       orderDiscount,
       taxRatePercent,
@@ -595,6 +617,7 @@ export class QuotationsService {
       unitPrice: totals.lines[i].unitPrice,
       discountType: totals.lines[i].discountType as DiscountType | null,
       discountValue: totals.lines[i].discountValue,
+      discountBasis: totals.lines[i].discountBasis,
       discountAmount: totals.lines[i].discountAmount,
       taxAmount: totals.lines[i].taxAmount,
       lineSubtotal: totals.lines[i].lineSubtotal,
@@ -724,6 +747,23 @@ export class QuotationsService {
     };
   }
 
+  /**
+   * A per-unit amount only means something as a fixed amount — a percentage is
+   * already the same figure per unit and per line. Refused rather than ignored,
+   * so a quotation cannot carry a flag that silently does nothing and then
+   * converts into a sale the API would reject.
+   */
+  private resolveDiscountBasis(item: {
+    discountType?: string | null;
+    discountBasis?: string | null;
+  }): DiscountBasis {
+    if (item.discountBasis !== 'UNIT') return 'LINE';
+    if (item.discountType !== 'FIXED') {
+      throw new BadRequestException('A per-unit discount must be a fixed amount');
+    }
+    return 'UNIT';
+  }
+
   private itemRowToView(it: QuotationRevisionRow['items'][number]): QuotationItemView {
     return {
       id: it.id,
@@ -739,6 +779,7 @@ export class QuotationsService {
       unitPrice: this.num(it.unitPrice),
       discountType: it.discountType,
       discountValue: it.discountValue != null ? this.num(it.discountValue) : null,
+      discountBasis: it.discountBasis,
       discountAmount: this.num(it.discountAmount),
       taxAmount: this.num(it.taxAmount),
       lineSubtotal: this.num(it.lineSubtotal),
@@ -763,6 +804,7 @@ export class QuotationsService {
       unitPrice: line.unitPrice,
       discountType: line.discountType,
       discountValue: line.discountValue,
+      discountBasis: line.discountBasis,
       discountAmount: line.discountAmount,
       taxAmount: line.taxAmount,
       lineSubtotal: line.lineSubtotal,
@@ -799,10 +841,32 @@ export class QuotationsService {
     return validUntil.getTime() < Date.now();
   }
 
-  private resolveValidUntil(input: string | undefined, defaultDays: number): Date | null {
-    if (input) return new Date(input);
-    const d = new Date();
-    d.setDate(d.getDate() + (defaultDays || 14));
-    return d;
+  /**
+   * A quotation's validity is a calendar day the customer reads off a printed
+   * document, so it resolves to end-of-day in the SHOP's zone. Parsing the bare
+   * `YYYY-MM-DD` with `new Date()` would pin UTC midnight and expire the
+   * quotation part-way through its own last day for any shop east of Greenwich.
+   */
+  private resolveValidUntil(
+    input: string | undefined,
+    defaultDays: number,
+    tz: string,
+  ): Date | null {
+    const zone = safeTimeZone(tz);
+    const day =
+      input && parseDay(input)
+        ? input
+        : this.addDays(todayInTimeZone(zone), defaultDays || 14);
+    const p = parseDay(day);
+    if (!p) return null;
+    return zonedTimeToUtc(p.year, p.month, p.day, 23, 59, 59, zone);
+  }
+
+  /** `YYYY-MM-DD` plus n days, staying on calendar days (UTC maths, no zone). */
+  private addDays(ymd: string, days: number): string {
+    const p = parseDay(ymd);
+    if (!p) return ymd;
+    const d = new Date(Date.UTC(p.year, p.month - 1, p.day + days));
+    return d.toISOString().slice(0, 10);
   }
 }

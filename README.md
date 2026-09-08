@@ -49,7 +49,9 @@ pnpm dev
 - Web → http://localhost:3000
 - API → http://localhost:4000/v1
 
-Seeded logins: `owner@hardwarepos.test` / `password123` (Owner), Manager PIN `2222`, Cashier PIN `1111`.
+Seeded logins: `owner@hardwarepos.test` / `password123` (Owner),
+`salesperson@hardwarepos.test` / `password123` (Salesperson),
+Manager PIN `2222`, Cashier PIN `1111`.
 
 See [docs/getting-started.md](./docs/getting-started.md) for full setup, and
 [docs/architecture.md](./docs/architecture.md) for the system design.

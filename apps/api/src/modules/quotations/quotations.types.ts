@@ -1,6 +1,7 @@
 import { QuotationStatusCode, ShareChannelCode } from '@hardware-pos/shared';
 
 export type DiscountTypeCode = 'PERCENTAGE' | 'FIXED';
+export type DiscountBasisCode = 'LINE' | 'UNIT';
 
 export interface QuotationItemView {
   id: string | null;
@@ -16,6 +17,8 @@ export interface QuotationItemView {
   unitPrice: number;
   discountType: DiscountTypeCode | null;
   discountValue: number | null;
+  /** Whether a FIXED amount was per unit or for the line. */
+  discountBasis: DiscountBasisCode;
   discountAmount: number;
   taxAmount: number;
   lineSubtotal: number;

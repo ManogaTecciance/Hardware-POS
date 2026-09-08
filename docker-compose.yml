@@ -7,6 +7,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: hardware_pos
+      # Timestamps are stored as UTC wall clocks; keep the server session in UTC
+      # so psql/pg_dump and any non-Prisma reader interpret them the same way.
+      TZ: UTC
+      PGTZ: UTC
     ports:
       - "5432:5432"
     volumes:

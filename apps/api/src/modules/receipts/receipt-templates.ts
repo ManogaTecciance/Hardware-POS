@@ -2,7 +2,12 @@
  * Printable HTML templates. Each returns a complete standalone document with
  * inline print CSS and a screen-only Print button (browser print for v1).
  */
-import { formatCurrency } from '@hardware-pos/shared';
+import {
+  CREDIT_METHOD_LABEL,
+  formatCurrency,
+  formatDateTimeInTimeZone,
+  paymentMethodLabel,
+} from '@hardware-pos/shared';
 
 export interface ReceiptLine {
   name: string;
@@ -10,6 +15,9 @@ export interface ReceiptLine {
   quantity: number;
   unitPrice: number;
   discountAmount: number;
+  /** How a per-unit discount was arrived at, so the printed figure can be checked. */
+  discountBasis?: 'LINE' | 'UNIT';
+  discountValue?: number | null;
   lineTotal: number;
 }
 
@@ -48,6 +56,18 @@ function money(amount: number, _currency: string): string {
 
 const PRINT_BUTTON = `<button class="no-print print-btn" onclick="window.print()">Print</button>`;
 
+/**
+ * The date stamp printed on every receipt — sale and return alike.
+ *
+ * Rendered in the SHOP's timezone, matching the A4 invoice for the same
+ * transaction, so a receipt and its invoice can never name different days and a
+ * reprint always reads the same. The server's own zone is deliberately not used:
+ * it is an accident of deployment, not a property of the business.
+ */
+export function formatReceiptDateTime(date: Date, tz: string): string {
+  return formatDateTimeInTimeZone(date, tz);
+}
+
 export function renderCustomerReceipt(d: CustomerReceiptData): string {
   const rows = d.items
     .map(
@@ -56,14 +76,37 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
         <td>${esc(it.name)}${it.sku ? `<br><span class="muted">${esc(it.sku)}</span>` : ''}</td>
         <td class="r">${it.quantity}</td>
         <td class="r">${money(it.unitPrice, d.currency)}</td>
-        <td class="r">${it.discountAmount > 0 ? '-' + money(it.discountAmount, d.currency) : '—'}</td>
+        <td class="r">${
+          it.discountAmount > 0
+            ? '-' +
+              money(it.discountAmount, d.currency) +
+              // "/u" rather than the invoice's "× 3": a 32-character roll has no
+              // room for the long form, and the point is only that the amount is
+              // per unit.
+              (it.discountBasis === 'UNIT' && it.discountValue != null
+                ? ` (${money(it.discountValue, d.currency)}/u)`
+                : '')
+            : '—'
+        }</td>
         <td class="r">${money(it.lineTotal, d.currency)}</td>
       </tr>`,
     )
     .join('');
 
-  const payments = d.payments
-    .map((p) => `<div class="row"><span>${esc(p.method)}</span><span>${money(p.amount, d.currency)}</span></div>`)
+  // Labelled, not the raw enum — a customer receipt should not read "BANK_TRANSFER".
+  // A remaining balance is listed as its own "Credit" line, so a credit sale says
+  // how it was settled instead of printing no payment line at all; once the sale
+  // is paid off, a reprint shows only the methods actually used.
+  const payments = [
+    ...d.payments.map((p) => ({ label: paymentMethodLabel(p.method), amount: p.amount })),
+    ...(d.balanceAmount > 0
+      ? [{ label: CREDIT_METHOD_LABEL, amount: d.balanceAmount }]
+      : []),
+  ]
+    .map(
+      (p) =>
+        `<div class="row"><span>${esc(p.label)}</span><span>${money(p.amount, d.currency)}</span></div>`,
+    )
     .join('');
 
   return `<!doctype html>

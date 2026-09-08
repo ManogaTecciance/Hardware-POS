@@ -10,6 +10,7 @@ import type { Paginated } from '@hardware-pos/shared';
 
 import { paginate } from '../../common/pagination';
 import { StorageService } from '../../common/storage/storage.service';
+import { isAdminLevelRole } from '../auth/permissions';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
 import { MockSyncSummary, ProductsRepository } from './products.repository';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -98,8 +99,8 @@ export class ProductsService {
 
   /**
    * Update a product. QuickBooks-managed products (those with a QBO item id) are
-   * the inventory master, so their stock can't be edited unless the actor is an
-   * owner/admin (explicit local override).
+   * the inventory master, so their stock can't be edited unless the actor holds
+   * an owner-level role (explicit local override).
    */
   async update(
     tenantId: string,
@@ -113,10 +114,10 @@ export class ProductsService {
       dto.quantityOnHand !== undefined &&
       Number(dto.quantityOnHand) !== Number(existing.quantityOnHand);
     const isQuickBooksManaged = existing.quickbooksItemId != null;
-    const isAdmin = actorRole === 'OWNER' || actorRole === 'ADMIN';
+    const isAdmin = isAdminLevelRole(actorRole);
     if (changingStock && isQuickBooksManaged && !isAdmin) {
       throw new ForbiddenException(
-        'Stock for QuickBooks-managed products is controlled by QuickBooks. Ask an owner/admin to override.',
+        'Stock for QuickBooks-managed products is controlled by QuickBooks. Ask someone with owner-level access to override.',
       );
     }
 

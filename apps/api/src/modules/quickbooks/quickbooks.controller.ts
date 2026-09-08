@@ -1,12 +1,11 @@
 import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Res } from '@nestjs/common';
-import { UserRole } from '@hardware-pos/database';
 import type { Response } from 'express';
 
 import { Public } from '../../common/decorators/public.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
-import { Permission } from '../auth/permissions';
+import { ADMIN_LEVEL_ROLES, Permission } from '../auth/permissions';
 import { QuickBooksCallbackQuery, QuickBooksConnectionStatus } from './quickbooks.interfaces';
 import { QuickBooksService } from './quickbooks.service';
 import { QuickBooksSyncService, type SyncProductsSummary } from './quickbooks-sync.service';
@@ -73,10 +72,10 @@ export class QuickBooksController {
   /**
    * The Intuit authorization URL for the frontend to navigate to. Returned as
    * JSON (not a redirect) because the route needs the Bearer header, which a
-   * plain browser navigation cannot send. Owner/admin only.
+   * plain browser navigation cannot send. Owner-level roles only.
    */
   @Get('connect')
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(...ADMIN_LEVEL_ROLES)
   async connect(@TenantId() tenantId: string): Promise<{ url: string }> {
     return { url: await this.quickBooksService.getAuthorizationUrl(tenantId) };
   }
@@ -95,7 +94,7 @@ export class QuickBooksController {
   /** Disconnect the company: revoke the token and remove the stored connection. */
   @Post('disconnect')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(...ADMIN_LEVEL_ROLES)
   disconnect(@TenantId() tenantId: string): Promise<{ disconnected: boolean }> {
     return this.quickBooksService.disconnect(tenantId);
   }

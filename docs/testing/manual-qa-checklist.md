@@ -6,6 +6,7 @@ Use `[x]` pass, `[!]` fail (add a note), `[-]` blocked/N-A.
 **Build under test:** ________  **Date:** ________  **Tester:** ________  **Env:** ☐ local ☐ staging
 
 **Test accounts** (tenant `tnt_dev`): Owner `owner@hardwarepos.test`/`password123` ·
+Salesperson `salesperson@hardwarepos.test`/`password123` ·
 Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · Cashier PIN `1111`.
 
 **Preconditions**
@@ -41,6 +42,10 @@ Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · 
 - [ ] Tap the same product again → quantity becomes 2 (one line, not two).
 - [ ] Cart shows subtotal, total discount, tax, and total.
 - [ ] Remove a line → totals update; empty cart disables **Payment**.
+- [ ] An **invoice date** selector sits directly above the customer dropdown and shows today.
+- [ ] An earlier date can be picked; it survives going to Payment and back.
+- [ ] A future date cannot be picked, and the API refuses one if forced.
+- [ ] After completing a backdated sale, the selector is back to today.
 
 ## 5. Quantity change
 - [ ] Increment/decrement quantity → line total and cart totals recompute.
@@ -74,21 +79,48 @@ Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · 
 - [ ] Sale is recorded as **credit/partial** (Invoice type); balance visible in `/sales`.
 - [ ] Attempt a partial/credit sale **without** a customer → blocked with a clear message.
 
+## 10a. Payment due date & settlement
+- [ ] Choosing **Credit** or **Partial** reveals a required **Payment due date**; Complete Payment
+      stays disabled until it is set, and says so.
+- [ ] Switching back to a **full** payment hides the field, and the sale completes without one.
+- [ ] A due date **earlier than the invoice date** is refused (try it on a backdated sale).
+- [ ] The sales list shows the **Due** date for that sale and "—" for a fully paid one.
+- [ ] The **Overdue** filter lists only sales past due that still owe; exporting from the filtered
+      view covers the same sales.
+- [ ] Credit is settled on the CUSTOMER, not the invoice: the sale detail has no Record payment
+      button, and the customer page has one.
+- [ ] Customer page → **Record payment**: part-pay an account with two credit sales on it. Both
+      sales still read **Credit** — not even the older one is settled — and the Credit history
+      lists the payment.
+- [ ] Pay the rest. Both sales flip to **Paid** together, and the account reads zero.
+- [ ] Ring up another credit sale for the same customer. It reads Credit; the settled ones stay
+      Paid; the account balance is just the new sale.
+- [ ] Paying **more** than the account owes is refused.
+- [ ] The customer's **Available credit** on /customers rises by what was settled.
+- [ ] The dashboard's **Credit Receivable** card falls by the same amount and, clicked, opens the
+      customers list filtered to those who still owe.
+- [ ] The A4 bill shows the **payment method**: "Credit" while a balance remains, "Cash, Credit"
+      for a part payment, and the real method(s) once settled — plus the **Payment due** date.
+      Check the bill printed from the app (`/print/sales/{id}`), not only the API's PDF.
+
 ## 11. Receipt print
 - [ ] Customer receipt renders with lines, discounts, totals, paid/balance; browser **Print** works.
 - [ ] A sale containing a **warehouse-pickup** product also produces a **warehouse picking copy** (pickup items only).
 - [ ] Mark a print job as printed → status updates.
+- [ ] A **backdated** sale prints the picked invoice date, not today's date.
 
 ## 12. QuickBooks Sales Receipt sync (fully paid)
 - [ ] Take a **fully-paid** sale; trigger sync (auto by worker, or **Sync** action).
 - [ ] Within a few seconds the sale shows **Synced** with a **Sales Receipt** id.
 - [ ] In QuickBooks sandbox a matching Sales Receipt exists; line items reference the right items; discount reflected in the amount/description.
 - [ ] Re-syncing does **not** create a duplicate.
+- [ ] A **backdated** sale is filed in QuickBooks under the picked date (check the transaction date in the sandbox).
 
 ## 13. QuickBooks Invoice + Payment sync (credit / partial)
 - [ ] A **partial** sale syncs as an **Invoice**; the paid amount posts as a linked **Payment**.
 - [ ] Sale shows the **Invoice** id; the payment shows a QuickBooks payment id.
 - [ ] In the sandbox the Invoice + Payment are linked and balances match.
+- [ ] On a backdated credit sale, the Invoice **and** its Payment both carry the picked date.
 - [ ] A pure **credit** sale (paid 0) posts an Invoice with **no** payment.
 
 ## 14. Failed sync retry
@@ -103,6 +135,8 @@ Accountant `accountant@hardwarepos.test`/`password123` · Manager PIN `2222` · 
 - [ ] **Manager**: can approve discounts; cannot connect QuickBooks or run product sync.
 - [ ] **Accountant**: can view **sync logs** and **QuickBooks status**; cannot create sales or take payment.
 - [ ] **Owner/Admin**: full access — connect QuickBooks, sync products/sales, settings, users.
+- [ ] **Salesperson**: identical to Owner on every check above — same nav, same QuickBooks
+      connect/sync access, same settings and user management, unlimited discounts.
 - [ ] Deep-linking to a forbidden route (e.g. Cashier → `/quickbooks/settings`) is blocked/redirected.
 - [ ] Directly calling a forbidden API returns **403**; missing token returns **401**.
 

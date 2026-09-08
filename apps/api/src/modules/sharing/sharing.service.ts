@@ -1,3 +1,4 @@
+import { formatDateInTimeZone, safeTimeZone } from '@hardware-pos/shared';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ShareChannel } from '@hardware-pos/database';
 
@@ -31,7 +32,7 @@ export class SharingService {
     const phone = this.normalizePhone(dto.phone ?? q.customer?.phone ?? '');
     const shareUrl = this.publicShareUrl(q.shareToken);
 
-    const message = this.fill(app.sharing.whatsappMessageTemplate, q, businessName);
+    const message = this.fill(app.sharing.whatsappMessageTemplate, q, businessName, safeTimeZone(app.timezone));
     const fullMessage = shareUrl ? `${message}\n${shareUrl}` : message;
     const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(fullMessage)}`;
 
@@ -59,8 +60,8 @@ export class SharingService {
       throw new BadRequestException('No recipient email — add one to the customer or pass "to".');
     }
 
-    const subject = dto.subject ?? this.fill(app.sharing.emailSubjectTemplate, q, businessName);
-    const body = dto.message ?? this.fill(app.sharing.emailBodyTemplate, q, businessName);
+    const subject = dto.subject ?? this.fill(app.sharing.emailSubjectTemplate, q, businessName, safeTimeZone(app.timezone));
+    const body = dto.message ?? this.fill(app.sharing.emailBodyTemplate, q, businessName, safeTimeZone(app.timezone));
     const shareUrl = this.publicShareUrl(q.shareToken);
 
     // Prefer a real PDF attachment; fall back to the print-ready HTML document.
@@ -143,13 +144,9 @@ export class SharingService {
     });
   }
 
-  private fill(template: string, q: QuotationDetail, businessName: string): string {
+  private fill(template: string, q: QuotationDetail, businessName: string, tz: string): string {
     const validUntil = q.validUntil
-      ? new Date(q.validUntil).toLocaleDateString('en-GB', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        })
+      ? formatDateInTimeZone(new Date(q.validUntil), tz)
       : '—';
     return template
       .replace(/\{customerName\}/g, q.customer?.name ?? 'Customer')

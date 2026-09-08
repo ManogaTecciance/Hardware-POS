@@ -97,6 +97,24 @@ describe('ReturnsService.preview', () => {
     expect(preview.quickbooksDocumentType).toBe('REFUND_RECEIPT');
   });
 
+  it('requires approval — not rejection — for a sale backdated past the return period', async () => {
+    // Backdating lets a sale be born older than the return window. The window is
+    // measured from the INVOICE date, so such a sale is still returnable; it just
+    // needs a manager. Reachable in production for the first time via backdating.
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+    const service = makeService({
+      findSaleForReturn: jest.fn().mockResolvedValue(makeSale({ completedAt: sixtyDaysAgo })),
+    });
+    const preview = await service.preview('t1', CASHIER, {
+      originalSaleId: 'sale1',
+      items: [{ saleItemId: 'si1', returnQuantity: 2, ...goodItem }],
+      refundMethod: 'CASH',
+    });
+    expect(preview.requiresApproval).toBe(true);
+    expect(preview.approvalReasons.join(' ')).toMatch(/return period/i);
+  });
+
   it('rejects a return quantity greater than the available quantity', async () => {
     const service = makeService({ findSaleForReturn: jest.fn().mockResolvedValue(makeSale()) });
     await expect(

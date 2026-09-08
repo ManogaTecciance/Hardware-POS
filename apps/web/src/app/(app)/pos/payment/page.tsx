@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 
+import { CustomerCombobox } from '@/components/pos/customer-combobox';
 import { NumericKeypad, QuickAmountButtons } from '@/components/pos/payment/numeric-keypad';
 import { PaymentMethodSelector, type Mode } from '@/components/pos/payment/payment-method-selector';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +27,9 @@ import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/lib/auth';
 import { computeLine, computeTotals, type CartItem } from '@/lib/cart';
 import { useCheckoutData } from '@/lib/catalog';
+import { checkCredit } from '@/lib/credit-guard';
+import { fetchCustomerCredit, type CustomerCredit } from '@/lib/customers-api';
+import { isValidYmd } from '@/lib/dates';
 import { usePosCart } from '@/lib/pos-cart';
 import { printCustomerReceipt, type ReceiptContext } from '@/lib/receipt-print';
 import {
@@ -66,6 +70,14 @@ export default function PaymentPage() {
   const cart = usePosCart();
 
   const currency = data.settings.currency;
+  // Keep the cart's notion of "today" on the shop's calendar, so the invoice-date
+  // picker can never offer a day the API will reject.
+  const shopTimeZone = data.settings.timezone;
+  const { setShopTimeZone } = cart;
+  React.useEffect(() => {
+    setShopTimeZone(shopTimeZone);
+  }, [shopTimeZone, setShopTimeZone]);
+
   const totals = computeTotals(cart.items, data.settings.taxRatePercent, cart.orderDiscount);
   const total = totals.total;
 
@@ -75,6 +87,15 @@ export default function PaymentPage() {
   const [partialAmount, setPartialAmount] = React.useState('');
   const [partialMethod, setPartialMethod] = React.useState<PaymentMethodCode>('CASH');
   const [splitLines, setSplitLines] = React.useState<SplitLine[]>([]);
+  const [dueDate, setDueDate] = React.useState('');
+  // Page-local, never stored with the cart: outstanding moves whenever any till
+  // takes a payment, so a figure carried alongside the order goes stale exactly
+  // when it matters. `customerId` travels with it so a slow response for a
+  // previously selected customer cannot be applied to the current one.
+  const [credit, setCredit] = React.useState<(CustomerCredit & { customerId: string }) | null>(
+    null,
+  );
+  const [creditUnavailable, setCreditUnavailable] = React.useState(false);
   const [printAfter, setPrintAfter] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -85,8 +106,9 @@ export default function PaymentPage() {
 
   // Selected customers always pass through cart.addCustomer, so the cart's own
   // list is sufficient to resolve the display name.
-  const customerName =
-    cart.addedCustomers.find((c) => c.id === cart.customerId)?.name ?? 'Walk-in customer';
+  const selectedCustomerName =
+    cart.addedCustomers.find((c) => c.id === cart.customerId)?.name ?? null;
+  const customerName = selectedCustomerName ?? 'Walk-in customer';
   const hasCustomer = !!cart.customerId;
 
   // Redirect back to the cart if it emptied (but not right after a successful sale).
@@ -99,6 +121,42 @@ export default function PaymentPage() {
   React.useEffect(() => {
     setTendered(total ? total.toFixed(2) : '');
   }, [total]);
+
+  // Re-read the customer's credit whenever the selection changes, and again
+  // whenever the till is brought back to the foreground — another till may have
+  // settled one of their invoices in the meantime.
+  const customerId = cart.customerId;
+  const [creditKey, setCreditKey] = React.useState(0);
+  React.useEffect(() => {
+    if (!session || !customerId) {
+      setCredit(null);
+      setCreditUnavailable(false);
+      return;
+    }
+    let ignore = false;
+    fetchCustomerCredit(session, customerId)
+      .then((c) => {
+        if (ignore) return;
+        setCredit({ ...c, customerId });
+        setCreditUnavailable(false);
+      })
+      .catch(() => {
+        // Fail OPEN: a transport problem must not stop the shop selling. The
+        // server checks the limit again on completion, which is the real gate.
+        if (ignore) return;
+        setCredit(null);
+        setCreditUnavailable(true);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [session, customerId, creditKey]);
+
+  React.useEffect(() => {
+    const refresh = () => setCreditKey((k) => k + 1);
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, []);
 
   // ── derive payments from the selected mode ─────────────────────────────────
   const splitPaid = round2(splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0));
@@ -142,13 +200,39 @@ export default function PaymentPage() {
   const change = mode === 'CASH' ? round2(Math.max(0, tenderedNum - total)) : 0;
   const cashShort = mode === 'CASH' ? round2(Math.max(0, total - tenderedNum)) : 0;
   const needsCustomer = paidAmount < total; // partial or credit → invoice needs a customer
+  const isBackdated = cart.saleDateValid && cart.saleDate < cart.today;
 
+  // Money left owing needs a date by which it is owed. A fully paid sale must
+  // not carry one — the API rejects it, and a "due date" on a settled sale is
+  // meaningless anyway.
+  const needsDueDate = balance > 0;
+  // Compared as plain YYYY-MM-DD strings, which sort chronologically.
+  const dueDateValid = isValidYmd(dueDate) && dueDate >= cart.saleDate;
+
+  // Derived on every render, not snapshotted, so editing a quantity in the order
+  // summary moves it immediately. The rule itself lives in checkCredit, which
+  // mirrors the server guard; this only ever explains the button, and the server
+  // re-checks on completion and remains what actually decides.
+  const {
+    applies: creditApplies,
+    refused: creditRefused,
+    overLimit,
+    available: creditAvailable,
+    credit: liveCredit,
+  } = checkCredit(balance, customerId, credit);
+
+  // Gated here as well as in the cart: /pos/payment is reachable by a direct
+  // reload, which rehydrates from sessionStorage without passing through /pos.
   const invalid =
     submitting ||
     cart.items.length === 0 ||
     totals.hasStockIssue ||
+    !cart.saleDateValid ||
     (needsCustomer && !hasCustomer) ||
     (mode === 'CASH' && tenderedNum < total) ||
+    (needsDueDate && !dueDateValid) ||
+    creditRefused ||
+    overLimit ||
     (mode === 'PARTIAL' && (paidAmount <= 0 || paidAmount >= total)) ||
     (mode === 'SPLIT' && (payments.length === 0 || paidAmount > total));
 
@@ -158,8 +242,14 @@ export default function PaymentPage() {
   if (!submitting) {
     if (totals.hasStockIssue) {
       disabledReason = 'Some items exceed available stock — adjust quantities in the cart.';
+    } else if (!cart.saleDateValid) {
+      // Names the cart because that is the only place the date can be fixed.
+      disabledReason = 'The invoice date must be today or earlier — fix it in the cart.';
     } else if (needsCustomer && !hasCustomer) {
       disabledReason = 'Select a customer to record a credit or partial sale.';
+      // No credit clause here on purpose: the credit panel above already states
+      // the position, in the same words and with the numbers. Repeating it in the
+      // footer says nothing new and puts the same sentence on screen twice.
     } else if (mode === 'CASH' && tenderedNum < total) {
       disabledReason = `Enter at least ${formatMoney(total, currency)} to complete this cash payment.`;
     } else if (mode === 'PARTIAL' && paidAmount <= 0) {
@@ -171,6 +261,10 @@ export default function PaymentPage() {
       disabledReason = 'Add at least one split payment.';
     } else if (mode === 'SPLIT' && paidAmount > total) {
       disabledReason = 'Split total is more than the amount due.';
+    } else if (needsDueDate && !isValidYmd(dueDate)) {
+      disabledReason = 'Set the date this balance is due.';
+    } else if (needsDueDate && dueDate < cart.saleDate) {
+      disabledReason = 'The payment due date cannot be before the invoice date.';
     }
   }
 
@@ -209,10 +303,16 @@ export default function PaymentPage() {
       const dto: CompleteSaleDto = {
         ...saleLocation(session!),
         customerId: cart.customerId || undefined,
+        saleDate: cart.submittedSaleDate,
+        paymentDueDate: needsDueDate ? dueDate : undefined,
         items: cart.items.map((it) => ({
           productId: it.product.id,
           quantity: it.quantity,
           discountType: it.discount?.type,
+          // Hand-written map: a field left out here is dropped with no type
+          // error, and the server would then recompute a whole-line amount while
+          // the cashier was shown the per-unit one.
+          discountBasis: it.discount?.basis,
           discountValue: it.discount?.value,
           discountReason: it.discount?.reason,
           approvalToken: it.approvalToken,
@@ -245,6 +345,10 @@ export default function PaymentPage() {
       // The failure may be another register beating us to the stock (or a
       // price change) — refresh the catalog so the cart reflects reality.
       data.reload();
+      // ...and the customer may have taken on credit elsewhere since we last
+      // looked, so re-read it too: a retry should be measured against the same
+      // numbers the server just used to refuse.
+      setCreditKey((k) => k + 1);
     } finally {
       setSubmitting(false);
     }
@@ -296,6 +400,13 @@ export default function PaymentPage() {
       <div className="flex shrink-0 flex-wrap items-baseline gap-x-3 gap-y-0">
         <h1 className="text-2xl font-semibold tracking-tight">Payment</h1>
         <p className="truncate text-sm text-muted-foreground">{customerName}</p>
+        {/* The date is only editable in the cart, so say plainly that this sale
+            is not being dated today before the payment is taken. */}
+        {isBackdated ? (
+          <span className="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning">
+            Dated {cart.saleDate}
+          </span>
+        ) : null}
       </div>
 
       {/* Order summary ~40% · payment workspace ~60% on lg+. */}
@@ -327,6 +438,21 @@ export default function PaymentPage() {
             </span>
             <span className="font-semibold text-primary">{formatMoney(total, currency)}</span>
           </button>
+
+          {/* Customer — pickable here as well as in the cart. A credit or partial
+              sale needs one, and being told so on this screen while only being
+              able to fix it on the previous one is a poor trade. Selecting one
+              re-reads their credit position, since the panel below keys on it. */}
+          <div className="shrink-0 border-b border-border px-4 py-3">
+            <CustomerCombobox
+              session={session!}
+              customerId={cart.customerId}
+              customerName={selectedCustomerName}
+              onSelect={(customer) =>
+                customer ? cart.addCustomer(customer) : cart.setCustomerId('')
+              }
+            />
+          </div>
 
           {/* TOP ZONE — Amount due + selected method (always visible). */}
           <div className="grid shrink-0 grid-cols-1 gap-4 p-5 sm:grid-cols-2 sm:items-center">
@@ -530,6 +656,80 @@ export default function PaymentPage() {
                 The full {formatMoney(total, currency)} will be recorded as credit (an Invoice). A
                 saved customer is required.
               </p>
+            ) : null}
+
+            {creditApplies && liveCredit ? (
+              <div
+                className={cn(
+                  'mt-5 max-w-md rounded-xl px-4 py-3 text-sm',
+                  overLimit || creditRefused ? 'bg-danger-soft text-danger' : 'bg-muted',
+                )}
+                role={overLimit || creditRefused ? 'alert' : 'status'}
+              >
+                {creditRefused ? (
+                  <p className="font-medium">
+                    {customerName} is not approved for credit — take full payment.
+                  </p>
+                ) : liveCredit.creditLimit == null ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Credit outstanding</span>
+                    <span className="font-medium">
+                      {formatMoney(liveCredit.outstanding, currency)} · no limit set
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={overLimit ? undefined : 'text-muted-foreground'}>
+                        Credit available
+                      </span>
+                      <span className="font-medium">{formatMoney(creditAvailable, currency)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={overLimit ? undefined : 'text-muted-foreground'}>
+                        This sale needs
+                      </span>
+                      <span className="font-medium">{formatMoney(balance, currency)}</span>
+                    </div>
+                    {overLimit ? (
+                      <p className="mt-1.5 font-medium">
+                        Over the limit by{' '}
+                        {formatMoney(round2(balance - creditAvailable), currency)} — take a larger
+                        payment now, or reduce the order.
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {creditApplies && creditUnavailable ? (
+              // Advisory only: the sale is not blocked, it is simply unchecked
+              // here. The server still enforces the limit on completion.
+              <p className="mt-5 max-w-md rounded-xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+                Could not read this customer&rsquo;s credit position. The limit will still be
+                checked when you complete the sale.
+              </p>
+            ) : null}
+
+            {needsDueDate ? (
+              <div className="mt-5 max-w-md space-y-1.5">
+                <Label htmlFor="due-date">
+                  Payment due date <span className="text-danger">*</span>
+                </Label>
+                <Input
+                  id="due-date"
+                  type="date"
+                  value={dueDate}
+                  min={cart.saleDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className="h-12"
+                />
+                <p className="text-xs text-muted-foreground">
+                  When the remaining {formatMoney(balance, currency)} is expected. Cannot be earlier
+                  than the invoice date.
+                </p>
+              </div>
             ) : null}
 
             {error ? (

@@ -42,6 +42,8 @@ services:
       # Highest precedence — guarantees uploads land on the mounted volume
       # regardless of what .env.prod says.
       UPLOAD_DIR: /data/uploads
+      # Datetimes are stored in UTC; the process zone must not be able to skew that.
+      TZ: UTC
     volumes:
       - uploads_data:/data/uploads # local product images (or use STORAGE_PROVIDER=s3)
     depends_on:
@@ -55,6 +57,11 @@ services:
     restart: always
     env_file:
       - .env.prod # provides POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+    environment:
+      # Timestamps are stored as UTC wall clocks; keep the server session in UTC
+      # so psql/pg_dump and any non-Prisma reader interpret them the same way.
+      TZ: UTC
+      PGTZ: UTC
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

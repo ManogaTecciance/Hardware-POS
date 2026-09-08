@@ -9,6 +9,7 @@ import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { CompleteSaleDto } from './dto/complete-sale.dto';
+import { MarkSalePaidDto } from './dto/mark-sale-paid.dto';
 import { QuerySalesDto } from './dto/query-sales.dto';
 import { QuerySalesReportDto } from './dto/query-sales-report.dto';
 import { SalesReportService } from './sales-report.service';
@@ -80,6 +81,23 @@ export class SalesController {
   @RequirePermissions(Permission.SALE_CREATE)
   sync(@TenantId() tenantId: string, @Param('id') id: string): Promise<SaleWithRelations> {
     return this.salesService.syncToQuickBooks(tenantId, id);
+  }
+
+  /**
+   * Tick a credit invoice off as paid, or clear the tick, from the customer page.
+   *
+   * Bookkeeping only — it moves no money. Requires `payment:create`, because it
+   * is an assertion about money having been received, not a sales edit.
+   */
+  @Post(':id/marked-paid')
+  @RequirePermissions(Permission.PAYMENT_CREATE)
+  setMarkedPaid(
+    @TenantId() tenantId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: MarkSalePaidDto,
+  ): Promise<SaleWithRelations> {
+    return this.salesService.setMarkedPaid(tenantId, user, id, dto.marked);
   }
 
   /** Alias of `/sync` — retry a failed/pending QuickBooks push from the Sales UI. */

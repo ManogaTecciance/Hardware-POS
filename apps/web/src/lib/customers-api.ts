@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { PaymentMethodCode } from './sales';
 import type { Session } from './auth';
 
 export type CustomerType = 'WALK_IN' | 'RETAIL' | 'CONTRACTOR' | 'CREDIT' | 'DEALER';
@@ -21,6 +22,10 @@ export const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
 export interface ManagedCustomer {
   id: string;
   name: string;
+  /** List responses only: unpaid balance across this customer's unsettled sales. */
+  outstandingCredit?: number;
+  /** List responses only: credit limit less what is owed. Null when no limit is set. */
+  availableCredit?: number | null;
   company: string | null;
   /** QuickBooks' free-text customer type taxonomy (e.g. "Wholesale Trade"). */
   qbCustomerType: string | null;
@@ -60,6 +65,8 @@ export interface CustomersQuery {
   search?: string;
   customerType?: CustomerType;
   isActive?: 'true' | 'false';
+  /** Only customers who currently owe money — the dashboard receivables card links here. */
+  hasOutstandingCredit?: 'true';
 }
 
 export interface CustomerInput {
@@ -86,9 +93,14 @@ export interface CustomerInput {
 }
 
 /** Raw JSON — Prisma Decimals may arrive as strings. */
-type ApiCustomer = Omit<ManagedCustomer, 'creditLimit' | 'openingBalance'> & {
+type ApiCustomer = Omit<
+  ManagedCustomer,
+  'creditLimit' | 'openingBalance' | 'outstandingCredit' | 'availableCredit'
+> & {
   creditLimit: string | number | null;
   openingBalance: string | number | null;
+  outstandingCredit?: string | number | null;
+  availableCredit?: string | number | null;
 };
 
 function auth(session: Session): { token: string; tenantId: string } {
@@ -124,6 +136,12 @@ function toManaged(c: ApiCustomer): ManagedCustomer {
     ...c,
     creditLimit: c.creditLimit != null ? Number(c.creditLimit) : null,
     openingBalance: c.openingBalance != null ? Number(c.openingBalance) : null,
+    outstandingCredit: c.outstandingCredit != null ? Number(c.outstandingCredit) : undefined,
+    // Null is meaningful here — "no limit set" — so it must survive the coercion
+    // rather than collapsing into undefined alongside "the detail endpoint does
+    // not send this field at all".
+    availableCredit:
+      c.availableCredit === undefined ? undefined : c.availableCredit === null ? null : Number(c.availableCredit),
   };
 }
 
@@ -133,6 +151,7 @@ function buildQuery(q: CustomersQuery): string {
   params.set('pageSize', String(q.pageSize ?? 25));
   if (q.search) params.set('search', q.search);
   if (q.customerType) params.set('customerType', q.customerType);
+  if (q.hasOutstandingCredit) params.set('hasOutstandingCredit', q.hasOutstandingCredit);
   if (q.isActive) params.set('isActive', q.isActive);
   return params.toString();
 }
@@ -150,6 +169,110 @@ export async function fetchCustomers(
 
 export async function fetchCustomer(session: Session, id: string): Promise<ManagedCustomer> {
   return toManaged(await api.get<ApiCustomer>(`/customers/${id}`, auth(session)));
+}
+
+/** A customer's live credit position, as the sale-completion guard sees it. */
+export interface CustomerCredit {
+  creditAllowed: boolean;
+  /** null = no limit configured, which means unlimited — NOT zero. */
+  creditLimit: number | null;
+  /** Unpaid balance across this customer's completed, unsettled sales. */
+  outstanding: number;
+  /** `creditLimit - outstanding`, or null when there is no limit. Can be negative. */
+  available: number | null;
+}
+
+/**
+ * Fetch what a customer owes right now.
+ *
+ * Deliberately not cached in the cart: outstanding moves when any till records a
+ * payment or completes another credit sale, so a figure stored alongside the
+ * order goes stale exactly when it matters.
+ */
+export async function fetchCustomerCredit(
+  session: Session,
+  id: string,
+): Promise<CustomerCredit> {
+  const c = await api.get<{
+    creditAllowed: boolean;
+    creditLimit: string | number | null;
+    outstanding: string | number;
+    available: string | number | null;
+  }>(`/customers/${id}/credit`, auth(session));
+  return {
+    creditAllowed: c.creditAllowed,
+    creditLimit: c.creditLimit == null ? null : Number(c.creditLimit),
+    outstanding: Number(c.outstanding),
+    available: c.available == null ? null : Number(c.available),
+  };
+}
+
+/** One payment received against a customer's credit account. */
+export interface AccountPayment {
+  id: string;
+  amount: number;
+  method: PaymentMethodCode;
+  reference: string | null;
+  createdAt: string;
+  /** When this payment was consumed by clearing the account; null while it is still working. */
+  settledAt: string | null;
+}
+
+/** A customer's credit history — account payments, newest first. */
+export async function fetchCustomerPayments(
+  session: Session,
+  customerId: string,
+): Promise<AccountPayment[]> {
+  const rows = await api.get<
+    Array<{
+      id: string;
+      amount: string | number;
+      method: PaymentMethodCode;
+      reference: string | null;
+      createdAt: string;
+      settledAt: string | null;
+    }>
+  >(`/payments?customerId=${encodeURIComponent(customerId)}`, auth(session));
+  return rows.map((r) => ({
+    id: r.id,
+    amount: Number(r.amount),
+    method: r.method,
+    reference: r.reference,
+    createdAt: r.createdAt,
+    settledAt: r.settledAt ?? null,
+  }));
+}
+
+/** What recording an account payment did. */
+export interface AccountPaymentResult {
+  /** The account balance after this payment. */
+  outstanding: number;
+  /** How many invoices it cleared — non-zero only when it closed the account. */
+  salesSettled: number;
+}
+
+/**
+ * Record a payment received against a customer's credit account.
+ *
+ * Not against any one invoice: credit is an account balance, so while anything
+ * is still owed every credit sale stays outstanding, and the moment the account
+ * reaches zero the invoices it covered are all marked settled together.
+ */
+export async function recordAccountPayment(
+  session: Session,
+  payload: {
+    customerId: string;
+    method: PaymentMethodCode;
+    amount: number;
+    reference?: string;
+  },
+): Promise<AccountPaymentResult> {
+  const res = await api.post<{ outstanding: string | number; salesSettled: number }>(
+    '/payments',
+    payload,
+    auth(session),
+  );
+  return { outstanding: Number(res.outstanding), salesSettled: res.salesSettled };
 }
 
 export async function createCustomer(

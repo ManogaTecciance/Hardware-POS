@@ -10,6 +10,7 @@ type Fixtures = Record<never, never>;
 
 interface WorkerFixtures {
   ownerApi: Api;
+  salespersonApi: Api;
   accountantApi: Api;
   managerApi: Api;
   cashierApi: Api;
@@ -28,6 +29,13 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
   ownerApi: [
     async ({}, use) => {
       const auth = await apiLogin(SEED.owner.email, SEED.owner.password);
+      await use(await Api.create(auth));
+    },
+    { scope: 'worker' },
+  ],
+  salespersonApi: [
+    async ({}, use) => {
+      const auth = await apiLogin(SEED.salesperson.email, SEED.salesperson.password);
       await use(await Api.create(auth));
     },
     { scope: 'worker' },
