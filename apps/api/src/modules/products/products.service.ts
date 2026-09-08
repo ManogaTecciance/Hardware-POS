@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Product, SellableKind, UserRole } from '@hardware-pos/database';
+import { Prisma, Product, QuantityType, SellableKind, UserRole } from '@hardware-pos/database';
 import type { Paginated } from '@hardware-pos/shared';
 
 import { mirrorExternalRef } from '../quickbooks/external-ref';
@@ -122,6 +122,11 @@ export class ProductsService {
     // D64 — the empty document counts as a full document, so a domain with
     // required attributes refuses a create that omits them entirely.
     await this.attributes.assertValidDocument(tenantId, dto.attributes ?? {});
+    // D113c — a measured product must say what it is measured in.
+    assertMeasuredProductNamesItsUnit(
+      dto.quantityType ?? QuantityType.WHOLE,
+      dto.unitOfMeasure,
+    );
     const link = await this.resolveCategoryLink(tenantId, dto.categoryId, dto.subcategoryId);
     const data: Prisma.ProductUncheckedCreateInput = {
       tenantId,
@@ -134,6 +139,10 @@ export class ProductsService {
       // D112 — validated against this tenant, so another tenant's brand id
       // is refused rather than silently stored as a dangling reference.
       brandId: await this.resolveBrand(tenantId, dto.brandId),
+      // D113 / D113b — omitted means WHOLE, which is what every product was
+      // before the column existed.
+      quantityType: dto.quantityType ?? QuantityType.WHOLE,
+      unitOfMeasure: dto.unitOfMeasure?.trim() || null,
       unitPrice: dto.unitPrice,
       purchaseDescription: dto.purchaseDescription ?? null,
       costPrice: dto.costPrice ?? null,
@@ -198,6 +207,19 @@ export class ProductsService {
       await this.attributes.assertValidDocument(tenantId, dto.attributes);
     }
 
+    /*
+     * D113c — checked against the RESULTING state, not the payload.
+     *
+     * `update` is partial, so a payload-only check would pass the only two
+     * cases worth guarding: turning a product DECIMAL when it has no unit, and
+     * clearing the unit on a product that is already DECIMAL. Each field falls
+     * back to what is stored when the caller did not mention it.
+     */
+    assertMeasuredProductNamesItsUnit(
+      dto.quantityType ?? existing.quantityType,
+      dto.unitOfMeasure !== undefined ? dto.unitOfMeasure : existing.unitOfMeasure,
+    );
+
     const changingStock =
       dto.quantityOnHand !== undefined &&
       Number(dto.quantityOnHand) !== Number(existing.quantityOnHand);
@@ -229,6 +251,11 @@ export class ProductsService {
       // intentions; a single `?? null` would collapse the first two.
       ...(dto.brandId !== undefined
         ? { brandId: dto.brandId ? await this.resolveBrand(tenantId, dto.brandId) : null }
+        : {}),
+      // D113 / D113b — same three-state contract as `brandId` above.
+      quantityType: dto.quantityType,
+      ...(dto.unitOfMeasure !== undefined
+        ? { unitOfMeasure: dto.unitOfMeasure.trim() || null }
         : {}),
       unitPrice: dto.unitPrice,
       purchaseDescription: dto.purchaseDescription,
@@ -490,4 +517,33 @@ function toCatalogShape(product: Product): ProductCatalogShape {
     isActive: product.isActive,
     externalItemId: product.quickbooksItemId,
   };
+}
+
+/**
+ * D113c — a product sold by weight or measure must say what it is measured in.
+ *
+ * The rule is CONDITIONAL, which is why it lives here and not on the column: it
+ * is mandatory for a `DECIMAL` product and meaningless for a shirt, and a
+ * `NOT NULL` column would demand a unit from every product in every tenant.
+ * Postgres could express it as a CHECK constraint, but Prisma will not model
+ * one — it would live only in raw migration SQL, and the API would still need
+ * its own check to produce a usable 400. One rule, in the place that can state
+ * it.
+ *
+ * Callers pass the RESULTING state, not the payload. `update` is partial, so a
+ * payload-only check passes the only two cases worth guarding.
+ *
+ * The message is written for a shopkeeper adding rice, not for a developer:
+ * `4.19` cost two hours on a promotion that behaved correctly and explained
+ * nothing.
+ */
+export function assertMeasuredProductNamesItsUnit(
+  quantityType: QuantityType,
+  unitOfMeasure: string | null | undefined,
+): void {
+  if (quantityType !== QuantityType.DECIMAL) return;
+  if (unitOfMeasure && unitOfMeasure.trim()) return;
+  throw new BadRequestException(
+    'A product sold by weight or measure needs a unit — for example kg, g or L.',
+  );
 }

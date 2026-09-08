@@ -749,6 +749,24 @@ model Product {
   /// most hardware and grocery products carry no brand worth recording, and
   /// "unbranded" is the absence of a brand rather than a brand called that.
   brandId               String?
+  /// D113 (`6.1`) — sold by the piece, or by weight/measure.
+  ///
+  /// Defaulted to WHOLE so every existing product — retail, hardware and
+  /// restaurant alike — reads exactly as it did before this column existed.
+  /// A tenant that never sets DECIMAL runs the behaviour that shipped in
+  /// Phase 8, byte for byte.
+  quantityType          QuantityType  @default(WHOLE)
+  /// D113b — what the quantity is measured IN: "kg", "g", "L", "m".
+  ///
+  /// Free text, because nothing computes on it — it is printed, exactly like
+  /// `material` in the clothing attribute schema. It is what lets the till ask
+  /// "How many kg?" instead of "How many?", and the receipt say `0.750 kg`.
+  ///
+  /// NULLABLE at the column and REQUIRED in the service (D113c): the rule is
+  /// conditional — mandatory for a DECIMAL product, meaningless for a shirt —
+  /// and a NOT NULL column would demand a unit from every product in every
+  /// tenant. `ProductsService` enforces it against the RESULTING state.
+  unitOfMeasure         String?
   /// QBO income account name (auto-resolved on sync; read-only in the UI).
   incomeAccount         String?
   /// Purchase description — what vendors see on purchase forms.
@@ -3560,6 +3578,18 @@ model ProductVariationOption {
   @@index([tenantId])
   @@index([dimensionId])
   @@index([attributeOptionId])
+}
+
+/// D113 (`6.1`) — how a product is measured when it is sold.
+///
+/// The variant answers "which one"; this answers "how much". They are
+/// orthogonal: rice has colour and type variants AND is sold by weight.
+enum QuantityType {
+  /// Sold by the piece. Every product that existed before D113.
+  WHOLE
+  /// Sold by weight or measure. The till asks the cashier for the amount,
+  /// read off an ordinary offline scale — there is no device integration.
+  DECIMAL
 }
 
 /// D104 Part 3 (`5.6`) — where a variant's barcode came from.

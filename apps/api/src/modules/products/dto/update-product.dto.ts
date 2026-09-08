@@ -2,6 +2,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -12,6 +13,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { QuantityType } from '@hardware-pos/database';
 
 import {
   PRODUCT_FOOD_TYPES,
@@ -60,6 +62,29 @@ export class UpdateProductDto {
   @IsString()
   @IsOptional()
   brandId?: string;
+
+  /**
+   * D113 (`6.1`) — sold by the piece, or by weight/measure.
+   *
+   * Omitted means `WHOLE`, which is what every product was before this
+   * existed. A client that has never heard of measured goods keeps working.
+   */
+  @IsEnum(QuantityType)
+  @IsOptional()
+  quantityType?: QuantityType;
+
+  /**
+   * D113b — what the quantity is measured in: `kg`, `g`, `L`.
+   *
+   * **Required when `quantityType` is `DECIMAL`** — enforced in
+   * `ProductsService` against the RESULTING state, not here, because the
+   * rule is conditional on another field and a DTO cannot see the stored row
+   * (D113c).
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(16)
+  unitOfMeasure?: string;
 
   /** Sales price/rate. */
   @IsNumber()
