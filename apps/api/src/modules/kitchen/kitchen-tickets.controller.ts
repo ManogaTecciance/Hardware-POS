@@ -40,7 +40,7 @@ export class KitchenTicketsController {
     return this.service.listTicketsForBranch(tenantId, branchId, parseFilter(status));
   }
 
-  // (D108: `?status=CANCELLED` is a pseudo-filter like OUTSTANDING — see
+  // (D115: `?status=CANCELLED` is a pseudo-filter like OUTSTANDING — see
   // parseFilter below; cancellation is order-side state, not a ticket status.)
 
   /**
@@ -65,7 +65,7 @@ export class KitchenTicketsController {
   }
 
   /**
-   * D106 — the cook takes the ticket: Preparing. Same permission as
+   * D113 — the cook takes the ticket: Preparing. Same permission as
    * complete; starting is the same kind of claim about the food, one step
    * earlier. The round and any takeaway profile move with it (service-side),
    * which is what puts "Preparing" on the Orders queue.
@@ -149,7 +149,7 @@ export class KitchenTicketsController {
 
 /**
  * `?status=` accepts a real ticket status or a board pseudo-filter —
- * `OUTSTANDING` (D68) and `CANCELLED` (D108, order-side cancellation).
+ * `OUTSTANDING` (D68) and `CANCELLED` (D115, order-side cancellation).
  * Anything unrecognised means "no filter" rather than an error: a stale
  * bookmark should show the whole board, not a 400.
  */

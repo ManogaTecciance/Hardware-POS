@@ -1,7 +1,7 @@
 /**
  * The Orders page poll — when it runs, and that it stays SILENT.
  *
- * - Silence (D111, PO): this screen once rang a new-order chime and a
+ * - Silence (D118, PO): this screen once rang a new-order chime and a
  *   food-ready bell; the PO wants sound in the kitchen alone. Pinned as a
  *   tripwire against the audio module, exercised with exactly the polls
  *   that USED to ring (total growth, ready-count growth) — a re-added
@@ -66,7 +66,7 @@ const SESSION = {
 /**
  * The paginated envelope with `total` orders in it. Rows stay empty — the
  * chime, the ready bell and the poll read the envelope, never the cards.
- * `ready` is D107's counter-owned READY tally (takeaway + third-party).
+ * `ready` is D114's counter-owned READY tally (takeaway + third-party).
  */
 function pageOf(total: number, ready = 0) {
   return {
@@ -124,12 +124,12 @@ async function settle(calls: number) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /*
- * D111 (PO) — the queue makes NO sound. These are the exact polls that used
+ * D118 (PO) — the queue makes NO sound. These are the exact polls that used
  * to ring (an arrival growing the total; a takeaway going READY growing the
  * handover tally), re-run as silence tripwires: the fetches are proven to
  * have happened, and neither audio export fired.
  */
-describe('the queue is silent (D111)', () => {
+describe('the queue is silent (D118)', () => {
   it('an arriving order changes the count on screen, not the speaker', async () => {
     list.mockResolvedValueOnce(pageOf(3)).mockResolvedValue(pageOf(4));
     render(<OrdersPage session={SESSION} branchId="brn_1" />);

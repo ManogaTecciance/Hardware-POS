@@ -59,7 +59,7 @@ interface Props {
  *   → Customer capture popup (Skip for dine-in/takeaway, required for delivery)
  *   → Payment popup (COD-only for delivery)
  *   → Server orchestration: takeaway.create (kicks the auto-KOT) →
- *     for dine-in/takeaway: settle (creates the Sale, D110 — the order
+ *     for dine-in/takeaway: settle (creates the Sale, D117 — the order
  *     stays PLACED and flows the kitchen lifecycle; handover is a later
  *     human act) → collect payment. For delivery: no Sale yet and rely
  *     on riders to mark handover later.

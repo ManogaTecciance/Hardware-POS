@@ -248,7 +248,7 @@ export class KitchenService {
    * a pre-D68 round still shows as work to do rather than silently
    * disappearing from the pass.
    *
-   * D108 — cancellation lives on the ORDER side (a cancelled takeaway
+   * D115 — cancellation lives on the ORDER side (a cancelled takeaway
    * profile, or a round/order cancelled outright — tickets themselves have
    * no such status), and until now it never reached this read: the kitchen
    * kept cooking food nobody was coming for. `OUTSTANDING` and `COMPLETED`
@@ -445,7 +445,7 @@ export class KitchenService {
   }
 
   /**
-   * D106 — the cook takes a ticket: QUEUED (or a retired print status) →
+   * D113 — the cook takes a ticket: QUEUED (or a retired print status) →
    * IN_PROGRESS, the KDS "Preparing" state every mainstream board has
    * between "new" and "bumped".
    *
@@ -569,7 +569,7 @@ export class KitchenService {
   }
 
   /**
-   * D106 — after any ticket status change, restate what the tickets now say
+   * D113 — after any ticket status change, restate what the tickets now say
    * onto the round and (for takeaway) the customer-facing profile, so the
    * Orders queue and the takeaway board move the moment the kitchen does —
    * the way mainstream KDS products drive order status from the bump bar.

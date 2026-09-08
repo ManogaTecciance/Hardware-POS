@@ -248,7 +248,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     /*
      * D94 (PO): the cashier gets the board. KOT_VIEW and nothing more — the
      * write controls are gated on KITCHEN_STATUS_UPDATE, which stays with
-     * the people who cooked the food (D68). Since D106 the outstanding
+     * the people who cooked the food (D68). Since D113 the outstanding
      * board's verb depends on ticket state (Start preparing → Mark done),
      * so BOTH names are matched: the contrast is "no write verb at all",
      * not the absence of one particular label.

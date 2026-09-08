@@ -343,14 +343,14 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // D83 — the whole order behind a ticket, for the board's Details view.
   'GET /restaurant/branches/:branchId/kitchen-tickets/:ticketId/order': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/complete': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  // D106 — Preparing: the bump bar's first tap.
+  // D113 — Preparing: the bump bar's first tap.
   'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/start': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   // D100 — recall: a wrong bump reopens on the board; same permission as
   // completing.
   'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'POST /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
-  // D110 — money without handover: close the session into a Sale, status untouched.
+  // D117 — money without handover: close the session into a Sale, status untouched.
   'POST /restaurant/takeaway/:profileId/settle': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/takeaway/:profileId/status': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'GET /restaurant/bills/:saleId': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },

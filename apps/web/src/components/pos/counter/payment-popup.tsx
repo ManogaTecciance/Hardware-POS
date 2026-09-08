@@ -60,9 +60,9 @@ interface MethodOption {
  *      generates the kitchen tickets.
  *   2. For Dine-In counter and Takeaway: `takeaway.settle` closes the
  *      session into a Sale (UNPAID) WITHOUT touching the lifecycle —
- *      D110: this used to be `updateStatus(HANDED_OVER)`, which told the
+ *      D117: this used to be `updateStatus(HANDED_OVER)`, which told the
  *      queue the bag had crossed the counter before the kitchen had even
- *      seen the ticket, and parked the order beyond D106's
+ *      seen the ticket, and parked the order beyond D113's
  *      kitchen-driven statuses for its whole cook time. The order now
  *      stays PLACED (queue: Pending) and flows Preparing → Ready as the
  *      kitchen works; handover is pressed when the food actually leaves
@@ -194,7 +194,7 @@ export function PaymentPopup(props: Props) {
       let receiptPrinted = false;
 
       if (!isDelivery) {
-        // Step 2 (D110): settle → creates the Sale (UNPAID) while the order
+        // Step 2 (D117): settle → creates the Sale (UNPAID) while the order
         // stays PLACED for the kitchen lifecycle. TakeawayView carries
         // `finalSaleId` directly (Pilot Change 3), so we go straight to
         // payment.

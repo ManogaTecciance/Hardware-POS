@@ -232,13 +232,13 @@ describe('degradation', () => {
 });
 
 /*
- * D109 — Cancel order lives on the queue, not the kitchen. Eligibility is
+ * D116 — Cancel order lives on the queue, not the kitchen. Eligibility is
  * pinned from both sides (a live takeaway offers it; a handed-over one, a
  * dine-in row, and an unpermitted viewer do not), and the confirm flow is
  * asserted to the API call it makes — the status machine the takeaway
  * workspace already uses, addressed by the detail's profile id.
  */
-describe('Cancel order (D109)', () => {
+describe('Cancel order (D116)', () => {
   const liveTakeaway: UnifiedOrderView = { ...ROW, unifiedStatus: 'PENDING' };
 
   it('offers Cancel on a live takeaway once the detail brings the profile id', async () => {
@@ -313,12 +313,12 @@ describe('Cancel order (D109)', () => {
 });
 
 /*
- * D110 — handover is a button now that payment stopped implying it. Same
+ * D117 — handover is a button now that payment stopped implying it. Same
  * eligibility as Cancel (both halves inherited and re-pinned here), and the
  * tap is asserted to the exact status call — HANDED_OVER, nothing else —
  * with the queue refreshed and the drawer closed after.
  */
-describe('Mark handed over (D110)', () => {
+describe('Mark handed over (D117)', () => {
   const liveTakeaway: UnifiedOrderView = { ...ROW, unifiedStatus: 'READY' };
 
   it('hands a live takeaway over in one tap and refreshes the queue', async () => {

@@ -706,7 +706,7 @@ export const kitchen = {
   listTickets(
     session: Session,
     branchId: string,
-    /** D108 — `CANCELLED` is a pseudo-filter: order-side cancellation. */
+    /** D115 — `CANCELLED` is a pseudo-filter: order-side cancellation. */
     status?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'ALL',
   ) {
     const query = status && status !== 'ALL' ? `?status=${status}` : '';
@@ -723,7 +723,7 @@ export const kitchen = {
     );
   },
   /** D68 — kitchen staff saying the food is done. */
-  /** D106 — first tap of the bump bar: QUEUED → Preparing. */
+  /** D113 — first tap of the bump bar: QUEUED → Preparing. */
   start(session: Session, branchId: string, ticketId: string) {
     return api.post<KitchenTicketView>(
       `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/start`,
@@ -816,7 +816,7 @@ export const takeaway = {
       auth(session),
     );
   },
-  /** D110 — close the session into a Sale (idempotent) WITHOUT handing over. */
+  /** D117 — close the session into a Sale (idempotent) WITHOUT handing over. */
   settle(session: Session, profileId: string) {
     return api.post<TakeawayView>(
       `/restaurant/takeaway/${profileId}/settle`,
@@ -956,7 +956,7 @@ export interface UnifiedOrdersPage {
   /** Per-status totals across every page, counted before the status filter. */
   statusCounts: Record<UnifiedOrderStatus, number>;
   /**
-   * D107 — READY takeaway + third-party rows (never dine-in: that alert is
+   * D114 — READY takeaway + third-party rows (never dine-in: that alert is
    * the floor's). Status-filter independent, like statusCounts — the ready
    * bell rings whichever tab is open.
    */

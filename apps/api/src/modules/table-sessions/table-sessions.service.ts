@@ -83,7 +83,7 @@ export interface RoundView {
 export interface OpenSessionSummary extends TableSessionView {
   activeOrderId: string | null;
   /**
-   * D105 — ids of this session's COMPLETED (bumped) kitchen tickets. This is
+   * D112 — ids of this session's COMPLETED (bumped) kitchen tickets. This is
    * how "food ready" reaches the floor plan WITHOUT `KOT_VIEW`: the waiter
    * has no business on the kitchen display (their template documents that),
    * but "your table's food is up" is exactly their business, and this route
@@ -358,7 +358,7 @@ export class TableSessionsService {
       },
       orderBy: { openedAt: 'asc' },
     });
-    // D105 — one query for every listed session's bumped tickets, walked back
+    // D112 — one query for every listed session's bumped tickets, walked back
     // to its session id. Kept out of the include above: the ticket hangs off
     // round → order, not off the one most-recent order that include selects.
     const readyBySession = new Map<string, string[]>();

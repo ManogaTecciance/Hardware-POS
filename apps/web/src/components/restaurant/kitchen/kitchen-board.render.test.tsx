@@ -162,7 +162,7 @@ describe('the write gate (WS-408 mirrored)', () => {
     ];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
-    // D106/D108 — one verb per state, one lane per ticket.
+    // D113/D115 — one verb per state, one lane per ticket.
     await waitFor(() =>
       expect(screen.getAllByRole('button', { name: /start preparing/i })).toHaveLength(1),
     );
@@ -213,12 +213,12 @@ describe('the bump', () => {
 });
 
 /*
- * D106/D108 — Start preparing moves the card one lane along: it leaves
+ * D113/D115 — Start preparing moves the card one lane along: it leaves
  * To make the moment it is tapped and turns up under Preparing with the
  * badge and the next verb — the bump-bar lane flow, pinned from both lanes
  * so a card that vanished entirely would fail the second half.
  */
-describe('start preparing (D106)', () => {
+describe('start preparing (D113)', () => {
   it('starting moves the card from To make to the Preparing lane', async () => {
     outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T7' })];
     startFn.mockImplementation(() => {
@@ -245,13 +245,13 @@ describe('start preparing (D106)', () => {
 });
 
 /*
- * D109 — the board has NO Cancelled lane: cancellation is the Orders
+ * D116 — the board has NO Cancelled lane: cancellation is the Orders
  * queue's business, and cancelled work simply never reaches this screen
  * (the server read excludes it — pinned in the integration suite). The tab
  * strip is asserted as the exact set, because a lane quietly added back
  * would pass any absence-only check the moment it was renamed.
  */
-describe('the lane strip (D109)', () => {
+describe('the lane strip (D116)', () => {
   it('offers exactly To make, Preparing and Done', async () => {
     outstandingRows = [ticket({ id: 'tk_1' })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);

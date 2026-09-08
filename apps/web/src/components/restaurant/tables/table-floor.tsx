@@ -48,7 +48,7 @@ interface Snapshot {
 }
 
 /**
- * D105 — "Food ready" acknowledgements survive the trip into the session
+ * D112 — "Food ready" acknowledgements survive the trip into the session
  * screen and back (this component unmounts on navigation), but stay
  * per-device: serving is whoever carried the plate, so one tablet's ack
  * must not clear another's bell. Same sessionStorage idiom as the POS cart.
@@ -149,7 +149,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   }, [state.snapshot.openTables]);
 
   /*
-   * D105 — "food ready" state per session; D111 (PO) removed the bell that
+   * D112 — "food ready" state per session; D118 (PO) removed the bell that
    * once rang here — the waiter's signal is now the VISUAL badge alone
    * (sound lives in the kitchen only). Acked ids are state (they gate
    * badges, so they must re-render) seeded from sessionStorage.
@@ -230,7 +230,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   }, [load]);
 
   /*
-   * D105 — the floor plan's only live loop. It refreshes SESSIONS, not the
+   * D112 — the floor plan's only live loop. It refreshes SESSIONS, not the
    * furniture: areas and tables change at admin cadence and keep their
    * explicit loads, but "whose food is up" is worthless stale. 8 s like the
    * orders queue (5 s is the kitchen's urgency, not the floor's), gated to a
@@ -641,7 +641,7 @@ function TableCard({
 }: {
   table: RestaurantTableView;
   session: OpenSessionView | null;
-  /** D105 — bumped tickets this device has not answered; >0 shows the bell. */
+  /** D112 — bumped tickets this device has not answered; >0 shows the bell. */
   readyCount: number;
   /** Tapping View order answers the badge for this session on this device. */
   onViewOrder: () => void;
@@ -710,7 +710,7 @@ function TableCard({
           <span>Held by {heldBy.map((o) => o.label ?? o.code).join(', ')}</span>
         </p>
       ) : null}
-      {/* D105 — the food-ready badge (D111: visual only — sound lives in
+      {/* D112 — the food-ready badge (D118: visual only — sound lives in
           the kitchen). Cleared per device by opening the order, not by any
           server state: serving has no verb here, carrying the plate is the
           acknowledgement. */}
@@ -1412,7 +1412,7 @@ function OpenTableCard({
 }: {
   table: OpenTableView;
   session: OpenSessionView | null;
-  /** D105 — see TableCard: unanswered bumped tickets on this party. */
+  /** D112 — see TableCard: unanswered bumped tickets on this party. */
   readyCount: number;
   onViewOrder: () => void;
   canOpen: boolean;
@@ -1445,7 +1445,7 @@ function OpenTableCard({
       <p className="text-xs text-muted-foreground">
         Joins {table.members.map((m) => m.label ?? m.code).join(' + ') || '—'}
       </p>
-      {/* D105 — same bell as TableCard; a joined party's food rings too. */}
+      {/* D112 — same bell as TableCard; a joined party's food rings too. */}
       {readyCount > 0 ? (
         <p className="flex items-center gap-1 text-xs font-semibold text-success">
           <ConciergeBell className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

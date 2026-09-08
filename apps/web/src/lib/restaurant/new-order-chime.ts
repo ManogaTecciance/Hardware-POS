@@ -2,8 +2,8 @@
  * The kitchen board's new-ticket chime — a RISING two-note ding (A5→D6),
  * the shape mainstream KDS products use for "something arrived".
  *
- * D111 (PO): the KITCHEN is the only screen that makes sound. The orders
- * queue's arrival chime and the D105/D107 food-ready bell were removed —
+ * D118 (PO): the KITCHEN is the only screen that makes sound. The orders
+ * queue's arrival chime and the D112/D114 food-ready bell were removed —
  * those screens inform visually (badges, tabs, counts). This module stays
  * the single home for POS audio should any of it be invited back.
  *

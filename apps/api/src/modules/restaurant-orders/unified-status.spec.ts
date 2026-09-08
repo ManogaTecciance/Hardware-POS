@@ -1,7 +1,7 @@
 /**
- * D106 — the pure derivation the Orders queue shows, finally exercised end
+ * D113 — the pure derivation the Orders queue shows, finally exercised end
  * to end now that the kitchen MOVES rounds (start → IN_PROGRESS, full bump →
- * READY). The function predates D106 unchanged; what changed is that its
+ * READY). The function predates D113 unchanged; what changed is that its
  * IN_PROGRESS/READY branches stopped being dead code, so they get pinned.
  *
  * Paired per D30: every branch is asserted with the input that reaches it
@@ -10,7 +10,7 @@
  */
 import { unifiedStatusForRestaurantOrder } from './restaurant-orders.service';
 
-describe('unifiedStatusForRestaurantOrder (D106 — rounds drive the queue)', () => {
+describe('unifiedStatusForRestaurantOrder (D113 — rounds drive the queue)', () => {
   const dineIn = (roundStatuses: string[]) =>
     unifiedStatusForRestaurantOrder({
       orderStatus: 'SUBMITTED',

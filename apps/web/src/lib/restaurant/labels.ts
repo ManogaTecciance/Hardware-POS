@@ -150,7 +150,7 @@ export const KITCHEN_TICKET_STATUS_LABELS: Record<KitchenTicketStatus, string> =
   PRINTED: 'To make',
   REPRINTED: 'To make',
   FAILED: 'To make',
-  // D106 — the started ticket; same word the rounds and the Orders queue use.
+  // D113 — the started ticket; same word the rounds and the Orders queue use.
   IN_PROGRESS: 'Preparing',
   COMPLETED: 'Done',
 };

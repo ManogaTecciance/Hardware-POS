@@ -45,7 +45,7 @@ interface Props {
 }
 
 /*
- * D110 (PO): no Completed tab. COMPLETED is the dine-in shell's closed
+ * D117 (PO): no Completed tab. COMPLETED is the dine-in shell's closed
  * state — those rows still exist under All Orders (and the server still
  * accepts ?status=COMPLETED from an old bookmark); the strip shows the
  * lifecycle the counter actually works: Pending → Preparing → Ready →
@@ -73,8 +73,8 @@ const CHANNEL_CHIPS: Array<{ key: UnifiedChannel | 'ALL'; label: string }> = [
  * `/restaurant/branches/:b/orders` endpoint every 8 s while the tab is
  * visible (a hidden tab stops polling and catches up on return).
  *
- * D111 (PO): this screen makes NO sound. It once rang a new-order chime and
- * (D107) a food-ready bell; the PO wants audio in the kitchen alone, so the
+ * D118 (PO): this screen makes NO sound. It once rang a new-order chime and
+ * (D114) a food-ready bell; the PO wants audio in the kitchen alone, so the
  * queue informs visually — status chips, tab counts, the Ready tab. The
  * server still tallies `readyHandoverCount` in the envelope (tested,
  * harmless) should the bell ever be invited back.

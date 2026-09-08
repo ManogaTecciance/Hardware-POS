@@ -40,7 +40,7 @@ import {
  *
  * Actions surface only endpoints that already exist on the backend today:
  * navigation shortcuts to the full-page workflows (bill, order-entry, POS)
- * and, D109, Cancel order for takeaway rows — the queue is where the
+ * and, D116, Cancel order for takeaway rows — the queue is where the
  * counter decides an order's fate; the kitchen board only ever decides
  * doneness. Advance / reprint flows for 3rd-party remain follow-up wiring.
  *
@@ -59,7 +59,7 @@ export function OrderDetailDrawer({
   order: UnifiedOrderView;
   branchId: string;
   onClose: () => void;
-  /** D109 — an action changed the order; the queue should refetch now, not on its next poll. */
+  /** D116 — an action changed the order; the queue should refetch now, not on its next poll. */
   onMutated?: () => void;
 }) {
   const orientation = useOrientation();
@@ -389,7 +389,7 @@ function OrderDetailActions({
   };
 
   /*
-   * D109 — cancelling belongs HERE, not on the kitchen board: the counter
+   * D116 — cancelling belongs HERE, not on the kitchen board: the counter
    * decides whether an order still exists, the kitchen only whether it is
    * done. Offered for takeaway rows that are still in play — not handed
    * over (the Sale exists after that; that is refund territory), not
@@ -406,7 +406,7 @@ function OrderDetailActions({
     Boolean(detail?.takeawayProfileId);
 
   /*
-   * D110 — the handover verb, now that payment no longer implies it: the
+   * D117 — the handover verb, now that payment no longer implies it: the
    * counter settles the money at placement and presses THIS when the bag
    * actually crosses the counter. PO (same day): offered ONLY on READY —
    * food that the kitchen has not called up cannot be handed to anyone,
@@ -443,7 +443,7 @@ function OrderDetailActions({
     setCancelError(null);
     try {
       await takeaway.updateStatus(session, detail.takeawayProfileId, { status: 'CANCELLED' });
-      // The kitchen's ticket leaves the board on its next poll (D108's
+      // The kitchen's ticket leaves the board on its next poll (D115's
       // read); the queue refetches NOW so the row says Cancelled at once.
       onMutated?.();
       setConfirmCancel(false);

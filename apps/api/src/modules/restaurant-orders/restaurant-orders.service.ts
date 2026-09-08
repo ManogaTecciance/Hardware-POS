@@ -117,7 +117,7 @@ export interface OrderDetailView extends OrderView {
    */
   timeline: { at: string; status: UnifiedOrderStatus }[];
   /**
-   * D109 — the takeaway profile behind this row, when there is one. The
+   * D116 — the takeaway profile behind this row, when there is one. The
    * queue's Cancel action drives the EXISTING takeaway status machine
    * (`PATCH /restaurant/takeaway/:profileId/status`) rather than growing a
    * parallel cancel route, and that machine is addressed by profile id.
@@ -162,9 +162,9 @@ export interface OrdersPage {
    */
   statusCounts: Record<UnifiedOrderStatus, number>;
   /**
-   * D107 — READY rows whose handover belongs to the COUNTER: takeaway and
+   * D114 — READY rows whose handover belongs to the COUNTER: takeaway and
    * third-party. Dine-in readiness is deliberately excluded — that alert is
-   * the floor's (D105), and a till that dings for every plated table is
+   * the floor's (D112), and a till that dings for every plated table is
    * noise. Tallied beside statusCounts (before the status filter, after
    * channel/search), so the queue's ready bell can ring whichever tab is
    * open and re-baseline on the same filter changes that move the counts.
@@ -321,7 +321,7 @@ export class RestaurantOrdersService {
     let readyHandoverCount = 0;
     for (const r of base) {
       statusCounts[r.unifiedStatus] += 1;
-      // D107 — see the field's doc: counter-owned readiness only.
+      // D114 — see the field's doc: counter-owned readiness only.
       if (r.unifiedStatus === 'READY' && r.channel !== 'DINE_IN') readyHandoverCount += 1;
     }
 

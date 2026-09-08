@@ -26,11 +26,11 @@ interface Props {
 }
 
 /*
- * D108/D109 — three lanes, bump-bar style, each ticket in exactly one: To
- * make (queued), Preparing (started, D106), Done (bumped). Cancelled work
- * never renders here at all: the read excludes it (D108), so a mid-cook
+ * D115/D116 — three lanes, bump-bar style, each ticket in exactly one: To
+ * make (queued), Preparing (started, D113), Done (bumped). Cancelled work
+ * never renders here at all: the read excludes it (D115), so a mid-cook
  * cancel simply pulls the card off the board. Cancelling — and reviewing
- * what was cancelled — is the ORDERS QUEUE's business (D109): the kitchen
+ * what was cancelled — is the ORDERS QUEUE's business (D116): the kitchen
  * decides doneness, never whether an order still exists.
  */
 type Filter = 'TO_MAKE' | 'PREPARING' | 'COMPLETED';
@@ -96,7 +96,7 @@ const URGENCY_TIMER_CLASS: Record<Urgency, string> = {
  * cannot plate a dish it can see but cannot place, so each ticket names its
  * table, its order and its round the way a printed KOT used to.
  *
- * Kitchen staff start a ticket when they take it (D106 — Preparing), mark
+ * Kitchen staff start a ticket when they take it (D113 — Preparing), mark
  * it done when the food is up, and recall it when the bump was wrong
  * (D100). That is the whole write surface; the floor is not theirs and
  * neither is the money. Start/done ripple to the round and any takeaway
@@ -139,7 +139,7 @@ export function KitchenBoard({ session, branchId }: Props) {
   } | null>(null);
 
   const load = React.useCallback(async () => {
-    // D108 — keyed on the FETCH, not the tab: To make ↔ Preparing share the
+    // D115 — keyed on the FETCH, not the tab: To make ↔ Preparing share the
     // outstanding list, so flipping between them keeps the baseline and a
     // genuine arrival rings on either; Done re-baselines as before.
     const fetchFilter = FETCH_FOR[filter];
@@ -220,7 +220,7 @@ export function KitchenBoard({ session, branchId }: Props) {
     );
 
   /**
-   * D106 — the first tap: the card STAYS on "To make" (unlike both verbs
+   * D113 — the first tap: the card STAYS on "To make" (unlike both verbs
    * above), so instead of the optimistic drop it swaps in the server's
    * updated ticket — the verb flips to Mark done and the Preparing badge
    * appears without waiting a poll.
@@ -244,7 +244,7 @@ export function KitchenBoard({ session, branchId }: Props) {
   };
 
   /*
-   * D108 — the lane the active tab shows, cut from the fetched list. The
+   * D115 — the lane the active tab shows, cut from the fetched list. The
    * queued family (QUEUED + the retired print statuses) is To make; started
    * tickets are Preparing; Done renders its fetch whole.
    */
@@ -510,7 +510,7 @@ function TicketCard({
   onDetails: () => void;
 }) {
   const done = ticket.status === 'COMPLETED';
-  /** D106 — started but not bumped: the card carries a Preparing badge. */
+  /** D113 — started but not bumped: the card carries a Preparing badge. */
   const preparing = ticket.status === 'IN_PROGRESS';
   // Completed tickets stop ageing: the colour answers "how long has this
   // dish been waiting?", which a done dish no longer is.
@@ -540,7 +540,7 @@ function TicketCard({
           ) : (
             // The timer sits where a status badge would, because on the
             // outstanding tab the age IS the status — every badge there read
-            // "To make", which the tab already says. D106's Preparing is the
+            // "To make", which the tab already says. D113's Preparing is the
             // one outstanding state worth a badge, so it rides beside the
             // timer rather than displacing it: the dish still ages.
             <div className="flex shrink-0 items-center gap-2">
@@ -613,7 +613,7 @@ function TicketCard({
            * is deliberately quieter than the bump (outline, not filled): it
            * is the undo, not the job.
            *
-           * D106 — ONE verb per state, industry bump-bar style: a queued
+           * D113 — ONE verb per state, industry bump-bar style: a queued
            * ticket offers Start preparing, a started one offers Mark done.
            * Two stacked 48px buttons would halve how many tickets the pass
            * can see, and the two taps are adjacent in time anyway.

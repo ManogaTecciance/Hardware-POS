@@ -1,5 +1,5 @@
 /**
- * D105 — the waiter's "Food ready" BADGE (D111: visual only — the bell that
+ * D112 — the waiter's "Food ready" BADGE (D118: visual only — the bell that
  * once rang here was removed; sound lives in the kitchen alone, and one
  * tripwire below re-runs the poll that used to ring and asserts silence).
  *
@@ -134,7 +134,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe('the food-ready badge (D105/D111)', () => {
+describe('the food-ready badge (D112/D118)', () => {
   it('a standing bump shows its badge on first load', async () => {
     listOpen.mockResolvedValue([openSession(['kt_1'])]);
     render(<TableFloor session={session} branchId="brn_1" canManage />);
@@ -143,7 +143,7 @@ describe('the food-ready badge (D105/D111)', () => {
     await waitFor(() => expect(screen.getByText('Food ready')).toBeTruthy());
   });
 
-  it('a poll bringing a new bump badges the table — and makes NO sound (D111)', async () => {
+  it('a poll bringing a new bump badges the table — and makes NO sound (D118)', async () => {
     render(<TableFloor session={session} branchId="brn_1" canManage />);
     await settle();
     expect(screen.queryByText('Food ready')).toBeNull();

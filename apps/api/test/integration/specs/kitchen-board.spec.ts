@@ -493,7 +493,7 @@ describe('D70 — session visibility is scoped to the waiter', () => {
 });
 
 /*
- * D106 — Preparing, and everything it moves.
+ * D113 — Preparing, and everything it moves.
  *
  * One flow, every direction asserted through the REAL routes: the start
  * puts the ticket on IN_PROGRESS (still outstanding — starting is not
@@ -503,7 +503,7 @@ describe('D70 — session visibility is scoped to the waiter', () => {
  * with the kitchen (PLACED → IN_KITCHEN → READY), retreats only from READY
  * on a recall, and never reaches HANDED_OVER without the cashier.
  */
-describe('D106 — start/preparing ripples to the round and the Orders queue', () => {
+describe('D113 — start/preparing ripples to the round and the Orders queue', () => {
   const unifiedFor = async (id: string) => {
     const res = await http.request<{ items: { id: string; unifiedStatus: string }[] }>(
       'GET',
@@ -512,7 +512,7 @@ describe('D106 — start/preparing ripples to the round and the Orders queue', (
     );
     return res.data.items.find((o) => o.id === id)?.unifiedStatus;
   };
-  /** D107 — the counter-owned READY tally the queue's bell rings on. */
+  /** D114 — the counter-owned READY tally the queue's bell rings on. */
   const readyHandover = async () => {
     const res = await http.request<{ readyHandoverCount: number }>(
       'GET',
@@ -542,7 +542,7 @@ describe('D106 — start/preparing ripples to the round and the Orders queue', (
 
     await verb(ticketId, 'complete');
     expect(await unifiedFor(orderId)).toBe('READY');
-    // D107's paired NEGATIVE: this is a DINE-IN order — ready, but the
+    // D114's paired NEGATIVE: this is a DINE-IN order — ready, but the
     // counter's bell tally must not count it. The floor's bell owns it.
     expect(await readyHandover()).toBe(0);
 
@@ -599,7 +599,7 @@ describe('D106 — start/preparing ripples to the round and the Orders queue', (
 
     await verb(takeawayTicket.id, 'complete');
     expect(await profileStatus()).toBe('READY');
-    // D107's POSITIVE: a takeaway up on the pass is the counter's to hear.
+    // D114's POSITIVE: a takeaway up on the pass is the counter's to hear.
     expect(await readyHandover()).toBe(1);
 
     // The recall retracts READY — "your food is ready" stopped being true —
@@ -611,13 +611,13 @@ describe('D106 — start/preparing ripples to the round and the Orders queue', (
 });
 
 /*
- * D108 — cancellation reaches the pass. A cancelled takeaway used to keep
+ * D115 — cancellation reaches the pass. A cancelled takeaway used to keep
  * its ticket on the board and the kitchen kept cooking it; now the ticket
  * leaves the working lanes and turns up under the CANCELLED pseudo-filter.
  * Both directions at every step: present where it must be, absent where it
  * must not, with the pre-cancel reads as the positive controls.
  */
-describe('D108 — cancelled work leaves the board and lands in its own lane', () => {
+describe('D115 — cancelled work leaves the board and lands in its own lane', () => {
   const boardAs = (query: string) =>
     http.request<TicketView[]>(
       'GET',
@@ -679,13 +679,13 @@ describe('D108 — cancelled work leaves the board and lands in its own lane', (
 });
 
 /*
- * D110 — money and handover are different instants. The counter settles at
+ * D117 — money and handover are different instants. The counter settles at
  * payment time; the order must keep flowing the kitchen lifecycle and the
  * later handover must REUSE the settled Sale, never mint a second one.
  * Every step asserts the status the queue derives from, because the bug
  * this fixes was precisely a fresh order reading "Handed over".
  */
-describe('D110 — settle creates the Sale without handing over', () => {
+describe('D117 — settle creates the Sale without handing over', () => {
   it('settled order stays in the lifecycle; handover later reuses the same Sale', async () => {
     const created = await http.request<{ id: string; orderNumber: string; status: string }>(
       'POST',
@@ -771,13 +771,13 @@ describe('D110 — settle creates the Sale without handing over', () => {
 });
 
 /*
- * D105 — "food ready" reaches the floor through open-sessions, not KOT_VIEW.
+ * D112 — "food ready" reaches the floor through open-sessions, not KOT_VIEW.
  * The bump and the recall are exercised through the real kitchen routes so
  * the field tracks the ticket's actual lifecycle, and both directions are
  * asserted: silence before the bump, the id after it, silence again after
  * the recall — a field that always echoed every ticket id would fail twice.
  */
-describe('D105 — open-sessions carries the session\'s bumped tickets', () => {
+describe('D112 — open-sessions carries the session\'s bumped tickets', () => {
   const openSessions = () =>
     http.request<{ id: string; readyTicketIds: string[] }[]>(
       'GET',

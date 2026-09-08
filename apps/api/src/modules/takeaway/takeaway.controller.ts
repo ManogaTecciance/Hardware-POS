@@ -52,7 +52,7 @@ export class TakeawayController {
   }
 
   /**
-   * D110 — settle the money without handing over: closes the session into a
+   * D117 — settle the money without handing over: closes the session into a
    * Sale (idempotent) while the profile keeps its lifecycle status, so a
    * counter order can be PAID up front and still flow
    * Pending → Preparing → Ready on the queue. Same permission as the status

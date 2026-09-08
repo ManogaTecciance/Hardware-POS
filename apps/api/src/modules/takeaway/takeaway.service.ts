@@ -219,7 +219,7 @@ export class TakeawayService {
       });
       let finalSaleId: string | null = null;
       // On handover, close the underlying session into a Sale (D1 junction).
-      // D110: the close lives in settleSessionIntoSale — the counter settles
+      // D117: the close lives in settleSessionIntoSale — the counter settles
       // at PAYMENT time now, so by handover the session is usually already
       // CLOSED and this is a no-op returning the existing Sale.
       if (nextStatus === 'HANDED_OVER' && updated.order.sessionId) {
@@ -235,10 +235,10 @@ export class TakeawayService {
   }
 
   /**
-   * D110 — money and handover are different instants. The counter takes
+   * D117 — money and handover are different instants. The counter takes
    * payment the moment the order is placed, but the food has not been cooked
    * yet — marking HANDED_OVER at payment (the old popup flow) told the queue
-   * a lie for the whole cook time and put the order beyond D106's
+   * a lie for the whole cook time and put the order beyond D113's
    * kitchen-driven statuses. Settling closes the session into a Sale (so
    * payment has something to land on and the receipt can print) while the
    * profile stays exactly where its lifecycle is; HANDED_OVER remains the

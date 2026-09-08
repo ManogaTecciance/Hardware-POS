@@ -68,9 +68,9 @@ function makeService(ticketRow: { id: string; status: string; roundId?: string }
       update,
       findFirstOrThrow: jest.fn().mockResolvedValue(fullRow('QUEUED')),
     },
-    // D106 — the recall now restates round/takeaway state. A null round makes
+    // D113 — the recall now restates round/takeaway state. A null round makes
     // that a no-op HERE on purpose: this spec pins the reopen WRITE, and the
-    // ripple is pinned where it can be real — the D106 integration tests in
+    // ripple is pinned where it can be real — the D113 integration tests in
     // kitchen-board.spec.ts, against actual rows.
     orderRound: { findUnique: jest.fn().mockResolvedValue(null) },
   };
