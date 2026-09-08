@@ -80,9 +80,22 @@ export function paymentStatusLabel(status: string): string {
 export function saleStatusLabel(
   paymentStatus: string,
   creditSettledAt: Date | string | null | undefined,
+  markedPaidAt?: Date | string | null,
 ): string {
-  if (creditSettledAt) return paymentStatusLabel('PAID');
+  // Two ways an invoice stops reading as credit, and both mean "someone has
+  // accounted for this": the account was cleared by payments, or a user ticked
+  // it off on the customer page. The invoice's own figures are unchanged either
+  // way — what the customer owes still comes from recorded payments.
+  if (creditSettledAt || markedPaidAt) return paymentStatusLabel('PAID');
   return paymentStatusLabel(paymentStatus);
+}
+
+/** Whether a sale reads as settled on screen — see `saleStatusLabel`. */
+export function saleReadsAsPaid(
+  creditSettledAt: Date | string | null | undefined,
+  markedPaidAt?: Date | string | null,
+): boolean {
+  return Boolean(creditSettledAt || markedPaidAt);
 }
 
 /**

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import * as React from 'react';
 import { Check, Search } from 'lucide-react';
 
-import { saleStatusLabel } from '@hardware-pos/shared';
+import { saleReadsAsPaid, saleStatusLabel } from '@hardware-pos/shared';
 
 import { SyncBadge } from '@/components/quickbooks/sync-badge';
 import { Badge } from '@/components/ui/badge';
@@ -230,9 +230,13 @@ export function CustomerInvoices({
                     </td>
                     <td className="px-4 py-3">
                       <Badge
-                        variant={s.creditSettledAt ? 'success' : STATUS_VARIANT[s.paymentStatus]}
+                        variant={
+                          saleReadsAsPaid(s.creditSettledAt, s.markedPaidAt)
+                            ? 'success'
+                            : STATUS_VARIANT[s.paymentStatus]
+                        }
                       >
-                        {saleStatusLabel(s.paymentStatus, s.creditSettledAt)}
+                        {saleStatusLabel(s.paymentStatus, s.creditSettledAt, s.markedPaidAt)}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">

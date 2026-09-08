@@ -286,6 +286,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | MARK-012 | Invoices table pages and searches | Customer with more than 10 invoices; search an invoice number | Pages of 10 with Previous/Next; search narrows to matching invoices | P | Not Run |
 | MARK-013 | Last-invoice rule survives paging | Customer whose only unaccounted invoice is on page 2 | The rule still applies to it — the count is taken across the account, not the page | N | Not Run |
 | MARK-014 | Credit history pages and searches | Customer with more than 10 payments; search a method or reference | Pages of 10; search matches date, method, reference and amount | P | Not Run |
+| MARK-018 | A ticked invoice reads Paid on the sales page | Tick one of two invoices, open the sales list | The badge reads Paid there too; the Credit filter excludes it and the Paid filter includes it | P | Automated |
+| MARK-019 | A ticked invoice is no longer overdue | Tick an overdue invoice, apply an overdue query | It is not returned | P | Automated |
+| MARK-020 | Sale detail shows who ticked it | Open the sale after ticking | Badge reads Paid; markedPaidBy carries the user | P | Automated |
 | MARK-009 | Invoices table matches the sales page | Compare a customer's rows with /sales filtered to them | Same sales, same totals, same payment badges | P | Not Run |
 
 ## SALE — Sales History
@@ -628,11 +631,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | POS | 50 | QB | 31 |
 | PAY | 41 | SET | 26 |
 | DISC | 15 | DOC | 16 |
-| MARK | 17 | ADM | 14 |
+| MARK | 20 | ADM | 14 |
 | SALE | 33 | UI | 23 |
 | RET | 18 | SEC | 12 |
 
-**Total: 478 test cases** (≈60% positive / 40% negative).
+**Total: 481 test cases** (≈60% positive / 40% negative).
 
 ### Notes for automation
 

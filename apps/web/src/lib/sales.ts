@@ -235,6 +235,9 @@ export interface SaleDetail {
   paymentDueDate: string | null;
   /** When the customer's credit account was cleared, covering this invoice. */
   creditSettledAt: string | null;
+  /** When a user accounted for this invoice on the customer page, and who. */
+  markedPaidAt: string | null;
+  markedPaidByName: string | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: number;
   quickbooksDocumentType: string | null;
@@ -268,6 +271,8 @@ interface ApiSaleDetail {
   paymentStatus: PaymentStatusCode;
   paymentDueDate: string | null;
   creditSettledAt: string | null;
+  markedPaidAt: string | null;
+  markedPaidBy: { name: string } | null;
   returnStatus: SaleReturnStatusCode;
   returnedAmount: string | number;
   quickbooksDocumentType: string | null;
@@ -384,6 +389,8 @@ export async function fetchSale(session: Session, id: string): Promise<SaleDetai
     paymentStatus: s.paymentStatus,
     paymentDueDate: s.paymentDueDate ?? null,
     creditSettledAt: s.creditSettledAt ?? null,
+    markedPaidAt: s.markedPaidAt ?? null,
+    markedPaidByName: s.markedPaidBy?.name ?? null,
     returnStatus: s.returnStatus,
     returnedAmount: Number(s.returnedAmount),
     quickbooksDocumentType: s.quickbooksDocumentType,
