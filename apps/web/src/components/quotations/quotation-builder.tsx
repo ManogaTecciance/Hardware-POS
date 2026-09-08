@@ -407,8 +407,25 @@ export function QuotationBuilder({ mode, initial, header }: Props) {
                   <div className="line-clamp-2 min-h-8 text-xs font-medium leading-tight">
                     {p.name}
                   </div>
+                  {/*
+                    The `\u00a0` is load-bearing. A variant product has NO parent SKU —
+                    D44 says the parent-level `sku` is a legacy fallback that is not
+                    read, so the read model sends null — and an empty div collapses to
+                    ZERO height. That shortened the card by one line, so the price and
+                    the action button sat higher than on every neighbouring card.
+
+                    A non-breaking space is exact by construction: it forces one line
+                    box at whatever line-height resolves to. A `min-h-*` constant would
+                    have to be kept matched to the font size by hand, and would be
+                    silently wrong the day either changed.
+
+                    NOT `mt-auto` on the button: every row here is a fixed line, so a
+                    card has no free space to distribute and the auto margin would
+                    collapse to nothing — closing the gap above the button rather than
+                    preserving it.
+                  */}
                   <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                    {p.sku ?? ''}
+                    {p.sku ?? '\u00a0'}
                   </div>
                   <div className="mt-1.5 flex items-end justify-between gap-1">
                     <span className="text-sm font-semibold text-primary">
