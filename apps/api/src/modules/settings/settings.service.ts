@@ -345,7 +345,12 @@ export class SettingsService implements OnModuleInit {
         defaultPaperSize: 'A4',
         orientation: 'PORTRAIT',
         showProductImages: false,
-        showSku: true,
+        // A SKU is an internal identifier; a customer reading a bill has no
+        // use for it. The COLUMN stays — it is a real setting with a real
+        // toggle (Settings → Documents → “Product SKU column”) and a shop that
+        // wants it can have it — but a new workspace does not start with it.
+        // Existing tenants persist their own value and are unaffected.
+        showSku: false,
         showTaxColumn: true,
         showDiscountColumn: true,
         showCustomerTaxNumber: true,

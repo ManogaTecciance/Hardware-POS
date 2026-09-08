@@ -14,6 +14,16 @@ export interface ReceiptLine {
   name: string;
   /** D123 (4.6) — "Promotion: <name>", printed under the item. Null when none. */
   promotionNote: string | null;
+  /**
+   * NOT printed. The customer receipt carried the SKU under every item name
+   * until 2026-09-08; it is an internal identifier and a customer has no use
+   * for it on an 80mm slip, where the width it costs is real.
+   *
+   * The field STAYS because `toReceiptContent` stores this object as the
+   * receipt's permanent record — dropping it would rewrite what an archived
+   * receipt knows about the line, which is a data change dressed up as a
+   * display fix. The A4 keeps its own SKU column behind `documents.showSku`.
+   */
   sku: string | null;
   /**
    * D134d (`6.5`) — already FORMATTED by `saleLineQuantity`, so `0.75 kg`
@@ -33,6 +43,15 @@ export interface CustomerReceiptData {
   saleNumber: string;
   dateTime: string;
   documentType: string | null;
+  /**
+   * The sale was VOIDED. Stamped across the receipt so a reprint cannot be
+   * passed off as proof of a live sale — the reason a voided sale is
+   * reprintable at all is the paper trail, not the paperwork.
+   *
+   * Optional: every caller predating this prints exactly what it printed
+   * before, and `undefined` is the same as not voided.
+   */
+  voided?: boolean;
   customerName: string | null;
   currency: string;
   items: ReceiptLine[];
@@ -88,7 +107,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
     .map(
       (it) => `
       <tr>
-        <td>${esc(it.name)}${it.promotionNote ? `<br><span class="muted">${esc(it.promotionNote)}</span>` : ''}${it.sku ? `<br><span class="muted">${esc(it.sku)}</span>` : ''}</td>
+        <td>${esc(it.name)}${it.promotionNote ? `<br><span class="muted">${esc(it.promotionNote)}</span>` : ''}</td>
         <td class="r">${it.quantity}</td>
         <td class="r">${money(it.unitPrice, d.currency)}</td>
         <td class="r">${
@@ -142,6 +161,10 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
   .grand { font-weight: bold; font-size: 14px; border-top: 1px solid #333; margin-top: 4px; padding-top: 4px; }
   .foot { text-align: center; color: #555; font-size: 12px; margin-top: 14px; }
   .badge { text-align:center; font-size:11px; color:#555; margin-bottom:8px; }
+  /* Loud on purpose. A void stamp that reads as a footnote has failed. */
+  .void { text-align:center; font-weight:bold; font-size:20px; letter-spacing:6px;
+          border:2px solid #111; padding:6px 0; margin:0 0 10px; }
+  .void-note { text-align:center; font-size:11px; color:#555; margin:-6px 0 10px; }
   .print-btn { display:block; margin:0 auto 14px; padding:8px 16px; font-size:14px; cursor:pointer; }
   @media print { .no-print { display: none; } body { padding: 0; } }
 </style></head>
@@ -150,6 +173,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
   <div class="receipt">
     <h1>${esc(d.storeName)}</h1>
     <div class="sub">Sales Receipt · ${esc(d.saleNumber)}<br>${esc(d.dateTime)}</div>
+    ${d.voided ? '<div class="void">VOID</div><div class="void-note">This sale was voided. Not valid as proof of purchase.</div>' : ''}
     ${d.customerName ? `<div class="badge">Customer: ${esc(d.customerName)}</div>` : ''}
     ${d.documentType ? `<div class="badge">${esc(d.documentType)}</div>` : ''}
     <table>

@@ -112,13 +112,34 @@ export class ReceiptsService {
 
   // ── helpers ──────────────────────────────────────────────────────────────────
 
+  /**
+   * A sale that money actually moved through, whatever happened to it after.
+   *
+   * Until 2026-09-08 this demanded `COMPLETED`, which put an arbitrary cliff
+   * at a full return: refund 99% of a sale and its status stayed `COMPLETED`
+   * and the receipt reprinted; refund the last 1% and the status became
+   * `REFUNDED` and the receipt was gone. **And every exchange crossed it** —
+   * a size swap returns the whole sale by definition (D130), so after any
+   * exchange the original receipt became unreachable.
+   *
+   * The sale happened; the receipt is the record of it, and a customer or an
+   * auditor asking for the receipt of a later-returned sale is ordinary. So
+   * `REFUNDED` and `VOIDED` both reprint — a voided one carrying a stamp, so
+   * the paper trail cannot be reused as proof of a live sale.
+   *
+   * `DRAFT` is still refused, and that is not the same kind of rule: a held
+   * basket has taken no money, so there is no transaction to document. The
+   * till also no longer offers the button there.
+   */
   private async loadCompletedSale(tenantId: string, saleId: string): Promise<SaleForReceipt> {
     const sale = await this.receiptsRepository.findSaleForReceipt(tenantId, saleId);
     if (!sale) {
       throw new NotFoundException(`Sale ${saleId} not found`);
     }
-    if (sale.status !== 'COMPLETED') {
-      throw new BadRequestException('Receipts are only available for completed sales');
+    if (sale.status === 'DRAFT') {
+      throw new BadRequestException(
+        'This sale is still on hold and has taken no payment, so it has no receipt yet.',
+      );
     }
     return sale;
   }
@@ -142,6 +163,10 @@ export class ReceiptsService {
         sale.quickbooksDocumentType ??
         customerDocumentLabel(resolveCustomerDocumentKind(sale.paymentStatus)),
       customerName: sale.customer?.name ?? null,
+      // Stamped, not merely recorded. A voided sale reprints so the paper
+      // trail survives; the stamp is what stops the reprint being reused as
+      // proof of a live sale.
+      voided: sale.status === 'VOIDED',
       currency,
       items: sale.items.map((it) => ({
         // D120 (2.12) — the size, on the paper a customer walks out with. This

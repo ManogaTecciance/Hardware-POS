@@ -37,7 +37,12 @@ describe('SettingsService (persistence + merge)', () => {
     const svc = new SettingsService(fakePrisma() as any);
     const s = svc.getSettings(TENANT);
     expect(s.documents.defaultPaperSize).toBe('A4');
-    expect(s.documents.showSku).toBe(true);
+    // FALSE since 2026-09-08: a SKU is an internal identifier and a new
+    // workspace does not put it on a customer's bill. The column still
+    // exists and still has its toggle; only the default moved. Updated for a
+    // deliberate product change, not to make a refactor pass — the
+    // distinction D16 draws.
+    expect(s.documents.showSku).toBe(false);
     expect(s.currency).toBeDefined();
   });
 
@@ -85,6 +90,10 @@ describe('SettingsService (persistence + merge)', () => {
 
   it('round-trips a measured geometry without disturbing the rest', async () => {
     const svc = new SettingsService(fakePrisma() as any);
+    // A value the tenant CHOSE: the SKU column defaults off since 5.10, so a
+    // stored `true` is exactly what a flattening merge would lose — the
+    // default would have hidden that loss.
+    await svc.updateSettings(TENANT, { documents: { showSku: true } });
     const next = await svc.updateSettings(TENANT, {
       documents: { billLeftInsetMm: 6, billPaperWidthMm: 58 },
     });
@@ -107,8 +116,10 @@ describe('SettingsService (persistence + merge)', () => {
     // changed fields applied…
     expect(next.documents.accentColor).toBe('#ff0000');
     expect(next.documents.showTaxColumn).toBe(false);
-    // …untouched fields keep their defaults
-    expect(next.documents.showSku).toBe(true);
+    // …untouched fields keep their defaults. What this asserts is the MERGE
+    // — that a partial update does not flatten its neighbours — so the value
+    // matters only in that it must equal the default, whatever that is.
+    expect(next.documents.showSku).toBe(false);
     expect(next.documents.defaultPaperSize).toBe('A4');
     // persisted + served from cache on the next read
     expect(prisma.tenantSettings.create).toHaveBeenCalledTimes(1);

@@ -413,18 +413,24 @@ export default function SalesPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <Tooltip label="Reprint receipt">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            aria-label="Reprint receipt"
-                            disabled={busyId === s.id}
-                            onClick={() => handleReprint(s.id)}
-                          >
-                            <Printer className="h-4 w-4" />
-                          </Button>
-                        </Tooltip>
+                        {/* A held basket has taken no money, so there is no
+                            receipt to reprint; the server refuses it and this
+                            handler swallows the refusal — gated the way the
+                            sale page gates its own button (5.10, D136a). */}
+                        {s.status !== 'DRAFT' ? (
+                          <Tooltip label="Reprint receipt">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              aria-label="Reprint receipt"
+                              disabled={busyId === s.id}
+                              onClick={() => handleReprint(s.id)}
+                            >
+                              <Printer className="h-4 w-4" />
+                            </Button>
+                          </Tooltip>
+                        ) : null}
                         {s.quickbooksDocumentType &&
                         (s.syncStatus === 'FAILED' || s.syncStatus === 'PENDING') ? (
                           <Tooltip label="Retry QuickBooks sync">

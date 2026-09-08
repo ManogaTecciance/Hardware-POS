@@ -350,7 +350,7 @@ POST /v1/receipts/{saleId}/customer    # customer receipt (+ auto warehouse copy
 201 → { "data": { "receiptNumber", "warehousePickupRequired": bool,
                    "printJob": { "id", "type": "CUSTOMER_RECEIPT", "status", "html" },
                    "warehousePrintJob": { ... } | null } }
-400 → sale not completed   |   404 → sale not found
+400 → sale is still a DRAFT (held basket, no payment; REFUNDED and VOIDED reprint, a voided one stamped VOID)   |   404 → sale not found
 
 POST /v1/receipts/{saleId}/warehouse   # (re)generate the warehouse picking copy
 201 → { "data": { "id", "type": "WAREHOUSE_PICKING", "status": "PENDING", "html" } }

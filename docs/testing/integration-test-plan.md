@@ -156,7 +156,7 @@ Automated end-to-end in `apps/e2e/tests/credit-management.spec.ts`.
 | I-11-3 | `POST /v1/receipts/{saleId}/warehouse` with no pickup items | 400. |
 | I-11-4 | `GET /v1/print-jobs?saleId=…` | Lists the jobs with html. |
 | I-11-5 | `POST /v1/print-jobs/{id}/mark-printed` | 200; `status=PRINTED`, `printedAt` set. |
-| I-11-6 | Receipt on a non-completed sale | 400. |
+| I-11-6 | Receipt on a DRAFT sale → 400; on a REFUNDED or VOIDED sale → 201 (the voided one carries the VOID stamp) | 400 / 201. |
 
 ## 12. QuickBooks Sales Receipt sync (fully paid)
 

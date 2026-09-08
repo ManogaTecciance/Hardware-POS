@@ -7178,6 +7178,40 @@ approach is now settled: see **D135**.
 
 ---
 
+## D134e — the server refuses measured goods outside RETAIL
+
+> Recorded at merge time (D136a) from commit `1887632`, which cites this
+> record; the branch never wrote it. The text is the commit's reasoning.
+
+The wizard stopped offering "How is this sold?" outside RETAIL, but hiding
+is usability only and the server stays the authority. Until this record a
+direct `POST /v1/products` could still make a hardware product `DECIMAL` —
+and hardware runs the retail till, so a numpad would have appeared for it.
+
+**Where it lives.** On `ProductAttributesService`, because `ProductsService`
+may not reference `BusinessProfileService` (D28, with a tripwire enforcing
+it) and that class exists for exactly this: domain data validation resolved
+from the profile, thrown as an ordinary refusal
+(`MEASURED_GOODS_NOT_OFFERED`, 400). It reads the domain registry's
+`catalogue.measuredGoods` capability — RETAIL declares it; hardware and
+food service do not — never a business-type conditional.
+
+**It reads the incoming value, not the resulting state.** D134c's unit
+check reads the resulting state, because measured-with-no-unit is invalid
+however it is arrived at. This rule is the opposite, deliberately: a row
+can be `DECIMAL` in a domain that no longer offers it — created before the
+capability existed, or before the workspace changed type. Reading the
+resulting state would refuse every edit to that row, including the one
+that fixes it. So the rule is "you may not ASSERT measured here", not "no
+measured row may exist here": an already-`DECIMAL` hardware product can
+still be renamed, and switched back to `WHOLE`.
+
+**Tests.** Six in `weighed-goods.spec.ts`, both sides: the refusal paired
+with a positive control (the identical create succeeds for RETAIL), an
+invisibility check (an ordinary `WHOLE` create in a hardware workspace
+notices nothing) and a second domain (food service is refused too, proving
+the registry is read).
+
 ## D135 — a tenant picks its catalogue attribute pack
 
 **Status:** accepted, 2026-09-07. **Planning only — no code written.** Migration
@@ -7555,6 +7589,65 @@ side authored. None was introduced here.
 
 ---
 
+### D136a — the four commits that followed, merged the same way
+
+`origin/feature/retail-template` moved on by four commits the same day
+(1887632 → 76ad3ac: the server refuses measured goods outside RETAIL,
+D134e; a refunded or voided sale keeps its receipt and a void is stamped;
+the SKU leaves the 80mm receipt and the A4 column defaults off for new
+workspaces; the wizard's variations come from the attribute library,
+D125). They were re-pulled and merged as a second merge commit.
+
+**The same renumber, the same way.** The four were cherry-picked onto the
+renumbered tip (`9c557af`) — two of them met the renumber commit on the
+same comment lines and took the incoming text — and their twenty-three
+references (D104 → D125, D104a → D125a, D109 → D130, D113c → D134c, D113e →
+D134e) were moved in one commit on the temporary branch, which is the
+merge's second parent. No migration, no schema, no decision-log change on
+their side.
+
+**No textual conflict; two of our specs pinned what they changed.** Git
+auto-merged all fourteen files, six of which D136 had unioned by hand.
+`product-availability.spec.ts` (D101) mocks the attributes service and
+now also stubs the D134e gate; the D99 geometry round-trip in
+`settings.service.spec.ts` used `showSku`'s default as its "untouched
+field keeps its value" example — it now stores `true` first, which is the
+value a flattening merge would actually lose. Both re-pointed at their
+intent, neither weakened (D16, D30). The D10 column tripwire is unchanged.
+
+**What a Tile Shop sees, for the record (D16).** Their 5.10 removes the SKU
+line from the 80mm SALES receipt for every tenant — the return receipt
+(`return-receipt.template.ts`) still prints it, so a refund slip now shows
+what the sale slip hides — and moves the A4 SKU column's DEFAULT to off.
+The settings service has written the whole documents object on every save
+since its first version, so any tenant that ever saved its settings or
+uploaded a logo keeps its column; only a workspace that never did loses
+it, and the web's offline fallback profile still says `true`. Neither
+change is covered by a decision record on their side — the commit calls it
+"a deliberate product change" — and both reach the QuickBooks pilot.
+Merged as written; flagged to the PO rather than reverted (O11). Their
+reprint change is a fix, not a wording change: a fully returned Tile Shop
+sale's receipt button has always rendered and now works. The VOID stamp is
+dormant everywhere — nothing writes `Sale.status = 'VOIDED'` yet.
+
+**What the review changed.** Four reviewers and two skeptics per finding
+read the three-way diffs. Their commit cites a D134e that no branch ever
+wrote; it is recorded above from the commit's own reasoning. Their
+category-change reconciliation unmapped a dimension but left its options'
+library links, exactly the shape the server refuses
+(`ATTRIBUTE_LINK_INCOMPLETE`); the options now unlink with the dimension,
+their names kept, asserted from both sides. Their DRAFT refusal comment
+says the till no longer offers the button, but only the sale page was
+gated — the sales list's reprint icon, whose handler swallows the
+refusal, is now gated the same way. The API spec, the integration plan and
+five catalogue rows that described the pre-D134e or pre-reprint behaviour
+were re-pointed. Left as their design, for the PO: once a workspace has
+any library definition, a pre-5.11 dimension renders as an unchosen
+picker beside its typed options; and the create path runs the D134e gate
+before the D134c unit check while the update path runs them the other
+way round, so a hardware `DECIMAL` create with no unit is refused for the
+domain and the same update for the unit.
+
 ## Open decisions
 
 | ID | Question | Needed by |
@@ -7569,3 +7662,4 @@ side authored. None was introduced here.
 | O8 | Cancelling a counter order that D117 has settled and paid: refuse it, or record the refund? The takeaway status write has no transition guard (D119). | before the next restaurant deploy |
 | O9 | How does the counter hand over a takeaway whose ticket the kitchen never bumped? The stepper D113/D117 named is gone (2026-08-10); handover is offered on READY only (D119). | before the next restaurant deploy |
 | O10 | Should the clothing Retail template (D120) offer the Salesperson, the hardware-only owner-equivalent of D108? It seeds Owner + Cashier today (D136). | before the first Retail workspace |
+| O11 | Their 5.10 (D136a) takes the SKU line off every 80mm SALES receipt (the return receipt still prints it) and turns the A4 SKU column's default off; both reach the Tile Shop, and a workspace that never saved its documents settings loses the column. Keep, or exempt the QuickBooks pilot (D16)? | before the next production deploy |

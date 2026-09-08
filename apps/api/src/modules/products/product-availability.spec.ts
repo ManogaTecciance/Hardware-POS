@@ -72,6 +72,9 @@ function makeService(existing: AnyRecord | null) {
   } as unknown as CatalogSyncProviderFactory;
   const attributes = {
     assertValidDocument: jest.fn().mockResolvedValue(undefined),
+    // D134e — the measured-goods gate lives beside the document rule; none
+    // of these rows asserts DECIMAL, so it has nothing to say here.
+    assertMeasuredGoodsAllowed: jest.fn().mockResolvedValue(undefined),
   } as unknown as ProductAttributesService;
   const service = new ProductsService(
     repository,
