@@ -229,6 +229,109 @@ describe('D113c — the unit is required for a measured product', () => {
     expect(row.unitOfMeasure).toBe('kg');
   });
 
+  /**
+   * Regression, 2026-09-08. `PATCH /v1/products/:id` returned **500** with
+   * `Cannot read properties of null (reading 'trim')` whenever the product form
+   * saved a product sold by the piece.
+   *
+   * Two halves, and the second is what makes it worth a named block:
+   *
+   *  - `@IsOptional()` skips validation for `null` as well as `undefined`, so a
+   *    null passes `@IsString()` and arrives at the service.
+   *  - `create` wrote `dto.unitOfMeasure?.trim()`; `update` wrote
+   *    `dto.unitOfMeasure.trim()`. **The same nullable field had two different
+   *    contracts depending on the verb.** The create path being right is why
+   *    nothing caught it: every test that set a unit went through create.
+   *
+   * It stayed latent until `6.1b` gave the form a control that sends `null` to
+   * mean "sold by the piece, no unit".
+   */
+  describe('clearing the unit (the 2026-09-08 500)', () => {
+    it('accepts null as "no unit" on a product sold by the piece', async () => {
+      const soap = await products.create(
+        shop.tenantId,
+        productInput({ name: 'Baby Soap', quantityType: 'DECIMAL', unitOfMeasure: 'kg' }),
+      );
+
+      // Exactly what the wizard sends when the operator picks "By the piece".
+      await products.update(
+        shop.tenantId,
+        soap.id,
+        { quantityType: 'WHOLE', unitOfMeasure: null } as never,
+        'OWNER' as never,
+      );
+
+      const row = await prisma.product.findUniqueOrThrow({ where: { id: soap.id } });
+      expect(row.quantityType).toBe(QuantityType.WHOLE);
+      expect(row.unitOfMeasure).toBeNull();
+    });
+
+    it('still REFUSES null on a product that stays measured (D113c)', async () => {
+      // The negative half. Accepting null must not have opened a second route
+      // around D113c — which is precisely the risk in making a guard tolerant.
+      const rice = await products.create(
+        shop.tenantId,
+        productInput({ name: 'Rice', quantityType: 'DECIMAL', unitOfMeasure: 'kg' }),
+      );
+
+      await expect(
+        products.update(
+          shop.tenantId,
+          rice.id,
+          { unitOfMeasure: null } as never,
+          'OWNER' as never,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      const row = await prisma.product.findUniqueOrThrow({ where: { id: rice.id } });
+      expect(row.unitOfMeasure).toBe('kg');
+    });
+
+    it('treats null and empty string identically', async () => {
+      // The contract is "no unit", not "which spelling of no unit". Two callers
+      // reaching different outcomes here is the defect one level up.
+      const a = await products.create(
+        shop.tenantId,
+        productInput({ name: 'A', quantityType: 'DECIMAL', unitOfMeasure: 'kg' }),
+      );
+      const b = await products.create(
+        shop.tenantId,
+        productInput({ name: 'B', quantityType: 'DECIMAL', unitOfMeasure: 'kg' }),
+      );
+
+      await products.update(
+        shop.tenantId, a.id,
+        { quantityType: 'WHOLE', unitOfMeasure: null } as never, 'OWNER' as never,
+      );
+      await products.update(
+        shop.tenantId, b.id,
+        { quantityType: 'WHOLE', unitOfMeasure: '' } as never, 'OWNER' as never,
+      );
+
+      const rowA = await prisma.product.findUniqueOrThrow({ where: { id: a.id } });
+      const rowB = await prisma.product.findUniqueOrThrow({ where: { id: b.id } });
+      expect(rowA.unitOfMeasure).toBeNull();
+      expect(rowB.unitOfMeasure).toBeNull();
+    });
+
+    it('leaves the unit alone when the field is absent entirely', async () => {
+      // The third state, asserted so the fix cannot have collapsed
+      // "not mentioned" into "clear it" — which would silently strip the unit
+      // off every measured product on any unrelated edit.
+      const rice = await products.create(
+        shop.tenantId,
+        productInput({ name: 'Rice', quantityType: 'DECIMAL', unitOfMeasure: 'kg' }),
+      );
+
+      await products.update(
+        shop.tenantId, rice.id, { name: 'Nadu Rice' } as never, 'OWNER' as never,
+      );
+
+      const row = await prisma.product.findUniqueOrThrow({ where: { id: rice.id } });
+      expect(row.unitOfMeasure).toBe('kg');
+    });
+  });
+
   it('trims the unit rather than storing what was typed', async () => {
     const rice = await products.create(
       shop.tenantId,

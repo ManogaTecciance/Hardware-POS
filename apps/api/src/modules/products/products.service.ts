@@ -252,10 +252,21 @@ export class ProductsService {
       ...(dto.brandId !== undefined
         ? { brandId: dto.brandId ? await this.resolveBrand(tenantId, dto.brandId) : null }
         : {}),
-      // D113 / D113b — same three-state contract as `brandId` above.
+      // D113 / D113b — same three-state contract as `brandId` above, with one
+      // difference that cost a 500: **`null` also means clear.**
+      //
+      // `@IsOptional()` skips validation for `null` as well as `undefined`, so a
+      // null reaches here having passed `@IsString()`. `!== undefined` then lets
+      // it through to `.trim()`. The create path one screen up already wrote
+      // `dto.unitOfMeasure?.trim()`; this one did not, so the same field had two
+      // contracts depending on which verb you used.
+      //
+      // Clearing a DECIMAL product's unit is still refused — by D113c above,
+      // against the resulting state, which is where that rule belongs. This line
+      // only decides what "no unit" is spelled as.
       quantityType: dto.quantityType,
       ...(dto.unitOfMeasure !== undefined
-        ? { unitOfMeasure: dto.unitOfMeasure.trim() || null }
+        ? { unitOfMeasure: dto.unitOfMeasure?.trim() || null }
         : {}),
       unitPrice: dto.unitPrice,
       purchaseDescription: dto.purchaseDescription,
