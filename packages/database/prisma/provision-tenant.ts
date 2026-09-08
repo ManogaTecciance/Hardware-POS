@@ -32,7 +32,7 @@
  * `--user` may only name one of them: a hardware (or no-profile, D57) tenant
  * offers OWNER, SALESPERSON and CASHIER; a food-service one OWNER, WAITER,
  * RESTAURANT_CASHIER and KITCHEN_STAFF; a hotel OWNER, WAITER and RECEPTIONIST.
- * Every user is linked to their role ROW on creation (D100), so nobody
+ * Every user is linked to their role ROW on creation (D108), so nobody
  * provisioned here starts on the legacy enum fallback. The enum column is
  * derived from the row the same way the platform console does it.
  */
@@ -138,7 +138,7 @@ function parseArgs(argv: string[]): {
   // PINs would be ambiguous.
   const pins = users.map((u) => u.pin).filter(Boolean);
   if (new Set(pins).size !== pins.length) fail('User PINs must be distinct');
-  // D100 — a role the template does not offer would leave the user with no
+  // D108 — a role the template does not offer would leave the user with no
   // row to link to, resolving from the enum instead: a SALESPERSON in a
   // restaurant would be an owner-equivalent the template says cannot exist.
   const offered = roleTemplatesForBusinessType(businessType ?? 'HARDWARE').map((t) => t.key);

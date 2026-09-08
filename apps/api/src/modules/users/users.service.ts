@@ -57,7 +57,7 @@ export class UsersService {
     return {
       userId: user.id,
       role: user.role,
-      // Owner-level roles hold every branch through the role itself (D100
+      // Owner-level roles hold every branch through the role itself (D108
       // added SALESPERSON to that set); the grants below are for everyone else.
       roleGrant: isAdminLevelRole(user.role),
       defaultBranchId: user.branchId,

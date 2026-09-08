@@ -26,7 +26,7 @@ export const GENERAL_DOMAIN: DomainDescriptor = {
   profile: { inventoryMode: 'DISABLED', accountingProvider: 'NONE' },
   modules: [...SHARED_CORE_MODULES],
   navigation: RETAIL_NAVIGATION,
-  // Owner and Cashier only — the hardware-only Salesperson is not offered here (D100).
+  // Owner and Cashier only — the hardware-only Salesperson is not offered here (D108).
   roleTemplates: GENERAL_ROLE_TEMPLATES,
   capabilities: GENERAL_CAPABILITIES,
   // No domain attributes (D64) — GENERAL is the deliberately-plain template.

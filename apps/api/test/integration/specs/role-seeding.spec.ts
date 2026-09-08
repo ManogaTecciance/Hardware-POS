@@ -84,7 +84,7 @@ describe('seeding a retail tenant', () => {
   it('creates exactly Owner, Salesperson and Cashier with the authority’s permissions', async () => {
     // PO decision 2026-08-17: a hardware workspace staffs an Owner and
     // Cashiers — the other built-ins are no longer part of its template.
-    // D100 (2026-09-08) added the Salesperson: owner-equivalent, hardware only.
+    // D108 (2026-09-08) added the Salesperson: owner-equivalent, hardware only.
     const tenantId = await makeTenant('tnt_retail', 'retail');
     await syncPermissionCatalogue(prisma);
     await seedTenantRoles(prisma, tenantId, 'HARDWARE');
@@ -123,11 +123,11 @@ describe('seeding a retail tenant', () => {
 
     const roles = await rolesOf(tenantId);
     expect(roles.every((r) => r.isSystem)).toBe(true);
-    // Positive control, and the D100 row is among the undeletable ones.
+    // Positive control, and the D108 row is among the undeletable ones.
     expect(roles.map((r) => r.key)).toContain('SALESPERSON');
   });
 
-  it('seeds the Salesperson row with exactly the Owner row’s permissions (D100)', async () => {
+  it('seeds the Salesperson row with exactly the Owner row’s permissions (D108)', async () => {
     const tenantId = await makeTenant('tnt_retail4', 'retail4');
     await syncPermissionCatalogue(prisma);
     await seedTenantRoles(prisma, tenantId, 'HARDWARE');
@@ -144,7 +144,7 @@ describe('seeding a retail tenant', () => {
     expect(salesperson.permissions.length).toBeGreaterThan(20);
   });
 
-  it('gives the Salesperson row to no other template (D100)', async () => {
+  it('gives the Salesperson row to no other template (D108)', async () => {
     // Every business type except HARDWARE, taken from the authority rather
     // than listed here so a type added to the enum is seeded and checked
     // without a second edit. The row must be absent from each, and the OWNER
@@ -180,7 +180,7 @@ describe('seeding a restaurant tenant', () => {
     const roles = await rolesOf(tenantId);
     // The literal set, not `roleTemplatesForBusinessType('RESTAURANT')`:
     // compared to the function that wrote them, the rows would match ANY
-    // template list — one that leaked the Salesperson in included (D100).
+    // template list — one that leaked the Salesperson in included (D108).
     expect(roles.map((r) => r.key).sort()).toEqual([
       'KITCHEN_STAFF',
       'OWNER',
@@ -310,7 +310,7 @@ describe('re-seeding an existing tenant', () => {
 });
 
 /**
- * D100 — the seed runs against EXISTING tenants (the production backfill is
+ * D108 — the seed runs against EXISTING tenants (the production backfill is
  * exactly that), so a row it finds under a template key is not necessarily one
  * it wrote. Adopting a tenant-created row would `set` the template's
  * permissions onto it — for SALESPERSON, the owner's — promoting everyone
@@ -318,7 +318,7 @@ describe('re-seeding an existing tenant', () => {
  * names a display-name clash before writing rather than failing on the unique
  * constraint half-way through the loop.
  */
-describe('seeding refuses a tenant’s own row under a template key or name (D100)', () => {
+describe('seeding refuses a tenant’s own row under a template key or name (D108)', () => {
   it('throws on a NON-system row under a BUILT-IN template key, and leaves the row alone', async () => {
     const tenantId = await makeTenant('tnt_custom_key', 'custom-key');
     await syncPermissionCatalogue(prisma);
@@ -392,14 +392,14 @@ describe('seeding refuses a tenant’s own row under a template key or name (D10
 });
 
 /**
- * D100 — `linkUsersToRoles` is what moves a salesperson off the legacy
+ * D108 — `linkUsersToRoles` is what moves a salesperson off the legacy
  * fallback. It links by enum key to SEEDED (`isSystem`), ACTIVE rows in the
  * user's own tenant and nothing else: no row, no link; an archived row, no
  * link; a tenant-created row that happens to carry the key, no link. Each
  * refusal below is paired with the same row made eligible, so it is that one
  * property — not the key or the tenant — that decides.
  */
-describe('linking users to rows (D100)', () => {
+describe('linking users to rows (D108)', () => {
   async function userOf(tenantId: string, role: 'SALESPERSON' | 'OWNER' | 'MANAGER'): Promise<string> {
     const id = `${tenantId}-${role.toLowerCase()}`;
     await prisma.user.create({
@@ -477,7 +477,7 @@ describe('linking users to rows (D100)', () => {
   it('NEGATIVE: never links to a tenant-created row under an enum key, even an active one', async () => {
     const tenantId = await makeTenant('tnt_link_custom', 'link-custom');
     await syncPermissionCatalogue(prisma);
-    // Created directly: the API reserves the key now (D100), but a row from
+    // Created directly: the API reserves the key now (D108), but a row from
     // before it did can still carry it. It is not the built-in, and linking
     // to it would hand the user THAT row's permissions — "something
     // approximate", which the contract rules out.

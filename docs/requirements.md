@@ -35,7 +35,7 @@ The POS is authoritative for:
 | Admin     | Manage users, configure the QBO connection, view sync logs, retry syncs      |
 | Owner     | Everything — the full permission set, with no discount ceiling               |
 | Accountant| Read sales, sync logs and QuickBooks status; no selling or editing           |
-| Salesperson | Owner-equivalent, hardware template only: the owner's permission set, screens and discount ceiling (D100) |
+| Salesperson | Owner-equivalent, hardware template only: the owner's permission set, screens and discount ceiling (D108) |
 
 ## 3. Functional requirements
 

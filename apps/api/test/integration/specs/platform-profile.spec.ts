@@ -394,7 +394,7 @@ describe('tenant isolation', () => {
  * without a verdict, and `EVERY_ROLE` is `Object.values(UserRole)` itself, so
  * a new role cannot be left out of the matrices below by omission (D30). The
  * verdicts are `PLATFORM_PROFILE_MANAGE`, which the owner-level roles hold and
- * nobody else does; D100's Salesperson is owner-level and writes as the owner.
+ * nobody else does; D108's Salesperson is owner-level and writes as the owner.
  */
 const PROFILE_UPDATE_VERDICT: Record<UserRole, 200 | 403> = {
   OWNER: 200,
@@ -431,7 +431,7 @@ describe('permission enforcement on PATCH', () => {
     expect(PROFILE_WRITERS.length).toBeGreaterThan(0);
     expect(PROFILE_NON_WRITERS.length).toBeGreaterThan(0);
     // The writers are the owner-level set — the same set that crosses branches
-    // (D100) — stated as a set equality so neither side can drift alone.
+    // (D108) — stated as a set equality so neither side can drift alone.
     expect([...PROFILE_WRITERS].sort()).toEqual([...ADMIN_LEVEL_ROLES].sort());
     expect(PROFILE_WRITERS).toContain('SALESPERSON');
 
@@ -468,7 +468,7 @@ describe('permission enforcement on PATCH', () => {
     expect(res.data.businessType).toBe(BusinessType.HARDWARE);
   });
 
-  // Every enum value, the D100 Salesperson included: a role that cannot read
+  // Every enum value, the D108 Salesperson included: a role that cannot read
   // its own tenant's profile renders an EMPTY navigation rail, not a reduced
   // one, so the read is universal by design.
   it.each(EVERY_ROLE)('%s can read the effective profile — navigation depends on it', async (role) => {

@@ -344,7 +344,7 @@ describe('module and permission are both required', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D100 — the Salesperson holds the owner's rail
+// D108 — the Salesperson holds the owner's rail
 // ─────────────────────────────────────────────────────────────────────────────
 
 /*
@@ -355,7 +355,7 @@ describe('module and permission are both required', () => {
  * stops the equality being satisfied by a resolver that answers the same
  * reduced list for everyone.
  */
-describe('D100 — a hardware Salesperson sees exactly the owner’s rail', () => {
+describe('D108 — a hardware Salesperson sees exactly the owner’s rail', () => {
   const owner = nav('HARDWARE', LEGACY_MODULES, 'OWNER');
   const salesperson = nav('HARDWARE', LEGACY_MODULES, 'SALESPERSON');
   const cashier = nav('HARDWARE', LEGACY_MODULES, 'CASHIER');

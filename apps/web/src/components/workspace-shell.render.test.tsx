@@ -295,7 +295,7 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     expect(links).not.toContain('Settings');
   });
 
-  it('D100 — a Salesperson is drawn the owner’s rail, Settings and QuickBooks included', async () => {
+  it('D108 — a Salesperson is drawn the owner’s rail, Settings and QuickBooks included', async () => {
     // The rendered counterpart of the cashier negative above: the role that
     // holds the owner's permissions gets the owner's sidebar, entry for entry.
     role = 'OWNER';

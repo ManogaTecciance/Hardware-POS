@@ -189,7 +189,7 @@ export const SEED = {
   cashier: { email: 'cashier@hardwarepos.test', password: 'password123' },
   /**
    * Owner-equivalent role added on main (2026-08-31), offered by the hardware
-   * template alone (D100): email + password, no PIN.
+   * template alone (D108): email + password, no PIN.
    */
   salesperson: { email: 'salesperson@hardwarepos.test', password: 'password123' },
   /**

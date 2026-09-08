@@ -20,7 +20,7 @@
  * One that offered every role it had ever seen would pass the positives and
  * fail the negatives. Neither half is sufficient alone.
  *
- * ## The fixtures are the real templates (D30, D100)
+ * ## The fixtures are the real templates (D30, D108)
  *
  * The rows are built from `HARDWARE_ROLE_TEMPLATES` and
  * `FOOD_SERVICE_ROLE_TEMPLATES` in `@hardware-pos/shared`, mapped to the API's
@@ -28,14 +28,14 @@
  * (built-ins first, then by name). The fixtures used to be hand-written — a
  * seven-role list carrying ADMIN, MANAGER and ACCOUNTANT rows that no template
  * has seeded since 2026-08-17 — so the spec was green against a catalogue that
- * did not exist. Deriving from the templates means a template change (D100
+ * did not exist. Deriving from the templates means a template change (D108
  * putting Salesperson on the hardware list and nowhere else) reaches this spec
  * without anyone editing it, and the exact-list assertions fail loudly when the
  * catalogue moves.
  *
  * Mutation-proven inline, at the bottom: the same component fed the restaurant
- * rows plus a Salesperson row renders it and the D100 negative throws; fed the
- * pre-D100 hardware pair (Owner, Cashier — what `GENERAL_ROLE_TEMPLATES` still
+ * rows plus a Salesperson row renders it and the D108 negative throws; fed the
+ * pre-D108 hardware pair (Owner, Cashier — what `GENERAL_ROLE_TEMPLATES` still
  * is) the exact hardware list throws. And a component that hard-coded either
  * workspace's list in place of the `roles` map would pass that workspace's half
  * and fail the other's — the asymmetry the paired assertions exist to cover,
@@ -161,7 +161,7 @@ const optionsOf = (select: HTMLElement): (string | null)[] =>
     .map((o) => o.textContent);
 
 describe('the fixtures are the production shape', () => {
-  it('the hardware rows are exactly Cashier, Owner, Salesperson — all built in (D100)', () => {
+  it('the hardware rows are exactly Cashier, Owner, Salesperson — all built in (D108)', () => {
     // Pinned here, not only through the component: if the template catalogue
     // moves, the failure names the catalogue rather than the picker.
     expect(HARDWARE_ROLES.map((r) => [r.key, r.name, r.isSystem])).toEqual([
@@ -193,7 +193,7 @@ describe('the Add user role picker', () => {
     // proven rather than "it renders the non-built-in ones".
     expect(options).toContain('Owner');
     expect(options).toHaveLength(RESTAURANT_ROLES.length);
-    // D100 — the hardware-only role is offered in no other workspace. The
+    // D108 — the hardware-only role is offered in no other workspace. The
     // positives above are what stop this passing on an empty picker.
     expect(options).not.toContain('Salesperson');
   });
@@ -240,7 +240,7 @@ describe('the user list', () => {
 
   it('says so when a user is on no workspace role at all', async () => {
     /*
-     * D100's rollout case: a hardware pilot's salesperson before the tenant's
+     * D108's rollout case: a hardware pilot's salesperson before the tenant's
      * rows are backfilled. The enum still grants the owner's permissions, and
      * the console must say that is where the authority comes from — not render
      * a blank select that looks like a load failure — while the picker offers
@@ -311,7 +311,7 @@ describe('the user list', () => {
 
 describe('the picker assertions can actually fail', () => {
   it('a Salesperson row leaking into a restaurant workspace would be detected', async () => {
-    // D100's negative, shown to bite: the same component fed the restaurant
+    // D108's negative, shown to bite: the same component fed the restaurant
     // rows plus the hardware-only role renders it, and `not.toContain` throws.
     const salesperson = HARDWARE_ROLES.find((r) => r.key === 'SALESPERSON');
     expect(salesperson).toBeDefined();
@@ -327,7 +327,7 @@ describe('the picker assertions can actually fail', () => {
   });
 
   it('a hardware workspace seeded without the Salesperson would be detected', async () => {
-    // The pre-D100 hardware pair, which is what GENERAL still seeds. The
+    // The pre-D108 hardware pair, which is what GENERAL still seeds. The
     // exact-list assertion is the one that fails — a `toContain('Owner')`
     // would not have.
     const preD100 = rowsFor(GENERAL_ROLE_TEMPLATES);
@@ -353,7 +353,7 @@ describe('the picker assertions can actually fail', () => {
     expect(restaurantConstant).toEqual(RESTAURANT_ROLES.map((r) => r.name));
 
     // A hard-coded hardware list fails the restaurant half on its positive and
-    // on its D100 negative…
+    // on its D108 negative…
     expect(() => expect(hardwareConstant).toContain('Waiter')).toThrow();
     expect(() => expect(hardwareConstant).not.toContain('Salesperson')).toThrow();
     // …and a hard-coded restaurant list fails the hardware half on its exact

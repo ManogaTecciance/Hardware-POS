@@ -31,7 +31,7 @@ export const HARDWARE_DOMAIN: DomainDescriptor = {
   profile: { inventoryMode: 'QUICKBOOKS', accountingProvider: 'QUICKBOOKS' },
   modules: [...SHARED_CORE_MODULES, ...RETAIL_MODULES],
   navigation: RETAIL_NAVIGATION,
-  // PO decisions 2026-08-17 and 2026-09-08 (D100): a hardware shop staffs an
+  // PO decisions 2026-08-17 and 2026-09-08 (D108): a hardware shop staffs an
   // Owner, an owner-equivalent Salesperson, and Cashiers. The Salesperson is
   // this template's alone.
   roleTemplates: HARDWARE_ROLE_TEMPLATES,

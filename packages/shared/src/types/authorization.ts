@@ -53,7 +53,7 @@ export const UserRole = {
   /**
    * Owner-equivalent (main, 2026-08-31): every permission, no discount ceiling,
    * admin-level overrides. The enum value is platform-wide like every other —
-   * the role TEMPLATE is offered by the hardware workspace only (D100).
+   * the role TEMPLATE is offered by the hardware workspace only (D108).
    */
   Salesperson: 'SALESPERSON',
 } as const;
@@ -176,7 +176,7 @@ export const Permission = {
   // matching permission AND `entity.createdByUserId === actor.id`; role alone
   // is never sufficient (that is what `_OWN` names — the row must belong to
   // the caller). Only the owner-level set holds these by default — OWNER and
-  // its owner-equivalent SALESPERSON, bound to one constant (D100); ADMIN has
+  // its owner-equivalent SALESPERSON, bound to one constant (D108); ADMIN has
   // them stripped from its otherwise-total set so that the "any other user
   // must not edit that entity" rule survives even for the highest role short
   // of the owner's.
@@ -225,7 +225,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = Object.values(Permission);
  * capability isn't enough on its own — a Restaurant tenant would then have any
  * OWNER able to overwrite another OWNER's floor. The service layer enforces the
  * `_OWN` half; ROLE_PERMISSIONS below grants these only to the owner's set
- * (OWNER, and SALESPERSON which IS that set by reference — D100), so a
+ * (OWNER, and SALESPERSON which IS that set by reference — D108), so a
  * compromised ADMIN account cannot escalate itself into every floor manager's
  * row.
  *
@@ -291,7 +291,7 @@ const OWNER_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS;
 
 export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   OWNER: OWNER_PERMISSIONS,
-  // Salesperson is the owner's set, by reference (main 2026-08-31; D100 makes
+  // Salesperson is the owner's set, by reference (main 2026-08-31; D108 makes
   // it the hardware template's role). It holds the full catalogue, NOT ADMIN's
   // narrowed set — the six creator-scoped permissions ADMIN lacks are exactly
   // the ones an owner-equivalent keeps.

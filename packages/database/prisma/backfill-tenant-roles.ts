@@ -1,5 +1,5 @@
 /**
- * D100 — give an EXISTING tenant its role rows, and link its users to them.
+ * D108 — give an EXISTING tenant its role rows, and link its users to them.
  *
  * Every tenant created since Phase 1.5 gets its roles at provisioning
  * (`provision-tenant.ts`, the platform console). A tenant that predates that —

@@ -88,7 +88,7 @@ async function main(): Promise<void> {
 
   /*
    * 2026-08-17: the hardware template staffs an Owner and Cashiers — and,
-   * since D100, an owner-equivalent Salesperson — so the demo does too; the
+   * since D108, an owner-equivalent Salesperson — so the demo does too; the
    * old Manager and Accountant users are gone (and
    * `removeRetiredDemoUsers` below clears them from a re-seeded database, so
    * the console never shows a user whose role no longer exists). The OWNER
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
       // cannot act as an approver, and the owner's 2222 answers those prompts.
       // A real salesperson can be given a PIN like any other user.
       //
-      // D100 gave the hardware template a SALESPERSON row, and
+      // D108 gave the hardware template a SALESPERSON row, and
       // `linkUsersToRoles` below links this user to it by enum key like the
       // owner and the cashier — it resolves from the database, not the enum
       // fallback.

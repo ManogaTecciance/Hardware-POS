@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { AUTH, expect, test } from '../src/fixtures';
 
 /**
- * PERM-014 / PERM-015 — the Salesperson gets the owner's UI (D100).
+ * PERM-014 / PERM-015 — the Salesperson gets the owner's UI (D108).
  *
  * The permission tables already say the two roles are equal; these look at
  * what a person actually gets. The rail is the visible shape of a role — it is
@@ -38,7 +38,7 @@ async function railFor(browser: import('@playwright/test').Browser, storageState
   }
 }
 
-test.describe('PERM — Salesperson parity with the owner (D100)', () => {
+test.describe('PERM — Salesperson parity with the owner (D108)', () => {
   test('PERM-014 the salesperson’s rail is the owner’s rail, and not the cashier’s', async ({ browser }) => {
     const [salesperson, owner, cashier] = await Promise.all([
       railFor(browser, AUTH.salesperson),

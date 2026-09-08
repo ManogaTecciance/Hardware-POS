@@ -95,7 +95,7 @@ export class PlatformAdminController {
    * D55.1 — the roles this workspace can assign, which its template decided.
    *
    * A hardware workspace answers with Owner, Salesperson and Cashier — the
-   * Salesperson is the hardware template's alone (D100); a food-service one
+   * Salesperson is the hardware template's alone (D108); a food-service one
    * with Owner, Waiter, Cashier and Kitchen staff; a hotel with Owner, Waiter
    * and Receptionist. The console has no business hard-coding any of them.
    */

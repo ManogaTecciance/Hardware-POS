@@ -105,7 +105,7 @@ describe('QuickBooks is one domain’s integration (plan §4.9.5 / D68)', () => 
   });
 });
 
-describe('the Salesperson is one domain’s role (D100)', () => {
+describe('the Salesperson is one domain’s role (D108)', () => {
   it('exactly the hardware domain offers the Salesperson template', () => {
     // Registry-level twin of the parity spec's template assertion. The
     // descriptor is what provisioning actually reads, so a vertical whose
@@ -162,7 +162,7 @@ describe('the extensibility contract (plan §13.4)', () => {
       navigation: domainFor('HARDWARE').navigation,
       // A composed vertical takes the two roles every workspace has. It does
       // NOT compose from the hardware list: the Salesperson is that template's
-      // own (D100), and the negative below is what keeps a copy-paste from
+      // own (D108), and the negative below is what keeps a copy-paste from
       // carrying it along.
       roleTemplates: domainFor('GENERAL').roleTemplates,
       capabilities: {

@@ -110,7 +110,7 @@ Roles: `OWNER`, `ADMIN`, `SALESPERSON`, `MANAGER`, `CASHIER`, `ACCOUNTANT`. Rout
 protected by a global JWT guard plus role/permission guards. `SALESPERSON` is an
 owner-equivalent role — it carries exactly the `OWNER` permission set, the same
 unlimited discount ceiling, and the same admin-level overrides. It is also the
-hardware template's role and no other's (D100): only a `HARDWARE` workspace seeds a
+hardware template's role and no other's (D108): only a `HARDWARE` workspace seeds a
 `SALESPERSON` role row, so the roles endpoints — `GET /v1/roles` and the console's
 `GET /v1/platform-admin/workspaces/:id/roles`, both of which read the workspace's own
 rows — never list it for a food-service, hotel or general workspace, and

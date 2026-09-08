@@ -71,7 +71,7 @@ test.describe('PERM — Roles & Permissions', () => {
   // the salesperson's UI parity (salesperson-parity.spec.ts). This is the API half.
   test('PERM-016 the seeded salesperson resolves from its own role row with the owner’s permissions', async ({ ownerApi }) => {
     /*
-     * D100, read back through the API rather than the seed: the Salesperson
+     * D108, read back through the API rather than the seed: the Salesperson
      * is a linked role ROW (source DATABASE — not the legacy enum fallback
      * the console used to show as "Not set"), and that row grants exactly
      * the owner's set. The effective-permissions report is what the console

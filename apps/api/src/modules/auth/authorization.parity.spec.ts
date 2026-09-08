@@ -262,7 +262,7 @@ describe('7.3 — every role resolves to a real, non-empty permission set', () =
         'SALESPERSON',
       ]);
     // The writers are exactly the owner-level set — the one authority for
-    // "may step past a guard-rail" (D99, D100). A role added there without
+    // "may step past a guard-rail" (D107, D108). A role added there without
     // this permission, or granted the permission without being owner-level,
     // fails here; the literal list above is what makes it fail by name.
     expect([...writers].sort()).toEqual([...ADMIN_LEVEL_ROLES].sort());

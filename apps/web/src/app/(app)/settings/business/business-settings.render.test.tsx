@@ -300,7 +300,7 @@ describe('states other than ready', () => {
     expect(screen.getByText('Hardware store')).toBeTruthy();
   });
 
-  it('admits a salesperson (D100)', () => {
+  it('admits a salesperson (D108)', () => {
     // The hardware Salesperson holds the owner's permissions and reaches the
     // owner's screens; this is the settings half of that claim.
     show({}, { as: 'SALESPERSON' });

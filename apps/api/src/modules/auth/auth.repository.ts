@@ -99,7 +99,7 @@ export class AuthRepository {
    * Does this user currently have access to that branch, within their tenant?
    *
    * Owner-level roles (`isAdminLevelRole`: OWNER, ADMIN, and SALESPERSON —
-   * the hardware template's owner-equivalent, D100) implicitly access every
+   * the hardware template's owner-equivalent, D108) implicitly access every
    * active branch in their tenant — they are the roles that manage the
    * branches, and a deactivated branch is still refused. Everyone else needs
    * a matching `BranchAccess` row, OR to

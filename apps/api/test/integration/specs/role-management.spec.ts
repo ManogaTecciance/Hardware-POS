@@ -38,7 +38,7 @@ const CUSTOM = {
 
 /**
  * The rows `seedTenantRoles(…, 'HARDWARE')` writes, all built in: Owner,
- * Salesperson (D100) and Cashier — `HARDWARE_ROLE_TEMPLATES` by key. Written
+ * Salesperson (D108) and Cashier — `HARDWARE_ROLE_TEMPLATES` by key. Written
  * out rather than read from the template list so the immutability cases below
  * name what they cover, and so the GET /roles case pins the set against the
  * database independently of the function that seeded it.
@@ -93,7 +93,7 @@ describe('reading roles', () => {
     expect(foreign.length).toBeGreaterThan(0);
     expect(ids.filter((id: string) => foreign.some((f) => f.id === id))).toEqual([]);
     // Positive control: it returned this tenant's roles rather than nothing —
-    // and exactly the hardware template's rows (D100), each built in, with no
+    // and exactly the hardware template's rows (D108), each built in, with no
     // food-service role among them.
     const keys = res.data.map((r) => r.key).sort();
     expect(keys).toEqual(['CASHIER', 'OWNER', 'SALESPERSON']);
@@ -165,7 +165,7 @@ describe('creating a custom role', () => {
   });
 
   /*
-   * D100 — keys the platform already means something by are refused, whether
+   * D108 — keys the platform already means something by are refused, whether
    * or not this tenant's template seeds them. A custom SALESPERSON in a
    * restaurant would map to the owner-level enum underneath and be adopted —
    * marked built-in, permissions set to the owner's — by the next role seed.
@@ -173,7 +173,7 @@ describe('creating a custom role', () => {
    * value with no template anywhere; WAITER is a template with no enum value.
    */
   it.each(['SALESPERSON', 'ADMIN', 'WAITER'] as const)(
-    'refuses the reserved key %s with ROLE_KEY_RESERVED and writes nothing (D100)',
+    'refuses the reserved key %s with ROLE_KEY_RESERVED and writes nothing (D108)',
     async (key) => {
       const rowsUnder = () =>
         prisma.role.findMany({
@@ -359,7 +359,7 @@ describe('assignment', () => {
   });
 
   /**
-   * D100 — both columns move together. The enum underneath still decides the
+   * D108 — both columns move together. The enum underneath still decides the
    * owner-level checks (cross-branch reach, the QuickBooks gates, the override
    * paths), and this tenant-facing endpoint used to leave it behind: a cashier
    * moved onto the Salesperson row stayed CASHIER for every one of them, and a
@@ -492,7 +492,7 @@ describe('lockout protection', () => {
       // The positive control. Without it, a service that refused every
       // assignment would pass the case above.
       await linkUsersToRoles(prisma, tile.tenantId);
-      // The hardware template seeds two administrative rows (D100): the Owner
+      // The hardware template seeds two administrative rows (D108): the Owner
       // and the owner-equivalent Salesperson. A second user on either one is
       // "another administrator" — the guard counts permissions, not keys.
       const adminRow = await prisma.role.findFirstOrThrow({

@@ -26,7 +26,7 @@
  *
  * Being enum-backed does not make a role universal, though. Salesperson is
  * built in — a tenant cannot delete it — yet only the HARDWARE template offers
- * it (D100). "Built in" says who owns the definition; the per-template lists at
+ * it (D108). "Built in" says who owns the definition; the per-template lists at
  * the bottom of this file say who gets a row. (That is also why trimming the template catalogue on 2026-08-17
  * deleted template OBJECTS below but no enum value: the enum is persisted
  * data with production users on it; a template is only a seeding blueprint.)
@@ -59,7 +59,7 @@ export interface RoleTemplate {
  * fallback, and existing tenants keep their already-seeded rows. Removing a
  * template stops NEW seeding; it rewrites no one's authority.
  *
- * Salesperson is the third (D100, PO decision 2026-09-08): owner-equivalent,
+ * Salesperson is the third (D108, PO decision 2026-09-08): owner-equivalent,
  * and offered by the HARDWARE template alone. It lives in this list because
  * it is enum-backed and undeletable like the other two — NOT because every
  * workspace seeds it. This list is the catalogue of built-ins; which of them
@@ -87,7 +87,7 @@ export const BUILT_IN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
   },
   {
     /*
-     * D100 — the hardware shop's second owner-level post: the person on the
+     * D108 — the hardware shop's second owner-level post: the person on the
      * counter who runs the shop as the owner would, with the owner's authority
      * and the owner's screens. `ROLE_PERMISSIONS.SALESPERSON` is the OWNER set
      * by reference (see authorization.ts), so "the same as the owner" is a
@@ -343,7 +343,7 @@ function template(key: string): RoleTemplate {
 /**
  * Hardware / retail: Owner, Salesperson, Cashier.
  *
- * D100 (PO decision, 2026-09-08): the Salesperson is a hardware-shop job and
+ * D108 (PO decision, 2026-09-08): the Salesperson is a hardware-shop job and
  * is offered NOWHERE else — see the template's own comment above. Listed
  * between the owner it is equivalent to and the till it is not.
  */
@@ -358,7 +358,7 @@ export const HARDWARE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
  *
  * This used to be `BUILT_IN_ROLE_TEMPLATES` itself, which stopped meaning the
  * same thing when Salesperson joined the built-ins for the hardware template
- * only (D100). Selecting by key keeps GENERAL's staffing a decision written
+ * only (D108). Selecting by key keeps GENERAL's staffing a decision written
  * here, not a side effect of what the catalogue happens to contain.
  */
 export const GENERAL_ROLE_TEMPLATES: readonly RoleTemplate[] = [
@@ -408,7 +408,7 @@ export const HOTEL_WORKSPACE_ROLE_TEMPLATES: readonly RoleTemplate[] = [
  * the column had to hold something, and must not inherit manager permissions
  * if their row is later deleted (the `LEGACY_FALLBACK` state).
  *
- * D100 moved this here from the API's platform-admin module because three
+ * D108 moved this here from the API's platform-admin module because three
  * callers now derive the column — the console, the tenant-facing role
  * assignment and `provision-tenant.ts` — and a second copy of the mapping
  * that decides whether a SALESPERSON row yields an owner-level enum would

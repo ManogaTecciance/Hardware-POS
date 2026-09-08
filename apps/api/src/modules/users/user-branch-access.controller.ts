@@ -41,7 +41,7 @@ export class UserBranchAccessController {
   /**
    * The branches this user is currently allowed into — the caller's view of
    * what an administrator has granted. Owner-level users (`isAdminLevelRole`:
-   * OWNER, ADMIN and, since D100, SALESPERSON) show `roleGrant` (implicit
+   * OWNER, ADMIN and, since D108, SALESPERSON) show `roleGrant` (implicit
    * through their role) so the response never lies about *why* they can
    * access something.
    */

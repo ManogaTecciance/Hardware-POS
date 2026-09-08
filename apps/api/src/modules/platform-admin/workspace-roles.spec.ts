@@ -6,7 +6,7 @@
  * `User.role` looks like bookkeeping once `roleId` is set — `PermissionResolver`
  * ignores it whenever the linked role resolves. It is not. `BranchScopeGuard`,
  * `AuthRepository` and `UsersService` still read the enum directly and treat the
- * owner-level roles — `isAdminLevelRole`: OWNER, ADMIN and, since D100, the
+ * owner-level roles — `isAdminLevelRole`: OWNER, ADMIN and, since D108, the
  * hardware template's SALESPERSON — as cross-branch, and it is what
  * `LEGACY_FALLBACK` resolution falls back to if the linked role row is ever
  * deleted. So "which enum does a Waiter get" is a real privilege question with
@@ -51,7 +51,7 @@ describe('baseUserRoleFor', () => {
   it('never grants an owner-level role to a key that is not literally that role', () => {
     // Near misses for every owner-level role — case, trailing whitespace, a
     // plausible alternative spelling — all land on the least-privileged
-    // answer. The SALESPERSON misses are D100's: it is the only owner-level
+    // answer. The SALESPERSON misses are D108's: it is the only owner-level
     // template besides the Owner that any workspace is provisioned with, and
     // the hardware workspace alone gets it — so a hand-typed role elsewhere
     // that reaches for the name must land on CASHIER, not on the owner's enum.

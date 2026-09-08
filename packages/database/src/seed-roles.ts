@@ -56,7 +56,7 @@ export async function syncPermissionCatalogue(db: Db): Promise<number> {
  * Permission assignments *are* re-applied, because those are the platform's
  * definition of the role rather than the tenant's presentation of it.
  *
- * ## Two refusals (D100)
+ * ## Two refusals (D108)
  *
  * This runs against EXISTING tenants too — the production backfill
  * (`backfill-tenant-roles.ts`) is exactly that — so a row it finds under a

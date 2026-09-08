@@ -102,7 +102,7 @@ export class BranchScopeGuard implements CanActivate {
     }
 
     // Owner-level roles (OWNER, ADMIN and the hardware template's SALESPERSON,
-    // D100) reach every active branch implicitly; the one place that answers
+    // D108) reach every active branch implicitly; the one place that answers
     // "is this role owner-level" is `isAdminLevelRole`, so a role added there
     // is cross-branch here without a second edit.
     const hasAccess =

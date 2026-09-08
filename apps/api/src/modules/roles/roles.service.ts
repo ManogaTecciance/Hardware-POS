@@ -108,7 +108,7 @@ export class RolesService {
   ): Promise<RoleView> {
     const permissions = this.validatePermissions(input.permissions);
 
-    // Built-in and template keys belong to the platform (D100): a custom role
+    // Built-in and template keys belong to the platform (D108): a custom role
     // under one would be mistaken for the built-in by everything that reads
     // keys — the enum derivation, the role seed — whether or not this tenant's
     // template happens to seed it.

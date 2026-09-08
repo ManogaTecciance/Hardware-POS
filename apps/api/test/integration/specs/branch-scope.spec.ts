@@ -9,9 +9,9 @@
  *  3. **A user whose branch access was revoked** is refused on the next
  *     request, without needing token expiry.
  *  4. **Owner-level roles implicitly access every active branch** of their
- *     tenant — the set is `ADMIN_LEVEL_ROLES` (OWNER, ADMIN and, since D100,
+ *     tenant — the set is `ADMIN_LEVEL_ROLES` (OWNER, ADMIN and, since D108,
  *     the hardware Salesperson); everyone else needs `User.branchId` or
- *     `BranchAccess`. The D100 block at the bottom derives its cases from that
+ *     `BranchAccess`. The D108 block at the bottom derives its cases from that
  *     set rather than naming roles, so a role added there is covered here.
  *  5. **Tenant-wide administration routes are NOT branch-gated** — refusing
  *     them for lack of an active branch would be the "incorrect branch
@@ -317,12 +317,12 @@ describe('Phase 1.5.6 — multi-branch access', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6 — D100: every owner-level role reaches every branch, and only those roles
+// 6 — D108: every owner-level role reaches every branch, and only those roles
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Five API sites used to decide cross-branch access on
- * `role === 'OWNER' || role === 'ADMIN'`; D100 moved all five onto
+ * `role === 'OWNER' || role === 'ADMIN'`; D108 moved all five onto
  * `isAdminLevelRole`, so the hardware Salesperson reaches every active branch
  * exactly as the owner does. These cases are derived from `ADMIN_LEVEL_ROLES`
  * and its complement in `ALL_USER_ROLES` rather than listing roles by hand: a
@@ -332,7 +332,7 @@ describe('Phase 1.5.6 — multi-branch access', () => {
  * Each subject is created with `branchId: null` and no `BranchAccess` row, so
  * the only thing that can let them into a branch is the role.
  */
-describe('D100 — owner-level roles cross branches; everyone else is scoped', () => {
+describe('D108 — owner-level roles cross branches; everyone else is scoped', () => {
   const NON_ADMIN_ROLES: readonly UserRole[] = ALL_USER_ROLES.filter(
     (role) => !ADMIN_LEVEL_ROLES.includes(role),
   );
@@ -346,7 +346,7 @@ describe('D100 — owner-level roles cross branches; everyone else is scoped', (
         tenantId: tile.tenantId,
         branchId: null,
         role,
-        name: `D100 ${role}`,
+        name: `D108 ${role}`,
         email: `d100.${role.toLowerCase()}@fixture-tile-shop.test`,
       },
     });
@@ -368,7 +368,7 @@ describe('D100 — owner-level roles cross branches; everyone else is scoped', (
       body: { branchId, items: [{ productId: tile.productAId, quantity: '1.000' }] },
     });
 
-  it('POSITIVE CONTROL: the two role sets partition the enum, and the D100 role is owner-level', () => {
+  it('POSITIVE CONTROL: the two role sets partition the enum, and the D108 role is owner-level', () => {
     // Every `it.each` below reads one of these tables; a table that came back
     // empty would pass every case by running none (D30 rule 7).
     expect(ADMIN_LEVEL_ROLES.length).toBeGreaterThan(0);
@@ -529,7 +529,7 @@ describe('D100 — owner-level roles cross branches; everyone else is scoped', (
     },
   );
 
-  it('MUTATION PROOF: the pre-D100 predicate would be detected by the tables above', async () => {
+  it('MUTATION PROOF: the pre-D108 predicate would be detected by the tables above', async () => {
     // The five sites used to ask this. Run it over the enum: it passes a
     // different set from `ADMIN_LEVEL_ROLES`, so the `it.each` tables derived
     // from that set contain a case (SALESPERSON) the old predicate refuses.

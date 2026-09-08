@@ -127,7 +127,7 @@ Seeded by `pnpm db:seed`. Idempotent — running it twice changes nothing, verif
 |---|---|
 | Workspace | `demo` |
 | Owner | `owner@hardwarepos.test` / `password123` (approval PIN `2222`) |
-| Salesperson | `salesperson@hardwarepos.test` / `password123` (owner-equivalent; resolves from the hardware template's `SALESPERSON` role row, D100; no PIN) |
+| Salesperson | `salesperson@hardwarepos.test` / `password123` (owner-equivalent; resolves from the hardware template's `SALESPERSON` role row, D108; no PIN) |
 | Cashier | `cashier@hardwarepos.test` / `password123` (approval PIN `1111`) |
 | Profile | **no profile row** — resolves to the legacy `TILE_SHOP` / QuickBooks configuration |
 

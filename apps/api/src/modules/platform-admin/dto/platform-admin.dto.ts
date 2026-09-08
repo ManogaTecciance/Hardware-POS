@@ -44,7 +44,7 @@ export class UpdateWorkspaceDto {
 /*
  * D55.1: the role is a `Role` row belonging to THIS workspace, not a member of a
  * fixed list. Each template seeds a different set (hardware gets Owner +
- * Salesperson + Cashier, the Salesperson being hardware-only per D100; food
+ * Salesperson + Cashier, the Salesperson being hardware-only per D108; food
  * service Owner + Waiter + Cashier + Kitchen staff; hotel Owner + Waiter +
  * Receptionist), so a literal `@IsIn([...])` here could only ever be right
  * for one template — and would have rejected `WAITER`, which is precisely the

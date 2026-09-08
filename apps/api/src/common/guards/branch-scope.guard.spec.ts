@@ -14,7 +14,7 @@ import type { AuthenticatedUser } from '../../modules/auth/auth.types';
  * The branch-scope integration spec drives the same guard over real routes
  * against a real database. This spec exists for one question that is awkward
  * to ask over the wire and easy to get silently wrong in code: WHICH roles the
- * guard lets into a branch with no grant at all. D100 widened that from
+ * guard lets into a branch with no grant at all. D108 widened that from
  * `role === 'OWNER' || role === 'ADMIN'` to `isAdminLevelRole`, so the set is
  * asserted as an exact set derived from the one authority (`ADMIN_LEVEL_ROLES`)
  * over the whole enum (`ALL_USER_ROLES`) — a role added to either without the
@@ -120,7 +120,7 @@ describe('BranchScopeGuard', () => {
       expect(passed).toEqual(ownerLevel);
       expect(refused).toEqual(notOwnerLevel);
       // Positive controls, by name, so neither exact set is satisfied by an
-      // enum that has quietly shrunk: the D100 widening is in, the till is out.
+      // enum that has quietly shrunk: the D108 widening is in, the till is out.
       expect(passed).toContain('SALESPERSON');
       expect(passed).toContain('OWNER');
       expect(refused).toContain('CASHIER');
@@ -292,7 +292,7 @@ describe('BranchScopeGuard', () => {
   });
 
   describe('mutation proofs', () => {
-    it('MUTATION PROOF — a regression to the pre-D100 check (OWNER || ADMIN) is red', async () => {
+    it('MUTATION PROOF — a regression to the pre-D108 check (OWNER || ADMIN) is red', async () => {
       // The legacy predicate, evaluated over the same enum the guard is tested
       // against. Were `isAdminLevelRole` in the guard replaced by this line,
       // the passing set in the first test would become `legacy`, and the exact
@@ -306,7 +306,7 @@ describe('BranchScopeGuard', () => {
 
       expect(legacy).not.toEqual(ownerLevel);
       expect(() => expect(legacy).toEqual(ownerLevel)).toThrow();
-      // What the old check misses is exactly the role D100 added.
+      // What the old check misses is exactly the role D108 added.
       expect(ownerLevel.filter((role) => !legacy.includes(role))).toEqual(['SALESPERSON']);
 
       // And the guard as built today does not produce the legacy set — so the
@@ -322,7 +322,7 @@ describe('BranchScopeGuard', () => {
     it('MUTATION PROOF — the real guard with isAdminLevelRole reverted to OWNER || ADMIN is red', async () => {
       // The strongest form of the proof above: not a predicate evaluated
       // beside the guard, but the guard itself, loaded in an isolated module
-      // registry with its one authority mocked back to the pre-D100 line.
+      // registry with its one authority mocked back to the pre-D108 line.
       // Runtime behaviour, not source text (D30.4) — and no production file
       // is edited to show it.
       let Mutated!: typeof BranchScopeGuard;
@@ -348,7 +348,7 @@ describe('BranchScopeGuard', () => {
       expect(passed).not.toContain('SALESPERSON');
       expect(() => expect(passed).toEqual(ownerLevel)).toThrow();
       // The salesperson under the mutant is refused with the stale-token
-      // message — the exact regression D100 closed. Matched by name and
+      // message — the exact regression D108 closed. Matched by name and
       // message rather than `instanceof`: the isolated registry loaded its
       // own copy of `@nestjs/common`, so the mutant's ForbiddenException is a
       // different class object from the one imported at the top of this file.

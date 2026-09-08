@@ -10,7 +10,7 @@ test.describe('POS — Discount Approval', () => {
 
   test('POS-019 approver PIN approves a discount within the manager limit', async ({ cashierApi }) => {
     // The seeded approver is the OWNER: the hardware template staffs Owner,
-    // Salesperson and Cashier (D100), and the demo Salesperson has no PIN.
+    // Salesperson and Cashier (D108), and the demo Salesperson has no PIN.
     // 10% is within every approver's cap.
     const res = await cashierApi.postRaw('/discounts/approve', {
       managerPin: SEED.approverPin, productId: orderKey, discountType: 'PERCENTAGE', discountValue: 10,

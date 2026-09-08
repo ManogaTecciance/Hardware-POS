@@ -63,7 +63,7 @@ export function Header() {
 }
 
 /*
- * D101 — the menu names the person and their role, and nothing else. It used
+ * D109 — the menu names the person and their role, and nothing else. It used
  * to list the branch and the register underneath; the PO asked for both to go
  * (2026-09-08): a menu about the account is not where the till's location
  * belongs, and on a one-branch shop the two lines were noise under every name.

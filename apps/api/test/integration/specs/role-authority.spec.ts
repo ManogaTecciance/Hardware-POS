@@ -215,7 +215,7 @@ describe('the readiness report describes reality', () => {
     await seedTenantRoles(prisma, other.tenantId, 'HARDWARE');
     await linkUsersToRoles(prisma, other.tenantId);
 
-    // The hardware template offers Owner, Salesperson and Cashier (D100) —
+    // The hardware template offers Owner, Salesperson and Cashier (D108) —
     // no MANAGER row — so the fixtures' enum-MANAGER users have no matching
     // row and linking rightly leaves them on the legacy path — the report
     // must SAY so before it can go clean.
@@ -282,15 +282,15 @@ describe('the readiness report describes reality', () => {
 });
 
 /**
- * D100 — the Salesperson has a row of its own, seeded by the hardware template
- * and no other. Before D100 the enum value existed with a permission set and
+ * D108 — the Salesperson has a row of its own, seeded by the hardware template
+ * and no other. Before D108 the enum value existed with a permission set and
  * nothing else, so a salesperson resolved through the legacy fallback forever
  * and the console showed "Not set". Both halves are pinned here: the hardware
  * salesperson links and resolves from the DATABASE with the owner's set; the
  * same user in a food-service tenant stays on the fallback, and the report
  * counts them rather than hiding them.
  */
-describe('D100 — the Salesperson resolves from its own row, in the hardware template only', () => {
+describe('D108 — the Salesperson resolves from its own row, in the hardware template only', () => {
   /** `{ role: SALESPERSON, roleId: null }` — a seeded or provisioned salesperson before linking. */
   async function unlinkedSalesperson(tenant: SeededTenant): Promise<string> {
     const id = `${tenant.tenantId}-salesperson`;

@@ -76,7 +76,7 @@ export class AuthController {
   /**
    * List the branches this session may switch into, right now (Phase 1.5.6).
    *
-   * Owner-level roles (`isAdminLevelRole`: OWNER, ADMIN and, since D100, the
+   * Owner-level roles (`isAdminLevelRole`: OWNER, ADMIN and, since D108, the
    * hardware template's SALESPERSON) see every active branch of their tenant.
    * Everyone else sees their assigned `User.branchId` plus every branch
    * granted through `BranchAccess`. Inactive branches are omitted.

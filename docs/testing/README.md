@@ -54,7 +54,7 @@ Seed data (`pnpm --filter @hardware-pos/database db:seed`) — tenant `tnt_dev`:
 | Role | Login | Discount limit | Notes |
 | --- | --- | --- | --- |
 | Owner | `owner@hardwarepos.test` / `password123` | unlimited | email/password; approval PIN `2222` |
-| Salesperson | `salesperson@hardwarepos.test` / `password123` | unlimited | owner-equivalent; email/password; linked to the hardware template's `SALESPERSON` role row (D100); no PIN |
+| Salesperson | `salesperson@hardwarepos.test` / `password123` | unlimited | owner-equivalent; email/password; linked to the hardware template's `SALESPERSON` role row (D108); no PIN |
 | Cashier | `cashier@hardwarepos.test` / `password123` | 0% | email/password; approval PIN `1111` |
 
 Plus 10 seeded hardware products (Cement 50kg, PVC pipe, etc.) each carrying a mock

@@ -104,12 +104,12 @@ docker compose -f docker-compose.prod.yml logs -f api
 curl -fsS https://api.axlopos.com/v1/health
 ```
 
-### Existing tenants: role rows (first deploy of Phase 1.5 / D100)
+### Existing tenants: role rows (first deploy of Phase 1.5 / D108)
 
 Migrations create the `Role` table and never fill it. A tenant that predates
 role rows — the pilot — keeps every user on the legacy enum fallback until an
 operator seeds its roles and links its users. Run once per existing tenant,
-after step 5, and read the dry run before writing (D100):
+after step 5, and read the dry run before writing (D108):
 
 ```bash
 # Dry run: what would be created, refreshed and linked, and who stays on the fallback.

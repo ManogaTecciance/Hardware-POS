@@ -9,7 +9,7 @@
  *    that differs only by CASE, and against a legacy mixed-case row — is a
  *    409, never a second workspace and never a raw database error.
  *
- * D100 adds the Salesperson: assignable through the console in a hardware
+ * D108 adds the Salesperson: assignable through the console in a hardware
  * workspace, and in no other — the picker reads the workspace's own rows
  * (D55.1), so a restaurant simply has no such row to offer or accept.
  */
@@ -121,7 +121,7 @@ describe('the trimmed role catalogue, per template', () => {
 
   it('each template seeds exactly its staffed roles — nothing removed comes back', async () => {
     const cases: [string, string[]][] = [
-      // D100 added SALESPERSON to hardware — the owner-equivalent counter
+      // D108 added SALESPERSON to hardware — the owner-equivalent counter
       // post — and to hardware ALONE: it must not appear in the two below.
       ['HARDWARE', ['CASHIER', 'OWNER', 'SALESPERSON']],
       // D68 added KITCHEN_STAFF to food service — the kitchen board replaced
@@ -142,7 +142,7 @@ describe('the trimmed role catalogue, per template', () => {
   });
 });
 
-describe('D100 — the Salesperson is assignable in a hardware workspace and nowhere else', () => {
+describe('D108 — the Salesperson is assignable in a hardware workspace and nowhere else', () => {
   interface WorkspaceRole {
     id: string;
     key: string | null;
@@ -184,7 +184,7 @@ describe('D100 — the Salesperson is assignable in a hardware workspace and now
 
     const created = await createUser(ws.data.id, { roleId: salesperson!.id });
     expect(created.status).toBe(201);
-    // Both columns: the enum underneath and the row in force. Before D100 the
+    // Both columns: the enum underneath and the row in force. Before D108 the
     // salesperson had no row, so the console could neither offer it nor show
     // it as anything but "Not set".
     expect(created.data).toMatchObject({

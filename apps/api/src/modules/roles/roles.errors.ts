@@ -96,7 +96,7 @@ export class TenantAdministrationLockoutError extends ConflictException {
 }
 
 /**
- * D100 — the keys of the built-in and template roles are the platform's, not
+ * D108 — the keys of the built-in and template roles are the platform's, not
  * the tenant's. A custom role keyed SALESPERSON in a restaurant would map to
  * the owner-level enum underneath (`baseUserRoleFor`) and be adopted as the
  * built-in by the next role seed; refusing the key up front is what makes

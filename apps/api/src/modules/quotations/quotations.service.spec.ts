@@ -34,7 +34,7 @@ const CASHIER: AuthenticatedUser = {
 };
 const OWNER: AuthenticatedUser = { id: 'u2', tenantId: 't1', role: 'OWNER', activeBranchId: null };
 /**
- * D100 — the hardware template's owner-equivalent. Owner-level for the
+ * D108 — the hardware template's owner-equivalent. Owner-level for the
  * re-conversion override below exactly as OWNER is: the service asks
  * `isAdminLevelRole`, never the enum by name.
  */
@@ -155,7 +155,7 @@ describe('QuotationsService guards', () => {
 
   /**
    * The override is honoured for owner-level roles only (`isAdminLevelRole`).
-   * D100 put SALESPERSON in that set, so it is exercised by name on both sides
+   * D108 put SALESPERSON in that set, so it is exercised by name on both sides
    * of the flag beside the CASHIER negative above, and the exact-set test at
    * the end derives the same fact from the authority so a role added to
    * `ADMIN_LEVEL_ROLES` cannot be skipped here silently.
@@ -175,7 +175,7 @@ describe('QuotationsService guards', () => {
     return { result: service.convertToSale('t1', actor, 'q1', dto), complete, linkConvertedSale };
   }
 
-  it('a SALESPERSON with { override: true } re-converts, exactly as the owner does (D100)', async () => {
+  it('a SALESPERSON with { override: true } re-converts, exactly as the owner does (D108)', async () => {
     for (const actor of [SALESPERSON, OWNER]) {
       const { result, complete, linkConvertedSale } = reconversion(actor, { override: true });
       await expect(result).resolves.toEqual({ saleId: 's2', saleNumber: 'S-2', quotationId: 'q1' });

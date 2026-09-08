@@ -237,7 +237,7 @@ export class PlatformAdminService {
    * because the rows are what `PermissionResolver` consults and a tenant may
    * have renamed or deactivated one. Which rows exist is decided by the
    * template: a hardware workspace seeds Owner + Salesperson + Cashier (the
-   * Salesperson is hardware-only, D100), a food-service one Owner + Waiter +
+   * Salesperson is hardware-only, D108), a food-service one Owner + Waiter +
    * Cashier + Kitchen staff, a hotel one Owner + Waiter + Receptionist.
    * Workspaces created before the 2026-08-17 trim keep whatever they were
    * seeded with — this list reflects that, by reading the rows.

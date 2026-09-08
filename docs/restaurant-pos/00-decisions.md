@@ -3545,7 +3545,7 @@ Mutation-proven by deleting the service charge and the packaging charge from
 the map.
 
 
-### D99 — merging `main` into the restaurant branch: how each clash was decided
+### D107 — merging `main` into the restaurant branch: how each clash was decided
 
 `feature/restaurant-pos-reshin` (131 commits since PR #8) was merged into
 `merge/restaurant-changes`, a branch cut from `main`, which had moved on by 51
@@ -3593,7 +3593,7 @@ the only place that question should be answered, which would extend each of
 them to the salesperson. They are security decisions on code `main` never had,
 so they were left as they were rather than widened in a merge.
 
-> **Resolved 2026-09-08 by [D100](#d100--the-salesperson-is-the-hardware-templates-role-with-a-row-of-its-own):**
+> **Resolved 2026-09-08 by [D108](#d108--the-salesperson-is-the-hardware-templates-role-with-a-row-of-its-own):**
 > all of them now ask `isAdminLevelRole`, so the Salesperson is cross-branch
 > and may hold branch access through the role, like the owner.
 
@@ -3608,7 +3608,7 @@ enum fallback — it works, and the platform console will show its role as
 "Not set". Whether the hardware workspace should offer Salesperson as a
 template is a product question, not a merge one.
 
-> **Resolved 2026-09-08 by [D100](#d100--the-salesperson-is-the-hardware-templates-role-with-a-row-of-its-own):**
+> **Resolved 2026-09-08 by [D108](#d108--the-salesperson-is-the-hardware-templates-role-with-a-row-of-its-own):**
 > the hardware template seeds a `SALESPERSON` row, `usr_salesperson` links to
 > it, and the console shows "Salesperson".
 
@@ -3646,7 +3646,7 @@ given the route-level `RETAIL_POS` guard every other sales write carries.
 `SettingsModule` for the timezone-aware product report. The migration-set
 tripwire lists all 68 with the eight from `main` annotated.
 
-### D100 — the Salesperson is the hardware template's role, with a row of its own
+### D108 — the Salesperson is the hardware template's role, with a row of its own
 
 **Decision (PO, 2026-09-08).** `SALESPERSON` is specific to the **hardware**
 workspace template. It grants exactly what the hardware Owner grants — the same
@@ -3654,7 +3654,7 @@ permissions and the same screens — and it has a **linked role row**: a built-i
 template keyed `SALESPERSON`, seeded into hardware workspaces and no others,
 with the seeded demo salesperson linked to it like every other seeded user.
 
-**Why.** D99 brought the role across from `main` as an enum value with a
+**Why.** D107 brought the role across from `main` as an enum value with a
 permission set and nothing else. That left it half a role: authority resolved
 through the legacy enum fallback, the platform console showed "Not set", the
 workspace picker could not offer it, and — because the enum is platform-wide —
@@ -3685,7 +3685,7 @@ assign, so it is offered nowhere else.
   scope guard, `AuthRepository.hasBranchAccess` and `listAccessibleBranches`,
   and `UsersService`'s `roleGrant` and last-branch revoke guard. All five now
   ask `isAdminLevelRole`, the one place that answers "is this role
-  owner-level" (D99), so a salesperson reaches every active branch exactly as
+  owner-level" (D107), so a salesperson reaches every active branch exactly as
   the owner does. This is the "same UI" half of the decision: the accessible
   branches, the branch-scoped screens and the branch-access console treat the
   two identically. Nothing else in the web app keys on the enum — navigation
@@ -3713,7 +3713,7 @@ assign, so it is offered nowhere else.
   tenant-created row under a template key, and names a display-name collision
   before writing instead of failing on the unique constraint half-way through.
   `linkUsersToRoles` links to active rows only. The hole predates this
-  decision (ADMIN, MANAGER, ACCOUNTANT keys were free everywhere); D100 is
+  decision (ADMIN, MANAGER, ACCOUNTANT keys were free everywhere); D108 is
   where it became worth closing because it is the first template offered to
   one business type and withheld from the rest.
 - **Tests.** The parity spec pins seven templates, the exact built-in and
@@ -3772,7 +3772,7 @@ while the owner's 2222 can; a real salesperson is given a PIN like any other
 user. The seed comment now states the difference instead of claiming the
 credentials mirror the owner's.
 
-### D101 — the account menu names the person and their role, nothing else
+### D109 — the account menu names the person and their role, nothing else
 
 **Decision (PO, 2026-09-08).** The menu behind the profile button in the
 header shows the user's name and role. The two lines beneath them — the branch

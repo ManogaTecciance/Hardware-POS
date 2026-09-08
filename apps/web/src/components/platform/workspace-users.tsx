@@ -52,7 +52,7 @@ export function WorkspaceUsers({
        * assign Waiter and the kitchen roles, a hardware one cannot, and a list
        * hard-coded in this component could only ever be right for one of them.
        * The reverse holds too: only a hardware workspace can assign Salesperson
-       * (D100), because only the hardware template seeds that row.
+       * (D108), because only the hardware template seeds that row.
        */
       const [u, r] = await Promise.all([
         platformAdmin.listUsers(session, workspace.id),

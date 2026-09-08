@@ -4,7 +4,7 @@
  *
  * This coverage moved here from Playwright (POS-018/019/021) on 2026-08-17:
  * the dev seed no longer creates a MANAGER user (the hardware template
- * staffs an Owner, an owner-equivalent Salesperson and Cashiers, D100), but
+ * staffs an Owner, an owner-equivalent Salesperson and Cashiers, D108), but
  * the manager tier itself is live — the
  * enum drives approval authority and the production pilot has managers — so
  * the cap rule needs a home where the fixture can own its users. The
@@ -65,7 +65,7 @@ const approve = (pin: string, discountValue: number) =>
     body: { managerPin: pin, productId: '__order__', discountType: 'PERCENTAGE', discountValue },
   });
 
-describe('POST /discounts/approve — the owner-level approver (D100)', () => {
+describe('POST /discounts/approve — the owner-level approver (D108)', () => {
   /*
    * Approval decides on the ENUM (`getRoleDiscountLimit(approver.role)`), not
    * on the role row, so the seeding work proves nothing here; and the demo
