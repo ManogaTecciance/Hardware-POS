@@ -25,6 +25,10 @@ import {
 } from '@/lib/products-api';
 import { fetchBranches, type BranchSummary } from '@/lib/products/branches-api';
 import {
+  fetchAttributeLibrary,
+  type AttributeDefinition as LibraryAttribute,
+} from '@/lib/products/attribute-library-api';
+import {
   fetchProductModifierGroups,
   putProductModifierGroups,
 } from '@/lib/products/product-modifiers-api';
@@ -178,6 +182,17 @@ export function ProductWizard(props: Props) {
   );
   const [categories, setCategories] = React.useState<CategoryNode[]>(props.categories ?? []);
   const [branches, setBranches] = React.useState<BranchSummary[]>([]);
+  /*
+   * D104 — the tenant's attribute library, so Step 2 can offer the scales an
+   * operator has already defined instead of asking them to retype "Size" and
+   * "Small" on every product. Fetched by the SHELL and passed down, the same
+   * way `branches` and the attribute schema are.
+   *
+   * Failure is empty, not fatal: the step falls back to the free-text fields
+   * it has always had, so a tenant with no library — or an API that is having
+   * a bad minute — can still build a product.
+   */
+  const [attributeLibrary, setAttributeLibrary] = React.useState<LibraryAttribute[]>([]);
   // D64 — [] until resolved (and on fetch failure): the safe default is no
   // attributes step, mirroring the profile's unresolved-shows-nothing rule.
   const [attributeSchema, setAttributeSchema] = React.useState<readonly AttributeField[]>([]);
@@ -203,17 +218,19 @@ export function ProductWizard(props: Props) {
   React.useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [cats, brs, attrs] = await Promise.all([
+      const [cats, brs, attrs, library] = await Promise.all([
         props.categories && props.categories.length > 0
           ? Promise.resolve(props.categories)
           : fetchCategoryTree(session).catch(() => [] as CategoryNode[]),
         fetchBranches(session).catch(() => [] as BranchSummary[]),
         fetchProductAttributeSchema(session).catch(() => ({ fields: [] as AttributeField[] })),
+        fetchAttributeLibrary(session).catch(() => [] as LibraryAttribute[]),
       ]);
       if (cancelled) return;
       setCategories(cats);
       setBranches(brs);
       setAttributeSchema(attrs.fields);
+      setAttributeLibrary(library);
     };
     void load();
     return () => {
@@ -447,7 +464,12 @@ export function ProductWizard(props: Props) {
             />
           ) : null}
           {currentStep === 'variations' ? (
-            <StepVariations state={state} errors={errors} onChange={patchState} />
+            <StepVariations
+              state={state}
+              errors={errors}
+              attributeLibrary={attributeLibrary}
+              onChange={patchState}
+            />
           ) : null}
           {currentStep === 'pricing' ? (
             <StepPricingInventory
