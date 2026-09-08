@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 308
-- Module-guarded routes: 209
+- Total routes: 309
+- Module-guarded routes: 210
 - Ungated routes: 99
 
 ## How to read the Guard column
@@ -245,6 +245,7 @@ returns cause a refund through the side door.
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
 | POST | `/exchanges` | EXCHANGES | ENFORCED | return:create + sale:create |
+| POST | `/exchanges/preview` | EXCHANGES | ENFORCED | return:create + sale:create |
 | GET | `/exchanges` | EXCHANGES | ENFORCED | return:read |
 | GET | `/exchanges/:id` | EXCHANGES | ENFORCED | return:read |
 

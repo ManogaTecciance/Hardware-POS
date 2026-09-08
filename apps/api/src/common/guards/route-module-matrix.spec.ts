@@ -421,6 +421,11 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // Module-gated like RETURNS, and tenant-scoped for the same reason: the
   // branch is carried on the sale and the return, not on the route.
   'POST /exchanges': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
+  // D109 — prices the returning leg AS AN EXCHANGE, so the approval verdict the
+  // screen shows is the one the completion will apply. Same module gate and the
+  // same permission pair as the completion: a tenant that may not perform an
+  // exchange has no business pricing one.
+  'POST /exchanges/preview': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
   // 7.3 — the note, from real data. D2's renderer finally has a transaction.
   'GET /documents/exchanges/:exchangeId': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },
   'GET /exchanges': { module: 'EXCHANGES', guard: 'ENFORCED', scope: T },

@@ -10,7 +10,8 @@
 
 import { api } from './api';
 import type { Session } from './auth';
-import type { ReturnItemInput } from './returns';
+import type { ReturnItemInput, ReturnPreview } from './returns';
+import type { PaymentMethodCode } from './sales';
 
 export interface ExchangeResult {
   id: string;
@@ -69,6 +70,20 @@ export interface CompleteExchangeInput {
 
 function auth(session: Session) {
   return { token: session.token, tenantId: session.user.tenantId };
+}
+
+/**
+ * Price the returning leg AS AN EXCHANGE.
+ *
+ * NOT `previewReturn`, which is what `7.5` used: that route cannot know it is
+ * inside an exchange, so it evaluated approval without D109's waiver and every
+ * exchange asked for a manager PIN the completion would not have required.
+ */
+export function previewExchange(
+  session: Session,
+  dto: { originalSaleId: string; items: ReturnItemInput[]; refundMethod?: PaymentMethodCode },
+): Promise<ReturnPreview> {
+  return api.post<ReturnPreview>('/exchanges/preview', dto, auth(session));
 }
 
 export function completeExchange(

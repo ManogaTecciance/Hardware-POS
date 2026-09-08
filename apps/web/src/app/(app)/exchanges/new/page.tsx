@@ -16,10 +16,20 @@
  * same figure and nothing changes hands — but the till still records both, so
  * the screen shows both rather than only the difference.
  *
- * **A manager PIN is usually required.** `Full-sale return` is an existing
- * approval trigger, and a customer who bought one shirt and swaps the size is
- * returning the whole sale. Rather than discovering that on submit, the screen
- * previews the return first and asks for the PIN in place.
+ * **A manager PIN is asked for only when one is genuinely required.** This
+ * paragraph used to say it was "usually" required, because `Full-sale return`
+ * is an approval trigger and a customer swapping the size of the one shirt
+ * they bought returns the whole sale by definition. **D109 waived exactly that
+ * trigger for exchanges** — on the server, in `evaluateApproval` — and this
+ * screen was never updated, so it went on previewing through the plain returns
+ * route and demanding a PIN the completion did not want. An owner was being
+ * asked to approve themselves.
+ *
+ * It now previews through `POST /exchanges/preview`, which evaluates approval
+ * the way the completion will. **Every other trigger still applies** — a
+ * cashier over their refund limit, a sale outside the return period, damaged
+ * goods, a credit customer, a mismatched refund method. Those are about the
+ * goods and the money, and an exchange changes neither.
  */
 
 import * as React from 'react';
@@ -40,12 +50,11 @@ import { formatCurrency } from '@hardware-pos/shared';
 import {
   approveReturn,
   fetchReturnableItems,
-  previewReturn,
   type ReturnableItem,
   type ReturnPreview,
 } from '@/lib/returns';
 import { fetchVariants, type ProductVariant } from '@/lib/products/variants-api';
-import { completeExchange, type ExchangeResult } from '@/lib/exchanges';
+import { completeExchange, previewExchange, type ExchangeResult } from '@/lib/exchanges';
 
 /** A size swap is "not suitable": the shop sent what was ordered and it did not fit. */
 const EXCHANGE_REASON = 'NOT_SUITABLE' as const;
@@ -114,13 +123,19 @@ export default function NewExchangePage() {
   }, [session, chosen]);
 
   // ── preview the returning leg, for its value AND its approval verdict ─────
+  //
+  // `previewExchange`, NOT `previewReturn`. The returns route cannot know it
+  // is inside an exchange, so it evaluated approval without D109's waiver and
+  // this screen demanded a manager PIN on every exchange — including from an
+  // owner, who was being asked to approve themselves. The completion never
+  // wanted it. Same rule, both paths, decided on the server.
   React.useEffect(() => {
     if (!session || !chosen) {
       setPreview(null);
       return;
     }
     let cancelled = false;
-    previewReturn(session, {
+    previewExchange(session, {
       originalSaleId: saleId,
       items: [
         {

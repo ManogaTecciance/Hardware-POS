@@ -17,6 +17,8 @@ import { RequirePermissions } from '../../common/decorators/permissions.decorato
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
+import { PreviewReturnDto } from '../returns/dto/preview-return.dto';
+import type { ReturnPreview } from '../returns/returns.types';
 import { CompleteExchangeDto } from './dto/complete-exchange.dto';
 import { ExchangesService, type ExchangeResult } from './exchanges.service';
 
@@ -46,6 +48,29 @@ export class ExchangesController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<ExchangeResult> {
     return this.exchanges.complete(tenantId, user, dto, idempotencyKey ?? null);
+  }
+
+  /**
+   * Price the returning leg AS AN EXCHANGE (D109).
+   *
+   * Its own route rather than `POST /returns/preview` for two reasons. The
+   * flag that waives the `Full-sale return` trigger is then set by the server
+   * on both exchange paths instead of being asserted by a caller; and this
+   * route carries `@RequireModule(EXCHANGES)` and the exchange permission
+   * pair, which the returns route does not — so a tenant without the module
+   * cannot price an exchange it may not perform.
+   *
+   * Read-only, so 200 rather than 201.
+   */
+  @Post('preview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.RETURN_CREATE, Permission.SALE_CREATE)
+  preview(
+    @TenantId() tenantId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: PreviewReturnDto,
+  ): Promise<ReturnPreview> {
+    return this.exchanges.preview(tenantId, user, dto);
   }
 
   @Get()

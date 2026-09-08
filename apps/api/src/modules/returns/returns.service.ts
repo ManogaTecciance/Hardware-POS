@@ -161,7 +161,23 @@ export class ReturnsService {
 
   // ── preview ────────────────────────────────────────────────────────────────
 
-  async preview(tenantId: string, actor: AuthenticatedUser, dto: PreviewReturnDto): Promise<ReturnPreview> {
+  /**
+   * D109 — `options` are what the SERVER may set, never the client, exactly
+   * as on `complete` below. A `PreviewReturnDto` field would let any caller
+   * of `POST /returns/preview` assert it; only `ExchangesService` can reach
+   * this.
+   *
+   * A preview grants nothing on its own, so the flag could not open a bypass
+   * here — but it decides whether the operator is ASKED for a PIN, and a
+   * preview that disagrees with the completion is the defect this parameter
+   * exists to remove. Keeping both paths on one rule is the point.
+   */
+  async preview(
+    tenantId: string,
+    actor: AuthenticatedUser,
+    dto: PreviewReturnDto,
+    options: { withinExchange?: boolean } = {},
+  ): Promise<ReturnPreview> {
     const sale = await this.loadSale(tenantId, dto.originalSaleId);
     const settings = this.settingsService.getSettings(tenantId);
     const computed = this.computeReturn(sale, dto.items);
@@ -173,6 +189,7 @@ export class ReturnsService {
       refundMethod,
       settings.returns,
       actor.role,
+      options.withinExchange === true,
     );
 
     // The same provider the completion will use, resolved from the same evidence,

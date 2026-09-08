@@ -2,7 +2,9 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { PaymentMethod } from '@hardware-pos/database';
 
 import { AuthenticatedUser } from '../auth/auth.types';
+import { PreviewReturnDto } from '../returns/dto/preview-return.dto';
 import { ReturnsService } from '../returns/returns.service';
+import type { ReturnPreview } from '../returns/returns.types';
 import { SalesService } from '../sales/sales.service';
 import { CompleteExchangeDto } from './dto/complete-exchange.dto';
 import { ExchangesRepository, type ExchangeWithLegs } from './exchanges.repository';
@@ -74,6 +76,28 @@ export class ExchangesService {
    * replacement up as an ordinary sale. That is the recoverable state D107
    * chose, not an accident.
    */
+  /**
+   * The returning leg, priced and evaluated **as part of an exchange**.
+   *
+   * `7.5` previewed through `POST /returns/preview`, which cannot know it is
+   * inside an exchange, so it evaluated approval WITHOUT D109's waiver and
+   * every counter exchange demanded a manager PIN that the completion would
+   * not have asked for. The screen and the server disagreed, and the screen
+   * was the stricter of the two — which is the direction that goes unnoticed,
+   * because nothing fails. It just makes an owner type a PIN to approve
+   * themselves.
+   *
+   * The flag is set HERE, never accepted from the request — the same rule
+   * `complete` follows, and stated once more so the two cannot drift.
+   */
+  async preview(
+    tenantId: string,
+    actor: AuthenticatedUser,
+    dto: PreviewReturnDto,
+  ): Promise<ReturnPreview> {
+    return this.returns.preview(tenantId, actor, dto, { withinExchange: true });
+  }
+
   async complete(
     tenantId: string,
     actor: AuthenticatedUser,

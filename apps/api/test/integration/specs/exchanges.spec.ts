@@ -564,6 +564,108 @@ describe('the exchange note', () => {
 
 // ── D109 — the approval exception, and its edges ────────────────────────────
 
+/**
+ * Regression, 2026-09-08. The COMPLETION waived the trigger (proved below since
+ * `7.5`); the PREVIEW did not, because the screen priced the returning leg
+ * through `POST /returns/preview`, which cannot know it is inside an exchange.
+ *
+ * So the till demanded a manager PIN on every counter exchange — including from
+ * an owner, asked to approve themselves — for an approval the server would not
+ * have required. Nothing failed, which is why it survived a phase gate and a
+ * verification pass: **the screen was STRICTER than the server**, and that
+ * direction produces friction rather than errors.
+ *
+ * The tests below therefore assert the AGREEMENT, not just the waiver. A test
+ * that only checked `complete` succeeds — which is what existed — passes
+ * happily while the operator is being asked for a PIN they do not need.
+ */
+describe('D109 — the preview agrees with the completion', () => {
+  it('an exchange preview asks for NO approval on a full-sale return', async () => {
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    const preview = await app.exchangesService.preview(tenant.tenantId, owner, {
+      originalSaleId: sale.id,
+      items: [returnLine(sale)],
+    } as never);
+
+    expect(preview.requiresApproval).toBe(false);
+    expect(preview.approvalReasons).not.toContain('Full-sale return');
+  });
+
+  it('the SAME preview through the returns route still asks — the waiver is scoped', async () => {
+    // The negative control. Without it the assertion above would pass for an
+    // implementation that had simply switched the trigger off for everybody,
+    // which is a materially different and much worse change.
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    const preview = await app.returnsService.preview(tenant.tenantId, owner, {
+      originalSaleId: sale.id,
+      items: [returnLine(sale)],
+    } as never);
+
+    expect(preview.requiresApproval).toBe(true);
+    expect(preview.approvalReasons).toContain('Full-sale return');
+  });
+
+  it('an exchange preview STILL asks when a trigger D109 does not waive applies', async () => {
+    // D109 waives exactly one trigger. Damaged goods are the shop's problem
+    // whether or not the customer leaves with a replacement, so this must
+    // still stop at a manager.
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    const preview = await app.exchangesService.preview(tenant.tenantId, owner, {
+      originalSaleId: sale.id,
+      // The disposition has to move with the condition — damaged goods cannot
+      // go back to normal stock, which is a separate rule and not this one.
+      items: [
+        {
+          ...returnLine(sale),
+          itemCondition: 'DAMAGED' as const,
+          stockDisposition: 'DAMAGED_STOCK' as const,
+        },
+      ],
+    } as never);
+
+    expect(preview.requiresApproval).toBe(true);
+    expect(preview.approvalReasons).not.toContain('Full-sale return');
+  });
+
+  it('THE INVARIANT — what the preview promises, the completion honours', async () => {
+    // The assertion that would have caught this the day it shipped: the two
+    // paths are asked the same question and must give the same answer. A
+    // preview saying "no approval needed" is a promise the completion keeps.
+    await seedVariants();
+    const sale = await soldOneMedium();
+
+    const preview = await app.exchangesService.preview(tenant.tenantId, owner, {
+      originalSaleId: sale.id,
+      items: [returnLine(sale)],
+    } as never);
+    expect(preview.requiresApproval).toBe(false);
+
+    // ...so completing with NO approval token must succeed.
+    const exchange = await app.exchangesService.complete(
+      tenant.tenantId,
+      owner,
+      {
+        originalSaleId: sale.id,
+        branchId: tenant.branchId,
+        registerId: tenant.registerId,
+        returnItems: [returnLine(sale)],
+        replacementItems: [
+          { productId: tenant.productAId, productVariantId: largeId, quantity: 1 },
+        ],
+        payments: [{ method: 'CASH' as const, amount: 1000 }],
+      },
+      null,
+    );
+    expect(exchange.complete).toBe(true);
+  });
+});
+
 describe('D109 — a full-sale return inside an exchange needs no manager', () => {
   it('completes with NO approval token, where a standalone return could not', async () => {
     await seedVariants();
