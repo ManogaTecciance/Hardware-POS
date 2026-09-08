@@ -50,7 +50,36 @@ export function visibleSteps(attributeSchema: readonly AttributeField[]): StepKe
 export interface VariationDraft {
   key: string;
   name: string;
-  options: Array<{ key: string; name: string }>;
+  /**
+   * D104 — the attribute-library definition this dimension was chosen from.
+   *
+   * Three states, and they are all different:
+   *  - `undefined` — never mapped by this wizard. The payload OMITS the key,
+   *    which the API reads as “leave whatever is stored alone”. That is what
+   *    stops an edit through a screen that does not know about the library
+   *    from silently unmapping a product somebody mapped by hand.
+   *  - `null` — explicitly unmapped.
+   *  - an id — mapped.
+   */
+  attributeDefinitionId?: string | null;
+  options: Array<{ key: string; name: string; attributeOptionId?: string | null }>;
+}
+
+/**
+ * The library attributes offered for one category (D104a).
+ *
+ * A definition bound to this category, **plus every unbound one** — the
+ * schema is explicit that `categoryId` is a binding HINT and that “an unbound
+ * definition (`Colour`) applies everywhere”. Filtering to the exact category
+ * would hide the shared scales the library exists to share.
+ *
+ * A pure function so the reconciliation below and the step component agree
+ * on one answer, and so it can be tested without rendering anything.
+ */
+export function attributesForCategory<
+  T extends { categoryId: string | null },
+>(definitions: readonly T[], categoryId: string): readonly T[] {
+  return definitions.filter((d) => d.categoryId === null || d.categoryId === categoryId);
 }
 
 /**
@@ -280,7 +309,14 @@ export function hydrateFromProduct(
     // an option without renaming the dimension.
     key: d.id,
     name: d.name,
-    options: d.options.map((o) => ({ key: o.id, name: o.name })),
+    // Echoed back exactly as stored, so re-saving an untouched product is a
+    // no-op on the mapping rather than a silent unmap.
+    attributeDefinitionId: d.attributeDefinitionId,
+    options: d.options.map((o) => ({
+      key: o.id,
+      name: o.name,
+      attributeOptionId: o.attributeOptionId,
+    })),
   }));
 
   const variantDrafts: VariantDraft[] = variants.map((v) => ({
@@ -714,6 +750,14 @@ export function buildCreateInput(
 }
 
 /** Build the `PUT /products/:id/variations` body. */
+/**
+ * The `PUT /products/:id/variations` body.
+ *
+ * The library ids are spread in only when they are DEFINED. The API draws a
+ * deliberate distinction — `null` clears a mapping, an omitted key leaves it
+ * as it is — and collapsing the two with `?? null` would unmap every product
+ * saved through a path that had not picked from the library.
+ */
 export function buildVariationsPayload(state: WizardState) {
   return {
     dimensions: state.variations
@@ -721,9 +765,18 @@ export function buildVariationsPayload(state: WizardState) {
       .map((d, di) => ({
         name: d.name.trim(),
         position: di,
+        ...(d.attributeDefinitionId !== undefined
+          ? { attributeDefinitionId: d.attributeDefinitionId }
+          : {}),
         options: d.options
           .filter((o) => o.name.trim())
-          .map((o, oi) => ({ name: o.name.trim(), position: oi })),
+          .map((o, oi) => ({
+            name: o.name.trim(),
+            position: oi,
+            ...(o.attributeOptionId !== undefined
+              ? { attributeOptionId: o.attributeOptionId }
+              : {}),
+          })),
       })),
   };
 }

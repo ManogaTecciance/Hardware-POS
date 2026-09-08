@@ -5,11 +5,15 @@ import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
+import type { AttributeDefinition } from '@/lib/products/attribute-library-api';
 
 import {
   COMBINATION_CONFIRM_THRESHOLD,
   MAX_COMBINATIONS,
+  attributesForCategory,
   enumerateCombinations,
   makeKey,
   type VariantDraft,
@@ -33,10 +37,23 @@ import {
 interface Props {
   state: WizardState;
   errors: Record<string, string>;
+  /**
+   * D104 — the tenant's attribute library, fetched by the shell.
+   *
+   * Defaults to empty, and empty means the free-text fields this step has
+   * always had. That is what keeps a tenant with no library — every hardware
+   * and restaurant workspace today — working exactly as before.
+   */
+  attributeLibrary?: readonly AttributeDefinition[];
   onChange: (patch: Partial<WizardState>) => void;
 }
 
-export function StepVariations({ state, errors, onChange }: Props) {
+export function StepVariations({
+  state,
+  errors,
+  attributeLibrary = [],
+  onChange,
+}: Props) {
   // Freshly-added option rows focus their Name input so the operator can type
   // straight in — the ref map is keyed by option key so re-renders don't lose
   // it (unlike an array index).
@@ -111,6 +128,98 @@ export function StepVariations({ state, errors, onChange }: Props) {
   const overConfirm = combinations.length > COMBINATION_CONFIRM_THRESHOLD;
   const overMax = combinations.length > MAX_COMBINATIONS;
   const matrixHidden = overConfirm && !overMax && !anyEnabled && !showMatrixConfirm;
+
+  /*
+   * The attributes this product may use: the ones bound to its category, plus
+   * every unbound scale (D104a — `categoryId` is a binding hint, and an unbound
+   * `Colour` applies everywhere).
+   *
+   * Recomputed from `state.categoryId`, so changing the category in Step 1
+   * changes what Step 2 offers without anything having to be told.
+   */
+  const available = React.useMemo(
+    () => attributesForCategory(attributeLibrary, state.categoryId),
+    [attributeLibrary, state.categoryId],
+  );
+  const libraryInUse = available.length > 0;
+  const byId = React.useMemo(
+    () => new Map(available.map((a) => [a.id, a] as const)),
+    [available],
+  );
+
+  /*
+   * Edge case: the category changed after an attribute was already chosen.
+   *
+   * A dimension mapped to a definition the new category does not offer is
+   * unmapped — `null`, not `undefined`, because the operator's own action
+   * caused it and the API must be told to clear the stored mapping rather than
+   * leave it. The dimension itself and its typed options are LEFT ALONE: they
+   * are the operator's work, and silently deleting rows because a dropdown
+   * moved is worse than leaving a dimension that needs re-picking.
+   */
+  React.useEffect(() => {
+    if (!state.hasVariations || !libraryInUse) return;
+    const stale = state.variations.filter(
+      (d) => d.attributeDefinitionId && !byId.has(d.attributeDefinitionId),
+    );
+    if (stale.length === 0) return;
+    onChange({
+      variations: state.variations.map((d) =>
+        d.attributeDefinitionId && !byId.has(d.attributeDefinitionId)
+          ? { ...d, attributeDefinitionId: null }
+          : d,
+      ),
+    });
+    // `onChange` is a stable callback from the shell.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [byId, libraryInUse, state.hasVariations, state.variations]);
+
+  /** Adopt a library attribute: its name, its id, and none of its options yet. */
+  const pickAttribute = (dimKey: string, definitionId: string) => {
+    const def = byId.get(definitionId);
+    onChange({
+      variations: state.variations.map((d) =>
+        d.key === dimKey
+          ? def
+            ? // Options start EMPTY and are ticked deliberately. A product that
+              // adopted every option of a scale the moment it was chosen would
+              // generate the full cross product before the operator had said
+              // which sizes they actually stock.
+              { ...d, name: def.name, attributeDefinitionId: def.id, options: [] }
+            : { ...d, name: '', attributeDefinitionId: null, options: [] }
+          : d,
+      ),
+    });
+  };
+
+  /** Tick or untick one library option on a mapped dimension. */
+  const toggleLibraryOption = (dimKey: string, optionId: string, on: boolean) => {
+    onChange({
+      variations: state.variations.map((d) => {
+        if (d.key !== dimKey) return d;
+        const def = d.attributeDefinitionId ? byId.get(d.attributeDefinitionId) : undefined;
+        const source = def?.options.find((o) => o.id === optionId);
+        if (!source) return d;
+        if (!on) {
+          return { ...d, options: d.options.filter((o) => o.attributeOptionId !== optionId) };
+        }
+        if (d.options.some((o) => o.attributeOptionId === optionId)) return d;
+        // Keep the library's own order, so the picker reads S, M, L rather than
+        // the order somebody happened to tick them in.
+        const next = [
+          ...d.options,
+          { key: makeKey('opt'), name: source.name, attributeOptionId: source.id },
+        ];
+        const order = new Map((def?.options ?? []).map((o, i) => [o.id, i] as const));
+        next.sort(
+          (a, b) =>
+            (order.get(a.attributeOptionId ?? '') ?? 0) -
+            (order.get(b.attributeOptionId ?? '') ?? 0),
+        );
+        return { ...d, options: next };
+      }),
+    });
+  };
 
   const addVariation = () => {
     const dim: VariationDraft = {
@@ -223,17 +332,50 @@ export function StepVariations({ state, errors, onChange }: Props) {
                       >
                         Variation
                       </label>
-                      <Input
-                        id={`dim-name-${dim.key}`}
-                        ref={(el) => {
-                          dimNameRefs.current.set(dim.key, el);
-                        }}
-                        value={dim.name}
-                        onChange={(e) => updateVariation(dim.key, { name: e.target.value })}
-                        placeholder={di === 0 ? 'Size' : 'Colour'}
-                        maxLength={40}
-                        aria-invalid={!!nameError}
-                      />
+                      {libraryInUse ? (
+                        /*
+                          D104 — the scales an operator already defined, not a box
+                          asking them to retype one. Names come from the library, so
+                          nothing here is hard-coded and a new attribute appears
+                          without a code change.
+
+                          Already-chosen definitions are filtered out: one product
+                          cannot have two dimensions of the same scale, and the
+                          server's `@@unique([productId, name])` would refuse it
+                          anyway — better not to offer it.
+                        */
+                        <Select
+                          id={`dim-name-${dim.key}`}
+                          value={dim.attributeDefinitionId ?? ''}
+                          onChange={(e) => pickAttribute(dim.key, e.target.value)}
+                          aria-invalid={!!nameError}
+                        >
+                          <option value="">Choose an attribute…</option>
+                          {available
+                            .filter(
+                              (a) =>
+                                a.id === dim.attributeDefinitionId ||
+                                !state.variations.some((o) => o.attributeDefinitionId === a.id),
+                            )
+                            .map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name}
+                              </option>
+                            ))}
+                        </Select>
+                      ) : (
+                        <Input
+                          id={`dim-name-${dim.key}`}
+                          ref={(el) => {
+                            dimNameRefs.current.set(dim.key, el);
+                          }}
+                          value={dim.name}
+                          onChange={(e) => updateVariation(dim.key, { name: e.target.value })}
+                          placeholder={di === 0 ? 'Size' : 'Colour'}
+                          maxLength={40}
+                          aria-invalid={!!nameError}
+                        />
+                      )}
                       {nameError ? (
                         <p className="text-xs text-danger" role="alert">
                           {nameError}
@@ -245,6 +387,16 @@ export function StepVariations({ state, errors, onChange }: Props) {
 
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-muted-foreground">Options</p>
+                    {libraryInUse ? (
+                      <LibraryOptions
+                        dim={dim}
+                        definition={
+                          dim.attributeDefinitionId ? byId.get(dim.attributeDefinitionId) : undefined
+                        }
+                        onToggle={(optionId, on) => toggleLibraryOption(dim.key, optionId, on)}
+                      />
+                    ) : (
+                    <>
                     <ul className="space-y-2" role="list">
                       {dim.options.map((opt) => (
                         <li
@@ -290,6 +442,8 @@ export function StepVariations({ state, errors, onChange }: Props) {
                     >
                       Add option
                     </Button>
+                    </>
+                    )}
                   </div>
                 </div>
               );
@@ -440,6 +594,76 @@ export function StepVariations({ state, errors, onChange }: Props) {
 }
 
 // ── Overflow menu for a variation card ───────────────────────────────────────
+
+/**
+ * The options of one library attribute, ticked on or off.
+ *
+ * Ticking rather than auto-adopting: a shop that stocks a scale's full range is
+ * the exception, and adopting everything the moment an attribute is chosen
+ * would build the entire cross product before the operator said what they
+ * actually carry.
+ *
+ * The two empty states say different things on purpose. "No attribute chosen"
+ * is a step not yet taken; "this attribute has no options" is a dead end that
+ * can only be fixed in the Attribute library, so it says where to go — the
+ * alternative is an operator ticking nothing and being refused by a validator
+ * that cannot explain why.
+ */
+function LibraryOptions({
+  dim,
+  definition,
+  onToggle,
+}: {
+  dim: VariationDraft;
+  definition: AttributeDefinition | undefined;
+  onToggle: (optionId: string, on: boolean) => void;
+}) {
+  if (!definition) {
+    return (
+      <p className="text-xs text-muted-foreground">Choose an attribute to see its options.</p>
+    );
+  }
+  if (definition.options.length === 0) {
+    return (
+      <p className="text-xs text-warning">
+        “{definition.name}” has no options yet. Add them under Products → Attributes before
+        using it on a product.
+      </p>
+    );
+  }
+  const chosen = new Set(dim.options.map((o) => o.attributeOptionId).filter(Boolean));
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label={`${definition.name} options`}>
+      {definition.options.map((opt) => {
+        const on = chosen.has(opt.id);
+        return (
+          <label
+            key={opt.id}
+            className={cn(
+              'flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors',
+              on
+                ? 'border-primary bg-primary/10 text-foreground'
+                : 'border-border text-muted-foreground hover:border-primary',
+            )}
+          >
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-current"
+              checked={on}
+              onChange={(e) => onToggle(opt.id, e.target.checked)}
+            />
+            {opt.name}
+            {/* The SKU segment this option contributes (`5.3`), so an operator
+                can see what the generated code will read like. */}
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              {opt.code}
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
 
 function DimensionMenu({ onDelete, label }: { onDelete: () => void; label: string }) {
   const [open, setOpen] = React.useState(false);

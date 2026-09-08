@@ -20,12 +20,20 @@ export interface ProductVariationOption {
   id: string;
   name: string;
   position: number;
+  /**
+   * D104 — the tenant library option this one was chosen from, or `null`
+   * for a dimension typed by hand. The server has always returned it; it
+   * was simply not typed here, so the wizard could not round-trip it.
+   */
+  attributeOptionId: string | null;
 }
 
 export interface ProductVariationDimension {
   id: string;
   name: string;
   position: number;
+  /** D104 — same contract as `attributeOptionId` above. */
+  attributeDefinitionId: string | null;
   options: ProductVariationOption[];
 }
 
