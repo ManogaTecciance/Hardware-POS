@@ -255,3 +255,50 @@ describe('D140 — the Preview tab shows both documents', () => {
     expect(screen.getByLabelText('Left inset (mm)')).toBeTruthy();
   });
 });
+
+describe('D141 — the bill preview shows goods the workspace actually sells', () => {
+  it('retail sees a shop basket, not a restaurant menu', async () => {
+    await open('Preview');
+    const bill = (screen.getByTitle('Bill preview') as HTMLIFrameElement).srcdoc;
+
+    // POSITIVE — clothing AND groceries, because RETAIL is one business type
+    // covering both and a sample showing one would look wrong to the other.
+    expect(bill).toContain('Cotton Shirt');
+    expect(bill).toContain('Basmati Rice');
+
+    // NEGATIVE — the restaurant menu that was being shown here. This is the
+    // reported bug, stated as an assertion.
+    for (const dish of ['Chicken Fried Rice', 'Grilled Seer', 'Vegetable Kottu', 'Black Coffee']) {
+      expect(bill, dish).not.toContain(dish);
+    }
+  });
+
+  it('and no service charge or table, which a shop does not have', async () => {
+    await open('Preview');
+    const bill = (screen.getByTitle('Bill preview') as HTMLIFrameElement).srcdoc;
+
+    // Previewing a service-charge row to a shop is previewing a line its bill
+    // will never print; a table number on a counter sale is meaningless.
+    expect(bill).not.toContain('Service charge');
+    expect(bill).not.toContain('M1/04');
+    expect(bill).not.toContain('Served By');
+    // …and the positive control: the rows a retail bill DOES have are there,
+    // so this cannot pass because the preview rendered nothing.
+    expect(bill).toContain('Discount');
+    expect(bill).toContain('Bill Amount');
+  });
+
+  it('a restaurant still sees its own menu and its service charge', async () => {
+    /*
+     * The paired half, and the one that proves this change stayed on retail's
+     * side of the line. Food service read this sample long before retail did.
+     */
+    businessType = 'RESTAURANT';
+    await open('Preview');
+    const bill = (screen.getByTitle('Bill preview') as HTMLIFrameElement).srcdoc;
+
+    expect(bill).toContain('Chicken Fried Rice');
+    expect(bill).toContain('Service charge');
+    expect(bill).not.toContain('Cotton Shirt');
+  });
+});

@@ -478,6 +478,7 @@ export default function SettingsPage() {
           set={set}
           showCalibration={view.showBillCalibration}
           timezone={timezone ?? DEFAULT_TIME_ZONE}
+          sampleKind={view.billSampleKind ?? 'FOOD_SERVICE'}
         />
       ) : view.previewKind === 'THERMAL_BILL_AND_A4' ? (
         /*
@@ -491,6 +492,7 @@ export default function SettingsPage() {
             set={set}
             showCalibration={view.showBillCalibration}
             timezone={timezone ?? DEFAULT_TIME_ZONE}
+            sampleKind={view.billSampleKind ?? 'FOOD_SERVICE'}
           />
           <PreviewTab docs={docs} showA4SaleDocument={view.showA4SaleDocument} />
         </div>

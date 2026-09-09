@@ -8063,6 +8063,88 @@ not what was asked for; it is recorded here rather than fixed in passing.
 
 ---
 
+## D141 — a preview shows the operator's own trade, and their own name
+
+**Status:** accepted and **built**, 2026-09-09. Preview/sample data only. No
+schema change, no migration, no change to any real document.
+
+### Two defects, both reported from a screenshot
+
+A retail owner opened `Settings → Preview` and saw:
+
+1. a **thermal bill full of restaurant food** — Chicken Fried Rice, Grilled
+   Seer, Vegetable Kottu, Black Coffee — with a **service charge** row and a
+   **table number**;
+2. an **A4 quotation headed "Hardware POS"**, on a workspace whose business
+   name has never been set.
+
+Neither is cosmetic. The preview is the one place an operator checks whether
+their logo is too wide, whether the note reads right, whether a long product
+name wraps — and a bill full of somebody else's trade answers none of it. It
+also reads as a bug, because it is one.
+
+### Why the bill was full of food
+
+`buildSampleBill` held one hard-coded catalogue, and it was a menu. That was
+correct while food service was the only domain that previewed a thermal bill.
+**D140 gave retail a thermal bill the day before**, and this list stopped being
+read only by restaurants.
+
+The service charge and the table are the same defect wearing different clothes:
+a shop charges no service charge, so previewing that row shows a line its bill
+will never print, and a table number on a counter sale is meaningless.
+
+**The fix.** Two catalogues, selected by a new `billSampleKind` on the
+presentation — `'FOOD_SERVICE' | 'RETAIL' | null`, resolved where every other
+document decision is. The Settings component reads a flag and names no business
+type, which is what the D96 contract test requires of it.
+
+The retail basket is **groceries and clothing together**, because `RETAIL` is
+one business type covering both (Q12 resolved not to split it) and a sample
+showing one would look wrong to half the workspaces that see it. It carries a
+size variant and a fractional weight deliberately: those are the two rows a
+retail bill has that a restaurant's does not.
+
+### Why the quotation said "Hardware POS"
+
+`buildSampleDocument` fell back to the literal `'Hardware POS'` whenever
+`documents.companyName` was unset — which is **every workspace that has not been
+through Settings yet**. Checked against the database before believing it: every
+retail tenant has `companyName: null`, so what the owner saw was the fallback,
+not their data. The Settings field's placeholder was the same literal, which is
+why it looked configured.
+
+**The fix.** The preview now uses the **tenant's own registered name**. Swapping
+one hard-coded vertical for another only moves the problem to whoever is not
+that vertical; the tenant's name is the one answer right for all of them, and it
+is what the operator would have typed anyway. Where even that is missing the
+fallback is `'Your Business'` — neutral, because a missing name is not a reason
+to claim a trade.
+
+`previewHtml` became **async** to do it. That adds exactly one indexed lookup to
+a Settings-screen render, and its spec's stub comment — which said the preview
+path "never touches the database" — was corrected rather than left to mislead
+the next reader.
+
+### What was deliberately NOT changed
+
+**The A4 sample line items are still hardware** — Portland Cement, TMT Steel
+Bar, PVC Pipe. The same defect class as the bill's menu, and visible on a retail
+quotation preview today.
+
+It is left alone because fixing it properly means making `SAMPLE_ITEMS`
+domain-aware, and the only home for a per-vertical catalogue that does not
+re-introduce a business-type if-chain is the domain registry itself (D56) —
+which would put preview illustration into the shared descriptors that every app
+reads. That is a larger decision than a sample list deserves, and it was not
+what was asked for. Recorded here so it is chosen deliberately rather than
+found again.
+
+It affects hardware, general and retail; food service never renders the A4
+preview at all (D96).
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

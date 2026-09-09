@@ -56,6 +56,16 @@ export type DocumentSurfaceKind =
 /** …plus the state where we do not yet know. */
 export type DocumentSurface = DocumentSurfaceKind | 'UNRESOLVED';
 
+/**
+ * D141 — whose goods the sample bill is filled with.
+ *
+ * Coarse on purpose. It names the kind of thing sold, not the business type:
+ * a grocer and a clothing shop both want "a shop's basket" here, and the
+ * preview is illustration, not behaviour. Anything finer would be a taxonomy
+ * somebody has to maintain for a picture.
+ */
+export type BillSampleKind = 'FOOD_SERVICE' | 'RETAIL';
+
 /** How the Preview tab renders. */
 export type DocumentPreviewKind =
   | 'SERVER_A4'
@@ -103,6 +113,18 @@ export interface DocumentSettingsPresentation {
    * have, so it would read as a contradiction of layoutNote sitting there.
    */
   showBillCalibration: boolean;
+  /**
+   * D141 — which sample the bill preview fills itself with.
+   *
+   * The sample is not decoration. An operator checks the preview to see
+   * whether their logo is too wide, whether the note reads right, whether a
+   * long product name wraps — and a bill full of somebody else's trade
+   * answers none of that. A clothing shop previewing "Grilled Seer" beside a
+   * service charge is being shown a restaurant's bill with their name on it.
+   *
+   * `null` where no bill is previewed at all.
+   */
+  billSampleKind: BillSampleKind | null;
 
   // ── Tabs that only apply to a food-service workspace ───────────────────
   /** Charges and Hours edit `RestaurantBranchConfig`, which retail has no row in. */
@@ -148,6 +170,8 @@ const A4_DOCUMENTS: DocumentSettingsPresentation = {
   previewKind: 'SERVER_A4',
   // An A4 sheet's geometry is the driver's; there is no roll to calibrate.
   showBillCalibration: false,
+  // No bill is previewed here at all.
+  billSampleKind: null,
   showRestaurantOperationsTabs: false,
   // Overlaid by the resolver -- see the interface.
   showBusinessDetailsTab: false,
@@ -182,6 +206,7 @@ const THERMAL_BILL: DocumentSettingsPresentation = {
     'A bill prints on a continuous roll, so there is no page size, orientation or margin to set. The roll’s own width and edge insets are measured on the Preview tab. What the bill contains is fixed; what it says comes from Business and Branding.',
   previewKind: 'THERMAL_BILL',
   showBillCalibration: true,
+  billSampleKind: 'FOOD_SERVICE',
   showRestaurantOperationsTabs: true,
   // Overlaid by the resolver -- see the interface.
   showBusinessDetailsTab: false,
@@ -226,6 +251,7 @@ const THERMAL_BILL_AND_A4_DOCUMENTS: DocumentSettingsPresentation = {
     'The settings above apply to your A4 documents. The printed bill has no page size or margins — it runs on a continuous roll, whose width and edge insets are measured on the Preview tab, and what it contains is fixed.',
   previewKind: 'THERMAL_BILL_AND_A4',
   showBillCalibration: true,
+  billSampleKind: 'RETAIL',
   showRestaurantOperationsTabs: false,
   // Overlaid by the resolver -- see the interface.
   showBusinessDetailsTab: false,
@@ -258,6 +284,7 @@ const UNRESOLVED: DocumentSettingsPresentation = {
   layoutNote: null,
   previewKind: 'NONE',
   showBillCalibration: false,
+  billSampleKind: null,
   showRestaurantOperationsTabs: false,
   // Overlaid by the resolver -- see the interface.
   showBusinessDetailsTab: false,

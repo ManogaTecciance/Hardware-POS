@@ -274,7 +274,8 @@ export class DocumentsService {
       where: { id: tenantId },
       select: { name: true },
     });
-    return tenant?.name ?? 'Hardware POS';
+    // D141 — see `seller`: a missing name is not a reason to claim a trade.
+    return tenant?.name ?? 'Your Business';
   }
 
   // ── Sale / bill A4 ───────────────────────────────────────────
@@ -690,13 +691,29 @@ export class DocumentsService {
    * effect of template settings before/without a real transaction. `overrides`
    * lets the Settings UI preview UNSAVED document settings live.
    */
-  previewHtml(
+  /**
+   * D141 — async so the letterhead can be the tenant's OWN name.
+   *
+   * The preview used to fall back to the literal 'Hardware POS' when a
+   * workspace had not filled its business name in, which is every workspace
+   * that has not been through Settings yet. A retail owner opening Preview
+   * saw a quotation from a hardware shop and reasonably read it as a bug.
+   *
+   * Swapping one hard-coded vertical for another would only move the problem
+   * to whoever is not that vertical. The tenant's registered name is the one
+   * answer that is right for all of them, and it is what the operator would
+   * have typed anyway.
+   */
+  async previewHtml(
     tenantId: string,
     type: PreviewDocumentType,
     overrides?: Partial<DocumentSettings>,
     lineCount = 6,
-  ): string {
-    return renderA4Document(this.buildSampleDocument(tenantId, type, overrides, lineCount));
+  ): Promise<string> {
+    const fallbackName = await this.tenantName(tenantId);
+    return renderA4Document(
+      this.buildSampleDocument(tenantId, type, overrides, lineCount, fallbackName),
+    );
   }
 
   async previewPdf(
@@ -706,7 +723,7 @@ export class DocumentsService {
     lineCount = 6,
   ): Promise<Buffer | null> {
     const docs = { ...this.settings.getSettings(tenantId).documents, ...overrides };
-    return this.pdf.htmlToPdf(this.previewHtml(tenantId, type, overrides, lineCount), {
+    return this.pdf.htmlToPdf(await this.previewHtml(tenantId, type, overrides, lineCount), {
       showPageNumbers: docs.showPageNumbers,
       footerLabel: `${PREVIEW_TITLES[type]} SAMPLE`,
     });
@@ -717,6 +734,12 @@ export class DocumentsService {
     type: PreviewDocumentType,
     overrides?: Partial<DocumentSettings>,
     lineCount = 6,
+    /**
+     * D141 — the name to show when the workspace has set none. Passed in
+     * rather than looked up here, because this builder is synchronous and
+     * every one of its other inputs is already resolved by its caller.
+     */
+    fallbackName = 'Your Business',
   ): A4Document {
     const docs: DocumentSettings = { ...this.settings.getSettings(tenantId).documents, ...overrides };
     const catalog = SAMPLE_ITEMS;
@@ -770,7 +793,13 @@ export class DocumentsService {
           ];
 
     return {
-      seller: this.seller(docs, 'Hardware POS', 'Main Branch', 'No. 42, Galle Road, Colombo 03', '+94 11 234 5678'),
+      seller: this.seller(
+        docs,
+        fallbackName,
+        'Main Branch',
+        'No. 42, Galle Road, Colombo 03',
+        '+94 11 234 5678',
+      ),
       title: PREVIEW_TITLES[type],
       number: PREVIEW_NUMBERS[type],
       statusBadge: type === 'quotation' ? 'Sent' : type === 'return' ? 'Refunded' : 'Paid',
@@ -809,7 +838,10 @@ export class DocumentsService {
     branchPhone: string | null,
   ): A4Seller {
     return {
-      name: docs.companyName ?? fallbackName ?? 'Hardware POS',
+      // D141 — neutral, not a vertical. This is only reached when a
+      // workspace has no business name AND no tenant name, so naming any one
+      // trade here puts somebody else's shop on the operator's letterhead.
+      name: docs.companyName ?? fallbackName ?? 'Your Business',
       addressLine: docs.addressLine ?? branchAddress ?? (branchName ? `Branch: ${branchName}` : null),
       phone: docs.phone ?? branchPhone ?? null,
       email: docs.email ?? null,
