@@ -520,8 +520,34 @@ function TicketCard({
   // Completed tickets stop ageing: the colour answers "how long has this
   // dish been waiting?", which a done dish no longer is.
   const urgency: Urgency = done ? 'fresh' : urgencyOf(ticket.createdAt, new Date());
+  /*
+   * The station and the round both left this line for the ribbon, leaving the
+   * order and the waiter. Joining the survivors beats prefixing each one with
+   * a separator: the prefix form emits a leading " · " the moment the part
+   * that used to be first is gone, which is now every ticket without an order
+   * number.
+   */
+  const provenance = [ticket.orderNumber, ticket.waiterName].filter(Boolean).join(' · ');
   return (
-    <Card className={done ? 'opacity-70' : URGENCY_CARD_CLASS[urgency]}>
+    <Card
+      className={`overflow-hidden ${done ? 'opacity-70' : (URGENCY_CARD_CLASS[urgency] ?? '')}`}
+    >
+      {/* D68 put the station in the subtitle, where it was the first grey item
+          in a truncated four-part run. A station-split order puts the SAME
+          table on two cards and the station is the only thing telling a cook
+          which of them is theirs, so it runs as a ribbon across the top: the
+          one position that survives a narrow column, reads before the card is
+          fully in view, and never competes with the place for the eye.
+          `overflow-hidden` on the card is what lets the ribbon sit flush and
+          take the rounded corners from its parent. */}
+      <div className="flex items-center justify-between gap-2 bg-brand-50 px-4 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700">
+        {/* The station can be long ("Main Kitchen") and the round never is, so
+            the station takes the truncation and the round is pinned. */}
+        <span className="truncate">{ticket.stationName}</span>
+        {/* Absent on a legacy ticket that predates rounds, and the ribbon must
+            not then render a bare "Round". */}
+        {ticket.roundNumber ? <span className="shrink-0">Round {ticket.roundNumber}</span> : null}
+      </div>
       <CardContent className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -530,12 +556,7 @@ function TicketCard({
             <p className="truncate text-xl font-semibold">
               {ticket.placeLabel ?? 'No table'}
             </p>
-            <p className="truncate text-sm text-muted-foreground">
-              {ticket.stationName}
-              {ticket.orderNumber ? ` · ${ticket.orderNumber}` : ''}
-              {ticket.roundNumber ? ` · round ${ticket.roundNumber}` : ''}
-              {ticket.waiterName ? ` · ${ticket.waiterName}` : ''}
-            </p>
+            <p className="mt-1.5 truncate text-sm text-muted-foreground">{provenance}</p>
           </div>
           {done ? (
             <StatusBadge
