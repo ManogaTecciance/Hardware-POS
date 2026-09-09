@@ -40,7 +40,8 @@ import {
 import { type ManagedProduct } from '@/lib/products-api';
 import { describeTimeWindow } from '@/lib/products/promotion-schedule';
 import { useEffectiveProfile } from '@/lib/platform-profile';
-import { cn } from '@/lib/utils';
+import { getActiveCurrency } from '@/lib/tenant-money';
+import { cn, formatMoney } from '@/lib/utils';
 
 /**
  * Promotion editor (D45 — Promotions admin).
@@ -108,6 +109,17 @@ interface EditorState {
    * operator's cursor. It never reaches the payload: Free simply writes 100.
    */
   rewardKind: 'FREE' | 'PERCENT';
+  /**
+   * FIXED_AMOUNT_DISCOUNT only — what the amount comes off.
+   *
+   * D126 makes this an emergent property of the item list: empty means the
+   * whole cart. That is a real choice the operator is making, and expressing
+   * it as the ABSENCE of rows meant they had to read a paragraph to discover
+   * that an empty list was a setting — the same shape D140 took out of BOGO.
+   * Held explicitly so the fields can follow it; the wire is unchanged, since
+   * CART simply sends no items.
+   */
+  amountScope: 'CART' | 'PRODUCTS';
   items: Array<{ productId: string; role: PromotionItem['role']; quantity: string; name?: string }>;
 }
 
@@ -138,6 +150,7 @@ function emptyState(type: PromotionType = 'BUNDLE_FIXED_PRICE'): EditorState {
     channelScope: [],
     stackable: false,
     rewardKind: 'FREE',
+    amountScope: 'CART',
     items: [],
   };
 }
@@ -164,6 +177,9 @@ function fromPromotion(p: Promotion): EditorState {
     // 100 IS free, so a saved reward at 100 reopens on the Free option rather
     // than as "percentage off: 100", which is the same offer said worse.
     rewardKind: p.percentageOff === 100 ? 'FREE' : 'PERCENT',
+    // The stored shape says which it was: no items IS cart-level (D126).
+    amountScope:
+      p.type === 'FIXED_AMOUNT_DISCOUNT' && p.items.length === 0 ? 'CART' : 'PRODUCTS',
     items: p.items.map((i) => ({
       productId: i.productId,
       role: i.role,
@@ -175,6 +191,163 @@ function fromPromotion(p: Promotion): EditorState {
       name: i.productName ?? undefined,
     })),
   };
+}
+
+/**
+ * The numeric rules, mirroring the DTOs rather than inventing limits.
+ *
+ * `type="number" min={0}` does NOT stop anyone typing `-10`: the attribute
+ * marks the field `:invalid` and constrains the steppers, and with no native
+ * form submit nothing was consulting it. So every one of these went to the
+ * server and came back a 400 written for an API client — "FIXED_AMOUNT_DISCOUNT
+ * requires a positive amountOff" — after a round trip, on a form the operator
+ * had already left.
+ *
+ * The server still refuses all of it; this is about saying so first, in the
+ * words of the field the operator is looking at. Limits come from
+ * `dto/promotion.dto.ts` and `promotions.service.validateTypeShape`:
+ * money is `@Min(0.01)` / `@Min(0)` at two decimal places, a percentage is
+ * `(0, 100]`, and the BOGO quantities are `@IsInt @Min(1)`.
+ */
+type NumericRule = { label: string; value: string; min: number; max?: number; integer?: boolean };
+
+function numericProblem({ label, value, min, max, integer }: NumericRule): string | null {
+  const trimmed = value.trim();
+  if (trimmed === '') return null; // "required" is a separate question, asked separately.
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return `${label} must be a number.`;
+  if (integer && !Number.isInteger(n)) return `${label} must be a whole number.`;
+  if (n < min) {
+    return min === 0
+      ? `${label} cannot be negative.`
+      : `${label} must be more than zero.`;
+  }
+  if (max !== undefined && n > max) return `${label} cannot be more than ${max}.`;
+  /*
+   * Money is `Decimal(12,2)` and the DTO refuses a third place outright, so a
+   * silently-rounded figure never reaches the column. Asked as "is this a
+   * whole number of cents", with a tolerance because 10.99 × 100 is
+   * 1098.9999999999998 in binary floating point and would otherwise fail.
+   */
+  if (!integer && Math.abs(n * 100 - Math.round(n * 100)) > 1e-9) {
+    return `${label} cannot have more than two decimal places.`;
+  }
+  return null;
+}
+
+/**
+ * Every problem with the form, by field.
+ *
+ * A map rather than the first message, because a form with three bad fields
+ * should not take three save attempts to discover them — and because a message
+ * belongs under the field it is about, not in a banner at the foot of a form
+ * long enough to have scrolled past it.
+ *
+ * Pure and taking the whole state, like the wizard's `validateStep`: the same
+ * function answers "may this save?" and "what should each field say?", so the
+ * two cannot disagree.
+ */
+export function validateAll(state: EditorState): Record<string, string> {
+  const errors: Record<string, string> = {};
+
+  if (!state.name.trim()) errors.name = 'Give the promotion a name.';
+
+  /*
+   * BUY_X_GET_Y names its two halves, because "add at least one product" is
+   * useless advice on a form with two product slots — and because the server
+   * refuses a missing GET with a message written for an API client.
+   */
+  if (state.type === 'BUY_X_GET_Y') {
+    if (!state.items.some((i) => i.role === 'BUY')) {
+      errors.itemsBuy = 'Choose the product the customer has to buy.';
+    }
+    if (!state.items.some((i) => i.role === 'GET')) {
+      errors.itemsGet = 'Choose what the customer gets. Without it the promotion can never apply.';
+    }
+  } else if (state.type === 'FIXED_AMOUNT_DISCOUNT') {
+    if (state.amountScope === 'PRODUCTS' && state.items.length === 0) {
+      errors.items = 'Add the products the amount comes off, or switch to the whole cart.';
+    }
+  } else if (state.items.length === 0) {
+    errors.items = 'Add at least one product.';
+  }
+
+  if (state.type === 'BUNDLE_FIXED_PRICE' && !state.fixedPrice) {
+    errors.fixedPrice = 'Bundle promotions need a fixed price.';
+  }
+  if (state.type === 'PERCENTAGE_DISCOUNT' && !state.percentageOff) {
+    errors.percentageOff = 'Set the percentage off.';
+  }
+  if (
+    state.type === 'BUY_X_GET_Y' &&
+    state.rewardKind === 'PERCENT' &&
+    !state.percentageOff
+  ) {
+    // Free writes 100 itself, so this is only reachable with the percentage
+    // option chosen and nothing typed.
+    errors.percentageOff = 'Set how much comes off the reward, or choose Free.';
+  }
+  if (state.type === 'FIXED_AMOUNT_DISCOUNT' && !state.amountOff) {
+    errors.amountOff = 'Set the amount off.';
+  }
+
+  /*
+   * Ranges last, and only where the field is still empty-free: "you left it
+   * blank" must never be reported as "it is out of range". Only the fields the
+   * current type RENDERS are checked — the payload nulls the rest, so a stale
+   * value behind a type switch is not the operator's problem.
+   */
+  const rules: (NumericRule & { key: string })[] = [];
+  if (state.type === 'BUNDLE_FIXED_PRICE') {
+    rules.push({ key: 'fixedPrice', label: 'Fixed price', value: state.fixedPrice, min: 0.01 });
+  }
+  if (state.type === 'PERCENTAGE_DISCOUNT') {
+    rules.push({
+      key: 'percentageOff',
+      label: 'Percentage off',
+      value: state.percentageOff,
+      min: 0.01,
+      max: 100,
+    });
+  }
+  if (state.type === 'BUY_X_GET_Y') {
+    rules.push(
+      { key: 'buyQuantity', label: 'Buy quantity', value: state.buyQuantity, min: 1, integer: true },
+      { key: 'getQuantity', label: 'Get quantity', value: state.getQuantity, min: 1, integer: true },
+    );
+    if (state.rewardKind === 'PERCENT') {
+      rules.push({
+        key: 'percentageOff',
+        label: 'The discount on the reward',
+        value: state.percentageOff,
+        min: 0.01,
+        max: 100,
+      });
+    }
+  }
+  if (state.type === 'FIXED_AMOUNT_DISCOUNT') {
+    rules.push({ key: 'amountOff', label: 'Amount off', value: state.amountOff, min: 0.01 });
+    if (state.amountScope === 'CART') {
+      rules.push({ key: 'minimumSpend', label: 'Minimum spend', value: state.minimumSpend, min: 0 });
+    }
+  }
+  for (const rule of rules) {
+    if (errors[rule.key]) continue;
+    const problem = numericProblem(rule);
+    if (problem) errors[rule.key] = problem;
+  }
+
+  return errors;
+}
+
+/** One message, under the field it is about. */
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p className="mt-1 text-xs text-danger" role="alert">
+      {message}
+    </p>
+  );
 }
 
 export function PromotionEditor({
@@ -225,6 +398,10 @@ export function PromotionEditor({
    * gets" be two sections rather than one list with a dropdown on every line.
    */
   const [pickerTarget, setPickerTarget] = React.useState<PromotionItem['role'] | null>(null);
+  /** True once Create has been pressed — see the `errors` memo below. */
+  const [attempted, setAttempted] = React.useState(false);
+  const [submitTick, setSubmitTick] = React.useState(0);
+  const formRef = React.useRef<HTMLDivElement>(null);
   const [saveState, setSaveState] = React.useState<'idle' | 'saving' | 'saved'>('idle');
 
   // Fetch branches for the branch-scope multi-select.
@@ -312,6 +489,22 @@ export function PromotionEditor({
     return `Buy ${buyQty} × ${buyItem.name ?? buyItem.productId}, get ${getQty} × ${rewardNames} ${value}.`;
   }, [state.type, state.buyQuantity, state.getQuantity, state.rewardKind, state.percentageOff, buyItem, getItems]);
 
+  /** The money-off offer in one line — same idea, same reason as above. */
+  const amountSummary = React.useMemo(() => {
+    if (state.type !== 'FIXED_AMOUNT_DISCOUNT') return null;
+    const amount = Number(state.amountOff);
+    if (!amount) return null;
+    if (state.amountScope === 'CART') {
+      const threshold = Number(state.minimumSpend);
+      return threshold > 0
+        ? `${formatMoney(amount)} off any basket of ${formatMoney(threshold)} or more.`
+        : `${formatMoney(amount)} off the whole cart.`;
+    }
+    if (state.items.length === 0) return null;
+    const names = state.items.map((i) => i.name ?? i.productId).join(', ');
+    return `${formatMoney(amount)} off ${names}, spread across them.`;
+  }, [state.type, state.amountScope, state.amountOff, state.minimumSpend, state.items]);
+
   const dirty = React.useMemo(
     () => JSON.stringify(state) !== initialSnapshotRef.current,
     [state],
@@ -390,6 +583,23 @@ export function PromotionEditor({
     });
   };
 
+  /**
+   * Switching scope takes the other mode's data with it.
+   *
+   * Not tidiness — correctness. A cart-level rule is defined by having NO
+   * items, so leaving one behind would silently make the promotion
+   * product-scoped again; and the engine never reads `minimumSpend` on a
+   * product-scoped rule, so keeping a threshold there would persist a figure
+   * that does nothing, which is the defect this whole section is fixing.
+   */
+  const setAmountScope = (scope: EditorState['amountScope']) =>
+    setState((prev) => ({
+      ...prev,
+      amountScope: scope,
+      minimumSpend: scope === 'CART' ? prev.minimumSpend : '',
+      items: scope === 'CART' ? [] : prev.items,
+    }));
+
   const setRewardKind = (kind: EditorState['rewardKind']) =>
     setState((prev) => ({
       ...prev,
@@ -399,54 +609,45 @@ export function PromotionEditor({
       percentageOff: kind === 'FREE' ? '' : prev.percentageOff,
     }));
 
-  const validate = (): string | null => {
-    if (!state.name.trim()) return 'Give the promotion a name.';
-    /*
-     * D126 — an EMPTY product list is how a FIXED_AMOUNT_DISCOUNT declares
-     * itself cart-level, so the blanket "add at least one product" no longer
-     * holds for that type. Every other type still needs its products, and the
-     * server re-checks all of it per type either way.
-     */
-    /*
-     * BUY_X_GET_Y names its two halves, because "add at least one product" is
-     * useless advice on a form with two product slots — and because the server
-     * refuses a missing GET with a message written for an API client.
-     */
-    if (state.type === 'BUY_X_GET_Y') {
-      if (!state.items.some((i) => i.role === 'BUY')) {
-        return 'Choose the product the customer has to buy.';
-      }
-      if (!state.items.some((i) => i.role === 'GET')) {
-        return 'Choose what the customer gets. Without it the promotion can never apply.';
-      }
-    } else if (state.items.length === 0 && state.type !== 'FIXED_AMOUNT_DISCOUNT') {
-      return 'Add at least one product.';
+  const errors = React.useMemo(
+    // Once Create has been pressed, the messages FOLLOW the values. A snapshot
+    // taken at submit time leaves a message standing under a field the
+    // operator has already fixed, and the only way to find out whether it
+    // worked is to press Create again — the same reason the product wizard
+    // re-runs its validator on every change after the first attempt.
+    () => (attempted ? validateAll(state) : {}),
+    [attempted, state],
+  );
+
+  /**
+   * Bring the first failed field into view when a save is blocked.
+   *
+   * Keyed on a tick rather than on the error map so pressing Create twice with
+   * the same fault re-focuses instead of sitting there looking inert. A real
+   * input is preferred because it can take focus; a section-level message
+   * (`role="alert"`) is the fallback for the product lists, which have no one
+   * input to blame. `scrollIntoView` is feature-checked: jsdom has none.
+   */
+  React.useEffect(() => {
+    if (submitTick === 0) return;
+    const root = formRef.current;
+    if (!root) return;
+    const field = root.querySelector<HTMLElement>('[aria-invalid="true"]');
+    const target = field ?? root.querySelector<HTMLElement>('[role="alert"]');
+    if (!target) return;
+    if (typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
-    if (state.type === 'BUNDLE_FIXED_PRICE' && !state.fixedPrice) {
-      return 'Bundle promotions need a fixed price.';
-    }
-    if (state.type === 'PERCENTAGE_DISCOUNT' && !state.percentageOff) {
-      return 'Set the percentage off.';
-    }
-    if (
-      state.type === 'BUY_X_GET_Y' &&
-      state.rewardKind === 'PERCENT' &&
-      (!state.percentageOff || Number(state.percentageOff) <= 0)
-    ) {
-      // Free writes 100 itself, so this can only be reached with the
-      // percentage option chosen and nothing (or nothing useful) typed.
-      return 'Set how much comes off the reward, or choose Free.';
-    }
-    if (state.type === 'FIXED_AMOUNT_DISCOUNT' && !state.amountOff) {
-      return 'Set the amount off.';
-    }
-    return null;
-  };
+    field?.focus({ preventScroll: true });
+  }, [submitTick]);
 
   const save = async () => {
-    const err = validate();
-    if (err) {
-      setError(err);
+    setAttempted(true);
+    setSubmitTick((tick) => tick + 1);
+    if (Object.keys(validateAll(state)).length > 0) {
+      // The fields say what is wrong now; a banner repeating one of them would
+      // be a second place to read the same thing, and the one further away.
+      setError(null);
       return;
     }
     setError(null);
@@ -480,8 +681,17 @@ export function PromotionEditor({
         state.type === 'FIXED_AMOUNT_DISCOUNT' && state.amountOff ? Number(state.amountOff) : null,
       // D126 — only meaningful for money-off; the server rejects it elsewhere,
       // so send null rather than leaving a stale value from a type switch.
+      /*
+       * Only on a CART-level rule. The engine reads `minimumSpend` in exactly
+       * one place — `resolveOrderPromotion`, which only ever sees rules with
+       * no items — so a threshold saved beside a product list is a number that
+       * can never be consulted. The form no longer offers the combination;
+       * this makes sure an older draft cannot smuggle one through either.
+       */
       minimumSpend:
-        state.type === 'FIXED_AMOUNT_DISCOUNT' && state.minimumSpend
+        state.type === 'FIXED_AMOUNT_DISCOUNT' &&
+        state.amountScope === 'CART' &&
+        state.minimumSpend
           ? Number(state.minimumSpend)
           : null,
       buyQuantity: state.type === 'BUY_X_GET_Y' ? Number(state.buyQuantity) || 1 : null,
@@ -544,7 +754,7 @@ export function PromotionEditor({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" ref={formRef}>
       {/* Basics — name, description, type */}
       <section className="space-y-4 rounded-2xl border border-border bg-card p-5">
         <div>
@@ -558,12 +768,14 @@ export function PromotionEditor({
           </label>
           <Input
             id="promo-name"
+            aria-invalid={!!errors.name}
             value={state.name}
             onChange={(e) => patch({ name: e.target.value })}
             placeholder="e.g. Lunch Bundle"
             maxLength={120}
             autoFocus
           />
+          <FieldError message={errors.name} />
         </div>
 
         <div className="space-y-1.5">
@@ -592,7 +804,14 @@ export function PromotionEditor({
                 { value: 'BUNDLE_FIXED_PRICE', label: 'Bundle', icon: <Layers className="h-4 w-4" /> },
                 { value: 'BUY_X_GET_Y', label: 'Buy X, Get Y', icon: <Sparkles className="h-4 w-4" /> },
                 { value: 'PERCENTAGE_DISCOUNT', label: 'Percentage', icon: <Percent className="h-4 w-4" /> },
-                { value: 'FIXED_AMOUNT_DISCOUNT', label: 'Amount off', icon: <span className="text-xs font-bold">LKR</span> },
+                {
+                  value: 'FIXED_AMOUNT_DISCOUNT',
+                  label: 'Amount off',
+                  // D54 — the TENANT's currency, never the pilot's. This read
+                  // is synchronous and cached, the same one every money
+                  // formatter in the app uses.
+                  icon: <span className="text-xs font-bold">{getActiveCurrency()}</span>,
+                },
               ] as { value: PromotionType; label: string; icon: React.ReactNode }[]
             ).map((t) => {
               const selected = state.type === t.value;
@@ -637,7 +856,9 @@ export function PromotionEditor({
               id="promo-fixed"
               value={state.fixedPrice}
               onChange={(v) => patch({ fixedPrice: v })}
+              invalid={!!errors.fixedPrice}
             />
+            <FieldError message={errors.fixedPrice} />
             <p className="text-[11px] text-muted-foreground">
               Total price the operator charges for the whole bundle.
             </p>
@@ -686,6 +907,7 @@ export function PromotionEditor({
                   onChange={(e) => patch({ buyQuantity: e.target.value })}
                   aria-label="Buy quantity"
                   className="w-20"
+                  aria-invalid={!!errors.buyQuantity}
                 />
                 <span aria-hidden="true" className="text-sm text-muted-foreground">
                   ×
@@ -700,6 +922,8 @@ export function PromotionEditor({
                   </span>
                 )}
               </div>
+              <FieldError message={errors.buyQuantity} />
+              <FieldError message={errors.itemsBuy} />
               <p className="text-[11px] text-muted-foreground">
                 The trigger. Exactly one product — the server refuses this type with more
                 than one, so choosing again replaces it.
@@ -746,6 +970,7 @@ export function PromotionEditor({
                   onChange={(e) => patch({ getQuantity: e.target.value })}
                   aria-label="Get quantity"
                   className="w-20"
+                  aria-invalid={!!errors.getQuantity}
                 />
                 <span aria-hidden="true" className="text-sm text-muted-foreground">
                   ×
@@ -775,6 +1000,9 @@ export function PromotionEditor({
                   </ul>
                 )}
               </div>
+
+              <FieldError message={errors.getQuantity} />
+              <FieldError message={errors.itemsGet} />
 
               <fieldset className="space-y-1.5">
                 <legend className="text-xs font-medium text-muted-foreground">
@@ -811,6 +1039,7 @@ export function PromotionEditor({
                         onChange={(e) => patch({ percentageOff: e.target.value })}
                         aria-label="Percentage off the reward"
                         className="pr-8"
+                        aria-invalid={!!errors.percentageOff}
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                         %
@@ -818,6 +1047,7 @@ export function PromotionEditor({
                     </div>
                   ) : null}
                 </div>
+                <FieldError message={errors.percentageOff} />
               </fieldset>
             </div>
 
@@ -849,52 +1079,117 @@ export function PromotionEditor({
                 value={state.percentageOff}
                 onChange={(e) => patch({ percentageOff: e.target.value })}
                 className="pr-8"
+                aria-invalid={!!errors.percentageOff}
               />
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                 %
               </span>
             </div>
-          </div>
-        ) : null}
-
-        {state.type === 'FIXED_AMOUNT_DISCOUNT' ? (
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="promo-amt">
-              Amount off<span className="text-danger" aria-hidden="true">*</span>
-            </label>
-            <MoneyInput
-              id="promo-amt"
-              value={state.amountOff}
-              onChange={(v) => patch({ amountOff: v })}
-            />
-            <label className="block pt-2 text-sm font-medium" htmlFor="promo-min-spend">
-              Minimum spend
-            </label>
-            <MoneyInput
-              id="promo-min-spend"
-              value={state.minimumSpend}
-              onChange={(v) => patch({ minimumSpend: v })}
-            />
-            <p className="text-xs text-muted-foreground">
-              {/*
-                * D126 — the two shapes of this promotion type, said where the
-                * operator decides between them. Leaving Products empty is the
-                * ONLY way to get a whole-cart discount, and nothing else on the
-                * screen would tell them that.
-                */}
-              Leave <span className="font-medium">Products</span> empty for a whole-cart
-              discount. Add products to take the amount off those products only. Blank
-              minimum spend means no threshold.
-            </p>
+            <FieldError message={errors.percentageOff} />
           </div>
         ) : null}
 
         {/*
-          * The flat product list, for the three types that have ONE list.
+          * FIXED_AMOUNT_DISCOUNT states its scope instead of implying it.
+          *
+          * D126 defines a cart-level money-off as one with NO products, and
+          * this form used to express that as an empty list plus a paragraph
+          * explaining that the empty list was a setting. Two costs, both real:
+          * the operator had to read prose to find the choice, and the form
+          * happily accepted a Minimum spend ALONGSIDE products — a combination
+          * the engine cannot honour, because `minimumSpend` is read only in
+          * `resolveOrderPromotion`, which never sees a rule that names
+          * products. The threshold was accepted, stored, and ignored.
+          *
+          * Making the scope a choice lets the fields follow it, so the
+          * unhonourable combination is unreachable rather than undocumented.
+          */}
+        {state.type === 'FIXED_AMOUNT_DISCOUNT' ? (
+          <div className="space-y-4">
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">What it discounts</legend>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="promo-amount-scope"
+                    checked={state.amountScope === 'CART'}
+                    onChange={() => setAmountScope('CART')}
+                  />
+                  The whole cart
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="promo-amount-scope"
+                    checked={state.amountScope === 'PRODUCTS'}
+                    onChange={() => setAmountScope('PRODUCTS')}
+                  />
+                  Specific products
+                </label>
+              </div>
+            </fieldset>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="promo-amt">
+                Amount off<span className="text-danger" aria-hidden="true">*</span>
+              </label>
+              <MoneyInput
+                id="promo-amt"
+                value={state.amountOff}
+                onChange={(v) => patch({ amountOff: v })}
+                invalid={!!errors.amountOff}
+              />
+              <FieldError message={errors.amountOff} />
+              {state.amountScope === 'PRODUCTS' ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Spread across the products below, in proportion to what each costs.
+                </p>
+              ) : null}
+            </div>
+
+            {/* Only where it can actually be honoured. */}
+            {state.amountScope === 'CART' ? (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="promo-min-spend">
+                  Minimum spend
+                </label>
+                <MoneyInput
+                  id="promo-min-spend"
+                  value={state.minimumSpend}
+                  onChange={(v) => patch({ minimumSpend: v })}
+                  invalid={!!errors.minimumSpend}
+                />
+                <FieldError message={errors.minimumSpend} />
+                <p className="text-[11px] text-muted-foreground">
+                  Blank means no threshold. A basket that reaches this figure exactly
+                  qualifies.
+                </p>
+              </div>
+            ) : null}
+
+            {amountSummary ? (
+              <p
+                role="status"
+                className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-700"
+              >
+                {amountSummary}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/*
+          * The flat product list, for the types that have ONE list.
+          *
           * BUY_X_GET_Y renders its own two sections above — its products are
           * not a list with a role attribute, they are two different questions.
+          * A cart-level money-off has no products by definition, so offering
+          * the list there is offering the operator a way to contradict the
+          * scope they just chose.
           */}
-        {state.type !== 'BUY_X_GET_Y' ? (
+        {state.type !== 'BUY_X_GET_Y' &&
+        !(state.type === 'FIXED_AMOUNT_DISCOUNT' && state.amountScope === 'CART') ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Products</span>
@@ -912,9 +1207,7 @@ export function PromotionEditor({
             </div>
             {state.items.length === 0 ? (
               <p className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-muted-foreground">
-                {state.type === 'FIXED_AMOUNT_DISCOUNT'
-                  ? 'No products — this discount applies to the whole cart.'
-                  : 'No products added yet.'}
+                No products added yet.
               </p>
             ) : (
               <ul className="space-y-2">
@@ -947,6 +1240,7 @@ export function PromotionEditor({
                 ))}
               </ul>
             )}
+            <FieldError message={errors.items} />
           </div>
         ) : null}
       </section>
@@ -1137,6 +1431,9 @@ export function PromotionEditor({
         </div>
       </section>
 
+      {/* The SERVER's word only — a 409 for a duplicate name, a refused
+          channel — which is the part no client-side rule can know. Everything
+          the form can judge for itself is said at its field. */}
       {error ? (
         <p className="rounded-lg border border-danger/40 bg-danger-soft p-3 text-sm text-danger" role="alert">
           {error}
@@ -1221,15 +1518,19 @@ function MoneyInput({
   id,
   value,
   onChange,
+  invalid,
 }: {
   id?: string;
   value: string;
   onChange: (v: string) => void;
+  invalid?: boolean;
 }) {
   return (
     <div className="relative max-w-[12rem]">
+      {/* D54 — a tenant billing in USD must not be asked for an amount in
+          LKR. `pl-12` still fits: every ISO 4217 code is three characters. */}
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">
-        LKR
+        {getActiveCurrency()}
       </span>
       <Input
         id={id}
@@ -1241,6 +1542,7 @@ function MoneyInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder="0.00"
         className="pl-12"
+        aria-invalid={invalid}
       />
     </div>
   );

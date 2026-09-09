@@ -7861,6 +7861,50 @@ the new render spec before it shipped.
 the old form produced for the same offer; the other three promotion types keep
 the shared product list unchanged.
 
+### D141 — a money-off promotion states its scope; a threshold it cannot honour is unreachable
+
+**Asked by the PO, 2026-09-09**, looking at the Amount-off form.
+
+**The defect.** `minimumSpend` is read in exactly ONE place in the pricing
+engine — `resolveOrderPromotion`, which only ever sees rules that
+`isCartLevel` accepts, i.e. `FIXED_AMOUNT_DISCOUNT` with no items. The
+product-scoped path (`applyFixedAmount`) never looks at it. The editor and the
+server both accepted a threshold BESIDE a product list, so this saved happily:
+
+    Amount off      100
+    Minimum spend   10,000
+    Products        Chicken Kottu
+
+and took 100 off that dish on a 300-rupee basket, forever, with nothing
+anywhere saying the 10,000 had been dropped. The figure was accepted,
+validated, stored, and never consulted.
+
+**The shape it came from.** D126 defines a cart-level money-off as one with no
+products, which made the scope an emergent property of an empty list — a real
+choice expressed as an ABSENCE, and explained only in a paragraph under the
+fields. That is the same shape D140 removed from Buy X, Get Y, and it is what
+allowed the impossible combination to be composed at all.
+
+**Now.** "What it discounts" is an explicit choice — the whole cart, or
+specific products — and the fields follow it. Whole cart shows Minimum spend
+and no product list; Specific products shows the list and no threshold.
+Switching clears what the other mode owned, because a leftover item would
+silently make a cart-level rule product-scoped, and a leftover threshold would
+persist a number that can never be read. The payload sends `minimumSpend` only
+on a cart-level rule, so an older draft cannot smuggle one through either. The
+offer is read back in one line, as on the BOGO form.
+
+Saving a product-scoped rule with no products is now refused, naming the
+alternative ("or switch to the whole cart"). It used to save — as a cart-level
+promotion, which is not what the operator had selected.
+
+**No schema, API or data change.** Cart-level still means "no items" on the
+wire. Existing rows reopen in the right mode, read from that same shape.
+
+**Not changed: the engine.** Whether a product-scoped money-off SHOULD honour
+a threshold is a product question, not a bug — the editor now matches what the
+engine does rather than promising what it does not.
+
 ## Open decisions
 
 | ID | Question | Needed by |
