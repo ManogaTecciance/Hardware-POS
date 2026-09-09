@@ -10,6 +10,7 @@ import {
 import { DiningService } from '../../dining/dining.service';
 import {
   projectOrderItems,
+  type ProjectedPromotion,
   type ProjectedSaleItem,
 } from '../../restaurant/settlement-projection';
 import type { FulfilmentProvider, ReleaseOutcome, WorkUnitRef } from './fulfilment-provider';
@@ -34,6 +35,7 @@ export class TableServiceFulfilmentProvider implements FulfilmentProvider {
     tx: Prisma.TransactionClient,
     tenantId: string,
     ref: WorkUnitRef,
+    promotionByLineId?: ReadonlyMap<string, ProjectedPromotion>,
   ): Promise<ProjectedSaleItem[]> {
     if (ref.kind !== 'TABLE_SESSION') {
       throw new Error(`TableServiceFulfilmentProvider cannot settle a ${ref.kind} work unit`);
@@ -46,7 +48,7 @@ export class TableServiceFulfilmentProvider implements FulfilmentProvider {
       },
       include: { modifiers: true },
     });
-    return projectOrderItems(items);
+    return projectOrderItems(items, promotionByLineId);
   }
 
   async releaseResources(

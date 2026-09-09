@@ -462,12 +462,20 @@ export interface SessionBillPreview {
     variantName: string | null;
     unitPrice: string;
     quantity: string;
+    /** NET of any promotion on this line, so the lines sum to the total. */
     lineTotal: string;
+    /** What a promotion took off this line. "0.00" when none did. */
+    promotionDiscount: string;
+    promotionName: string | null;
     roundNumber: number | null;
     /** D72 — "no onions". Shown at the table and printed on the bill. */
     specialInstructions: string | null;
   }[];
   subtotal: string;
+  /** Line-level and cart-level promotions as one figure, for the footer. */
+  promotionDiscount: string;
+  /** Named only when exactly one promotion applied. */
+  promotionName: string | null;
   serviceChargeAmount: string;
   packagingCharge: string;
   taxAmount: string;

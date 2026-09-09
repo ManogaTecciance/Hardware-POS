@@ -123,6 +123,17 @@ vi.mock('./use-menu-data', () => ({
     loadMore: vi.fn(),
     total: 2,
     loadedCount: 2,
+    /*
+     * Arrived with merge/restaurant-changes (D138): the counter prices its own
+     * draft through `applyPromotions` over the rules the catalogue shipped, so
+     * a catalogue without this key crashes the component before it renders.
+     *
+     * EMPTY on purpose. These tests are about the questions the app asks
+     * before it throws a cart away, and a live promotion would put a discount
+     * line in every total they read. "No promotion runs here" is the state
+     * that keeps the subject of the spec the subject.
+     */
+    promotionRules: [],
   }),
 }));
 

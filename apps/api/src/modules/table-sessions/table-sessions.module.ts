@@ -5,6 +5,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
 import { AuthModule } from '../auth/auth.module';
 import { DiningModule } from '../dining/dining.module';
 import { KitchenModule } from '../kitchen/kitchen.module';
+import { PromotionsModule } from '../promotions/promotions.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TableSessionsController } from './table-sessions.controller';
 import { TableSessionsService } from './table-sessions.service';
@@ -12,7 +13,16 @@ import { TableSessionsService } from './table-sessions.service';
 @Module({
   // D70 — AuthModule for PermissionResolver: the controller asks whether the
   // caller may see other waiters' sessions.
-  imports: [AuthModule, AuditLogModule, KitchenModule, DiningModule, SettingsModule, ProvidersModule],
+  imports: [
+    AuthModule,
+    AuditLogModule,
+    KitchenModule,
+    DiningModule,
+    SettingsModule,
+    ProvidersModule,
+    // Promotions on the bill (see RestaurantPromotionPricingService).
+    PromotionsModule,
+  ],
   controllers: [TableSessionsController],
   providers: [TableSessionsService],
   exports: [TableSessionsService],

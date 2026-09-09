@@ -23,8 +23,11 @@
  * path. Do not conflate the two.
  */
 
+import type { PromotionRule } from '@hardware-pos/shared';
+
 import { api } from '../api';
 import type { Session } from '../auth';
+import { toPromotionRule, type ApiPromotionRule } from '../catalog';
 
 // ── Wire types ───────────────────────────────────────────────────────────────
 
@@ -101,6 +104,19 @@ export interface PosCatalogueItem {
 
 export interface PosCatalogueResponse {
   items: PosCatalogueItem[];
+  /**
+   * The promotions live for this branch and channel, in the shape the shared
+   * applier consumes.
+   *
+   * `PosCatalogueItem.promotions` is the BADGE on a menu card — which offers
+   * touch this dish. This is what makes the badge chargeable. The server has
+   * sent both since 4.3; the restaurant till read only the badge, which is why
+   * a promotion could show on a card and take nothing off the bill.
+   *
+   * Empty when the API predates 4.3, so an older server prices nothing rather
+   * than throwing.
+   */
+  promotionRules: PromotionRule[];
   /** Rows matching the filter, across every page — not the page length. */
   total: number;
   /**
@@ -181,6 +197,8 @@ interface ApiResponse {
   items: ApiItem[];
   total: number;
   nextCursor?: string | null;
+  /** Absent on a response from an API predating 4.3. */
+  promotionRules?: ApiPromotionRule[];
 }
 
 function auth(session: Session): { token: string; tenantId: string } {
@@ -263,5 +281,14 @@ export async function fetchPosCatalogue(
   // still answers (with Deprecation headers) until its sunset; this client
   // moved on the day the successor shipped.
   const res = await api.get<ApiResponse>(`/products/sellable?${params.join('&')}`, auth(session));
-  return { items: res.items.map(toItem), total: res.total, nextCursor: res.nextCursor ?? null };
+  return {
+    items: res.items.map(toItem),
+    total: res.total,
+    nextCursor: res.nextCursor ?? null,
+    // Mapped by the SAME function the retail till uses, so a rule cannot mean
+    // one thing on one screen and another on the other — a wire mapper is
+    // where a field goes to die (4.15 lost `productName`, D126 lost
+    // `minimumSpend`), and one mapper is one place for that to happen.
+    promotionRules: (res.promotionRules ?? []).map(toPromotionRule),
+  };
 }

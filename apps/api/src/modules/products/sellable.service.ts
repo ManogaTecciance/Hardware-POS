@@ -14,6 +14,7 @@ import { variantDisplayName } from '../../common/variant-display';
 import { isPromotionActive } from '../promotions/promotions.evaluator';
 import { PromotionsRepository } from '../promotions/promotions.repository';
 import { BusinessProfileService } from '../platform/business-profile.service';
+import { SettingsService } from '../settings/settings.service';
 
 /**
  * D62 — `GET /products/sellable`: the ONE POS read model (convergence plan
@@ -217,6 +218,9 @@ export class SellableService {
     private readonly prisma: PrismaService,
     private readonly promotions: PromotionsRepository,
     private readonly profiles: BusinessProfileService,
+    // D139 — the tenant's zone, so a promotion's day/time window is read on
+    // the clock the operator set it on rather than the server's.
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -416,6 +420,7 @@ export class SellableService {
     }
 
     const now = new Date();
+    const tenantTimeZone = this.settings.getSettings(tenantId).timezone;
     const validPromotionsById = new Map<
       string,
       { id: string; name: string; type: string; description: string | null }
@@ -425,7 +430,14 @@ export class SellableService {
     // disagree about which promotions are live.
     const promotionRules: SellablePromotionRule[] = [];
     for (const promo of activePromotions) {
-      if (isPromotionActive(promo, { now, branchId: query.branchId, channel: query.channel })) {
+      if (
+        isPromotionActive(promo, {
+          now,
+          branchId: query.branchId,
+          channel: query.channel,
+          tenantTimeZone,
+        })
+      ) {
         validPromotionsById.set(promo.id, {
           id: promo.id,
           name: promo.name,

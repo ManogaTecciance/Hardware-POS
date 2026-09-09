@@ -7685,6 +7685,76 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D149 — merging `merge/restaurant-changes`: how each clash was decided
+
+The ten commits that landed on the integration branch while this one was open
+(2026-09-09): four promotions decisions recorded there as D138–D141, a rewrite
+of the categories screen, a toolbar on `Dialog`, and three kitchen-board
+commits. Merged at `631f502`. In brief:
+
+**Both branches took D138–D141.** Theirs keep them: they are already on the
+shared branch and other people's commits cite them. This branch had never been
+pushed, so it moved — every record here shifted up by four (D138 → D142 …
+D144 → D148), 261 references across 72 files, in one pass so a rule could not
+feed its own output. Their citations and ours now resolve to different records
+with no overlap.
+
+**The station contradiction is the one thing this merge could not settle.**
+Two of their three kitchen commits are built ON the per-station split: the
+ribbon (35e94fa) exists to tell a cook which of several cards for one table is
+theirs, and the filter (6cbb36a) exists because "a station-split order already
+puts one table on several cards". D147 removed the split. After it every
+ticket carries `stationId: null`, so the ribbon would print nothing and every
+filter chip would count zero and hide the board. They cannot both ship.
+
+Resolved PROVISIONALLY in favour of D147, because it is the most recent product
+decision and was given directly after the PO saw the symptom, and because it
+also closed a defect their work does not address: at a branch with two or more
+stations an unlinked dish reached no ticket at all. Their ribbon, their chip
+strip, its per-branch memory and its chime scoping are removed from the working
+tree and preserved in history at those two shas. **This is the PO's call to
+confirm, not ours** — recorded here so the choice is visible rather than buried
+in a merge diff.
+
+Their third kitchen commit, ae11a7d, is pure layout and has nothing to do with
+stations. It survives whole, and the resolution was built by starting from
+THEIR file and removing the station affordances rather than porting their work
+onto ours, precisely so none of it was lost by hand. Two verifiers walked every
+line they added; one found a real loss — 35e94fa pinned that a ticket predating
+rounds must not print a bare "Round", the guard moved into the subtitle join we
+kept, and the test went out with the ribbon suite that happened to hold it. The
+test is restored, and the mutant that survived without it now dies.
+
+**Everything else auto-merged and was checked rather than trusted.** `Dialog`
+carries their toolbar and our centring together. `types.ts` took their
+promotion fields beside our `stationId` comment. Their 188-line rewrite of
+`table-sessions.service.ts` never touched the kitchen call, so D147's rename
+survived at both call sites. Their branch introduced no native dialog, so D145
+holds across the merge.
+
+**`shared-subcategory-library.tsx` was a modify/delete and their delete wins.**
+Their categories rewrite replaced it and `lib/category-assignments.ts`
+outright, and nothing imports either afterwards. Our only change to it was the
+D145 modal conversion, which is moot once the file is gone; the spec we wrote
+for it went with it.
+
+**One spec of ours was a genuine casualty.** Their counter now prices its own
+draft through `applyPromotions` over rules the catalogue ships, and our D145
+spec's catalogue mock predates that key, so the component threw before it
+rendered. The mock supplies an empty rule set — the questions the app asks
+before discarding a cart are the subject, and a live promotion would put a
+discount line in every total those tests read.
+
+**Left undone, deliberately:** their four decisions ship no `testcases.md`
+rows. Writing them from the outside would be guessing at what their authors
+meant to cover, so the catalogue is short by however many the promotions work
+deserves.
+
+Gates on the merged tree: typecheck 7/7, api unit 1438 across 89 suites, web
+unit 1337 across 98 files (2 skipped), integration 1158 across 54 suites, lint
+0 errors (13 warnings, all pre-existing). Playwright not run — it needs a live
+stack.
+
 ### D142 — the kitchen board keeps today; the kitchen's history gets its own screen, and the pass loses the dashboard
 
 Three things the kitchen asked for, and they are one change: the Done lane had
@@ -8194,6 +8264,225 @@ screen-reader path — and the row click is a mouse convenience over the same
 action, ignoring clicks that land on something interactive or that end a text
 selection, which is the line the sales list already draws.
 
+### D138 — promotions reach the restaurant bill (D52's deferral, lifted)
+
+**Asked for by the PO, 2026-09-09**, after a promotion configured on a
+food-service tenant took nothing off an order placed at the POS.
+
+**Why it did nothing.** D52 deferred promotion pricing on a restaurant bill
+with a reason that has since expired: "the promotions module exports only
+`isPromotionActive`, an activity-window predicate. There is no promotion
+*pricing* engine anywhere, so applying them is a feature to design, not a bug
+to fix." D123 then built one —
+`packages/shared/src/promotions/applier.ts` — and retail has charged
+promotions through it since. What was left was wiring, and the absence of it
+was invisible from the admin screens: a promotion could be created,
+activated, badged on a menu card by the POS catalogue, and still never touch
+a bill. `/pos` sends a TABLE_SERVICE tenant to `PosCounterWorkspace`, which
+settles through the table-session and takeaway paths, and both wrote
+`totalDiscount: 0` with no promotion pass at all.
+
+**What now happens.** Both restaurant settlement paths and both of their
+previews price promotions through the same applier retail uses:
+
+- the dine-in running bill (`GET /table-sessions/:id/bill-preview`),
+- the dine-in close (`POST /table-sessions/:id/close`),
+- the counter/takeaway settle (`takeaway.settle`, which is what D110's
+  counter payment calls),
+- and the till's own cart preview in `PosCounterWorkspace`.
+
+`RestaurantPromotionPricingService` owns the two reads (the tenant's live
+promotions, which products are sold by measure) and delegates the decision to
+the pure layer, so a bill and its preview cannot disagree.
+
+**Channel is passed, never assumed.** `isPromotionActive` refuses a
+channel-scoped promotion when the context names no channel, so a caller that
+omitted it would silently price nothing — the same class of failure D56
+found. Dine-in passes `DINE_IN`, takeaway passes `TAKEAWAY`: the values the
+till's own catalogue read already sends, so the badge on a menu card and the
+discount on the bill are decided by one predicate over one set of inputs.
+
+**Where the money lands.** Line-level promotions reduce the goods, so the
+service charge and the tax follow what the guest actually pays for food —
+which is what `document-totals.ts` was written anticipating ("when promotions
+reach the bill the charges follow what the customer actually pays, in one
+place"). A D126 cart-level promotion comes off AFTER tax, the asymmetry
+`sales.service` records as PO-confirmed; restaurant bills copy that rule
+rather than inventing a second one for the same promotion. On the settled
+`Sale`, line promotions are `totalDiscount` — which is what
+`discountedSubtotal = subtotal - totalDiscount` has to mean for
+`returns.calc` to reverse a refund correctly — and the cart-level one uses
+its own `promotionOrder*` columns.
+
+**No migration.** `SaleItem.promotionDiscountAmount` / `promotionId` /
+`promotionNameSnapshot` and `Sale.promotionOrder*` have existed since D123
+and D126. This slice writes columns that were already there.
+
+**The invariant moved with it.** `assertProjectionMatchesSubtotal` compared
+`Σ lineTotal` to the subtotal, which a promotion sitting between subtotal and
+total would break. It now compares `Σ lineSubtotal` (unchanged for a bill
+with no promotion) and checks the discount as its own identity beside it, so
+a settled document whose lines and footer disagree still refuses to persist.
+
+**Dine-in's cart card is deliberately NOT priced.** In dine-in mode the
+running-bill card shows the round the waiter is adding, not the bill; the
+bill is every round on the table and a bundle spans them. Pricing one round
+there would show a figure the close then computes differently. The table's
+bill sheet reads the server's preview, which prices the whole session.
+
+**Still deferred.** Manual order-level discounts on a restaurant bill (D52's
+second deferral) are untouched — they need the manager-approval flow retail
+has, and are a separate piece of work.
+
+**A known divergence, stated rather than hidden.** A counter line's manual
+discount is client-side only — `RestaurantOrderItem` has no discount column,
+which `pos-counter-workspace` has documented since the pilot. The cart
+preview honours D123's rule (a manually discounted line is invisible to
+promotions); the server, which never receives that discount, sees an
+undiscounted line and may award a promotion on it. The preview and the bill
+can therefore differ on a manually discounted line, in a flow where they
+already differed because the manual discount itself never reaches the Sale.
+The preview keeps the D123 rule rather than dropping it, so the day a
+restaurant line discount is persisted the behaviour is already correct.
+
+### D139 — a promotion's schedule is read on the tenant's clock, and its dates are whole days
+
+Two defects found while tracing D138, both of which made a correctly
+configured promotion quietly not fire.
+
+**1. An end date lost its final day.** The editor's Start/End are
+`type="date"`, so `'2026-09-30'` reaches the service and `new Date()` parses
+it as `2026-09-30T00:00:00Z`. The evaluator compared it as an instant —
+`now > endsOn` — so "ends 30 Sep" expired at 00:00 UTC ON the 30th. For a
+Colombo tenant that is 05:30 local: the promotion was dead for all but the
+first five and a half hours of the day it was meant to run. `startsOn` had
+the mirror-image fault, holding a promotion back until 05:30 local on its
+first day.
+
+An operator setting a date means a whole day, inclusive, in their own zone.
+Both bounds are now compared as `YYYY-MM-DD` calendar dates: the stored
+value's UTC date (which IS the date typed, because a bare date parses as UTC
+midnight) against today's date in the tenant's zone. Lexicographic order on
+that format is chronological, so the comparison needs no date arithmetic.
+
+*Not fixed by changing what is stored.* Writing `endsOn` as end-of-day would
+need the tenant's zone at write time AND a backfill of every existing row,
+and would leave two readings of the column in the codebase at once. Reading
+the column as what it has always been — a calendar date — needs neither.
+
+**2. The schedule was evaluated on the server's clock.** `isPromotionActive`
+has accepted `tenantTimeZone` since D45 and no caller passed one, so every
+day-of-week and time-of-day window was read in the host's zone. On a UTC
+server an 11:00–15:00 lunch promotion for a Colombo tenant was live
+16:30–20:30 their time — the offer ran through the evening and was off at
+lunch. The optional parameter nobody passed is the failure shape: it type-
+checked, it ran, and it was wrong.
+
+Every call site now passes it, from `SettingsService.getSettings(tenantId)
+.timezone` (guarded by `safeTimeZone`, and the same value every document
+formatter already uses): the retail sale, the sellable/POS-catalogue read,
+the restaurant pricing service (D138), and the `onlyCurrentlyValid` list.
+The list route resolves it inside the service rather than taking it as an
+argument, for the reason above — an optional parameter is a thing a caller
+forgets.
+
+**Mutation-proven.** Restoring the two instant-comparison lines fails exactly
+three of the new date cases and leaves the rest green; the proof is recorded
+inline in `promotions.evaluator.spec.ts` beside the cases it justifies (D30).
+
+**Scope.** The evaluator's host-zone fallback stays for a caller with no
+tenant context, and matches how `MenuAvailability` windows are still read.
+No migration, no stored value changed.
+
+### D140 — Buy X, Get Y is composed as a sentence, not a field grid
+
+**Asked for by the PO, 2026-09-09**: "i feel now ui is confusing."
+
+**What was confusing, precisely.** The editor asked for Buy quantity, Get
+quantity and "Percentage off (100 = free)" in one row of boxes, then for
+products in a flat list where every row carried a Role dropdown. Three
+failures came out of that shape, and all three were silent:
+
+- Every product landed as BUY (the picker's role heuristic), and a
+  BUY_X_GET_Y with no GET item is skipped whole by the applier —
+  `buyXGetYOutcome` returns null when `getIds` is empty. No badge, no
+  discount, no error. The operator who reported this had exactly that.
+- The picker deduped on product id alone, so one product could hold only one
+  role — making "buy 2 shirts, get a third free", the commonest BOGO there
+  is, impossible to express. The server has always accepted the pair
+  (`@@unique([promotionId, productId, role])`) and the applier has a branch
+  for it; only the editor blocked it.
+- "100 = free" asked an operator to encode the ordinary case as a magic
+  number. The one who reported this typed 7, and got a promotion that took
+  7% off the "free" item.
+
+**The shape now.** Two labelled sections — "Customer buys" and "Customer
+gets" — which is what Shopify, Square, Lightspeed, Toast and Loyverse all
+converge on. The section a product sits in IS its role, so there is no role
+attribute to notice; each quantity sits beside the thing it counts; the
+reward is Free (default) or a percentage; a "Same product as above" checkbox
+covers the same-item case in one tap; and the offer is read back in one line
+("Buy 2 × Shirt, get 1 × Tie free.") as it is composed.
+
+Choosing in the Buy section REPLACES rather than appends, because the server
+allows exactly one BUY item on this type — composing a second and being
+refused at save time was reachable before. The save is blocked with a message
+naming the missing half rather than passing an incomplete offer to the server
+for an API-shaped rejection.
+
+**Free means 100, decided once.** In the payload, not in the radio's handler.
+The first cut wrote '100' into the field when the radio changed, which looked
+equivalent and was not: a form left on its default Free had never run that
+handler, so it sent `percentageOff: null` and the server refused it. Caught by
+the new render spec before it shipped.
+
+**No schema, API or data change.** The wire payload is byte-identical to what
+the old form produced for the same offer; the other three promotion types keep
+the shared product list unchanged.
+
+### D141 — a money-off promotion states its scope; a threshold it cannot honour is unreachable
+
+**Asked by the PO, 2026-09-09**, looking at the Amount-off form.
+
+**The defect.** `minimumSpend` is read in exactly ONE place in the pricing
+engine — `resolveOrderPromotion`, which only ever sees rules that
+`isCartLevel` accepts, i.e. `FIXED_AMOUNT_DISCOUNT` with no items. The
+product-scoped path (`applyFixedAmount`) never looks at it. The editor and the
+server both accepted a threshold BESIDE a product list, so this saved happily:
+
+    Amount off      100
+    Minimum spend   10,000
+    Products        Chicken Kottu
+
+and took 100 off that dish on a 300-rupee basket, forever, with nothing
+anywhere saying the 10,000 had been dropped. The figure was accepted,
+validated, stored, and never consulted.
+
+**The shape it came from.** D126 defines a cart-level money-off as one with no
+products, which made the scope an emergent property of an empty list — a real
+choice expressed as an ABSENCE, and explained only in a paragraph under the
+fields. That is the same shape D140 removed from Buy X, Get Y, and it is what
+allowed the impossible combination to be composed at all.
+
+**Now.** "What it discounts" is an explicit choice — the whole cart, or
+specific products — and the fields follow it. Whole cart shows Minimum spend
+and no product list; Specific products shows the list and no threshold.
+Switching clears what the other mode owned, because a leftover item would
+silently make a cart-level rule product-scoped, and a leftover threshold would
+persist a number that can never be read. The payload sends `minimumSpend` only
+on a cart-level rule, so an older draft cannot smuggle one through either. The
+offer is read back in one line, as on the BOGO form.
+
+Saving a product-scoped rule with no products is now refused, naming the
+alternative ("or switch to the whole cart"). It used to save — as a cart-level
+promotion, which is not what the operator had selected.
+
+**No schema, API or data change.** Cart-level still means "no items" on the
+wire. Existing rows reopen in the right mode, read from that same shape.
+
+**Not changed: the engine.** Whether a product-scoped money-off SHOULD honour
+a threshold is a product question, not a bug — the editor now matches what the
+engine does rather than promising what it does not.
 
 ## Open decisions
 

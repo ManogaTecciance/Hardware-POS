@@ -13,6 +13,10 @@
  *   tickets (the positive control that proves the board rendered).
  * - Both verbs drop the card optimistically — the reload must not resurrect
  *   it, so the api mocks empty their rows when the verb lands.
+ * - Layout: `h-full` and `mt-auto` are asserted together, because either one
+ *   alone still describes a row of cards whose buttons fail to line up; the
+ *   provenance row is pinned by what its row does NOT contain (the timer),
+ *   which is the whole of what moving it changed.
  * - D147's "no station on the card" is asserted against a fixture that still
  *   CARRIES one on the wire, so the negative has something to catch, and the
  *   pair is mutation-proved at the foot of the file.
@@ -126,10 +130,7 @@ function ticket(overrides: Partial<KitchenTicketView> & { id: string }): Kitchen
  * again, "Grill" is on screen and these tests go red. Proven by mutation at
  * the bottom of this file.
  */
-function withStationOnTheWire(
-  t: KitchenTicketView,
-  stationName = 'Grill',
-): KitchenTicketView {
+function withStationOnTheWire(t: KitchenTicketView, stationName = 'Grill'): KitchenTicketView {
   return { ...t, stationId: 'stn_grill', stationName } as KitchenTicketView;
 }
 
@@ -265,7 +266,9 @@ describe('the write gate (WS-408 mirrored)', () => {
     canUpdate = false;
     outstandingRows = [ticket({ id: 'tk_1' })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
     await waitFor(() => expect(screen.getByText('Nothing on the stove.')).toBeTruthy());
@@ -277,7 +280,9 @@ describe('the write gate (WS-408 mirrored)', () => {
     canUpdate = true;
     outstandingRows = [ticket({ id: 'tk_1' })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
     await waitFor(() =>
@@ -554,16 +559,88 @@ describe('the new-ticket chime', () => {
   });
 });
 
-/*
- * D142 — the Done lane holds today, and says where the rest went.
- *
- * The lane's own contents are the server's business (pinned in
- * kitchen-history.spec.ts and kitchen-board.spec.ts); what belongs here is that
- * the board ASKS for the day-scoped lane and offers the way out of it. Both
- * halves matter: a board that asked for the unbounded list would look identical
- * on screen, and the link is what D142 names as the mitigation for the one
- * thing the change takes away.
- */
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('card layout', () => {
+  it('pins the actions to the bottom so a row of cards shares one button line', async () => {
+    outstandingRows = [ticket({ id: 'tk_lay', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    /*
+     * Both halves, or neither is worth asserting. The board is a grid, so
+     * every card is stretched to the tallest in its row. Without h-full the
+     * card declines that height and mt-auto has nothing to push against;
+     * without mt-auto the verb floats wherever the dish list happened to end.
+     * Either assertion alone passes on a board whose buttons still fail to
+     * line up, which is the bug this replaced.
+     */
+    const card = screen.getByText('T1').closest('.rounded-2xl') as HTMLElement;
+    // The anchor itself is asserted: a `closest` that found nothing would make
+    // every className check below vacuous.
+    expect(card).toBeTruthy();
+    expect(card.className).toContain('h-full');
+    expect(card.className).toContain('flex-col');
+
+    const actions = screen.getByRole('button', { name: /Start preparing/ }).parentElement;
+    expect(actions?.className).toContain('mt-auto');
+    // …and it is THIS card's own bottom that was pinned.
+    expect(card.contains(actions)).toBe(true);
+  });
+
+  it('gives the provenance line a row of its own, clear of the timer', async () => {
+    // It used to share the header row with the timer, which left it about half
+    // a card: every ordinary ticket truncated to "RO-000010 · Restauran…".
+    outstandingRows = [ticket({ id: 'tk_prov', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    const title = screen.getByText('T1');
+    const timer = screen.getByText('2 min');
+    const provenance = screen.getByText('RO-000010 · round 1 · Nimal');
+    const headerRow = title.parentElement as HTMLElement;
+
+    // Positive: the place shares its row with the timer, which is the pair
+    // that row exists for…
+    expect(headerRow.contains(timer)).toBe(true);
+    // …and NEGATIVE: the provenance line is not in it. Both halves, because
+    // "the line exists" passes on the old header too.
+    expect(headerRow.contains(provenance)).toBe(false);
+    // It sits under the header inside the same block, at the card's full width.
+    expect(provenance.parentElement).toBe(headerRow.parentElement);
+    expect(
+      title.compareDocumentPosition(provenance) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(provenance.className).toContain('truncate');
+  });
+
+  it('keeps the ticket number and Details on one line', async () => {
+    // A long completed-by name used to wrap and drag Details out of the row.
+    doneRows = [
+      ticket({
+        id: 'tk_wrap',
+        status: 'COMPLETED',
+        placeLabel: 'T1',
+        completedAt: minutesAgo(3),
+        completedByName: 'A Very Long Kitchen Hand Name',
+      }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Done/ }));
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    // Positive: the name is the part that gives.
+    const name = screen.getByText('A Very Long Kitchen Hand Name');
+    expect(name.className).toContain('truncate');
+    // Negative: the time beside it does NOT, so it survives a long name.
+    const time = screen.getByText(/^· /);
+    expect(time.className).toContain('shrink-0');
+  });
+});
+
 /*
  * D142b — every chip carries a number, whichever lane is open.
  *
@@ -649,6 +726,16 @@ describe('the lane chips (D142b)', () => {
   });
 });
 
+/*
+ * D142 — the Done lane holds today, and says where the rest went.
+ *
+ * The lane's own contents are the server's business (pinned in
+ * kitchen-history.spec.ts and kitchen-board.spec.ts); what belongs here is that
+ * the board ASKS for the day-scoped lane and offers the way out of it. Both
+ * halves matter: a board that asked for the unbounded list would look identical
+ * on screen, and the link is what D142 names as the mitigation for the one
+ * thing the change takes away.
+ */
 describe('the Done lane is today’s (D142)', () => {
   it('asks the server for the day-scoped lane, not for every ticket ever bumped', async () => {
     outstandingRows = [ticket({ id: 'tk_1' })];
@@ -732,6 +819,53 @@ describe('one ticket per round (D147)', () => {
     await waitFor(() => expect(screen.getByText('T1 · Main')).toBeTruthy());
     const subtitle = screen.getByText(/round 2/);
     expect(subtitle.textContent).toBe('round 2');
+    expectNoStationAnywhere(container);
+  });
+
+  it('joins every surviving part on a full card, and starts a thin one at its first', async () => {
+    // The join, seen from both ends on one board: the full ticket keeps the
+    // whole dotted run, and the ticket missing its first part starts at the
+    // next survivor rather than at " · ".
+    outstandingRows = [
+      withStationOnTheWire(ticket({ id: 'tk_full', placeLabel: 'T1' })),
+      withStationOnTheWire(ticket({ id: 'tk_thin', placeLabel: 'T2', orderNumber: null })),
+    ];
+    const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
+
+    // Positive: a full ticket still joins every survivor.
+    expect(screen.getByText('RO-000010 · round 1 · Nimal')).toBeTruthy();
+    // Negative: a thin one carries no leading separator.
+    const thin = screen.getByText('round 1 · Nimal');
+    expect(thin.textContent).toBe('round 1 · Nimal');
+    expectNoStationAnywhere(container);
+  });
+
+  it('leaves the round out rather than printing a bare "round null"', async () => {
+    /*
+     * Their branch pinned this and it very nearly went out with the ribbon
+     * (35e94fa: "The round is null-guarded, or a ticket predating rounds
+     * prints a bare 'Round'"). The GUARD moved into the join above when the
+     * ribbon that carried the round was removed, so the claim outlived the
+     * test that proved it — deleting the guard left this whole spec green.
+     *
+     * A ticket predating rounds is the case: `roundNumber` is null on the
+     * wire, and an unguarded template would put "round null" on the pass.
+     */
+    outstandingRows = [
+      withStationOnTheWire(ticket({ id: 'tk_noround', placeLabel: 'T9', roundNumber: null })),
+    ];
+    const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T9')).toBeTruthy());
+
+    // POSITIVE — the other two parts still join, which is what separates
+    // "this ticket has no round" from "this ticket has no subtitle".
+    const line = screen.getByText('RO-000010 · Nimal');
+    expect(line.textContent).toBe('RO-000010 · Nimal');
+    // NEGATIVE — the word never reaches the card at all, in any casing.
+    expect(screen.queryByText(/round/i)).toBeNull();
     expectNoStationAnywhere(container);
   });
 
@@ -861,10 +995,33 @@ describe('one ticket per round (D147)', () => {
  * 2. `withStationOnTheWire` really does put a station in front of the
  *    component, so the assertion is looking at a fixture that COULD break it.
  *
- * Beyond these, the real components were mutated outside the repo and the
- * suite re-run: restoring `{ticket.stationName}` to the TicketCard subtitle
- * and restoring the station chip to ticket-order-dialog.tsx each turned this
- * file red (killed); the repo was restored from the scratch copy afterwards.
+ * Beyond these, the real components were mutated on a scratch copy taken
+ * outside the repo and this suite re-run against each mutation; every one went
+ * red where it should and green again on restore. What each killed:
+ *
+ * - The station back at the head of the provenance line (as it read before
+ *   D147) — all four D147 card negatives.
+ * - The station chip back on ticket-order-dialog.tsx's item lines — the D147
+ *   dialog negative. Both halves of the old chip come back together, so the
+ *   "no station" warning is covered with the name.
+ * - `h-full` off the Card — "pins the actions to the bottom". Separately,
+ *   `mt-auto` off the actions block — the SAME one test, which is why the
+ *   pair is asserted together: either mutation alone still lines the cards up
+ *   wrong, and either assertion alone would miss one of them.
+ * - The provenance line moved back inside the header row beside the timer —
+ *   "gives the provenance line a row of its own".
+ * - `shrink-0` off the completion time, letting it truncate with the name —
+ *   "keeps the ticket number and Details on one line".
+ * - Every chip reading the SERVER count, the fetched lanes included — "moves
+ *   the active lane's chip on a bump" (D142b's optimistic half). Dropping the
+ *   server counts entirely, back to counting only the open lane, killed all
+ *   four chip tests.
+ * - `COMPLETED` in place of `COMPLETED_TODAY` — "asks the server for the
+ *   day-scoped lane" and seven other tests that reach the Done lane, since the
+ *   fixture answers that token with the OUTSTANDING rows rather than pretending
+ *   both are the same lane.
+ * - The lane cut ignoring IN_PROGRESS — five lane tests, the control that says
+ *   `inLane` is doing the work the counts and the board both read from.
  */
 describe('the D147 negatives can actually fail', () => {
   it('catches the subtitle this slice removed', () => {

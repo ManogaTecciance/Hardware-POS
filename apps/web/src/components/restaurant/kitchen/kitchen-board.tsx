@@ -8,7 +8,6 @@ import { StatusBadge } from '@/components/restaurant/status-badge';
 import { TicketOrderDialog } from '@/components/restaurant/kitchen/ticket-order-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog } from '@/components/ui/dialog';
 import { ChipRow } from '@/components/ui/chip-row';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
@@ -272,16 +271,24 @@ export function KitchenBoard({ session, branchId }: Props) {
   };
 
   /*
-   * D115 — the lane the active tab shows, cut from the fetched list. The
-   * queued family (QUEUED + the retired print statuses) is To make; started
-   * tickets are Preparing; Done renders its fetch whole.
+   * D115 — one lane's share of a fetched list. The queued family (QUEUED + the
+   * retired print statuses) is To make; started tickets are Preparing; Done
+   * renders its fetch whole.
+   *
+   * A function of (rows, lane) rather than an inline ternary because the chips
+   * ask it the same question about a lane the board is not showing (D142b).
    */
-  const visible =
-    filter === 'TO_MAKE'
-      ? tickets.filter((t) => t.status !== 'IN_PROGRESS')
-      : filter === 'PREPARING'
-        ? tickets.filter((t) => t.status === 'IN_PROGRESS')
-        : tickets;
+  const inLane = (rows: KitchenTicketView[], lane: Filter): KitchenTicketView[] =>
+    lane === 'TO_MAKE'
+      ? rows.filter((t) => t.status !== 'IN_PROGRESS')
+      : lane === 'PREPARING'
+        ? rows.filter((t) => t.status === 'IN_PROGRESS')
+        : rows;
+
+  /** The lane the active tab shows. There is no further cut: every ticket a
+      branch is working on belongs on this board, one card per round (D147). */
+  const visible = inLane(tickets, filter);
+
   /** Which server count belongs to which chip. */
   const COUNT_KEY: Record<Filter, keyof KitchenLaneCounts> = {
     TO_MAKE: 'toMake',
@@ -299,22 +306,15 @@ export function KitchenBoard({ session, branchId }: Props) {
    * before, and why "Done" showed nothing from To make, and To make and
    * Preparing showed nothing from Done.
    */
-  const laneCount = (key: Filter): number | null => {
-    if (FETCH_FOR[key] !== FETCH_FOR[filter]) return counts?.[COUNT_KEY[key]] ?? null;
-    if (FETCH_FOR[key] !== 'OUTSTANDING') return visible.length;
-    return key === 'TO_MAKE'
-      ? tickets.filter((t) => t.status !== 'IN_PROGRESS').length
-      : tickets.filter((t) => t.status === 'IN_PROGRESS').length;
-  };
+  const laneCount = (key: Filter): number | null =>
+    FETCH_FOR[key] === FETCH_FOR[filter]
+      ? inLane(tickets, key).length
+      : (counts?.[COUNT_KEY[key]] ?? null);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <ChipRow
-          ariaLabel="Filter kitchen tickets"
-          activeKey={filter}
-          className="min-w-0 flex-1"
-        >
+        <ChipRow ariaLabel="Filter kitchen tickets" activeKey={filter} className="min-w-0 flex-1">
           {FILTERS.map((f) => {
             const count = laneCount(f.key);
             return (
@@ -436,7 +436,6 @@ export function KitchenBoard({ session, branchId }: Props) {
  * is on this card, and the Details dialog remains the way to see the rest of
  * the ORDER — the earlier rounds this card is not.
  */
-
 function TicketCard({
   ticket,
   canUpdate,
@@ -461,15 +460,15 @@ function TicketCard({
   // dish been waiting?", which a done dish no longer is.
   const urgency: Urgency = done ? 'fresh' : urgencyOf(ticket.createdAt, new Date());
   /*
-   * D147 — order, round, waiter. The station used to lead this line and no
-   * longer exists on a ticket, so it JOINS a list rather than chaining
-   * ` · ` prefixes the way it did when the first element was always there:
-   * dropping the station out of the old form opened every card with a stray
-   * separator. Nothing left is guaranteed either (a takeaway before its order
-   * number lands carries none of the three), which is why an empty line is
-   * dropped instead of printed.
+   * D147 — order, round, waiter. This line is built as a FILTERED JOIN rather
+   * than as fragments each prefixed with ` · `: the prefix form was only ever
+   * safe while its first part was always present, and it emits a leading
+   * separator the moment that part goes missing — which, with the station gone
+   * from every ticket, is now the ordinary card. Nothing left is guaranteed
+   * either (a takeaway before its order number lands carries none of the
+   * three), which is why an empty line is dropped instead of printed.
    */
-  const subtitle = [
+  const provenance = [
     ticket.orderNumber,
     ticket.roundNumber ? `round ${ticket.roundNumber}` : null,
     ticket.waiterName,
@@ -477,44 +476,54 @@ function TicketCard({
     .filter(Boolean)
     .join(' · ');
   return (
-    <Card className={done ? 'opacity-70' : URGENCY_CARD_CLASS[urgency]}>
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+    // The board is a grid, so the row stretches every card to its tallest
+    // member. `h-full` is what makes this card ACCEPT that height, and without
+    // it the actions' `mt-auto` below has nothing to push against — the two
+    // only line a row's buttons up as a pair.
+    <Card
+      className={`flex h-full flex-col ${done ? 'opacity-70' : (URGENCY_CARD_CLASS[urgency] ?? '')}`}
+    >
+      <CardContent className="flex flex-1 flex-col space-y-3 p-4">
+        <div>
+          <div className="flex items-start justify-between gap-2">
             {/* The place is the biggest thing on the card: a dish the pass
                 cannot place is a dish that does not leave the kitchen. */}
-            <p className="truncate text-xl font-semibold">
+            <p className="min-w-0 flex-1 truncate text-xl font-semibold">
               {ticket.placeLabel ?? 'No table'}
             </p>
-            {subtitle ? (
-              <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
-            ) : null}
+            {done ? (
+              <StatusBadge
+                tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
+                label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
+              />
+            ) : (
+              // The timer sits where a status badge would, because on the
+              // outstanding tab the age IS the status — every badge there read
+              // "To make", which the tab already says. D113's Preparing is the
+              // one outstanding state worth a badge, so it rides beside the
+              // timer rather than displacing it: the dish still ages.
+              <div className="flex shrink-0 items-center gap-2">
+                {preparing ? (
+                  <StatusBadge
+                    tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
+                    label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
+                  />
+                ) : null}
+                <span
+                  className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
+                >
+                  {formatElapsed(ticket.createdAt)}
+                </span>
+              </div>
+            )}
           </div>
-          {done ? (
-            <StatusBadge
-              tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
-              label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
-            />
-          ) : (
-            // The timer sits where a status badge would, because on the
-            // outstanding tab the age IS the status — every badge there read
-            // "To make", which the tab already says. D113's Preparing is the
-            // one outstanding state worth a badge, so it rides beside the
-            // timer rather than displacing it: the dish still ages.
-            <div className="flex shrink-0 items-center gap-2">
-              {preparing ? (
-                <StatusBadge
-                  tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
-                  label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
-                />
-              ) : null}
-              <span
-                className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
-              >
-                {formatElapsed(ticket.createdAt)}
-              </span>
-            </div>
-          )}
+          {/* Its own full-width line. Sharing the header row with the timer
+              left it roughly half a card, which truncated the waiter off the
+              end of an ordinary ticket ("RO-000001 · Restauran..."). Nothing
+              here is worth reading at half width. */}
+          {provenance ? (
+            <p className="mt-1 truncate text-sm text-muted-foreground">{provenance}</p>
+          ) : null}
         </div>
 
         <ul className="space-y-2">
@@ -540,25 +549,42 @@ function TicketCard({
           ))}
         </ul>
 
-        <div className="space-y-2 border-t border-border pt-3">
+        {/*
+         * The board is a grid, so every card is stretched to the tallest in
+         * its row. Without mt-auto the verb sits wherever the dish list
+         * happens to end, leaving a void beneath it and putting each card's
+         * button at a different height - the thing a cook reaches for moves
+         * every time the ticket beside it changes. Pinning the actions to the
+         * bottom gives the row one button line to aim at.
+         */}
+        <div className="mt-auto space-y-2 border-t border-border pt-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            {/* min-w-0 + truncate, or a long "completed by" name wraps to a
+                second line and drags Details up out of the row with it. The
+                icon and the button keep their size; the name is what gives. */}
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
               {done ? (
                 <>
-                  <Check className="h-4 w-4" />
-                  {ticket.completedByName ?? 'Done'}
-                  {ticket.completedAt ? ` · ${formatTime(ticket.completedAt)}` : ''}
+                  <Check className="h-4 w-4 shrink-0" />
+                  {/* The name gives and the time is pinned: "who bumped it" is
+                      recoverable from Details, "when" is the half a pass
+                      actually scans a Done card for. */}
+                  <span className="truncate">{ticket.completedByName ?? 'Done'}</span>
+                  {ticket.completedAt ? (
+                    <span className="shrink-0">· {formatTime(ticket.completedAt)}</span>
+                  ) : null}
                 </>
               ) : (
                 <>
-                  <Clock className="h-4 w-4" />
-                  {ticket.ticketNumber}
+                  <Clock className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{ticket.ticketNumber}</span>
                 </>
               )}
             </span>
             <Button
               size="sm"
               variant="ghost"
+              className="shrink-0"
               leftIcon={<ListTree className="h-4 w-4" />}
               onClick={onDetails}
             >

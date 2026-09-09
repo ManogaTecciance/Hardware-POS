@@ -338,7 +338,12 @@ export function labelForPromotionType(type: PromotionType): string {
   }
 }
 
-const DAY_LABEL: Record<PromotionDayOfWeek, string> = {
+/**
+ * Day, channel and item-role wording, centralised for the same reason
+ * {@link labelForPromotionType} is: the list, the editor and the detail view
+ * all render these, and three private copies is how they drift.
+ */
+export const PROMOTION_DAY_LABELS: Record<PromotionDayOfWeek, string> = {
   MON: 'Mon',
   TUE: 'Tue',
   WED: 'Wed',
@@ -346,6 +351,23 @@ const DAY_LABEL: Record<PromotionDayOfWeek, string> = {
   FRI: 'Fri',
   SAT: 'Sat',
   SUN: 'Sun',
+};
+
+export const PROMOTION_CHANNEL_LABELS: Record<PromotionChannel, string> = {
+  COUNTER: 'Counter',
+  DINE_IN: 'Dine-in',
+  TAKEAWAY: 'Takeaway',
+  ONLINE: 'Online',
+};
+
+/**
+ * BUY/GET only mean anything on a BOGO; on the other types every item is the
+ * thing being discounted, which is why the roles read as they do.
+ */
+export const PROMOTION_ROLE_LABELS: Record<PromotionItemRole, string> = {
+  BUY: 'Buy',
+  GET: 'Get free',
+  BUNDLE: 'In bundle',
 };
 
 /**
@@ -358,7 +380,7 @@ export function summarisePromotionSchedule(p: Pick<Promotion, 'daysOfWeek' | 'st
   if (p.daysOfWeek.length === 0 || p.daysOfWeek.length === 7) {
     parts.push('All week');
   } else {
-    parts.push(p.daysOfWeek.map((d) => DAY_LABEL[d]).join(', '));
+    parts.push(p.daysOfWeek.map((d) => PROMOTION_DAY_LABELS[d]).join(', '));
   }
   if (p.startTime && p.endTime) {
     parts.push(`${p.startTime}–${p.endTime}`);

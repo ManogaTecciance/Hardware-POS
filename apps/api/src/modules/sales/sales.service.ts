@@ -13,11 +13,10 @@ import {
   applyPromotions,
   taxableBase,
   type Paginated,
-  type PromotionRule,
 } from '@hardware-pos/shared';
 
-import { isPromotionActive } from '../promotions/promotions.evaluator';
-import { PromotionsRepository, type PromotionWithItems } from '../promotions/promotions.repository';
+import { eligiblePromotionRules } from '../promotions/promotion-pricing';
+import { PromotionsRepository } from '../promotions/promotions.repository';
 
 import { paginate } from '../../common/pagination';
 import { round2, sum2 } from '../../common/money';
@@ -60,36 +59,6 @@ function requireProductId(productId: string | null, saleItemId: string): string 
     throw new Error(`Draft sale item ${saleItemId} has no productId — refusing to complete`);
   }
   return productId;
-}
-
-/**
- * D123 (4.4) — the Decimal → number boundary for promotions, in one place.
- *
- * `shared` carries no runtime dependency on Prisma, so the applier works in
- * plain numbers with cent rounding. `catalog.ts` performs the mirror-image
- * conversion from the wire strings, so both callers hand the applier the same
- * shape and the same values.
- */
-function toPromotionRule(p: PromotionWithItems): PromotionRule {
-  return {
-    id: p.id,
-    name: p.name,
-    type: p.type as PromotionRule['type'],
-    fixedPrice: p.fixedPrice === null ? null : Number(p.fixedPrice),
-    percentageOff: p.percentageOff === null ? null : Number(p.percentageOff),
-    amountOff: p.amountOff === null ? null : Number(p.amountOff),
-    // D126 — the cart threshold. Null on every rule written before D126, which
-    // the applier reads as "no threshold".
-    minimumSpend: p.minimumSpend === null ? null : Number(p.minimumSpend),
-    buyQuantity: p.buyQuantity,
-    getQuantity: p.getQuantity,
-    stackable: p.stackable,
-    items: p.items.map((it) => ({
-      productId: it.productId,
-      role: it.role as PromotionRule['items'][number]['role'],
-      quantity: it.quantity,
-    })),
-  };
 }
 
 @Injectable()
@@ -652,10 +621,21 @@ export class SalesService {
      * channel `catalog.ts` sends; omitting it would make a channel-scoped
      * promotion apply on the till and NOT here, since the evaluator refuses a
      * scoped promotion when the context names no channel.
+     *
+     * D139 — the tenant's zone is passed for the same reason the channel is.
+     * Without it a day-of-week or time-of-day window was read on the HOST's
+     * clock: on a UTC server an 11:00–15:00 lunch offer for a Colombo tenant
+     * was live 16:30–20:30 their time.
      */
-    const eligiblePromotions = (await this.promotions.listForCatalogue(tenantId))
-      .filter((p) => isPromotionActive(p, { now: new Date(), branchId, channel: 'COUNTER' }))
-      .map(toPromotionRule);
+    const eligiblePromotions = eligiblePromotionRules(
+      await this.promotions.listForCatalogue(tenantId),
+      {
+        now: new Date(),
+        branchId,
+        channel: 'COUNTER',
+        tenantTimeZone: settings.timezone,
+      },
+    );
 
     const promotionResult = applyPromotions({
       lines: lines.map((l, i) => ({
