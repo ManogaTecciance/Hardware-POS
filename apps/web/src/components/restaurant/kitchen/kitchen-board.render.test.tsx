@@ -592,3 +592,53 @@ describe('station ribbon', () => {
     expect(screen.queryByText(/Round/)).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('card layout', () => {
+  it('pins the actions to the bottom so a row of cards shares one button line', async () => {
+    outstandingRows = [ticket({ id: 'tk_lay', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    /*
+     * Both halves, or neither is worth asserting. The board is a grid, so
+     * every card is stretched to the tallest in its row. Without h-full the
+     * card declines that height and mt-auto has nothing to push against;
+     * without mt-auto the verb floats wherever the dish list happened to end.
+     * Either assertion alone passes on a board whose buttons still fail to
+     * line up, which is the bug this replaced.
+     */
+    const card = screen.getByText('Grill').parentElement?.parentElement;
+    expect(card?.className).toContain('h-full');
+    expect(card?.className).toContain('flex-col');
+
+    const actions = screen.getByRole('button', { name: /Start preparing/ }).parentElement;
+    expect(actions?.className).toContain('mt-auto');
+  });
+
+  it('keeps the ticket number and Details on one line', async () => {
+    // A long completed-by name used to wrap and drag Details out of the row.
+    doneRows = [
+      ticket({
+        id: 'tk_wrap',
+        status: 'COMPLETED',
+        placeLabel: 'T1',
+        completedAt: minutesAgo(3),
+        completedByName: 'A Very Long Kitchen Hand Name',
+      }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Done/ }));
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    // Positive: the name is the part that gives.
+    const name = screen.getByText('A Very Long Kitchen Hand Name');
+    expect(name.className).toContain('truncate');
+    // Negative: the time beside it does NOT, so it survives a long name.
+    const time = screen.getByText(/^· /);
+    expect(time.className).toContain('shrink-0');
+  });
+});
