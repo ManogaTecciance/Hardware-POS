@@ -20,7 +20,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '@/lib/auth';
-import type { KitchenTicketView } from '@/lib/restaurant/types';
+import type { KitchenStationView, KitchenTicketView } from '@/lib/restaurant/types';
 
 // ── boundaries ───────────────────────────────────────────────────────────────
 
@@ -35,6 +35,7 @@ const startFn = vi.fn();
 const completeFn = vi.fn();
 const reopenFn = vi.fn();
 const orderFn = vi.fn();
+const stationsFn = vi.fn();
 vi.mock('@/lib/restaurant/api', () => ({
   kitchen: {
     listTickets: (...args: unknown[]) => listFn(...args),
@@ -42,6 +43,9 @@ vi.mock('@/lib/restaurant/api', () => ({
     complete: (...args: unknown[]) => completeFn(...args),
     reopen: (...args: unknown[]) => reopenFn(...args),
     order: (...args: unknown[]) => orderFn(...args),
+  },
+  kitchenStations: {
+    list: (...args: unknown[]) => stationsFn(...args),
   },
 }));
 
@@ -91,6 +95,19 @@ function ticket(overrides: Partial<KitchenTicketView> & { id: string }): Kitchen
   };
 }
 
+function station(id: string, name: string): KitchenStationView {
+  return {
+    id,
+    branchId: 'brn_1',
+    code: name.toUpperCase().replace(/\s+/g, '_'),
+    name,
+    category: 'FOOD',
+    isActive: true,
+    createdAt: minutesAgo(60),
+    updatedAt: minutesAgo(60),
+  };
+}
+
 /** Mutable rows, so a verb can empty them and the reload stays honest. */
 let outstandingRows: KitchenTicketView[] = [];
 let doneRows: KitchenTicketView[] = [];
@@ -104,7 +121,15 @@ beforeEach(() => {
   completeFn.mockReset();
   reopenFn.mockReset();
   orderFn.mockReset();
+  stationsFn.mockReset();
   chime.mockReset();
+  /*
+   * One station by default, so the station strip stays hidden and every test
+   * written before the filter existed still describes the board it meant to.
+   * The filter's own tests opt into more.
+   */
+  stationsFn.mockImplementation(() => Promise.resolve([station('stn_1', 'Grill')]));
+  window.localStorage.clear();
   orderFn.mockImplementation(() => new Promise(() => undefined));
   listFn.mockImplementation((_s: unknown, _b: unknown, filter: unknown) =>
     Promise.resolve(filter === 'COMPLETED' ? doneRows : outstandingRows),
@@ -201,7 +226,9 @@ describe('the write gate (WS-408 mirrored)', () => {
     canUpdate = false;
     outstandingRows = [ticket({ id: 'tk_1' })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
     await waitFor(() => expect(screen.getByText('Nothing on the stove.')).toBeTruthy());
@@ -213,7 +240,9 @@ describe('the write gate (WS-408 mirrored)', () => {
     canUpdate = true;
     outstandingRows = [ticket({ id: 'tk_1' })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
     await waitFor(() =>
@@ -640,5 +669,215 @@ describe('card layout', () => {
     // Negative: the time beside it does NOT, so it survives a long name.
     const time = screen.getByText(/^· /);
     expect(time.className).toContain('shrink-0');
+  });
+});
+
+// -----------------------------------------------------------------------------
+
+/*
+ * The station filter.
+ *
+ * Pinned in pairs throughout, because every half here has a passing twin that
+ * describes a broken board: a strip that is always shown, a filter that hides
+ * everything, and a memory that never forgets.
+ */
+describe('the station filter', () => {
+  const twoStations = () => [station('stn_1', 'Grill'), station('stn_2', 'Main Kitchen')];
+
+  it('offers no strip when the branch has a single station', async () => {
+    // One station is no routing decision, so the strip would be furniture.
+    stationsFn.mockImplementation(() => Promise.resolve([station('stn_1', 'Grill')]));
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /All stations/ })).toBeNull();
+  });
+
+  it('offers the strip once there is a choice to make', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: /All stations/ })).toBeTruthy());
+    expect(screen.getByRole('button', { name: /Main Kitchen/ })).toBeTruthy();
+  });
+
+  it('cuts the board to one station and leaves the other tickets out', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // Positive control: unfiltered, the board carries both.
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+    expect(screen.getByText('T-MAIN')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+
+    // Positive: the chosen station survives. Negative: the other one goes.
+    await waitFor(() => expect(screen.queryByText('T-GRILL')).toBeNull());
+    expect(screen.getByText('T-MAIN')).toBeTruthy();
+  });
+
+  it('counts the lane per station, not the whole board', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g1', placeLabel: 'T1', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_g2', placeLabel: 'T2', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m1', placeLabel: 'T3', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /All stations/ })).toBeTruthy());
+    // Each chip counts its own station; All counts every one of them.
+    expect(screen.getByRole('button', { name: /All stations 3/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Grill 2/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Main Kitchen 1/ })).toBeTruthy();
+
+    // And the lane strip follows the cut, or it would advertise work the
+    // board is not showing.
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen 1/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /To make 1/ })).toBeTruthy());
+  });
+
+  it('says which station is empty rather than looking like an empty kitchen', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T1', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+
+    // Positive: the station is named, so a forgotten filter is visible...
+    await waitFor(() => expect(screen.getByText(/Nothing for Main Kitchen/)).toBeTruthy());
+    // ...and there is a way back out of it.
+    fireEvent.click(screen.getByRole('button', { name: /Show all stations/ }));
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+  });
+
+  it('remembers the station across a remount, per branch', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    const first = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+    await waitFor(() => expect(screen.queryByText('T-GRILL')).toBeNull());
+    first.unmount();
+
+    // Positive: the same branch comes back on the station it was left on.
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-MAIN')).toBeTruthy());
+    expect(screen.queryByText('T-GRILL')).toBeNull();
+    cleanup();
+
+    // Negative: a DIFFERENT branch is not dragged along with it.
+    render(<KitchenBoard session={SESSION} branchId="brn_2" />);
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+  });
+
+  it('drops a remembered station that no longer exists', async () => {
+    // The screen was left on a station that has since been archived.
+    window.localStorage.setItem('kitchen.stationFilter.brn_1', 'stn_gone');
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // Rather than filtering to nothing for ever with no clue why.
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+  });
+
+  it('keeps the board when the station list cannot be fetched', async () => {
+    // The filter is a convenience; the board is the job.
+    stationsFn.mockImplementation(() => Promise.reject(new Error('403')));
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /All stations/ })).toBeNull();
+  });
+});
+
+// -----------------------------------------------------------------------------
+
+/*
+ * The chime, once a station is chosen.
+ *
+ * Both halves in one test on purpose. "It does not ring for another station"
+ * passes on a board whose chime is simply broken, so the same filtered screen
+ * must be shown ringing for its own arrival immediately afterwards.
+ */
+describe('the chime under a station filter', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('hears its own station and stays deaf to the others', async () => {
+    stationsFn.mockImplementation(() =>
+      Promise.resolve([station('stn_1', 'Grill'), station('stn_2', 'Main Kitchen')]),
+    );
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /^Grill/ }));
+    // Let the station switch re-baseline before anything arrives.
+    await vi.advanceTimersByTimeAsync(5000);
+    chime.mockReset();
+
+    // Negative: a dessert landing on another station is not this screen's work.
+    outstandingRows = [
+      ...outstandingRows,
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(chime).not.toHaveBeenCalled();
+
+    // Positive: its own station still rings, so the silence above is a filter
+    // and not a broken chime.
+    outstandingRows = [
+      ...outstandingRows,
+      ticket({ id: 'tk_g2', placeLabel: 'T-GRILL-2', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(chime).toHaveBeenCalled();
+  });
+
+  it('re-baselines on a station switch instead of ringing for the reveal', async () => {
+    stationsFn.mockImplementation(() =>
+      Promise.resolve([station('stn_1', 'Grill'), station('stn_2', 'Main Kitchen')]),
+    );
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /^Grill/ }));
+    await waitFor(() => expect(screen.queryByText('T-MAIN')).toBeNull());
+    chime.mockReset();
+
+    // Widening the view reveals a ticket this screen has never counted. That
+    // is a change of view, not an arrival, and must not ring.
+    fireEvent.click(screen.getByRole('button', { name: /All stations/ }));
+    await waitFor(() => expect(screen.getByText('T-MAIN')).toBeTruthy());
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(chime).not.toHaveBeenCalled();
   });
 });
