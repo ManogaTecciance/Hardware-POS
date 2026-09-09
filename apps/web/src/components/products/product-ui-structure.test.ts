@@ -164,9 +164,16 @@ describe('inventory-mode decisions live in the resolver, not in JSX', () => {
     // consume only the type; they do NOT call the runtime resolver — the
     // "components must not compare a mode themselves" rule above continues to
     // enforce the boundary.
+    //
+    // D139 added `inventory-tabs.tsx`. It calls the runtime resolver
+    // (`resolveCatalogueTabs`) rather than only consuming a type, and that is
+    // the point: the tab bar asks which catalogue sub-surfaces a workspace has
+    // and reads flags back. It is an importer BECAUSE it refuses to decide for
+    // itself, which is what this list is here to protect.
     expect(importers).toEqual([
       'app/(app)/products/[id]/page.tsx',
       'app/(app)/products/page.tsx',
+      'components/products/inventory-tabs.tsx',
       'components/products/product-detail.tsx',
       'components/products/product-status-badge.tsx',
       'components/products/wizard/product-wizard.tsx',

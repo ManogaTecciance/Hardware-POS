@@ -121,6 +121,13 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
       // gets to redefine them. Spread for the same reason `measuredGoods` is:
       // `RETAIL_CAPABILITIES` is the hardware template too.
       configurableBusinessDetails: true,
+      // D139 — the attribute library is retail's, not hardware's. Both read
+      // `RETAIL_CAPABILITIES`, so declaring it there would hand the tab to a
+      // hardware counter that types a variation when it needs one and keeps no
+      // library of them. Same reason `measuredGoods` sits here. `internalBarcodes`
+      // is NOT repeated: it is on the shared constant precisely because hardware
+      // keeps it too, and restating it here would invite the two to drift.
+      attributeLibrary: true,
     },
   },
   /**

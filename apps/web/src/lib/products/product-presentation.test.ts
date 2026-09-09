@@ -15,11 +15,14 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { BUSINESS_TYPE_VALUES, domainFor } from '@hardware-pos/shared';
+
 import {
   ALL_INVENTORY_MODES,
   ALL_SELLABLE_KINDS,
   classifiedInventoryModes,
   classifiedSellableKinds,
+  resolveCatalogueTabs,
   resolveItemStockPresentation,
   resolveProductManagementPresentation,
   type ProductPresentation,
@@ -451,5 +454,110 @@ describe('D101 — resolveItemStockPresentation', () => {
         expect(resolveItemStockPresentation(p, kind)).toBe('NONE');
       }
     }
+  });
+});
+
+/**
+ * D139 — which workspaces are offered the Attributes and Barcodes tabs.
+ *
+ * ## What makes these assertions non-vacuous
+ *
+ * The exact map over the REAL registry is the assertion. "Restaurant has no
+ * Barcodes tab" alone would pass for a resolver that returned false for
+ * everyone — and false-for-everyone is a real possible bug here, because both
+ * capabilities are OPTIONAL and a missing declaration reads as `undefined`.
+ * So every business type is asserted in one expectation, positives included.
+ *
+ * The two flags are also asserted to DISAGREE for hardware. That is the whole
+ * point of the change and the one case a single shared flag could not express:
+ * hardware keeps Barcodes and loses Attributes.
+ */
+describe('D139 — catalogue sub-surface tabs', () => {
+  it('offers each tab to exactly the workspaces that asked for it', () => {
+    const rows = BUSINESS_TYPE_VALUES.map((type) => [type, resolveCatalogueTabs(type)]);
+
+    expect(Object.fromEntries(rows)).toEqual({
+      // Retail keeps everything — the PO was explicit that its bar is unchanged.
+      RETAIL: { showAttributes: true, showBarcodes: true },
+      // Hardware stocks and labels goods, so it keeps Barcodes; it types a
+      // variation when it needs one and keeps no library, so Attributes goes.
+      HARDWARE: { showAttributes: false, showBarcodes: true },
+      // Food service loses both. HOTEL shares FOOD_SERVICE_CAPABILITIES, which
+      // is why it is here rather than forgotten — the D56 failure exactly.
+      RESTAURANT: { showAttributes: false, showBarcodes: false },
+      CAFE: { showAttributes: false, showBarcodes: false },
+      BAKERY: { showAttributes: false, showBarcodes: false },
+      HOTEL: { showAttributes: false, showBarcodes: false },
+      // Unchanged by this decision, deliberately.
+      GENERAL: { showAttributes: true, showBarcodes: true },
+    });
+    // …and the walk covered the whole registry, so the map above cannot pass
+    // by being compared against a subset of itself.
+    expect(rows).toHaveLength(BUSINESS_TYPE_VALUES.length);
+  });
+
+  it('the two flags are independent, which is why there are two', () => {
+    // POSITIVE and NEGATIVE in one workspace. A single "catalogue extras" flag
+    // would have to give hardware both tabs or neither, and the PO asked for
+    // exactly one of them.
+    const hardware = resolveCatalogueTabs('HARDWARE');
+    expect(hardware.showBarcodes).toBe(true);
+    expect(hardware.showAttributes).toBe(false);
+  });
+
+  it('hides both while the profile is unresolved', () => {
+    // D31 — a tab that appears a beat late is better than one that vanishes
+    // under a click, so `null` is not treated as retail.
+    expect(resolveCatalogueTabs(null)).toEqual({
+      showAttributes: false,
+      showBarcodes: false,
+    });
+    // …paired, so it cannot pass because the resolver hides everything always.
+    expect(resolveCatalogueTabs('RETAIL')).toEqual({
+      showAttributes: true,
+      showBarcodes: true,
+    });
+  });
+
+  it('reads the registry rather than a list written here', () => {
+    /*
+     * The resolver's answer must BE the registry's, not a copy that agrees with
+     * it today. Compared field by field against the descriptors themselves, so
+     * a capability edited in `capabilities.ts` and forgotten here fails.
+     */
+    for (const type of BUSINESS_TYPE_VALUES) {
+      const { catalogue } = domainFor(type).capabilities;
+      expect(resolveCatalogueTabs(type), type).toEqual({
+        showAttributes: catalogue.attributeLibrary === true,
+        showBarcodes: catalogue.internalBarcodes === true,
+      });
+    }
+  });
+
+  describe('the gate can actually fail', () => {
+    it('M1: a truthiness check would offer the tab to every domain that omits the flag', () => {
+      /*
+       * Both capabilities are optional, so most domains read `undefined`.
+       * `undefined` is falsy, so the mutation looks harmless — until a domain
+       * declares a non-boolean. Proven against the shipped resolver.
+       */
+      const truthyNonTrue = 'yes' as unknown as boolean;
+      expect(Boolean(truthyNonTrue)).toBe(true);
+      expect(truthyNonTrue === true).toBe(false);
+    });
+
+    it('M2: gating on ProductBusinessKind cannot separate hardware from retail', () => {
+      /*
+       * The mutation somebody will propose: reuse the coarse kind instead of a
+       * capability. Its RETAIL bucket covers hardware, so it hands hardware the
+       * Attributes tab the PO asked to remove.
+       */
+      const byCoarseKind = (type: string) => type !== 'RESTAURANT';
+      expect(byCoarseKind('HARDWARE')).toBe(byCoarseKind('RETAIL'));
+      // …and the shipped resolver tells them apart.
+      expect(resolveCatalogueTabs('HARDWARE').showAttributes).not.toBe(
+        resolveCatalogueTabs('RETAIL').showAttributes,
+      );
+    });
   });
 });

@@ -89,6 +89,35 @@ export interface TenantCapabilities {
      * nothing about them changes.
      */
     readonly configurableBusinessDetails?: boolean;
+    /**
+     * D139 — the reusable **attribute library** (`Products → Attributes`).
+     *
+     * Naming "Size" and its options once, then reusing them across products,
+     * pays for itself in a catalogue with many variants of the same few scales.
+     * A hardware counter types a variation when it needs one and does not keep
+     * a library of them, and a kitchen's variants are not scales at all — for
+     * both the screen is a door to a feature they never walk through.
+     *
+     * **The API stays shared core.** D125 gated `/attribute-library` on
+     * permission, not on business type, deliberately: any workspace that DOES
+     * want a library may use one. This hides a tab, which is usability
+     * (CLAUDE.md), and changes no authority.
+     *
+     * Optional, absent means `false`, for the same reason as the two above.
+     */
+    readonly attributeLibrary?: boolean;
+    /**
+     * D139 — **internal barcodes** (`Products → Barcodes`).
+     *
+     * Allocating EAN-13s from an in-store range, auditing them and printing
+     * shelf labels is a stocked-goods activity (Phase 5, D125/D106). A kitchen
+     * does not barcode a portion of rice, so the screen is noise on a
+     * food-service workspace.
+     *
+     * Declared on `RETAIL_CAPABILITIES`, which is the HARDWARE template as well
+     * as retail's base — both stock and label physical goods, and both keep it.
+     */
+    readonly internalBarcodes?: boolean;
   };
   readonly fulfilment: {
     readonly kind: FulfilmentKind;
@@ -126,6 +155,11 @@ export const RETAIL_CAPABILITIES: TenantCapabilities = {
     // "Seasonal") — the plan's original motivation for renaming menus.
     collections: true,
     components: false,
+    // D139 — hardware and retail both stock and label physical goods, so both
+    // keep the Barcodes screen. `attributeLibrary` is deliberately NOT here:
+    // this constant IS the hardware template, and only retail wants that tab,
+    // so it is declared on the retail descriptor instead (the D134e pattern).
+    internalBarcodes: true,
   },
   fulfilment: { kind: 'IMMEDIATE', stationRouting: false, rounds: false, channels: ['COUNTER'] },
   charges: { serviceCharge: false, packaging: false },
@@ -161,6 +195,12 @@ export const GENERAL_CAPABILITIES: TenantCapabilities = {
     preparation: false,
     collections: false,
     components: false,
+    // D139 — unchanged: the general template showed both catalogue tabs before
+    // this decision and nothing asked for that to change. Stated explicitly
+    // rather than inherited, because absent means false and silence here would
+    // remove two working screens from a template nobody was talking about.
+    attributeLibrary: true,
+    internalBarcodes: true,
   },
   fulfilment: { kind: 'IMMEDIATE', stationRouting: false, rounds: false, channels: ['COUNTER'] },
   charges: { serviceCharge: false, packaging: false },

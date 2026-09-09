@@ -7837,6 +7837,114 @@ seed, not a schema.
 
 ---
 
+## D139 — the Inventory tab bar is per workspace: Attributes and Barcodes are not for everyone
+
+**Status:** accepted and **built**, 2026-09-09. No schema change, no migration,
+no route removed, no API gate changed.
+
+### The problem
+
+`InventoryTabs` rendered a module-level array unconditionally, so every
+workspace got the same seven tabs:
+
+```
+Products | Categories | Promotions | Attributes | Barcodes | Stock | Purchases
+```
+
+Two of those are not for every business:
+
+- **Attributes** (D125's reusable variation-attribute library) pays for itself
+  in a catalogue with many variants of the same few scales — Size, Colour, Fit.
+  A hardware counter types a variation on the rare product that needs one and
+  keeps no library of them. A kitchen's variants are not scales at all.
+- **Barcodes** (Phase 5's in-store EAN-13 allocation, audit and shelf labels) is
+  a stocked-goods activity. A kitchen does not barcode a portion of rice.
+
+Both were doors to features those workspaces never walk through.
+
+### The decision
+
+| | Attributes | Barcodes |
+|---|---|---|
+| **RETAIL** | ✅ | ✅ |
+| **HARDWARE** | ❌ | ✅ |
+| **RESTAURANT / CAFE / BAKERY / HOTEL** | ❌ | ❌ |
+| **GENERAL** | ✅ | ✅ |
+
+Two optional capabilities, `catalogue.attributeLibrary` and
+`catalogue.internalBarcodes`, resolved once by `resolveCatalogueTabs` in
+`product-presentation.ts`. The tab bar reads flags and filters; it names no
+capability and no business type.
+
+### Why the two flags cannot live in the same place
+
+`RETAIL_CAPABILITIES` **is** the hardware template — hardware reads it verbatim
+and retail spreads it (D134e's finding, unchanged). Hardware and retail need
+DIFFERENT answers for Attributes and the SAME answer for Barcodes, so:
+
+- `internalBarcodes: true` on **`RETAIL_CAPABILITIES`** → hardware and retail
+  both keep it, which is the point.
+- `attributeLibrary: true` on the **retail descriptor's** spread → retail only,
+  the same pattern `measuredGoods` and `configurableBusinessDetails` use.
+
+`FOOD_SERVICE_CAPABILITIES` is **not edited at all**. Absent means false, so
+restaurant, cafe, bakery and hotel lose both without the food-service template
+being touched — which is the desired blast radius on a branch other teams merge
+into.
+
+### Why `GENERAL` keeps both
+
+Nothing asked to change it. It showed both tabs before this decision, and
+hiding two working screens from a template nobody was discussing would be a
+regression smuggled in beside a requested change. Declared explicitly on
+`GENERAL_CAPABILITIES` rather than inherited, because absent means false and
+silence would have removed them.
+
+### Why `HOTEL` loses both
+
+It shares `FOOD_SERVICE_CAPABILITIES`. Giving it a different answer would mean
+forking the hotel descriptor to contradict the capability set it exists to
+reuse. HOTEL is the business type the seven hand-written predicates D56 replaced
+had all independently forgotten; it is named in the tests for that reason.
+
+### Why not `ProductBusinessKind`
+
+The coarse `RESTAURANT` / `RETAIL` split already exists and is the obvious
+shortcut. It cannot express this: its `RETAIL` bucket covers hardware, general
+trade and retail together, and hardware must differ from retail on one flag and
+match it on the other. A capability per surface is the only thing that says it.
+
+### Hiding is usability — the routes and the API are unchanged
+
+`/products/attributes` and `/products/barcodes` still render for anyone who
+types the URL and holds the permission, and `/attribute-library` stays **shared
+core**: D125 gated it on permission rather than business type deliberately, so
+any workspace that does want a library may use one. This decision changes what
+the bar draws and nothing else. CLAUDE.md: *frontend hiding is usability only;
+the server remains the authority.*
+
+That is also why nothing here is a security boundary, and why the change needed
+no server work at all.
+
+### Tests
+
+`product-presentation.test.ts` asserts the exact map over the real registry —
+walked from `BUSINESS_TYPE_VALUES`, so a new business type fails by name — plus
+that the two flags disagree for hardware, which is the case a single shared flag
+could not express.
+
+`inventory-tabs.render.test.tsx` renders the real component and reads the tabs
+off the screen, asserting the WHOLE sequence rather than the absence of one
+label: "restaurant has no Barcodes tab" would hold for a bar that rendered
+nothing, and rendering nothing is a live possibility when both capabilities are
+optional.
+
+Mutation-proven: removing the filter fails 5; swapping which flag gates which
+tab fails 2 — and only the hardware case tells the swap apart, which is stated
+in the spec.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
