@@ -313,6 +313,80 @@ describe('BUY_X_GET_Y', () => {
     expect(result.totalDiscount).toBe(500);
   });
 
+  /**
+   * "Buy 5, get 1 free" — ON THE SAME PRODUCT.
+   *
+   * The commonest BOGO there is, and it had **no test at all**: every existing
+   * case here names two different products (`p_shirt`/`p_tie`, `p_buy`/`p_get`).
+   * `applier.ts` handles it deliberately — `rewardEntitlements` carries a comment
+   * describing exactly this shape — but the promotion editor refused to author
+   * it, so nobody could reach the path from the UI and nobody had covered it here.
+   *
+   * The reward is drawn from the pool it counts: buy 6 and one of the six is
+   * free, rather than the customer being handed a seventh.
+   */
+  it('discounts a same-product BOGO from the pool it counts', () => {
+    const lines = [item('l_soap', 'p_soap', 150, 6)];
+    const promo = rule({
+      id: 'promo_bogo_same',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 5,
+      getQuantity: 1,
+      percentageOff: 100,
+      // One product, two roles. `PromotionItem` is
+      // `@@unique([promotionId, productId, role])`, so this is a shape the
+      // database has always been able to hold.
+      items: [
+        { productId: 'p_soap', role: 'BUY', quantity: 5 },
+        { productId: 'p_soap', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    const result = applyPromotions({ lines, promotions: [promo] });
+
+    // Six on the line, five of them pay: exactly one unit's price comes off.
+    expect(result.totalDiscount).toBe(150);
+    expect(byLine(result)).toEqual({ l_soap: 150 });
+  });
+
+  it('gives nothing away below the buy threshold, same product or not', () => {
+    // The negative half. Without it the case above would pass for an applier
+    // that discounted a unit whenever the product merely appeared.
+    const lines = [item('l_soap', 'p_soap', 150, 4)];
+    const promo = rule({
+      id: 'promo_bogo_same',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 5,
+      getQuantity: 1,
+      percentageOff: 100,
+      items: [
+        { productId: 'p_soap', role: 'BUY', quantity: 5 },
+        { productId: 'p_soap', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    expect(applyPromotions({ lines, promotions: [promo] }).totalDiscount).toBe(0);
+  });
+
+  it('earns a second free unit at twice the threshold', () => {
+    // 12 units, buy-5-get-1: the pool yields two rewards. Asserted because
+    // `Math.floor(buyPool / buyQty)` is where an off-by-one would hide.
+    const lines = [item('l_soap', 'p_soap', 150, 12)];
+    const promo = rule({
+      id: 'promo_bogo_same',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 5,
+      getQuantity: 1,
+      percentageOff: 100,
+      items: [
+        { productId: 'p_soap', role: 'BUY', quantity: 5 },
+        { productId: 'p_soap', role: 'GET', quantity: 1 },
+      ],
+    });
+
+    expect(applyPromotions({ lines, promotions: [promo] }).totalDiscount).toBe(300);
+  });
+
   it('honours the discount ON THE REWARD, not just "free"', () => {
     /*
      * The defect this case exists for. The promotion editor collects

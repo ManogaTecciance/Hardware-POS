@@ -206,6 +206,15 @@ export function PromotionEditor({
   const [toast, setToast] = React.useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = React.useState(false);
   const [productPickerOpen, setProductPickerOpen] = React.useState(false);
+  /**
+   * Why an item was refused, when it was.
+   *
+   * The add guard used to return the state unchanged and say nothing, so a
+   * refusal was indistinguishable from a dead button — which is precisely how
+   * “I cannot put the same product in Buy and Get” was reported. A rule the
+   * operator can read is a rule they can work with.
+   */
+  const [itemNotice, setItemNotice] = React.useState<string | null>(null);
   const [saveState, setSaveState] = React.useState<'idle' | 'saving' | 'saved'>('idle');
 
   // Fetch branches for the branch-scope multi-select.
@@ -299,12 +308,48 @@ export function PromotionEditor({
     }));
   };
 
+  /**
+   * Add a product, in the first role it does not already hold.
+   *
+   * ## Why this is not simply “refuse a duplicate”
+   *
+   * It used to be `if (items.some(i => i.productId === id)) return prev` — one
+   * product, one row, whatever its role. That made **“buy 5 get 1 free” on the
+   * same product impossible to author**, which is the commonest BOGO there is;
+   * an operator wanting it had to name a different product as the reward.
+   *
+   * Nothing else in the stack agreed with that restriction. `PromotionItem` is
+   * `@@unique([promotionId, productId, role])` — role is IN the key — the create
+   * DTO validates each item alone, and `applier.ts` handles the same-product
+   * case explicitly, with a comment describing exactly this shape: “a
+   * same-product BOGO draws its reward from the pool it counts, so the customer
+   * is always already holding it”. The engine was built for a promotion the UI
+   * would not let anyone create.
+   *
+   * So the guard now matches the database key. A second add of the same product
+   * lands in the remaining role, which for `BUY_X_GET_Y` is GET — the only valid
+   * one left, and the one the operator is reaching for.
+   *
+   * ## And it says so when it cannot
+   *
+   * The old guard returned `prev`: clicking Add did nothing, with no message.
+   * That silence is why this read as “impossible” rather than “refused”.
+   */
   const addProduct = (product: ManagedProduct) => {
     setState((prev) => {
-      if (prev.items.some((i) => i.productId === product.id)) return prev;
-      // Role heuristic: BOGO always adds as BUY (the reward is configured
-      // separately); Bundle adds as BUNDLE; discounts add as BUY.
-      const role: PromotionItem['role'] = prev.type === 'BUNDLE_FIXED_PRICE' ? 'BUNDLE' : 'BUY';
+      const roles: PromotionItem['role'][] =
+        prev.type === 'BUNDLE_FIXED_PRICE' ? ['BUNDLE'] : ['BUY', 'GET'];
+      const taken = new Set(
+        prev.items.filter((i) => i.productId === product.id).map((i) => i.role),
+      );
+      const role = roles.find((r) => !taken.has(r));
+      if (!role) {
+        setItemNotice(
+          `${product.name} is already on this promotion in every role it can hold.`,
+        );
+        return prev;
+      }
+      setItemNotice(null);
       return {
         ...prev,
         items: [...prev.items, { productId: product.id, role, quantity: '1', name: product.name }],
@@ -313,22 +358,55 @@ export function PromotionEditor({
     setProductPickerOpen(false);
   };
 
-  const removeProduct = (productId: string) => {
-    setState((prev) => ({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
-  };
-
-  const changeItemQuantity = (productId: string, quantity: string) => {
+  /*
+   * All three key on (productId, ROLE), because a product may now legitimately
+   * appear twice. Keyed on the product alone, removing the Buy row of a
+   * same-product BOGO would take the Get row with it, and editing one
+   * quantity would silently change the other — the sort of defect that only
+   * shows up on the one promotion shape nobody could author before.
+   */
+  const removeProduct = (productId: string, role: PromotionItem['role']) => {
+    setItemNotice(null);
     setState((prev) => ({
       ...prev,
-      items: prev.items.map((i) => (i.productId === productId ? { ...i, quantity } : i)),
+      items: prev.items.filter((i) => !(i.productId === productId && i.role === role)),
     }));
   };
 
-  const changeItemRole = (productId: string, role: PromotionItem['role']) => {
+  const changeItemQuantity = (
+    productId: string,
+    role: PromotionItem['role'],
+    quantity: string,
+  ) => {
     setState((prev) => ({
       ...prev,
-      items: prev.items.map((i) => (i.productId === productId ? { ...i, role } : i)),
+      items: prev.items.map((i) =>
+        i.productId === productId && i.role === role ? { ...i, quantity } : i,
+      ),
     }));
+  };
+
+  const changeItemRole = (
+    productId: string,
+    from: PromotionItem['role'],
+    to: PromotionItem['role'],
+  ) => {
+    setState((prev) => {
+      // Refuse a move onto a (product, role) that is already taken — the
+      // database would reject the save, and a refusal the operator can see
+      // beats a 500 after Save.
+      if (prev.items.some((i) => i.productId === productId && i.role === to)) {
+        setItemNotice('That product already has a row in this role.');
+        return prev;
+      }
+      setItemNotice(null);
+      return {
+        ...prev,
+        items: prev.items.map((i) =>
+          i.productId === productId && i.role === from ? { ...i, role: to } : i,
+        ),
+      };
+    });
   };
 
   const validate = (): string | null => {
@@ -657,6 +735,11 @@ export function PromotionEditor({
               Add product
             </Button>
           </div>
+          {itemNotice ? (
+            <p className="text-xs text-warning" role="status">
+              {itemNotice}
+            </p>
+          ) : null}
           {state.items.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-muted-foreground">
               {state.type === 'FIXED_AMOUNT_DISCOUNT'
@@ -667,7 +750,9 @@ export function PromotionEditor({
             <ul className="space-y-2">
               {state.items.map((i) => (
                 <li
-                  key={i.productId}
+                  // (product, role) — one product can hold two rows now, and a
+                  // duplicate React key would make them share render state.
+                  key={`${i.productId}:${i.role}`}
                   className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface p-3"
                 >
                   <div className="min-w-0 flex-1">
@@ -678,7 +763,7 @@ export function PromotionEditor({
                     <Select
                       value={i.role}
                       onChange={(e) =>
-                        changeItemRole(i.productId, e.target.value as PromotionItem['role'])
+                        changeItemRole(i.productId, i.role, e.target.value as PromotionItem['role'])
                       }
                       className="w-24"
                       aria-label="Item role"
@@ -692,15 +777,15 @@ export function PromotionEditor({
                     inputMode="numeric"
                     min={1}
                     value={i.quantity}
-                    onChange={(e) => changeItemQuantity(i.productId, e.target.value)}
-                    aria-label={`Quantity for ${i.name ?? i.productId}`}
+                    onChange={(e) => changeItemQuantity(i.productId, i.role, e.target.value)}
+                    aria-label={`Quantity for ${i.name ?? i.productId} (${i.role})`}
                     className="w-20"
                   />
                   <button
                     type="button"
-                    onClick={() => removeProduct(i.productId)}
+                    onClick={() => removeProduct(i.productId, i.role)}
                     className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-danger"
-                    aria-label={`Remove ${i.name ?? i.productId}`}
+                    aria-label={`Remove ${i.name ?? i.productId} (${i.role})`}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
