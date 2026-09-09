@@ -130,8 +130,16 @@ export class PromotionsRepository {
    * hot POS-read query and the CRUD-list query can diverge without stepping
    * on each other's projections.
    */
-  listForCatalogue(tenantId: string): Promise<PromotionWithItems[]> {
-    return this.prisma.promotion.findMany({
+  listForCatalogue(
+    tenantId: string,
+    /**
+     * Read through a caller's transaction when it has one — the restaurant
+     * close prices the same rows it is about to settle. Defaults to the pool,
+     * which is what every catalogue read does.
+     */
+    client: Prisma.TransactionClient | null = null,
+  ): Promise<PromotionWithItems[]> {
+    return (client ?? this.prisma).promotion.findMany({
       where: { tenantId, isActive: true },
       include: {
         items: {

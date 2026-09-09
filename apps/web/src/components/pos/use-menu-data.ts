@@ -2,6 +2,8 @@
 
 import * as React from 'react';
 
+import type { PromotionRule } from '@hardware-pos/shared';
+
 import type { Session } from '@/lib/auth';
 import {
   menuItems as menuItemsApi,
@@ -159,6 +161,15 @@ export interface PosCatalogueResult {
   total: number;
   /** Rows currently in `data`. */
   loadedCount: number;
+  /**
+   * The promotions live for this branch and channel, ready for the applier.
+   *
+   * Every page of the catalogue repeats the same eligible set — the server
+   * runs one `isPromotionActive` pass per request, not per page — so these are
+   * REPLACED on each response rather than accumulated. Appending them would
+   * apply a bundle once per page loaded.
+   */
+  promotionRules: PromotionRule[];
 }
 
 /**
@@ -211,6 +222,7 @@ export function usePosCatalogue(
   const [items, setItems] = React.useState<PosCatalogueItem[]>([]);
   const [cursor, setCursor] = React.useState<string | null>(null);
   const [total, setTotal] = React.useState(0);
+  const [promotionRules, setPromotionRules] = React.useState<PromotionRule[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -242,12 +254,16 @@ export function usePosCatalogue(
         setItems(res.items);
         setCursor(res.nextCursor);
         setTotal(res.total);
+        setPromotionRules(res.promotionRules);
       } catch (err) {
         if (generation.current !== mine) return;
         setError(err instanceof Error ? err.message : 'Failed to load catalogue');
         setItems([]);
         setCursor(null);
         setTotal(0);
+        // No catalogue means no basis for a discount. Keeping stale rules here
+        // would price a cart against promotions this branch may no longer run.
+        setPromotionRules([]);
       } finally {
         if (generation.current === mine) setLoading(false);
       }
@@ -281,6 +297,8 @@ export function usePosCatalogue(
         });
         setCursor(res.nextCursor);
         setTotal(res.total);
+        // Replaced, not appended — see `promotionRules` on the result type.
+        setPromotionRules(res.promotionRules);
       } catch (err) {
         if (generation.current !== mine) return;
         setError(err instanceof Error ? err.message : 'Failed to load more items');
@@ -303,6 +321,7 @@ export function usePosCatalogue(
     loadMore,
     total,
     loadedCount: items.length,
+    promotionRules,
   };
 }
 

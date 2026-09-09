@@ -6,6 +6,7 @@ import {
 import { Prisma } from '@hardware-pos/database';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { BusinessProfileService } from '../platform/business-profile.service';
 import {
@@ -85,12 +86,12 @@ export class PromotionsService {
     private readonly repository: PromotionsRepository,
     private readonly audit: AuditLogService,
     private readonly profiles: BusinessProfileService,
+    private readonly settings: SettingsService,
   ) {}
 
   async list(
     tenantId: string,
     query: QueryPromotionsDto,
-    tenantTimeZone?: string,
   ): Promise<{ items: PromotionView[]; total: number }> {
     const isActive =
       query.isActive === undefined ? undefined : query.isActive === 'true';
@@ -111,6 +112,10 @@ export class PromotionsService {
     });
 
     const now = new Date();
+    // D139 — resolved here rather than taken as an argument: every caller of
+    // this route wants the tenant's own clock, and an optional parameter that
+    // nobody passed is exactly how the evaluator spent D45 reading the host's.
+    const tenantTimeZone = this.settings.getSettings(tenantId).timezone;
     const filtered = onlyValid
       ? items.filter((p) =>
           isPromotionActive(p, {

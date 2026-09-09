@@ -19,6 +19,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { PromotionRule } from '@hardware-pos/shared';
+
 import type {
   PosCatalogueItem,
   PosCatalogueQuery,
@@ -79,8 +81,26 @@ function page(
   items: PosCatalogueItem[],
   nextCursor: string | null,
   total = items.length,
+  promotionRules: PromotionRule[] = [],
 ): PosCatalogueResponse {
-  return { items, total, nextCursor };
+  return { items, total, nextCursor, promotionRules };
+}
+
+/** A live promotion, in the shape the applier consumes. */
+function rule(id: string): PromotionRule {
+  return {
+    id,
+    name: 'Lunch 10%',
+    type: 'PERCENTAGE_DISCOUNT',
+    fixedPrice: null,
+    percentageOff: 10,
+    amountOff: null,
+    minimumSpend: null,
+    buyQuantity: null,
+    getQuantity: null,
+    stackable: false,
+    items: [{ productId: 'p1', role: 'BUY', quantity: 1 }],
+  };
 }
 
 /** The query object passed to the Nth call (0-indexed). */
@@ -299,5 +319,58 @@ describe('term normalisation', () => {
     // Both spellings normalise to one term, so the effect key is unchanged and
     // no second request goes out.
     expect(fetchPosCatalogue).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('promotion rules', () => {
+  it('surfaces what the server said is live for this branch and channel', async () => {
+    fetchPosCatalogue.mockResolvedValue(page([item('p1', 'Rice')], null, 1, [rule('promo_1')]));
+
+    const { result } = renderHook(() => usePosCatalogue(SESSION, 'brn_1', 'DINE_IN'));
+    await waitFor(() => expect(result.current.loadedCount).toBe(1));
+
+    // The server has sent these since 4.3 and the restaurant till dropped them,
+    // which is why a promotion could badge a menu card and take nothing off the
+    // bill. Asserting the id, not just a non-empty array: a mapper that built
+    // rules out of nothing would satisfy a length check.
+    expect(result.current.promotionRules.map((r) => r.id)).toEqual(['promo_1']);
+    expect(result.current.promotionRules[0]?.percentageOff).toBe(10);
+  });
+
+  it('REPLACES the set on the next page rather than appending it', async () => {
+    // Every page repeats the same eligible set — one server-side eligibility
+    // pass per request, not per page. Appending would apply a bundle once per
+    // page loaded, so a three-page catalogue would discount it three times.
+    fetchPosCatalogue.mockResolvedValueOnce(page([item('p1', 'Rice')], 'CURSOR_1', 2, [rule('promo_1')]));
+    const { result } = renderHook(() => usePosCatalogue(SESSION, 'brn_1', 'DINE_IN'));
+    await waitFor(() => expect(result.current.loadedCount).toBe(1));
+
+    fetchPosCatalogue.mockResolvedValueOnce(page([item('p2', 'Kottu')], null, 2, [rule('promo_1')]));
+    await act(async () => {
+      result.current.loadMore();
+    });
+    await waitFor(() => expect(result.current.loadedCount).toBe(2));
+
+    // POSITIVE: the rule survives paging…
+    expect(result.current.promotionRules.map((r) => r.id)).toEqual(['promo_1']);
+    // …NEGATIVE: exactly once, not once per page.
+    expect(result.current.promotionRules).toHaveLength(1);
+  });
+
+  it('drops the rules when the catalogue fails, rather than pricing against stale ones', async () => {
+    fetchPosCatalogue.mockResolvedValueOnce(page([item('p1', 'Rice')], null, 1, [rule('promo_1')]));
+    const { result, rerender } = renderHook(
+      ({ search }: { search: string }) => usePosCatalogue(SESSION, 'brn_1', 'DINE_IN', { search }),
+      { initialProps: { search: '' } },
+    );
+    await waitFor(() => expect(result.current.promotionRules).toHaveLength(1));
+
+    fetchPosCatalogue.mockRejectedValueOnce(new Error('offline'));
+    rerender({ search: 'kottu' });
+    await waitFor(() => expect(result.current.error).toBe('offline'));
+
+    // No catalogue is no basis for a discount: keeping the old rules would
+    // price a cart against promotions this branch may no longer run.
+    expect(result.current.promotionRules).toHaveLength(0);
   });
 });

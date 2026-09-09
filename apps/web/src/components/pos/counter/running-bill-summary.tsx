@@ -8,6 +8,10 @@ interface Props {
   itemCount: number;
   subtotal: number;
   itemDiscount: number;
+  /** Promotions the cart earned automatically. Shown apart from a manual
+   *  discount because nobody approved it — the offer did. */
+  promotionDiscount: number;
+  promotionName?: string | null;
   serviceCharge: number;
   taxAmount: number;
   servicePct: number;
@@ -28,6 +32,8 @@ export function RunningBillSummary({
   itemCount,
   subtotal,
   itemDiscount,
+  promotionDiscount,
+  promotionName,
   serviceCharge,
   taxAmount,
   servicePct,
@@ -44,6 +50,13 @@ export function RunningBillSummary({
         <Row
           label="Item discounts"
           value={`- ${formatMoney(itemDiscount)}`}
+          tone="success"
+        />
+      ) : null}
+      {promotionDiscount > 0 ? (
+        <Row
+          label={promotionName ?? 'Promotion'}
+          value={`- ${formatMoney(promotionDiscount)}`}
           tone="success"
         />
       ) : null}

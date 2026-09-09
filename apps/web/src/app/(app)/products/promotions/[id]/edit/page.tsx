@@ -15,6 +15,10 @@ import { fetchPromotion, type Promotion } from '@/lib/products/promotions-api';
  * Edit an existing promotion. Pre-fetches the promotion so the shell can gate
  * on 404 before mounting the editor; the editor also refetches on its own if
  * `initialPromotion` isn't supplied (defence in depth against a stale link).
+ *
+ * Back and Cancel return to the promotion's own page rather than the list —
+ * this route is reached from there, and dumping the operator back at the list
+ * loses the record they were looking at.
  */
 export default function EditPromotionPage() {
   const { session, hasPermission } = useAuth();
@@ -48,10 +52,10 @@ export default function EditPromotionPage() {
   return (
     <div className="space-y-6">
       <Link
-        href="/products/promotions"
+        href={id ? `/products/promotions/${id}` : '/products/promotions'}
         className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to promotions
+        <ArrowLeft className="h-4 w-4" /> Back to promotion
       </Link>
 
       {loading ? (
@@ -69,7 +73,12 @@ export default function EditPromotionPage() {
           </CardContent>
         </Card>
       ) : (
-        <PromotionEditor session={session} promotionId={promo.id} initialPromotion={promo} />
+        <PromotionEditor
+          session={session}
+          promotionId={promo.id}
+          initialPromotion={promo}
+          successHref={`/products/promotions/${promo.id}`}
+        />
       )}
     </div>
   );

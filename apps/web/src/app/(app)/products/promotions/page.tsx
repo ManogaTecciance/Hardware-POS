@@ -37,6 +37,10 @@ import {
  *
  * Row actions: Edit (link), Activate/Deactivate (in place), Delete
  * (confirmation Dialog). Header action: `+ New promotion`.
+ *
+ * The name and the read-only View link open `/products/promotions/[id]`, the
+ * detail view. They used to open `/edit`, which showed the fields but refused
+ * a PRODUCT_READ operator outright — so "View" led to a permission notice.
  */
 export default function PromotionsPage() {
   const { session, hasPermission } = useAuth();
@@ -209,7 +213,7 @@ export default function PromotionsPage() {
                     <td className="px-4 py-3">
                       <div className="min-w-0">
                         <Link
-                          href={`/products/promotions/${p.id}/edit`}
+                          href={`/products/promotions/${p.id}`}
                           className="font-medium text-foreground hover:text-primary hover:underline"
                         >
                           {p.name}
@@ -305,7 +309,7 @@ export default function PromotionsPage() {
                           </>
                         ) : (
                           <Link
-                            href={`/products/promotions/${p.id}/edit`}
+                            href={`/products/promotions/${p.id}`}
                             className="text-sm text-primary hover:underline"
                           >
                             View

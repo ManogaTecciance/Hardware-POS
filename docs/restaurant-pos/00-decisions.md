@@ -7685,6 +7685,136 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D138 — promotions reach the restaurant bill (D52's deferral, lifted)
+
+**Asked for by the PO, 2026-09-09**, after a promotion configured on a
+food-service tenant took nothing off an order placed at the POS.
+
+**Why it did nothing.** D52 deferred promotion pricing on a restaurant bill
+with a reason that has since expired: "the promotions module exports only
+`isPromotionActive`, an activity-window predicate. There is no promotion
+*pricing* engine anywhere, so applying them is a feature to design, not a bug
+to fix." D123 then built one —
+`packages/shared/src/promotions/applier.ts` — and retail has charged
+promotions through it since. What was left was wiring, and the absence of it
+was invisible from the admin screens: a promotion could be created,
+activated, badged on a menu card by the POS catalogue, and still never touch
+a bill. `/pos` sends a TABLE_SERVICE tenant to `PosCounterWorkspace`, which
+settles through the table-session and takeaway paths, and both wrote
+`totalDiscount: 0` with no promotion pass at all.
+
+**What now happens.** Both restaurant settlement paths and both of their
+previews price promotions through the same applier retail uses:
+
+- the dine-in running bill (`GET /table-sessions/:id/bill-preview`),
+- the dine-in close (`POST /table-sessions/:id/close`),
+- the counter/takeaway settle (`takeaway.settle`, which is what D110's
+  counter payment calls),
+- and the till's own cart preview in `PosCounterWorkspace`.
+
+`RestaurantPromotionPricingService` owns the two reads (the tenant's live
+promotions, which products are sold by measure) and delegates the decision to
+the pure layer, so a bill and its preview cannot disagree.
+
+**Channel is passed, never assumed.** `isPromotionActive` refuses a
+channel-scoped promotion when the context names no channel, so a caller that
+omitted it would silently price nothing — the same class of failure D56
+found. Dine-in passes `DINE_IN`, takeaway passes `TAKEAWAY`: the values the
+till's own catalogue read already sends, so the badge on a menu card and the
+discount on the bill are decided by one predicate over one set of inputs.
+
+**Where the money lands.** Line-level promotions reduce the goods, so the
+service charge and the tax follow what the guest actually pays for food —
+which is what `document-totals.ts` was written anticipating ("when promotions
+reach the bill the charges follow what the customer actually pays, in one
+place"). A D126 cart-level promotion comes off AFTER tax, the asymmetry
+`sales.service` records as PO-confirmed; restaurant bills copy that rule
+rather than inventing a second one for the same promotion. On the settled
+`Sale`, line promotions are `totalDiscount` — which is what
+`discountedSubtotal = subtotal - totalDiscount` has to mean for
+`returns.calc` to reverse a refund correctly — and the cart-level one uses
+its own `promotionOrder*` columns.
+
+**No migration.** `SaleItem.promotionDiscountAmount` / `promotionId` /
+`promotionNameSnapshot` and `Sale.promotionOrder*` have existed since D123
+and D126. This slice writes columns that were already there.
+
+**The invariant moved with it.** `assertProjectionMatchesSubtotal` compared
+`Σ lineTotal` to the subtotal, which a promotion sitting between subtotal and
+total would break. It now compares `Σ lineSubtotal` (unchanged for a bill
+with no promotion) and checks the discount as its own identity beside it, so
+a settled document whose lines and footer disagree still refuses to persist.
+
+**Dine-in's cart card is deliberately NOT priced.** In dine-in mode the
+running-bill card shows the round the waiter is adding, not the bill; the
+bill is every round on the table and a bundle spans them. Pricing one round
+there would show a figure the close then computes differently. The table's
+bill sheet reads the server's preview, which prices the whole session.
+
+**Still deferred.** Manual order-level discounts on a restaurant bill (D52's
+second deferral) are untouched — they need the manager-approval flow retail
+has, and are a separate piece of work.
+
+**A known divergence, stated rather than hidden.** A counter line's manual
+discount is client-side only — `RestaurantOrderItem` has no discount column,
+which `pos-counter-workspace` has documented since the pilot. The cart
+preview honours D123's rule (a manually discounted line is invisible to
+promotions); the server, which never receives that discount, sees an
+undiscounted line and may award a promotion on it. The preview and the bill
+can therefore differ on a manually discounted line, in a flow where they
+already differed because the manual discount itself never reaches the Sale.
+The preview keeps the D123 rule rather than dropping it, so the day a
+restaurant line discount is persisted the behaviour is already correct.
+
+### D139 — a promotion's schedule is read on the tenant's clock, and its dates are whole days
+
+Two defects found while tracing D138, both of which made a correctly
+configured promotion quietly not fire.
+
+**1. An end date lost its final day.** The editor's Start/End are
+`type="date"`, so `'2026-09-30'` reaches the service and `new Date()` parses
+it as `2026-09-30T00:00:00Z`. The evaluator compared it as an instant —
+`now > endsOn` — so "ends 30 Sep" expired at 00:00 UTC ON the 30th. For a
+Colombo tenant that is 05:30 local: the promotion was dead for all but the
+first five and a half hours of the day it was meant to run. `startsOn` had
+the mirror-image fault, holding a promotion back until 05:30 local on its
+first day.
+
+An operator setting a date means a whole day, inclusive, in their own zone.
+Both bounds are now compared as `YYYY-MM-DD` calendar dates: the stored
+value's UTC date (which IS the date typed, because a bare date parses as UTC
+midnight) against today's date in the tenant's zone. Lexicographic order on
+that format is chronological, so the comparison needs no date arithmetic.
+
+*Not fixed by changing what is stored.* Writing `endsOn` as end-of-day would
+need the tenant's zone at write time AND a backfill of every existing row,
+and would leave two readings of the column in the codebase at once. Reading
+the column as what it has always been — a calendar date — needs neither.
+
+**2. The schedule was evaluated on the server's clock.** `isPromotionActive`
+has accepted `tenantTimeZone` since D45 and no caller passed one, so every
+day-of-week and time-of-day window was read in the host's zone. On a UTC
+server an 11:00–15:00 lunch promotion for a Colombo tenant was live
+16:30–20:30 their time — the offer ran through the evening and was off at
+lunch. The optional parameter nobody passed is the failure shape: it type-
+checked, it ran, and it was wrong.
+
+Every call site now passes it, from `SettingsService.getSettings(tenantId)
+.timezone` (guarded by `safeTimeZone`, and the same value every document
+formatter already uses): the retail sale, the sellable/POS-catalogue read,
+the restaurant pricing service (D138), and the `onlyCurrentlyValid` list.
+The list route resolves it inside the service rather than taking it as an
+argument, for the reason above — an optional parameter is a thing a caller
+forgets.
+
+**Mutation-proven.** Restoring the two instant-comparison lines fails exactly
+three of the new date cases and leaves the rest green; the proof is recorded
+inline in `promotions.evaluator.spec.ts` beside the cases it justifies (D30).
+
+**Scope.** The evaluator's host-zone fallback stays for a caller with no
+tenant context, and matches how `MenuAvailability` windows are still read.
+No migration, no stored value changed.
+
 ## Open decisions
 
 | ID | Question | Needed by |

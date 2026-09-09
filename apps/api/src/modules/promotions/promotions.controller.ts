@@ -58,9 +58,6 @@ export class PromotionsController {
     @TenantId() tenantId: string,
     @Query() query: QueryPromotionsDto,
   ): Promise<{ items: PromotionView[]; total: number }> {
-    // Tenant time-zone plumbing lands with the settings work — the evaluator
-    // falls back to the host's local zone for now. See the evaluator's
-    // comments for the drop-in point.
     return this.service.list(tenantId, query);
   }
 

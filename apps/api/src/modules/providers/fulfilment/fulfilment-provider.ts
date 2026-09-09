@@ -1,7 +1,10 @@
 import { FulfilmentKind, Prisma } from '@hardware-pos/database';
 
 import type { OpenTableReleaseSummary } from '../../dining/dining.service';
-import type { ProjectedSaleItem } from '../../restaurant/settlement-projection';
+import type {
+  ProjectedPromotion,
+  ProjectedSaleItem,
+} from '../../restaurant/settlement-projection';
 
 /**
  * D61 — the third provider axis (convergence plan §4.5, Phase 4), alongside
@@ -46,6 +49,14 @@ export interface FulfilmentProvider {
     tx: Prisma.TransactionClient,
     tenantId: string,
     ref: WorkUnitRef,
+    /**
+     * Line-level promotion awards keyed by work-unit line id, resolved by the
+     * caller before the transaction. Passed IN rather than looked up here so a
+     * provider stays a projection and the bill's totals and its lines are
+     * priced from one evaluation: a provider that ran its own would be a
+     * second opinion about what the guest was charged.
+     */
+    promotionByLineId?: ReadonlyMap<string, ProjectedPromotion>,
   ): Promise<ProjectedSaleItem[]>;
 
   /**

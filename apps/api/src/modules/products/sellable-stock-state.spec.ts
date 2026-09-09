@@ -69,7 +69,10 @@ function buildService(
       capabilities,
     })),
   };
-  return new SellableService(prisma as never, promotions, profiles as never);
+  // D139 — the evaluator reads the tenant's zone; pinned so these specs do
+  // not depend on the clock of whatever machine runs them.
+  const settings = { getSettings: () => ({ timezone: 'Asia/Colombo' }) };
+  return new SellableService(prisma as never, promotions, profiles as never, settings as never);
 }
 
 describe('SellableService stockState (D101)', () => {

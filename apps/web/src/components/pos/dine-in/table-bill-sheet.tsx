@@ -243,6 +243,16 @@ export function TableBillSheet({
 
           <div className="space-y-1 border-t border-border pt-3 text-sm">
             <Row label="Subtotal" value={preview.subtotal} />
+            {/* The server prices the promotion over the WHOLE session — every
+                round, since a bundle spans them — so this is the figure the
+                close will write, not an estimate of it. */}
+            {Number(preview.promotionDiscount) > 0 ? (
+              <Row
+                label={preview.promotionName ?? 'Promotion'}
+                value={preview.promotionDiscount}
+                tone="success"
+              />
+            ) : null}
             {Number(preview.serviceChargeAmount) > 0 ? (
               <Row label="Service charge" value={preview.serviceChargeAmount} />
             ) : null}
@@ -261,11 +271,29 @@ export function TableBillSheet({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'success';
+}) {
   return (
-    <div className="flex items-center justify-between text-muted-foreground">
+    <div
+      className={
+        tone === 'success'
+          ? 'flex items-center justify-between text-success'
+          : 'flex items-center justify-between text-muted-foreground'
+      }
+    >
       <span>{label}</span>
-      <span className="tabular-nums">{formatMoney(value)}</span>
+      {/* A deduction reads as one: the minus sits outside the formatter, which
+          would otherwise put it inside the currency ("Rs. -1,500.00"). */}
+      <span className="tabular-nums">
+        {tone === 'success' ? `- ${formatMoney(value)}` : formatMoney(value)}
+      </span>
     </div>
   );
 }

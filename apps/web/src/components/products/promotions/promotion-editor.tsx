@@ -28,6 +28,8 @@ import {
   fetchPromotion,
   labelForPromotionType,
   PROMOTION_CHANNELS,
+  PROMOTION_CHANNEL_LABELS,
+  PROMOTION_DAY_LABELS,
   PROMOTION_DAYS_OF_WEEK,
   updatePromotion,
   type Promotion,
@@ -68,26 +70,13 @@ interface Props {
    * shell can gate on existence before mounting the editor.
    */
   initialPromotion?: Promotion;
-  /** After a successful save, navigate back to this route. Defaults to list. */
+  /**
+   * Where Cancel and a discarded edit return to. Defaults to the list. A
+   * SUCCESSFUL save goes to the saved promotion's own page instead, so the
+   * operator can check what they just configured.
+   */
   successHref?: string;
 }
-
-const DAY_LABELS: Record<PromotionDayOfWeek, string> = {
-  MON: 'Mon',
-  TUE: 'Tue',
-  WED: 'Wed',
-  THU: 'Thu',
-  FRI: 'Fri',
-  SAT: 'Sat',
-  SUN: 'Sun',
-};
-
-const CHANNEL_LABELS: Record<PromotionChannel, string> = {
-  COUNTER: 'Counter',
-  DINE_IN: 'Dine-in',
-  TAKEAWAY: 'Takeaway',
-  ONLINE: 'Online',
-};
 
 interface EditorState {
   name: string;
@@ -405,16 +394,26 @@ export function PromotionEditor({
     };
 
     try {
+      let saved: Promotion;
       if (isEdit && promotionId) {
-        await updatePromotion(session, promotionId, commonPayload);
+        saved = await updatePromotion(session, promotionId, commonPayload);
         setToast('Promotion updated.');
       } else {
-        await createPromotion(session, { ...commonPayload, type: state.type });
+        saved = await createPromotion(session, { ...commonPayload, type: state.type });
         setToast('Promotion created.');
       }
       setSaveState('saved');
       initialSnapshotRef.current = JSON.stringify(state);
-      setTimeout(() => router.push(successHref), 400);
+      /*
+       * Land on the saved promotion, not back on the list.
+       *
+       * The list shows a name, a type badge and a schedule summary — an
+       * operator who had just configured a bundle's items, branch scope and
+       * time window had nowhere to go to check any of it, and the only route
+       * that showed those fields was the editor, which a PRODUCT_READ user is
+       * refused. `successHref` stays what Cancel/discard honours.
+       */
+      setTimeout(() => router.push(`/products/promotions/${saved.id}`), 400);
     } catch (err) {
       setSaving(false);
       setSaveState('idle');
@@ -803,7 +802,7 @@ export function PromotionEditor({
                       : 'border-border bg-surface text-muted-foreground hover:border-primary hover:text-foreground'
                   }`}
                 >
-                  {DAY_LABELS[d]}
+                  {PROMOTION_DAY_LABELS[d]}
                 </button>
               );
             })}
@@ -828,7 +827,7 @@ export function PromotionEditor({
                       : 'border-border bg-surface text-muted-foreground hover:border-primary hover:text-foreground'
                   }`}
                 >
-                  {CHANNEL_LABELS[c]}
+                  {PROMOTION_CHANNEL_LABELS[c]}
                 </button>
               );
             })}

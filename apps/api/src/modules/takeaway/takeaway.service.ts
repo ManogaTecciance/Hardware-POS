@@ -12,8 +12,12 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { KitchenService } from '../kitchen/kitchen.service';
+import { RestaurantPromotionPricingService } from '../promotions/restaurant-promotion-pricing.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
-import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
+import {
+  assertProjectionMatchesSubtotal,
+  type ProjectedPromotion,
+} from '../restaurant/settlement-projection';
 import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
 import { RoundDepletionService } from '../providers/inventory/round-depletion.service';
 import { resolveRoundItemInputs, writeRoundItems } from '../table-sessions/round-item-resolution';
@@ -67,6 +71,7 @@ export class TakeawayService {
     private readonly fulfilment: TableServiceFulfilmentProvider,
     // D65 — takeaway rounds deplete exactly as dine-in rounds do.
     private readonly roundDepletion: RoundDepletionService,
+    private readonly promotionPricing: RestaurantPromotionPricingService,
   ) {}
 
   async create(
@@ -319,29 +324,50 @@ export class TakeawayService {
           taxRatePercent: true,
         },
       });
+      // Promotions live for THIS channel — the same TAKEAWAY the counter
+      // workspace's catalogue read sends, so a promotion badged on the menu
+      // card is the promotion charged here.
+      const promotion = await this.promotionPricing.priceOrderItems(
+        tenantId,
+        session.branchId,
+        RestaurantOrderChannel.TAKEAWAY,
+        session.orders.flatMap((order) => order.items),
+        tx,
+      );
+      const promotionByItemId: ReadonlyMap<string, ProjectedPromotion> = new Map(
+        promotion.lines.map((l) => [l.id, l]),
+      );
+
       const appSettings = this.settings.getSettings(tenantId);
-      const totals = computeRestaurantTotals(subtotal, RestaurantOrderChannel.TAKEAWAY, {
-        serviceChargePercent: branchConfig?.serviceChargePercent ?? new Prisma.Decimal(0),
-        serviceChargeChannels: branchConfig?.serviceChargeChannels ?? [
-          RestaurantOrderChannel.DINE_IN,
-        ],
-        serviceChargeTaxable: branchConfig?.serviceChargeTaxable ?? true,
-        packagingChargeAmount: branchConfig?.packagingChargeAmount ?? new Prisma.Decimal(0),
-        // D59/Q5: branch override wins when set; NULL inherits.
-        taxRatePercent:
-          branchConfig?.taxRatePercent != null
-            ? branchConfig.taxRatePercent.toNumber()
-            : appSettings.taxRatePercent,
-      });
+      const totals = computeRestaurantTotals(
+        subtotal,
+        RestaurantOrderChannel.TAKEAWAY,
+        {
+          serviceChargePercent: branchConfig?.serviceChargePercent ?? new Prisma.Decimal(0),
+          serviceChargeChannels: branchConfig?.serviceChargeChannels ?? [
+            RestaurantOrderChannel.DINE_IN,
+          ],
+          serviceChargeTaxable: branchConfig?.serviceChargeTaxable ?? true,
+          packagingChargeAmount: branchConfig?.packagingChargeAmount ?? new Prisma.Decimal(0),
+          // D59/Q5: branch override wins when set; NULL inherits.
+          taxRatePercent:
+            branchConfig?.taxRatePercent != null
+              ? branchConfig.taxRatePercent.toNumber()
+              : appSettings.taxRatePercent,
+        },
+        { lineDiscount: promotion.totalLineDiscount, orderDiscount: promotion.orderDiscountAmount },
+      );
 
       // D58/D61: collection via the fulfilment provider — the same
       // projection and sum invariant the dine-in close uses, from an
       // independent query over the same rows.
-      const projected = await this.fulfilment.collectSettlementLines(tx, tenantId, {
-        kind: 'TABLE_SESSION',
-        sessionId: session.id,
-      });
-      assertProjectionMatchesSubtotal(projected, subtotal);
+      const projected = await this.fulfilment.collectSettlementLines(
+        tx,
+        tenantId,
+        { kind: 'TABLE_SESSION', sessionId: session.id },
+        promotionByItemId,
+      );
+      assertProjectionMatchesSubtotal(projected, subtotal, totals.promotionLineDiscount);
       const sale = await tx.sale.create({
         data: {
           tenantId,
@@ -350,6 +376,12 @@ export class TakeawayService {
           cashierId: cashier,
           saleNumber: `S-${padSequence(await nextDocumentNumber(tx, tenantId, 'SALE'))}`,
           subtotal,
+          // See the dine-in close: line promotions are the sale's
+          // `totalDiscount`; a cart-level one has its own columns.
+          totalDiscount: totals.promotionLineDiscount,
+          promotionOrderDiscountAmount: totals.promotionOrderDiscount,
+          promotionOrderId: promotion.orderPromotionId,
+          promotionOrderNameSnapshot: promotion.orderPromotionNameSnapshot,
           serviceChargeAmount: totals.serviceChargeAmount,
           packagingCharge: totals.packagingCharge,
           taxAmount: totals.taxAmount,

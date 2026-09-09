@@ -4,6 +4,8 @@ import { AlertTriangle, ChevronUp, Percent, ReceiptText, ShoppingCart, Trash2 } 
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
+import { applyPromotions, type PromotionRule } from '@hardware-pos/shared';
+
 import { PageHeader } from '@/components/page-header';
 import { Sheet } from '@/components/ui/sheet';
 import { ApiError } from '@/lib/api';
@@ -40,6 +42,12 @@ import { addDraftLine, cryptoRandomKey, draftSubtotal } from './pos-utils';
 import { normalizeSearchTerm } from '@/lib/search-term';
 
 import { useMenuData, usePosCatalogue } from './use-menu-data';
+
+/**
+ * Stable empty reference — a fresh `[]` per render would invalidate the
+ * promotion `useMemo` on every keystroke in the cart.
+ */
+const EMPTY_PROMOTION_RULES: PromotionRule[] = [];
 
 interface Props {
   session: Session;
@@ -309,10 +317,68 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   // ── Money ──────────────────────────────────────────────────────────────
   const subtotal = draftSubtotal(draft);
   const totalItemDiscount = draft.reduce((sum, l) => sum + discountAmount(l), 0);
-  const netSubtotal = Math.max(0, subtotal - totalItemDiscount);
+
+  /*
+   * Promotions on the cart being built.
+   *
+   * DINE_IN is deliberately excluded. There, this card prices the round the
+   * waiter is adding, not the bill — the bill is every round on the table, and
+   * a bundle spans them. Pricing one round here would show a discount the
+   * session close (which evaluates the whole table) then computes differently,
+   * and a waiter reading a figure to a guest that the bill contradicts is
+   * worse than showing nothing. The table's own bill sheet reads the server's
+   * `bill-preview`, which prices the whole session.
+   *
+   * For counter, takeaway and delivery the draft IS the order, so this is the
+   * same evaluation the settle performs, over the same rules the server sent.
+   */
+  const promotionRules = mode === 'DINE_IN' ? EMPTY_PROMOTION_RULES : catalogue.promotionRules;
+  const promotion = React.useMemo(
+    () =>
+      applyPromotions({
+        lines: draft.map((line) => ({
+          id: line.key,
+          // A legacy MENU_ITEM line has no Product behind it, so no promotion
+          // can name it. The empty string matches nothing.
+          productId: line.productId ?? '',
+          unitPrice: lineUnitWithModifiers(line),
+          quantity: line.quantity,
+          lineSubtotal: round2(line.quantity * lineUnitWithModifiers(line)),
+          // Manual wins: a discounted line is invisible to promotions (D123),
+          // and the server applies the same rule.
+          manualDiscountAmount: discountAmount(line),
+        })),
+        promotions: promotionRules,
+      }),
+    [draft, promotionRules],
+  );
+  const promotionDiscount = round2(
+    promotion.totalDiscount + (promotion.orderPromotion?.discountAmount ?? 0),
+  );
+  /*
+   * Named only when ONE promotion applied. Several stackable offers have no
+   * single honest label, and the cart rows already carry the detail — the
+   * server's bill preview makes the same call for the same reason.
+   */
+  const promotionName = React.useMemo(() => {
+    const names = new Set(
+      [
+        ...promotion.lines.map((l) => l.promotionName),
+        promotion.orderPromotion?.promotionName ?? null,
+      ].filter((n): n is string => n !== null),
+    );
+    return names.size === 1 ? [...names][0]! : null;
+  }, [promotion]);
+
+  const netSubtotal = Math.max(0, subtotal - totalItemDiscount - promotion.totalDiscount);
   const serviceCharge = mode === 'THIRD_PARTY' ? 0 : netSubtotal * (servicePct / 100);
   const taxAmount = (netSubtotal + serviceCharge) * (taxPct / 100);
-  const total = netSubtotal + serviceCharge + taxAmount;
+  // D126 — the cart-level promotion comes off AFTER tax, the same asymmetry
+  // the retail sale and the restaurant totals both apply.
+  const total = Math.max(
+    0,
+    netSubtotal + serviceCharge + taxAmount - (promotion.orderPromotion?.discountAmount ?? 0),
+  );
 
   // ── D69: dine-in actions ───────────────────────────────────────────────
 
@@ -574,6 +640,8 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
             mode={mode}
             subtotal={subtotal}
             itemDiscount={totalItemDiscount}
+            promotionDiscount={promotionDiscount}
+            promotionName={promotionName}
             serviceCharge={serviceCharge}
             taxAmount={taxAmount}
             servicePct={servicePct}
@@ -651,6 +719,8 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
           canDiscount={canDiscount}
           subtotal={subtotal}
           itemDiscount={totalItemDiscount}
+          promotionDiscount={promotionDiscount}
+          promotionName={promotionName}
           serviceCharge={serviceCharge}
           taxAmount={taxAmount}
           servicePct={servicePct}
@@ -783,6 +853,8 @@ interface CartRailBodyProps {
   canDiscount: boolean;
   subtotal: number;
   itemDiscount: number;
+  promotionDiscount: number;
+  promotionName: string | null;
   serviceCharge: number;
   taxAmount: number;
   servicePct: number;
@@ -825,7 +897,7 @@ function CartCard(props: CartCardProps) {
 function CartBody(props: CartRailBodyProps) {
   const {
     draft, onEdit, onDiscount, onChangeQty, onRemove, onClearAll,
-    canDiscount, subtotal, itemDiscount, serviceCharge, taxAmount,
+    canDiscount, subtotal, itemDiscount, promotionDiscount, promotionName, serviceCharge, taxAmount,
     servicePct, taxPct, total,
   } = props;
 
@@ -882,6 +954,8 @@ function CartBody(props: CartRailBodyProps) {
         itemCount={draft.reduce((s, r) => s + r.quantity, 0)}
         subtotal={subtotal}
         itemDiscount={itemDiscount}
+        promotionDiscount={promotionDiscount}
+        promotionName={promotionName}
         serviceCharge={serviceCharge}
         taxAmount={taxAmount}
         servicePct={servicePct}
@@ -1100,10 +1174,14 @@ function QtyBtn({
 
 // ── Money helpers ───────────────────────────────────────────────────────
 
+/** Unit price as the guest pays it — the item plus its chosen modifiers. */
+function lineUnitWithModifiers(line: DraftLine): number {
+  return Number(line.unitPrice) + line.modifiers.reduce((s, m) => s + Number(m.priceDelta), 0);
+}
+
 function discountAmount(line: DraftLine): number {
   if (!line.discount) return 0;
-  const unitWithMods =
-    Number(line.unitPrice) + line.modifiers.reduce((s, m) => s + Number(m.priceDelta), 0);
+  const unitWithMods = lineUnitWithModifiers(line);
   const lineSubtotal = line.quantity * unitWithMods;
   if (line.discount.type === 'PERCENTAGE') {
     return round2(lineSubtotal * (line.discount.value / 100));
