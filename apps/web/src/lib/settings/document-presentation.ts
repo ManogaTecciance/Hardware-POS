@@ -39,14 +39,30 @@ import type { TenantCapabilities } from '@hardware-pos/shared';
  * hidden keeps whatever value it already had.
  */
 
-/** The document surface a tenant prints on. */
-export type DocumentSurfaceKind = 'A4_DOCUMENTS' | 'THERMAL_BILL';
+/**
+ * The document surface a tenant prints on.
+ *
+ * D140 added the third. It is not a midpoint between the other two: a retail
+ * workspace prints its BILL on a roll and its QUOTATIONS on a letterhead, so
+ * it needs the thermal bill's controls and the A4 document's controls at the
+ * same time. Modelling that as "A4 with a thermal option" or "thermal with
+ * extras" would make one of the two a second-class citizen on the screen.
+ */
+export type DocumentSurfaceKind =
+  | 'A4_DOCUMENTS'
+  | 'THERMAL_BILL'
+  | 'THERMAL_BILL_AND_A4_DOCUMENTS';
 
 /** …plus the state where we do not yet know. */
 export type DocumentSurface = DocumentSurfaceKind | 'UNRESOLVED';
 
 /** How the Preview tab renders. */
-export type DocumentPreviewKind = 'SERVER_A4' | 'THERMAL_BILL' | 'NONE';
+export type DocumentPreviewKind =
+  | 'SERVER_A4'
+  | 'THERMAL_BILL'
+  /** D140 — both, stacked: the roll the till prints and the A4 it quotes on. */
+  | 'THERMAL_BILL_AND_A4'
+  | 'NONE';
 
 export interface DocumentSettingsPresentation {
   surface: DocumentSurface;
@@ -173,6 +189,51 @@ const THERMAL_BILL: DocumentSettingsPresentation = {
 };
 
 /**
+ * D140 — retail: the bill is a slip, the quotation is a letterhead.
+ *
+ * Every A4 control stays, because a quotation still carries a logo, an accent,
+ * a signature block, a stamp, a page size and a column set — and the operator
+ * who prints one has to be able to set them. What goes is the A4 BILL: the
+ * sale document is the roll now, so offering a second, A4 version of the same
+ * sale is offering two answers to one question.
+ *
+ * What it GAINS over `A4_DOCUMENTS` is the bill: the read-only summary of what
+ * the slip contains, the roll calibration, and a preview of the thing the till
+ * actually prints.
+ */
+const THERMAL_BILL_AND_A4_DOCUMENTS: DocumentSettingsPresentation = {
+  surface: 'THERMAL_BILL_AND_A4_DOCUMENTS',
+  headerDescription:
+    'Branding and letterhead for your quotations and notes, and the layout of the printed bill.',
+  // The sale document is the roll, so the note that rides on it is the bill's.
+  billNoteLabel: 'Bill note',
+  billNoteHint: 'Printed on the bill, above the footer line.',
+  // Every one of these belongs to the quotation, which retail still issues.
+  showSignatureAsset: true,
+  showStampAsset: true,
+  showAccentColor: true,
+  showLogoPlacement: true,
+  brandingNote:
+    'The logo appears on your A4 quotations where you place it, and centred at the top of the printed bill, where it replaces the business name — so a wide or faint logo is worth checking on the Preview tab.',
+  showPageSetup: true,
+  showDocumentColumnToggles: true,
+  showSignatureFieldsToggle: true,
+  showPageNumbersToggle: true,
+  // …and this is what the surface adds: the bill has no settings of its own,
+  // so the summary is how an operator learns what it contains.
+  showBillLayoutSummary: true,
+  layoutNote:
+    'The settings above apply to your A4 documents. The printed bill has no page size or margins — it runs on a continuous roll, whose width and edge insets are measured on the Preview tab, and what it contains is fixed.',
+  previewKind: 'THERMAL_BILL_AND_A4',
+  showBillCalibration: true,
+  showRestaurantOperationsTabs: false,
+  // Overlaid by the resolver -- see the interface.
+  showBusinessDetailsTab: false,
+  // D140 — the point of the whole surface: no A4 bill.
+  showA4SaleDocument: false,
+};
+
+/**
  * Nothing drawn until the profile answers.
  *
  * Every flag false, and `previewKind: 'NONE'` rather than either real value —
@@ -210,12 +271,14 @@ const UNRESOLVED: DocumentSettingsPresentation = {
 const CLASSIFICATION: Record<DocumentSurfaceKind, DocumentSettingsPresentation> = {
   A4_DOCUMENTS,
   THERMAL_BILL,
+  THERMAL_BILL_AND_A4_DOCUMENTS,
 };
 
 /** Every surface, for a spec that wants to walk the whole space. */
 export const ALL_DOCUMENT_SURFACE_KINDS: readonly DocumentSurfaceKind[] = [
   'A4_DOCUMENTS',
   'THERMAL_BILL',
+  'THERMAL_BILL_AND_A4_DOCUMENTS',
 ];
 
 /** The surfaces the classification actually answers for. */
@@ -232,8 +295,7 @@ export function resolveDocumentSettingsPresentation(
   input: DocumentSettingsPresentationInput,
 ): DocumentSettingsPresentation {
   if (input.capabilities === null) return UNRESOLVED;
-  const surface =
-    CLASSIFICATION[input.capabilities.documents.proformaBill ? 'THERMAL_BILL' : 'A4_DOCUMENTS'];
+  const surface = CLASSIFICATION[documentSurfaceFor(input.capabilities)];
   return {
     ...surface,
     /*
@@ -245,4 +307,30 @@ export function resolveDocumentSettingsPresentation(
     showBusinessDetailsTab:
       input.capabilities.catalogue.configurableBusinessDetails === true,
   };
+}
+
+/**
+ * D140 — the surface, from the two facts that decide it.
+ *
+ * Until D140 this read `documents.proformaBill`, which means "a pre-payment
+ * bill is issued separately from the receipt" — a food-service fact that
+ * happened to correlate with 80mm paper. It could not answer for retail, whose
+ * bill is a slip and which issues no proforma at all. Asking the paper question
+ * directly is what lets the third surface exist.
+ *
+ * `=== true` on both: they are OPTIONAL capabilities, so a domain that has not
+ * opted in reads `undefined`, and `undefined` must mean "no" rather than
+ * "unknown".
+ *
+ * Neither flag set falls back to `A4_DOCUMENTS`. No domain is in that state
+ * today; it is the answer the screen gave before D140 for every domain that
+ * was not food service, so a future descriptor that forgets both lands where
+ * it would have landed rather than somewhere new.
+ */
+function documentSurfaceFor(capabilities: TenantCapabilities): DocumentSurfaceKind {
+  const thermalBill = capabilities.documents.thermalBill === true;
+  const a4Documents = capabilities.documents.a4Documents === true;
+  if (thermalBill && a4Documents) return 'THERMAL_BILL_AND_A4_DOCUMENTS';
+  if (thermalBill) return 'THERMAL_BILL';
+  return 'A4_DOCUMENTS';
 }

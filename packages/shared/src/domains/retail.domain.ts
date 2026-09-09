@@ -129,6 +129,12 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
       // keeps it too, and restating it here would invite the two to drift.
       attributeLibrary: true,
     },
+    // D140 — retail's bill prints on a roll. Spread onto the descriptor, not
+    // into `RETAIL_CAPABILITIES`, because that constant IS the hardware
+    // template and hardware still prints an A4 bill. `a4Documents` stays true
+    // through the spread: a shop quotes on a letterhead even though its bill
+    // is a slip, and those are two facts rather than one switch.
+    documents: { ...RETAIL_CAPABILITIES.documents, thermalBill: true },
   },
   /**
    * D64 (2.4) — the clothing catalogue fields.

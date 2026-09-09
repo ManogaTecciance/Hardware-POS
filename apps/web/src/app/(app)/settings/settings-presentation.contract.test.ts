@@ -40,12 +40,25 @@ const SETTINGS_COMPONENTS = [
 const RESOLVER = 'lib/settings/document-presentation.ts';
 
 describe('D96 — the document decision has one home', () => {
-  it('the resolver exists and names the capability it routes on', () => {
+  it('the resolver exists and names the capabilities it routes on', () => {
     // POSITIVE FIRST. Every negative below is meaningless if this file moved.
     const source = readComponents(WEB_SRC, [RESOLVER]).get(RESOLVER);
     expect(source).toBeDefined();
-    expect(source).toContain('documents.proformaBill');
-    expect(source).toContain('resolveDocumentSettingsPresentation');
+    /*
+     * D140 — asserted against STRIPPED source, and that is a correction.
+     * This case used to read the raw file, so a capability named only in a
+     * doc comment satisfied it — the exact shape D30 calls out, and it was
+     * live: after the discriminator moved, the raw-source assertion still
+     * passed on a sentence explaining what the code no longer did.
+     */
+    const code = stripComments(source!);
+    expect(code).toContain('documents.thermalBill');
+    expect(code).toContain('documents.a4Documents');
+    expect(code).toContain('resolveDocumentSettingsPresentation');
+    // NEGATIVE — and the retired discriminator is not still being consulted
+    // in code. `proformaBill` remains a real domain fact; it is simply no
+    // longer what decides which paper this screen is about.
+    expect(code).not.toContain('documents.proformaBill');
   });
 
   it('no settings component decides for itself', () => {
@@ -92,7 +105,7 @@ describe('D96 — the document decision has one home', () => {
     expect(code).not.toContain('proformaBill');
   });
 
-  it('the capability is read in exactly one place across the whole web app', () => {
+  it('the capabilities are read in exactly one place across the whole web app', () => {
     /*
      * An EXACT SET over every non-test source file. This is the assertion that
      * catches the tenth call site somebody adds later in a file nobody thinks
@@ -101,10 +114,30 @@ describe('D96 — the document decision has one home', () => {
      */
     const readers = collectFiles(WEB_SRC, {
       accept: (name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name),
-      predicate: (content) => /proformaBill/.test(stripComments(content)),
+      predicate: (content) => /thermalBill|a4Documents/.test(stripComments(content)),
     });
 
     expect(readers).toEqual([RESOLVER]);
+  });
+
+  it('the retired discriminator is read by nothing at all', () => {
+    /*
+     * D140 — `proformaBill` still exists, because a restaurant really does
+     * issue a pre-payment bill and a future feature may act on that. What it
+     * must never again be is a stand-in for "prints on 80mm paper": that proxy
+     * is what made retail unrepresentable, since a shop prints a slip and
+     * issues no proforma.
+     *
+     * An EMPTY set is the assertion here, so it is paired with the case above,
+     * which proves the analyser finds readers when there are some. Without
+     * that pairing an analyser that inspected nothing would satisfy this.
+     */
+    const readers = collectFiles(WEB_SRC, {
+      accept: (name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name),
+      predicate: (content) => /proformaBill/.test(stripComments(content)),
+    });
+
+    expect(readers).toEqual([]);
   });
 
   it('the analyser would notice a violation — mutation proof', () => {
@@ -115,13 +148,17 @@ describe('D96 — the document decision has one home', () => {
      * empty offender list means what it looks like it means.
      */
     const violating = `
-      const view = profile?.capabilities.documents.proformaBill ? bill() : a4();
-      // proformaBill in a comment must NOT count
+      const view = profile?.capabilities.documents.thermalBill ? bill() : a4();
+      // thermalBill in a comment must NOT count
     `;
     const code = stripComments(violating);
-    expect(/proformaBill/.test(code)).toBe(true);
+    expect(/thermalBill/.test(code)).toBe(true);
 
-    const commentOnly = '// proformaBill\n/* businessType === "RESTAURANT" */\nexport const x = 1;';
+    const commentOnly =
+      '// thermalBill a4Documents proformaBill\n/* businessType === "RESTAURANT" */\nexport const x = 1;';
+    expect(/thermalBill|a4Documents/.test(stripComments(commentOnly))).toBe(false);
+    // D140 — the same proof for the retired name, because the empty-set case
+    // above would otherwise pass on a comment mentioning it.
     expect(/proformaBill/.test(stripComments(commentOnly))).toBe(false);
     expect(/businessType\s*===/.test(stripComments(commentOnly))).toBe(false);
   });

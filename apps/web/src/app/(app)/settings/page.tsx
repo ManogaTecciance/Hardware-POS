@@ -479,8 +479,23 @@ export default function SettingsPage() {
           showCalibration={view.showBillCalibration}
           timezone={timezone ?? DEFAULT_TIME_ZONE}
         />
+      ) : view.previewKind === 'THERMAL_BILL_AND_A4' ? (
+        /*
+         * D140 — retail prints both, so it previews both. The bill comes
+         * first: it is the document that goes to a customer on every single
+         * sale, where a quotation is occasional.
+         */
+        <div className="space-y-6">
+          <BillPreviewTab
+            docs={docs}
+            set={set}
+            showCalibration={view.showBillCalibration}
+            timezone={timezone ?? DEFAULT_TIME_ZONE}
+          />
+          <PreviewTab docs={docs} showA4SaleDocument={view.showA4SaleDocument} />
+        </div>
       ) : view.previewKind === 'SERVER_A4' ? (
-        <PreviewTab docs={docs} />
+        <PreviewTab docs={docs} showA4SaleDocument={view.showA4SaleDocument} />
       ) : (
         /*
          * Unresolved. Neither preview is right yet, and guessing means flashing
@@ -910,16 +925,30 @@ function LayoutTab({
   view: DocumentSettingsPresentation;
 }) {
   /*
-   * D96 — a workspace that prints bills gets a read-only summary instead of
-   * these controls. Not because the controls are unwanted, but because not one
-   * of them can reach a thermal bill: its columns are fixed, its totals rows
-   * appear when they are non-zero, and a continuous roll has no page to lay
-   * out. Offering them would be offering settings that change nothing.
+   * D96 — a workspace that prints bills gets a read-only summary of what the
+   * slip contains. Not because the A4 controls are unwanted, but because not
+   * one of them can reach a thermal bill: its columns are fixed, its totals
+   * rows appear when they are non-zero, and a continuous roll has no page to
+   * lay out.
+   *
+   * D140 — and the two are no longer mutually exclusive. This was an early
+   * RETURN, because every workspace that printed a bill printed ONLY a bill.
+   * Retail broke that: its sale is a slip and its quotation is a letterhead,
+   * so it needs the summary AND the page controls, and an early return would
+   * have silently taken the quotation's page size away from it.
+   *
+   * Each half is now guarded by its own flag, so the three surfaces read out
+   * of the same code: summary only (food service), controls only (hardware,
+   * general), both (retail).
    */
-  if (view.showBillLayoutSummary) return <BillStructureCard note={view.layoutNote} />;
+  const summary = view.showBillLayoutSummary ? (
+    <BillStructureCard note={view.layoutNote} />
+  ) : null;
+  if (!view.showPageSetup) return summary;
 
   return (
     <div className="max-w-3xl space-y-4">
+      {summary}
       <Card>
         <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
           <Field label="Margins">
@@ -996,8 +1025,28 @@ function LayoutTab({
   );
 }
 
-function PreviewTab({ docs }: { docs: DocumentSettings }) {
+/**
+ * D140 — `showA4SaleDocument` decides whether "Invoice / Bill" is offered.
+ *
+ * A retail workspace prints its sale on a roll now, so an A4 invoice is a
+ * document it cannot produce. Previewing one is the dead control D96 was
+ * written to remove — it answers a question the operator will then be unable
+ * to act on. Its quotations, returns and exchanges are still A4 and stay.
+ */
+function PreviewTab({
+  docs,
+  showA4SaleDocument,
+}: {
+  docs: DocumentSettings;
+  showA4SaleDocument: boolean;
+}) {
   const { session } = useAuth();
+  const types = React.useMemo(
+    () => PREVIEW_TYPES.filter((t) => t.value !== 'invoice' || showA4SaleDocument),
+    [showA4SaleDocument],
+  );
+  // 'quotation' for everyone: it is the one A4 document every surface that
+  // reaches this component still issues, so the default is never filtered out.
   const [type, setType] = React.useState<PreviewDocumentType>('quotation');
   const [lineCount, setLineCount] = React.useState(6);
   const [html, setHtml] = React.useState<string>('');
@@ -1034,13 +1083,17 @@ function PreviewTab({ docs }: { docs: DocumentSettings }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">
-          <Label>Document type</Label>
+          {/* D140 -- associated with its control. The label was floating, so
+              the chooser had no accessible name: a screen reader announced an
+              unlabelled combobox, and it could not be found by its label. */}
+          <Label htmlFor="preview-document-type">Document type</Label>
           <Select
+            id="preview-document-type"
             value={type}
             onChange={(e) => setType(e.target.value as PreviewDocumentType)}
             className="w-56"
           >
-            {PREVIEW_TYPES.map((t) => (
+            {types.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
               </option>

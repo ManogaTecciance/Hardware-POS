@@ -7945,6 +7945,124 @@ in the spec.
 
 ---
 
+## D140 — retail's bill prints on a roll; its quotations stay on the letterhead
+
+**Status:** accepted and **built**, 2026-09-09. Frontend only. No schema change,
+no migration, no route removed, no server behaviour changed.
+
+### What was asked
+
+Retail needs only a thermal bill. The A4 bill goes, and Settings' Layout and
+Preview should be about the bill.
+
+### Why it was not a one-line change
+
+The Settings screen routed on `documents.proformaBill`, which means **"a
+pre-payment bill is issued separately from the receipt"** — the bill a waiter
+brings to a table before anyone has paid. It had been standing in for "prints on
+80mm paper" since D96, and the two happened to coincide because food service was
+the only thermal domain.
+
+Retail breaks the coincidence twice over:
+
+1. **A shop issues no proforma.** Flipping `proformaBill` to `true` for retail
+   would assert something false about it in the domain registry — the proxy
+   abuse D56 exists to prevent — and any future feature reading that capability
+   for what it actually means would then be wrong about retail.
+2. **Retail prints BOTH.** It rings up on a roll and quotes on a letterhead.
+   `proformaBill` is one boolean between two surfaces, so it cannot say that at
+   all: routing retail to the food-service surface strips the signature block,
+   stamp, accent colour, logo placement, page size and column toggles — every
+   one of which belongs to the **quotation** that retail still issues.
+
+The second point is the one that decided the shape. Retail is not "A4 with a
+thermal option" or "thermal with extras"; it genuinely prints two documents.
+
+### The decision
+
+**Two capabilities, replacing the proxy, and a third surface.**
+
+```ts
+readonly documents: {
+  readonly proformaBill: boolean;   // unchanged, and no longer a discriminator
+  readonly splitByItem: boolean;
+  readonly thermalBill?: boolean;   // the BILL prints on an 80mm roll
+  readonly a4Documents?: boolean;   // the tenant issues A4 documents on a letterhead
+};
+```
+
+| | thermalBill | a4Documents | surface |
+|---|---|---|---|
+| **HARDWARE** | — | ✅ | `A4_DOCUMENTS` *(unchanged)* |
+| **GENERAL** | — | ✅ | `A4_DOCUMENTS` *(unchanged)* |
+| **RESTAURANT / CAFE / BAKERY / HOTEL** | ✅ | — | `THERMAL_BILL` *(unchanged)* |
+| **RETAIL** | ✅ | ✅ | `THERMAL_BILL_AND_A4_DOCUMENTS` **(new)** |
+
+`thermalBill` sits on the **retail descriptor's** spread, not in
+`RETAIL_CAPABILITIES` — that constant **is** the hardware template (D134e), and
+hardware still prints an A4 bill. `a4Documents` sits **on** the shared constant,
+because hardware and retail both quote. `FOOD_SERVICE_CAPABILITIES` gains
+`thermalBill: true`, which states directly what `proformaBill` had been standing
+in for and changes no behaviour: food service resolved to the thermal surface
+before this line and resolves to it after.
+
+`proformaBill` is kept. A restaurant really does issue a pre-payment bill, and a
+future feature may act on that. What it must never be again is a stand-in for
+paper — a contract test now asserts it is read by **nothing**.
+
+### What retail gets
+
+| | |
+|---|---|
+| **Sale page** | "Print A4 bill" is gone. "Thermal receipt" stays — that IS the document |
+| **POS payment** | the "Print A4 bill after payment" toggle is gone, and the auto-print is gated |
+| **Branding** | unchanged — logo, accent, signature, stamp, all still the quotation's |
+| **Layout** | the A4 page controls **plus** the read-only summary of what the slip prints |
+| **Preview** | the bill preview and roll calibration **plus** the A4 chooser, minus "Invoice / Bill" |
+
+### The one that would have been missed
+
+The POS payment screen opened the A4 print window on **every completed sale** —
+`printAfter` defaults to `true`. Removing the button from the sale page alone
+would have hidden the door while the till kept walking through it. The auto-open
+is now gated on the same flag the button is, and the flag is checked at the call
+site as well as on the control: the toggle's state survives a profile that
+resolves late, so a hidden switch left `true` would still have fired.
+
+### Two structural changes this forced
+
+**`LayoutTab` stopped being either/or.** It early-returned the bill summary,
+because until now every workspace that printed a bill printed *only* a bill.
+Each half is now guarded by its own flag, so all three surfaces read out of the
+same code: summary only, controls only, or both.
+
+**The Preview chooser drops "Invoice / Bill" where there is no A4 sale
+document.** Previewing a document the operator cannot print is the dead control
+D96 was written to remove. Quotation, return and exchange remain.
+
+### A latent test defect this uncovered
+
+The D96 contract test asserted the resolver "names the capability it routes on"
+against **raw** source, so a capability named only in a doc comment satisfied it
+— the exact vacuity D30 describes. It was live: after the discriminator moved,
+the assertion still passed on a sentence explaining what the code no longer did.
+It now runs on stripped source and pairs the positive with a negative.
+
+### Hiding is usability
+
+`/print/sales/[saleId]` stays ungated and a typed URL still renders an A4 bill,
+exactly as D96 recorded. The server is unchanged; no API gained or lost a gate.
+This decides what the screens offer.
+
+### Scope deliberately not taken
+
+The **A4 note** on the returns screen is offered to every workspace and is gated
+by nothing at all — including food service, which has had no letterhead controls
+since D96. That is a pre-existing inconsistency, older than this decision and
+not what was asked for; it is recorded here rather than fixed in passing.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

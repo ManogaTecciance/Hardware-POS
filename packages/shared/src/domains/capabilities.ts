@@ -133,9 +133,39 @@ export interface TenantCapabilities {
     readonly packaging: boolean;
   };
   readonly documents: {
-    /** A pre-payment bill is issued separately from the receipt. */
+    /**
+     * A pre-payment bill is issued separately from the receipt.
+     *
+     * A food-service fact: the bill you bring to a table before anyone has
+     * paid. **Not** a statement about paper. It was the Settings screen's
+     * A4-vs-thermal discriminator until D140, which is why retail could not
+     * be moved to a thermal bill without asserting something false about it:
+     * a shop rings up and prints a receipt, it issues no proforma.
+     */
     readonly proformaBill: boolean;
     readonly splitByItem: boolean;
+    /**
+     * D140 — the customer's BILL prints on an 80mm roll, not an A4 sheet.
+     *
+     * This is the paper question, asked directly. A kitchen and a clothing
+     * shop both hand over a slip from a till-top printer; they have almost
+     * nothing else in common, which is exactly why the old proxy could not
+     * serve both.
+     */
+    readonly thermalBill?: boolean;
+    /**
+     * D140 — the tenant issues A4 documents on a letterhead.
+     *
+     * Quotations and printed notes: the documents whose logo, accent colour,
+     * signature block, stamp, page size and column set live on the Branding
+     * and Layout tabs.
+     *
+     * **Independent of `thermalBill`, and retail is why.** A retail workspace
+     * prints its bill on a roll AND quotes on a letterhead, so the two are
+     * separate facts rather than two ends of one switch. Collapsing them
+     * would leave a retail owner with a quotation they cannot brand.
+     */
+    readonly a4Documents?: boolean;
   };
 }
 
@@ -163,7 +193,10 @@ export const RETAIL_CAPABILITIES: TenantCapabilities = {
   },
   fulfilment: { kind: 'IMMEDIATE', stationRouting: false, rounds: false, channels: ['COUNTER'] },
   charges: { serviceCharge: false, packaging: false },
-  documents: { proformaBill: false, splitByItem: false },
+  // D140 — hardware and retail both quote on a letterhead, so the A4 document
+  // set is here. `thermalBill` is NOT: this constant is the hardware template,
+  // hardware still prints its bill on A4, and only retail moved to a roll.
+  documents: { proformaBill: false, splitByItem: false, a4Documents: true },
 };
 
 /** Food service: table sessions, rounds, kitchen routing, split bills. */
@@ -184,7 +217,12 @@ export const FOOD_SERVICE_CAPABILITIES: TenantCapabilities = {
     channels: ['DINE_IN', 'TAKEAWAY', 'ONLINE'],
   },
   charges: { serviceCharge: true, packaging: true },
-  documents: { proformaBill: true, splitByItem: true },
+  // D140 — `thermalBill` states directly what `proformaBill` was standing in
+  // for. Additive and behaviour-preserving: food service resolved to the
+  // thermal surface before this line and resolves to it after. `a4Documents`
+  // stays absent — a kitchen issues no quotation, which is the whole reason
+  // its Branding and Layout tabs lost the letterhead controls in D96.
+  documents: { proformaBill: true, splitByItem: true, thermalBill: true },
 };
 
 /** A catalogue without stock tracking; sells over the counter. */
@@ -204,5 +242,8 @@ export const GENERAL_CAPABILITIES: TenantCapabilities = {
   },
   fulfilment: { kind: 'IMMEDIATE', stationRouting: false, rounds: false, channels: ['COUNTER'] },
   charges: { serviceCharge: false, packaging: false },
-  documents: { proformaBill: false, splitByItem: false },
+  // D140 — unchanged: A4 documents, no thermal bill. Stated rather than
+  // inherited, because absent means false and silence would quietly move a
+  // template nobody was discussing onto a different surface.
+  documents: { proformaBill: false, splitByItem: false, a4Documents: true },
 };
