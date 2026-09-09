@@ -15,6 +15,7 @@ import {
   ChefHat,
   ClipboardCheck,
   FileText,
+  History,
   LayoutDashboard,
   Link2,
   ListChecks,
@@ -51,6 +52,7 @@ export const NAV_ICONS: Record<NavIconName, LucideIcon> = {
   ChefHat,
   ClipboardCheck,
   FileText,
+  History,
   LayoutDashboard,
   Link2,
   ListChecks,
@@ -246,6 +248,62 @@ const ROUTE_MODULES: ReadonlyMap<string, ModuleKey> = (() => {
   for (const [href, moduleKey] of declared) if (moduleKey) gated.set(href, moduleKey);
   return gated;
 })();
+
+/**
+ * The ONE rail entry that should read as current, or `''` for none.
+ *
+ * Longest match wins, on whole segments — the same rule `moduleForPath` below
+ * uses, and for the same reason. Marking every entry whose href is a prefix of
+ * the path lights up two links at once the moment a destination is nested:
+ * standing on `/kitchen/history` highlighted Kitchen AND Ticket history, so
+ * the rail said the reader was in two places (D138a).
+ *
+ * Pure, so the rule is testable without rendering a sidebar.
+ */
+export function activeNavHref(groups: NavGroup[], pathname: string): string {
+  let best = '';
+  for (const group of groups) {
+    for (const item of group.items) {
+      const matches = pathname === item.href || pathname.startsWith(`${item.href}/`);
+      if (matches && item.href.length > best.length) best = item.href;
+    }
+  }
+  return best;
+}
+
+/**
+ * Where to send someone who has landed somewhere their own rail does not offer
+ * — or `null` for "leave them exactly where they are".
+ *
+ * D138. Login, `/` and half a dozen "back to safety" links all point at
+ * `/dashboard`, which was fine while every role had one. Kitchen staff no
+ * longer do, and a role that lands on a screen missing from its own navigation
+ * has no way back except the browser's history.
+ *
+ * `null` in three cases, and each matters: the rail is still UNRESOLVED (an
+ * empty list, which is also what an error renders — never redirect on a guess,
+ * D31), the destination IS on the rail, or the rail offers nothing at all to
+ * redirect to. Otherwise the first destination the rail does offer, which is
+ * the same order the sidebar renders and so the same thing the person would
+ * have clicked.
+ *
+ * A pure resolver, in the shape D28/D31 asks for: no session, no router, no
+ * role names — the answer is derived from the navigation the permissions
+ * already produced. Its one caller today is the dashboard page; it is written
+ * generally because the next screen to lose a role will want the same answer.
+ *
+ * Matching follows the sidebar's own rule (whole segments), so a person on
+ * `/kitchen/history` is at a destination their rail offers.
+ */
+export function redirectFor(groups: NavGroup[], pathname: string): string | null {
+  const items = groups.flatMap((group) => group.items);
+  if (items.length === 0) return null;
+  const reachable = items.some(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
+  if (reachable) return null;
+  return items[0]?.href ?? null;
+}
 
 /**
  * The module a path requires, or `null` when the path is ungated.

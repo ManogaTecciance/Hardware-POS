@@ -4,6 +4,7 @@ import { Info, Wand2 } from 'lucide-react';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { usePrompt } from '@/components/ui/confirm';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { type Session } from '@/lib/auth';
@@ -265,6 +266,11 @@ function VariantMatrix({
   // first paint on desktop is the correct table.
   const isTabletUp = useIsTabletUp();
 
+  // D141 — the app's own prompt, so both bulk actions below are AWAITED. The
+  // native one blocked the main thread, which on this screen froze the very
+  // matrix the operator is about to see filled in.
+  const prompt = usePrompt();
+
   const enabledIndexes = state.variants
     .map((v, i) => (v.enabled ? i : -1))
     .filter((i) => i !== -1);
@@ -282,11 +288,22 @@ function VariantMatrix({
   };
 
   // ── Bulk actions ────────────────────────────────────────────────
-  const generateSkus = () => {
-    // The prompt is the least-invasive way to get a prefix without adding a
-    // new dialog just for this bulk action. Cashiers rarely need it in edit
-    // mode; a follow-up can promote it to a Popover if usage warrants it.
-    const raw = typeof window !== 'undefined' ? window.prompt('SKU prefix (e.g. MILK)') : null;
+  const generateSkus = async () => {
+    // One field is still the least-invasive way to get a prefix without
+    // building a bespoke dialog for this bulk action. Cashiers rarely need it
+    // in edit mode; a follow-up can promote it to a Popover if usage warrants it.
+    const raw = await prompt({
+      title: 'Generate SKUs',
+      message: 'Every enabled variant gets this prefix followed by its option initials.',
+      label: 'SKU prefix',
+      placeholder: 'MILK',
+      // "Generate", not "Generate SKUs": the toolbar button already carries
+      // that name, and two identical buttons on screen at once is a question
+      // about which one you are pressing.
+      confirmLabel: 'Generate',
+    });
+    // Unchanged guard: dismissal (null) and an empty box both leave the rows
+    // alone, and a prefix of only spaces is emptied by the trim below.
     if (!raw) return;
     const prefix = raw.trim().toUpperCase();
     if (!prefix) return;
@@ -306,9 +323,18 @@ function VariantMatrix({
     });
   };
 
-  const setReorderForAll = () => {
-    const raw =
-      typeof window !== 'undefined' ? window.prompt('Reorder point for every enabled variant') : null;
+  const setReorderForAll = async () => {
+    const raw = await prompt({
+      title: 'Reorder point for every enabled variant',
+      message: 'Leave it blank to clear the reorder point on those rows.',
+      label: 'Reorder point',
+      placeholder: 'Optional',
+      // A count, so the tablet gets a number pad rather than a keyboard.
+      inputMode: 'numeric',
+      confirmLabel: 'Apply to all',
+    });
+    // `== null` on purpose, as before: only dismissal aborts. An empty string
+    // is a deliberate clear, and is written to every enabled row below.
     if (raw == null) return;
     const trimmed = raw.trim();
     if (trimmed !== '' && !Number.isFinite(Number(trimmed))) return;

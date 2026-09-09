@@ -8,7 +8,7 @@ import { QUOTATION_STATUS_LABELS, type QuotationStatusCode } from '@hardware-pos
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Pagination } from '@/components/ui/pagination';
+import { PAGE_SIZES, Pagination } from '@/components/ui/pagination';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -42,11 +42,15 @@ export default function QuotationsPage() {
   const [status, setStatus] = React.useState<QuotationStatusCode | ''>('');
   const [validity, setValidity] = React.useState<'' | 'valid' | 'expired'>('');
   const [loading, setLoading] = React.useState(true);
-  const pageSize = 25;
+  // D139a — adjustable, like every other list. It was fixed at 25, which was
+  // also the one page size in the product that no footer offered.
+  const [pageSize, setPageSize] = React.useState(PAGE_SIZES[0]!);
 
+  // Resizing re-numbers every page, so the reader starts from 1 — the same
+  // rule the filters follow.
   React.useEffect(() => {
     setPage(1);
-  }, [search, status, validity]);
+  }, [search, status, validity, pageSize]);
 
   React.useEffect(() => {
     if (!session) return;
@@ -66,7 +70,7 @@ export default function QuotationsPage() {
         .finally(() => setLoading(false));
     }, 250);
     return () => window.clearTimeout(handle);
-  }, [session, page, search, status, validity]);
+  }, [session, page, pageSize, search, status, validity]);
 
   const canCreate = hasPermission(Permission.QUOTATION_CREATE);
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -178,7 +182,9 @@ export default function QuotationsPage() {
         page={page}
         pageSize={pageSize}
         total={total}
+        disabled={loading}
         onPageChange={setPage}
+        onPageSizeChange={setPageSize}
       />
     </div>
   );

@@ -1,6 +1,8 @@
 import { Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { KitchenTicketStatus, ModuleKey } from '@hardware-pos/database';
 
+import type { Paginated } from '@hardware-pos/shared';
+
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
@@ -8,7 +10,9 @@ import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
+import { QueryKitchenHistoryDto } from './dto/kitchen.dto';
 import {
+  KitchenLaneCounts,
   KitchenOrderView,
   KitchenService,
   KitchenTicketNotFoundError,
@@ -44,10 +48,53 @@ export class KitchenTicketsController {
   // parseFilter below; cancellation is order-side state, not a ticket status.)
 
   /**
+   * D138b — what each lane chip says.
+   *
+   * The board reads one lane at a time, so it could only count the lane it was
+   * on: "To make" and "Preparing" carried numbers while "Done" carried none,
+   * and standing on Done it was the other two that went blank. Declared above
+   * the `:ticketId` routes, and KOT_VIEW like every other read here.
+   */
+  @Get('counts')
+  @RequirePermissions(Permission.KOT_VIEW)
+  counts(
+    @TenantId() tenantId: string,
+    @Param('branchId') branchId: string,
+  ): Promise<KitchenLaneCounts> {
+    return this.service.laneCountsForBranch(tenantId, branchId);
+  }
+
+  /**
+   * D138 — the kitchen's own history: every ticket this branch has bumped,
+   * today's included, paged and searchable.
+   *
+   * Declared ABOVE the `:ticketId` routes because `history` would otherwise be
+   * a candidate ticket id, and KOT_VIEW like the board: this is the same
+   * information the kitchen already received, read back later.
+   */
+  @Get('history')
+  @RequirePermissions(Permission.KOT_VIEW)
+  history(
+    @TenantId() tenantId: string,
+    @Param('branchId') branchId: string,
+    @Query() query: QueryKitchenHistoryDto,
+  ): Promise<Paginated<KitchenTicketView>> {
+    return this.service.listHistoryForBranch(tenantId, branchId, {
+      page: query.page,
+      pageSize: query.pageSize,
+      skip: query.skip,
+      take: query.take,
+      search: query.search,
+    });
+  }
+
+  /**
    * D83 — the whole order behind a ticket, for the board's Details view.
    *
    * KOT_VIEW, like the board: this is the same information the kitchen
-   * already receives, assembled across stations instead of split by them.
+   * already receives, assembled across the order's ROUNDS instead of one
+   * round at a time. (It read "across stations" until D143 made a ticket the
+   * whole round; rounds are what a card is a slice of now.)
    */
   @Get(':ticketId/order')
   @RequirePermissions(Permission.KOT_VIEW)
@@ -80,12 +127,21 @@ export class KitchenTicketsController {
   ): Promise<KitchenTicketView> {
     try {
       const updated = await this.service.startTicket(tenantId, branchId, ticketId);
+      /*
+       * D143 — `stationId` is no longer recorded here (nor on complete or
+       * reopen below). A ticket cut since the split was removed belongs to no
+       * station, so the key would be null on every entry written from now on,
+       * and a permanently-null field reads as data that went missing rather
+       * than data that stopped existing. Nothing is lost for the pre-D143
+       * tickets that DO carry one: `entityId` is the ticket, and the ticket
+       * row still holds the station it was routed to.
+       */
       await this.audit.record(tenantId, {
         userId: actor.id,
         action: 'KITCHEN_TICKET_STARTED',
         entityType: 'KitchenTicket',
         entityId: ticketId,
-        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
+        metadata: { ticketNumber: updated.ticketNumber },
       });
       return updated;
     } catch (err) {
@@ -109,7 +165,7 @@ export class KitchenTicketsController {
         action: 'KITCHEN_TICKET_COMPLETED',
         entityType: 'KitchenTicket',
         entityId: ticketId,
-        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
+        metadata: { ticketNumber: updated.ticketNumber },
       });
       return updated;
     } catch (err) {
@@ -137,7 +193,7 @@ export class KitchenTicketsController {
         action: 'KITCHEN_TICKET_REOPENED',
         entityType: 'KitchenTicket',
         entityId: ticketId,
-        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
+        metadata: { ticketNumber: updated.ticketNumber },
       });
       return updated;
     } catch (err) {
@@ -149,7 +205,8 @@ export class KitchenTicketsController {
 
 /**
  * `?status=` accepts a real ticket status or a board pseudo-filter —
- * `OUTSTANDING` (D68) and `CANCELLED` (D115, order-side cancellation).
+ * `OUTSTANDING` (D68), `CANCELLED` (D115, order-side cancellation) and
+ * `COMPLETED_TODAY` (D138, the Done lane cut to the shop's day).
  * Anything unrecognised means "no filter" rather than an error: a stale
  * bookmark should show the whole board, not a 400. Only the two pseudo-filters
  * exclude cancelled orders' tickets; a raw status (`QUEUED`, `IN_PROGRESS`,
@@ -158,8 +215,10 @@ export class KitchenTicketsController {
  */
 function parseFilter(
   status?: string,
-): KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | undefined {
+): KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY' | undefined {
   if (!status) return undefined;
-  if (status === 'OUTSTANDING' || status === 'CANCELLED') return status;
+  if (status === 'OUTSTANDING' || status === 'CANCELLED' || status === 'COMPLETED_TODAY') {
+    return status;
+  }
   return status in KitchenTicketStatus ? (status as KitchenTicketStatus) : undefined;
 }

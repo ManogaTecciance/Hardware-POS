@@ -5,6 +5,7 @@ import * as React from 'react';
 
 import { ItemSplitAssigner } from '@/components/restaurant/billing/item-split-assigner';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/ui/confirm';
 import { Sheet } from '@/components/ui/sheet';
 import { type Session } from '@/lib/auth';
 import { billing, tableSessions } from '@/lib/restaurant/api';
@@ -63,6 +64,7 @@ export function TableBillSheet({
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const confirm = useConfirm();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -83,14 +85,28 @@ export function TableBillSheet({
     };
   }, [session, sessionId]);
 
-  const confirmUnsent = () =>
+  /*
+   * D141 — the app's own confirm, so this one is AWAITED. It has to be: the
+   * native dialog froze the same thread the bill preview and the floor's
+   * session poll run on, and Chrome drops it entirely after a few in a row —
+   * on a busy service that silently turns the guard below into a no-op.
+   *
+   * The guard itself is unchanged. A "no" still stops the close before the
+   * session is raised into a Sale, which is the only point at which the
+   * unsent items could still be sent.
+   */
+  const confirmUnsent = async () =>
     !hasUnsentDraft ||
-    window.confirm(
-      'The cart still has items that were never sent to the kitchen. They are NOT on this bill. Close the session anyway?',
-    );
+    (await confirm({
+      title: 'Close the session anyway?',
+      message:
+        'The cart still has items that were never sent to the kitchen. They are NOT on this bill.',
+      confirmLabel: 'Close session',
+      tone: 'danger',
+    }));
 
   const closeOnly = async () => {
-    if (busy || !confirmUnsent()) return;
+    if (busy || !(await confirmUnsent())) return;
     setBusy(true);
     setError(null);
     try {
@@ -105,7 +121,7 @@ export function TableBillSheet({
   };
 
   const closeAndSplit = async (splits: Parameters<typeof billing.splitByItems>[2]['splits']) => {
-    if (busy || !confirmUnsent()) return;
+    if (busy || !(await confirmUnsent())) return;
     setBusy(true);
     setError(null);
     let saleId: string;

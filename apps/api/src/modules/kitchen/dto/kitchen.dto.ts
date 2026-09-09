@@ -5,7 +5,10 @@ import {
   IsString,
   Length,
   Matches,
+  MaxLength,
 } from 'class-validator';
+
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 const CODE = /^[A-Z][A-Z0-9-]*$/;
 
@@ -33,4 +36,17 @@ export class MarkPrintedDto {
 export class MarkFailedDto {
   @IsString() @Length(1, 128) printerId!: string;
   @IsString() @Length(1, 500) error!: string;
+}
+
+/**
+ * D138 — the ticket history screen's query.
+ *
+ * Page and size come from the shared pager (1 / 25, capped at 200) so this
+ * list behaves like every other list in the product. `search` is bounded the
+ * way the sales list bounds its own: a term long enough to be a sentence is a
+ * mistake, not a query, and refusing it here beats handing Postgres a
+ * megabyte to `ILIKE`.
+ */
+export class QueryKitchenHistoryDto extends PaginationQueryDto {
+  @IsOptional() @IsString() @MaxLength(120) search?: string;
 }

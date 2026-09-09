@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   KitchenTicketStatus,
   OrderRoundStatus,
@@ -7,9 +7,13 @@ import {
   TakeawayOrderStatus,
 } from '@hardware-pos/database';
 
+import { lastNDaysInTimeZone, safeTimeZone, type Paginated } from '@hardware-pos/shared';
+
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { paginate } from '../../common/pagination';
 import { withTabName } from '../../common/place-label';
+import { SettingsService } from '../settings/settings.service';
 
 /** D83 — every item on the order a ticket belongs to, for the kitchen. */
 export interface KitchenOrderView {
@@ -27,9 +31,21 @@ export interface KitchenOrderView {
     modifierNames: string[];
     specialInstructions: string | null;
     roundNumber: number | null;
-    /** Which station received it — null if it reached none (unrouted). */
-    stationName: string | null;
   }[];
+}
+
+/**
+ * D138b — what each lane chip says, for ALL THREE lanes at once.
+ *
+ * The board fetches one lane's tickets at a time, so it can only count the
+ * lane it is looking at; the other two chips had no number to show. These are
+ * counted server-side over the same `where` the lists use, so a chip and its
+ * lane can never disagree.
+ */
+export interface KitchenLaneCounts {
+  toMake: number;
+  preparing: number;
+  doneToday: number;
 }
 
 export interface KitchenTicketView {
@@ -37,8 +53,13 @@ export interface KitchenTicketView {
   ticketNumber: string;
   branchId: string;
   roundId: string;
-  stationId: string;
-  stationName: string;
+  /*
+   * D143 — NULL on every ticket cut since the per-station split was removed:
+   * a round is ONE ticket now, and a ticket that belongs to no station must
+   * not claim one. Non-null only on tickets raised BEFORE D143, which keep
+   * the station they were genuinely routed to.
+   */
+  stationId: string | null;
   status: KitchenTicketStatus;
   /*
    * D68 — the board is the ONLY place this ticket is ever delivered, so it
@@ -79,168 +100,124 @@ export interface KitchenTicketView {
  */
 @Injectable()
 export class KitchenService {
-  private readonly logger = new Logger(KitchenService.name);
-
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+  ) {}
 
   /**
-   * Generate one ticket per unique station referenced by the round's items.
+   * The zone the business reckons its days in — the same read the dashboard's
+   * "today" makes (D138). Cutting the Done lane on the SERVER's midnight would,
+   * on a UTC host serving a Colombo kitchen, empty the lane at half past five
+   * in the morning and keep the last of the night's tickets on it until then.
    */
-  async generateTicketsForRound(
+  private tz(tenantId: string): string {
+    return safeTimeZone(this.settings.getSettings(tenantId).timezone);
+  }
+
+  /**
+   * Half-open `[midnight, next midnight)` in the shop's zone, resolved PER
+   * CALL. The board polls every five seconds and a kitchen screen is never
+   * closed, so a window captured once at mount would keep last night's
+   * tickets on the lane until somebody reloaded the page; recomputing here
+   * means the lane empties itself at the shop's midnight, unattended.
+   */
+  private todayWindow(tenantId: string): { gte: Date; lt: Date } {
+    const { from, to } = lastNDaysInTimeZone(1, this.tz(tenantId));
+    return { gte: from, lt: to };
+  }
+
+  /**
+   * D143 — ONE ticket per round, carrying every item of that round.
+   *
+   * It used to be one ticket per KITCHEN STATION the round's items routed to,
+   * so a single order for a single round arrived on the board as several
+   * separate cards (RO-000026, one round of 15 lines, became KOT-000027 with
+   * 13 of them and KOT-000028 with 2). The split is gone because the routing
+   * it rested on was never reachable: the only place to link a dish to a
+   * station is the product wizard's Step 3 multi-select, which is
+   * branch-scoped and renders EMPTY when no branch is selected, so products
+   * are created with no station link at all.
+   *
+   * WHAT THIS FIXES, and it is worse than the duplicate cards: the old
+   * routing DROPPED an item with no station link unless the branch happened
+   * to have exactly one active station (the D67 fallback). The affected
+   * branch has four, so an unlinked dish reached the kitchen board on NO
+   * ticket whatsoever — ordered, billed, and never cooked. Every item of the
+   * round is now on the one ticket, so there is nothing left to drop.
+   *
+   * The station catalogue and both link junctions (MenuItemStationLink,
+   * ProductStationLink) stay in the schema and in the wizard; they simply no
+   * longer influence what the kitchen receives.
+   *
+   * Returns the new ticket's id, or null for a round with no items — a round
+   * with nothing on it must not burn a KOT number or put an empty card on the
+   * pass.
+   */
+  async generateTicketForRound(
     tx: Prisma.TransactionClient,
     tenantId: string,
     branchId: string,
     roundId: string,
-  ): Promise<string[]> {
+  ): Promise<string | null> {
     const items = await tx.restaurantOrderItem.findMany({
       where: { tenantId, roundId },
+      /*
+       * The round's own order — the sequence the waiter keyed the lines in is
+       * the sequence the kitchen reads them in. `createdAt` alone cannot give
+       * it: a round's items are all written inside ONE transaction, so
+       * Postgres stamps every one of them with the same instant. The id
+       * tiebreak restores the insertion order (a cuid's timestamp+counter
+       * prefix increments per row) and, more importantly, makes the order
+       * TOTAL — without it two lines could swap places between two reads.
+       */
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
-        id: true,
-        menuItemId: true,
         menuItemName: true,
         quantity: true,
         specialInstructions: true,
-        // D46 — source + Product + variant snapshot so the routing lookup
-        // reads from the correct junction (MenuItem vs Product) and the
-        // printed ticket carries the operator-selected variant verbatim.
-        sourceKind: true,
-        productId: true,
+        // D46 — the operator-selected variant, snapshotted at submit.
         variantNameSnapshot: true,
         modifiers: { select: { optionName: true } },
       },
     });
-    if (items.length === 0) return [];
+    if (items.length === 0) return null;
 
-    /*
-     * D60 — routing keys off the PRODUCT whenever the line carries one,
-     * regardless of sourceKind: the catalogue-convergence backfill stamps
-     * `productId` onto MENU_ITEM-sourced lines and copies their station
-     * links to `ProductStationLink`, so one junction serves everything. The
-     * MenuItemStationLink lookup remains only as the fallback for an
-     * unmigrated legacy line (productId null), and dies with the deferred
-     * drop.
-     */
-    const menuItemIds = [
-      ...new Set(items.filter((i) => i.productId === null).map((i) => i.menuItemId)),
-    ];
-    const productIds = [
-      ...new Set(
-        items
-          .filter((i): i is typeof i & { productId: string } => i.productId !== null)
-          .map((i) => i.productId),
-      ),
-    ];
-    const [menuItemStationLinks, productStationLinks] = await Promise.all([
-      menuItemIds.length
-        ? tx.menuItemStationLink.findMany({
-            where: { menuItemId: { in: menuItemIds } },
-            select: { menuItemId: true, stationId: true },
-          })
-        : Promise.resolve([]),
-      productIds.length
-        ? tx.productStationLink.findMany({
-            where: { productId: { in: productIds } },
-            select: { productId: true, stationId: true },
-          })
-        : Promise.resolve([]),
-    ]);
-    const stationsByMenuItem = new Map<string, string[]>();
-    for (const link of menuItemStationLinks) {
-      const list = stationsByMenuItem.get(link.menuItemId) ?? [];
-      list.push(link.stationId);
-      stationsByMenuItem.set(link.menuItemId, list);
-    }
-    const stationsByProduct = new Map<string, string[]>();
-    for (const link of productStationLinks) {
-      const list = stationsByProduct.get(link.productId) ?? [];
-      list.push(link.stationId);
-      stationsByProduct.set(link.productId, list);
-    }
-
-    /*
-     * D67 — the single-station fallback.
-     *
-     * An item with no station link used to be dropped silently: no ticket,
-     * nothing on the pass, and the kitchen never learns the dish was
-     * ordered. That is indefensible once tickets print automatically. When
-     * the branch has exactly ONE active station there is no routing decision
-     * to make, so unrouted items go there. With two or more stations the
-     * choice is a real one the operator must configure — guessing would send
-     * food to the wrong line — so those items stay unrouted and are logged
-     * by name, which is how an operator finds the missing link.
-     *
-     * D68 keeps this: the consequence of an unrouted item is now a dish
-     * missing from the BOARD, which is no less severe than a missing
-     * printout.
-     */
-    const branchStations = await tx.kitchenStation.findMany({
-      where: { tenantId, branchId, isActive: true },
-      select: { id: true },
+    // One document number for the round, not one per station.
+    const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
+    const ticketNumber = `KOT-${padSequence(seq)}`;
+    const ticket = await tx.kitchenTicket.create({
+      data: {
+        tenantId,
+        branchId,
+        roundId,
+        // D143 — written explicitly rather than left to the column default,
+        // because "this ticket belongs to no station" is the claim being
+        // made, not an omission.
+        stationId: null,
+        ticketNumber,
+        status: KitchenTicketStatus.QUEUED,
+      },
     });
-    const soleStationId = branchStations.length === 1 ? branchStations[0]!.id : null;
-
-    // Aggregate items per station.
-    const perStation = new Map<string, typeof items>();
-    const unrouted: string[] = [];
     for (const item of items) {
-      // Look up in the junction that matches the item's source.
-      const stationIds = item.productId
-        ? stationsByProduct.get(item.productId) ?? []
-        : stationsByMenuItem.get(item.menuItemId) ?? [];
-      const targets =
-        stationIds.length > 0 ? stationIds : soleStationId ? [soleStationId] : [];
-      if (targets.length === 0) {
-        unrouted.push(item.menuItemName);
-        continue;
-      }
-      for (const stationId of targets) {
-        const list = perStation.get(stationId) ?? [];
-        list.push(item);
-        perStation.set(stationId, list);
-      }
-    }
-    if (unrouted.length > 0) {
-      this.logger.warn(
-        `Round ${roundId}: ${unrouted.length} item(s) reached no kitchen station and will not ` +
-          `appear on the kitchen board — link them to a station (${unrouted.join(', ')})`,
-      );
-    }
-
-    const ticketIds: string[] = [];
-    for (const [stationId, stationItems] of perStation) {
-      const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
-      const ticketNumber = `KOT-${padSequence(seq)}`;
-      const ticket = await tx.kitchenTicket.create({
+      await tx.kitchenTicketItem.create({
         data: {
           tenantId,
-          branchId,
-          roundId,
-          stationId,
-          ticketNumber,
-          status: KitchenTicketStatus.QUEUED,
+          ticketId: ticket.id,
+          menuItemName: item.menuItemName,
+          // D46 — print the variant selection ("MEDIUM", "LARGE") on
+          // the KOT verbatim from the round-item snapshot. NULL when
+          // the round item has no variant (a MENU_ITEM row or a
+          // non-variant Product); the kitchen must not infer the
+          // variant from selling price.
+          variantName: item.variantNameSnapshot,
+          quantity: item.quantity,
+          modifierNames: item.modifiers.map((m) => m.optionName),
+          specialInstructions: item.specialInstructions,
         },
       });
-      for (const item of stationItems) {
-        await tx.kitchenTicketItem.create({
-          data: {
-            tenantId,
-            ticketId: ticket.id,
-            menuItemName: item.menuItemName,
-            // D46 — print the variant selection ("MEDIUM", "LARGE") on
-            // the KOT verbatim from the round-item snapshot. NULL when
-            // the round item has no variant (a MENU_ITEM row or a
-            // non-variant Product); the kitchen must not infer the
-            // variant from selling price.
-            variantName: item.variantNameSnapshot,
-            quantity: item.quantity,
-            modifierNames: item.modifiers.map((m) => m.optionName),
-            specialInstructions: item.specialInstructions,
-          },
-        });
-      }
-      ticketIds.push(ticket.id);
     }
-    return ticketIds;
+    return ticket.id;
   }
 
   /**
@@ -256,12 +233,24 @@ export class KitchenService {
    * now exclude cancelled work, and the `CANCELLED` pseudo-filter collects
    * it (any ticket status, newest first) so the pass can SEE what was
    * called off rather than having it vanish mid-cook.
+   *
+   * D138 — `COMPLETED_TODAY` is the third pseudo-filter, and it is what the
+   * board's Done lane asks for now: the same set as `COMPLETED`, cut to the
+   * shop's calendar day. `COMPLETED` itself is UNCHANGED — the KDS route, a
+   * bookmarked query and the history screen all still mean "every ticket ever
+   * bumped" by it. Widening the lane's meaning in place would have left the
+   * integration assertions green while they stopped proving anything, because
+   * their tickets are completed seconds before they are read (D30).
+   *
+   * D138b — extracted from the list so the lane COUNTS are counted over
+   * exactly the rows the lane lists. Two copies of "what is outstanding" is
+   * how a chip comes to promise three tickets the list does not have.
    */
-  async listTicketsForBranch(
+  private whereForFilter(
     tenantId: string,
     branchId: string,
-    filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED',
-  ): Promise<KitchenTicketView[]> {
+    filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY',
+  ): Prisma.KitchenTicketWhereInput {
     /*
      * "This ticket's work was called off", spelled from the ticket's point
      * of view. Only the takeaway path writes a cancellation today; the
@@ -298,24 +287,186 @@ export class KitchenService {
           }
         : filter === 'CANCELLED'
           ? { tenantId, branchId, ...cancelledWork }
-          : filter === KitchenTicketStatus.COMPLETED
-            ? { tenantId, branchId, status: filter, ...notCancelled }
-            : { tenantId, branchId, ...(filter ? { status: filter } : {}) };
+          : filter === 'COMPLETED_TODAY'
+            ? {
+                tenantId,
+                branchId,
+                status: KitchenTicketStatus.COMPLETED,
+                completedAt: this.todayWindow(tenantId),
+                ...notCancelled,
+              }
+            : filter === KitchenTicketStatus.COMPLETED
+              ? { tenantId, branchId, status: filter, ...notCancelled }
+              : { tenantId, branchId, ...(filter ? { status: filter } : {}) };
+    return where;
+  }
+
+  /**
+   * D68/D115/D138 — the board's read, one lane at a time.
+   */
+  async listTicketsForBranch(
+    tenantId: string,
+    branchId: string,
+    filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY',
+  ): Promise<KitchenTicketView[]> {
+    const where = this.whereForFilter(tenantId, branchId, filter);
 
     const rows = await this.prisma.kitchenTicket.findMany({
       where,
-      // Oldest first while outstanding: a kitchen works a queue, and the
-      // dish that has been waiting longest is the one that goes next.
-      // Done and Cancelled read newest first — they answer "what just
-      // happened", not "what is next".
-      orderBy: {
-        createdAt:
-          filter === KitchenTicketStatus.COMPLETED || filter === 'CANCELLED' ? 'desc' : 'asc',
-      },
+      /*
+       * Oldest first while outstanding: a kitchen works a queue, and the dish
+       * that has been waiting longest is the one that goes next.
+       *
+       * Done and Cancelled read newest first — they answer "what just
+       * happened", not "what is next". D138: the day-scoped lane sorts by when
+       * the food was FINISHED, because that is now what the lane is about; a
+       * ticket raised at 11:00 and bumped at 14:00 belongs above one raised at
+       * 13:00 and bumped at 13:30, which sorting by `createdAt` got backwards.
+       * The unscoped COMPLETED list keeps `createdAt` so nothing that reads it
+       * today changes underneath.
+       */
+      orderBy:
+        filter === 'COMPLETED_TODAY'
+          ? [{ completedAt: 'desc' as const }, { id: 'desc' as const }]
+          : {
+              createdAt:
+                filter === KitchenTicketStatus.COMPLETED || filter === 'CANCELLED'
+                  ? ('desc' as const)
+                  : ('asc' as const),
+            },
       include: TICKET_INCLUDE,
     });
     const waiters = await this.waiterNames(rows);
     return rows.map((row) => toView(row, waiters));
+  }
+
+  /**
+   * D138b — the three lane counts in one round trip.
+   *
+   * `To make` and `Preparing` are the client's split of the OUTSTANDING lane
+   * (not started / started), so they are counted the same way here: the
+   * outstanding `where`, narrowed by status. `Done` is the day-scoped lane.
+   * Three counts in one transaction, so the numbers are consistent with each
+   * other as well as with the lists — a ticket bumped between two separate
+   * queries would otherwise be counted twice or not at all.
+   */
+  async laneCountsForBranch(tenantId: string, branchId: string): Promise<KitchenLaneCounts> {
+    const outstanding = this.whereForFilter(tenantId, branchId, 'OUTSTANDING');
+    const [toMake, preparing, doneToday] = await this.prisma.$transaction([
+      this.prisma.kitchenTicket.count({
+        where: {
+          ...outstanding,
+          // Narrower than the lane's own `not: COMPLETED`, and it replaces it:
+          // "to make" is everything outstanding that nobody has started.
+          status: {
+            notIn: [KitchenTicketStatus.COMPLETED, KitchenTicketStatus.IN_PROGRESS],
+          },
+        },
+      }),
+      this.prisma.kitchenTicket.count({
+        where: { ...outstanding, status: KitchenTicketStatus.IN_PROGRESS },
+      }),
+      this.prisma.kitchenTicket.count({
+        where: this.whereForFilter(tenantId, branchId, 'COMPLETED_TODAY'),
+      }),
+    ]);
+    return { toMake, preparing, doneToday };
+  }
+
+  /**
+   * D138 — every ticket the branch has ever bumped, newest first.
+   *
+   * The board's Done lane answers "what did we finish today"; this answers
+   * "when did we finish that, and who was on it" — a different question, asked
+   * days or weeks later, over a set that only grows. So it pages in SQL and
+   * searches in SQL rather than handing the pass a list that reaches a
+   * thousand rows and stops being scrollable.
+   *
+   * TODAY'S TICKETS ARE IN IT. The lane and this list overlap deliberately:
+   * splitting them by date would make "the ticket I bumped an hour ago"
+   * findable in neither place once the lane scrolled, which is the failure the
+   * screen exists to prevent.
+   *
+   * Cancelled work is excluded on the same reasoning as `COMPLETED` (D115):
+   * it has its own lane on the board, and a history of what the kitchen
+   * COOKED should not be padded with what it was told to stop cooking.
+   */
+  async listHistoryForBranch(
+    tenantId: string,
+    branchId: string,
+    query: { page: number; pageSize: number; skip: number; take: number; search?: string },
+  ): Promise<Paginated<KitchenTicketView>> {
+    const search = query.search?.trim() || undefined;
+    const where: Prisma.KitchenTicketWhereInput = {
+      tenantId,
+      branchId,
+      status: KitchenTicketStatus.COMPLETED,
+      round: {
+        status: { not: OrderRoundStatus.CANCELLED },
+        order: {
+          status: { not: 'CANCELLED' },
+          OR: [
+            { takeawayProfile: null },
+            { takeawayProfile: { status: { not: TakeawayOrderStatus.CANCELLED } } },
+          ],
+        },
+      },
+      /*
+       * The four things a person actually remembers about a ticket: its own
+       * number, the order it belonged to, where it was going, and what was on
+       * it. Searching the dish name matters most — "which table had the
+       * lamprais that came back" is the question this screen gets asked, and
+       * no ticket number is remembered alongside it.
+       */
+      ...(search
+        ? {
+            OR: [
+              { ticketNumber: { contains: search, mode: 'insensitive' } },
+              { round: { order: { orderNumber: { contains: search, mode: 'insensitive' } } } },
+              {
+                round: {
+                  order: {
+                    session: {
+                      OR: [
+                        { tabName: { contains: search, mode: 'insensitive' } },
+                        { table: { code: { contains: search, mode: 'insensitive' } } },
+                        { table: { area: { name: { contains: search, mode: 'insensitive' } } } },
+                      ],
+                    },
+                  },
+                },
+              },
+              { items: { some: { menuItemName: { contains: search, mode: 'insensitive' } } } },
+            ],
+          }
+        : {}),
+    };
+
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.kitchenTicket.findMany({
+        where,
+        /*
+         * By when the food was DONE, not when the ticket was raised: this list
+         * is read as a record of service, and a ticket raised early and bumped
+         * late belongs where the kitchen finished it. `completedAt` is never
+         * null on a COMPLETED row — `completeTicket` writes both in one update
+         * and `reopenTicket` clears both — but the id tiebreak keeps the order
+         * total anyway, so a page boundary can never repeat or skip a row.
+         */
+        orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+        skip: query.skip,
+        take: query.take,
+        include: TICKET_INCLUDE,
+      }),
+      this.prisma.kitchenTicket.count({ where }),
+    ]);
+    const waiters = await this.waiterNames(rows);
+    return paginate(
+      rows.map((row) => toView(row, waiters)),
+      total,
+      query.page,
+      query.pageSize,
+    );
   }
 
   /**
@@ -344,12 +495,16 @@ export class KitchenService {
   /**
    * D83 — the whole order behind one ticket.
    *
-   * A ticket carries only the items routed to ITS station, which is right
-   * for making them and wrong for timing them: the grill cannot tell whether
-   * it is plating alone or alongside a curry the main kitchen has not
-   * started. This returns every non-voided item on the order, each labelled
-   * with the station it went to and the round it came in on, so the pass can
-   * see the table as the guests will.
+   * A ticket carries only ITS OWN ROUND, which is right for making the food
+   * and wrong for timing it: the pass cannot tell whether it is plating alone
+   * or alongside a starter that went in twenty minutes ago. This returns
+   * every non-voided item on the order, labelled with the round it came in
+   * on, so the pass can see the table as the guests will.
+   *
+   * D143 narrowed what this adds, and did not remove it: a ticket is now the
+   * whole ROUND rather than one station's slice of it, so the extra a reader
+   * gets here is the order's OTHER rounds. The per-item station annotation is
+   * gone with the split — a ticket belongs to no station to annotate from.
    *
    * Read-only and KOT_VIEW gated, like the board itself. Deliberately NOT
    * routed through the table-session read: that one is scoped to the waiter
@@ -402,20 +557,6 @@ export class KitchenService {
       },
     });
 
-    /*
-     * Which station each item went to, read back from the tickets rather
-     * than re-derived from the routing links: the links can be edited after
-     * the fact, and the ticket is what the kitchen actually received.
-     */
-    const tickets = await this.prisma.kitchenTicket.findMany({
-      where: { tenantId, round: { orderId: round.orderId } },
-      select: { station: { select: { name: true } }, items: { select: { menuItemName: true } } },
-    });
-    const stationByName = new Map<string, string>();
-    for (const t of tickets) {
-      for (const item of t.items) stationByName.set(item.menuItemName, t.station.name);
-    }
-
     const table = order.session?.table;
     const waiter = order.session?.waiterUserId
       ? await this.prisma.user.findUnique({
@@ -446,7 +587,6 @@ export class KitchenService {
         modifierNames: item.modifiers.map((m) => m.optionName),
         specialInstructions: item.specialInstructions,
         roundNumber: item.round?.roundNumber ?? null,
-        stationName: stationByName.get(item.menuItemName) ?? null,
       })),
     };
   }
@@ -684,7 +824,9 @@ export class KitchenTicketNotFoundError extends Error {
  */
 const TICKET_INCLUDE = {
   items: true,
-  station: { select: { name: true } },
+  // D143 — no `station`: a ticket cut since the split was removed belongs to
+  // none, and the board, the history table and the ticket dialog have all
+  // stopped naming one.
   completedBy: { select: { name: true } },
   round: {
     select: {
@@ -718,7 +860,6 @@ function toView(
     branchId: row.branchId,
     roundId: row.roundId,
     stationId: row.stationId,
-    stationName: row.station.name,
     status: row.status,
     orderNumber: row.round?.order?.orderNumber ?? null,
     // The synthetic walk-in table backs every counter and takeaway order;

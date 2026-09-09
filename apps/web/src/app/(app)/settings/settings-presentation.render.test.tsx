@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { domainFor } from '@hardware-pos/shared';
 
+import { ConfirmProvider } from '@/components/ui/confirm';
 import type { AppSettings } from '@/lib/settings-api';
 
 const session = {
@@ -125,8 +126,18 @@ vi.mock('@/lib/platform-profile', () => ({
 
 const SettingsPage = (await import('./page')).default;
 
+/*
+ * D141 — the page asks its reset question through <ConfirmProvider>, which the
+ * authenticated shell mounts. `useConfirm` throws outside it rather than
+ * falling back to `window.confirm`, so every render here supplies it.
+ */
+
 async function open(tab: string) {
-  render(<SettingsPage />);
+  render(
+    <ConfirmProvider>
+      <SettingsPage />
+    </ConfirmProvider>,
+  );
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -278,7 +289,11 @@ describe('D96 — which tabs exist', () => {
 
   it('an unresolved profile offers neither, and previews nothing', async () => {
     businessType = null;
-    render(<SettingsPage />);
+    render(
+      <ConfirmProvider>
+        <SettingsPage />
+      </ConfirmProvider>,
+    );
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
     });

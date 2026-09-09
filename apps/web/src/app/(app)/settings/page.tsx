@@ -9,6 +9,7 @@ import { availableTimeZones, DEFAULT_TIME_ZONE, timeZoneOffsetLabel } from '@har
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { useConfirm } from '@/components/ui/confirm';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
@@ -102,6 +103,7 @@ const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
 export default function SettingsPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.SETTINGS_MANAGE);
+  const confirm = useConfirm();
   /*
    * D96 — one resolver call, one prop. Every tab below reads flags; none of
    * them compares a capability, a business type or an inventory mode, which is
@@ -229,7 +231,17 @@ export default function SettingsPage() {
 
   const reset = async () => {
     if (!session) return;
-    if (!window.confirm('Reset all document settings to defaults? This cannot be undone.')) return;
+    // D141 — the app's own confirm, awaited: the guard is the same one
+    // `window.confirm` gave, and nothing below it runs until it answers.
+    if (
+      !(await confirm({
+        title: 'Reset all document settings to defaults?',
+        message: 'This cannot be undone.',
+        confirmLabel: 'Reset',
+        tone: 'danger',
+      }))
+    )
+      return;
     setSaving(true);
     try {
       const next = await resetSettings(session);

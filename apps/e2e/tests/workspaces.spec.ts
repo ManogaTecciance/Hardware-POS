@@ -165,7 +165,16 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     await signIn(page, RESTAURANT_SEED.owner);
     const flat = await railLinkNames(page);
 
-    for (const expected of ['Dashboard', 'POS', 'Orders', 'Kitchen', 'Tables', 'Menu']) {
+    for (const expected of [
+      'Dashboard',
+      'POS',
+      'Orders',
+      'Kitchen',
+      // D138 — the board's Done lane holds today; the rest is here.
+      'Ticket history',
+      'Tables',
+      'Menu',
+    ]) {
       expect(flat.join(' | '), `restaurant rail should contain ${expected}`).toContain(expected);
     }
     // NEGATIVE — the two labels it used to carry are gone: "Inventory" (D45's
@@ -269,6 +278,15 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
      * with permissions. The takeaway order goes in as the cashier over the API,
      * which is the same path the console uses, and generates its kitchen
      * ticket server-side in the same transaction.
+     *
+     * D143 — one round is now one ticket, so this order plants exactly one
+     * card. It planted one before as well, but only because `prd_resto_10`
+     * is a SEEDED dish and the seed routes every dish to a station: a
+     * product created through the wizard carries no station link, and at a
+     * four-station branch the old routing dropped such an item entirely,
+     * planting nothing. Swap the id below for a wizard-made product and the
+     * positive control would have gone back to reading whatever the dev
+     * database already held.
      */
     const cashierApi = await Api.create(
       await apiLogin(RESTAURANT_SEED.cashier.email, RESTAURANT_SEED.cashier.password),
@@ -317,6 +335,72 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     } finally {
       await kitchenContext.close();
     }
+  });
+
+  test('WS-409 kitchen staff get the board and its history, and no dashboard (D138)', async ({
+    page,
+  }) => {
+    /*
+     * D138. The service dashboard is a floor board — open tables, bills
+     * requested, tables needing attention — and it was the one destination in
+     * the product with no gate at all, so it reached the role whose template
+     * deliberately holds nothing on the floor. The reads behind those tiles
+     * only need PLATFORM_PROFILE_READ, so it did not fail shut: kitchen staff
+     * were shown the whole restaurant on the way to the one screen they work.
+     *
+     * Both directions in one test: what the rail now holds, and what the
+     * landing route now does with a role that has no dashboard. The positive
+     * halves matter most — an empty rail and a redirect to a dead route would
+     * satisfy every negative here.
+     */
+    await signIn(page, RESTAURANT_SEED.kitchen);
+
+    const rail = await railLinkNames(page);
+    expect(rail, 'the kitchen rail should be exactly the board and its history').toEqual([
+      'Kitchen',
+      'Ticket history',
+    ]);
+
+    // Landing: /dashboard is where login and `/` both point, and it is no
+    // longer theirs — they arrive at the board instead of at the floor.
+    await page.goto('/dashboard');
+    await page.waitForURL((u) => u.pathname === '/kitchen', { timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: 'Kitchen' })).toBeVisible();
+    // NEGATIVE, on the floor wording the dashboard would have shown them.
+    await expect(page.getByText('Open tables')).toHaveCount(0);
+
+    // The history opens, and is the screen it claims to be.
+    await page.goto('/kitchen/history');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('heading', { name: 'Ticket history' })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByLabel('Search ticket history')).toBeVisible();
+    // …and it is not the module gate's refusal card wearing the same title.
+    await expect(page.getByText('Not part of this workspace')).toHaveCount(0);
+
+    /*
+     * D138a — the rail marks ONE place. The prefix rule this replaced lit up
+     * Kitchen and Ticket history together, so a screen reader was told the
+     * user was in two places at once.
+     */
+    const current = page
+      .getByRole('navigation', { name: 'Main', exact: true })
+      .locator('a[aria-current="page"]');
+    await expect(current).toHaveCount(1);
+    await expect(current).toHaveText(/ticket history/i);
+  });
+
+  test('WS-410 every other restaurant role keeps the dashboard (D138)', async ({ page }) => {
+    // The positive control for WS-409's negative: the gate is
+    // TABLE_VIEW / SALE_READ / REPORT_READ, so it discriminates rather than
+    // simply closing the door. Without this, removing the entry for everyone
+    // would pass WS-409 just as well.
+    await signIn(page, RESTAURANT_SEED.cashier);
+    expect(await railLinkNames(page)).toContain('Dashboard');
+    await page.goto('/dashboard');
+    await page.waitForLoadState('networkidle');
+    await expect(page).toHaveURL(/\/dashboard$/);
   });
 
   test('WS-407 a deep link to a mode the till cannot work asks instead of opening it', async ({

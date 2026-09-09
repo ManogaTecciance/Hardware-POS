@@ -15,10 +15,11 @@
  * `validateStep` here and pass its output as the `errors` prop, which is what
  * the shell does at runtime.
  */
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ConfirmProvider } from '@/components/ui/confirm';
 import type { CategoryNode } from '@/lib/products-api';
 
 import { ProductPreview } from './product-preview';
@@ -113,6 +114,16 @@ const branches = [
  * Kept minimal — one useState, `patch` for shallow merge, and a ref so the
  * spec can peek at the "latest" state without racing React's commit cycle.
  */
+/**
+ * The variant matrix asks for its bulk-action values through the app's own
+ * prompt (D141), so anything that renders Step 3 in matrix mode needs the
+ * provider — `usePrompt` throws outside it rather than silently falling back
+ * to `window.prompt`.
+ */
+function renderWithConfirm(ui: React.ReactElement) {
+  return render(<ConfirmProvider>{ui}</ConfirmProvider>);
+}
+
 function useHarness(initial: WizardState) {
   const [state, setState] = React.useState<WizardState>(initial);
   const patch = React.useCallback((p: Partial<WizardState>) => {
@@ -559,7 +570,7 @@ describe('StepPricingInventory', () => {
         optionKeys: ['opt-500'],
       },
     ];
-    render(
+    renderWithConfirm(
       <StepPricingInventory
         state={s}
         errors={{}}
@@ -575,7 +586,7 @@ describe('StepPricingInventory', () => {
     expect(screen.queryByLabelText(/sku for 500ml/i)).toBeNull();
   });
 
-  it('Generate SKUs stamps each row with prefix + first-3 uppercased option initials', () => {
+  it('Generate SKUs stamps each row with prefix + first-3 uppercased option initials', async () => {
     // Deliberately mirror the wizard's contract: prefix "COKE" and options
     // ["200ml", "Glass Bottle"] should stamp "COKE-200-GLA" — first three
     // characters of each option value, uppercased and dash-joined.
@@ -622,22 +633,195 @@ describe('StepPricingInventory', () => {
       );
     }
 
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('COKE');
-    render(<Harness />);
+    // Answering the NATIVE prompt with a different prefix on purpose (D141):
+    // if this call site ever went back to `window.prompt`, the rows would read
+    // "NATIVE-…" and the assertions below would fail loudly rather than pass
+    // on a coincidence.
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('NATIVE');
+    renderWithConfirm(<Harness />);
 
-    fireEvent.click(screen.getByRole('button', { name: /generate skus/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate SKUs' }));
 
-    // Positive: the row's SKU now matches the formula.
-    const skuInput = screen.getByLabelText(/sku for 200ml/i) as HTMLInputElement;
-    expect(skuInput.value).toBe('COKE-200-GLA');
-
-    // Negative control: cancelling the prompt (raw=null) leaves the SKU alone.
-    promptSpy.mockReturnValueOnce(null);
-    fireEvent.change(skuInput, { target: { value: '' } });
-    fireEvent.click(screen.getByRole('button', { name: /generate skus/i }));
+    // The question is asked first, and nothing is stamped while it is open —
+    // this is the guard the await replaced the blocking dialog with.
+    await screen.findByRole('heading', { name: 'Generate SKUs' });
     expect((screen.getByLabelText(/sku for 200ml/i) as HTMLInputElement).value).toBe('');
 
+    fireEvent.change(screen.getByLabelText('SKU prefix'), { target: { value: 'COKE' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    // Positive: the row's SKU now matches the formula.
+    await waitFor(() =>
+      expect((screen.getByLabelText(/sku for 200ml/i) as HTMLInputElement).value).toBe(
+        'COKE-200-GLA',
+      ),
+    );
+
+    // Negative control: dismissing the prompt (raw=null) leaves the SKU alone.
+    fireEvent.change(screen.getByLabelText(/sku for 200ml/i), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate SKUs' }));
+    // Positive control for the negative: the question really was asked again,
+    // so what follows cannot pass because the button had become inert.
+    await screen.findByRole('heading', { name: 'Generate SKUs' });
+    fireEvent.change(screen.getByLabelText('SKU prefix'), { target: { value: 'COKE' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('SKU prefix')).toBeNull());
+    expect((screen.getByLabelText(/sku for 200ml/i) as HTMLInputElement).value).toBe('');
+    expect(promptSpy).not.toHaveBeenCalled();
+
     promptSpy.mockRestore();
+  });
+
+  it('Set reorder for all writes the typed value to every enabled row, and nothing on dismissal', async () => {
+    // The second of Step 3's two bulk actions (D141). Same shape as Generate
+    // SKUs: ask, then apply — and only to rows the operator kept enabled.
+    const s = initialState();
+    s.hasVariations = true;
+    s.variations = [
+      {
+        key: 'dim-size',
+        name: 'Size',
+        options: [
+          { key: 'opt-200', name: '200ml' },
+          { key: 'opt-500', name: '500ml' },
+        ],
+      },
+    ];
+    s.variants = [
+      {
+        key: 'v-1',
+        enabled: true,
+        sku: 'COKE-200',
+        barcode: '',
+        unitPrice: '220',
+        costPrice: '',
+        openingQuantity: '',
+        reorderLevel: '',
+        imageUrl: null,
+        isActive: true,
+        optionKeys: ['opt-200'],
+      },
+      {
+        // Disabled, and carrying its own reorder point: "every enabled
+        // variant" must leave this one exactly as it is.
+        key: 'v-2',
+        enabled: false,
+        sku: 'COKE-500',
+        barcode: '',
+        unitPrice: '350',
+        costPrice: '',
+        openingQuantity: '',
+        reorderLevel: '3',
+        imageUrl: null,
+        isActive: true,
+        optionKeys: ['opt-500'],
+      },
+    ];
+
+    let latest: WizardState = s;
+    function Harness() {
+      const h = useHarness(s);
+      latest = h.state;
+      return (
+        <StepPricingInventory
+          state={h.state}
+          errors={{}}
+          branches={branches}
+          showOpeningStock={true}
+          onChange={h.patch}
+        />
+      );
+    }
+
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('99');
+    renderWithConfirm(<Harness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set reorder for all' }));
+    await screen.findByRole('heading', { name: 'Reorder point for every enabled variant' });
+    // Held back until the question is answered.
+    expect((screen.getByLabelText(/reorder point for 200ml/i) as HTMLInputElement).value).toBe('');
+
+    fireEvent.change(screen.getByLabelText('Reorder point'), { target: { value: ' 12 ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to all' }));
+
+    // Positive: trimmed, and written to the enabled row.
+    await waitFor(() =>
+      expect((screen.getByLabelText(/reorder point for 200ml/i) as HTMLInputElement).value).toBe(
+        '12',
+      ),
+    );
+    // …and the disabled row is untouched, exactly as before the conversion.
+    expect(latest.variants[1]!.reorderLevel).toBe('3');
+
+    // Negative: dismissing leaves the value that is already there.
+    fireEvent.click(screen.getByRole('button', { name: 'Set reorder for all' }));
+    await screen.findByRole('heading', { name: 'Reorder point for every enabled variant' });
+    fireEvent.change(screen.getByLabelText('Reorder point'), { target: { value: '7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('Reorder point')).toBeNull());
+    expect((screen.getByLabelText(/reorder point for 200ml/i) as HTMLInputElement).value).toBe('12');
+    expect(promptSpy).not.toHaveBeenCalled();
+
+    promptSpy.mockRestore();
+  });
+
+  it('Set reorder for all keeps blank as a clear, and refuses a non-number', async () => {
+    // The old `window.prompt` guard was `raw == null`, not `!raw`: an empty
+    // box CLEARS the reorder point, and only a value that is neither blank
+    // nor finite is rejected. Both survive the conversion (D141).
+    const s = initialState();
+    s.hasVariations = true;
+    s.variations = [
+      { key: 'dim-size', name: 'Size', options: [{ key: 'opt-200', name: '200ml' }] },
+    ];
+    s.variants = [
+      {
+        key: 'v-1',
+        enabled: true,
+        sku: 'COKE-200',
+        barcode: '',
+        unitPrice: '220',
+        costPrice: '',
+        openingQuantity: '',
+        reorderLevel: '5',
+        imageUrl: null,
+        isActive: true,
+        optionKeys: ['opt-200'],
+      },
+    ];
+
+    function Harness() {
+      const h = useHarness(s);
+      return (
+        <StepPricingInventory
+          state={h.state}
+          errors={{}}
+          branches={branches}
+          showOpeningStock={true}
+          onChange={h.patch}
+        />
+      );
+    }
+
+    renderWithConfirm(<Harness />);
+    const row = () => screen.getByLabelText(/reorder point for 200ml/i) as HTMLInputElement;
+    expect(row().value).toBe('5');
+
+    // Rejected: "abc" is not finite, so the rows keep the 5 they had.
+    fireEvent.click(screen.getByRole('button', { name: 'Set reorder for all' }));
+    await screen.findByRole('heading', { name: 'Reorder point for every enabled variant' });
+    fireEvent.change(screen.getByLabelText('Reorder point'), { target: { value: 'abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to all' }));
+    await waitFor(() => expect(screen.queryByLabelText('Reorder point')).toBeNull());
+    expect(row().value).toBe('5');
+
+    // Accepted: an empty box is a clear, not a dismissal.
+    fireEvent.click(screen.getByRole('button', { name: 'Set reorder for all' }));
+    await screen.findByRole('heading', { name: 'Reorder point for every enabled variant' });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to all' }));
+    await waitFor(() => expect(row().value).toBe(''));
   });
 
   it('Branch select is hidden outside LOCAL mode, appears once opening qty > 0 in LOCAL', () => {
@@ -667,7 +851,7 @@ describe('StepPricingInventory', () => {
       },
     ];
 
-    const { rerender } = render(
+    const { rerender } = renderWithConfirm(
       <StepPricingInventory
         state={s}
         errors={{}}
@@ -681,13 +865,15 @@ describe('StepPricingInventory', () => {
 
     // Positive: switch to LOCAL and the branch select appears.
     rerender(
-      <StepPricingInventory
-        state={s}
-        errors={{}}
-        branches={branches}
-        showOpeningStock={true}
-        onChange={() => {}}
-      />,
+      <ConfirmProvider>
+        <StepPricingInventory
+          state={s}
+          errors={{}}
+          branches={branches}
+          showOpeningStock={true}
+          onChange={() => {}}
+        />
+      </ConfirmProvider>,
     );
     expect(screen.getByLabelText(/opening stock branch/i)).toBeDefined();
   });
@@ -1126,7 +1312,7 @@ describe('validateStep — DTO-mirroring field rules', () => {
       // A validation that blocks Continue with no visible message is worse
       // than none — prove each new key reaches the matrix.
       const s = withVariant({ barcode: 'B'.repeat(81), openingQuantity: '-1', reorderLevel: '1.2345' });
-      render(
+      renderWithConfirm(
         <StepPricingInventory
           state={s}
           errors={pricing(s)}

@@ -16,7 +16,7 @@ interface DialogProps {
 }
 
 /**
- * Lightweight modal (overlay + centered card). Closes on Escape / overlay click.
+ * Lightweight modal (overlay + centred card). Closes on Escape / overlay click.
  *
  * ## Height (D85)
  *
@@ -44,14 +44,27 @@ export function Dialog({ open, onClose, title, description, children, footer, cl
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 sm:items-center sm:p-4"
+      /*
+       * Centred at EVERY width (PO, 2026-09-09). This used to be
+       * `items-end … sm:items-center`: a bottom sheet on a phone and a centred
+       * card from `sm` up. A modal that asks a question belongs in the middle
+       * of the screen wherever it is read, and on a wall-mounted tablet the
+       * bottom edge is the furthest thing from the person's eye.
+       *
+       * `p-4` at every width too, so the card never touches the screen edge —
+       * the padding used to be skipped on mobile because the sheet was flush
+       * to the bottom by design.
+       */
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         className={cn(
-          'flex max-h-[80dvh] w-full max-w-md flex-col rounded-t-2xl bg-surface shadow-xl sm:rounded-2xl',
+          // Rounded on all four corners now that it floats at every width; it
+          // was `rounded-t-2xl` for the sheet, whose bottom corners were off-screen.
+          'flex max-h-[80dvh] w-full max-w-md flex-col rounded-2xl bg-surface shadow-xl',
           className,
         )}
         onClick={(e) => e.stopPropagation()}

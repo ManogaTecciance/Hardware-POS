@@ -19,10 +19,11 @@
  * re-adding the lines: 3 × 1000 is 3000, but the total shown is 3300 with
  * service charge, and only the server knows that.
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ConfirmProvider } from '@/components/ui/confirm';
 import type { SessionBillPreview } from '@/lib/restaurant/types';
 
 const billPreview = vi.fn<() => Promise<SessionBillPreview>>();
@@ -86,18 +87,36 @@ const sheet = (
 ) => {
   const onClosed = vi.fn();
   render(
-    <TableBillSheet
-      session={session}
-      sessionId="ts_1"
-      tableLabel="T7"
-      hasUnsentDraft={false}
-      canSplit
-      onClose={vi.fn()}
-      {...props}
-      onClosed={onClosed}
-    />,
+    // D141 — the unsent-items question is the app's own dialog now, so the
+    // sheet only works inside the provider that draws it.
+    <ConfirmProvider>
+      <TableBillSheet
+        session={session}
+        sessionId="ts_1"
+        tableLabel="T7"
+        hasUnsentDraft={false}
+        canSplit
+        onClose={vi.fn()}
+        {...props}
+        onClosed={onClosed}
+      />
+    </ConfirmProvider>,
   );
   return onClosed;
+};
+
+const UNSENT_QUESTION = 'Close the session anyway?';
+
+/*
+ * Both the sheet and the confirm are `role="dialog"`, and the assigner has a
+ * "Cancel" of its own, so every button below is looked up INSIDE the confirm
+ * card. Scoping by its heading also proves the card on screen is this
+ * question and not some other dialog that happens to offer a Cancel.
+ */
+const unsentDialog = () => {
+  const card = screen.getByRole('heading', { name: UNSENT_QUESTION }).closest('[role="dialog"]');
+  if (!card) throw new Error('the unsent-items question is not inside a dialog');
+  return within(card as HTMLElement);
 };
 
 describe('reviewing the bill', () => {
@@ -209,5 +228,103 @@ describe('closing', () => {
     ).toBe(true);
     expect(closeSession).not.toHaveBeenCalled();
     expect(onClosed).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * D141 — the unsent-items guard, now an awaited in-app dialog.
+ *
+ * This guard is the last thing standing between "items the kitchen never
+ * cooked" and a Sale that omits them, and closing is not reversible from
+ * here. So each of the two call sites is asserted in BOTH directions:
+ * confirming closes, dismissing leaves the session open. A one-directional
+ * test would still pass if the `await` were dropped — an unawaited promise is
+ * truthy, so the guard would wave every close through.
+ */
+describe('the unsent-items question (D141)', () => {
+  it('does not ask when nothing is unsent, and closes straight away', async () => {
+    billPreview.mockResolvedValue(PREVIEW);
+    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    const onClosed = sheet({ hasUnsentDraft: false });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Close .* one bill/ }));
+
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
+    // POSITIVE CONTROL for the two tests below: the question is conditional,
+    // so their "the dialog appeared" is about the unsent draft and not about
+    // a dialog this sheet always shows.
+    expect(screen.queryByRole('heading', { name: UNSENT_QUESTION })).toBeNull();
+  });
+
+  it('asks before closing one bill, and closes when the waiter confirms', async () => {
+    billPreview.mockResolvedValue(PREVIEW);
+    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    const onClosed = sheet({ hasUnsentDraft: true });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Close .* one bill/ }));
+
+    // Nothing has moved yet: the close waits on the answer.
+    await screen.findByRole('heading', { name: UNSENT_QUESTION });
+    expect(closeSession).not.toHaveBeenCalled();
+    // The consequence is still spelled out, in the words the native dialog used.
+    expect(screen.getByText(/never sent to the kitchen/)).toBeTruthy();
+
+    fireEvent.click(unsentDialog().getByRole('button', { name: 'Close session' }));
+
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
+    expect(onClosed).toHaveBeenCalledWith({ saleId: 'sale_1', splitCount: 0 });
+    expect(closeSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the session OPEN when the waiter cancels', async () => {
+    billPreview.mockResolvedValue(PREVIEW);
+    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    const onClosed = sheet({ hasUnsentDraft: true });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Close .* one bill/ }));
+
+    await screen.findByRole('heading', { name: UNSENT_QUESTION });
+    fireEvent.click(unsentDialog().getByRole('button', { name: 'Cancel' }));
+
+    // The question is gone and the bill is still on screen — cancelling is a
+    // stop, not a crash — and no Sale was raised.
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: UNSENT_QUESTION })).toBeNull(),
+    );
+    expect(screen.getByText(/Beef Steak/)).toBeTruthy();
+    expect(closeSession).not.toHaveBeenCalled();
+    expect(onClosed).not.toHaveBeenCalled();
+  });
+
+  it('guards the SPLIT close too — cancelling raises no Sale to split', async () => {
+    billPreview.mockResolvedValue(PREVIEW);
+    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    splitByItems.mockResolvedValue({});
+    const onClosed = sheet({ hasUnsentDraft: true });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Split between guests/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Assign rest to/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Close and create/ }));
+
+    await screen.findByRole('heading', { name: UNSENT_QUESTION });
+    fireEvent.click(unsentDialog().getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: UNSENT_QUESTION })).toBeNull(),
+    );
+    expect(closeSession).not.toHaveBeenCalled();
+    expect(splitByItems).not.toHaveBeenCalled();
+    expect(onClosed).not.toHaveBeenCalled();
+
+    // …and confirming the same action still goes through, so the assertions
+    // above are about the answer and not about a split that never worked.
+    fireEvent.click(screen.getByRole('button', { name: /Close and create/ }));
+    await screen.findByRole('heading', { name: UNSENT_QUESTION });
+    fireEvent.click(unsentDialog().getByRole('button', { name: 'Close session' }));
+
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
+    expect(closeSession).toHaveBeenCalledTimes(1);
+    expect(splitByItems).toHaveBeenCalledTimes(1);
+    expect(onClosed).toHaveBeenCalledWith({ saleId: 'sale_1', splitCount: 1 });
   });
 });

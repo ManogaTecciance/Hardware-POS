@@ -306,6 +306,9 @@ describe('36/37 — nothing outside the product screens changed', () => {
     const shells = readComponents(SRC, [
       'app/(app)/tables/page.tsx',
       'app/(app)/kitchen/page.tsx',
+      // D138 — the history route is a shell like its neighbour: the screen's
+      // state, fetching and paging live in components/restaurant/kitchen.
+      'app/(app)/kitchen/history/page.tsx',
       'app/(app)/orders/page.tsx',
       'components/upcoming-feature.tsx',
     ]);

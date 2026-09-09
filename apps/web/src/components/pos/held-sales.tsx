@@ -27,6 +27,7 @@
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/ui/confirm';
 import { Dialog } from '@/components/ui/dialog';
 import { cartLineKey, type CartItem } from '@/lib/cart';
 import type { ClientProduct } from '@/lib/catalog';
@@ -98,6 +99,7 @@ export function HoldCartButton({ session, branchId, items, customerId }: Props) 
 /** "Held (n)" — the baskets waiting to be picked up again. */
 export function HeldSalesButton({ session, branchId, products }: Props) {
   const cart = usePosCart();
+  const confirm = useConfirm();
   const [open, setOpen] = React.useState(false);
   const [held, setHeld] = React.useState<HeldSale[] | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -163,7 +165,17 @@ export function HeldSalesButton({ session, branchId, products }: Props) {
   };
 
   const discard = async (sale: HeldSale) => {
-    if (!window.confirm(`Discard held basket ${sale.saleNumber}? This cannot be undone.`)) return;
+    // Awaited, not branched on a return value: the app's own confirm is a
+    // promise (D141). The guard is otherwise the one that was here — the basket
+    // number stays in the question, because "Discard held basket?" on a screen
+    // listing four of them does not say which one is about to go.
+    const ok = await confirm({
+      title: `Discard held basket ${sale.saleNumber}?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Discard basket',
+      tone: 'danger',
+    });
+    if (!ok) return;
     await discardHeldSale(session, sale.id);
     reload();
   };

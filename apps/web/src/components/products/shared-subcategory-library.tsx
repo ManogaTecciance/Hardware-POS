@@ -5,6 +5,7 @@ import { Info, Plus, Trash2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { useConfirm } from '@/components/ui/confirm';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
@@ -28,6 +29,7 @@ export function SharedSubcategoryLibrary({
   categories: { id: string; name: string }[];
   canManage: boolean;
 }) {
+  const confirm = useConfirm();
   const [library, setLibrary] = React.useState<Subcategory[]>([]);
   const [selectedCat, setSelectedCat] = React.useState<string>('');
   const [assigned, setAssigned] = React.useState<Subcategory[]>([]);
@@ -92,11 +94,19 @@ export function SharedSubcategoryLibrary({
                         size="icon-sm"
                         className="text-danger"
                         aria-label={`Delete ${s.name} from library`}
-                        onClick={() => {
-                          if (window.confirm(`Delete "${s.name}" from the shared library and all assignments?`)) {
-                            svc.deleteFromLibrary(s.id);
-                            refresh();
-                          }
+                        onClick={async () => {
+                          // Awaited because the app's confirm is a promise, not a
+                          // blocking native dialog (D141). The guard is unchanged:
+                          // anything but an explicit yes leaves the library alone.
+                          const ok = await confirm({
+                            title: `Delete "${s.name}" from the shared library?`,
+                            message: 'It is also removed from every category it is assigned to.',
+                            confirmLabel: 'Delete',
+                            tone: 'danger',
+                          });
+                          if (!ok) return;
+                          svc.deleteFromLibrary(s.id);
+                          refresh();
                         }}
                       >
                         <Trash2 className="h-4 w-4" />

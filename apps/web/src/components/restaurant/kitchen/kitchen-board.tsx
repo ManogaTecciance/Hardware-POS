@@ -1,9 +1,11 @@
 'use client';
 
 import { Check, ChefHat, Clock, ListTree, RotateCcw, UtensilsCrossed } from 'lucide-react';
+import Link from 'next/link';
 import * as React from 'react';
 
 import { StatusBadge } from '@/components/restaurant/status-badge';
+import { TicketOrderDialog } from '@/components/restaurant/kitchen/ticket-order-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
@@ -18,7 +20,7 @@ import {
   formatElapsed,
   formatTime,
 } from '@/lib/restaurant/labels';
-import type { KitchenOrderView, KitchenTicketView } from '@/lib/restaurant/types';
+import type { KitchenLaneCounts, KitchenTicketView } from '@/lib/restaurant/types';
 
 interface Props {
   session: Session;
@@ -27,7 +29,8 @@ interface Props {
 
 /*
  * D115/D116 — three lanes, bump-bar style, each ticket in exactly one: To
- * make (queued), Preparing (started, D113), Done (bumped). Cancelled work
+ * make (queued), Preparing (started, D113), Done (bumped TODAY — D138; the
+ * rest of what this kitchen has ever cooked is on Ticket history). Cancelled work
  * never renders here at all: the read excludes it (D115), so a mid-cook
  * cancel simply pulls the card off the board. Cancelling — and reviewing
  * what was cancelled — is the ORDERS QUEUE's business (D116): the kitchen
@@ -47,10 +50,17 @@ const FILTERS: { key: Filter; label: string }[] = [
  * are live at once, and the new-ticket chime keeps one baseline across
  * both (an arrival rings whichever of the two the cook is reading).
  */
-const FETCH_FOR: Record<Filter, 'OUTSTANDING' | 'COMPLETED'> = {
+const FETCH_FOR: Record<Filter, 'OUTSTANDING' | 'COMPLETED_TODAY'> = {
   TO_MAKE: 'OUTSTANDING',
   PREPARING: 'OUTSTANDING',
-  COMPLETED: 'COMPLETED',
+  /*
+   * D138 — TODAY's, not everything ever bumped. The lane answers "what have we
+   * finished this service"; left unbounded it grew without limit, so the
+   * ticket somebody was actually looking for sank below a week of older ones.
+   * The day is cut on the SHOP's midnight, which is why the server decides it
+   * and this only names the lane.
+   */
+  COMPLETED: 'COMPLETED_TODAY',
 };
 
 /*
@@ -124,6 +134,12 @@ export function KitchenBoard({ session, branchId }: Props) {
   const [pending, setPending] = React.useState<Set<string>>(new Set());
   /** D83 — the ticket whose whole order is being read. */
   const [detailFor, setDetailFor] = React.useState<KitchenTicketView | null>(null);
+  /*
+   * D138b — the counts for the lanes this board is NOT fetching. The active
+   * lane keeps deriving its own from the list it already has, so a bump moves
+   * its chip instantly instead of waiting up to five seconds for the poll.
+   */
+  const [counts, setCounts] = React.useState<KitchenLaneCounts | null>(null);
 
   /*
    * Ticket ids seen on the last poll, per filter — the chime's memory (same
@@ -135,7 +151,7 @@ export function KitchenBoard({ session, branchId }: Props) {
    * another arrives — exactly the arrival the pass must hear.
    */
   const chimeBaseline = React.useRef<{
-    key: 'OUTSTANDING' | 'COMPLETED';
+    key: (typeof FETCH_FOR)[Filter];
     ids: Set<string>;
   } | null>(null);
 
@@ -163,6 +179,17 @@ export function KitchenBoard({ session, branchId }: Props) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load kitchen tickets');
       setStatus('error');
+    }
+    /*
+     * Best effort, and deliberately after the list: a chip without a number is
+     * a smaller problem than a board that will not load, so a failing count
+     * must not take the tickets down with it. The last known numbers stay on
+     * screen rather than blinking out on one bad poll.
+     */
+    try {
+      setCounts(await kitchen.laneCounts(session, branchId));
+    } catch {
+      /* keep whatever the last successful poll reported */
     }
   }, [session, branchId, filter]);
 
@@ -255,11 +282,26 @@ export function KitchenBoard({ session, branchId }: Props) {
       : filter === 'PREPARING'
         ? tickets.filter((t) => t.status === 'IN_PROGRESS')
         : tickets;
-  /** Both outstanding lanes' counts are live from the one shared fetch. */
+  /** Which server count belongs to which chip. */
+  const COUNT_KEY: Record<Filter, keyof KitchenLaneCounts> = {
+    TO_MAKE: 'toMake',
+    PREPARING: 'preparing',
+    COMPLETED: 'doneToday',
+  };
+
+  /*
+   * D138b — every chip carries a number, whichever lane is open.
+   *
+   * Two sources, and the split is the point. A lane sharing the CURRENT fetch
+   * is counted from the list already in hand, so an optimistic bump moves both
+   * outstanding chips at once instead of lagging a poll behind. Every other
+   * lane takes the server's count — which is what the board could not know
+   * before, and why "Done" showed nothing from To make, and To make and
+   * Preparing showed nothing from Done.
+   */
   const laneCount = (key: Filter): number | null => {
-    if (FETCH_FOR[filter] !== 'OUTSTANDING' || FETCH_FOR[key] !== 'OUTSTANDING') {
-      return key === filter ? visible.length : null;
-    }
+    if (FETCH_FOR[key] !== FETCH_FOR[filter]) return counts?.[COUNT_KEY[key]] ?? null;
+    if (FETCH_FOR[key] !== 'OUTSTANDING') return visible.length;
     return key === 'TO_MAKE'
       ? tickets.filter((t) => t.status !== 'IN_PROGRESS').length
       : tickets.filter((t) => t.status === 'IN_PROGRESS').length;
@@ -301,7 +343,19 @@ export function KitchenBoard({ session, branchId }: Props) {
             );
           })}
         </ChipRow>
-        <span className="shrink-0 text-xs text-muted-foreground">Refreshes every 5 s.</span>
+        {filter === 'COMPLETED' ? (
+          // D138 — the lane holds today only, so the way to everything older
+          // belongs beside it rather than only on the rail: the cook looking
+          // for last night's ticket is looking HERE when they fail to find it.
+          <Link
+            href="/kitchen/history"
+            className="shrink-0 text-xs font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Older tickets → Ticket history
+          </Link>
+        ) : (
+          <span className="shrink-0 text-xs text-muted-foreground">Refreshes every 5 s.</span>
+        )}
       </div>
 
       {error ? (
@@ -333,7 +387,7 @@ export function KitchenBoard({ session, branchId }: Props) {
                   : // D94 — the till reads the board but holds no verb; do not send
                     // it to a button it does not have.
                     'Nothing on the stove.'
-                : 'Nothing completed yet.'}
+                : 'Nothing finished today yet. Earlier tickets are in Ticket history.'}
           </CardContent>
         </Card>
       ) : (
@@ -369,133 +423,19 @@ export function KitchenBoard({ session, branchId }: Props) {
 }
 
 /**
- * D83 — the whole order behind one ticket.
+ * One card — one round, whole (D143).
  *
- * A card shows only what THIS station is making, which is right for cooking
- * and wrong for timing: the grill cannot tell whether it is plating alone or
- * alongside a curry the main kitchen has not started. Every item on the
- * order is listed here with the station that received it, so the pass can
- * see the table as the guests will.
+ * A card used to be one STATION's share of a round, so a single "send" broke
+ * the table across as many cards as it had stations, and the grill could not
+ * tell whether it was plating alone or alongside a curry the main kitchen had
+ * not started. Worse, a dish linked to no station reached no card at all: with
+ * more than one station in the branch the routing had nowhere to put it, so it
+ * was ordered, billed and never cooked. There is no reachable screen for
+ * linking a dish to a station, which made that the ordinary case rather than
+ * the edge one. The round is now the unit: every item a waiter confirmed in it
+ * is on this card, and the Details dialog remains the way to see the rest of
+ * the ORDER — the earlier rounds this card is not.
  */
-function TicketOrderDialog({
-  session,
-  branchId,
-  ticket,
-  onClose,
-}: {
-  session: Session;
-  branchId: string;
-  ticket: KitchenTicketView;
-  onClose: () => void;
-}) {
-  const [order, setOrder] = React.useState<KitchenOrderView | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    kitchen
-      .order(session, branchId, ticket.id)
-      .then((o) => {
-        if (!cancelled) setOrder(o);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Could not load the order');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session, branchId, ticket.id]);
-
-  const byRound = React.useMemo(() => {
-    const groups = new Map<number | null, KitchenOrderView['items']>();
-    for (const item of order?.items ?? []) {
-      const list = groups.get(item.roundNumber) ?? [];
-      list.push(item);
-      groups.set(item.roundNumber, list);
-    }
-    return [...groups.entries()].sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0));
-  }, [order]);
-
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title={ticket.placeLabel ?? ticket.ticketNumber}
-      description={
-        order
-          ? `${order.orderNumber ?? ''}${order.waiterName ? ` · ${order.waiterName}` : ''} · whole order`
-          : 'Loading the order…'
-      }
-      className="sm:max-w-lg"
-      footer={<Button onClick={onClose}>Close</Button>}
-    >
-      {/*
-       * min-h on BOTH states: the dialog used to open at spinner height and
-       * jump open when the order landed, which read as a glitch at the pass.
-       * With a shared floor the common one-round order never resizes at all;
-       * a long order still grows, but downward, once.
-       */}
-      <div className="min-h-44">
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-        {!order && !error ? (
-          // A skeleton in the shape of the answer: a round header and a few
-          // item lines, where they will actually appear.
-          <div className="space-y-3" aria-hidden>
-            <div className="h-3 w-20 animate-pulse rounded bg-muted motion-reduce:animate-none" />
-            <div className="h-5 w-3/4 animate-pulse rounded bg-muted motion-reduce:animate-none" />
-            <div className="h-5 w-2/3 animate-pulse rounded bg-muted motion-reduce:animate-none" />
-            <div className="h-5 w-1/2 animate-pulse rounded bg-muted motion-reduce:animate-none" />
-          </div>
-        ) : null}
-
-        {order ? (
-          <div className="space-y-4">
-            {byRound.map(([round, items]) => (
-              <div key={round ?? 'x'}>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {round ? `Round ${round}` : 'Items'}
-                </p>
-                <ul className="space-y-1.5">
-                  {items.map((item) => (
-                    <li key={item.id} className="text-sm">
-                      <span className="font-medium">
-                        {trimQuantity(item.quantity)}× {item.name}
-                        {item.variantName ? ` (${item.variantName})` : ''}
-                      </span>
-                      {/* The station is what makes this view worth opening: it
-                          says who else is working on this table. */}
-                      {item.stationName ? (
-                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                          {item.stationName}
-                        </span>
-                      ) : (
-                        <span className="ml-2 rounded bg-warning-soft px-1.5 py-0.5 text-xs text-warning">
-                          no station
-                        </span>
-                      )}
-                      {item.modifierNames.length > 0 ? (
-                        <span className="block text-xs text-muted-foreground">
-                          {item.modifierNames.join(', ')}
-                        </span>
-                      ) : null}
-                      {item.specialInstructions ? (
-                        <span className="block text-xs font-medium text-warning">
-                          {item.specialInstructions}
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </Dialog>
-  );
-}
 
 function TicketCard({
   ticket,
@@ -520,6 +460,22 @@ function TicketCard({
   // Completed tickets stop ageing: the colour answers "how long has this
   // dish been waiting?", which a done dish no longer is.
   const urgency: Urgency = done ? 'fresh' : urgencyOf(ticket.createdAt, new Date());
+  /*
+   * D143 — order, round, waiter. The station used to lead this line and no
+   * longer exists on a ticket, so it JOINS a list rather than chaining
+   * ` · ` prefixes the way it did when the first element was always there:
+   * dropping the station out of the old form opened every card with a stray
+   * separator. Nothing left is guaranteed either (a takeaway before its order
+   * number lands carries none of the three), which is why an empty line is
+   * dropped instead of printed.
+   */
+  const subtitle = [
+    ticket.orderNumber,
+    ticket.roundNumber ? `round ${ticket.roundNumber}` : null,
+    ticket.waiterName,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <Card className={done ? 'opacity-70' : URGENCY_CARD_CLASS[urgency]}>
       <CardContent className="space-y-3 p-4">
@@ -530,12 +486,9 @@ function TicketCard({
             <p className="truncate text-xl font-semibold">
               {ticket.placeLabel ?? 'No table'}
             </p>
-            <p className="truncate text-sm text-muted-foreground">
-              {ticket.stationName}
-              {ticket.orderNumber ? ` · ${ticket.orderNumber}` : ''}
-              {ticket.roundNumber ? ` · round ${ticket.roundNumber}` : ''}
-              {ticket.waiterName ? ` · ${ticket.waiterName}` : ''}
-            </p>
+            {subtitle ? (
+              <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
+            ) : null}
           </div>
           {done ? (
             <StatusBadge

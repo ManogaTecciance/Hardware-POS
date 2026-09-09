@@ -18,6 +18,18 @@
  *     instead of overflowing inside it;
  *   • header and footer are `shrink-0`, so the body is the only thing that
  *     gives.
+ *
+ * ## Where it sits (PO, 2026-09-09)
+ *
+ * The second contract, asserted below: a modal is centred at EVERY width. It
+ * used to be `items-end … sm:items-center` — a bottom sheet on a phone, a
+ * centred card from `sm` up. Every question the app asks now goes through this
+ * one component, so the position it picks is the position all of them get.
+ *
+ * Mutation-proved (D30): restoring the old overlay
+ * (`items-end justify-center sm:items-center … p-0 sm:p-4`) fails 2 tests, and
+ * restoring `rounded-t-2xl` on the card fails 1 — both run in a scratch copy
+ * and reverted.
  */
 import { cleanup, render, screen } from '@testing-library/react';
 import * as React from 'react';
@@ -89,5 +101,51 @@ describe('Dialog height', () => {
     // POSITIVE CONTROL for the queries above: they resolve a real element
     // only because the dialog mounts when open.
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('Dialog placement', () => {
+  const overlay = () => screen.getByRole('dialog').parentElement!;
+
+  it('centres the card on both axes, at every width', () => {
+    open();
+
+    // Both axes: `justify-center` alone leaves a card pinned to an edge that
+    // is horizontally centred, which is what a bottom sheet is.
+    expect(overlay().className).toContain('items-center');
+    expect(overlay().className).toContain('justify-center');
+  });
+
+  it('NEGATIVE — no edge-pinning class survives, at any breakpoint', () => {
+    open();
+    const classes = overlay().className;
+
+    /*
+     * The regression this exists for, spelled out. `items-end sm:items-center`
+     * passed the positive check above at every width — the string is right
+     * there — while a phone still got a sheet flush to the bottom edge. So the
+     * pinning alignments are named and excluded, bare and behind a variant.
+     */
+    for (const pinned of ['items-end', 'items-start', 'items-baseline']) {
+      expect(classes).not.toMatch(new RegExp(`(^|\\s)${pinned}(\\s|$)`));
+      // …and behind any variant prefix (`sm:`, `md:`, `print:`, …).
+      expect(classes).not.toMatch(new RegExp(`(^|\\s)[a-z-]+:${pinned}(\\s|$)`));
+    }
+    // Unconditional centring: a `sm:items-center` would mean the base state is
+    // something else, which is the bug.
+    expect(classes).toMatch(/(^|\s)items-center(\s|$)/);
+  });
+
+  it('keeps the card off the screen edge and rounded on all four corners', () => {
+    const card = open();
+
+    // `p-4` at every width. It used to be `p-0 sm:p-4`, because a sheet flush
+    // to the bottom wanted no padding — a floating card always does.
+    expect(overlay().className).toMatch(/(^|\s)p-4(\s|$)/);
+    expect(overlay().className).not.toMatch(/(^|\s)p-0(\s|$)/);
+    // `rounded-t-2xl` was right for a sheet whose bottom corners were
+    // off-screen. A centred card shows all four.
+    expect(card.className).toMatch(/(^|\s)rounded-2xl(\s|$)/);
+    expect(card.className).not.toContain('rounded-t-2xl');
   });
 });

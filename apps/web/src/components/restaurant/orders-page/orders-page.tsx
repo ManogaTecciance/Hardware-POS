@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
 import { Input } from '@/components/ui/input';
+import { PAGE_SIZES, Pagination } from '@/components/ui/pagination';
 import { Select } from '@/components/ui/select';
 import { normalizeSearchTerm } from '@/lib/search-term';
 import { type Session } from '@/lib/auth';
@@ -88,13 +89,13 @@ const CHANNEL_CHIPS: Array<{ key: UnifiedChannel | 'ALL'; label: string }> = [
  * agreement between two files. The server still clamps it, which is why the
  * arithmetic below reads the size it echoed back rather than this constant.
  */
-const ORDERS_PAGE_SIZE = 25;
 /**
  * The Rows-per-page choices (PO request) — the customers-list pattern on the
- * queue. Bounded by the server's clamp (1..100), defaulting to the size this
- * screen has always used; the default stays out of the URL like page 1.
+ * queue, and since 2026-09-09 the SAME list every other footer offers rather
+ * than this screen's own 25/50/75/100. Bounded by the server's clamp (1..100);
+ * the default is the smallest and stays out of the URL, like page 1.
  */
-const PAGE_SIZES = [25, 50, 75, 100] as const;
+const ORDERS_PAGE_SIZE = PAGE_SIZES[0]!;
 
 export function OrdersPage({ session, branchId }: Props) {
   const router = useRouter();
@@ -690,59 +691,30 @@ export function OrdersPage({ session, branchId }: Props) {
       )}
 
       {/*
-        Numbered paging rather than infinite scroll: this list is read against a
-        docket in hand, and "I was on page 3" has to survive a refresh — which
-        is why the page (and the chosen size) live in the URL beside the
-        filters. Gated on the MINIMUM size, not the current one — the
-        customers-list rule — so picking a larger size never makes the
-        selector itself vanish; the Prev/Next pair still only shows when a
-        second page exists.
+        D139a — the SHARED footer, like every other list, replacing this
+        screen's own rows-per-page + bare Previous/Next pair. Numbered paging
+        rather than infinite scroll: this list is read against a docket in hand,
+        and "I was on page 3" has to survive a refresh — which is why the page
+        and the chosen size still live in the URL beside the filters.
+        `Pagination` handles the numbers; `patch` keeps them bookmarkable.
+
+        Always rendered now, answering O7 the way every `main` list already
+        answers it. Hiding it below one page also hid the ROWS-PER-PAGE control,
+        so on a quiet branch the sizes were unreachable — which is exactly how
+        this was reported.
+
+        The size handed over is the one the SERVER used, not the one asked for,
+        so the arithmetic can never count pages that do not exist.
       */}
-      {total > PAGE_SIZES[0] ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>Rows per page</span>
-            <Select
-              value={String(requestedSize)}
-              onChange={(e) => patch({ size: Number(e.target.value) })}
-              className="w-auto"
-              aria-label="Rows per page"
-            >
-              {PAGE_SIZES.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </Select>
-            <span role="status">
-              Showing {firstOnPage}–{lastOnPage} of {total} order{total === 1 ? '' : 's'}
-            </span>
-          </div>
-          {pageCount > 1 ? (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => patch({ page: page - 1 })}
-                disabled={page <= 1 || loading}
-              >
-                Previous
-              </Button>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                Page {page} of {pageCount}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => patch({ page: page + 1 })}
-                disabled={page >= pageCount || loading}
-              >
-                Next
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      <Pagination
+        className="pt-1"
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        disabled={loading}
+        onPageChange={(next) => patch({ page: next })}
+        onPageSizeChange={(next) => patch({ size: next })}
+      />
 
       {truncated ? (
         <p className="text-xs text-warning" role="status">

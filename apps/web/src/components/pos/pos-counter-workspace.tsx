@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
 import { PageHeader } from '@/components/page-header';
+import { useConfirm } from '@/components/ui/confirm';
 import { Sheet } from '@/components/ui/sheet';
 import { ApiError } from '@/lib/api';
 import { useAuth, type Session } from '@/lib/auth';
@@ -79,6 +80,11 @@ interface Props {
  */
 export function PosCounterWorkspace({ session, branchId, initialMode, onModeChange }: Props) {
   const router = useRouter();
+  // D141 — the app's own confirm. The two questions below are asked on a
+  // tablet at the counter, where the browser's dialog is untappably small and
+  // (after a few in a row) silently suppressed, which would answer "clear it"
+  // for the operator.
+  const confirm = useConfirm();
   const { hasPermission } = useAuth();
   const canPlaceTakeaway = hasPermission(Permission.TAKEAWAY_CREATE);
   // D101 — the 86 switch at the till (waiter and cashier templates hold it).
@@ -292,9 +298,20 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
         .filter((r) => r.quantity > 0),
     );
   const remove = (key: string) => setDraft((r) => r.filter((row) => row.key !== key));
-  const clearAll = () => {
+  const clearAll = async () => {
     if (draft.length === 0) return;
-    if (draft.length > 1 && !window.confirm('Clear current order? All unsent items will be removed.')) {
+    // Still only asked past one line — a single item is one tap to re-add.
+    // Awaited rather than branched on a return value because the app's confirm
+    // is a promise (D141); the guard is otherwise the one that was here.
+    if (
+      draft.length > 1 &&
+      !(await confirm({
+        title: 'Clear current order?',
+        message: 'All unsent items will be removed.',
+        confirmLabel: 'Clear order',
+        tone: 'danger',
+      }))
+    ) {
       return;
     }
     setDraft([]);
@@ -404,9 +421,19 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
     // If they want to switch, the Change chip is right there.
   };
 
-  const resetMode = () => {
+  const resetMode = async () => {
     if (draft.length > 0) {
-      if (!window.confirm('Changing order type will clear the current cart. Continue?')) {
+      // D141 — awaited, and the early return is the point: a "no" here must
+      // leave the cart AND the mode exactly as they were, so everything below
+      // stays behind the guard rather than running while the modal is open.
+      if (
+        !(await confirm({
+          title: 'Change order type?',
+          message: 'This will clear the current cart.',
+          confirmLabel: 'Change order type',
+          tone: 'danger',
+        }))
+      ) {
         return;
       }
       setDraft([]);

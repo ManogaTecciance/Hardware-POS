@@ -648,11 +648,12 @@ export class TableSessionsService {
         actorUserId,
       );
 
-      // Phase 6: generate KOTs inside the same transaction so a round and
-      // its tickets are visible together. D68 — the tickets ARE the
-      // delivery: they land QUEUED on the kitchen board the moment this
-      // transaction commits, with nothing downstream to go wrong.
-      await this.kitchen.generateTicketsForRound(tx, tenantId, session.branchId, round.id);
+      // Phase 6: generate the KOT inside the same transaction so a round and
+      // its ticket are visible together. D68 — the ticket IS the delivery: it
+      // lands QUEUED on the kitchen board the moment this transaction
+      // commits, with nothing downstream to go wrong. D143 — one ticket for
+      // the whole round, so no item of it can reach the board on none.
+      await this.kitchen.generateTicketForRound(tx, tenantId, session.branchId, round.id);
 
       const roundFull = await tx.orderRound.findUniqueOrThrow({
         where: { id: round.id },

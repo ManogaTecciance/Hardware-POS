@@ -6,6 +6,7 @@ import { PlatformConsoleBoundary } from '@/components/platform/platform-console-
 import { PlatformConsoleScreen } from '@/components/platform/platform-console';
 import { Protected } from '@/components/protected';
 import { Sidebar } from '@/components/sidebar';
+import { ConfirmProvider } from '@/components/ui/confirm';
 import { PlatformProfileProvider } from '@/lib/platform-profile';
 import { PosCartProvider } from '@/lib/pos-cart';
 import { ReturnDraftProvider } from '@/lib/return-draft';
@@ -23,6 +24,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <PlatformProfileProvider>
         <SidebarProvider>
           <PosCartProvider>
+            {/* D141 — the app's own confirm/prompt, mounted once for every
+                authenticated screen so no call site reaches for the browser's. */}
+            <ConfirmProvider>
             <ReturnDraftProvider>
               {/* Viewport-locked shell: the app fills the visible viewport height
                 (dvh handles the iPad/Safari dynamic toolbar) and never lets the
@@ -68,6 +72,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
             </ReturnDraftProvider>
+            </ConfirmProvider>
           </PosCartProvider>
         </SidebarProvider>
       </PlatformProfileProvider>

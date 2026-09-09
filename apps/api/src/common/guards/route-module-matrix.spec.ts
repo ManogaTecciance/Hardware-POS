@@ -368,6 +368,20 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/branches/:branchId/kitchen-printers/:printerId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  // D138b — the three lane counts, so every chip on the board carries one.
+  'GET /restaurant/branches/:branchId/kitchen-tickets/counts': {
+    module: 'KITCHEN',
+    guard: 'ENFORCED',
+    scope: T,
+  },
+  // D138 — the kitchen's own history, paged and searchable. KITCHEN like the
+  // board it relieves; reading back what was cooked is the same claim as
+  // reading what is cooking.
+  'GET /restaurant/branches/:branchId/kitchen-tickets/history': {
+    module: 'KITCHEN',
+    guard: 'ENFORCED',
+    scope: T,
+  },
   'GET /restaurant/branches/:branchId/kitchen-tickets': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   // D68 — one write verb where Phase 6 had three. mark-printed/mark-failed/
   // reprint described what a printer did, and there is no printer.

@@ -1,6 +1,6 @@
 'use client';
 
-import { ChefHat, Clock, ShoppingBag, UtensilsCrossed } from 'lucide-react';
+import { CalendarClock, ChefHat, Clock, ShoppingBag, UtensilsCrossed } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -9,9 +9,18 @@ import { StatusBadge } from '@/components/restaurant/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth, type Session } from '@/lib/auth';
-import { diningAreas, kitchen, restaurantTables, takeaway, tableSessions } from '@/lib/restaurant/api';
+import {
+  diningAreas,
+  kitchen,
+  reservations as reservationsApi,
+  restaurantTables,
+  takeaway,
+  tableSessions,
+} from '@/lib/restaurant/api';
 import {
   KITCHEN_TICKET_STATUS_TONES,
+  RESERVATION_STATUS_LABELS,
+  RESERVATION_STATUS_TONES,
   TABLE_STATUS_LABELS,
   TABLE_STATUS_TONES,
   TAKEAWAY_STATUS_LABELS,
@@ -21,6 +30,7 @@ import {
 import type {
   DiningAreaView,
   KitchenTicketView,
+  ReservationView,
   RestaurantTableView,
   TableSessionView,
   TakeawayView,
@@ -32,6 +42,8 @@ interface Snapshot {
   openSessions: TableSessionView[];
   queuedTickets: KitchenTicketView[];
   takeawayOrders: TakeawayView[];
+  /** D144 — the next bookings due at this branch, soonest first. */
+  upcomingReservations: ReservationView[];
 }
 
 interface State {
@@ -46,7 +58,23 @@ const EMPTY: Snapshot = {
   openSessions: [],
   queuedTickets: [],
   takeawayOrders: [],
+  upcomingReservations: [],
 };
+
+/**
+ * How far ahead the reservations card looks (D144).
+ *
+ * A day, not a shift: the card is answering "what is coming", and a booking
+ * for tomorrow lunch taken during tonight's service is exactly the thing a
+ * host wants to see before they promise a walk-in a table. The card shows the
+ * soonest few, so a quiet branch and a busy one both read the same.
+ */
+const RESERVATION_LOOKAHEAD_HOURS = 24;
+
+/** Matches the calendar's own clock so a booking reads the same on both screens. */
+function formatReservationTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
 
 /**
  * The Restaurant Dashboard is operational, not decorative.
@@ -96,6 +124,34 @@ export function RestaurantDashboard({ session }: { session: Session }) {
           ? await takeaway.list(session, branchId).catch(() => [])
           : [];
 
+        /*
+         * D144 — the reservation book, on the dashboard.
+         *
+         * `from` is NOW rather than the top of the day: a booking at 18:00 is
+         * no longer upcoming at 20:00, and a card headed "upcoming" that
+         * opens with three tables already seated is worse than no card. The
+         * list returns everything INTERSECTING the window, so a booking that
+         * started ten minutes ago and has not been seated is still here —
+         * which is the one the host most needs to see.
+         *
+         * `includeClosed` is left false, so cancelled, completed and no-show
+         * bookings never reach the card.
+         */
+        const now = new Date();
+        const upcomingReservations = hasPermission('reservation:view')
+          ? await reservationsApi
+              .list(
+                session,
+                branchId,
+                now,
+                new Date(now.getTime() + RESERVATION_LOOKAHEAD_HOURS * 60 * 60 * 1000),
+              )
+              .then((rows) =>
+                [...rows].sort((a, b) => a.startAt.localeCompare(b.startAt)),
+              )
+              .catch(() => [] as ReservationView[])
+          : [];
+
         if (!cancelled) {
           setState({
             status: 'ready',
@@ -105,6 +161,7 @@ export function RestaurantDashboard({ session }: { session: Session }) {
               openSessions,
               queuedTickets,
               takeawayOrders,
+              upcomingReservations,
             },
           });
         }
@@ -157,14 +214,31 @@ export function RestaurantDashboard({ session }: { session: Session }) {
   );
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Service dashboard"
-        description={`${session.branchName} · ${session.registerName}`}
-      />
+    /*
+     * The service dashboard FITS its screen (PO, 2026-09-09).
+     *
+     * The shell already gives `main` the only vertical scroll and a definite
+     * height (`h-dvh` + `overflow-hidden` on the frame), so `lg:h-full` here
+     * makes this page exactly as tall as the space it is given and the panel
+     * row below absorbs whatever is left. Each panel then scrolls INSIDE its
+     * own card. That is what keeps a fourth card from pushing the page into a
+     * scroll: adding a panel costs width, never height.
+     *
+     * Height-constrained from `lg` up only. On a phone the tiles alone are
+     * taller than the viewport, and four panels squeezed into quarter-height
+     * boxes would be unreadable — there, scrolling the page is the right
+     * answer and the constraint is simply not applied.
+     */
+    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
+      <div className="shrink-0">
+        <PageHeader
+          title="Service dashboard"
+          description={`${session.branchName} · ${session.registerName}`}
+        />
+      </div>
 
       {state.status === 'error' ? (
-        <Card>
+        <Card className="shrink-0">
           <CardContent className="py-6 text-sm text-danger">
             Could not load today&apos;s operational data. {state.error ?? ''}
           </CardContent>
@@ -172,7 +246,7 @@ export function RestaurantDashboard({ session }: { session: Session }) {
       ) : null}
 
       {/* Summary tiles */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid shrink-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryTile
           icon={<UtensilsCrossed className="h-5 w-5" />}
           label="Open tables"
@@ -207,16 +281,30 @@ export function RestaurantDashboard({ session }: { session: Session }) {
         />
       </div>
 
-      {/* Operational panels */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      {/*
+        Operational panels. `auto-rows-fr` is what makes two rows of two share
+        the height evenly at `lg`; without it the rows size to their content
+        and the taller one pushes the page past the fold again.
+
+        The lists are no longer sliced to a fixed few. A card that scrolls
+        inside itself can hold the whole list, and truncating at six hid work
+        from the very people the board is for.
+      */}
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:auto-rows-fr lg:grid-cols-2 xl:grid-cols-4">
         <NeedsAttentionCard
-          tables={[...billRequested, ...cleaning, ...foodReadyTables].slice(0, 8)}
+          tables={[...billRequested, ...cleaning, ...foodReadyTables]}
           areas={snapshot.areas}
           loading={state.status === 'loading'}
         />
-        <TicketsCard tickets={snapshot.queuedTickets.slice(0, 6)} loading={state.status === 'loading'} />
+        <TicketsCard tickets={snapshot.queuedTickets} loading={state.status === 'loading'} />
+        <UpcomingReservationsCard
+          reservations={snapshot.upcomingReservations}
+          tables={snapshot.tables}
+          canView={hasPermission('reservation:view')}
+          loading={state.status === 'loading'}
+        />
         <TakeawayCard
-          takeaways={takeawaysReady.concat(takeawaysWaiting).slice(0, 6)}
+          takeaways={takeawaysReady.concat(takeawaysWaiting)}
           loading={state.status === 'loading'}
         />
       </div>
@@ -275,11 +363,12 @@ function NeedsAttentionCard({
 }) {
   const areaById = React.useMemo(() => new Map(areas.map((a) => [a.id, a.name])), [areas]);
   return (
-    <Card>
-      <CardHeader>
+    <Card className="flex flex-col lg:h-full lg:min-h-0">
+      <CardHeader className="shrink-0 p-4 pb-2">
         <CardTitle>Tables needing attention</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      {/* The card, not the page, is the scroller — see the layout note above. */}
+      <CardContent className="space-y-2 p-4 pt-0 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         {loading ? (
           <p className="py-6 text-center text-sm text-muted-foreground">Loading tables…</p>
         ) : tables.length === 0 ? (
@@ -318,11 +407,12 @@ function TicketsCard({
   loading: boolean;
 }) {
   return (
-    <Card>
-      <CardHeader>
+    <Card className="flex flex-col lg:h-full lg:min-h-0">
+      <CardHeader className="shrink-0 p-4 pb-2">
         <CardTitle>Kitchen queue</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      {/* The card, not the page, is the scroller — see the layout note above. */}
+      <CardContent className="space-y-2 p-4 pt-0 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         {loading ? (
           <p className="py-6 text-center text-sm text-muted-foreground">Loading tickets…</p>
         ) : tickets.length === 0 ? (
@@ -354,6 +444,86 @@ function TicketsCard({
   );
 }
 
+/**
+ * D144 — the reservation book, on the service dashboard.
+ *
+ * The waiter and the restaurant cashier both land here, and both hold
+ * `RESERVATION_VIEW`; between them they are the people who promise a walk-in
+ * a table. Until now the only place a booking existed was /calendar, so that
+ * promise was made from memory.
+ *
+ * Permission-gated as its own state, not by hiding the card. Someone whose
+ * role does not carry `RESERVATION_VIEW` is told the book is not theirs
+ * rather than shown an empty one — an empty card reads as "no bookings
+ * tonight", which is a different and much more dangerous claim. The server
+ * refuses the read either way; this is usability, not security.
+ */
+function UpcomingReservationsCard({
+  reservations,
+  tables,
+  canView,
+  loading,
+}: {
+  reservations: ReservationView[];
+  tables: RestaurantTableView[];
+  canView: boolean;
+  loading: boolean;
+}) {
+  // The booking names a table id; the floor calls it "Table 12" or its label.
+  const tableById = React.useMemo(
+    () => new Map(tables.map((t) => [t.id, t.label ?? `Table ${t.code}`])),
+    [tables],
+  );
+  return (
+    <Card className="flex flex-col lg:h-full lg:min-h-0">
+      <CardHeader className="shrink-0 p-4 pb-2">
+        <CardTitle>Upcoming reservations</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 p-4 pt-0 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+        {!canView ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            The reservation book is not part of your role.
+          </p>
+        ) : loading ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Loading reservations…</p>
+        ) : reservations.length === 0 ? (
+          <div className="py-6 text-center">
+            <CalendarClock className="mx-auto h-5 w-5 text-muted-foreground" />
+            <p className="mt-2 text-sm text-muted-foreground">
+              Nothing booked in the next {RESERVATION_LOOKAHEAD_HOURS} hours.
+            </p>
+            <Button variant="link" size="sm" asChild>
+              <Link href="/calendar">Open the calendar</Link>
+            </Button>
+          </div>
+        ) : (
+          reservations.map((r) => (
+            <Link
+              key={r.id}
+              href="/calendar"
+              className="flex items-center justify-between gap-3 rounded-xl border border-border p-3 hover:bg-muted"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">
+                  {formatReservationTime(r.startAt)} · {r.customerName}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {tableById.get(r.tableId) ?? 'Table released'} · {r.partySize}{' '}
+                  {r.partySize === 1 ? 'guest' : 'guests'}
+                </p>
+              </div>
+              <StatusBadge
+                label={RESERVATION_STATUS_LABELS[r.status]}
+                tone={RESERVATION_STATUS_TONES[r.status]}
+              />
+            </Link>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function TakeawayCard({
   takeaways,
   loading,
@@ -362,11 +532,12 @@ function TakeawayCard({
   loading: boolean;
 }) {
   return (
-    <Card>
-      <CardHeader>
+    <Card className="flex flex-col lg:h-full lg:min-h-0">
+      <CardHeader className="shrink-0 p-4 pb-2">
         <CardTitle>Takeaway</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      {/* The card, not the page, is the scroller — see the layout note above. */}
+      <CardContent className="space-y-2 p-4 pt-0 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         {loading ? (
           <p className="py-6 text-center text-sm text-muted-foreground">Loading takeaway…</p>
         ) : takeaways.length === 0 ? (

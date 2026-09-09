@@ -29,6 +29,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 [DOC](#doc--documents--printing) · [RSV](#rsv--table-reservations--calendar-d47) ·
 [OTBL](#otbl--open-tables-d49d50) ·
 [BSPL](#bspl--bill-splitting-by-item-d51) ·
+[KIT](#kit--kitchen-board-d68--d100--d111d116--d138) ·
 [STK](#stk--stock-takes-d132) · [RPT](#rpt--retail-reports-d129d131) ·
 [ADM](#adm--administration--multi-tenancy) ·
 [UI](#ui--theme-layout--responsiveness) · [SEC](#sec--security)
@@ -75,6 +76,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PERM-014 | Salesperson nav matches the owner's | Log in as salesperson | Same nav entries as PERM-001 | P | Not Run |
 | PERM-015 | Salesperson discount needs no approval | Apply a 50% line discount as salesperson | Accepted with no manager PIN prompt (unlimited ceiling) | P | Not Run |
 | PERM-016 | Salesperson resolves from its own role row (D108) | Owner reads GET /v1/users/{salesperson}/effective-permissions | `source` is `DATABASE` and the permission list equals the owner's; the cashier's is shorter | P | Not Run |
+| PERM-017 | Waiter may name a takeaway customer (D142) | Waiter takes a takeaway order and types a new name at the customer step; then the same waiter calls POST /v1/payments and GET /v1/reports/sales | The customer is created and attached to the order — no "You don't have permission to create a customer" — while both other calls still 403: CUSTOMER_MANAGE is the only key the waiter gained | P | Not Run |
 
 ## DASH — Dashboards
 
@@ -104,6 +106,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DASH-022 | An account payment comes off the receivable at once | Part-pay an account, then clear it | The receivable drops by the part payment immediately, and by the full amount once cleared | P | Automated |
 | DASH-023 | Receivable is not windowed | Switch the dashboard range (Today → 1Y) | Credit Receivable is unchanged — money owed does not stop being owed at midnight | P | Not Run |
 | DASH-024 | Receivable card deep-links to who owes | Click Credit Receivable | Customers page opens filtered to customers with credit outstanding | P | Not Run |
+| DASH-025 | Upcoming reservations are on the service dashboard (D144) | Sign in as the restaurant owner, then the waiter, then the restaurant cashier, with bookings in the next few hours | All three see an Upcoming reservations card listing the soonest bookings first, each showing time, guest name, table and party size; clicking a row opens the calendar | P | Not Run |
+| DASH-026 | The card shows what is COMING, not what is seated (D144) | With one booking earlier today already finished, one in progress and one later tonight, read the card | The finished booking is absent, the later one is listed, and a booking whose time has just passed but who has not been seated is still shown — the window starts at the current moment, not at midnight | P | Not Run |
+| DASH-027 | A role without the reservation book is told so (D144) | Sign in as kitchen staff or any role lacking reservation:view and open the service dashboard | The card says the reservation book is not part of that role. It must NOT show an empty card, which would read as "nothing booked tonight" | P | Not Run |
+| DASH-028 | The service dashboard fits its screen (D144) | Open the dashboard at 1440, 1280 and 1024 px wide with plenty of open tables, kitchen tickets, bookings and takeaways | The page itself never scrolls: header and tiles stay put, all four panels are visible, and any list too long for its panel scrolls INSIDE that card. At phone width the page scrolls normally | P | Not Run |
 
 ## PROD — Products & Categories
 
@@ -709,7 +715,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | OTBL-024 | A joined member is shown, not offered (D106) | Look at a member table on the floor while its arrangement is in service | It reads Reserved with no Unreserve control; releasing it out from under the party is impossible | N | Not Run |
 | OTBL-025 | Food ready shows on the floor, per tab (D112/D104) | Join two tables, open two tabs, bump one tab's ticket | The arrangement's card shows "Food ready"; opening that tab's link clears it on this device while the other tab's link does not; no bell sounds (D118) | P | Not Run |
 
-## KIT — Kitchen Board (D68 / D100 / D111–D116)
+## KIT — Kitchen Board (D68 / D100 / D111–D116 / D138)
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
@@ -719,6 +725,22 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | KIT-004 | Start preparing, then done (D113) | Tap Start on a queued ticket, then Mark done | Ticket moves QUEUED → IN_PROGRESS → COMPLETED; the orders queue's unified status follows (Preparing, then Ready); POST …/kitchen-tickets/:id/start needs the same permission as completing | P | Not Run |
 | KIT-005 | Three lanes, each ticket in exactly one (D115/D116) | Read the board with queued, preparing and done tickets | To make · Preparing · Done; a cancelled order's ticket leaves the pass, and there is no Cancel on the board — cancelling belongs to the orders queue | P | Not Run |
 | KIT-006 | Recall lands on To make (D100/D113) | Mark an IN_PROGRESS ticket done, then Reopen; try Reopen on a ticket that is still preparing | Reopen returns a done ticket to To make (QUEUED), never to Preparing; a preparing ticket has no Reopen and the call is a no-op; the till (KOT_VIEW only) sees neither Start nor Mark done | P | Not Run |
+| KIT-007 | The Done lane holds today only (D138) | With tickets bumped yesterday and today, open the board's Done tab; then change the workspace timezone in Settings → Business and reload | Only today's bumped tickets are listed, newest first; the day is the SHOP's (the lane's contents follow the configured timezone, not the tablet's clock); the empty lane reads "Nothing finished today yet. Earlier tickets are in Ticket history." | P | Not Run |
+| KIT-013 | Recall reaches today only (D100/D138) | Bump a ticket, then open Done and use Recall; separately, look for a Recall control on a ticket bumped before the shop's midnight (on the Done lane and in Ticket history) | Today's bump can still be recalled from the lane; an older one offers no Recall anywhere — the history is a record and carries no verbs, so stale work is never re-queued onto the pass | N | Not Run |
+| KIT-014 | The rail marks one place at a time (D138a) | Open Kitchen, then Ticket history; look at the rail in both | Exactly one entry is highlighted and carries aria-current="page" each time — on /kitchen/history that is Ticket history, and Kitchen is NOT also lit | N | Not Run |
+| KIT-015 | A history row carries both ends of the ticket (D138a) | Open Ticket history and read a finished row | Started shows when the ticket reached the kitchen, Finished when it was bumped, and the turnaround reads under the finish ("25 min on the pass"); a row with no finish shows no turnaround | P | Not Run |
+| KIT-016 | A history record opens the whole order (D138a) | Click a history row, and separately tab to the ticket number and press Enter; then press Escape | Both open the same dialog showing EVERY item the table ordered across stations and rounds — quantities, variants, modifiers and special instructions — not just this ticket's station share; Escape closes it; a click that ends a text selection does not open it | P | Not Run |
+| KIT-017 | Every lane chip carries its count (D138b) | With work queued, work started and tickets bumped today, read the three chips from To make, then from Preparing, then from Done | All three chips show a number on every tab — To make, Preparing and Done — and each matches the list that lane shows when opened | P | Not Run |
+| KIT-018 | The chips move with a bump, not with the poll (D138b) | Press Start preparing, then Mark done, watching the chips | To make and Preparing change immediately, without waiting for the five-second refresh; Done's number follows on the next poll | P | Not Run |
+| KIT-019 | One round is one ticket (D143) | Send a round whose items belong to several kitchen stations — for example a curry, a fried rice and something off the grill — and watch the kitchen board | Exactly ONE card appears, carrying every line of the round with its quantities, variants and modifiers; the round never splits into a card per station however many stations the branch has | P | Not Run |
+| KIT-020 | A dish nobody linked to a station still reaches the kitchen (D143) | At a branch with two or more active stations, create a product WITHOUT touching the wizard's Kitchen stations multi-select, order it, and send the round | The dish is on the board. Before D143 it appeared on no ticket at all and was only logged, so it was ordered and billed but never cooked | P | Not Run |
+| KIT-021 | Nothing on the board or the history names a station (D143) | Read a board card and its Details dialog, then the ticket-history table and its search box | No station appears anywhere: no subtitle station, no per-item station chip, no Station column, and searching a station name matches nothing on that ground alone | P | Not Run |
+| KIT-022 | Tickets cut before D143 keep their station in the data | Query a KitchenTicket row written before the change and one written after | The old row still carries its stationId, the new one carries NULL; the migration removed only the NOT NULL and moved no value | P | Not Run |
+| KIT-008 | Yesterday's tickets are in the history, and so are today's (D138) | Open Ticket history from the rail, and from the "Older tickets" link on the Done lane | Both reach /kitchen/history; the list holds the ticket bumped yesterday AND the one bumped minutes ago, newest first, with where it went, its items, its station, when it was finished and by whom | P | Not Run |
+| KIT-009 | Ticket history pages and searches on the server (D138) | With more than one page of finished tickets: change the rows-per-page, go to page 2, then search a dish name, a ticket number and a table code | Each request carries page/pageSize/search to GET …/kitchen-tickets/history; searching returns to page 1; a term with a double space still matches; a term that matches nothing reads "No tickets match “…”" rather than the empty-branch wording | P | Not Run |
+| KIT-010 | Cancelled work is in neither the lane nor the history (D115/D138) | Cancel an order whose ticket was already bumped; check the Done lane and Ticket history | The ticket appears in neither; it remains visible on the board's Cancelled lane | N | Not Run |
+| KIT-011 | Kitchen staff get the board and its history, and no dashboard (D138) | Sign in as kitchen staff; read the rail; press Ctrl+K; then open /dashboard directly | The rail is exactly Kitchen · Ticket history; the palette offers Open ticket history and not Go to dashboard; /dashboard redirects to /kitchen instead of showing the floor | N | Not Run |
+| KIT-012 | Every other restaurant role keeps the dashboard (D138) | Sign in as the restaurant owner, a waiter and the till; read the rail and open /dashboard | All three keep the Dashboard entry and the service dashboard renders for each — the gate is TABLE_VIEW / SALE_READ / REPORT_READ, not a role name | P | Not Run |
 
 ## BSPL — Bill Splitting by Item (D51)
 
@@ -781,9 +803,16 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
-| UI-021 | Pagination is numbered everywhere | Open sales, products, customers, quotations, returns, suppliers, the POS grid and both customer-page tables | Every footer shows numbered pages with the current one highlighted — no bare Previous/Next anywhere | P | Not Run |
+| UI-021 | Pagination is numbered everywhere | Open sales, products, customers, quotations, returns, suppliers, the POS grid, the restaurant orders queue, the ticket history and both customer-page tables | Every footer shows numbered pages with the current one highlighted — no bare Previous/Next anywhere | P | Not Run |
 | UI-022 | Page numbers collapse on long lists | A list of 40+ pages | Shows 1 … current-1 current current+1 … last; the first and last stay reachable and the row keeps its width | P | Not Run |
-| UI-023 | Rows per page only where it applies | Compare a list page with the quotations and suppliers lists | Rows-per-page appears where the size is adjustable and is absent where it is fixed; the range still shows | P | Not Run |
+| UI-023 | Rows per page is on every list (D139a) | Open the rows-per-page control on quotations and suppliers, which used to have none, and on the restaurant orders queue with fewer than 20 rows | All three offer it; the queue shows its footer even when everything fits one page, with the paging steps disabled rather than removed — a short list must not make the sizes unreachable | P | Not Run |
+| UI-027 | Rows per page offers the same three sizes everywhere | Open the rows-per-page control on sales, products, customers, returns, both customer-page tables, the POS product grid, the ticket history and the restaurant orders queue | Every one offers exactly 20, 50 and 100 — the till's old 20/30/40/50 and the orders queue's 25/50/75/100 are gone; each list starts on 20, the control announces itself as "Rows per page", and picking a size repages from 1 | P | Not Run |
+| UI-028 | The brand mark is legible in both themes (D140) | Switch the theme control between Light and Dark on any app page, and open the platform console; then open /login in each theme | The mark is fully visible each time — dark chevrons on the light rail, white on the dark one — at the same size and position, so the wordmark beside it does not shift; the login screen keeps the white mark in both themes because its panel is always dark | P | Not Run |
+| UI-029 | No question is asked by the browser any more (D141) | Trigger each guarded action in turn: clear a counter draft with more than one line, clear the retail cart, discard a held basket, close a dine-in table with unsent lines, delete a shared subcategory, reset document settings, and both variant-matrix bulk actions (Generate SKUs, Set reorder for all) | Every one opens the app's own modal — themed, touch-sized, with a verb on the action button — and none opens a browser dialog; the destructive ones are red with Cancel focused, so a stray Enter cancels rather than destroys | P | Not Run |
+| UI-030 | A question answers the same way it used to | For each guarded action above: press the action, then repeat and press Cancel, then repeat and press Escape | Confirming does exactly what the native dialog did; Cancel and Escape both leave everything untouched, and the handler behind the question never stalls — the screen is usable immediately either way. On the two prompts, an empty box applied with the action clears the field, while dismissing leaves it alone | P | Not Run |
+| UI-031 | Every modal opens in the middle of the screen (PO) | Open any modal at 1440, 1024, 768 and 390 px wide — a confirm, the ticket-order details, a payment dialog | Each is centred vertically and horizontally at every width, never flush to the bottom edge, with a gap to the screen edge and all four corners rounded | P | Not Run |
+| UI-032 | Wide panels are centred too, not stuck to the bottom (D141) | Open the dine-in bill, the modifier picker, the payment popup and the variant editor on a desktop window | Each floats in the MIDDLE of the window with the scrim visible above AND below it, rounded on all four corners, with no grab handle. None sits against the bottom edge | P | Not Run |
+| UI-033 | The three deliberately edge-anchored surfaces still are (D141) | Open a supplier QuickBooks mapping drawer, an order-detail drawer, the command palette with Ctrl+K, and the retail cart at phone width | The two drawers slide in from the right at full height, the palette opens near the top, and the phone cart rises from the bottom. These are panels and a palette, not questions, and centring them is not wanted | P | Not Run |
 | UI-017 | Tooltips are not clipped by their table | Hover a tooltip in the sales, products, customers or invoices table | The bubble shows in full above the row, not trimmed to the cell or the card | P | Not Run |
 | UI-018 | Tooltip follows the page as it scrolls | Hover a tooltip, then scroll the table or the page | It stays with its trigger, or goes away — never stranded mid-screen | P | Not Run |
 | UI-019 | Tooltip on a disabled control | Hover the disabled Mark paid on a customer's last invoice | Reason is shown; the button is still not clickable | P | Not Run |
@@ -832,8 +861,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | Module | Cases | Module | Cases |
 |---|---|---|---|
 | AUTH | 15 | CUST | 36 |
-| PERM | 16 | CIMP | 10 |
-| DASH | 24 | SUP | 15 |
+| PERM | 17 | CIMP | 10 |
+| DASH | 28 | SUP | 15 |
 | PROD | 50 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
 | POS | 62 | SET | 31 |
@@ -841,13 +870,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
-| RET | 18 | KIT | 6 |
+| RET | 18 | KIT | 22 |
 | EXC-T | 12 | ADM | 15 |
-| EXC-D | 4 | UI | 26 |
+| EXC-D | 4 | UI | 33 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 619 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 647 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 
