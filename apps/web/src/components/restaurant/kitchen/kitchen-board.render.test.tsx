@@ -487,3 +487,108 @@ describe('the new-ticket chime', () => {
     expect(chime).not.toHaveBeenCalled();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/*
+ * The station ribbon.
+ *
+ * Pinned in pairs, like everything else here, because each half alone also
+ * describes a broken card:
+ *
+ * - "Grill is on the card" passes on the OLD board too, where the station was
+ *   grey subtitle text. The ribbon assertion is therefore paired with the
+ *   subtitle no longer carrying it, which is what actually changed.
+ * - The split-order case is the reason the ribbon exists: one table, two
+ *   stations, two cards. Asserting one station name would pass on a board that
+ *   rendered a single card and dropped the other.
+ * - The separator pair guards the join: dropping the station from the front of
+ *   the dotted run is exactly what a prefix-per-part build would turn into a
+ *   leading " · ".
+ */
+describe('station ribbon', () => {
+  it('promotes the station out of the subtitle into a ribbon atop the card', async () => {
+    outstandingRows = [ticket({ id: 'tk_st', placeLabel: 'T1', stationName: 'Grill' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    // Positive: the station is its own ribbon, not loose text.
+    const station = screen.getByText('Grill');
+    const ribbon = station.parentElement;
+    expect(ribbon?.className).toContain('bg-brand-50');
+
+    // Negative: the subtitle it used to lead is still there, without it.
+    const subtitle = screen.getByText('RO-000010 · Nimal');
+    expect(subtitle.textContent).not.toContain('Grill');
+
+    /*
+     * Placement, pinned both ways. "The station is on the card somewhere"
+     * passes with it back in the grey run it came from, so pin the ribbon to
+     * the top: it precedes the place, and sits OUTSIDE the block that owns the
+     * place and its provenance line. Either assertion alone still allows the
+     * old position.
+     */
+    const title = screen.getByText('T1');
+    expect(station.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(title.parentElement?.contains(station)).toBe(false);
+  });
+
+  it('tells two cards of one station-split order apart', async () => {
+    // The same table, the same round, routed to two stations — the case that
+    // made the grey subtitle insufficient.
+    outstandingRows = [
+      ticket({ id: 'tk_a', placeLabel: 'T4', stationName: 'Main Kitchen' }),
+      ticket({ id: 'tk_b', placeLabel: 'T4', stationName: 'Grill' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getAllByText('T4')).toHaveLength(2));
+    expect(screen.getByText('Main Kitchen')).toBeTruthy();
+    expect(screen.getByText('Grill')).toBeTruthy();
+  });
+
+  it('never leaves a dangling separator when the subtitle loses a part', async () => {
+    outstandingRows = [
+      ticket({ id: 'tk_full', placeLabel: 'T1' }),
+      ticket({ id: 'tk_thin', placeLabel: 'T2', orderNumber: null }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
+
+    // Positive: a full ticket still joins every survivor.
+    expect(screen.getByText('RO-000010 · Nimal')).toBeTruthy();
+    // Negative: a thin one starts at its first surviving part, not at " · ".
+    const thin = screen.getByText('Nimal');
+    expect(thin.textContent).toBe('Nimal');
+  });
+
+  it('carries the round at the far end of the ribbon, opposite the station', async () => {
+    outstandingRows = [ticket({ id: 'tk_r', placeLabel: 'T1', roundNumber: 2 })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    // Positive: both ends of the ONE ribbon, station first.
+    const station = screen.getByText('Grill');
+    const round = screen.getByText('Round 2');
+    expect(station.parentElement).toBe(round.parentElement);
+    expect(station.compareDocumentPosition(round) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Negative: the round MOVED to the ribbon rather than being shown twice.
+    expect(screen.getByText('RO-000010 · Nimal').textContent).not.toContain('Round');
+  });
+
+  it('leaves the round half empty rather than printing a bare "Round"', async () => {
+    // A ticket predating rounds. The station half must still render, which is
+    // what separates "no round" from "no ribbon".
+    outstandingRows = [ticket({ id: 'tk_nr', placeLabel: 'T1', roundNumber: null })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    expect(screen.getByText('Grill')).toBeTruthy();
+    expect(screen.queryByText(/Round/)).toBeNull();
+  });
+});
