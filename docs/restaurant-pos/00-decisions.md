@@ -7212,11 +7212,19 @@ invisibility check (an ordinary `WHOLE` create in a hardware workspace
 notices nothing) and a second domain (food service is refused too, proving
 the registry is read).
 
-## D135 — a tenant picks its catalogue attribute pack
+## D135 — a tenant picks its catalogue attribute pack — **SUPERSEDED by D138**
 
-**Status:** accepted, 2026-09-07. **Planning only — no code written.** Migration
-required when built (`TenantBusinessProfile.cataloguePack`). Answers `Q6`;
-implements Phase 6 step `6.10`.
+> **Withdrawn unbuilt, 2026-09-09.** D138 answers the same problem by letting a
+> tenant define its OWN field list rather than pick from lists we wrote, which
+> needs no `cataloguePack` column and no migration. The two traps this decision
+> identified were both real and are both answered there. Kept in full below
+> because the reasoning that rejected splitting `RETAIL` and rejected merging
+> the two lists still stands, and because "why not packs" is a question that
+> will be asked again.
+
+**Status:** ~~accepted, 2026-09-07~~ superseded. **Planning only — no code written.**
+Migration would have been required when built (`TenantBusinessProfile.cataloguePack`).
+Answers `Q6`; was to implement Phase 6 step `6.10`.
 
 ### The problem
 
@@ -7684,6 +7692,150 @@ the inventory tabs above the list already carry a Categories tab to the
 same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
+
+## D138 — a tenant defines its own business details, and D135's packs are withdrawn
+
+**Status:** accepted and **built**, 2026-09-09. **Retail only.** No schema change,
+no migration. **Supersedes D135**, which is withdrawn unbuilt.
+
+### The problem, restated from D135
+
+`ProductAttributesService.schemaForTenant` resolved **one schema per business
+type**. The `RETAIL` descriptor declares the clothing list — `material`, `fit`,
+`careInstructions`, `gender`, `season` — and clothing and grocery are both
+`RETAIL` because **Q12 resolved: do not split `RETAIL`**. So a grocer was asked
+for **Fit** and **Season**, and `validateAttributes` refused `allergens` as an
+unknown key. Not a missing feature; an actively wrong one.
+
+### Why D135's answer is withdrawn
+
+D135 proposed that a **domain** declare named packs (`attributePacks`) and a
+tenant select one, stored in a new nullable column
+`TenantBusinessProfile.cataloguePack`.
+
+It is withdrawn for three reasons, none of which were visible at planning time:
+
+1. **It does not actually answer the question.** A pack is a list somebody else
+   chose. The grocer whose problem opened D135 does not want *our* grocery pack;
+   they want `expiryDate` because they sell dairy. D135 itself conceded this —
+   "What this does NOT decide: the grocery pack's field list… that draft needs a
+   real grocer before it is committed to". A pack ships the same wrongness with
+   a different list, and then needs a code change and a deploy every time a
+   tenant asks for one more field.
+2. **It costs a migration to store a choice we already have somewhere to put.**
+   `TenantSettings.data.catalogue` is a JSON blob that has held tenant catalogue
+   configuration since 5.8. A tenant's own field list is exactly that shape.
+3. **It is strictly less powerful for strictly more schema.** A tenant-authored
+   list *contains* packs: "the grocery pack" is a list a tenant can type once.
+
+### The decision
+
+**A tenant whose domain allows it defines its own business details.** The list
+lives in `TenantSettings.data.catalogue.businessDetails` and replaces the
+domain's declared `attributeSchema` for that tenant.
+
+```ts
+// capabilities.ts — optional, for the same reason `measuredGoods` is.
+readonly catalogue: {
+  readonly configurableBusinessDetails?: boolean;
+};
+```
+
+`true` on the **retail descriptor** only. It could not live in
+`RETAIL_CAPABILITIES`, because that constant **is** the hardware template
+(D134e's finding, unchanged); it sits on the one line where the two domains
+differ. Optional rather than required, deliberately: required would mean editing
+the hardware, food-service, hotel and general templates to declare that nothing
+about them changes.
+
+**Three states, all distinct:**
+
+| Stored value | Meaning | Wizard |
+|---|---|---|
+| **absent** | the tenant has said nothing | the domain's list — every tenant today |
+| **`[]`** | "we track none" | the step disappears (`visibleSteps`) |
+| **a list** | the tenant's own fields | that list |
+
+Absence is the safety property, and it is the same one D135 wanted from a
+nullable column without needing the column: every existing tenant — clothing,
+hardware, restaurant, every domain — resolves exactly as it does today with no
+backfill. Only a tenant that opens the tab and saves sees anything different.
+
+### One resolver, not two
+
+`BusinessDetailsService.schemaFor` is the single resolver;
+`ProductAttributesService.schemaForTenant` delegates to it. The wizard, `GET
+/products/attribute-schema` and server-side attribute validation therefore
+cannot disagree about what a tenant's fields are — which is the property D64
+bought by declaring one list, and the one a second resolver would have spent.
+
+**A stored list is ignored where the capability is off**, rather than obeyed. A
+workspace that changes business type must not keep enforcing the previous
+type's fields. The list is not deleted — changing back restores it.
+
+### Field types
+
+`text`, `enum` (dropdown) and the new `date` — the three the PO asked for. The
+existing `integer`, `number` and `boolean` remain valid in the schema and are
+still rendered and validated; they are simply not offered in the Settings
+editor, because no tenant asked to author one and every type offered is a type
+that must keep working forever.
+
+`date` is a **calendar date**, validated as one:
+
+```ts
+export function isCalendarDate(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const d = new Date(`${raw}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === raw;
+}
+```
+
+The round-trip comparison is the point: a pattern alone accepts `2026-02-31`,
+and a browser date input on some platforms will hand exactly that over.
+
+### D135's two traps, both answered
+
+**1. Switching strands stored attributes.** D135 required the build to "either
+refuse the switch once products carry attributes, or make it an explicit
+operation with a warning naming the count". **The PO chose refuse.** Removing a
+field, removing a dropdown option, or changing a field's type is refused with
+409 and the count while any product records it:
+
+> `3 product(s) still record "Material". Clear it on those products before removing the field.`
+
+This matches `AttributeLibraryService.remove`, which refuses a definition a
+variant points at. Nothing is cascaded and nothing is silently rewritten. The
+guard fired for real on live data during development — the `Umbalakada` product
+holds `careInstructions: "supiriyak"`.
+
+**2. A field is a commitment.** The `key` is derived from the label once, when
+the field is first saved, and then frozen. The Settings screen offers a rename
+of the **label** and never of the key, because renaming a key orphans every
+value already stored under it. D64 says this of the schema; it is equally true
+of a tenant's own list.
+
+### Why the API is not module-gated
+
+`/products/business-details` is permission-gated (`product:read` / `product:manage`)
+and **not** module-gated. Whether a workspace may define its own catalogue fields
+is a **capability of its business type**, which the service reads and refuses on
+(D56). A module gate would be a second, weaker answer to the same question —
+right today, wrong the moment a second domain opts in. Hiding the Settings tab
+is usability; the server remains the authority and refuses a workspace whose
+domain does not offer it, whatever the browser draws.
+
+### What this does NOT decide
+
+**Whether any other domain gets it.** Retail alone, because retail alone has the
+clothing-vs-grocery problem that opened D135. Hardware, food-service, hotel and
+general are untouched, and a tripwire over the real registry asserts it.
+
+**A grocery preset.** Deliberately not shipped. A tenant types its own fields;
+that is the whole point of withdrawing packs. If a preset is ever wanted it is a
+seed, not a schema.
+
+---
 
 ## Open decisions
 

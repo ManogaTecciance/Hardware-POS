@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { domainFor } from '@hardware-pos/shared';
+import { BUSINESS_TYPE_VALUES, domainFor } from '@hardware-pos/shared';
 
 import {
   ALL_DOCUMENT_SURFACE_KINDS,
@@ -130,7 +130,14 @@ describe('resolveDocumentSettingsPresentation', () => {
   it('the registry drives it: every business type lands somewhere deliberate', () => {
     // Walks the real registry so a NEW business type shows up here rather than
     // silently taking whichever branch its capabilities happen to hit.
-    const surfaces = (['HARDWARE', 'RESTAURANT', 'CAFE', 'BAKERY', 'HOTEL', 'GENERAL'] as const).map(
+    //
+    // D138: it now walks BUSINESS_TYPE_VALUES rather than a hand-written list.
+    // The hand-written one had already fallen behind -- RETAIL was added in
+    // D120 and never reached here, so the type this whole slice is about was
+    // the one type the exhaustiveness test did not cover. A list that has to
+    // be remembered is the failure D30 names: the fixture stopped representing
+    // the real production structure and nothing went red.
+    const surfaces = BUSINESS_TYPE_VALUES.map(
       (type) => [
         type,
         resolveDocumentSettingsPresentation({ capabilities: domainFor(type).capabilities }).surface,
@@ -144,7 +151,11 @@ describe('resolveDocumentSettingsPresentation', () => {
       BAKERY: 'THERMAL_BILL',
       HOTEL: 'THERMAL_BILL',
       GENERAL: 'A4_DOCUMENTS',
+      RETAIL: 'A4_DOCUMENTS',
     });
+    // …and the walk really covered everything, so the map above cannot pass
+    // by being compared against a subset of itself.
+    expect(surfaces).toHaveLength(BUSINESS_TYPE_VALUES.length);
   });
 
   /*
@@ -173,6 +184,110 @@ describe('resolveDocumentSettingsPresentation', () => {
       expect(inverted(retail())).toBe('THERMAL_BILL');
       expect(resolveDocumentSettingsPresentation({ capabilities: retail() }).surface).toBe(
         'A4_DOCUMENTS',
+      );
+    });
+  });
+});
+
+/**
+ * D138 — which tenants may define their own business details.
+ *
+ * ## What makes these assertions non-vacuous
+ *
+ * The exact map over the REAL registry is the assertion. `showBusinessDetailsTab
+ * is false for hardware` alone would pass for a resolver that returned false for
+ * everyone — which is precisely what the shipped code did before the capability
+ * existed — so the positive and the negative are one expectation over every
+ * business type there is, not two expectations that could each hold alone.
+ *
+ * Walking `BUSINESS_TYPE_VALUES` rather than a list written here means a new
+ * business type arrives in this test as a failure, with a name, rather than
+ * quietly inheriting whichever answer its capabilities happen to produce.
+ */
+describe('D138 — the business-details tab', () => {
+  it('is offered to retail and to nobody else', () => {
+    const flags = BUSINESS_TYPE_VALUES.map((type) => [
+      type,
+      resolveDocumentSettingsPresentation({ capabilities: domainFor(type).capabilities })
+        .showBusinessDetailsTab,
+    ]);
+
+    expect(Object.fromEntries(flags)).toEqual({
+      HARDWARE: false,
+      RESTAURANT: false,
+      CAFE: false,
+      BAKERY: false,
+      HOTEL: false,
+      GENERAL: false,
+      RETAIL: true,
+    });
+    expect(flags).toHaveLength(BUSINESS_TYPE_VALUES.length);
+  });
+
+  it('is hidden while the profile is unresolved', () => {
+    // D31 — not "assume retail and correct yourself"; a tab that appears and
+    // then vanishes under the operator is worse than one that appears late.
+    expect(
+      resolveDocumentSettingsPresentation({ capabilities: null }).showBusinessDetailsTab,
+    ).toBe(false);
+  });
+
+  it('does not travel with the print surface', () => {
+    /*
+     * The reason the flag is overlaid rather than table-driven. Hardware and
+     * retail resolve to the SAME surface constant, so anything read off the
+     * surface is necessarily the same for both — and the two must differ here.
+     */
+    const hardware = resolveDocumentSettingsPresentation({
+      capabilities: domainFor('HARDWARE').capabilities,
+    });
+    const retailTenant = resolveDocumentSettingsPresentation({
+      capabilities: domainFor('RETAIL').capabilities,
+    });
+
+    expect(hardware.surface).toBe(retailTenant.surface);
+    expect(hardware.showBusinessDetailsTab).toBe(false);
+    expect(retailTenant.showBusinessDetailsTab).toBe(true);
+  });
+
+  describe('the gate can actually fail', () => {
+    it('M4: a truthiness check would hand the tab to every domain that omits the flag', () => {
+      /*
+       * The capability is OPTIONAL, so every other domain reads `undefined`.
+       * `undefined` is falsy, so this mutation looks harmless — until a domain
+       * sets it to `false` explicitly, or one is added that sets it to a
+       * non-boolean. Proven by asserting the shipped resolver refuses a truthy
+       * non-`true` value that a truthiness check would accept.
+       */
+      const truthyNonTrue = {
+        ...domainFor('HARDWARE').capabilities,
+        catalogue: {
+          ...domainFor('HARDWARE').capabilities.catalogue,
+          configurableBusinessDetails: 'yes' as unknown as boolean,
+        },
+      };
+      expect(Boolean(truthyNonTrue.catalogue.configurableBusinessDetails)).toBe(true);
+      expect(
+        resolveDocumentSettingsPresentation({ capabilities: truthyNonTrue })
+          .showBusinessDetailsTab,
+      ).toBe(false);
+    });
+
+    it('M5: reading the flag off the surface table would give hardware the tab', () => {
+      // The mutation, written out: take the flag from the surface constant.
+      const fromSurface = (type: 'HARDWARE' | 'RETAIL') =>
+        resolveDocumentSettingsPresentation({ capabilities: domainFor(type).capabilities })
+          .surface === 'A4_DOCUMENTS';
+
+      // It cannot tell them apart…
+      expect(fromSurface('HARDWARE')).toBe(fromSurface('RETAIL'));
+      // …and the shipped resolver does.
+      expect(
+        resolveDocumentSettingsPresentation({ capabilities: domainFor('HARDWARE').capabilities })
+          .showBusinessDetailsTab,
+      ).not.toBe(
+        resolveDocumentSettingsPresentation({ capabilities: domainFor('RETAIL').capabilities })
+          .showBusinessDetailsTab,
       );
     });
   });

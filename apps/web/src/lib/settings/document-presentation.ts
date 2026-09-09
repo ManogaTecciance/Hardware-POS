@@ -92,6 +92,20 @@ export interface DocumentSettingsPresentation {
   /** Charges and Hours edit `RestaurantBranchConfig`, which retail has no row in. */
   showRestaurantOperationsTabs: boolean;
 
+  // ── Tabs gated on a catalogue capability, not on the print surface ─────
+  /**
+   * D138 — "Business details": the tab where a tenant defines the extra
+   * per-product fields its Add Product wizard collects.
+   *
+   * NOT a property of the surface, which is why the three constants below all
+   * declare it `false` and the resolver overlays the real answer. Retail and
+   * hardware both print A4 documents and land on the SAME surface constant, and
+   * exactly one of them may configure its own fields. Reading it off the
+   * surface would therefore give hardware the tab, and the server would then
+   * refuse everything the operator did on it.
+   */
+  showBusinessDetailsTab: boolean;
+
   // ── Elsewhere: the sale detail's print controls ────────────────────────
   /** "Print A4 bill" — the document whose branding this tenant can configure. */
   showA4SaleDocument: boolean;
@@ -119,6 +133,8 @@ const A4_DOCUMENTS: DocumentSettingsPresentation = {
   // An A4 sheet's geometry is the driver's; there is no roll to calibrate.
   showBillCalibration: false,
   showRestaurantOperationsTabs: false,
+  // Overlaid by the resolver -- see the interface.
+  showBusinessDetailsTab: false,
   showA4SaleDocument: true,
 };
 
@@ -151,6 +167,8 @@ const THERMAL_BILL: DocumentSettingsPresentation = {
   previewKind: 'THERMAL_BILL',
   showBillCalibration: true,
   showRestaurantOperationsTabs: true,
+  // Overlaid by the resolver -- see the interface.
+  showBusinessDetailsTab: false,
   showA4SaleDocument: false,
 };
 
@@ -180,6 +198,8 @@ const UNRESOLVED: DocumentSettingsPresentation = {
   previewKind: 'NONE',
   showBillCalibration: false,
   showRestaurantOperationsTabs: false,
+  // Overlaid by the resolver -- see the interface.
+  showBusinessDetailsTab: false,
   showA4SaleDocument: false,
 };
 
@@ -212,7 +232,17 @@ export function resolveDocumentSettingsPresentation(
   input: DocumentSettingsPresentationInput,
 ): DocumentSettingsPresentation {
   if (input.capabilities === null) return UNRESOLVED;
-  return CLASSIFICATION[
-    input.capabilities.documents.proformaBill ? 'THERMAL_BILL' : 'A4_DOCUMENTS'
-  ];
+  const surface =
+    CLASSIFICATION[input.capabilities.documents.proformaBill ? 'THERMAL_BILL' : 'A4_DOCUMENTS'];
+  return {
+    ...surface,
+    /*
+     * D138 -- overlaid rather than table-driven, because it does not vary with
+     * the print surface. `=== true` and not a truthiness check: the capability
+     * is OPTIONAL on `catalogue`, so every domain that has not opted in reads
+     * `undefined`, and `undefined` must mean "no tab", not "unknown".
+     */
+    showBusinessDetailsTab:
+      input.capabilities.catalogue.configurableBusinessDetails === true,
+  };
 }

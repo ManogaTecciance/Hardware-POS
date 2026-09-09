@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { domainFor, validateAttributes, type AttributeField } from '@hardware-pos/shared';
 
 import { BusinessProfileService } from '../platform/business-profile.service';
+import { BusinessDetailsService } from './business-details.service';
 
 /**
  * D64 — the one authority on which `Product.attributes` keys a tenant may
@@ -16,7 +17,10 @@ import { BusinessProfileService } from '../platform/business-profile.service';
  */
 @Injectable()
 export class ProductAttributesService {
-  constructor(private readonly profiles: BusinessProfileService) {}
+  constructor(
+    private readonly profiles: BusinessProfileService,
+    private readonly businessDetails: BusinessDetailsService,
+  ) {}
 
   /**
    * D134e — refuse a measured product from a domain that does not sell by
@@ -58,10 +62,17 @@ export class ProductAttributesService {
     });
   }
 
-  /** The tenant domain's declared schema. Empty = every key is refused. */
+  /**
+   * The fields this tenant collects. Empty = every key is refused.
+   *
+   * D138 — delegated, so the tenant's own list and the domain's declared one
+   * are resolved in exactly ONE place. Validation, the wizard's schema
+   * endpoint and the Settings tab all end up here; a second copy of the
+   * “override or default” rule is how a form and a refusal drift apart, which
+   * is the failure D64 built this single-authority arrangement to prevent.
+   */
   async schemaForTenant(tenantId: string): Promise<readonly AttributeField[]> {
-    const profile = await this.profiles.getEffectiveProfile(tenantId);
-    return domainFor(profile.businessType).catalogue.attributeSchema;
+    return this.businessDetails.schemaFor(tenantId);
   }
 
   /**

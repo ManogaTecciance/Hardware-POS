@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 316
+- Total routes: 318
 - Module-guarded routes: 216
-- Ungated routes: 100
+- Ungated routes: 102
 
 ## How to read the Guard column
 
@@ -232,6 +232,8 @@ drives the wizard's generic attributes step and the server-side validator.
 | Method | Path | Module | Guard | Permission |
 |---|---|---|---|---|
 | GET | `/products/attribute-schema` | SHARED_CORE | shared-core | product:read |
+| GET | `/products/business-details` | SHARED_CORE | shared-core | product:read |
+| PUT | `/products/business-details` | SHARED_CORE | shared-core | product:manage |
 
 ### ExchangesController
 

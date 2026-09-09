@@ -1,6 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@hardware-pos/database';
-import { DEFAULT_CURRENCY, DEFAULT_TIME_ZONE, safeTimeZone } from '@hardware-pos/shared';
+import {
+  DEFAULT_CURRENCY,
+  DEFAULT_TIME_ZONE,
+  safeTimeZone,
+  type AttributeField,
+} from '@hardware-pos/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
@@ -198,21 +203,7 @@ export class SettingsService implements OnModuleInit {
       },
     };
 
-    // Manual upsert on (tenantId, branchId=null): Prisma's compound-unique input
-    // types the nullable branchId as non-null, so we match by id instead.
-    const existing = await this.prisma.tenantSettings.findFirst({
-      where: { tenantId, branchId: null },
-      select: { id: true },
-    });
-    const data = next as unknown as Prisma.InputJsonValue;
-    if (existing) {
-      await this.prisma.tenantSettings.update({ where: { id: existing.id }, data: { data } });
-    } else {
-      await this.prisma.tenantSettings.create({ data: { tenantId, branchId: null, data } });
-    }
-    // The writing replica sees its own change immediately; every other replica
-    // picks it up within the TTL.
-    this.cache.set(tenantId, { value: next, loadedAt: Date.now() });
+    await this.persist(tenantId, next);
     return next;
   }
 
@@ -250,6 +241,55 @@ export class SettingsService implements OnModuleInit {
       patch[key] = nullable.has(key) && value === '' ? null : value;
     }
     return { ...current, ...(patch as Partial<DocumentSettings>) };
+  }
+
+  /**
+   * D138 — replace the tenant's business-detail field list.
+   *
+   * Its own method rather than a field on `UpdateCatalogueSettingsDto`, and
+   * that is the point: removing a field that products still hold values for has
+   * to be REFUSED, and that check needs to read products. Routing it through
+   * the generic settings endpoint would hand every caller a way past the
+   * refusal. `BusinessDetailsService` owns the rule and calls this once it
+   * holds.
+   *
+   * `undefined` CLEARS the override, so the tenant falls back to its domain's
+   * declared schema. That is a different state from `[]`, which means “we track
+   * no business details” and hides the wizard step entirely.
+   */
+  async replaceBusinessDetails(
+    tenantId: string,
+    fields: AttributeField[] | undefined,
+  ): Promise<AppSettings> {
+    const current = this.getSettings(tenantId);
+    const catalogue = { ...current.catalogue };
+    if (fields === undefined) delete catalogue.businessDetails;
+    else catalogue.businessDetails = fields;
+    const next: AppSettings = { ...current, catalogue };
+    await this.persist(tenantId, next);
+    return next;
+  }
+
+  /**
+   * Write the whole document, and make this replica's cache agree with it.
+   *
+   * Manual upsert on (tenantId, branchId=null): Prisma's compound-unique input
+   * types the nullable branchId as non-null, so we match by id instead.
+   */
+  private async persist(tenantId: string, next: AppSettings): Promise<void> {
+    const existing = await this.prisma.tenantSettings.findFirst({
+      where: { tenantId, branchId: null },
+      select: { id: true },
+    });
+    const data = next as unknown as Prisma.InputJsonValue;
+    if (existing) {
+      await this.prisma.tenantSettings.update({ where: { id: existing.id }, data: { data } });
+    } else {
+      await this.prisma.tenantSettings.create({ data: { tenantId, branchId: null, data } });
+    }
+    // The writing replica sees its own change immediately; every other replica
+    // picks it up within the TTL.
+    this.cache.set(tenantId, { value: next, loadedAt: Date.now() });
   }
 
   private mergeOverDefaults(data: Prisma.JsonValue): AppSettings {

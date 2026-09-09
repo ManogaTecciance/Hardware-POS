@@ -1,3 +1,5 @@
+import type { AttributeField } from '@hardware-pos/shared';
+
 /** POS-level settings surfaced to the front-end. */
 export interface AppSettings {
   currency: string;
@@ -59,6 +61,22 @@ export interface CatalogueSettings {
   barcodePrefixByCategoryId: Record<string, string>;
   /** `5.8` — label geometry, per tenant and (via the settings row) per branch. */
   label: LabelSettings;
+  /**
+   * D138 — the tenant's own **business details**: the extra per-product
+   * fields the wizard collects into `Product.attributes`.
+   *
+   * `undefined` means “this tenant has not defined any”, and the domain's
+   * declared `catalogue.attributeSchema` answers instead — which is what every
+   * tenant does today and why nothing changes until somebody opens the tab.
+   * An EMPTY ARRAY is a different answer: “we track none”, which hides the
+   * wizard step. The two must not be collapsed.
+   *
+   * Stored here rather than in tables because `AttributeField` is already the
+   * shape, `key` is already the identity, and D64's whole point is that a
+   * vertical's catalogue fields need no migration. `5.8` set the precedent
+   * with label geometry.
+   */
+  businessDetails?: AttributeField[];
 }
 
 /**

@@ -17,6 +17,7 @@ import { Toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth';
 import { BillPreviewTab } from '@/components/settings/bill-preview-tab';
+import { BusinessDetailsTab } from '@/components/settings/business-details-tab';
 import { BillStructureCard } from '@/components/settings/bill-structure-card';
 import { ChargesTab } from '@/components/settings/charges-tab';
 import { HoursTab } from '@/components/settings/hours-tab';
@@ -48,8 +49,21 @@ import {
  *
  * D90 — "Hours" likewise: it edits the branch's opening hours, which only a
  * food-service tenant has. Appended for the same reason.
+ *
+ * D138 — "Business details" is retail-only for now, and appended for the
+ * third time for the third time's reason: a bookmark on any existing tab
+ * still lands where it did.
  */
-const TABS = ['Business', 'Branding', 'Layout', 'Preview', 'Charges', 'Hours', 'Workspace'] as const;
+const TABS = [
+  'Business',
+  'Branding',
+  'Layout',
+  'Preview',
+  'Charges',
+  'Hours',
+  'Workspace',
+  'Business details',
+] as const;
 
 /**
  * Every zone the runtime knows, grouped by region for a navigable `<select>`.
@@ -81,6 +95,17 @@ type Tab = (typeof TABS)[number];
  */
 const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours'];
 
+/**
+ * D138 — the tab is shown only where the business type offers the feature.
+ *
+ * A SECOND list rather than a member of the one above, because they are
+ * different questions with different answers: Charges and Hours ask whether a
+ * branch config row exists, this asks whether the catalogue may be redefined.
+ * Folding them together would make the next tab that needs a gate inherit the
+ * wrong answer, which is the drift D96 was written to correct.
+ */
+const CONFIGURABLE_CATALOGUE_TABS: readonly Tab[] = ['Business details'];
+
 /*
  * D90 — tabs that write their OWN record and carry their own Save button, plus
  * (D95) the read-only Workspace tab, which owns no record at all.
@@ -90,7 +115,13 @@ const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours'];
  * bottom of the viewport, so it sat on top of the Save button that does apply
  * to what they just edited. Two Save buttons, the visible one wrong.
  */
-const SELF_SAVING_TABS: readonly Tab[] = ['Charges', 'Hours', 'Workspace'];
+// D138 — Business details writes `TenantSettings`, not the document profile.
+const SELF_SAVING_TABS: readonly Tab[] = [
+  'Charges',
+  'Hours',
+  'Workspace',
+  'Business details',
+];
 
 const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
   { value: 'quotation', label: 'Quotation' },
@@ -137,8 +168,12 @@ export default function SettingsPage() {
    */
   const visibleTabs = React.useMemo(
     () =>
-      TABS.filter((t) => !FOOD_SERVICE_ONLY_TABS.includes(t) || view.showRestaurantOperationsTabs),
-    [view.showRestaurantOperationsTabs],
+      TABS.filter(
+        (t) =>
+          (!FOOD_SERVICE_ONLY_TABS.includes(t) || view.showRestaurantOperationsTabs) &&
+          (!CONFIGURABLE_CATALOGUE_TABS.includes(t) || view.showBusinessDetailsTab),
+      ),
+    [view.showRestaurantOperationsTabs, view.showBusinessDetailsTab],
   );
   /*
    * …and a tab that disappears under the operator must not leave the screen
@@ -412,6 +447,24 @@ export default function SettingsPage() {
           <Card className="max-w-3xl">
             <CardContent className="py-16 text-center text-sm text-muted-foreground">
               Opening hours are set per branch. Ask an administrator for branch access.
+            </CardContent>
+          </Card>
+        )
+      ) : tab === 'Business details' ? (
+        /*
+         * D138 — its own save button, for the same reason Charges has one: it
+         * writes `TenantSettings.data.catalogue`, which the sticky document bar
+         * below knows nothing about. Unlike Charges it needs no branch — the
+         * fields a business tracks are the same in every one of its shops, so
+         * the only thing guarded here is the session itself, which this page
+         * carries as nullable throughout.
+         */
+        session ? (
+          <BusinessDetailsTab session={session} />
+        ) : (
+          <Card className="max-w-3xl">
+            <CardContent className="py-16 text-center text-sm text-muted-foreground">
+              Sign in to change the fields your products record.
             </CardContent>
           </Card>
         )

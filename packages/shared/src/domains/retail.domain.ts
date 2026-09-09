@@ -112,7 +112,16 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
    */
   capabilities: {
     ...RETAIL_CAPABILITIES,
-    catalogue: { ...RETAIL_CAPABILITIES.catalogue, measuredGoods: true },
+    catalogue: {
+      ...RETAIL_CAPABILITIES.catalogue,
+      measuredGoods: true,
+      // D138 — a clothing shop and a grocer track different things about a
+      // product, and the five fields declared below are the CLOTHING answer.
+      // Retail is the domain that has to serve both, so it is the domain that
+      // gets to redefine them. Spread for the same reason `measuredGoods` is:
+      // `RETAIL_CAPABILITIES` is the hardware template too.
+      configurableBusinessDetails: true,
+    },
   },
   /**
    * D64 (2.4) — the clothing catalogue fields.

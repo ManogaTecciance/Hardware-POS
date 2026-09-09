@@ -74,6 +74,21 @@ export interface TenantCapabilities {
      * not claim more than the product offers.
      */
     readonly measuredGoods?: boolean;
+    /**
+     * D64 / D138 — the tenant defines its own **business details**: the extra
+     * per-product fields Step 2 of the wizard collects into
+     * `Product.attributes`.
+     *
+     * Without this the domain's declared `catalogue.attributeSchema` is the
+     * whole answer, exactly as it has been — a hotel keeps its three fields,
+     * hardware and food service keep none, and no Settings tab appears.
+     *
+     * Optional for the same reason as `measuredGoods` above: absent means
+     * false, which is what every domain but retail wants, and requiring it
+     * would mean editing the hardware and food-service blocks to declare that
+     * nothing about them changes.
+     */
+    readonly configurableBusinessDetails?: boolean;
   };
   readonly fulfilment: {
     readonly kind: FulfilmentKind;

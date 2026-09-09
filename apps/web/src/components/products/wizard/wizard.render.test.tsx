@@ -853,6 +853,107 @@ describe('StepAttributes', () => {
   });
 });
 
+/**
+ * D138 — the calendar-date field a tenant can now define for itself.
+ *
+ * ## What makes these assertions non-vacuous
+ *
+ * "The launch date renders a date input" would pass for a step that rendered
+ * `type="date"` on everything, so every case below asserts the OTHER fields in
+ * the same schema at the same time: a text field that is not a date input, and
+ * an enum that is still a select. One schema, three types, one render.
+ *
+ * The validation cases pair a date that exists with one that does not, because
+ * a validator that accepted every `YYYY-MM-DD` string would pass the first
+ * alone — and 2026-02-31 is exactly the string a browser date input on some
+ * platforms will hand over.
+ */
+const TENANT_SCHEMA: readonly AttributeField[] = [
+  { key: 'material', label: 'Material', type: 'text' },
+  { key: 'fit', label: 'Fit', type: 'enum', options: ['Slim', 'Regular'] },
+  { key: 'launchDate', label: 'Launch date', type: 'date' },
+];
+
+describe('D138 — a tenant-defined calendar date', () => {
+  function Harness({ state }: { state: WizardState }) {
+    const h = useHarness(state);
+    const errors = validateStep('attributes', h.state, {
+      inventoryMode: 'LOCAL',
+      attributeSchema: TENANT_SCHEMA,
+    });
+    return (
+      <StepAttributes
+        state={h.state}
+        errors={errors}
+        schema={TENANT_SCHEMA}
+        positionLabel="Step 2 of 5"
+        onChange={h.patch}
+      />
+    );
+  }
+
+  it('renders a date input for the date field and for nothing else', () => {
+    render(<Harness state={initialState()} />);
+
+    // POSITIVE — the new branch is reached.
+    const launch = screen.getByLabelText('Launch date') as HTMLInputElement;
+    expect(launch.getAttribute('type')).toBe('date');
+
+    // NEGATIVE — and did not swallow the other two types in the same schema.
+    const material = screen.getByLabelText('Material') as HTMLInputElement;
+    expect(material.getAttribute('type')).not.toBe('date');
+    const fit = screen.getByLabelText('Fit');
+    expect(fit.tagName).toBe('SELECT');
+    // …which also proves the enum branch still precedes it, rather than the
+    // date branch being unreachable behind an earlier match.
+    expect(Array.from((fit as HTMLSelectElement).options).map((o) => o.textContent)).toEqual([
+      'Not set',
+      'Slim',
+      'Regular',
+    ]);
+  });
+
+  it('a picked date reaches wizard state under the field key', () => {
+    render(<Harness state={initialState()} />);
+    const launch = screen.getByLabelText('Launch date') as HTMLInputElement;
+
+    fireEvent.change(launch, { target: { value: '2026-09-09' } });
+
+    expect((screen.getByLabelText('Launch date') as HTMLInputElement).value).toBe('2026-09-09');
+    // NEGATIVE — typing into one field does not write into its neighbours.
+    expect((screen.getByLabelText('Material') as HTMLInputElement).value).toBe('');
+  });
+
+  it('a date rides on the payload as a string, and a blank one is dropped', () => {
+    const s = initialState();
+    s.attributes = { launchDate: '2026-09-09', material: '' };
+    // NOT coerced: a date is a scalar string in `attributes` (D64), and turning
+    // it into a number or a Date here is how a document stops matching what the
+    // shared validator will accept.
+    expect(buildAttributesDocument(s, TENANT_SCHEMA)).toEqual({ launchDate: '2026-09-09' });
+  });
+
+  it('refuses a date that does not exist, and accepts one that does', () => {
+    const s = initialState();
+    const errorsFor = (value: string) => {
+      s.attributes = { launchDate: value };
+      return validateStep('attributes', s, {
+        inventoryMode: 'LOCAL',
+        attributeSchema: TENANT_SCHEMA,
+      });
+    };
+
+    // NEGATIVE — the calendar, not the pattern: 31 February matches the shape.
+    expect(errorsFor('2026-02-31')['attr-launchDate']).toBeDefined();
+    // …and neither does a different notation for a real day.
+    expect(errorsFor('09/09/2026')['attr-launchDate']).toBeDefined();
+    // POSITIVE — a real date passes, so the refusals above are not "refuse all".
+    expect(errorsFor('2026-09-09')).toEqual({});
+    // Blank is not a refusal either; a field is optional unless declared.
+    expect(errorsFor('')).toEqual({});
+  });
+});
+
 describe('D65 — recipe drafts', () => {
   const draft = (over: Partial<import('./wizard-state').ComponentDraft> = {}) => ({
     componentProductId: 'p-bun',

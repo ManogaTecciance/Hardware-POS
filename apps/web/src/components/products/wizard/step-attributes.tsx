@@ -82,6 +82,26 @@ export function StepAttributes({ state, errors, schema, positionLabel, onChange 
                 <option value="true">Yes</option>
                 <option value="false">No</option>
               </Select>
+            ) : field.type === 'date' ? (
+              /*
+               * D138 -- a real date input, so the operator gets the platform's
+               * own calendar and its own locale formatting.
+               *
+               * `type="date"` is the one control here that constrains what can
+               * be typed, and it is safe to let it: its value is always
+               * `YYYY-MM-DD` or empty, which is exactly what `isCalendarDate`
+               * accepts, so the browser and the server cannot disagree about
+               * what a date is. The server still refuses 2026-02-31 -- some
+               * browsers will hand it over -- so this remains help, not
+               * authority.
+               */
+              <Input
+                id={id}
+                type="date"
+                value={value}
+                onChange={(e) => setValue(field.key, e.target.value)}
+                aria-invalid={!!error}
+              />
             ) : (
               <Input
                 id={id}

@@ -30,6 +30,10 @@ const SETTINGS_COMPONENTS = [
   'components/settings/bill-structure-card.tsx',
   'components/settings/charges-tab.tsx',
   'components/settings/hours-tab.tsx',
+  // D138 -- listed the day it was written. A component absent from this set
+  // is a component the analyser never opens, and the suite would stay green
+  // while the newest file on the screen decided for itself.
+  'components/settings/business-details-tab.tsx',
 ];
 
 /** The one file allowed to name the capability. */
