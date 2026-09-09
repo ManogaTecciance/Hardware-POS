@@ -58,11 +58,21 @@ export default function globalSetup(): void {
     cwd: DATABASE_PACKAGE,
     stdio: 'inherit',
     env: process.env,
-    // On Windows `pnpm` is a .cmd shim, not an executable, so a bare
-    // execFileSync cannot find it and the whole integration run dies in
-    // globalSetup with a bare ENOENT. Harmless elsewhere; the argv is a fixed
-    // literal, so routing it through a shell introduces nothing to quote.
-    shell: process.platform === 'win32',
+    // NO `shell` option, deliberately -- see the header above.
+    //
+    // A `shell: process.platform === 'win32'` was added here reasoning about
+    // `pnpm` being a `.cmd` shim on Windows. This call does not invoke pnpm:
+    // it invokes `process.execPath`, which on a default Windows install is
+    //
+    //   C:\Program Files\nodejs\node.exe
+    //
+    // Through a shell that argument is concatenated unescaped (DEP0190, which
+    // the header already warns about), cmd splits it at the space, and every
+    // integration run on Windows dies in globalSetup with
+    // "'C:\Program' is not recognized as an internal or external command".
+    //
+    // Resolving the CLI and running it under `process.execPath` is already the
+    // portable, shell-free answer that the `.cmd` problem called for.
   });
 
   console.log('[integration] Schema ready.');
