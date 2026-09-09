@@ -10,7 +10,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { ChipRow } from '@/components/ui/chip-row';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
-import { kitchen } from '@/lib/restaurant/api';
+import { kitchen, kitchenStations } from '@/lib/restaurant/api';
 import { playNewOrderChime } from '@/lib/restaurant/new-order-chime';
 import {
   KITCHEN_TICKET_STATUS_LABELS,
@@ -18,7 +18,11 @@ import {
   formatElapsed,
   formatTime,
 } from '@/lib/restaurant/labels';
-import type { KitchenOrderView, KitchenTicketView } from '@/lib/restaurant/types';
+import type {
+  KitchenOrderView,
+  KitchenStationView,
+  KitchenTicketView,
+} from '@/lib/restaurant/types';
 
 interface Props {
   session: Session;
@@ -126,6 +130,23 @@ export function KitchenBoard({ session, branchId }: Props) {
   const [detailFor, setDetailFor] = React.useState<KitchenTicketView | null>(null);
 
   /*
+   * The station filter. `null` is every station.
+   *
+   * The list comes from the stations endpoint rather than from the tickets on
+   * screen: a chip that vanishes when its last ticket is bumped, and returns
+   * when the next one lands, is unusable on a wall-mounted screen. Kitchen
+   * staff already hold PLATFORM_PROFILE_READ, which is what that endpoint
+   * requires, so the strip is available to exactly the people who need it.
+   *
+   * A failed fetch leaves the list empty and the strip hidden. The board is
+   * the job; the filter is a convenience, and must never be able to take the
+   * board down with it.
+   */
+  const [stations, setStations] = React.useState<KitchenStationView[]>([]);
+  const [stationId, setStationId] = React.useState<string | null>(null);
+  const stationStorageKey = `kitchen.stationFilter.${branchId}`;
+
+  /*
    * Ticket ids seen on the last poll, per filter — the chime's memory (same
    * rule as the orders queue: null until the first response lands, so opening
    * the board never dings, and a filter switch re-baselines instead of
@@ -135,36 +156,104 @@ export function KitchenBoard({ session, branchId }: Props) {
    * another arrives — exactly the arrival the pass must hear.
    */
   const chimeBaseline = React.useRef<{
-    key: 'OUTSTANDING' | 'COMPLETED';
+    /** `<fetch filter>|<station id or ALL>` — see the chime block in `load`. */
+    key: string;
     ids: Set<string>;
   } | null>(null);
+
+  /*
+   * Restore the screen's own station after a reload. A kitchen board is
+   * mounted at a station and left there, so making the cook re-pick Grill
+   * every refresh defeats the filter. Read in an effect, not in a useState
+   * initialiser: this component server-renders, and localStorage does not
+   * exist there.
+   */
+  React.useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(stationStorageKey);
+      if (saved) setStationId(saved);
+    } catch {
+      // Private mode or blocked storage. An unremembered filter is fine.
+    }
+  }, [stationStorageKey]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void kitchenStations
+      .list(session, branchId)
+      .then((rows) => {
+        if (!cancelled) setStations(rows.filter((st) => st.isActive));
+      })
+      .catch(() => {
+        if (!cancelled) setStations([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, branchId]);
+
+  /*
+   * A remembered station that has since been archived would otherwise filter
+   * the board down to nothing for ever, with no clue why. Only drop it once
+   * the list has actually arrived: an empty list is also what a failed fetch
+   * looks like, and that must not silently clear the cook's selection.
+   */
+  React.useEffect(() => {
+    if (stations.length === 0 || stationId === null) return;
+    if (!stations.some((st) => st.id === stationId)) setStationId(null);
+  }, [stations, stationId]);
+
+  const selectStation = React.useCallback(
+    (next: string | null) => {
+      setStationId(next);
+      try {
+        if (next) window.localStorage.setItem(stationStorageKey, next);
+        else window.localStorage.removeItem(stationStorageKey);
+      } catch {
+        // Not remembering the choice is survivable; failing the click is not.
+      }
+    },
+    [stationStorageKey],
+  );
 
   const load = React.useCallback(async () => {
     // D115 — keyed on the FETCH, not the tab: To make ↔ Preparing share the
     // outstanding list, so flipping between them keeps the baseline and a
     // genuine arrival rings on either; Done re-baselines as before.
     const fetchFilter = FETCH_FOR[filter];
+    /*
+     * The chime answers "is there work for THIS screen?", so it hears only
+     * the selected station. A grill screen ringing for a dessert is noise,
+     * and silencing that is most of the reason to mount a filtered board.
+     *
+     * The station is part of the baseline key for the same reason the fetch
+     * filter is: switching Grill → All reveals tickets this screen has never
+     * seen, which is a change of view, not an arrival. Re-baseline instead of
+     * ringing.
+     */
+    const chimeKey = `${fetchFilter}|${stationId ?? 'ALL'}`;
     try {
       const next = await kitchen.listTickets(session, branchId, fetchFilter);
       setTickets(next);
       setStatus('ready');
+      const heard = stationId ? next.filter((t) => t.stationId === stationId) : next;
       const prev = chimeBaseline.current;
       // Only outstanding work rings: a ticket appearing on Done is someone
       // bumping, not work arriving. A recall by ANOTHER screen does ring —
       // it lands on the outstanding list as a ticket the pass has not seen.
       if (
         fetchFilter === 'OUTSTANDING' &&
-        prev?.key === fetchFilter &&
-        next.some((t) => !prev.ids.has(t.id))
+        prev?.key === chimeKey &&
+        heard.some((t) => !prev.ids.has(t.id))
       ) {
         playNewOrderChime();
       }
-      chimeBaseline.current = { key: fetchFilter, ids: new Set(next.map((t) => t.id)) };
+      chimeBaseline.current = { key: chimeKey, ids: new Set(heard.map((t) => t.id)) };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load kitchen tickets');
       setStatus('error');
     }
-  }, [session, branchId, filter]);
+  }, [session, branchId, filter, stationId]);
 
   React.useEffect(() => {
     void load();
@@ -249,21 +338,37 @@ export function KitchenBoard({ session, branchId }: Props) {
    * queued family (QUEUED + the retired print statuses) is To make; started
    * tickets are Preparing; Done renders its fetch whole.
    */
-  const visible =
-    filter === 'TO_MAKE'
-      ? tickets.filter((t) => t.status !== 'IN_PROGRESS')
-      : filter === 'PREPARING'
-        ? tickets.filter((t) => t.status === 'IN_PROGRESS')
-        : tickets;
+  const inLane = (rows: KitchenTicketView[], lane: Filter): KitchenTicketView[] =>
+    lane === 'TO_MAKE'
+      ? rows.filter((t) => t.status !== 'IN_PROGRESS')
+      : lane === 'PREPARING'
+        ? rows.filter((t) => t.status === 'IN_PROGRESS')
+        : rows;
+
+  /*
+   * The station cut comes first and everything downstream reads from it, so
+   * the lane counts describe the board actually on screen. A strip reading
+   * "To make 11" above two visible cards is worse than no count at all.
+   */
+  const scoped = stationId ? tickets.filter((t) => t.stationId === stationId) : tickets;
+  const visible = inLane(scoped, filter);
   /** Both outstanding lanes' counts are live from the one shared fetch. */
   const laneCount = (key: Filter): number | null => {
     if (FETCH_FOR[filter] !== 'OUTSTANDING' || FETCH_FOR[key] !== 'OUTSTANDING') {
       return key === filter ? visible.length : null;
     }
-    return key === 'TO_MAKE'
-      ? tickets.filter((t) => t.status !== 'IN_PROGRESS').length
-      : tickets.filter((t) => t.status === 'IN_PROGRESS').length;
+    return inLane(scoped, key).length;
   };
+  /*
+   * Station counts are for the CURRENT lane across every station, so they
+   * answer "where is the work?" while the lane strip answers "what state is
+   * it in?". Deliberately not scoped by `stationId`: a chip that only ever
+   * counted its own selection would read zero on every station but one.
+   */
+  const inLaneAllStations = inLane(tickets, filter);
+  const stationCount = (id: string): number =>
+    inLaneAllStations.filter((t) => t.stationId === id).length;
+  const selectedStationName = stations.find((st) => st.id === stationId)?.name ?? null;
 
   return (
     <div className="space-y-4">
@@ -300,6 +405,48 @@ export function KitchenBoard({ session, branchId }: Props) {
         <span className="shrink-0 text-xs text-muted-foreground">Refreshes every 5 s.</span>
       </div>
 
+      {/*
+       * Only worth a strip when there is a routing decision to make. One
+       * station means every ticket is already this screen's, and a lone
+       * "All stations" chip beside it would be furniture. Same reasoning as
+       * D67's single-station fallback on the routing side.
+       */}
+      {stations.length > 1 ? (
+        <ChipRow
+          ariaLabel="Filter by kitchen station"
+          activeKey={stationId ?? 'ALL'}
+          className="min-w-0"
+        >
+          {[{ id: null as string | null, name: 'All stations' }, ...stations].map((st) => {
+            const active = stationId === st.id;
+            const count = st.id === null ? inLaneAllStations.length : stationCount(st.id);
+            return (
+              <button
+                key={st.id ?? 'ALL'}
+                type="button"
+                onClick={() => selectStation(st.id)}
+                data-active={active}
+                aria-pressed={active}
+                className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors ${
+                  active
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-foreground hover:bg-border'
+                }`}
+              >
+                {st.name}
+                <span
+                  className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs ${
+                    active ? 'bg-primary-foreground/20' : 'bg-border'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </ChipRow>
+      ) : null}
+
       {error ? (
         <Card>
           <CardContent className="py-3 text-sm text-danger">{error}</CardContent>
@@ -321,15 +468,33 @@ export function KitchenBoard({ session, branchId }: Props) {
       ) : visible.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            {filter === 'TO_MAKE'
-              ? 'Nothing to make. New tickets appear here as waiters send them.'
-              : filter === 'PREPARING'
-                ? canUpdate
-                  ? 'Nothing on the stove. Start a ticket from To make.'
-                  : // D94 — the till reads the board but holds no verb; do not send
-                    // it to a button it does not have.
-                    'Nothing on the stove.'
-                : 'Nothing completed yet.'}
+            {/* Naming the station matters more than the lane copy here: an
+                empty board is otherwise indistinguishable from a filter the
+                cook forgot they left on. */}
+            {selectedStationName ? (
+              <>
+                Nothing for {selectedStationName} on this lane.{' '}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() => selectStation(null)}
+                >
+                  Show all stations
+                </button>
+              </>
+            ) : filter === 'TO_MAKE' ? (
+              'Nothing to make. New tickets appear here as waiters send them.'
+            ) : filter === 'PREPARING' ? (
+              canUpdate ? (
+                'Nothing on the stove. Start a ticket from To make.'
+              ) : (
+                // D94 — the till reads the board but holds no verb; do not send
+                // it to a button it does not have.
+                'Nothing on the stove.'
+              )
+            ) : (
+              'Nothing completed yet.'
+            )}
           </CardContent>
         </Card>
       ) : (
