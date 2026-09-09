@@ -11,6 +11,20 @@ interface DialogProps {
   title?: string;
   description?: string;
   children: React.ReactNode;
+  /**
+   * A control bar pinned between the header and the scrolling body — a search
+   * box, typically.
+   *
+   * Here rather than as a `position: sticky` child of the body because sticky
+   * only hides what passes behind its own painted box: every transparent strip
+   * around it (the body's own padding, a `space-y` gap to the first row) turns
+   * into a slot where rows are seen sliding past, and closing them one at a
+   * time is whack-a-mole. A `shrink-0` sibling of the scroller cannot have the
+   * problem — the body clips at its own edge, and there is nothing above that
+   * edge to see through. The body's top padding is dropped when a toolbar is
+   * present, so the first row meets the toolbar with no gap between them.
+   */
+  toolbar?: React.ReactNode;
   footer?: React.ReactNode;
   className?: string;
 }
@@ -32,7 +46,16 @@ interface DialogProps {
  *
  * The cap is a MAXIMUM. A short dialog is still only as tall as its content.
  */
-export function Dialog({ open, onClose, title, description, children, footer, className }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  description,
+  children,
+  toolbar,
+  footer,
+  className,
+}: DialogProps) {
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -73,10 +96,21 @@ export function Dialog({ open, onClose, title, description, children, footer, cl
             <X className="h-5 w-5" />
           </button>
         </div>
+        {toolbar ? <div className="shrink-0 px-6 pb-3 pt-1">{toolbar}</div> : null}
         {/* min-h-0 is what actually lets this scroll: a flex child's default
             min-height is its content, which would push the card past the cap
             rather than overflow inside it. */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-6 pt-2">{children}</div>
+        <div
+          className={cn(
+            'min-h-0 flex-1 overflow-y-auto p-6',
+            // The toolbar owns the gap above the content when there is one;
+            // leaving the body's own padding there would put a transparent
+            // band under the toolbar for content to scroll through.
+            toolbar ? 'pt-0' : 'pt-2',
+          )}
+        >
+          {children}
+        </div>
         {footer ? (
           // flex-wrap: wide button sets (long labels, formatted amounts) wrap
           // onto extra lines instead of overflowing past the card edge.

@@ -17,7 +17,6 @@ import { ProductSelectorDialog } from '@/components/products/product-selector-di
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Toast } from '@/components/ui/toast';
@@ -52,11 +51,16 @@ import { cn } from '@/lib/utils';
  *   edit mode; a Bundle cannot become a Percentage without redoing the item
  *   roles, and the backend enforces the same. Kept as a hard disable rather
  *   than a warning so the operator can't burn a save on a rejected PATCH.
- * - **Type shapes the fields.** Bundle asks for a fixed price; BOGO wants a
- *   Buy + Get pair plus percentage-off; the two discount kinds share one item
- *   picker + a rate or amount. Fields that don't apply to the current type
- *   don't render — the wizard's server-side validator refuses stray fields
- *   too, but the UI never asks for them.
+ * - **Type shapes the fields.** Bundle asks for a fixed price; the two
+ *   discount kinds share one item picker + a rate or amount. Fields that don't
+ *   apply to the current type don't render — the server-side validator refuses
+ *   stray fields too, but the UI never asks for them.
+ * - **BUY_X_GET_Y is a sentence, not a field grid.** It renders its own two
+ *   sections — "Customer buys" and "Customer gets" — instead of the shared
+ *   product list, because its products answer two different questions. The
+ *   section a product sits in IS its role, so there is no role dropdown to
+ *   miss; the quantities sit beside the things they count; and the reward is
+ *   Free or a percentage rather than a number where 100 secretly means free.
  * - **Cancel confirms when dirty.** The comparator diffs against the initial
  *   snapshot rather than against the last save, so an operator who typed then
  *   deleted is not warned.
@@ -96,7 +100,22 @@ interface EditorState {
   branchScope: string[];
   channelScope: PromotionChannel[];
   stackable: boolean;
+  /**
+   * BUY_X_GET_Y only — whether the reward is free or discounted.
+   *
+   * Held explicitly rather than derived from `percentageOff === '100'`. Derived,
+   * typing 100 into the percentage box would make the box vanish under the
+   * operator's cursor. It never reaches the payload: Free simply writes 100.
+   */
+  rewardKind: 'FREE' | 'PERCENT';
   items: Array<{ productId: string; role: PromotionItem['role']; quantity: string; name?: string }>;
+}
+
+/** Identity of an item row. Role is part of it: the same product can be the
+ *  trigger AND the reward, which is how "buy 2, get 1 free" on one product is
+ *  expressed (`@@unique([promotionId, productId, role])` allows the pair). */
+function itemKey(item: { productId: string; role: PromotionItem['role'] }): string {
+  return `${item.role}:${item.productId}`;
 }
 
 function emptyState(type: PromotionType = 'BUNDLE_FIXED_PRICE'): EditorState {
@@ -118,6 +137,7 @@ function emptyState(type: PromotionType = 'BUNDLE_FIXED_PRICE'): EditorState {
     branchScope: [],
     channelScope: [],
     stackable: false,
+    rewardKind: 'FREE',
     items: [],
   };
 }
@@ -141,6 +161,9 @@ function fromPromotion(p: Promotion): EditorState {
     branchScope: p.branchScope,
     channelScope: p.channelScope,
     stackable: p.stackable,
+    // 100 IS free, so a saved reward at 100 reopens on the Free option rather
+    // than as "percentage off: 100", which is the same offer said worse.
+    rewardKind: p.percentageOff === 100 ? 'FREE' : 'PERCENT',
     items: p.items.map((i) => ({
       productId: i.productId,
       role: i.role,
@@ -194,7 +217,14 @@ export function PromotionEditor({
   const [error, setError] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = React.useState(false);
-  const [productPickerOpen, setProductPickerOpen] = React.useState(false);
+  /**
+   * Which slot the product picker is filling, or null when it is closed.
+   *
+   * The role used to be an attribute the operator set on the row afterwards.
+   * Carrying it on the OPEN instead is what lets "Customer buys" and "Customer
+   * gets" be two sections rather than one list with a dropdown on every line.
+   */
+  const [pickerTarget, setPickerTarget] = React.useState<PromotionItem['role'] | null>(null);
   const [saveState, setSaveState] = React.useState<'idle' | 'saving' | 'saved'>('idle');
 
   // Fetch branches for the branch-scope multi-select.
@@ -256,6 +286,32 @@ export function PromotionEditor({
     [state.startTime, state.endTime],
   );
 
+  // ── BUY_X_GET_Y — the two halves of the sentence, and the sentence itself ──
+  const buyItem = state.items.find((i) => i.role === 'BUY') ?? null;
+  const getItems = state.items.filter((i) => i.role === 'GET');
+  const rewardIsBuyItem =
+    buyItem !== null && getItems.length === 1 && getItems[0]!.productId === buyItem.productId;
+
+  /**
+   * The offer in one line, regenerated as it is composed.
+   *
+   * A form can be filled in correctly and still not say what the operator
+   * meant; reading the offer back is the cheapest check there is, and it is
+   * what every mainstream promotion builder puts under this form. Null until
+   * both halves exist — a half-written sentence is worse than none.
+   */
+  const bogoSummary = React.useMemo(() => {
+    if (state.type !== 'BUY_X_GET_Y' || !buyItem || getItems.length === 0) return null;
+    const buyQty = Number(state.buyQuantity) || 1;
+    const getQty = Number(state.getQuantity) || 1;
+    const rewardNames = getItems.map((i) => i.name ?? i.productId).join(' or ');
+    const value =
+      state.rewardKind === 'FREE'
+        ? 'free'
+        : `at ${state.percentageOff || '0'}% off`;
+    return `Buy ${buyQty} × ${buyItem.name ?? buyItem.productId}, get ${getQty} × ${rewardNames} ${value}.`;
+  }, [state.type, state.buyQuantity, state.getQuantity, state.rewardKind, state.percentageOff, buyItem, getItems]);
+
   const dirty = React.useMemo(
     () => JSON.stringify(state) !== initialSnapshotRef.current,
     [state],
@@ -289,36 +345,59 @@ export function PromotionEditor({
   };
 
   const addProduct = (product: ManagedProduct) => {
+    const role: PromotionItem['role'] =
+      pickerTarget ?? (state.type === 'BUNDLE_FIXED_PRICE' ? 'BUNDLE' : 'BUY');
     setState((prev) => {
-      if (prev.items.some((i) => i.productId === product.id)) return prev;
-      // Role heuristic: BOGO always adds as BUY (the reward is configured
-      // separately); Bundle adds as BUNDLE; discounts add as BUY.
-      const role: PromotionItem['role'] = prev.type === 'BUNDLE_FIXED_PRICE' ? 'BUNDLE' : 'BUY';
+      const row = { productId: product.id, role, quantity: '1', name: product.name };
+      /*
+       * The server allows exactly one BUY item on a BUY_X_GET_Y, so choosing
+       * again in the Customer-buys section REPLACES rather than appends —
+       * otherwise the operator composes something the save rejects with
+       * "BUY_X_GET_Y requires exactly one BUY item", three fields later.
+       */
+      if (prev.type === 'BUY_X_GET_Y' && role === 'BUY') {
+        return { ...prev, items: [...prev.items.filter((i) => i.role !== 'BUY'), row] };
+      }
+      // Deduped on (product, role), not product alone: the same product can be
+      // both the trigger and the reward, which is how B2G1 on one item is said.
+      if (prev.items.some((i) => itemKey(i) === itemKey(row))) return prev;
+      return { ...prev, items: [...prev.items, row] };
+    });
+    setPickerTarget(null);
+  };
+
+  const removeItem = (key: string) => {
+    setState((prev) => ({ ...prev, items: prev.items.filter((i) => itemKey(i) !== key) }));
+  };
+
+  const changeItemQuantity = (key: string, quantity: string) => {
+    setState((prev) => ({
+      ...prev,
+      items: prev.items.map((i) => (itemKey(i) === key ? { ...i, quantity } : i)),
+    }));
+  };
+
+  /** The reward is the trigger — "buy 2 shirts, get a third free". */
+  const toggleRewardSameAsBuy = (same: boolean) => {
+    setState((prev) => {
+      const buy = prev.items.find((i) => i.role === 'BUY');
+      const withoutGets = prev.items.filter((i) => i.role !== 'GET');
+      if (!same || !buy) return { ...prev, items: withoutGets };
       return {
         ...prev,
-        items: [...prev.items, { productId: product.id, role, quantity: '1', name: product.name }],
+        items: [...withoutGets, { ...buy, role: 'GET' as const }],
       };
     });
-    setProductPickerOpen(false);
   };
 
-  const removeProduct = (productId: string) => {
-    setState((prev) => ({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
-  };
-
-  const changeItemQuantity = (productId: string, quantity: string) => {
+  const setRewardKind = (kind: EditorState['rewardKind']) =>
     setState((prev) => ({
       ...prev,
-      items: prev.items.map((i) => (i.productId === productId ? { ...i, quantity } : i)),
+      rewardKind: kind,
+      // Only the box is cleared here; what Free MEANS is decided once, in the
+      // payload, so a form left on its default cannot mean something else.
+      percentageOff: kind === 'FREE' ? '' : prev.percentageOff,
     }));
-  };
-
-  const changeItemRole = (productId: string, role: PromotionItem['role']) => {
-    setState((prev) => ({
-      ...prev,
-      items: prev.items.map((i) => (i.productId === productId ? { ...i, role } : i)),
-    }));
-  };
 
   const validate = (): string | null => {
     if (!state.name.trim()) return 'Give the promotion a name.';
@@ -328,7 +407,19 @@ export function PromotionEditor({
      * holds for that type. Every other type still needs its products, and the
      * server re-checks all of it per type either way.
      */
-    if (state.items.length === 0 && state.type !== 'FIXED_AMOUNT_DISCOUNT') {
+    /*
+     * BUY_X_GET_Y names its two halves, because "add at least one product" is
+     * useless advice on a form with two product slots — and because the server
+     * refuses a missing GET with a message written for an API client.
+     */
+    if (state.type === 'BUY_X_GET_Y') {
+      if (!state.items.some((i) => i.role === 'BUY')) {
+        return 'Choose the product the customer has to buy.';
+      }
+      if (!state.items.some((i) => i.role === 'GET')) {
+        return 'Choose what the customer gets. Without it the promotion can never apply.';
+      }
+    } else if (state.items.length === 0 && state.type !== 'FIXED_AMOUNT_DISCOUNT') {
       return 'Add at least one product.';
     }
     if (state.type === 'BUNDLE_FIXED_PRICE' && !state.fixedPrice) {
@@ -337,9 +428,14 @@ export function PromotionEditor({
     if (state.type === 'PERCENTAGE_DISCOUNT' && !state.percentageOff) {
       return 'Set the percentage off.';
     }
-    if (state.type === 'BUY_X_GET_Y' && !state.percentageOff) {
-      // 100 = free — but the field is still required so "free reward" is explicit.
-      return 'Set the discount on the Get item (100 = free).';
+    if (
+      state.type === 'BUY_X_GET_Y' &&
+      state.rewardKind === 'PERCENT' &&
+      (!state.percentageOff || Number(state.percentageOff) <= 0)
+    ) {
+      // Free writes 100 itself, so this can only be reached with the
+      // percentage option chosen and nothing (or nothing useful) typed.
+      return 'Set how much comes off the reward, or choose Free.';
     }
     if (state.type === 'FIXED_AMOUNT_DISCOUNT' && !state.amountOff) {
       return 'Set the amount off.';
@@ -362,12 +458,24 @@ export function PromotionEditor({
       description: state.description.trim() || null,
       fixedPrice:
         state.type === 'BUNDLE_FIXED_PRICE' && state.fixedPrice ? Number(state.fixedPrice) : null,
+      /*
+       * Free IS 100 on the wire, and this is the ONE place that is decided.
+       * Writing '100' into the field when the radio changed looked equivalent
+       * and was not: a form left on its default Free had never run that
+       * handler, so it saved `percentageOff: null` and the server refused it.
+       */
       percentageOff:
-        state.type === 'PERCENTAGE_DISCOUNT' || state.type === 'BUY_X_GET_Y'
-          ? state.percentageOff
-            ? Number(state.percentageOff)
-            : null
-          : null,
+        state.type === 'BUY_X_GET_Y'
+          ? state.rewardKind === 'FREE'
+            ? 100
+            : state.percentageOff
+              ? Number(state.percentageOff)
+              : null
+          : state.type === 'PERCENTAGE_DISCOUNT'
+            ? state.percentageOff
+              ? Number(state.percentageOff)
+              : null
+            : null,
       amountOff:
         state.type === 'FIXED_AMOUNT_DISCOUNT' && state.amountOff ? Number(state.amountOff) : null,
       // D126 — only meaningful for money-off; the server rejects it elsewhere,
@@ -536,54 +644,193 @@ export function PromotionEditor({
           </div>
         ) : null}
 
+        {/*
+          * BUY_X_GET_Y reads as a sentence, in two labelled halves.
+          *
+          * The previous shape asked for Buy quantity, Get quantity and
+          * "Percentage off (100 = free)" in one row of boxes, and then for
+          * products in a separate list where each row carried a Role dropdown.
+          * Three problems, all reported from the floor: the role of a product
+          * was an attribute you had to notice and set (everything landed as
+          * Buy, and a promotion with no Get item is silently skipped by the
+          * pricing engine); the quantities sat far from the things they count;
+          * and "100 = free" made the operator encode the commonest offer there
+          * is as a magic number — one of them typed 7.
+          *
+          * Here the SECTION is the role, the quantity sits beside its own
+          * product, and Free is an option rather than a number to know.
+          */}
         {state.type === 'BUY_X_GET_Y' ? (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium" htmlFor="promo-buy-qty">
-                Buy quantity
-              </label>
-              <Input
-                id="promo-buy-qty"
-                type="number"
-                inputMode="numeric"
-                min={1}
-                value={state.buyQuantity}
-                onChange={(e) => patch({ buyQuantity: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium" htmlFor="promo-get-qty">
-                Get quantity
-              </label>
-              <Input
-                id="promo-get-qty"
-                type="number"
-                inputMode="numeric"
-                min={1}
-                value={state.getQuantity}
-                onChange={(e) => patch({ getQuantity: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium" htmlFor="promo-pct">
-                Percentage off (100 = free)<span className="text-danger" aria-hidden="true">*</span>
-              </label>
-              <div className="relative">
-                <Input
-                  id="promo-pct"
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  max={100}
-                  value={state.percentageOff}
-                  onChange={(e) => patch({ percentageOff: e.target.value })}
-                  className="pr-8"
-                />
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                  %
-                </span>
+          <div className="space-y-3">
+            {/* ── Customer buys ─────────────────────────────────────────── */}
+            <div className="space-y-2 rounded-xl border border-border bg-surface p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">Customer buys</h3>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPickerTarget('BUY')}
+                  leftIcon={<Plus className="h-3.5 w-3.5" />}
+                >
+                  {buyItem ? 'Change product' : 'Choose product'}
+                </Button>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id="promo-buy-qty"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={state.buyQuantity}
+                  onChange={(e) => patch({ buyQuantity: e.target.value })}
+                  aria-label="Buy quantity"
+                  className="w-20"
+                />
+                <span aria-hidden="true" className="text-sm text-muted-foreground">
+                  ×
+                </span>
+                {buyItem ? (
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    {buyItem.name ?? buyItem.productId}
+                  </span>
+                ) : (
+                  <span className="flex-1 text-sm text-muted-foreground">
+                    No product chosen yet
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                The trigger. Exactly one product — the server refuses this type with more
+                than one, so choosing again replaces it.
+              </p>
             </div>
+
+            {/* ── Customer gets ─────────────────────────────────────────── */}
+            <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">Customer gets</h3>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPickerTarget('GET')}
+                  leftIcon={<Plus className="h-3.5 w-3.5" />}
+                >
+                  Add reward
+                </Button>
+              </div>
+
+              {/* The commonest offer in retail — "buy 2, get a third free" —
+                  needs the same product on both sides. One tap for it. */}
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={rewardIsBuyItem}
+                  disabled={!buyItem}
+                  onChange={(e) => toggleRewardSameAsBuy(e.target.checked)}
+                  aria-label="The reward is the same product the customer buys"
+                />
+                <span className={buyItem ? undefined : 'text-muted-foreground'}>
+                  Same product as above
+                </span>
+              </label>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id="promo-get-qty"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={state.getQuantity}
+                  onChange={(e) => patch({ getQuantity: e.target.value })}
+                  aria-label="Get quantity"
+                  className="w-20"
+                />
+                <span aria-hidden="true" className="text-sm text-muted-foreground">
+                  ×
+                </span>
+                {getItems.length === 0 ? (
+                  <span className="flex-1 text-sm text-muted-foreground">
+                    No reward chosen yet
+                  </span>
+                ) : (
+                  <ul className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                    {getItems.map((i) => (
+                      <li
+                        key={itemKey(i)}
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-sm"
+                      >
+                        <span className="truncate">{i.name ?? i.productId}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeItem(itemKey(i))}
+                          className="text-muted-foreground hover:text-danger"
+                          aria-label={`Remove ${i.name ?? i.productId}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <fieldset className="space-y-1.5">
+                <legend className="text-xs font-medium text-muted-foreground">
+                  What the reward costs
+                </legend>
+                <div className="flex flex-wrap items-center gap-4">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="promo-reward-kind"
+                      checked={state.rewardKind === 'FREE'}
+                      onChange={() => setRewardKind('FREE')}
+                    />
+                    Free
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="promo-reward-kind"
+                      checked={state.rewardKind === 'PERCENT'}
+                      onChange={() => setRewardKind('PERCENT')}
+                    />
+                    Percentage off
+                  </label>
+                  {state.rewardKind === 'PERCENT' ? (
+                    <div className="relative w-28">
+                      <Input
+                        id="promo-pct"
+                        type="number"
+                        inputMode="decimal"
+                        min={1}
+                        max={100}
+                        value={state.percentageOff}
+                        onChange={(e) => patch({ percentageOff: e.target.value })}
+                        aria-label="Percentage off the reward"
+                        className="pr-8"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                        %
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              </fieldset>
+            </div>
+
+            {/* The offer, read back. `role="status"` so a screen reader hears
+                it change rather than having to go looking for it. */}
+            {bogoSummary ? (
+              <p
+                role="status"
+                className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-700"
+              >
+                {bogoSummary}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -642,72 +889,66 @@ export function PromotionEditor({
           </div>
         ) : null}
 
-        {/* Items */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Products</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setProductPickerOpen(true)}
-              leftIcon={<Plus className="h-3.5 w-3.5" />}
-            >
-              Add product
-            </Button>
-          </div>
-          {state.items.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-muted-foreground">
-              {state.type === 'FIXED_AMOUNT_DISCOUNT'
-                ? 'No products — this discount applies to the whole cart.'
-                : 'No products added yet.'}
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {state.items.map((i) => (
-                <li
-                  key={i.productId}
-                  className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface p-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{i.name ?? i.productId}</p>
-                    <p className="text-[11px] text-muted-foreground">Role: {i.role}</p>
-                  </div>
-                  {state.type === 'BUY_X_GET_Y' ? (
-                    <Select
-                      value={i.role}
-                      onChange={(e) =>
-                        changeItemRole(i.productId, e.target.value as PromotionItem['role'])
-                      }
-                      className="w-24"
-                      aria-label="Item role"
-                    >
-                      <option value="BUY">Buy</option>
-                      <option value="GET">Get</option>
-                    </Select>
-                  ) : null}
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    value={i.quantity}
-                    onChange={(e) => changeItemQuantity(i.productId, e.target.value)}
-                    aria-label={`Quantity for ${i.name ?? i.productId}`}
-                    className="w-20"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeProduct(i.productId)}
-                    className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-danger"
-                    aria-label={`Remove ${i.name ?? i.productId}`}
+        {/*
+          * The flat product list, for the three types that have ONE list.
+          * BUY_X_GET_Y renders its own two sections above — its products are
+          * not a list with a role attribute, they are two different questions.
+          */}
+        {state.type !== 'BUY_X_GET_Y' ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Products</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setPickerTarget(state.type === 'BUNDLE_FIXED_PRICE' ? 'BUNDLE' : 'BUY')
+                }
+                leftIcon={<Plus className="h-3.5 w-3.5" />}
+              >
+                Add product
+              </Button>
+            </div>
+            {state.items.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-muted-foreground">
+                {state.type === 'FIXED_AMOUNT_DISCOUNT'
+                  ? 'No products — this discount applies to the whole cart.'
+                  : 'No products added yet.'}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {state.items.map((i) => (
+                  <li
+                    key={itemKey(i)}
+                    className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface p-3"
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{i.name ?? i.productId}</p>
+                    </div>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={i.quantity}
+                      onChange={(e) => changeItemQuantity(itemKey(i), e.target.value)}
+                      aria-label={`Quantity for ${i.name ?? i.productId}`}
+                      className="w-20"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeItem(itemKey(i))}
+                      className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-danger"
+                      aria-label={`Remove ${i.name ?? i.productId}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
       </section>
 
       {/* Schedule */}
@@ -930,13 +1171,23 @@ export function PromotionEditor({
         </Button>
       </div>
 
-      {productPickerOpen ? (
+      {pickerTarget !== null ? (
         <ProductSelectorDialog
           session={session}
           onSelect={addProduct}
-          onBack={() => setProductPickerOpen(false)}
-          title="Add a product to this promotion"
-          description="Pick the product this promotion applies to. Its role and quantity are set on the row once it is added."
+          onBack={() => setPickerTarget(null)}
+          title={
+            pickerTarget === 'GET'
+              ? 'Choose the reward'
+              : pickerTarget === 'BUY' && state.type === 'BUY_X_GET_Y'
+                ? 'Choose the product the customer buys'
+                : 'Add a product to this promotion'
+          }
+          description={
+            state.type === 'BUY_X_GET_Y'
+              ? 'The section you opened this from decides its part in the offer.'
+              : 'Pick the product this promotion applies to. Its quantity is set on the row once it is added.'
+          }
         />
       ) : null}
 

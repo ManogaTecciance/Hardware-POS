@@ -290,9 +290,16 @@ export default function PromotionDetailPage() {
                     label="Buy / Get"
                     value={`Buy ${promo.buyQuantity ?? 1}, get ${promo.getQuantity ?? 1}`}
                   />
+                  {/* 100 IS free, and the editor now offers it as "Free"
+                      rather than a number to know — so the detail says the
+                      same word back. */}
                   <DetailRow
-                    label="Discount on the free item"
-                    value={promo.percentageOff != null ? `${promo.percentageOff}%` : '100%'}
+                    label="Reward"
+                    value={
+                      promo.percentageOff == null || promo.percentageOff === 100
+                        ? 'Free'
+                        : `${promo.percentageOff}% off`
+                    }
                   />
                 </>
               ) : null}

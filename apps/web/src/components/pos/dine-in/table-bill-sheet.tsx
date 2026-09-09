@@ -3,6 +3,8 @@
 import { Loader2, Receipt, SplitSquareHorizontal } from 'lucide-react';
 import * as React from 'react';
 
+import { saleLinePromotionNote } from '@hardware-pos/shared';
+
 import { ItemSplitAssigner } from '@/components/restaurant/billing/item-split-assigner';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
@@ -248,7 +250,9 @@ export function TableBillSheet({
                 close will write, not an estimate of it. */}
             {Number(preview.promotionDiscount) > 0 ? (
               <Row
-                label={preview.promotionName ?? 'Promotion'}
+                // Same wording as the receipt, the A4 bill and the counter's
+                // running total — one vocabulary for one thing.
+                label={saleLinePromotionNote(preview.promotionName) ?? 'Promotion'}
                 value={preview.promotionDiscount}
                 tone="success"
               />

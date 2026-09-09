@@ -2,6 +2,8 @@
 
 import * as React from 'react';
 
+import { saleLinePromotionNote } from '@hardware-pos/shared';
+
 import { formatMoney } from '@/lib/restaurant/labels';
 
 interface Props {
@@ -55,7 +57,17 @@ export function RunningBillSummary({
       ) : null}
       {promotionDiscount > 0 ? (
         <Row
-          label={promotionName ?? 'Promotion'}
+          /*
+           * Named AND labelled as a promotion. The bare offer name sat in the
+           * same column as "Service charge" and "Tax" with nothing to say what
+           * kind of line it was, so "Lunch 10%" read as a mystery deduction.
+           *
+           * `saleLinePromotionNote` rather than a local string: the receipt and
+           * the A4 document already print "Promotion: {name}" through it, and
+           * the till saying it differently is exactly the drift that helper
+           * exists to prevent.
+           */
+          label={saleLinePromotionNote(promotionName) ?? 'Promotion'}
           value={`- ${formatMoney(promotionDiscount)}`}
           tone="success"
         />

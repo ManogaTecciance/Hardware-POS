@@ -128,6 +128,38 @@ describe('reviewing the bill', () => {
     expect(screen.getByText('LKR 300.00')).toBeTruthy();
   });
 
+  it('labels a promotion row as one, rather than leaving a bare offer name', async () => {
+    billPreview.mockResolvedValue({
+      ...PREVIEW,
+      promotionDiscount: '250.00',
+      promotionName: 'Lunch 10%',
+    });
+    sheet();
+
+    await screen.findByText(/Beef Steak/);
+    /*
+     * The row sits in the same column as "Service charge" and "Tax". A bare
+     * "Lunch 10%" there reads as a mystery deduction — and the receipt and the
+     * A4 bill have printed "Promotion: {name}" through the shared formatter
+     * since D123, so the till saying it any other way would be drift.
+     */
+    expect(screen.getByText('Promotion: Lunch 10%')).toBeTruthy();
+    expect(screen.queryByText('Lunch 10%')).toBeNull();
+    // The deduction reads as one, with the minus outside the currency.
+    expect(screen.getByText('- LKR 250.00')).toBeTruthy();
+  });
+
+  it('shows no promotion row when nothing was discounted', async () => {
+    billPreview.mockResolvedValue(PREVIEW);
+    sheet();
+
+    await screen.findByText(/Beef Steak/);
+    // NEGATIVE: the fixture's promotionDiscount is "0.00". A row rendered on
+    // every bill would be worse than none — it would claim a discount that
+    // was never given.
+    expect(screen.queryByText(/^Promotion/)).toBeNull();
+  });
+
   it('hides the split action from a role that cannot split', async () => {
     billPreview.mockResolvedValue(PREVIEW);
     sheet({ canSplit: false });

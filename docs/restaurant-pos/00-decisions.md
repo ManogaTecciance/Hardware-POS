@@ -7815,6 +7815,52 @@ inline in `promotions.evaluator.spec.ts` beside the cases it justifies (D30).
 tenant context, and matches how `MenuAvailability` windows are still read.
 No migration, no stored value changed.
 
+### D140 — Buy X, Get Y is composed as a sentence, not a field grid
+
+**Asked for by the PO, 2026-09-09**: "i feel now ui is confusing."
+
+**What was confusing, precisely.** The editor asked for Buy quantity, Get
+quantity and "Percentage off (100 = free)" in one row of boxes, then for
+products in a flat list where every row carried a Role dropdown. Three
+failures came out of that shape, and all three were silent:
+
+- Every product landed as BUY (the picker's role heuristic), and a
+  BUY_X_GET_Y with no GET item is skipped whole by the applier —
+  `buyXGetYOutcome` returns null when `getIds` is empty. No badge, no
+  discount, no error. The operator who reported this had exactly that.
+- The picker deduped on product id alone, so one product could hold only one
+  role — making "buy 2 shirts, get a third free", the commonest BOGO there
+  is, impossible to express. The server has always accepted the pair
+  (`@@unique([promotionId, productId, role])`) and the applier has a branch
+  for it; only the editor blocked it.
+- "100 = free" asked an operator to encode the ordinary case as a magic
+  number. The one who reported this typed 7, and got a promotion that took
+  7% off the "free" item.
+
+**The shape now.** Two labelled sections — "Customer buys" and "Customer
+gets" — which is what Shopify, Square, Lightspeed, Toast and Loyverse all
+converge on. The section a product sits in IS its role, so there is no role
+attribute to notice; each quantity sits beside the thing it counts; the
+reward is Free (default) or a percentage; a "Same product as above" checkbox
+covers the same-item case in one tap; and the offer is read back in one line
+("Buy 2 × Shirt, get 1 × Tie free.") as it is composed.
+
+Choosing in the Buy section REPLACES rather than appends, because the server
+allows exactly one BUY item on this type — composing a second and being
+refused at save time was reachable before. The save is blocked with a message
+naming the missing half rather than passing an incomplete offer to the server
+for an API-shaped rejection.
+
+**Free means 100, decided once.** In the payload, not in the radio's handler.
+The first cut wrote '100' into the field when the radio changed, which looked
+equivalent and was not: a form left on its default Free had never run that
+handler, so it sent `percentageOff: null` and the server refused it. Caught by
+the new render spec before it shipped.
+
+**No schema, API or data change.** The wire payload is byte-identical to what
+the old form produced for the same offer; the other three promotion types keep
+the shared product list unchanged.
+
 ## Open decisions
 
 | ID | Question | Needed by |
