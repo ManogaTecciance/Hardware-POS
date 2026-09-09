@@ -268,11 +268,7 @@ export function KitchenBoard({ session, branchId }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <ChipRow
-          ariaLabel="Filter kitchen tickets"
-          activeKey={filter}
-          className="min-w-0 flex-1"
-        >
+        <ChipRow ariaLabel="Filter kitchen tickets" activeKey={filter} className="min-w-0 flex-1">
           {FILTERS.map((f) => {
             const count = laneCount(f.key);
             return (
@@ -530,7 +526,7 @@ function TicketCard({
   const provenance = [ticket.orderNumber, ticket.waiterName].filter(Boolean).join(' · ');
   return (
     <Card
-      className={`overflow-hidden ${done ? 'opacity-70' : (URGENCY_CARD_CLASS[urgency] ?? '')}`}
+      className={`flex h-full flex-col overflow-hidden ${done ? 'opacity-70' : (URGENCY_CARD_CLASS[urgency] ?? '')}`}
     >
       {/* D68 put the station in the subtitle, where it was the first grey item
           in a truncated four-part run. A station-split order puts the SAME
@@ -548,41 +544,47 @@ function TicketCard({
             not then render a bare "Round". */}
         {ticket.roundNumber ? <span className="shrink-0">Round {ticket.roundNumber}</span> : null}
       </div>
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+      <CardContent className="flex flex-1 flex-col space-y-3 p-4">
+        <div>
+          <div className="flex items-start justify-between gap-2">
             {/* The place is the biggest thing on the card: a dish the pass
                 cannot place is a dish that does not leave the kitchen. */}
-            <p className="truncate text-xl font-semibold">
+            <p className="min-w-0 flex-1 truncate text-xl font-semibold">
               {ticket.placeLabel ?? 'No table'}
             </p>
-            <p className="mt-1.5 truncate text-sm text-muted-foreground">{provenance}</p>
+            {done ? (
+              <StatusBadge
+                tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
+                label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
+              />
+            ) : (
+              // The timer sits where a status badge would, because on the
+              // outstanding tab the age IS the status — every badge there read
+              // "To make", which the tab already says. D113's Preparing is the
+              // one outstanding state worth a badge, so it rides beside the
+              // timer rather than displacing it: the dish still ages.
+              <div className="flex shrink-0 items-center gap-2">
+                {preparing ? (
+                  <StatusBadge
+                    tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
+                    label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
+                  />
+                ) : null}
+                <span
+                  className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
+                >
+                  {formatElapsed(ticket.createdAt)}
+                </span>
+              </div>
+            )}
           </div>
-          {done ? (
-            <StatusBadge
-              tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
-              label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
-            />
-          ) : (
-            // The timer sits where a status badge would, because on the
-            // outstanding tab the age IS the status — every badge there read
-            // "To make", which the tab already says. D113's Preparing is the
-            // one outstanding state worth a badge, so it rides beside the
-            // timer rather than displacing it: the dish still ages.
-            <div className="flex shrink-0 items-center gap-2">
-              {preparing ? (
-                <StatusBadge
-                  tone={KITCHEN_TICKET_STATUS_TONES[ticket.status]}
-                  label={KITCHEN_TICKET_STATUS_LABELS[ticket.status]}
-                />
-              ) : null}
-              <span
-                className={`shrink-0 text-xl font-bold tabular-nums ${URGENCY_TIMER_CLASS[urgency]}`}
-              >
-                {formatElapsed(ticket.createdAt)}
-              </span>
-            </div>
-          )}
+          {/* Its own full-width line. Sharing the header row with the timer
+              left it roughly half a card, which truncated the waiter off the
+              end of an ordinary ticket ("RO-000001 · Restauran..."). Nothing
+              here is worth reading at half width. */}
+          {provenance ? (
+            <p className="mt-1 truncate text-sm text-muted-foreground">{provenance}</p>
+          ) : null}
         </div>
 
         <ul className="space-y-2">
@@ -608,25 +610,42 @@ function TicketCard({
           ))}
         </ul>
 
-        <div className="space-y-2 border-t border-border pt-3">
+        {/*
+         * The board is a grid, so every card is stretched to the tallest in
+         * its row. Without mt-auto the verb sits wherever the dish list
+         * happens to end, leaving a void beneath it and putting each card's
+         * button at a different height - the thing a cook reaches for moves
+         * every time the ticket beside it changes. Pinning the actions to the
+         * bottom gives the row one button line to aim at.
+         */}
+        <div className="mt-auto space-y-2 border-t border-border pt-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            {/* min-w-0 + truncate, or a long "completed by" name wraps to a
+                second line and drags Details up out of the row with it. The
+                icon and the button keep their size; the name is what gives. */}
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
               {done ? (
                 <>
-                  <Check className="h-4 w-4" />
-                  {ticket.completedByName ?? 'Done'}
-                  {ticket.completedAt ? ` · ${formatTime(ticket.completedAt)}` : ''}
+                  <Check className="h-4 w-4 shrink-0" />
+                  {/* The name gives and the time is pinned: "who bumped it" is
+                      recoverable from Details, "when" is the half a pass
+                      actually scans a Done card for. */}
+                  <span className="truncate">{ticket.completedByName ?? 'Done'}</span>
+                  {ticket.completedAt ? (
+                    <span className="shrink-0">· {formatTime(ticket.completedAt)}</span>
+                  ) : null}
                 </>
               ) : (
                 <>
-                  <Clock className="h-4 w-4" />
-                  {ticket.ticketNumber}
+                  <Clock className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{ticket.ticketNumber}</span>
                 </>
               )}
             </span>
             <Button
               size="sm"
               variant="ghost"
+              className="shrink-0"
               leftIcon={<ListTree className="h-4 w-4" />}
               onClick={onDetails}
             >
