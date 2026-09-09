@@ -21,7 +21,7 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
         collapsed ? 'justify-center px-0' : 'px-6',
       )}
     >
-      {/* The brand logo, not a generic glyph (PO request, 2026-08-17). D140 —
+      {/* The brand logo, not a generic glyph (PO request, 2026-08-17). D144 —
           through `BrandMark`, because this rail is `bg-surface`: white in light
           mode, where the white-filled SVG on its own was invisible. */}
       <BrandMark className="h-9 w-auto shrink-0" />
@@ -62,7 +62,7 @@ function NavList({ collapsed, label }: { collapsed?: boolean; label: string }) {
   });
 
   /*
-   * D138a — exactly one entry reads as current, by longest match. The old
+   * D142a — exactly one entry reads as current, by longest match. The old
    * per-item prefix test lit up Kitchen AND Ticket history together on
    * `/kitchen/history`; `aria-current="page"` on two links tells a screen
    * reader the user is in two places at once.

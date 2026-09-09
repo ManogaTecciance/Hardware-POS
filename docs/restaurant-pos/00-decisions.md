@@ -7685,7 +7685,7 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
-### D138 — the kitchen board keeps today; the kitchen's history gets its own screen, and the pass loses the dashboard
+### D142 — the kitchen board keeps today; the kitchen's history gets its own screen, and the pass loses the dashboard
 
 Three things the kitchen asked for, and they are one change: the Done lane had
 become a scroll of everything the branch had ever cooked, there was nowhere to
@@ -7828,7 +7828,7 @@ index is the fix when a branch's history gets long enough to feel it; it is a
 migration and therefore its own decision, with a measurement attached.
 
 
-### D144 — the reservation book reaches the service dashboard, and the dashboard fits
+### D148 — the reservation book reaches the service dashboard, and the dashboard fits
 
 PO decision, 2026-09-09: "include a card that shows the upcoming reservations.
 Make sure that the new card does not make the dashboard scrollable. Instead
@@ -7875,7 +7875,7 @@ Height-constrained from `lg` up only. On a phone the summary tiles alone are
 taller than the viewport and four quarter-height panels would be unreadable, so
 there the page scrolls, which is the right answer at that width.
 
-### D143 — a round is one ticket, because nobody can say which station cooks what
+### D147 — a round is one ticket, because nobody can say which station cooks what
 
 PO decision, 2026-09-09. Reported as "I added a huge order RO-000026, why did it
 break into 2 tickets in the kitchen page? It should be one single ticket because
@@ -7928,7 +7928,7 @@ The board and the history stop naming a station anywhere: the card subtitle, the
 history column, the per-item chip in the order dialog, and the history search
 leg. A field that is null on every new row is not worth a column.
 
-### D142 — the waiter may record who a takeaway is for
+### D146 — the waiter may record who a takeaway is for
 
 D87 gave the waiter takeaway orders: a seated guest asking for something to take
 home is still the waiter's order to take. The counter's customer popup then asks
@@ -7956,7 +7956,7 @@ A live tenant needs its role rows re-seeded before this reaches anyone —
 `prisma/backfill-tenant-roles.ts --write` (or a seed run, which is what the dev
 database got).
 
-### D141 — the app asks its own questions
+### D145 — the app asks its own questions
 
 `window.confirm` and `window.prompt` are drawn by the BROWSER, so they carry
 neither the app's theme nor its wording, they cannot be made touch-sized on the
@@ -8018,7 +8018,7 @@ not collapse into `!raw`. Mutation-proved (D30): seven mutants of `confirm.tsx`
 against `confirm.render.test.tsx` and three of the centring against
 `dialog.render.test.tsx`, all killed; the per-site specs carry their own.
 
-### D140 — the brand mark follows the theme, because one asset cannot serve both
+### D144 — the brand mark follows the theme, because one asset cannot serve both
 
 The app chrome used a single logo, `/brand/axlo-icon.svg`, whose two chevrons
 are filled `#fff`. On the dark rail that reads; on the light rail — `bg-surface`
@@ -8058,7 +8058,7 @@ hard-coded `bg-[#161d2f]` and `bg-[#1b2236]` in both themes, so a theme-aware
 mark there would blank the logo for a light-mode visitor — the same trap in
 reverse.
 
-### D139a — every list gets the same footer, and the kitchen's record gets a better name
+### D143a — every list gets the same footer, and the kitchen's record gets a better name
 
 Three things, all in the same direction: one pagination footer, everywhere.
 
@@ -8082,7 +8082,7 @@ paging steps go disabled rather than disappearing, so the row keeps its width.
 
 **"Kitchen history" is now "Ticket history".** The rail already says Kitchen
 directly above it, so the old label repeated its parent — which is also why the
-sidebar's double-highlight (D138a) showed up there first and why its tests need
+sidebar's double-highlight (D142a) showed up there first and why its tests need
 anchored queries. "Ticket" is the kitchen's own word for the thing the screen
 lists, the same reasoning D103 used in choosing "Menu". The route stays
 `/kitchen/history`: it is still the kitchen's history, the nesting is what earns
@@ -8093,7 +8093,7 @@ the KITCHEN module gate for free, and a URL is worth more stable than tidy.
 which named a dining AREA on the two screens that have nothing to do with one.
 The pass is not a room; the subtitles now say what the screen is for.
 
-### D139 — one rows-per-page list: 20, 50, 100
+### D143 — one rows-per-page list: 20, 50, 100
 
 PO, 2026-09-09. Three lists had drifted apart — the shared `10/20/30/50`, the
 retail till's own `20/30/40/50` and the orders queue's `25/50/75/100` — so the
@@ -8121,7 +8121,7 @@ The tests assert the WIRING as well as the constant, because asserting the
 exported list alone would have said nothing about the two screens that rendered
 their own.
 
-### D138b — every lane chip carries a number, whichever lane is open
+### D142b — every lane chip carries a number, whichever lane is open
 
 The board fetches ONE lane's tickets at a time — To make and Preparing share
 the outstanding list, Done is its own read — so it could only count the lane it
@@ -8157,9 +8157,9 @@ number is a smaller problem than a board that will not load, so a failing count
 leaves the last known numbers on screen and never takes the tickets down with
 it.
 
-### D138a — the rail marks one place, and a history row opens the whole order
+### D142a — the rail marks one place, and a history row opens the whole order
 
-Three things the kitchen asked for after using D138.
+Three things the kitchen asked for after using D142.
 
 **One entry is current, not two.** The sidebar marked every entry whose href is
 a PREFIX of the path, which was invisible while no destination was nested and
@@ -8205,9 +8205,9 @@ selection, which is the line the sales list already draws.
 | O4 | Pilot restaurant: which tenant, how many branches, which printers, which channels. | Phase 4 |
 | O5 | Commercial model (per-branch / per-register / per-module) — blocks subscription and entitlement design. | before entitlements |
 | O6 | `InventoryReceiptLine.productVariant`: `RESTRICT` (what the database has since D44) or `SetNull` (what the schema implies)? Until answered, `migrate diff` keeps emitting the FK pair and it keeps being stripped (D110). | next migration |
-| O7 | ~~Should a list's pager hide when the rows fit one page?~~ **Answered 2026-09-09 (D139a): no — every footer renders, with the paging steps disabled. The orders queue's hiding also hid its rows-per-page control, so a short list made the sizes unreachable.** | closed |
+| O7 | ~~Should a list's pager hide when the rows fit one page?~~ **Answered 2026-09-09 (D143a): no — every footer renders, with the paging steps disabled. The orders queue's hiding also hid its rows-per-page control, so a short list made the sizes unreachable.** | closed |
 | O8 | Cancelling a counter order that D117 has settled and paid: refuse it, or record the refund? The takeaway status write has no transition guard (D119). | before the next restaurant deploy |
 | O9 | How does the counter hand over a takeaway whose ticket the kitchen never bumped? The stepper D113/D117 named is gone (2026-08-10); handover is offered on READY only (D119). | before the next restaurant deploy |
 | O10 | Should the clothing Retail template (D120) offer the Salesperson, the hardware-only owner-equivalent of D108? It seeds Owner + Cashier today (D136). | before the first Retail workspace |
 | O11 | Their 5.10 (D136a) takes the SKU line off every 80mm SALES receipt (the return receipt still prints it) and turns the A4 SKU column's default off; both reach the Tile Shop, and a workspace that never saved its documents settings loses the column. Keep, or exempt the QuickBooks pilot (D16)? | before the next production deploy |
-| O12 | `startOfDayInTimeZone` resolves a local midnight that DST SKIPS backwards, so in a zone whose transition is at 00:00 (Cuba, Chile) a business day computed from it is an hour short at the end — the Done lane (D138), the dashboard's "today" and every `lastNDaysInTimeZone` report. Found by review, pre-existing, no tenant is in such a zone today. Fix the helper, or leave it? | before a tenant in Cuba/Chile |
+| O12 | `startOfDayInTimeZone` resolves a local midnight that DST SKIPS backwards, so in a zone whose transition is at 00:00 (Cuba, Chile) a business day computed from it is an hour short at the end — the Done lane (D142), the dashboard's "today" and every `lastNDaysInTimeZone` report. Found by review, pre-existing, no tenant is in such a zone today. Fix the helper, or leave it? | before a tenant in Cuba/Chile |

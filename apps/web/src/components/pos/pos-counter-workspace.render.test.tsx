@@ -1,5 +1,5 @@
 /**
- * D141 — the counter workspace's two destructive questions, asked through the
+ * D145 — the counter workspace's two destructive questions, asked through the
  * app's own confirm instead of `window.confirm`.
  *
  * ## Why both directions, on both sites
@@ -183,7 +183,7 @@ afterEach(() => {
 
 // ── Clear current order ──────────────────────────────────────────────────────
 
-describe('Clear current order (D141)', () => {
+describe('Clear current order (D145)', () => {
   it('asks before clearing, and Cancel leaves the cart alone', async () => {
     // Proves the native dialog is gone as well as that the guard holds: jsdom's
     // `window.confirm` returns false, so a leftover call would ALSO leave the
@@ -234,7 +234,7 @@ describe('Clear current order (D141)', () => {
 
 // ── Change order type ────────────────────────────────────────────────────────
 
-describe('Change order type (D141)', () => {
+describe('Change order type (D145)', () => {
   it('asks before discarding the cart, and Cancel keeps the mode and the cart', async () => {
     const { onModeChange } = await mount();
     await addTwoItems();

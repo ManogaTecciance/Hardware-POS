@@ -294,7 +294,7 @@ describe('templates are selected by business type', () => {
     expect(till.permissions).not.toContain(Permission.ORDER_SEND_TO_KITCHEN);
   });
 
-  it('the waiter can record WHO a takeaway is for, not just raise it (D142)', () => {
+  it('the waiter can record WHO a takeaway is for, not just raise it (D146)', () => {
     const waiter = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === 'WAITER')!;
 
     /*

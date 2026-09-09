@@ -24,7 +24,7 @@ const orderFn = vi.fn();
 vi.mock('@/lib/restaurant/api', () => ({
   kitchen: {
     history: (...args: unknown[]) => history(...args),
-    // D138a — a row opens the whole order behind its ticket, through the same
+    // D142a — a row opens the whole order behind its ticket, through the same
     // dialog the board uses.
     order: (...args: unknown[]) => orderFn(...args),
   },
@@ -40,7 +40,7 @@ function ticket(over: Partial<KitchenTicketView> = {}): KitchenTicketView {
     ticketNumber: 'K-000123',
     branchId: 'brn_1',
     roundId: 'rnd_1',
-    // D143 — a ticket is the whole round and is routed to no station, so
+    // D147 — a ticket is the whole round and is routed to no station, so
     // every ticket cut since that decision carries none.
     stationId: null,
     status: 'COMPLETED',
@@ -66,7 +66,7 @@ function ticket(over: Partial<KitchenTicketView> = {}): KitchenTicketView {
 }
 
 /**
- * D143 — a row that still CARRIES a station, exactly as an older server sent
+ * D147 — a row that still CARRIES a station, exactly as an older server sent
  * it (and as every ticket cut before the decision still stores).
  *
  * The negatives below say the table names no station. Against a fixture with
@@ -144,7 +144,7 @@ async function type(term: string) {
 
 describe('what the screen shows', () => {
   it('renders a finished ticket with where it went, what was on it and who bumped it', async () => {
-    // The row is handed a station it must not print (D143).
+    // The row is handed a station it must not print (D147).
     history.mockResolvedValue(page([withStationOnTheWire(ticket())]));
     render(<KitchenHistory session={SESSION} branchId="brn_1" />);
 
@@ -284,7 +284,7 @@ describe('when a ticket started, and how long it was on the pass', () => {
 
 describe('opening a record', () => {
   /*
-   * D143 rewrote what this test claims. A ticket used to be one STATION's
+   * D147 rewrote what this test claims. A ticket used to be one STATION's
    * share of a round, so the dialog's job was to show the stations either
    * side of it; a ticket is now the whole round, so its job is to show the
    * ROUNDS either side of it — the two courses this table has already eaten,
@@ -342,7 +342,7 @@ describe('opening a record', () => {
     expect(within(dialog).getByText('No egg')).toBeTruthy();
     expect(within(dialog).getByText('Round 1')).toBeTruthy();
     expect(within(dialog).getByText('Round 2')).toBeTruthy();
-    // NEGATIVE (D143) — the per-item station chip is gone, both of its
+    // NEGATIVE (D147) — the per-item station chip is gone, both of its
     // states. The items above still arrive with a station on them, so a chip
     // that came back would put "Hot line" inside this dialog.
     expectNoStationAnywhere(dialog);
@@ -366,7 +366,7 @@ describe('opening a record', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
 
     // The dishes cell: a plain, non-interactive cell, which is what the row
-    // shortcut is for. It used to be the Station cell, which D143 removed.
+    // shortcut is for. It used to be the Station cell, which D147 removed.
     fireEvent.click(screen.getByText('2 × Chicken Kottu'));
     const dialog = await screen.findByRole('dialog');
 
@@ -496,7 +496,7 @@ describe('summariseItems', () => {
 });
 
 /*
- * D143 — the table's columns, as an exact SET.
+ * D147 — the table's columns, as an exact SET.
  *
  * A ticket is the whole round now and is routed to no station, so the Station
  * column has nothing to put in it. The set is asserted whole rather than by
@@ -507,7 +507,7 @@ describe('summariseItems', () => {
  * damage removing a column does — the empty state would sit under a phantom
  * seventh column and pull the row wider than the table.
  */
-describe('the columns (D143)', () => {
+describe('the columns (D147)', () => {
   const headerNames = () =>
     screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim());
 
@@ -562,7 +562,7 @@ describe('the columns (D143)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /*
- * The D143 assertions above are absence claims, which are the easiest kind to
+ * The D147 assertions above are absence claims, which are the easiest kind to
  * leave vacuous. Three things are shown here:
  *
  * 1. `expectNoStationAnywhere` genuinely fails on the markup this slice
@@ -578,7 +578,7 @@ describe('the columns (D143)', () => {
  * assertions red as well (both killed); the repo was restored from the scratch
  * copy afterwards.
  */
-describe('the D143 negatives can actually fail', () => {
+describe('the D147 negatives can actually fail', () => {
   it('catches the Station cell this slice removed', () => {
     const { container } = render(
       <table>

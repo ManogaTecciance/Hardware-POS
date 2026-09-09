@@ -170,7 +170,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
       'POS',
       'Orders',
       'Kitchen',
-      // D138 — the board's Done lane holds today; the rest is here.
+      // D142 — the board's Done lane holds today; the rest is here.
       'Ticket history',
       'Tables',
       'Menu',
@@ -279,7 +279,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
      * which is the same path the console uses, and generates its kitchen
      * ticket server-side in the same transaction.
      *
-     * D143 — one round is now one ticket, so this order plants exactly one
+     * D147 — one round is now one ticket, so this order plants exactly one
      * card. It planted one before as well, but only because `prd_resto_10`
      * is a SEEDED dish and the seed routes every dish to a station: a
      * product created through the wizard carries no station link, and at a
@@ -337,11 +337,11 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     }
   });
 
-  test('WS-409 kitchen staff get the board and its history, and no dashboard (D138)', async ({
+  test('WS-409 kitchen staff get the board and its history, and no dashboard (D142)', async ({
     page,
   }) => {
     /*
-     * D138. The service dashboard is a floor board — open tables, bills
+     * D142. The service dashboard is a floor board — open tables, bills
      * requested, tables needing attention — and it was the one destination in
      * the product with no gate at all, so it reached the role whose template
      * deliberately holds nothing on the floor. The reads behind those tiles
@@ -380,7 +380,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     await expect(page.getByText('Not part of this workspace')).toHaveCount(0);
 
     /*
-     * D138a — the rail marks ONE place. The prefix rule this replaced lit up
+     * D142a — the rail marks ONE place. The prefix rule this replaced lit up
      * Kitchen and Ticket history together, so a screen reader was told the
      * user was in two places at once.
      */
@@ -391,7 +391,7 @@ test.describe('WS-4 — Restaurant navigation is derived from the profile', () =
     await expect(current).toHaveText(/ticket history/i);
   });
 
-  test('WS-410 every other restaurant role keeps the dashboard (D138)', async ({ page }) => {
+  test('WS-410 every other restaurant role keeps the dashboard (D142)', async ({ page }) => {
     // The positive control for WS-409's negative: the gate is
     // TABLE_VIEW / SALE_READ / REPORT_READ, so it discriminates rather than
     // simply closing the door. Without this, removing the entry for everyone

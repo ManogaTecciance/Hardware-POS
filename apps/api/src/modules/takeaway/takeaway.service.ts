@@ -153,7 +153,7 @@ export class TakeawayService {
         depletionItems,
         actorUserId,
       );
-      // D143 — one ticket for the round, exactly as a dine-in round gets.
+      // D147 — one ticket for the round, exactly as a dine-in round gets.
       await this.kitchen.generateTicketForRound(tx, tenantId, dto.branchId, round.id);
 
       const profile = await tx.takeawayOrderProfile.create({

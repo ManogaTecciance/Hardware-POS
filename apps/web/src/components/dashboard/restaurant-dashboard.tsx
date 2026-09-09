@@ -42,7 +42,7 @@ interface Snapshot {
   openSessions: TableSessionView[];
   queuedTickets: KitchenTicketView[];
   takeawayOrders: TakeawayView[];
-  /** D144 — the next bookings due at this branch, soonest first. */
+  /** D148 — the next bookings due at this branch, soonest first. */
   upcomingReservations: ReservationView[];
 }
 
@@ -62,7 +62,7 @@ const EMPTY: Snapshot = {
 };
 
 /**
- * How far ahead the reservations card looks (D144).
+ * How far ahead the reservations card looks (D148).
  *
  * A day, not a shift: the card is answering "what is coming", and a booking
  * for tomorrow lunch taken during tonight's service is exactly the thing a
@@ -125,7 +125,7 @@ export function RestaurantDashboard({ session }: { session: Session }) {
           : [];
 
         /*
-         * D144 — the reservation book, on the dashboard.
+         * D148 — the reservation book, on the dashboard.
          *
          * `from` is NOW rather than the top of the day: a booking at 18:00 is
          * no longer upcoming at 20:00, and a card headed "upcoming" that
@@ -445,7 +445,7 @@ function TicketsCard({
 }
 
 /**
- * D144 — the reservation book, on the service dashboard.
+ * D148 — the reservation book, on the service dashboard.
  *
  * The waiter and the restaurant cashier both land here, and both hold
  * `RESERVATION_VIEW`; between them they are the people who promise a walk-in

@@ -5,7 +5,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { SettingsService } from '../settings/settings.service';
 
 /**
- * D143 — a round is ONE kitchen ticket, holding every item of it.
+ * D147 — a round is ONE kitchen ticket, holding every item of it.
  *
  * Two claims, and the second is the one that made this urgent:
  *
@@ -136,7 +136,7 @@ function makeHarness(items: RoundItem[] = ROUND_ITEMS): Harness {
   const raw = {
     restaurantOrderItem: { findMany: jest.fn().mockResolvedValue(items) },
     /*
-     * The junctions and the station catalogue SURVIVE D143 — the schema, the
+     * The junctions and the station catalogue SURVIVE D147 — the schema, the
      * wizard multi-select and the station screens all still exist. They are
      * stubbed with real-looking data on purpose: a test that stubbed them
      * empty would pass for a service that still consulted them, because an
@@ -185,7 +185,7 @@ function makeHarness(items: RoundItem[] = ROUND_ITEMS): Harness {
 }
 
 /**
- * D143's contract, in one place, so the mutation proof at the bottom is run
+ * D147's contract, in one place, so the mutation proof at the bottom is run
  * against exactly the check every test above rests on. If this ever stops
  * distinguishing one ticket from several, the proof fails and says so.
  */
@@ -206,7 +206,7 @@ function assertOneTicketCarryingEveryItem(
   expect(written).toHaveLength(expectedNames.length);
 }
 
-describe('KitchenService.generateTicketForRound (D143)', () => {
+describe('KitchenService.generateTicketForRound (D147)', () => {
   it('a round whose items span several stations still yields exactly ONE ticket, carrying all of them', async () => {
     const h = makeHarness();
 
@@ -329,7 +329,7 @@ describe('KitchenService.generateTicketForRound (D143)', () => {
 
   it('MUTATION PROOF — restoring the per-station split turns these assertions red', async () => {
     /*
-     * The mutant is the code that shipped before D143: group the round's items
+     * The mutant is the code that shipped before D147: group the round's items
      * by their ProductStationLink rows, fall back to the branch's sole active
      * station (there isn't one — four stations), drop whatever routes nowhere,
      * and cut a ticket per group. It is run against the SAME stub and read
@@ -359,7 +359,7 @@ describe('KitchenService.generateTicketForRound (D143)', () => {
 });
 
 /**
- * The pre-D143 routing, reimplemented here and NOWHERE ELSE, purely so the
+ * The pre-D147 routing, reimplemented here and NOWHERE ELSE, purely so the
  * mutation proof above has something real to reject. It writes through the
  * harness's own stub, so what it produces is read exactly as the shipped
  * service's output is.

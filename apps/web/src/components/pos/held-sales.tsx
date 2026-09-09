@@ -166,7 +166,7 @@ export function HeldSalesButton({ session, branchId, products }: Props) {
 
   const discard = async (sale: HeldSale) => {
     // Awaited, not branched on a return value: the app's own confirm is a
-    // promise (D141). The guard is otherwise the one that was here — the basket
+    // promise (D145). The guard is otherwise the one that was here — the basket
     // number stays in the question, because "Discard held basket?" on a screen
     // listing four of them does not say which one is about to go.
     const ok = await confirm({

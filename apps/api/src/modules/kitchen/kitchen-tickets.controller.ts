@@ -48,7 +48,7 @@ export class KitchenTicketsController {
   // parseFilter below; cancellation is order-side state, not a ticket status.)
 
   /**
-   * D138b — what each lane chip says.
+   * D142b — what each lane chip says.
    *
    * The board reads one lane at a time, so it could only count the lane it was
    * on: "To make" and "Preparing" carried numbers while "Done" carried none,
@@ -65,7 +65,7 @@ export class KitchenTicketsController {
   }
 
   /**
-   * D138 — the kitchen's own history: every ticket this branch has bumped,
+   * D142 — the kitchen's own history: every ticket this branch has bumped,
    * today's included, paged and searchable.
    *
    * Declared ABOVE the `:ticketId` routes because `history` would otherwise be
@@ -93,7 +93,7 @@ export class KitchenTicketsController {
    *
    * KOT_VIEW, like the board: this is the same information the kitchen
    * already receives, assembled across the order's ROUNDS instead of one
-   * round at a time. (It read "across stations" until D143 made a ticket the
+   * round at a time. (It read "across stations" until D147 made a ticket the
    * whole round; rounds are what a card is a slice of now.)
    */
   @Get(':ticketId/order')
@@ -128,11 +128,11 @@ export class KitchenTicketsController {
     try {
       const updated = await this.service.startTicket(tenantId, branchId, ticketId);
       /*
-       * D143 — `stationId` is no longer recorded here (nor on complete or
+       * D147 — `stationId` is no longer recorded here (nor on complete or
        * reopen below). A ticket cut since the split was removed belongs to no
        * station, so the key would be null on every entry written from now on,
        * and a permanently-null field reads as data that went missing rather
-       * than data that stopped existing. Nothing is lost for the pre-D143
+       * than data that stopped existing. Nothing is lost for the pre-D147
        * tickets that DO carry one: `entityId` is the ticket, and the ticket
        * row still holds the station it was routed to.
        */
@@ -206,7 +206,7 @@ export class KitchenTicketsController {
 /**
  * `?status=` accepts a real ticket status or a board pseudo-filter —
  * `OUTSTANDING` (D68), `CANCELLED` (D115, order-side cancellation) and
- * `COMPLETED_TODAY` (D138, the Done lane cut to the shop's day).
+ * `COMPLETED_TODAY` (D142, the Done lane cut to the shop's day).
  * Anything unrecognised means "no filter" rather than an error: a stale
  * bookmark should show the whole board, not a 400. Only the two pseudo-filters
  * exclude cancelled orders' tickets; a raw status (`QUEUED`, `IN_PROGRESS`,

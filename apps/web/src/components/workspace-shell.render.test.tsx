@@ -33,7 +33,7 @@ vi.mock('next/link', () => ({
   ),
 }));
 
-/** Mutable so a nested route can be asserted (D138a); reset in `beforeEach`. */
+/** Mutable so a nested route can be asserted (D142a); reset in `beforeEach`. */
 let pathname = '/dashboard';
 
 vi.mock('next/navigation', () => ({
@@ -227,7 +227,7 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     // Tile Shop / retail keeps "Products". If both labels ever regress to
     // the same string, the sidebar disambiguation is gone. (D45 still holds:
     // the legacy /menu route has no entry — the label points at /products.)
-    // Anchored: since D138 the rail carries both "Kitchen" and "Kitchen
+    // Anchored: since D142 the rail carries both "Kitchen" and "Kitchen
     // history", and a substring query would match two links and throw on the
     // ambiguity rather than on anything real.
     for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Ticket history', 'Menu']) {
@@ -351,7 +351,7 @@ describe('accessibility — the shell is navigable without sight or a mouse', ()
     }
   });
 
-  it('marks exactly ONE entry current, even on a nested route (D138a)', async () => {
+  it('marks exactly ONE entry current, even on a nested route (D142a)', async () => {
     // `/kitchen/history` sits under `/kitchen`, and both are rail entries. The
     // per-item prefix rule this replaced marked both, so `aria-current="page"`
     // told a screen reader the user was in two places at once.

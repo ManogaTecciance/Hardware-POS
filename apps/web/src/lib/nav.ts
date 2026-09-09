@@ -256,7 +256,7 @@ const ROUTE_MODULES: ReadonlyMap<string, ModuleKey> = (() => {
  * uses, and for the same reason. Marking every entry whose href is a prefix of
  * the path lights up two links at once the moment a destination is nested:
  * standing on `/kitchen/history` highlighted Kitchen AND Ticket history, so
- * the rail said the reader was in two places (D138a).
+ * the rail said the reader was in two places (D142a).
  *
  * Pure, so the rule is testable without rendering a sidebar.
  */
@@ -275,7 +275,7 @@ export function activeNavHref(groups: NavGroup[], pathname: string): string {
  * Where to send someone who has landed somewhere their own rail does not offer
  * — or `null` for "leave them exactly where they are".
  *
- * D138. Login, `/` and half a dozen "back to safety" links all point at
+ * D142. Login, `/` and half a dozen "back to safety" links all point at
  * `/dashboard`, which was fine while every role had one. Kitchen staff no
  * longer do, and a role that lands on a screen missing from its own navigation
  * has no way back except the browser's history.

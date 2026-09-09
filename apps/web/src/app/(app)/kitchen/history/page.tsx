@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 
 /**
- * Ticket history (D138).
+ * Ticket history (D142).
  *
  * Everything this branch's kitchen has bumped, today's tickets included. The
  * board's Done lane is cut to the shop's day so it stays readable during

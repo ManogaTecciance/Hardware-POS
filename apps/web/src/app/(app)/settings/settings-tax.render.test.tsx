@@ -166,7 +166,7 @@ vi.mock('@/lib/restaurant/api', () => ({
 const SettingsPage = (await import('./page')).default;
 
 /*
- * D141 — the page asks its reset question through <ConfirmProvider>, which the
+ * D145 — the page asks its reset question through <ConfirmProvider>, which the
  * authenticated shell mounts. `useConfirm` throws outside it rather than
  * falling back to `window.confirm`, so every render here supplies it.
  */

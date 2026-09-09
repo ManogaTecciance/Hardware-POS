@@ -32,7 +32,7 @@ function fullRow(status: 'QUEUED' | 'COMPLETED') {
     ticketNumber: 'KOT-000042',
     branchId: BRANCH,
     roundId: 'rnd_1',
-    // D143 — a ticket cut since the per-station split was removed belongs to
+    // D147 — a ticket cut since the per-station split was removed belongs to
     // no station, and TICKET_INCLUDE no longer joins one. The fixture says so
     // too: a `station: { name: … }` here would let the projection go on
     // reading a relation production has stopped selecting (D30).
@@ -82,7 +82,7 @@ function makeService(ticketRow: { id: string; status: string; roundId?: string }
     $transaction: (fn: (tx: unknown) => unknown) => fn(tx),
     user: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as PrismaService;
-  // D138 — the service reads the tenant's timezone to cut the Done lane on
+  // D142 — the service reads the tenant's timezone to cut the Done lane on
   // the shop's day. Recall never asks for it, so the stub only has to exist.
   const settings = {
     getSettings: () => ({ timezone: 'Asia/Colombo' }),

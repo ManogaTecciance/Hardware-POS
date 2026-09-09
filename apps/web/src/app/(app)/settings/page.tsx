@@ -231,7 +231,7 @@ export default function SettingsPage() {
 
   const reset = async () => {
     if (!session) return;
-    // D141 — the app's own confirm, awaited: the guard is the same one
+    // D145 — the app's own confirm, awaited: the guard is the same one
     // `window.confirm` gave, and nothing below it runs until it answers.
     if (
       !(await confirm({

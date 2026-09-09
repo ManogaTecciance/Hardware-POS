@@ -12,13 +12,13 @@ import type { KitchenOrderView, KitchenTicketView } from '@/lib/restaurant/types
  * D83 — the whole order behind one ticket: every item the table asked for,
  * grouped by round.
  *
- * Extracted from the kitchen board by D138a so the history screen opens the
- * SAME dialog. A ticket is ONE ROUND of an order (D143), so the card and the
+ * Extracted from the kitchen board by D142a so the history screen opens the
+ * SAME dialog. A ticket is ONE ROUND of an order (D147), so the card and the
  * history row both show a slice — this round, not the two the table ate an
  * hour ago; this is the only place either can see what the table actually
  * ordered, and a second copy of it would be a second answer to that question.
  *
- * D143 — the item lines no longer carry a station chip. A ticket is not
+ * D147 — the item lines no longer carry a station chip. A ticket is not
  * routed to a station any more, so "who else is working on this table" is
  * answered by the round headings alone; the chip's other state said "no
  * station" in warning colours on the dish nobody had linked to one, which was

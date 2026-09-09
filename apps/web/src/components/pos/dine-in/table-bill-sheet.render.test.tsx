@@ -87,7 +87,7 @@ const sheet = (
 ) => {
   const onClosed = vi.fn();
   render(
-    // D141 — the unsent-items question is the app's own dialog now, so the
+    // D145 — the unsent-items question is the app's own dialog now, so the
     // sheet only works inside the provider that draws it.
     <ConfirmProvider>
       <TableBillSheet
@@ -232,7 +232,7 @@ describe('closing', () => {
 });
 
 /**
- * D141 — the unsent-items guard, now an awaited in-app dialog.
+ * D145 — the unsent-items guard, now an awaited in-app dialog.
  *
  * This guard is the last thing standing between "items the kitchen never
  * cooked" and a Sale that omits them, and closing is not reversible from
@@ -241,7 +241,7 @@ describe('closing', () => {
  * test would still pass if the `await` were dropped — an unawaited promise is
  * truthy, so the guard would wave every close through.
  */
-describe('the unsent-items question (D141)', () => {
+describe('the unsent-items question (D145)', () => {
   it('does not ask when nothing is unsent, and closes straight away', async () => {
     billPreview.mockResolvedValue(PREVIEW);
     closeSession.mockResolvedValue({ saleId: 'sale_1' });

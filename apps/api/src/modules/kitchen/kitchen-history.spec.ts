@@ -6,7 +6,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { SettingsService } from '../settings/settings.service';
 
 /**
- * D138 — the Done lane is today's, and the history is everything.
+ * D142 — the Done lane is today's, and the history is everything.
  *
  * Two claims, and each is only worth anything with its opposite beside it:
  *
@@ -58,7 +58,7 @@ function lastWhere(captured: Captured): Prisma.KitchenTicketWhereInput {
   return (call[0] as { where: Prisma.KitchenTicketWhereInput }).where;
 }
 
-describe('the Done lane is cut on the shop’s day (D138)', () => {
+describe('the Done lane is cut on the shop’s day (D142)', () => {
   it('bounds COMPLETED_TODAY by the shop’s midnight, not the server’s', async () => {
     const { service, captured } = makeService();
 
@@ -162,7 +162,7 @@ describe('the Done lane is cut on the shop’s day (D138)', () => {
   });
 });
 
-describe('the ticket history (D138)', () => {
+describe('the ticket history (D142)', () => {
   const query = { page: 1, pageSize: 25, skip: 0, take: 25 };
 
   it('pages in SQL and returns the standard envelope', async () => {
@@ -239,10 +239,10 @@ describe('the ticket history (D138)', () => {
     expect(serialised.match(/insensitive/g)).toHaveLength(or.length + 2);
   });
 
-  it('D143 — no longer searches by station name, and the other legs are untouched', async () => {
+  it('D147 — no longer searches by station name, and the other legs are untouched', async () => {
     /*
      * The station leg came off with the per-station split: a ticket cut since
-     * D143 belongs to no station, so a fifth leg would only ever match the
+     * D147 belongs to no station, so a fifth leg would only ever match the
      * tickets raised before it — a search that quietly means something
      * different depending on the ticket's age.
      *

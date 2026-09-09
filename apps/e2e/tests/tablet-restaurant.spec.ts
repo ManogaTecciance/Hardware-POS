@@ -351,7 +351,7 @@ test.describe('TAB-FIT — restaurant screens fit the viewport', () => {
   const SCREENS: { path: string; ready: RegExp }[] = [
     { path: '/pos?mode=takeaway', ready: /^pos$/i },
     { path: '/kitchen', ready: /^kitchen$/i },
-    // D138 — a table screen on a wall tablet: the fit check is what proves the
+    // D142 — a table screen on a wall tablet: the fit check is what proves the
     // history's columns scroll inside their own box instead of pushing the page.
     { path: '/kitchen/history', ready: /^ticket history$/i },
     { path: '/tables', ready: /^tables$/i },

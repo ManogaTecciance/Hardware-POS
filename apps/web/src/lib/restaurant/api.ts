@@ -712,7 +712,7 @@ export const kitchen = {
     branchId: string,
     /**
      * D115 — `CANCELLED` is a pseudo-filter: order-side cancellation.
-     * D138 — so is `COMPLETED_TODAY`: the Done lane cut to the shop's own day,
+     * D142 — so is `COMPLETED_TODAY`: the Done lane cut to the shop's own day,
      * which is the server's reckoning and not the browser's.
      */
     status?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY' | 'ALL',
@@ -724,7 +724,7 @@ export const kitchen = {
     );
   },
   /**
-   * D138b — the three lane counts, for the chips the board cannot count itself.
+   * D142b — the three lane counts, for the chips the board cannot count itself.
    */
   laneCounts(session: Session, branchId: string) {
     return api.get<KitchenLaneCounts>(
@@ -733,7 +733,7 @@ export const kitchen = {
     );
   },
   /**
-   * D138 — every ticket this branch has bumped, today's included.
+   * D142 — every ticket this branch has bumped, today's included.
    *
    * A sibling of `listTickets` rather than an option on it: this one pages and
    * searches, so it answers with an envelope where the board answers with a

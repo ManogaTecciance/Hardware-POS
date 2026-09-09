@@ -1,6 +1,6 @@
 /**
  * The service dashboard: the reservations card, and the promise that the page
- * fits its screen (D144).
+ * fits its screen (D148).
  *
  * Two claims, and they pull against each other — which is the whole reason
  * this spec exists. Adding a fourth panel is the obvious way to make a

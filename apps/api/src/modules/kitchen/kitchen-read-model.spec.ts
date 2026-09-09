@@ -5,7 +5,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { SettingsService } from '../settings/settings.service';
 
 /**
- * D143 — the kitchen's READ model stopped naming stations.
+ * D147 — the kitchen's READ model stopped naming stations.
  *
  * A ticket cut since the per-station split was removed belongs to no station,
  * so `stationName` came off the ticket view (the board card and the history
@@ -39,7 +39,7 @@ function ticketRow() {
     ticketNumber: 'KOT-000027',
     branchId: BRANCH,
     roundId: 'rnd_1',
-    // D143 — null on every ticket written since the split was removed.
+    // D147 — null on every ticket written since the split was removed.
     stationId: null,
     status: 'QUEUED',
     completedAt: null,
@@ -133,7 +133,7 @@ function makeService() {
   return { service: new KitchenService(prisma, settings), kitchenTicket };
 }
 
-describe('the ticket view (D143)', () => {
+describe('the ticket view (D147)', () => {
   it('projects the whole card and names no station', async () => {
     const { service } = makeService();
 
@@ -150,7 +150,7 @@ describe('the ticket view (D143)', () => {
     // NEGATIVE — and it carries no station name at all.
     expect(view).not.toHaveProperty('stationName');
     expect(Object.keys(view!)).not.toContain('stationName');
-    // `stationId` survives, nullable: a pre-D143 ticket keeps the station it
+    // `stationId` survives, nullable: a pre-D147 ticket keeps the station it
     // was genuinely routed to, and a new one says so by being null.
     expect(view!.stationId).toBeNull();
   });
@@ -171,7 +171,7 @@ describe('the ticket view (D143)', () => {
   });
 });
 
-describe('the order behind a ticket (D83, narrowed by D143)', () => {
+describe('the order behind a ticket (D83, narrowed by D147)', () => {
   it('returns every round’s items, labelled by round and by no station', async () => {
     const { service } = makeService();
 

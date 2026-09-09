@@ -116,7 +116,7 @@ const branches = [
  */
 /**
  * The variant matrix asks for its bulk-action values through the app's own
- * prompt (D141), so anything that renders Step 3 in matrix mode needs the
+ * prompt (D145), so anything that renders Step 3 in matrix mode needs the
  * provider — `usePrompt` throws outside it rather than silently falling back
  * to `window.prompt`.
  */
@@ -633,7 +633,7 @@ describe('StepPricingInventory', () => {
       );
     }
 
-    // Answering the NATIVE prompt with a different prefix on purpose (D141):
+    // Answering the NATIVE prompt with a different prefix on purpose (D145):
     // if this call site ever went back to `window.prompt`, the rows would read
     // "NATIVE-…" and the assertions below would fail loudly rather than pass
     // on a coincidence.
@@ -674,7 +674,7 @@ describe('StepPricingInventory', () => {
   });
 
   it('Set reorder for all writes the typed value to every enabled row, and nothing on dismissal', async () => {
-    // The second of Step 3's two bulk actions (D141). Same shape as Generate
+    // The second of Step 3's two bulk actions (D145). Same shape as Generate
     // SKUs: ask, then apply — and only to rows the operator kept enabled.
     const s = initialState();
     s.hasVariations = true;
@@ -770,7 +770,7 @@ describe('StepPricingInventory', () => {
   it('Set reorder for all keeps blank as a clear, and refuses a non-number', async () => {
     // The old `window.prompt` guard was `raw == null`, not `!raw`: an empty
     // box CLEARS the reorder point, and only a value that is neither blank
-    // nor finite is rejected. Both survive the conversion (D141).
+    // nor finite is rejected. Both survive the conversion (D145).
     const s = initialState();
     s.hasVariations = true;
     s.variations = [

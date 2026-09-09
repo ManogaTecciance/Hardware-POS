@@ -65,7 +65,7 @@ async function signInAsRestaurantOwner(page: import('@playwright/test').Page) {
 
 /** Menu item picker used by all three golden paths. Reused so a rename lives once. */
 /*
- * KNOWN FIXTURE GAP, pre-existing and NOT introduced by D143.
+ * KNOWN FIXTURE GAP, pre-existing and NOT introduced by D147.
  *
  * `MENU_ITEM_WITH_MODIFIERS` matches nothing the seed creates: the restaurant
  * seed has no "Chicken Kottu", and more importantly it links NO product to a
@@ -352,7 +352,7 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
     expect(['PAID', 'PARTIAL']).toContain(found?.paymentStatus);
 
     /*
-     * D143 — the round is ONE ticket, and it carries every line of it.
+     * D147 — the round is ONE ticket, and it carries every line of it.
      *
      * The counter workspace waits for `takeaway.create` to succeed before it
      * shows the completion screen, and that endpoint calls
@@ -419,9 +419,9 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
     // `stationId` is the positive control for the negative beside it: the key
     // is present and null, so "no stationName" is a claim about a real ticket
     // payload rather than about an object that has no fields at all.
-    expect(kot.stationId, 'a ticket cut since D143 belongs to no station').toBeNull();
+    expect(kot.stationId, 'a ticket cut since D147 belongs to no station').toBeNull();
     expect('stationId' in kot, 'the board still ships the (nullable) column').toBe(true);
-    expect('stationName' in kot, 'D143 took stationName off the ticket view').toBe(false);
+    expect('stationName' in kot, 'D147 took stationName off the ticket view').toBe(false);
 
     await api.ctx.dispose();
   });

@@ -115,7 +115,7 @@ describe('D93 — the POS command gate', () => {
      * gate, not about an empty list.
      *
      * It used to be `dashboard`, the palette's one ungated command — until
-     * D138 gated that too, which would have left this negative passing for
+     * D142 gated that too, which would have left this negative passing for
      * precisely the reason the control exists to rule out. Re-armed on the
      * command kitchen staff genuinely hold (KOT_VIEW), so it still proves the
      * filter returns something for this role.
@@ -123,7 +123,7 @@ describe('D93 — the POS command gate', () => {
     expect(availableCommands(templateHolder('KITCHEN_STAFF')).map((c) => c.id)).toContain(
       'kitchen-history',
     );
-    // NEGATIVE, D138: and the dashboard is no longer among them.
+    // NEGATIVE, D142: and the dashboard is no longer among them.
     expect(availableCommands(templateHolder('KITCHEN_STAFF')).map((c) => c.id)).not.toContain(
       'dashboard',
     );

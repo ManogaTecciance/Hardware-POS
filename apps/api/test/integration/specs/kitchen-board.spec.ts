@@ -19,7 +19,7 @@
  *   • Idempotency is proven by identity of the recorded completer, not by
  *     absence of an error — a second call that silently rewrote the name
  *     would still "succeed".
- *   • D143's "one card per round" is asserted on the ROWS as well as on the
+ *   • D147's "one card per round" is asserted on the ROWS as well as on the
  *     board, and always with the station links the retired split routed on
  *     left in the fixture and asserted PRESENT. "One ticket, belonging to no
  *     station" proves nothing against a fixture that had nothing to route on
@@ -53,9 +53,9 @@ interface TicketView {
   ticketNumber: string;
   status: string;
   /**
-   * D143 — NULL on every ticket this spec cuts: a round is one ticket now, and
+   * D147 — NULL on every ticket this spec cuts: a round is one ticket now, and
    * a ticket that belongs to no station must not claim one. It stays on the
-   * wire (retyped) because a ticket raised BEFORE D143 genuinely still carries
+   * wire (retyped) because a ticket raised BEFORE D147 genuinely still carries
    * the station it was routed to. `stationName` is gone from the view
    * altogether, so it is deliberately NOT declared here; the tests assert its
    * absence from the payload rather than trusting this type.
@@ -117,7 +117,7 @@ const board = (query = '') =>
     { token: kitchenToken() },
   );
 
-/** D138b — the three lane chips' numbers. */
+/** D142b — the three lane chips' numbers. */
 const laneCounts = () =>
   http.request<{ toMake: number; preparing: number; doneToday: number }>(
     'GET',
@@ -125,7 +125,7 @@ const laneCounts = () =>
     { token: kitchenToken() },
   );
 
-/** D138 — the paged history, read as the kitchen reads it. */
+/** D142 — the paged history, read as the kitchen reads it. */
 const history = (query = '') =>
   http.request<{ items: TicketView[]; total: number; page: number; pageSize: number }>(
     'GET',
@@ -234,7 +234,7 @@ beforeEach(async () => {
   });
   productId = product.id;
   /*
-   * D143 — this link is left here ON PURPOSE and the tests assert it is still
+   * D147 — this link is left here ON PURPOSE and the tests assert it is still
    * present. Station links did not go away; they stopped routing. Asserting
    * "the ticket belongs to no station" against a fixture that had never linked
    * anything would be a vacuous test (D30).
@@ -256,7 +256,7 @@ describe('D68 — a sent round lands on the kitchen board', () => {
     const ticket = res.data[0]!;
     expect(ticket.status).toBe('QUEUED');
     /*
-     * D143 — this assertion read `stationName === 'Pass'` and is now false by
+     * D147 — this assertion read `stationName === 'Pass'` and is now false by
      * decision: the card names no station. The product IS linked to Pass (the
      * fixture makes that link, and the row read below asserts it survives),
      * which is what makes the null meaningful rather than incidental.
@@ -284,7 +284,7 @@ describe('D68 — a sent round lands on the kitchen board', () => {
       select: { primaryPrinterId: true, stationId: true },
     });
     expect(stored.primaryPrinterId).toBeNull();
-    // D143 in the COLUMN, not only in the projection.
+    // D147 in the COLUMN, not only in the projection.
     expect(stored.stationId).toBeNull();
     // POSITIVE CONTROL for that null: the link exists and was simply not
     // consulted. Without it the null would also hold for a fixture that had
@@ -296,7 +296,7 @@ describe('D68 — a sent round lands on the kitchen board', () => {
     await sendRound();
     await sendRound();
     const res = await board();
-    // D143 collapsed the STATION split and nothing else: two rounds are still
+    // D147 collapsed the STATION split and nothing else: two rounds are still
     // two cards, and an order is never folded into a single ticket.
     expect(res.data).toHaveLength(2);
     expect(res.data.map((t) => t.roundNumber).sort()).toEqual([1, 2]);
@@ -306,7 +306,7 @@ describe('D68 — a sent round lands on the kitchen board', () => {
 });
 
 /*
- * D143 — a round is ONE card, whatever its dishes would have routed to.
+ * D147 — a round is ONE card, whatever its dishes would have routed to.
  *
  * The board used to show a single order for a single round as several
  * separate cards, one per kitchen station the items routed to (RO-000026, one
@@ -322,7 +322,7 @@ describe('D68 — a sent round lands on the kitchen board', () => {
  * linked to nothing: the exact fixture the retired routing would have split
  * three ways while silently losing the fourth dish.
  */
-describe('D143 — a round is one card, whatever its dishes would have routed to', () => {
+describe('D147 — a round is one card, whatever its dishes would have routed to', () => {
   let grillProductId: string;
   let pastryProductId: string;
   let unlinkedProductId: string;
@@ -353,7 +353,7 @@ describe('D143 — a round is one card, whatever its dishes would have routed to
     /*
      * FOUR active stations, the shape of the branch that reported this (Bar,
      * Grill, Main Kitchen, Pastry — the outer fixture's 'Pass' stands in for
-     * the fourth). The COUNT is load-bearing: the routing D143 removed had
+     * the fourth). The COUNT is load-bearing: the routing D147 removed had
      * exactly one escape hatch for a dish linked to nothing, and it was a
      * branch with exactly ONE active station. At four there was no escape.
      */
@@ -438,7 +438,7 @@ describe('D143 — a round is one card, whatever its dishes would have routed to
     expect(new Set(links.map((l) => l.stationId)).size).toBe(3);
   });
 
-  it('puts a dish linked to NO station on the board — the defect D143 fixes', async () => {
+  it('puts a dish linked to NO station on the board — the defect D147 fixes', async () => {
     /*
      * Named, because it is the reason the split went rather than a side
      * effect of removing it: at a branch with more than one active station
@@ -1063,7 +1063,7 @@ describe('D112 — open-sessions carries the session\'s bumped tickets', () => {
 });
 
 /*
- * D138 — the Done lane holds the shop's TODAY, and the history holds the rest.
+ * D142 — the Done lane holds the shop's TODAY, and the history holds the rest.
  *
  * The pairing is the point. A lane assertion alone would pass against a build
  * that had simply stopped returning old tickets anywhere, and a history
@@ -1071,7 +1071,7 @@ describe('D112 — open-sessions carries the session\'s bumped tickets', () => {
  * old ticket is asserted ABSENT from one list and PRESENT in the other, in the
  * same test, against the same row.
  */
-describe('D138 — today on the board, everything in the history', () => {
+describe('D142 — today on the board, everything in the history', () => {
   it('drops yesterday’s ticket from Done and keeps it in the history', async () => {
     await sendRound();
     const todayTicket = (await board('?status=OUTSTANDING')).data[0]!.id;
@@ -1118,7 +1118,7 @@ describe('D138 — today on the board, everything in the history', () => {
     // The context a printed KOT used to carry, still on the row weeks later.
     expect(items[0]!.items[0]!.menuItemName).toBeTruthy();
     /*
-     * D143 — this line asserted `stationName` was truthy, which is now false
+     * D147 — this line asserted `stationName` was truthy, which is now false
      * by decision rather than by regression: a ticket belongs to no station to
      * name. Rewritten to the new truth, and to the context the history screen
      * actually has to carry — where the food went, and whose order it was.
@@ -1273,14 +1273,14 @@ describe('D138 — today on the board, everything in the history', () => {
 });
 
 /*
- * D138b — the chips agree with the lanes.
+ * D142b — the chips agree with the lanes.
  *
  * The board fetches one lane at a time and counts the other two from here, so
  * the only failure that matters is DRIFT: a chip promising work the list does
  * not have. Every count is therefore asserted against the LIST it labels, in
  * the same test, rather than against a number typed into the spec.
  */
-describe('D138b — the lane counts', () => {
+describe('D142b — the lane counts', () => {
   it('matches each lane’s own list, across all three', async () => {
     // One queued, one started, one bumped — every lane non-empty, so no count
     // can pass by being zero.

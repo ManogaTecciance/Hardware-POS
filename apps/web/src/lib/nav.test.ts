@@ -207,7 +207,7 @@ describe('Restaurant navigation', () => {
       'POS',
       'Orders',
       'Kitchen',
-      // D138 — the board's Done lane is today's; everything older is here.
+      // D142 — the board's Done lane is today's; everything older is here.
       'Ticket history',
       'Tables',
       // D47 — the reservation calendar.
@@ -807,7 +807,7 @@ describe('D93 — any-of permission gates', () => {
     /*
      * The assertion that catches an any-of written as all-of-nothing.
      *
-     * D138 took the food-service rail's last ungated destination away — the
+     * D142 took the food-service rail's last ungated destination away — the
      * Dashboard is now gated on the floor/money/reporting set — so the
      * restaurant half of this tripwire would have gone VACUOUS: an empty rail
      * satisfies every "must not contain" below it, which is exactly the D30
@@ -837,7 +837,7 @@ describe('D93 — any-of permission gates', () => {
     expect(labels(onlyKot)).toEqual(['Kitchen', 'Ticket history']);
 
     // And the same for retail, where the blast radius includes QuickBooks and
-    // the Dashboard is still deliberately ungated (D138 scoped the gate to the
+    // the Dashboard is still deliberately ungated (D142 scoped the gate to the
     // domain whose kitchen role may not see the floor).
     expect(
       labels(
@@ -850,7 +850,7 @@ describe('D93 — any-of permission gates', () => {
     ).toEqual(['Dashboard']);
   });
 
-  it('D138 — the service dashboard is for whoever may see the floor, the money or the reports', () => {
+  it('D142 — the service dashboard is for whoever may see the floor, the money or the reports', () => {
     const railFor = (held: Permission[]) =>
       labels(
         resolveNavigation({
@@ -878,7 +878,7 @@ describe('D93 — any-of permission gates', () => {
     expect(railFor([Permission.KOT_VIEW, Permission.KITCHEN_STATUS_UPDATE])).toContain('Kitchen');
   });
 
-  it('D138 — kitchen staff get the board and its history, and nothing else', () => {
+  it('D142 — kitchen staff get the board and its history, and nothing else', () => {
     // Built from the SHIPPED template rather than a hand-typed permission list,
     // so a permission quietly added to the role shows up here.
     const rail = labels(restaurantNav('KITCHEN_STAFF'));
@@ -1161,7 +1161,7 @@ describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
 });
 
 /*
- * D138a — exactly one rail entry reads as current.
+ * D142a — exactly one rail entry reads as current.
  *
  * The prefix rule this replaced marked EVERY entry whose href is a prefix of
  * the path, so a nested destination lit up two links at once and
@@ -1207,7 +1207,7 @@ describe('activeNavHref', () => {
 });
 
 /*
- * D138 — where someone goes when they land on a screen their rail has not got.
+ * D142 — where someone goes when they land on a screen their rail has not got.
  *
  * The three `null` cases are the whole risk: redirecting on an UNRESOLVED rail
  * would bounce every user off the dashboard for the moment before the profile

@@ -86,7 +86,7 @@ const COMMANDS: Command[] = [
   { id: 'add-customer', label: 'Add a customer', hint: 'Customers', href: '/customers/new', icon: UserPlus, keywords: 'create client new customer', permission: Permission.CUSTOMER_MANAGE },
   { id: 'quickbooks', label: 'Open QuickBooks & sync log', hint: 'Integrations', href: '/quickbooks', icon: Link2, keywords: 'accounting sync integration qbo', permission: Permission.QUICKBOOKS_READ },
   /*
-   * D138 — the palette mirrors the rail, and the rail no longer offers the
+   * D142 — the palette mirrors the rail, and the rail no longer offers the
    * service dashboard to a role that may not see the floor. Same any-of set as
    * the nav entry: leaving this ungated would have handed kitchen staff the one
    * door Ctrl+K still opened onto the whole restaurant.

@@ -1,5 +1,5 @@
 /**
- * The app's own confirm and prompt (D141) — the primitive every converted call
+ * The app's own confirm and prompt (D145) — the primitive every converted call
  * site now depends on.
  *
  * Nine guards moved onto this hook in one change. Each of them reads
@@ -359,7 +359,7 @@ describe('nothing is ever left waiting', () => {
 describe('a screen that forgot the provider', () => {
   it('throws, rather than quietly falling back to the browser', () => {
     /*
-     * The whole point of D141 is that no screen asks the BROWSER a question.
+     * The whole point of D145 is that no screen asks the BROWSER a question.
      * A fallback to `window.confirm` would keep such a screen working — badly,
      * blocking the main thread, unstyled, suppressible by Chrome — and nobody
      * would find out. Failing loudly means it is found the first time the

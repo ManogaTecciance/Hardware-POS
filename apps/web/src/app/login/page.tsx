@@ -117,7 +117,7 @@ function LoginForm() {
           fit a laptop viewport without scrolling. */}
       <section className="flex flex-1 items-center justify-center border-l border-white/5 bg-[#1b2236] px-6 py-6">
         <div className="w-full max-w-sm">
-          {/* D140 — the raw white-filled asset ON PURPOSE, not `BrandMark`:
+          {/* D144 — the raw white-filled asset ON PURPOSE, not `BrandMark`:
               this panel is `bg-[#1b2236]` in BOTH themes, so a theme-aware mark
               would blank the logo for a light-mode visitor. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}

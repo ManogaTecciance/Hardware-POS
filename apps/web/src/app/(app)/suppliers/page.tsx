@@ -29,7 +29,7 @@ export default function SuppliersPage() {
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [filters, setFilters] = React.useState<SuppliersQuery>({ sort: 'name' });
   const [page, setPage] = React.useState(1);
-  // D139a — adjustable, like every other list; it was fixed at 20.
+  // D143a — adjustable, like every other list; it was fixed at 20.
   const [pageSize, setPageSize] = React.useState(PAGE_SIZES[0]!);
 
   const [rows, setRows] = React.useState<Supplier[]>([]);

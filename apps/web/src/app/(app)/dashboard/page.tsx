@@ -31,7 +31,7 @@ export default function DashboardPage() {
   const router = useRouter();
 
   /*
-   * D138 — this route is where login, `/` and every "back to safety" link
+   * D142 — this route is where login, `/` and every "back to safety" link
    * send people, and it is no longer everybody's. Kitchen staff may not see
    * the floor, so the service dashboard is not on their rail; landing them on
    * a screen their own navigation does not list would leave them nowhere.
@@ -67,7 +67,7 @@ export default function DashboardPage() {
    * The dispatch below is on the BUSINESS TYPE, so rendering before the answer
    * arrives falls through to the retail branch and shows a restaurant tenant
    * the retail cashier dashboard — which then fires the retail dashboard's
-   * requests. D31 already calls unresolved its own state; D138 makes it matter,
+   * requests. D31 already calls unresolved its own state; D142 makes it matter,
    * because whether this page belongs to the viewer at all is now decided from
    * the same profile, and a failed fetch would otherwise leave kitchen staff
    * parked on a screen that is neither theirs nor their workspace's.

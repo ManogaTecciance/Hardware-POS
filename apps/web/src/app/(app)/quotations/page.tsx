@@ -42,7 +42,7 @@ export default function QuotationsPage() {
   const [status, setStatus] = React.useState<QuotationStatusCode | ''>('');
   const [validity, setValidity] = React.useState<'' | 'valid' | 'expired'>('');
   const [loading, setLoading] = React.useState(true);
-  // D139a — adjustable, like every other list. It was fixed at 25, which was
+  // D143a — adjustable, like every other list. It was fixed at 25, which was
   // also the one page size in the product that no footer offered.
   const [pageSize, setPageSize] = React.useState(PAGE_SIZES[0]!);
 

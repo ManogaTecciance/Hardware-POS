@@ -86,7 +86,7 @@ export function TableBillSheet({
   }, [session, sessionId]);
 
   /*
-   * D141 — the app's own confirm, so this one is AWAITED. It has to be: the
+   * D145 — the app's own confirm, so this one is AWAITED. It has to be: the
    * native dialog froze the same thread the bill preview and the floor's
    * session poll run on, and Chrome drops it entirely after a few in a row —
    * on a busy service that silently turns the guard below into a no-op.

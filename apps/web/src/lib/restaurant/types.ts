@@ -500,7 +500,7 @@ export interface KitchenTicketView {
   branchId: string;
   roundId: string;
   /*
-   * D143 — a ticket is now the WHOLE round, so nothing routes it to one
+   * D147 — a ticket is now the WHOLE round, so nothing routes it to one
    * station and every ticket cut after that decision stores no station at
    * all. The column survives, nullable, only so tickets cut BEFORE it keep
    * the station they were genuinely sent to; no screen reads it, which is
@@ -527,7 +527,7 @@ export interface KitchenTicketView {
 }
 
 /**
- * D138b — what each of the board's three lane chips says.
+ * D142b — what each of the board's three lane chips says.
  *
  * The board fetches one lane at a time, so it can only count the lane it is
  * looking at; these come from the server so the other two chips have a number
@@ -540,7 +540,7 @@ export interface KitchenLaneCounts {
 }
 
 /**
- * D138 — one page of the kitchen's history. The standard envelope every other
+ * D142 — one page of the kitchen's history. The standard envelope every other
  * list in the product returns, over the same ticket view the board renders:
  * the history is the board's own rows read back later, not a second shape of
  * the truth.

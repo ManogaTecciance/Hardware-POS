@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 
 /**
  * The Axlo mark, in the version that is actually legible on the surface behind
- * it (D140).
+ * it (D144).
  *
  * There are two assets and each is drawn for one background:
  *

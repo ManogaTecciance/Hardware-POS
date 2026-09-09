@@ -218,7 +218,7 @@ export const FOOD_SERVICE_NAVIGATION: readonly NavGroupSpec[] = [
         label: 'Dashboard',
         icon: 'LayoutDashboard',
         /*
-         * D138 — the service dashboard is a FLOOR board: open tables, bills
+         * D142 — the service dashboard is a FLOOR board: open tables, bills
          * requested, tables needing attention, with the kitchen queue as one
          * tile among four. Until now it was the one destination in the product
          * with no gate at all, so it reached the one role that may not see the
@@ -285,7 +285,7 @@ export const FOOD_SERVICE_NAVIGATION: readonly NavGroupSpec[] = [
       },
       {
         /*
-         * D138 — where the board's Done lane used to grow without limit. The
+         * D142 — where the board's Done lane used to grow without limit. The
          * lane now answers "what did we finish today"; every ticket the branch
          * has ever bumped, today's included, is looked up here instead.
          *

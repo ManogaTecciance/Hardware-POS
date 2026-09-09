@@ -576,7 +576,7 @@ export function PosRetailCheckout() {
               className="h-8 px-2 text-danger hover:bg-danger-soft hover:text-danger"
               onClick={async () => {
                 /*
-                 * D141 — the app's own confirm, so the answer is awaited rather
+                 * D145 — the app's own confirm, so the answer is awaited rather
                  * than taken from a call that froze the page. Deliberately still
                  * the POSITIVE form this guard had: the cart is emptied only on a
                  * yes, and Cancel, Escape or the overlay leave the basket alone.

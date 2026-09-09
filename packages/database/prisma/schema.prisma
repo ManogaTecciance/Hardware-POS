@@ -3219,10 +3219,10 @@ model KitchenTicket {
   branchId String
   roundId  String
 
-  /// D143 — NULL on every ticket written since the station split was removed.
+  /// D147 — NULL on every ticket written since the station split was removed.
   /// A round now produces exactly ONE ticket holding all of its items, so a
   /// ticket no longer belongs to a station and must not claim one. Kept
-  /// nullable rather than dropped so the tickets cut before D143 keep the
+  /// nullable rather than dropped so the tickets cut before D147 keep the
   /// station they were genuinely routed to.
   stationId        String?
   primaryPrinterId String?

@@ -136,7 +136,7 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.PRODUCT_READ,
       Permission.CUSTOMER_READ,
       /*
-       * D142 — the waiter takes takeaway orders (D87), and a takeaway order
+       * D146 — the waiter takes takeaway orders (D87), and a takeaway order
        * asks who it is for. Without this the counter popup offered the name
        * and phone field, posted it, and came back "You don't have permission
        * to create a customer" — the order could only go through as a walk-in,

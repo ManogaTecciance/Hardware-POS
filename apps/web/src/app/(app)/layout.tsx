@@ -24,7 +24,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <PlatformProfileProvider>
         <SidebarProvider>
           <PosCartProvider>
-            {/* D141 — the app's own confirm/prompt, mounted once for every
+            {/* D145 — the app's own confirm/prompt, mounted once for every
                 authenticated screen so no call site reaches for the browser's. */}
             <ConfirmProvider>
             <ReturnDraftProvider>

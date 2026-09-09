@@ -42,7 +42,7 @@ export function PlatformConsoleScreen() {
       <header className="border-b border-border bg-surface">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            {/* D140 — themed surface, so the mark follows the theme. */}
+            {/* D144 — themed surface, so the mark follows the theme. */}
             <BrandMark className="h-8 w-auto" />
             <div>
               <p className="text-base font-semibold tracking-tight">Axlo POS</p>

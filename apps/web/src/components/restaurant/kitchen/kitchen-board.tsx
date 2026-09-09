@@ -29,7 +29,7 @@ interface Props {
 
 /*
  * D115/D116 — three lanes, bump-bar style, each ticket in exactly one: To
- * make (queued), Preparing (started, D113), Done (bumped TODAY — D138; the
+ * make (queued), Preparing (started, D113), Done (bumped TODAY — D142; the
  * rest of what this kitchen has ever cooked is on Ticket history). Cancelled work
  * never renders here at all: the read excludes it (D115), so a mid-cook
  * cancel simply pulls the card off the board. Cancelling — and reviewing
@@ -54,7 +54,7 @@ const FETCH_FOR: Record<Filter, 'OUTSTANDING' | 'COMPLETED_TODAY'> = {
   TO_MAKE: 'OUTSTANDING',
   PREPARING: 'OUTSTANDING',
   /*
-   * D138 — TODAY's, not everything ever bumped. The lane answers "what have we
+   * D142 — TODAY's, not everything ever bumped. The lane answers "what have we
    * finished this service"; left unbounded it grew without limit, so the
    * ticket somebody was actually looking for sank below a week of older ones.
    * The day is cut on the SHOP's midnight, which is why the server decides it
@@ -135,7 +135,7 @@ export function KitchenBoard({ session, branchId }: Props) {
   /** D83 — the ticket whose whole order is being read. */
   const [detailFor, setDetailFor] = React.useState<KitchenTicketView | null>(null);
   /*
-   * D138b — the counts for the lanes this board is NOT fetching. The active
+   * D142b — the counts for the lanes this board is NOT fetching. The active
    * lane keeps deriving its own from the list it already has, so a bump moves
    * its chip instantly instead of waiting up to five seconds for the poll.
    */
@@ -290,7 +290,7 @@ export function KitchenBoard({ session, branchId }: Props) {
   };
 
   /*
-   * D138b — every chip carries a number, whichever lane is open.
+   * D142b — every chip carries a number, whichever lane is open.
    *
    * Two sources, and the split is the point. A lane sharing the CURRENT fetch
    * is counted from the list already in hand, so an optimistic bump moves both
@@ -344,7 +344,7 @@ export function KitchenBoard({ session, branchId }: Props) {
           })}
         </ChipRow>
         {filter === 'COMPLETED' ? (
-          // D138 — the lane holds today only, so the way to everything older
+          // D142 — the lane holds today only, so the way to everything older
           // belongs beside it rather than only on the rail: the cook looking
           // for last night's ticket is looking HERE when they fail to find it.
           <Link
@@ -423,7 +423,7 @@ export function KitchenBoard({ session, branchId }: Props) {
 }
 
 /**
- * One card — one round, whole (D143).
+ * One card — one round, whole (D147).
  *
  * A card used to be one STATION's share of a round, so a single "send" broke
  * the table across as many cards as it had stations, and the grill could not
@@ -461,7 +461,7 @@ function TicketCard({
   // dish been waiting?", which a done dish no longer is.
   const urgency: Urgency = done ? 'fresh' : urgencyOf(ticket.createdAt, new Date());
   /*
-   * D143 — order, round, waiter. The station used to lead this line and no
+   * D147 — order, round, waiter. The station used to lead this line and no
    * longer exists on a ticket, so it JOINS a list rather than chaining
    * ` · ` prefixes the way it did when the first element was always there:
    * dropping the station out of the old form opened every card with a stray

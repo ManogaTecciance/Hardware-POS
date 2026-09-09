@@ -181,7 +181,7 @@ export interface WizardState {
   /**
    * KitchenStation ids linked to this product (Step 3, card C).
    *
-   * LINKED to, not routed to: since D143 a round is one ticket and nothing
+   * LINKED to, not routed to: since D147 a round is one ticket and nothing
    * consults these links at ticket time. They are recorded and still editable;
    * they no longer decide anything.
    */

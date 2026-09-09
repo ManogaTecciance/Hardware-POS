@@ -266,7 +266,7 @@ function VariantMatrix({
   // first paint on desktop is the correct table.
   const isTabletUp = useIsTabletUp();
 
-  // D141 — the app's own prompt, so both bulk actions below are AWAITED. The
+  // D145 — the app's own prompt, so both bulk actions below are AWAITED. The
   // native one blocked the main thread, which on this screen froze the very
   // matrix the operator is about to see filled in.
   const prompt = usePrompt();

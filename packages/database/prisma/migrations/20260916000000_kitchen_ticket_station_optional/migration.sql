@@ -1,4 +1,4 @@
--- D143 — a round produces ONE kitchen ticket, so a ticket no longer belongs
+-- D147 — a round produces ONE kitchen ticket, so a ticket no longer belongs
 -- to a station.
 --
 -- Additive and reversible: the column keeps every value it holds, and the

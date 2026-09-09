@@ -80,7 +80,7 @@ interface Props {
  */
 export function PosCounterWorkspace({ session, branchId, initialMode, onModeChange }: Props) {
   const router = useRouter();
-  // D141 — the app's own confirm. The two questions below are asked on a
+  // D145 — the app's own confirm. The two questions below are asked on a
   // tablet at the counter, where the browser's dialog is untappably small and
   // (after a few in a row) silently suppressed, which would answer "clear it"
   // for the operator.
@@ -302,7 +302,7 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
     if (draft.length === 0) return;
     // Still only asked past one line — a single item is one tap to re-add.
     // Awaited rather than branched on a return value because the app's confirm
-    // is a promise (D141); the guard is otherwise the one that was here.
+    // is a promise (D145); the guard is otherwise the one that was here.
     if (
       draft.length > 1 &&
       !(await confirm({
@@ -423,7 +423,7 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
 
   const resetMode = async () => {
     if (draft.length > 0) {
-      // D141 — awaited, and the early return is the point: a "no" here must
+      // D145 — awaited, and the early return is the point: a "no" here must
       // leave the cart AND the mode exactly as they were, so everything below
       // stays behind the guard rather than running while the modal is open.
       if (

@@ -96,7 +96,7 @@ export function SharedSubcategoryLibrary({
                         aria-label={`Delete ${s.name} from library`}
                         onClick={async () => {
                           // Awaited because the app's confirm is a promise, not a
-                          // blocking native dialog (D141). The guard is unchanged:
+                          // blocking native dialog (D145). The guard is unchanged:
                           // anything but an explicit yes leaves the library alone.
                           const ok = await confirm({
                             title: `Delete "${s.name}" from the shared library?`,

@@ -13,7 +13,7 @@
  *   tickets (the positive control that proves the board rendered).
  * - Both verbs drop the card optimistically — the reload must not resurrect
  *   it, so the api mocks empty their rows when the verb lands.
- * - D143's "no station on the card" is asserted against a fixture that still
+ * - D147's "no station on the card" is asserted against a fixture that still
  *   CARRIES one on the wire, so the negative has something to catch, and the
  *   pair is mutation-proved at the foot of the file.
  */
@@ -33,7 +33,7 @@ vi.mock('@/lib/auth', () => ({
   useAuth: () => ({ hasPermission: () => canUpdate }),
 }));
 
-// D138 — the Done lane links to the history screen; the real `next/link` wants
+// D142 — the Done lane links to the history screen; the real `next/link` wants
 // a router context this suite has no reason to build.
 vi.mock('next/link', () => ({
   default: ({
@@ -89,7 +89,7 @@ function ticket(overrides: Partial<KitchenTicketView> & { id: string }): Kitchen
     ticketNumber: 'KOT-000001',
     branchId: 'brn_1',
     roundId: 'rnd_1',
-    // D143 — a ticket is the whole round and is routed to no station, so
+    // D147 — a ticket is the whole round and is routed to no station, so
     // every ticket cut since that decision carries none.
     stationId: null,
     status: 'QUEUED',
@@ -115,10 +115,10 @@ function ticket(overrides: Partial<KitchenTicketView> & { id: string }): Kitchen
 }
 
 /**
- * D143 — a row that still CARRIES a station, exactly as an older server sent
+ * D147 — a row that still CARRIES a station, exactly as an older server sent
  * it (and as every ticket cut before the decision still stores).
  *
- * The negatives in the D143 suite say the board prints no station anywhere.
+ * The negatives in the D147 suite say the board prints no station anywhere.
  * Against a fixture with no station in it those would be VACUOUS — green on a
  * board that had simply been handed nothing to print, which is the shape D30
  * forbids. So the wire keeps the field the view type no longer declares: the
@@ -138,7 +138,7 @@ function withStationOnTheWire(
  * the wire carried nor the "no station" warning the old dialog printed.
  *
  * Shared so the mutation proof at the foot of this file can be run against the
- * pre-D143 markup and shown to fail: an assertion no fixture can break is not
+ * pre-D147 markup and shown to fail: an assertion no fixture can break is not
  * an assertion.
  */
 function expectNoStationAnywhere(root: HTMLElement, name = 'Grill') {
@@ -156,7 +156,7 @@ beforeEach(() => {
   doneRows = [];
   listFn.mockReset();
   laneCountsFn.mockReset();
-  // D138b — the chips the board is not fetching read these.
+  // D142b — the chips the board is not fetching read these.
   laneCountsFn.mockResolvedValue({ toMake: 0, preparing: 0, doneToday: 0 });
   startFn.mockReset();
   completeFn.mockReset();
@@ -165,7 +165,7 @@ beforeEach(() => {
   chime.mockReset();
   orderFn.mockImplementation(() => new Promise(() => undefined));
   /*
-   * D138 — the Done lane asks for `COMPLETED_TODAY`, not `COMPLETED`. Keyed on
+   * D142 — the Done lane asks for `COMPLETED_TODAY`, not `COMPLETED`. Keyed on
    * the exact token the board sends so a lane that silently reverted to the
    * unbounded fetch would serve OUTSTANDING rows here and fail loudly, rather
    * than passing on a fixture that answered both.
@@ -387,7 +387,7 @@ describe('the Details dialog', () => {
           modifierNames: [],
           specialInstructions: null,
           roundNumber: 1,
-          // Still on the wire, unread since D143 — left here so this test's
+          // Still on the wire, unread since D147 — left here so this test's
           // dialog is also handed a station it must not print.
           stationName: 'Grill',
         },
@@ -555,24 +555,24 @@ describe('the new-ticket chime', () => {
 });
 
 /*
- * D138 — the Done lane holds today, and says where the rest went.
+ * D142 — the Done lane holds today, and says where the rest went.
  *
  * The lane's own contents are the server's business (pinned in
  * kitchen-history.spec.ts and kitchen-board.spec.ts); what belongs here is that
  * the board ASKS for the day-scoped lane and offers the way out of it. Both
  * halves matter: a board that asked for the unbounded list would look identical
- * on screen, and the link is what D138 names as the mitigation for the one
+ * on screen, and the link is what D142 names as the mitigation for the one
  * thing the change takes away.
  */
 /*
- * D138b — every chip carries a number, whichever lane is open.
+ * D142b — every chip carries a number, whichever lane is open.
  *
  * The board reads one lane at a time, so it could only count the lane it was
  * on: standing on To make, "Done" carried nothing; standing on Done, the other
  * two went blank. Asserted from BOTH sides, because a fix that filled Done
  * while leaving To make empty from Done is the same bug facing the other way.
  */
-describe('the lane chips (D138b)', () => {
+describe('the lane chips (D142b)', () => {
   const chipText = (name: RegExp) =>
     screen.getByRole('button', { name }).textContent?.replace(/\s+/g, ' ') ?? '';
 
@@ -649,7 +649,7 @@ describe('the lane chips (D138b)', () => {
   });
 });
 
-describe('the Done lane is today’s (D138)', () => {
+describe('the Done lane is today’s (D142)', () => {
   it('asks the server for the day-scoped lane, not for every ticket ever bumped', async () => {
     outstandingRows = [ticket({ id: 'tk_1' })];
     doneRows = [ticket({ id: 'tk_done', status: 'COMPLETED', completedAt: minutesAgo(5) })];
@@ -691,7 +691,7 @@ describe('the Done lane is today’s (D138)', () => {
 });
 
 /*
- * D143 — one ticket per round, and nothing on it names a station.
+ * D147 — one ticket per round, and nothing on it names a station.
  *
  * A ticket used to be one STATION's share of a round, which split a single
  * send across several cards and — because there is no reachable screen for
@@ -705,7 +705,7 @@ describe('the Done lane is today’s (D138)', () => {
  * card that printed nothing at all would satisfy the negative, and a card that
  * kept the station would satisfy the positive.
  */
-describe('one ticket per round (D143)', () => {
+describe('one ticket per round (D147)', () => {
   it('names the order, the round and the waiter — and no station', async () => {
     outstandingRows = [withStationOnTheWire(ticket({ id: 'tk_1' }))];
     const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
@@ -783,7 +783,7 @@ describe('one ticket per round (D143)', () => {
     const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
     await waitFor(() => expect(screen.getByText('T1 · Main')).toBeTruthy());
-    // ONE card — the split is what D143 removed, so the count is the claim.
+    // ONE card — the split is what D147 removed, so the count is the claim.
     expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1);
     const card = screen.getByText('T1 · Main').closest('.rounded-2xl') as HTMLElement;
     expect(within(card).getByText(/2× Chicken Wings/)).toBeTruthy();
@@ -852,11 +852,11 @@ describe('one ticket per round (D143)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /*
- * The D143 negatives above are absence claims, and an absence claim is the
+ * The D147 negatives above are absence claims, and an absence claim is the
  * easiest kind of test to leave vacuous. Two things are shown here:
  *
  * 1. `expectNoStationAnywhere` genuinely fails on the markup this slice
- *    removed — the pre-D143 subtitle and the pre-D143 station chip, rendered
+ *    removed — the pre-D147 subtitle and the pre-D147 station chip, rendered
  *    verbatim below.
  * 2. `withStationOnTheWire` really does put a station in front of the
  *    component, so the assertion is looking at a fixture that COULD break it.
@@ -866,10 +866,10 @@ describe('one ticket per round (D143)', () => {
  * and restoring the station chip to ticket-order-dialog.tsx each turned this
  * file red (killed); the repo was restored from the scratch copy afterwards.
  */
-describe('the D143 negatives can actually fail', () => {
+describe('the D147 negatives can actually fail', () => {
   it('catches the subtitle this slice removed', () => {
     const { container } = render(
-      // The line as it stood before D143: station first, everything else a
+      // The line as it stood before D147: station first, everything else a
       // ` · ` prefix hanging off it.
       <p>{`Grill · RO-000010 · round 1 · Nimal`}</p>,
     );

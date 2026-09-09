@@ -145,7 +145,7 @@ describe('the pager control', () => {
   it('says where you are, in the shared footer’s own words', async () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
 
-    // D139a — the screen dropped its hand-rolled "Showing 1–25 of 80 orders"
+    // D143a — the screen dropped its hand-rolled "Showing 1–25 of 80 orders"
     // for the footer every other list renders.
     expect(await screen.findByText('1–25 of 80')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Page 1' })).toBeTruthy();
@@ -158,7 +158,7 @@ describe('the pager control', () => {
     await waitFor(() => expect(list).toHaveBeenCalled());
 
     /*
-     * D139a answers O7 the way every `main` list already answers it. Hiding the
+     * D143a answers O7 the way every `main` list already answers it. Hiding the
      * footer on a short list also hid the ROWS-PER-PAGE control, so on a quiet
      * branch the sizes could not be reached at all — which is how this was
      * reported. The paging controls go inert instead of disappearing.
@@ -376,7 +376,7 @@ describe('the rows-per-page dropdown', () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
 
     await waitFor(() => expect(screen.getByLabelText('Rows per page')).toBeTruthy());
-    // D139a — the shared footer keeps its controls and disables them rather
+    // D143a — the shared footer keeps its controls and disables them rather
     // than removing them, so the row does not change width under the reader.
     // Choosing a size that fits everything must never take the selector with it.
     expect(

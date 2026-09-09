@@ -1,5 +1,5 @@
 /**
- * D141 — clearing the retail cart asks first, and the asking is the guard.
+ * D145 — clearing the retail cart asks first, and the asking is the guard.
  *
  * This site is the POSITIVE form: `if (ok) cart.clearCart()`. Nothing about it
  * is visible in the DOM, so the only way to tell a real guard from a button
@@ -158,7 +158,7 @@ function renderCheckout() {
 /** The cart header's Clear — not the search box's "Clear search". */
 const clearButton = () => screen.getByRole('button', { name: 'Clear' });
 
-describe('PosRetailCheckout — clearing the cart (D141)', () => {
+describe('PosRetailCheckout — clearing the cart (D145)', () => {
   it('asks before clearing, and clears when the question is answered yes', async () => {
     renderCheckout();
 

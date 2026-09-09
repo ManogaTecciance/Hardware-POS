@@ -691,7 +691,7 @@ export function OrdersPage({ session, branchId }: Props) {
       )}
 
       {/*
-        D139a — the SHARED footer, like every other list, replacing this
+        D143a — the SHARED footer, like every other list, replacing this
         screen's own rows-per-page + bare Previous/Next pair. Numbered paging
         rather than infinite scroll: this list is read against a docket in hand,
         and "I was on page 3" has to survive a refresh — which is why the page

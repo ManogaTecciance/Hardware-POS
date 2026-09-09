@@ -1,5 +1,5 @@
 /**
- * D141 — "Reset to defaults" asks before it resets, in the app's own dialog.
+ * D145 — "Reset to defaults" asks before it resets, in the app's own dialog.
  *
  * ## Why this test exists
  *
@@ -168,7 +168,7 @@ const SettingsPage = (await import('./page')).default;
 const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))));
 
 /**
- * D141 — the page reads `useConfirm`, which throws outside the provider the
+ * D145 — the page reads `useConfirm`, which throws outside the provider the
  * authenticated shell mounts. Rendering it here is what makes the dialog real
  * rather than mocked, so the guard is exercised end to end.
  */
@@ -204,7 +204,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('D141 — the document reset asks before it resets', () => {
+describe('D145 — the document reset asks before it resets', () => {
   it('asks first: the dialog is on screen and nothing has been reset yet', async () => {
     await openSettings();
     await clickResetToDefaults();

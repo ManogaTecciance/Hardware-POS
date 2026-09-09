@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 /**
- * The app's own confirm and prompt (D141), replacing `window.confirm` and
+ * The app's own confirm and prompt (D145), replacing `window.confirm` and
  * `window.prompt`.
  *
  * The native dialogs had to go for reasons that are not cosmetic. They are

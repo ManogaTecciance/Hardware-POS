@@ -368,13 +368,13 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/branches/:branchId/kitchen-printers/:printerId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  // D138b — the three lane counts, so every chip on the board carries one.
+  // D142b — the three lane counts, so every chip on the board carries one.
   'GET /restaurant/branches/:branchId/kitchen-tickets/counts': {
     module: 'KITCHEN',
     guard: 'ENFORCED',
     scope: T,
   },
-  // D138 — the kitchen's own history, paged and searchable. KITCHEN like the
+  // D142 — the kitchen's own history, paged and searchable. KITCHEN like the
   // board it relieves; reading back what was cooked is the same claim as
   // reading what is cooking.
   'GET /restaurant/branches/:branchId/kitchen-tickets/history': {

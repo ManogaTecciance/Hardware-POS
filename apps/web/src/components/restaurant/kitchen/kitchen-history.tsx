@@ -28,7 +28,7 @@ interface Props {
 const DEFAULT_PAGE_SIZE = 20;
 
 /**
- * D138 — the kitchen's history: every ticket this branch has bumped.
+ * D142 — the kitchen's history: every ticket this branch has bumped.
  *
  * The board's Done lane answers "what have we finished this service" and is
  * cut to the shop's day. This answers the question that outgrew it — "when did
@@ -40,7 +40,7 @@ const DEFAULT_PAGE_SIZE = 20;
  * No polling. A record of what already happened does not move under the reader,
  * and a five-second refresh would fight the operator's paging.
  *
- * D143 — six columns, not seven. A ticket is a whole round rather than one
+ * D147 — six columns, not seven. A ticket is a whole round rather than one
  * station's share of it, so there is no station to name here and no station
  * leg in the search: the term still matches the ticket number, the order
  * number, where it went and the dishes on it.
@@ -133,7 +133,7 @@ export function KitchenHistory({ session, branchId }: Props) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search ticket, order, table, or dish…"
-          // The server refuses a longer term with a 400 (D138's DTO). Stopping
+          // The server refuses a longer term with a 400 (D142's DTO). Stopping
           // it here turns a pasted paragraph into a search that finds nothing,
           // rather than into an error banner.
           maxLength={120}

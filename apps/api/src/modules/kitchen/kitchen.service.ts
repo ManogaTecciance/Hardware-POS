@@ -35,7 +35,7 @@ export interface KitchenOrderView {
 }
 
 /**
- * D138b — what each lane chip says, for ALL THREE lanes at once.
+ * D142b — what each lane chip says, for ALL THREE lanes at once.
  *
  * The board fetches one lane's tickets at a time, so it can only count the
  * lane it is looking at; the other two chips had no number to show. These are
@@ -54,9 +54,9 @@ export interface KitchenTicketView {
   branchId: string;
   roundId: string;
   /*
-   * D143 — NULL on every ticket cut since the per-station split was removed:
+   * D147 — NULL on every ticket cut since the per-station split was removed:
    * a round is ONE ticket now, and a ticket that belongs to no station must
-   * not claim one. Non-null only on tickets raised BEFORE D143, which keep
+   * not claim one. Non-null only on tickets raised BEFORE D147, which keep
    * the station they were genuinely routed to.
    */
   stationId: string | null;
@@ -107,7 +107,7 @@ export class KitchenService {
 
   /**
    * The zone the business reckons its days in — the same read the dashboard's
-   * "today" makes (D138). Cutting the Done lane on the SERVER's midnight would,
+   * "today" makes (D142). Cutting the Done lane on the SERVER's midnight would,
    * on a UTC host serving a Colombo kitchen, empty the lane at half past five
    * in the morning and keep the last of the night's tickets on it until then.
    */
@@ -128,7 +128,7 @@ export class KitchenService {
   }
 
   /**
-   * D143 — ONE ticket per round, carrying every item of that round.
+   * D147 — ONE ticket per round, carrying every item of that round.
    *
    * It used to be one ticket per KITCHEN STATION the round's items routed to,
    * so a single order for a single round arrived on the board as several
@@ -191,7 +191,7 @@ export class KitchenService {
         tenantId,
         branchId,
         roundId,
-        // D143 — written explicitly rather than left to the column default,
+        // D147 — written explicitly rather than left to the column default,
         // because "this ticket belongs to no station" is the claim being
         // made, not an omission.
         stationId: null,
@@ -234,7 +234,7 @@ export class KitchenService {
    * it (any ticket status, newest first) so the pass can SEE what was
    * called off rather than having it vanish mid-cook.
    *
-   * D138 — `COMPLETED_TODAY` is the third pseudo-filter, and it is what the
+   * D142 — `COMPLETED_TODAY` is the third pseudo-filter, and it is what the
    * board's Done lane asks for now: the same set as `COMPLETED`, cut to the
    * shop's calendar day. `COMPLETED` itself is UNCHANGED — the KDS route, a
    * bookmarked query and the history screen all still mean "every ticket ever
@@ -242,7 +242,7 @@ export class KitchenService {
    * integration assertions green while they stopped proving anything, because
    * their tickets are completed seconds before they are read (D30).
    *
-   * D138b — extracted from the list so the lane COUNTS are counted over
+   * D142b — extracted from the list so the lane COUNTS are counted over
    * exactly the rows the lane lists. Two copies of "what is outstanding" is
    * how a chip comes to promise three tickets the list does not have.
    */
@@ -302,7 +302,7 @@ export class KitchenService {
   }
 
   /**
-   * D68/D115/D138 — the board's read, one lane at a time.
+   * D68/D115/D142 — the board's read, one lane at a time.
    */
   async listTicketsForBranch(
     tenantId: string,
@@ -318,7 +318,7 @@ export class KitchenService {
        * that has been waiting longest is the one that goes next.
        *
        * Done and Cancelled read newest first — they answer "what just
-       * happened", not "what is next". D138: the day-scoped lane sorts by when
+       * happened", not "what is next". D142: the day-scoped lane sorts by when
        * the food was FINISHED, because that is now what the lane is about; a
        * ticket raised at 11:00 and bumped at 14:00 belongs above one raised at
        * 13:00 and bumped at 13:30, which sorting by `createdAt` got backwards.
@@ -341,7 +341,7 @@ export class KitchenService {
   }
 
   /**
-   * D138b — the three lane counts in one round trip.
+   * D142b — the three lane counts in one round trip.
    *
    * `To make` and `Preparing` are the client's split of the OUTSTANDING lane
    * (not started / started), so they are counted the same way here: the
@@ -374,7 +374,7 @@ export class KitchenService {
   }
 
   /**
-   * D138 — every ticket the branch has ever bumped, newest first.
+   * D142 — every ticket the branch has ever bumped, newest first.
    *
    * The board's Done lane answers "what did we finish today"; this answers
    * "when did we finish that, and who was on it" — a different question, asked
@@ -501,7 +501,7 @@ export class KitchenService {
    * every non-voided item on the order, labelled with the round it came in
    * on, so the pass can see the table as the guests will.
    *
-   * D143 narrowed what this adds, and did not remove it: a ticket is now the
+   * D147 narrowed what this adds, and did not remove it: a ticket is now the
    * whole ROUND rather than one station's slice of it, so the extra a reader
    * gets here is the order's OTHER rounds. The per-item station annotation is
    * gone with the split — a ticket belongs to no station to annotate from.
@@ -824,7 +824,7 @@ export class KitchenTicketNotFoundError extends Error {
  */
 const TICKET_INCLUDE = {
   items: true,
-  // D143 — no `station`: a ticket cut since the split was removed belongs to
+  // D147 — no `station`: a ticket cut since the split was removed belongs to
   // none, and the board, the history table and the ticket dialog have all
   // stopped naming one.
   completedBy: { select: { name: true } },

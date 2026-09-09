@@ -1,5 +1,5 @@
 /**
- * Shared subcategory library — delete confirmation (D141, D30).
+ * Shared subcategory library — delete confirmation (D145, D30).
  *
  * The delete button drops a subcategory from the shared library AND from every
  * category it is assigned to, so it is guarded by a confirm. That guard moved
@@ -51,7 +51,7 @@ const { SharedSubcategoryLibrary } = await import('./shared-subcategory-library'
 
 const categories = [{ id: 'cat_tiles', name: 'Tiles' }];
 
-/** Fails the run if anything still reaches for the browser dialog (D141). */
+/** Fails the run if anything still reaches for the browser dialog (D145). */
 const nativeConfirm = vi.fn<(message?: string) => boolean>(() => true);
 
 beforeEach(() => {
