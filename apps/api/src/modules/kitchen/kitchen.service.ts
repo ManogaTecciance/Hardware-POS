@@ -374,22 +374,32 @@ export class KitchenService {
   }
 
   /**
-   * D142 — every ticket the branch has ever bumped, newest first.
+   * D142/D150 — every ticket the branch holds, whatever lane it is in.
    *
    * The board's Done lane answers "what did we finish today"; this answers
-   * "when did we finish that, and who was on it" — a different question, asked
-   * days or weeks later, over a set that only grows. So it pages in SQL and
-   * searches in SQL rather than handing the pass a list that reaches a
-   * thousand rows and stops being scrollable.
+   * "what has this kitchen had on, when was it finished, and who was on it" —
+   * a different question, asked days or weeks later, over a set that only
+   * grows. So it pages in SQL and searches in SQL rather than handing the pass
+   * a list that reaches a thousand rows and stops being scrollable.
    *
    * TODAY'S TICKETS ARE IN IT. The lane and this list overlap deliberately:
    * splitting them by date would make "the ticket I bumped an hour ago"
    * findable in neither place once the lane scrolled, which is the failure the
    * screen exists to prevent.
    *
-   * Cancelled work is excluded on the same reasoning as `COMPLETED` (D115):
-   * it has its own lane on the board, and a history of what the kitchen
-   * COOKED should not be padded with what it was told to stop cooking.
+   * D150 — AND UNFINISHED TICKETS ARE IN IT. This read narrowed to `COMPLETED`
+   * until now, so a ticket that was still To make or Preparing appeared on no
+   * row of the history screen at all: the one list in the product that carries
+   * no date bound could not be used to find live work. The screen was always
+   * built for it — it badges every row with its own status and prints "—" for
+   * a null `completedAt` and a missing completer — and this clause was the
+   * only thing keeping those rows out.
+   *
+   * Cancelled work is still excluded, on the same reasoning as `COMPLETED`
+   * (D115): it has its own lane on the board, and a history of what the
+   * kitchen COOKED should not be padded with what it was told to stop cooking.
+   * D150 widened the STATUS filter and nothing else — the round, order and
+   * takeaway cancellation clauses below are exactly as they were.
    */
   async listHistoryForBranch(
     tenantId: string,
@@ -400,7 +410,11 @@ export class KitchenService {
     const where: Prisma.KitchenTicketWhereInput = {
       tenantId,
       branchId,
-      status: KitchenTicketStatus.COMPLETED,
+      /*
+       * D150 — no `status` narrowing, deliberately. Queued, in progress and
+       * completed are one list here; the lanes are the BOARD's split of the
+       * work in front of the pass, not a division of the kitchen's record.
+       */
       round: {
         status: { not: OrderRoundStatus.CANCELLED },
         order: {
@@ -448,12 +462,26 @@ export class KitchenService {
         /*
          * By when the food was DONE, not when the ticket was raised: this list
          * is read as a record of service, and a ticket raised early and bumped
-         * late belongs where the kitchen finished it. `completedAt` is never
-         * null on a COMPLETED row — `completeTicket` writes both in one update
-         * and `reopenTicket` clears both — but the id tiebreak keeps the order
-         * total anyway, so a page boundary can never repeat or skip a row.
+         * late belongs where the kitchen finished it.
+         *
+         * D150 — an unfinished ticket has NO `completedAt` to sort by, so
+         * `nulls: 'first'` decides where it lands rather than leaving it to the
+         * engine's default. Live work goes to the TOP rather than being
+         * interleaved by when it was raised: the list pages twenty at a time,
+         * and a ticket still sitting on the pass, buried three pages back by
+         * its raise time, is precisely what this screen was asked to surface.
+         * A stuck ticket at the top of the history is useful, not noise.
+         *
+         * `createdAt` then orders that pending block newest-raised first — the
+         * rows share a null sort key and would otherwise come back in whatever
+         * order the plan produced — and the id keeps the whole order TOTAL, so
+         * a page boundary can never repeat or skip a row.
          */
-        orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+        orderBy: [
+          { completedAt: { sort: 'desc', nulls: 'first' } },
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ],
         skip: query.skip,
         take: query.take,
         include: TICKET_INCLUDE,

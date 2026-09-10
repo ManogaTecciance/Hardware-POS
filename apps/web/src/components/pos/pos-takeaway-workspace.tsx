@@ -314,7 +314,6 @@ export function PosTakeawayWorkspace({ session, branchId }: Props) {
           router.push(`/pos?mode=${next.toLowerCase()}`);
         }}
         branchName={session.branchName}
-        registerName={session.registerName}
         workspace={workspace}
         rail={rail}
       />

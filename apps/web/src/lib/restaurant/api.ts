@@ -733,7 +733,8 @@ export const kitchen = {
     );
   },
   /**
-   * D142 — every ticket this branch has bumped, today's included.
+   * D142 — every ticket this branch holds, today's included. D150 widened it
+   * past the Done lane: work still on the pass is on this screen too.
    *
    * A sibling of `listTickets` rather than an option on it: this one pages and
    * searches, so it answers with an envelope where the board answers with a

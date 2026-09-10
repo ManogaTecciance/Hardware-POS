@@ -10,7 +10,6 @@ interface Props {
   mode: PosMode;
   onModeChange: (mode: PosMode) => void;
   branchName: string;
-  registerName: string;
   /** Left column — menu workspace. */
   workspace: React.ReactNode;
   /** Right column — the mode's order rail. */
@@ -24,14 +23,15 @@ interface Props {
  * sticky right rail. Every mode composes its own workspace (usually the
  * menu picker) and rail body inside this shell.
  */
-export function PosShell({ mode, onModeChange, branchName, registerName, workspace, rail, context }: Props) {
+export function PosShell({ mode, onModeChange, branchName, workspace, rail, context }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <PageHeader
-          title="POS"
-          description={`${branchName} · ${registerName}`}
-        />
+        {/* D151 — the branch, and nothing else. This read
+            "Main Dining · Counter 1": the counter half named a register the
+            system does not actually track, so it was a seed value dressed up
+            as context. The branch IS a real record and stays. */}
+        <PageHeader title="POS" description={branchName} />
         <PosModeSelector value={mode} onChange={onModeChange} />
       </div>
       {context ? (

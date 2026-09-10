@@ -231,10 +231,9 @@ export function RestaurantDashboard({ session }: { session: Session }) {
      */
     <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
       <div className="shrink-0">
-        <PageHeader
-          title="Service dashboard"
-          description={`${session.branchName} · ${session.registerName}`}
-        />
+        {/* D151 — the branch alone; the register half named a counter the
+            system does not track. */}
+        <PageHeader title="Service dashboard" description={session.branchName} />
       </div>
 
       {state.status === 'error' ? (

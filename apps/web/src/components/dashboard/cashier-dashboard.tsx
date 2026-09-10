@@ -122,20 +122,20 @@ export function CashierDashboard({
   ];
 
   const greeting = greetingFor(new Date().getHours());
-  const registerReady = session.registerName && session.registerName !== '—';
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <DashboardHero
         greeting={greeting}
         name={firstNameOf(session.user.name)}
-        subtitle={
-          registerReady
-            ? `${session.registerName} is ready — start a sale or pick up where you left off.`
-            : 'Start a sale or pick up where you left off.'
-        }
+        /*
+         * D151 — no register anywhere on this hero. It used to open
+         * "Counter 1 is ready…" and carry the same name again as a meta chip.
+         * The system does not track counters, so both were dressing a seed
+         * value as fact; the greeting says the same thing without it.
+         */
+        subtitle="Start a sale or pick up where you left off."
         meta={[
-          { key: 'register', icon: MonitorSmartphone, label: session.registerName },
           ...(data.lastUpdatedLabel
             ? [{ key: 'updated', icon: Clock3, label: `Updated ${data.lastUpdatedLabel}` }]
             : []),

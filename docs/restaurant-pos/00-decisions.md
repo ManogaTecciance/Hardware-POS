@@ -7685,6 +7685,93 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D151 — the header loses its search bar, and the screen stops naming a counter
+
+Two PO requests on 2026-09-10, both removals of things that were taking up room
+without earning it.
+
+**No search bar beside the theme toggle.** The header carried a "Search or jump
+to… ⌘K" button. It is gone. The palette is NOT gone: `CommandPalette` is now
+headless — it mounts the Ctrl/Cmd+K listener and the dialog and draws nothing
+until asked. The request was about the bar, and the two are separable; the
+keyboard route costs no header space, which is what was being reclaimed.
+
+What it costs is discoverability, and that is worth saying plainly: nothing on
+screen now advertises that Ctrl+K exists, so anyone who does not already know
+will not find out. UI-013 and UI-014 still describe the shortcut and still
+pass. If the palette should go entirely, that is a second decision and a
+larger one — the gate, the command list and their specs all hang off it.
+
+`show()` went with the button rather than being left as an opener nothing
+calls, and a render spec now pins both halves: the component renders literally
+nothing, and the shortcut still opens, closes, toggles and navigates. Each
+half is the other's positive control, which is what keeps "renders nothing"
+from passing for a component that was gutted.
+
+**No counter on any screen.** The POS header read "Main Dining · Counter 1".
+The PO's reason: counters are not tracked in this system, so the second half
+was a seed value dressed as context. `registerName` is dropped from `PosShell`
+entirely rather than left unused, so no counter is threaded through the POS at
+all; the service dashboard's header loses the same suffix, and the retail
+cashier hero loses both the "Counter 1 is ready…" greeting and the register
+meta chip.
+
+**The branch name STAYS.** A Branch is a real record with real data hanging off
+it, and on a multi-branch tenant it is the one piece of context that answers
+"whose till am I looking at". Only the register half was fiction. If the branch
+should go too, say so — it is one string per screen.
+
+Two things deliberately untouched. The cashier dashboard's "Register Health"
+card shows shift state and QuickBooks sync, never a register NAME, so it is
+about tracked state and stays. And `registerName` still reaches the printed A4
+document through `document-template-service`; a document recording which till
+took a sale is a different question from a page header decorating itself, and
+changing what a document prints is its own decision (D16).
+
+### D150 — the ticket history holds every lane, not only Done
+
+PO, 2026-09-10: "To make and preparing tickets are not showing in the ticket
+history."
+
+One clause caused it. `listHistoryForBranch` carried `status: COMPLETED`, so a
+screen advertised as the kitchen's record only ever held bumped tickets; a
+queued or in-progress ticket appeared NOWHERE — not on the history, and on the
+board only until someone changed lanes. The lanes are the BOARD's split, a way
+of organising work in front of a cook. They were never meant to divide the
+kitchen's record, and D142 did not intend this.
+
+**Order.** A pending ticket has no `completedAt` to sort by, so the list is
+`completedAt DESC NULLS FIRST, createdAt DESC, id DESC`: unfinished first,
+newest-raised first within that block, then finished newest-first, with the id
+keeping the order total so a page boundary can neither repeat nor skip a row.
+Live work at the top rather than interleaved by raise time, because the list
+pages twenty at a time and a ticket still on the pass buried three pages back
+is the thing this change was asked to surface. Postgres already defaults DESC
+to NULLS FIRST; the clause is spelled out so the intent survives a refactor,
+and the spec fails if it is removed.
+
+The consequence, accepted: the pending block is unbounded and sits above all
+finished work. A branch carrying stale never-bumped tickets pins them to page
+one indefinitely. That is the trade — a stuck ticket at the top is a thing
+someone should see.
+
+**What did not move.** No date bound, which is the whole point of the screen
+(D142). The D115 cancellation exclusions, all three legs. The Done LANE, still
+cut to the shop's own day. The search legs, the paging and the view mapping.
+
+**A test gap this change created and closed.** While the read said `COMPLETED`,
+a cancelled takeaway whose ticket was never bumped was held out for free by the
+status clause. Widening removed that cover and made the takeaway-profile leg
+of D115 load-bearing for the first time — and nothing asserted it: deleting it
+left every unit and integration test green. Two independent verifiers found the
+same surviving mutant. The D115 unit test now asserts the exact pair, and the
+mutant dies. This is the D30 failure mode exactly: an exclusion that would pass
+if it were deleted.
+
+No index was added for the new sort over a now strictly larger set, and no
+migration was made — the repo forbids one without a decision record, and this
+is not that record.
+
 ### D149 — merging `merge/restaurant-changes`: how each clash was decided
 
 The ten commits that landed on the integration branch while this one was open

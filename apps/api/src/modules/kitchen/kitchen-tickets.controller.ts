@@ -65,8 +65,13 @@ export class KitchenTicketsController {
   }
 
   /**
-   * D142 — the kitchen's own history: every ticket this branch has bumped,
-   * today's included, paged and searchable.
+   * D142 — the kitchen's own history: every ticket this branch holds, paged
+   * and searchable, today's included.
+   *
+   * D150 — "holds", not "has bumped". The read carried `status: COMPLETED`
+   * until the PO pointed out that To make and Preparing appeared nowhere on
+   * the screen; the lanes are the BOARD's split, not a division of the
+   * kitchen's record.
    *
    * Declared ABOVE the `:ticketId` routes because `history` would otherwise be
    * a candidate ticket id, and KOT_VIEW like the board: this is the same

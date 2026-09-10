@@ -101,6 +101,48 @@ function page(items: KitchenTicketView[], over: Record<string, unknown> = {}) {
   return { items, total: items.length, page: 1, pageSize: 20, ...over };
 }
 
+/** The row whose Ticket cell names this ticket. */
+function rowFor(ticketNumber: string): HTMLElement {
+  return screen.getByText(ticketNumber).closest('tr')! as HTMLElement;
+}
+
+/**
+ * The cell under a NAMED column, located through the header rather than a
+ * hard-coded index.
+ *
+ * The D150 assertions turn on which cell holds the dash, and a positional index
+ * quietly reads the wrong one the moment the columns move — this table has
+ * already lost one (D147). Throwing rather than returning nothing is D30's rule
+ * for an analyser handed no input: a missing column must fail the test, not
+ * turn it into an assertion about `undefined`.
+ */
+function cellUnder(row: HTMLElement, column: string): HTMLElement {
+  const headers = screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim());
+  const index = headers.indexOf(column);
+  if (index < 0) throw new Error(`no “${column}” column: this assertion would inspect nothing`);
+  const cell = row.querySelectorAll('td')[index];
+  if (!cell) throw new Error(`no cell under “${column}”: this assertion would inspect nothing`);
+  return cell as HTMLElement;
+}
+
+/** A clock time, however the runtime's locale data spaces or prefixes it. */
+const A_TIME = /\d{1,2}:\d{2}/;
+
+/**
+ * D150 — everything a ticket still on the pass must NOT claim: no finish
+ * stamp, nobody who bumped it, no turnaround.
+ *
+ * Shared so the mutation proof at the foot of this file can run it against a
+ * row that DOES carry a finish and show it fail — a dash asserted on a table
+ * that prints no times anywhere would be green for the wrong reason.
+ */
+function expectNoFinish(row: HTMLElement) {
+  expect(cellUnder(row, 'Finished').textContent?.trim()).toBe('—');
+  expect(cellUnder(row, 'Finished').textContent ?? '').not.toMatch(A_TIME);
+  expect(cellUnder(row, 'By').textContent?.trim()).toBe('—');
+  expect(within(row).queryByText(/on the pass/)).toBeNull();
+}
+
 /** The query object of the last request the screen made. */
 function lastQuery(): { page?: number; pageSize?: number; search?: string } {
   const call = history.mock.calls.at(-1);
@@ -159,12 +201,24 @@ describe('what the screen shows', () => {
     expectNoStationAnywhere(row);
   });
 
-  it('says nothing is here yet when the branch has finished nothing', async () => {
+  /*
+   * D150 rewrote this claim. The empty state used to read "No tickets have been
+   * finished in this branch yet", which was true only while the list was
+   * filtered to COMPLETED; it now holds every lane, so that sentence would tell
+   * a kitchen with three rounds on the pass that it had nothing — and hide the
+   * fact that this screen would have shown them.
+   */
+  it('says nothing is here yet when the kitchen has been sent nothing', async () => {
     render(<KitchenHistory session={SESSION} branchId="brn_1" />);
 
     await waitFor(() =>
-      expect(screen.getByText(/No tickets have been finished in this branch yet/)).toBeTruthy(),
+      expect(screen.getByText(/No tickets have reached this kitchen yet/)).toBeTruthy(),
     );
+    const empty = screen.getByText(/No tickets have reached this kitchen yet/);
+    // NEGATIVE (D150) — the empty state does not promise a record of FINISHED
+    // work. Scoped to the cell, because the table legitimately has a "Finished"
+    // column header and a screen-wide match would be red for the wrong reason.
+    expect(empty.textContent ?? '').not.toMatch(/finish/i);
     // NEGATIVE — the "no matches" wording belongs to a search, not to an empty
     // kitchen; a screen that showed it here would tell a new branch its history
     // was filtered away.
@@ -178,7 +232,7 @@ describe('what the screen shows', () => {
     await type('lamprais');
 
     await waitFor(() => expect(screen.getByText(/No tickets match “lamprais”/)).toBeTruthy());
-    expect(screen.queryByText(/have been finished in this branch yet/)).toBeNull();
+    expect(screen.queryByText(/have reached this kitchen yet/)).toBeNull();
   });
 
   it('surfaces a failure instead of an empty table that looks like no history', async () => {
@@ -279,6 +333,100 @@ describe('when a ticket started, and how long it was on the pass', () => {
 
     await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
     expect(screen.queryByText(/on the pass/)).toBeNull();
+  });
+});
+/*
+ * D150 — the history holds every LANE, not just Done.
+ *
+ * The server used to filter this list to COMPLETED, so a round still queued or
+ * on the pass appeared on this screen nowhere at all: an operator searching a
+ * ticket number was told no ticket matched while it hung on the board in front
+ * of them. The table was always built for it — the badge names the lane, and an
+ * unfinished row simply has no finish stamp and nobody to name — but nothing
+ * here PROVED that, because every fixture in this file was COMPLETED.
+ *
+ * The three lanes are rendered into ONE table deliberately. A dash asserted on
+ * a table where nothing ever prints a finish time is the vacuous shape D30
+ * forbids: it would stay green if the Finished column were deleted outright.
+ * Beside a bumped row that does print its stamp, the dash means what it says.
+ * Proven by mutation at the foot of this file.
+ */
+describe('every lane, not just Done (D150)', () => {
+  /** Raised, not yet started — "To make" on the board. */
+  const queued = () =>
+    ticket({
+      id: 'tkt_q',
+      ticketNumber: 'K-000201',
+      status: 'QUEUED',
+      completedAt: null,
+      completedByName: null,
+      createdAt: '2026-09-08T13:55:00.000Z',
+    });
+
+  /** Started, still on the pass — "Preparing". */
+  const preparing = () =>
+    ticket({
+      id: 'tkt_p',
+      ticketNumber: 'K-000202',
+      status: 'IN_PROGRESS',
+      completedAt: null,
+      completedByName: null,
+      createdAt: '2026-09-08T13:50:00.000Z',
+    });
+
+  /** Unfinished work first, exactly as the server now orders it (D150). */
+  async function renderAllThreeLanes() {
+    history.mockResolvedValue(page([queued(), preparing(), ticket()]));
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
+  }
+
+  it('names the lane on every row — To make, Preparing and Done', async () => {
+    await renderAllThreeLanes();
+
+    expect(within(rowFor('K-000201')).getByText('To make')).toBeTruthy();
+    expect(within(rowFor('K-000202')).getByText('Preparing')).toBeTruthy();
+    expect(within(rowFor('K-000123')).getByText('Done')).toBeTruthy();
+    /*
+     * NEGATIVE — each row carries its OWN lane. The labels come from one record
+     * keyed by status, so the way this breaks is every row wearing the same
+     * badge: a screen that hard-coded "Done" (which is all the list used to
+     * contain) would pass the three positives above one at a time and fail
+     * here.
+     */
+    expect(within(rowFor('K-000201')).queryByText('Done')).toBeNull();
+    expect(within(rowFor('K-000202')).queryByText('Done')).toBeNull();
+    expect(within(rowFor('K-000123')).queryByText('To make')).toBeNull();
+    expect(within(rowFor('K-000123')).queryByText('Preparing')).toBeNull();
+  });
+
+  it('leaves Finished and By empty while a ticket is on the pass — and fills them once it is bumped', async () => {
+    await renderAllThreeLanes();
+
+    for (const number of ['K-000201', 'K-000202']) {
+      const row = rowFor(number);
+      /*
+       * POSITIVE first. The row DOES print a stamp — when the ticket reached
+       * the kitchen — so the dashes below are a statement about the Finished
+       * and By cells, not about a row that renders no times at all.
+       */
+      expect(cellUnder(row, 'Started').textContent ?? '').toMatch(A_TIME);
+      expect(within(row).getByText(/2 × Chicken Kottu/)).toBeTruthy();
+      // NEGATIVE — no finish, nobody on it, no turnaround.
+      expectNoFinish(row);
+    }
+
+    /*
+     * …and the other direction, in the SAME table: the bumped ticket prints its
+     * finish stamp, who bumped it and how long it was on the pass. This is what
+     * makes the dashes above meaningful rather than a fixture that never had a
+     * value to show.
+     */
+    const done = rowFor('K-000123');
+    expect(cellUnder(done, 'Finished').textContent ?? '').toMatch(A_TIME);
+    expect(cellUnder(done, 'Finished').textContent?.trim()).not.toBe('—');
+    expect(within(done).getByText(/25 min on the pass/)).toBeTruthy();
+    expect(cellUnder(done, 'By').textContent?.trim()).toBe('Chef Perera');
   });
 });
 
@@ -448,7 +596,7 @@ describe('two requests in the air', () => {
     // NEGATIVE — the empty-state wording would be a false statement about the
     // kitchen; the table says the history is unavailable and leaves the reason
     // to the banner.
-    expect(screen.queryByText(/have been finished in this branch yet/)).toBeNull();
+    expect(screen.queryByText(/have reached this kitchen yet/)).toBeNull();
     expect(screen.getByText('History unavailable.')).toBeTruthy();
   });
 });
@@ -525,7 +673,7 @@ describe('the columns (D147)', () => {
   it('spans the empty state across every column the header actually has', async () => {
     render(<KitchenHistory session={SESSION} branchId="brn_1" />);
 
-    const cell = await screen.findByText(/No tickets have been finished in this branch yet/);
+    const cell = await screen.findByText(/No tickets have reached this kitchen yet/);
     const td = cell.closest('td')!;
     expect(Number(td.getAttribute('colspan'))).toBe(headerNames().length);
   });
@@ -616,3 +764,87 @@ describe('the D147 negatives can actually fail', () => {
   });
 });
 
+/*
+ * D150's dashes are absence claims too, and the failure mode to rule out is the
+ * dash that is green because the assertion read the wrong cell — or no cell.
+ *
+ * Two things are shown inline: `expectNoFinish` genuinely fails on a row that
+ * DOES carry a finish, and `cellUnder` refuses to inspect a table that has lost
+ * the column it was asked about (D30's "fail when the analyser inspects
+ * nothing") rather than quietly asserting about `undefined`.
+ *
+ * Beyond these, the real component was mutated in a scratch copy outside the
+ * repo and this spec re-run:
+ *
+ *  1. Finished always printing a stamp (`formatFinishedStamp(t.completedAt ??
+ *     t.createdAt)`) — KILLED, both pending rows failed.
+ *  2. By falling back to the waiter (`t.completedByName ?? t.waiterName`) —
+ *     KILLED, both pending rows failed.
+ *  3. The badge hard-coded to `KITCHEN_TICKET_STATUS_LABELS.COMPLETED`, which
+ *     is what a Done-only list could have got away with — KILLED.
+ *  4. The turnaround line rendered unconditionally — KILLED.
+ *  5. The empty state reverted to "No tickets have been finished in this branch
+ *     yet." — KILLED.
+ *  6. The Finished column removed outright, header and cell — KILLED by
+ *     `cellUnder`, which threw rather than passing the dash by default.
+ *
+ * The repo was restored from the scratch copy afterwards.
+ */
+describe('the D150 dashes can actually fail', () => {
+  /** A table shaped like the real one, whose single row is FINISHED. */
+  function finishedRow(): HTMLElement {
+    const { container } = render(
+      <table>
+        <thead>
+          <tr>
+            {['Ticket', 'Where', 'Items', 'Started', 'Finished', 'By'].map((h) => (
+              <th key={h} scope="col">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>K-000201</td>
+            <td>T3 · Garden</td>
+            <td>2 × Chicken Kottu</td>
+            <td>1:40 PM</td>
+            <td>
+              2:05 PM<div>25 min on the pass</div>
+            </td>
+            <td>Chef Perera</td>
+          </tr>
+        </tbody>
+      </table>,
+    );
+    return container.querySelector('tbody tr')! as HTMLElement;
+  }
+
+  it('catches a finish stamp on a row that is supposed to be on the pass', () => {
+    expect(() => expectNoFinish(finishedRow())).toThrow();
+  });
+
+  it('refuses to inspect a table that has lost the column it was asked about', () => {
+    const { container } = render(
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Ticket</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>K-000201</td>
+          </tr>
+        </tbody>
+      </table>,
+    );
+    const row = container.querySelector('tbody tr')! as HTMLElement;
+
+    // Not "the Finished cell is empty, so the dash holds" — there is no such
+    // cell, and a test that carried on would be asserting about nothing.
+    expect(() => cellUnder(row, 'Finished')).toThrow(/would inspect nothing/);
+    expect(() => cellUnder(row, 'By')).toThrow(/would inspect nothing/);
+  });
+});

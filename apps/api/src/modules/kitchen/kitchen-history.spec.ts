@@ -19,6 +19,12 @@ import type { SettingsService } from '../settings/settings.service';
  * - The history pages and searches in SQL, and TODAY'S TICKETS ARE IN IT. A
  *   test that only asserted "old tickets appear" would also pass for a screen
  *   that excluded today, which is the one thing the brief calls out.
+ * - D150 — the history holds UNFINISHED tickets too. It narrowed to
+ *   `COMPLETED`, so a ticket still To make or Preparing was on no row of the
+ *   screen. The positive is that the emitted `where` carries no `status` key
+ *   at all; the negative, in the same test, is that no `completedAt` clause
+ *   crept in with the widening. Asserting only the absence of `status` would
+ *   pass just as well against a `where` that had collapsed to nothing.
  *
  * Prisma is a stub and the assertions are about the QUERY the service issues —
  * the ladder, the window and the paging arithmetic — not about the database.
@@ -48,6 +54,27 @@ function makeService(tz = SHOP_TZ): { service: KitchenService; captured: Capture
     getSettings: () => ({ timezone: tz }),
   } as unknown as SettingsService;
   return { service: new KitchenService(prisma, settings), captured: { findMany, count } };
+}
+
+/**
+ * A row as the history's `include` returns it for a ticket nobody has bumped:
+ * no `completedAt`, no completer, no session behind it. D150 put these rows in
+ * front of the read model for the first time.
+ */
+function pendingRow(id: string, status: 'QUEUED' | 'IN_PROGRESS') {
+  return {
+    id,
+    ticketNumber: `KOT-${id}`,
+    branchId: BRANCH,
+    roundId: 'rnd_1',
+    stationId: null,
+    status,
+    completedAt: null,
+    completedBy: null,
+    createdAt: new Date('2026-09-10T04:00:00.000Z'),
+    items: [],
+    round: null,
+  };
 }
 
 /** The `where` of the last `findMany` the service issued. */
@@ -182,7 +209,7 @@ describe('the ticket history (D142)', () => {
     expect(res).toEqual({ items: [], total: 80, page: 3, pageSize: 20 });
   });
 
-  it('includes TODAY — the history carries no date bound at all', async () => {
+  it('includes TODAY and every lane — no date bound, and no status bound (D150)', async () => {
     const { service, captured } = makeService();
 
     await service.listHistoryForBranch(TENANT, BRANCH, query);
@@ -192,18 +219,114 @@ describe('the ticket history (D142)', () => {
     // this list must still hold it — AND must already hold the one bumped a
     // minute ago. A `completedAt` clause here would break one or the other.
     expect(where.completedAt).toBeUndefined();
-    expect(where.status).toBe('COMPLETED');
+    /*
+     * D150 — this line asserted `status === 'COMPLETED'`, which is now false by
+     * decision rather than by regression: that clause is what kept To make and
+     * Preparing off the screen entirely. Rewritten to the new truth, and
+     * POSITIVELY: the key is ABSENT from the query, so a queued or in-progress
+     * ticket is inside the set this `where` describes. Both spellings, because
+     * `toBeUndefined` also passes for a key present and explicitly undefined —
+     * which Prisma treats as "no filter" but which would mean the service was
+     * still computing one.
+     */
+    expect('status' in where).toBe(false);
+    expect(where.status).toBeUndefined();
+    // …and the scoping the widening must NOT have taken with it, so none of
+    // the above can pass against a `where` that collapsed to nothing.
     expect(where.tenantId).toBe(TENANT);
     expect(where.branchId).toBe(BRANCH);
+    expect(where.round).toBeDefined();
   });
 
-  it('orders by when the food was done, with a tiebreak so pages cannot repeat a row', async () => {
+  it('MUTATION PROOF — a status narrowing creeping back would be detected', async () => {
+    /*
+     * The mutant: `status: 'COMPLETED'`, the clause D150 removed, put back on
+     * the `where` the SHIPPED service just emitted — not on a local stand-in,
+     * so this proves the assertions above are about the code that runs. Proven
+     * against the real source too: restoring that line in the service and
+     * running this spec turns the test above red.
+     */
+    const { service, captured } = makeService();
+    await service.listHistoryForBranch(TENANT, BRANCH, query);
+    const shipped = lastWhere(captured);
+    const mutant = { ...shipped, status: 'COMPLETED' };
+
+    // The mutation lands — the two queries are genuinely different…
+    expect(mutant).not.toEqual(shipped);
+    // …and the assertion the test above rests on rejects the mutant…
+    expect(() => expect('status' in mutant).toBe(false)).toThrow();
+    // …while accepting what actually shipped.
+    expect('status' in shipped).toBe(false);
+  });
+
+  it('D150 — a pending ticket survives the read model, badge and all', async () => {
+    /*
+     * The `where` is only half the fix. The rows the widened query now returns
+     * have a null `completedAt` and no completer, and the table renders a
+     * status badge from every row and "—" for both nulls — so the view mapping
+     * is asserted here on exactly those rows rather than assumed. Nothing in
+     * the mapping had to change; that is the claim, and it is worth pinning,
+     * because a mapping that threw on a null completer would turn the fix into
+     * a 500 on the same screen.
+     */
+    const { service, captured } = makeService();
+    captured.findMany.mockResolvedValue([
+      pendingRow('kt_queued', 'QUEUED'),
+      pendingRow('kt_started', 'IN_PROGRESS'),
+    ]);
+    captured.count.mockResolvedValue(2);
+
+    const res = await service.listHistoryForBranch(TENANT, BRANCH, query);
+
+    expect(res.items.map((t) => t.id)).toEqual(['kt_queued', 'kt_started']);
+    expect(res.items.map((t) => t.status)).toEqual(['QUEUED', 'IN_PROGRESS']);
+    expect(res.items.map((t) => t.completedAt)).toEqual([null, null]);
+    expect(res.items.map((t) => t.completedByName)).toEqual([null, null]);
+    expect(res.total).toBe(2);
+  });
+
+  it('D150 — unfinished work first, then newest-finished, with a total tiebreak', async () => {
     const { service, captured } = makeService();
 
     await service.listHistoryForBranch(TENANT, BRANCH, query);
 
-    const args = captured.findMany.mock.calls.at(-1)![0] as { orderBy: Record<string, string>[] };
+    const args = captured.findMany.mock.calls.at(-1)![0] as { orderBy: unknown };
+    /*
+     * This asserted `[{ completedAt: 'desc' }, { id: 'desc' }]` and is now
+     * false by decision: with D150 the list holds tickets that have NO
+     * `completedAt` to sort by, and where those land is the whole ordering
+     * question. `nulls: 'first'` is the load-bearing half — the list pages
+     * twenty at a time, so a ticket still on the pass, sorted by when it was
+     * raised, would sit three pages back, which is exactly the ticket the
+     * screen was asked to surface. `createdAt` orders the pending block
+     * newest-raised first (they share a null key and would otherwise be
+     * arbitrary), and `id` keeps the order total so a page boundary can
+     * neither repeat nor skip a row.
+     */
+    expect(args.orderBy).toEqual([
+      { completedAt: { sort: 'desc', nulls: 'first' } },
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ]);
+  });
+
+  it('NEGATIVE — the Done LANE is untouched: still today-only, still two keys', async () => {
+    /*
+     * D142 draws the line D150 must not cross. The board's lane is the shop's
+     * own day and orders by two keys; only the HISTORY widened. Asserted here,
+     * beside the change, because "nothing else moved" is the easiest half of
+     * this fix to lose — and it is asserted POSITIVELY (the window and the
+     * order are what they were) rather than as an absence.
+     */
+    const { service, captured } = makeService();
+
+    await service.listTicketsForBranch(TENANT, BRANCH, 'COMPLETED_TODAY');
+
+    const args = captured.findMany.mock.calls.at(-1)![0] as { orderBy: unknown; where: unknown };
     expect(args.orderBy).toEqual([{ completedAt: 'desc' }, { id: 'desc' }]);
+    const where = args.where as Prisma.KitchenTicketWhereInput;
+    expect(where.status).toBe('COMPLETED');
+    expect(where.completedAt).toEqual({ gte: expect.any(Date), lt: expect.any(Date) });
   });
 
   it('excludes work that was called off, like the Done lane (D115)', async () => {
@@ -213,10 +336,27 @@ describe('the ticket history (D142)', () => {
 
     const round = lastWhere(captured).round as {
       status: { not: string };
-      order: { status: { not: string } };
+      order: { status: { not: string }; OR: Record<string, unknown>[] };
     };
     expect(round.status).toEqual({ not: 'CANCELLED' });
     expect(round.order.status).toEqual({ not: 'CANCELLED' });
+    /*
+     * The THIRD leg, and D150 is what made it matter. A cancelled takeaway
+     * whose ticket was never bumped used to be held out for free by the
+     * `status: COMPLETED` clause — it was not COMPLETED, so it could not
+     * appear. Widening the read to every lane removed that cover, and this
+     * clause became the only thing keeping a called-off takeaway off the
+     * screen.
+     *
+     * Asserted as the exact pair rather than "some takeaway clause exists":
+     * dropping `{ takeawayProfile: null }` alone would silently exclude every
+     * DINE-IN ticket, which is most of them, and a loose check would not
+     * notice.
+     */
+    expect(round.order.OR).toEqual([
+      { takeawayProfile: null },
+      { takeawayProfile: { status: { not: 'CANCELLED' } } },
+    ]);
   });
 
   it('searches the four things a person remembers, case-insensitively', async () => {

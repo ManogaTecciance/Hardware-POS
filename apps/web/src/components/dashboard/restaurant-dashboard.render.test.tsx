@@ -216,6 +216,21 @@ describe('the upcoming reservations card', () => {
   });
 });
 
+describe('what the page header says (D151)', () => {
+  it('names the branch and NOT the counter', async () => {
+    await mount();
+
+    // The fixture carries `registerName: 'Till 1'`, so this negative is about
+    // a value the component was handed and chose not to print — not about a
+    // session that never had one.
+    expect(screen.getByRole('heading', { name: 'Service dashboard' })).toBeTruthy();
+    expect(screen.getByText('Colombo')).toBeTruthy();
+    expect(screen.queryByText(/Till 1/)).toBeNull();
+    // The separator went with it: "Colombo · " would be the half-removal.
+    expect(screen.queryByText(/Colombo\s*·/)).toBeNull();
+  });
+});
+
 describe('the dashboard fits its screen', () => {
   /*
    * jsdom computes no layout, so none of this can be measured. It is asserted

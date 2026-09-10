@@ -56,7 +56,6 @@ function useShell(session: Session, rail: React.ReactNode, workspace: React.Reac
         router.push(`/pos?mode=${next.toLowerCase().replace('_', '-')}`)
       }
       branchName={session.branchName}
-      registerName={session.registerName}
       workspace={workspace}
       rail={rail}
       context={

@@ -28,7 +28,7 @@ interface Props {
 const DEFAULT_PAGE_SIZE = 20;
 
 /**
- * D142 — the kitchen's history: every ticket this branch has bumped.
+ * D142, D150 — the kitchen's history: every ticket this branch's kitchen holds.
  *
  * The board's Done lane answers "what have we finished this service" and is
  * cut to the shop's day. This answers the question that outgrew it — "when did
@@ -36,6 +36,14 @@ const DEFAULT_PAGE_SIZE = 20;
  * searches on the SERVER. Today's tickets are in it deliberately: the lane
  * drops a ticket at midnight, and a screen that started the day after would
  * leave the one bumped an hour ago findable in neither place.
+ *
+ * D150 — and every LANE, not just Done. The server used to filter this list to
+ * COMPLETED, so a round still queued or on the pass was on this screen nowhere:
+ * searching its ticket number here answered "no tickets match" about a ticket
+ * hanging on the board. The table was always built for all of it — the badge
+ * names the lane, and an unfinished row simply has no finish stamp and nobody
+ * to name — so what changed is the query behind it and the words around it.
+ * Cancelled work stays out (D115) and there is still no date bound (D142).
  *
  * No polling. A record of what already happened does not move under the reader,
  * and a five-second refresh would fight the operator's paging.
@@ -201,15 +209,22 @@ export function KitchenHistory({ session, branchId }: Props) {
                   <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
                     {/* Three different facts, and saying the wrong one is worse
                         than saying nothing: the request failed, nothing matched
-                        the term, or this kitchen has genuinely cooked nothing.
-                        The failure case defers to the banner above — telling a
-                        busy branch it has no history because the network blipped
-                        is the one message here that is actually false. */}
+                        the term, or this kitchen has genuinely been sent
+                        nothing. The failure case defers to the banner above —
+                        telling a busy branch it has no history because the
+                        network blipped is the one message here that is actually
+                        false.
+
+                        D150 — "no tickets yet", not "nothing finished yet". The
+                        list now holds unfinished work too, so the old wording
+                        would have read as "you have finished nothing" to a
+                        kitchen whose only ticket was on the pass, and hidden
+                        the fact that this screen would have shown it. */}
                     {status === 'error'
                       ? 'History unavailable.'
                       : term
                         ? `No tickets match “${term}”.`
-                        : 'No tickets have been finished in this branch yet.'}
+                        : 'No tickets have reached this kitchen yet.'}
                   </td>
                 </tr>
               ) : (
@@ -254,6 +269,13 @@ export function KitchenHistory({ session, branchId }: Props) {
                     <td className="whitespace-nowrap px-4 py-3">
                       {formatFinishedStamp(t.createdAt)}
                     </td>
+                    {/* D150 — a ticket still on the pass has no finish stamp
+                        and nobody to name, so both cells read "—", and the
+                        turnaround under the stamp is absent rather than a
+                        running "so far" figure. This screen does not poll (a
+                        record does not move under its reader), so an elapsed
+                        time printed here would be wrong seconds after it
+                        painted; live work is timed on the board. */}
                     <td className="whitespace-nowrap px-4 py-3">
                       {t.completedAt ? formatFinishedStamp(t.completedAt) : '—'}
                       {t.completedAt ? (

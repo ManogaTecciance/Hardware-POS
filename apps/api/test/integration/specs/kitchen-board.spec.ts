@@ -1064,12 +1064,19 @@ describe('D112 — open-sessions carries the session\'s bumped tickets', () => {
 
 /*
  * D142 — the Done lane holds the shop's TODAY, and the history holds the rest.
+ * D150 — and "the rest" means every lane, not only the finished one.
  *
  * The pairing is the point. A lane assertion alone would pass against a build
  * that had simply stopped returning old tickets anywhere, and a history
  * assertion alone would pass against one that had never scoped the lane: each
  * old ticket is asserted ABSENT from one list and PRESENT in the other, in the
  * same test, against the same row.
+ *
+ * D150 is proven against real rows for the same reason: the widened `where` is
+ * a claim about which tickets Postgres returns, so the strongest form of it is
+ * three tickets genuinely left queued, started and bumped — and a cancelled
+ * one that must still not come back, tested in the QUEUED state where the old
+ * `COMPLETED` filter was excluding it for free.
  */
 describe('D142 — today on the board, everything in the history', () => {
   it('drops yesterday’s ticket from Done and keeps it in the history', async () => {
@@ -1112,6 +1119,9 @@ describe('D142 — today on the board, everything in the history', () => {
     await bump(second);
 
     const items = (await history()).data.items;
+    // Both are bumped, so this pins the FINISHED block of the D150 order:
+    // newest-finished first, regardless of which was raised first. Where the
+    // unfinished ones land relative to it is asserted in its own test below.
     expect(items.map((t) => t.id)).toEqual([second, first]);
     expect(items[0]!.completedByName).toBe('Chef Fixture');
     expect(items[0]!.completedAt).not.toBeNull();
@@ -1204,6 +1214,129 @@ describe('D142 — today on the board, everything in the history', () => {
     expect((await history()).data.items.map((t) => t.id)).not.toContain(ticketId);
     // …and it is still findable where cancelled work belongs.
     expect((await board('?status=CANCELLED')).data.map((t) => t.id)).toContain(ticketId);
+  });
+
+  it('D150 — holds To make and Preparing as well, with the unfinished first', async () => {
+    /*
+     * THE DEFECT, against real rows: the history narrowed to COMPLETED, so a
+     * ticket that was still queued or on the pass appeared on no row of the
+     * screen at all. Three tickets, one in each lane the board draws, and all
+     * three asserted present in the one list — with the board's own lanes read
+     * beside them, so "all three are here" cannot pass against a build whose
+     * lanes had themselves stopped splitting anything.
+     */
+    await sendRound();
+    const queued = (await board('?status=OUTSTANDING')).data[0]!.id;
+    await sendRound();
+    const preparing = (await board('?status=OUTSTANDING')).data.find((t) => t.id !== queued)!.id;
+    await http.request(
+      'POST',
+      `/restaurant/branches/${branchId}/kitchen-tickets/${preparing}/start`,
+      { token: kitchenToken() },
+    );
+    await sendRound();
+    const done = (await board('?status=OUTSTANDING')).data.find(
+      (t) => t.id !== queued && t.id !== preparing,
+    )!.id;
+    await bump(done);
+
+    /*
+     * `createdAt` is a TIMESTAMP(3), so three rounds sent inside one
+     * millisecond would tie and hand the pending pair's order to the id
+     * tiebreak. Pushing the first one back an hour makes the assertion below
+     * about the ORDERING rather than about how fast the machine ran — and it
+     * leaves `done`, raised LAST of the three, as the newest row of all, so
+     * "unfinished first" cannot be mistaken for "newest first".
+     */
+    await prisma.kitchenTicket.update({
+      where: { id: queued },
+      data: { createdAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+
+    const page = (await history()).data;
+    // POSITIVE — every lane in the one list, unfinished first (newest-raised
+    // of the two leading), and the finished one last despite being newest.
+    expect(page.items.map((t) => t.id)).toEqual([preparing, queued, done]);
+    expect(page.total).toBe(3);
+
+    // …each carrying what the table renders per row: the status it badges by,
+    // and the nulls it prints as "—".
+    const byId = new Map(page.items.map((t) => [t.id, t]));
+    expect(byId.get(queued)!.status).toBe('QUEUED');
+    expect(byId.get(preparing)!.status).toBe('IN_PROGRESS');
+    expect(byId.get(done)!.status).toBe('COMPLETED');
+    expect(byId.get(queued)!.completedAt).toBeNull();
+    expect(byId.get(queued)!.completedByName).toBeNull();
+    expect(byId.get(preparing)!.completedAt).toBeNull();
+    expect(byId.get(done)!.completedAt).not.toBeNull();
+    expect(byId.get(done)!.completedByName).toBe('Chef Fixture');
+    // …and the context a pending row still has to carry, since this screen is
+    // now where a stuck ticket gets chased from.
+    expect(byId.get(queued)!.placeLabel).toBe('T7 · Terrace');
+    expect(byId.get(queued)!.items[0]!.menuItemName).toBe('Beef Steak');
+
+    /*
+     * NEGATIVE — the BOARD still splits those same three tickets three ways.
+     * Without this the test above would also pass for a build that had widened
+     * the lanes as well, which is the one thing D142 says must not happen: the
+     * history got wider, the lanes did not.
+     */
+    expect([...(await board('?status=OUTSTANDING')).data.map((t) => t.id)].sort()).toEqual(
+      [queued, preparing].sort(),
+    );
+    expect((await board('?status=COMPLETED_TODAY')).data.map((t) => t.id)).toEqual([done]);
+  });
+
+  it('D115/D150 — cancelled work stays out even in the states D150 let in', async () => {
+    /*
+     * The exclusion this widening could most easily have broken. While the
+     * history read `status: COMPLETED`, a queued ticket was kept out by the
+     * STATUS clause whatever its round or order said; the cancellation clauses
+     * were only ever load-bearing for bumped tickets. So both tickets here are
+     * left QUEUED, which is the state where nothing else is keeping them out.
+     */
+    await sendRound();
+    const kept = (await board('?status=OUTSTANDING')).data[0]!.id;
+    await sendRound();
+    const calledOff = (await board('?status=OUTSTANDING')).data.find((t) => t.id !== kept)!.id;
+
+    // POSITIVE first — D150 puts both queued tickets in the history, so the
+    // negatives below cannot pass on an empty branch, and cannot pass by the
+    // old status filter quietly still doing the excluding.
+    const before = (await history()).data;
+    expect(before.items.map((t) => t.id)).toEqual(expect.arrayContaining([kept, calledOff]));
+    expect(before.total).toBe(2);
+
+    // One round is called off. No verb writes this today — D115's clause is
+    // spelled at the level a future cancel will write, so the row is made by
+    // hand, exactly as `backdate` makes yesterday.
+    const { roundId } = await prisma.kitchenTicket.findUniqueOrThrow({
+      where: { id: calledOff },
+      select: { roundId: true },
+    });
+    await prisma.orderRound.update({ where: { id: roundId }, data: { status: 'CANCELLED' } });
+
+    const afterRound = (await history()).data;
+    // NEGATIVE, paired with the POSITIVE that its neighbour survived: this is
+    // an exclusion and not an empty list.
+    expect(afterRound.items.map((t) => t.id)).toContain(kept);
+    expect(afterRound.items.map((t) => t.id)).not.toContain(calledOff);
+    expect(afterRound.total).toBe(1);
+
+    // And the order-level cancel takes the survivor with it.
+    await prisma.restaurantOrder.update({
+      where: { id: orderId },
+      data: { status: 'CANCELLED' },
+    });
+    const afterOrder = (await history()).data;
+    expect(afterOrder.items).toEqual([]);
+    expect(afterOrder.total).toBe(0);
+
+    // …and both are still findable where cancelled work belongs, so the zeroes
+    // above are an exclusion from THIS list rather than a deletion.
+    expect([...(await board('?status=CANCELLED')).data.map((t) => t.id)].sort()).toEqual(
+      [kept, calledOff].sort(),
+    );
   });
 
   it('is the kitchen’s to read — the same permission as the board', async () => {

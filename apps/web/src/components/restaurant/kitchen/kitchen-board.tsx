@@ -28,8 +28,9 @@ interface Props {
 
 /*
  * D115/D116 — three lanes, bump-bar style, each ticket in exactly one: To
- * make (queued), Preparing (started, D113), Done (bumped TODAY — D142; the
- * rest of what this kitchen has ever cooked is on Ticket history). Cancelled work
+ * make (queued), Preparing (started, D113), Done (bumped TODAY — D142; every
+ * other ticket, cooked or still waiting, is on Ticket history — D150).
+ * Cancelled work
  * never renders here at all: the read excludes it (D115), so a mid-cook
  * cancel simply pulls the card off the board. Cancelling — and reviewing
  * what was cancelled — is the ORDERS QUEUE's business (D116): the kitchen
@@ -351,7 +352,9 @@ export function KitchenBoard({ session, branchId }: Props) {
             href="/kitchen/history"
             className="shrink-0 text-xs font-medium text-primary underline-offset-4 hover:underline"
           >
-            Older tickets → Ticket history
+            {/* D150 — the destination is no longer only the past, so the
+                link no longer promises it. */}
+            All tickets → Ticket history
           </Link>
         ) : (
           <span className="shrink-0 text-xs text-muted-foreground">Refreshes every 5 s.</span>

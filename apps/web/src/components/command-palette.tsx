@@ -92,7 +92,7 @@ const COMMANDS: Command[] = [
    * door Ctrl+K still opened onto the whole restaurant.
    */
   { id: 'dashboard', label: 'Go to dashboard', hint: 'Overview', href: '/dashboard', icon: LayoutDashboard, keywords: 'home overview metrics', permission: [Permission.TABLE_VIEW, Permission.SALE_READ, Permission.REPORT_READ] },
-  { id: 'kitchen-history', label: 'Open ticket history', hint: 'Kitchen', href: '/kitchen/history', icon: History, keywords: 'kitchen ticket done bumped past history kot', permission: Permission.KOT_VIEW },
+  { id: 'kitchen-history', label: 'Open ticket history', hint: 'Kitchen', href: '/kitchen/history', icon: History, keywords: 'kitchen ticket done bumped past history kot queued preparing to make', permission: Permission.KOT_VIEW },
   { id: 'settings', label: 'Open settings', hint: 'System', href: '/settings', icon: Settings, keywords: 'preferences configuration', permission: Permission.SETTINGS_MANAGE },
 ];
 
@@ -110,8 +110,8 @@ export function availableCommands(
   return COMMANDS.filter((c) => holdsAnyOf(c.permission, { hasPermission }));
 }
 
-/** Global command search. Opens on Cmd/Ctrl+K or via its trigger; permission-
- *  aware; keyboard-driven listbox with focus restore. */
+/** Global command search. Opens on Cmd/Ctrl+K — its header trigger went with
+ *  D151; permission-aware; keyboard-driven listbox with focus restore. */
 export function CommandPalette() {
   const router = useRouter();
   const { hasPermission } = useAuth();
@@ -141,12 +141,14 @@ export function CommandPalette() {
     restoreRef.current?.focus?.();
   }, []);
 
-  const show = React.useCallback(() => {
-    restoreRef.current = document.activeElement as HTMLElement;
-    setOpen(true);
-  }, []);
+  /*
+   * There is no `show()` any more: the header button that called it went with
+   * D151, and the shortcut below opens the dialog itself. Keeping an opener
+   * nothing calls would be the first thing to mislead the next reader.
+   */
 
-  // Global Cmd/Ctrl+K.
+  // Global Cmd/Ctrl+K — the only way in since D151.
+  
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -197,22 +199,22 @@ export function CommandPalette() {
     }
   };
 
+  /*
+   * D151 — no search bar in the header (PO).
+   *
+   * This used to render a "Search or jump to… ⌘K" button beside the theme
+   * toggle. It is gone, and the component is now headless: it mounts the
+   * Ctrl/Cmd+K listener and the dialog, and draws nothing until someone asks
+   * for it.
+   *
+   * The SHORTCUT deliberately survives. The PO asked for the bar to go, not
+   * for the palette, and the two are separable — the keyboard route costs no
+   * header space, which is the thing that was being reclaimed. What it costs
+   * is discoverability: nothing on screen now advertises that Ctrl+K exists,
+   * so anyone who does not already know is not going to find out.
+   */
   return (
     <>
-      <button
-        type="button"
-        onClick={show}
-        aria-label="Open command search"
-        aria-keyshortcuts="Meta+K Control+K"
-        className="group flex h-9 items-center gap-2 rounded-xl border border-border bg-canvas px-2.5 text-sm text-muted-foreground transition-colors hover:border-brand-200 hover:text-foreground sm:w-56 md:w-64"
-      >
-        <Search className="h-4 w-4 shrink-0" aria-hidden />
-        <span className="hidden flex-1 text-left sm:inline">Search or jump to…</span>
-        <kbd className="hidden items-center gap-0.5 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
-          ⌘K
-        </kbd>
-      </button>
-
       {open ? (
         <div className="fixed inset-0 z-[60] flex items-start justify-center p-4 pt-[12vh]">
           <button

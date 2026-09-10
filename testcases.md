@@ -736,6 +736,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | KIT-020 | A dish nobody linked to a station still reaches the kitchen (D147) | At a branch with two or more active stations, create a product WITHOUT touching the wizard's Kitchen stations multi-select, order it, and send the round | The dish is on the board. Before D147 it appeared on no ticket at all and was only logged, so it was ordered and billed but never cooked | P | Not Run |
 | KIT-021 | Nothing on the board or the history names a station (D147) | Read a board card and its Details dialog, then the ticket-history table and its search box | No station appears anywhere: no subtitle station, no per-item station chip, no Station column, and searching a station name matches nothing on that ground alone | P | Not Run |
 | KIT-022 | Tickets cut before D147 keep their station in the data | Query a KitchenTicket row written before the change and one written after | The old row still carries its stationId, the new one carries NULL; the migration removed only the NOT NULL and moved no value | P | Not Run |
+| KIT-023 | The ticket history holds every lane (D150) | With work queued, work started and work bumped, open Ticket history | All three appear. A To make and a Preparing ticket each show their lane badge, a dash under Finished and a dash under By; a bumped one shows its finish stamp and the time it spent on the pass | P | Not Run |
+| KIT-024 | Unfinished work sorts to the top (D150) | On a branch with several pending and several finished tickets, read the first page | Pending tickets come first, newest-raised first, then finished ones newest-finished first. Paging forward and back never repeats or skips a row | P | Not Run |
+| KIT-025 | Cancelled work still stays out, in every lane (D115/D150) | Cancel a round, an order, and a takeaway whose ticket was never bumped; open Ticket history | None of the three appears, even though they are no longer excluded by being unfinished. The cancelled filter on the board still shows them | P | Not Run |
 | KIT-008 | Yesterday's tickets are in the history, and so are today's (D142) | Open Ticket history from the rail, and from the "Older tickets" link on the Done lane | Both reach /kitchen/history; the list holds the ticket bumped yesterday AND the one bumped minutes ago, newest first, with where it went, its items, its station, when it was finished and by whom | P | Not Run |
 | KIT-009 | Ticket history pages and searches on the server (D142) | With more than one page of finished tickets: change the rows-per-page, go to page 2, then search a dish name, a ticket number and a table code | Each request carries page/pageSize/search to GET …/kitchen-tickets/history; searching returns to page 1; a term with a double space still matches; a term that matches nothing reads "No tickets match “…”" rather than the empty-branch wording | P | Not Run |
 | KIT-010 | Cancelled work is in neither the lane nor the history (D115/D142) | Cancel an order whose ticket was already bumped; check the Done lane and Ticket history | The ticket appears in neither; it remains visible on the board's Cancelled lane | N | Not Run |
@@ -813,6 +816,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | UI-031 | Every modal opens in the middle of the screen (PO) | Open any modal at 1440, 1024, 768 and 390 px wide — a confirm, the ticket-order details, a payment dialog | Each is centred vertically and horizontally at every width, never flush to the bottom edge, with a gap to the screen edge and all four corners rounded | P | Not Run |
 | UI-032 | Wide panels are centred too, not stuck to the bottom (D145) | Open the dine-in bill, the modifier picker, the payment popup and the variant editor on a desktop window | Each floats in the MIDDLE of the window with the scrim visible above AND below it, rounded on all four corners, with no grab handle. None sits against the bottom edge | P | Not Run |
 | UI-033 | The three deliberately edge-anchored surfaces still are (D145) | Open a supplier QuickBooks mapping drawer, an order-detail drawer, the command palette with Ctrl+K, and the retail cart at phone width | The two drawers slide in from the right at full height, the palette opens near the top, and the phone cart rises from the bottom. These are panels and a palette, not questions, and centring them is not wanted | P | Not Run |
+| UI-034 | No search bar in the header (D151) | Look at the header beside the theme toggle on any page, at desktop and tablet widths | There is no search box and no ⌘K chip. Pressing Ctrl+K still opens the command palette, Escape closes it, and picking a result still navigates | P | Not Run |
+| UI-035 | No counter is named on any screen (D151) | Read the POS header, the service dashboard header and the retail cashier greeting | Each names the branch alone. Nothing reads "Counter 1", no trailing separator is left behind, and the cashier hero shows no register chip. The Register Health card still reports shift and sync state | P | Not Run |
 | UI-017 | Tooltips are not clipped by their table | Hover a tooltip in the sales, products, customers or invoices table | The bubble shows in full above the row, not trimmed to the cell or the card | P | Not Run |
 | UI-018 | Tooltip follows the page as it scrolls | Hover a tooltip, then scroll the table or the page | It stays with its trigger, or goes away — never stranded mid-screen | P | Not Run |
 | UI-019 | Tooltip on a disabled control | Hover the disabled Mark paid on a customer's last invoice | Reason is shown; the button is still not clickable | P | Not Run |
@@ -870,13 +875,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
-| RET | 18 | KIT | 22 |
+| RET | 18 | KIT | 25 |
 | EXC-T | 12 | ADM | 15 |
-| EXC-D | 4 | UI | 33 |
+| EXC-D | 4 | UI | 35 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 647 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 652 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 
