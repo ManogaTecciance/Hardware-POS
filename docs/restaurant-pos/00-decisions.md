@@ -9300,6 +9300,85 @@ two cases: the shape claim and the price.
 
 ---
 
+## D157 — two previews, one at a time
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
+no migration, no API change. Retail only.
+
+### What was reported
+
+> "cant we use a switch button or something display thermal-preview or
+> A4-preview without adding one below other"
+
+### The problem D152 left behind
+
+D152 gave retail both previews, because retail prints both, and stacked them:
+bill on top, quotation underneath. That was the right content in the wrong
+arrangement. A thermal bill is a **metre of paper** rendered at full length, so
+reaching the quotation meant scrolling past an entire receipt, and neither
+document could be seen whole. The taller the workspace's bill — more line
+items, a longer footer — the worse it got.
+
+### The decision
+
+**One preview on screen at a time, chosen by a segmented control.** The bill is
+the default: it goes to a customer on every single sale, where a quotation is
+occasional.
+
+Three sub-decisions, each of which a mutation proof pins to one test:
+
+**1. A tablist, not a switch or a pair of buttons.**
+A switch means on/off. This is a choice between two named documents, and
+flipping it swaps a panel of content — which is what `role="tablist"` means.
+Built on the existing `Tabs` primitive (D44), so it inherits roving arrow-key
+focus, `aria-selected`, and the tabpanel wiring rather than reimplementing
+them. The LOOK is borrowed class for class from `ThemeToggle`, the segmented
+control this app already uses, so a second visual idiom was not invented.
+
+**2. The hidden panel keeps its DOM.**
+`TabsContent` hides rather than unmounts. `PreviewTab` holds the chosen
+document type in its own state, so a `{cond ? <A/> : <B/>}` implementation
+would reset an operator comparing a return slip against the bill to
+"Quotation" on every flip.
+
+**3. The choice lives on the page, not inside the Preview panel.**
+The loop an operator actually works in is: change the logo, look at the bill,
+change it again. The main tab bar is a ternary and discards whatever the panel
+held, so state kept there would land them back on the bill every time they came
+back from Branding.
+
+### What did not change
+
+Hardware and restaurant preview one document each and get **no** toggle: a
+segmented control with one segment is a dead control, which is what D96 exists
+to remove. Both are asserted directly, each paired with the preview it *does*
+have so "no tabs" cannot pass because the page rendered nothing.
+
+D152's and D153's eleven existing assertions are untouched (D16) and still
+green. They query by title and label, which find hidden nodes, so they state
+what retail previews — not where on the page it sits. That is the right
+division: this decision changed the arrangement, not the content.
+
+### Mutation proof
+
+Three mutations, each failing exactly — and only — the case that carries
+its decision:
+
+| Mutation | Fails |
+|---|---|
+| both panels visible at once (the stacked layout) | the 3 visibility cases |
+| the hidden panel is unmounted rather than hidden | *only* "keeps its document across a flip" |
+| the main tab bar resets the choice | *only* "survives a trip to another tab and back" |
+
+"Not stacked" is a claim about what is **visible**, and the hidden panel is
+still in the DOM on purpose. `getByText`/`getByTitle` cannot state it — they
+find hidden nodes and would pass just as happily against the old layout. The
+assertions read through `screen.getByRole('tabpanel')`, which omits `hidden`
+subtrees and throws on more than one match: it therefore asserts EXACTLY ONE
+visible panel, and fails against the stacked layout for the right reason.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

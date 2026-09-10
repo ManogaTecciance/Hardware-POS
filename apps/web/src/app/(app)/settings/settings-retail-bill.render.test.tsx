@@ -21,7 +21,7 @@
  * comparison runs against the same component tree, so "retail kept its A4
  * controls" cannot pass because the page ignored the resolver entirely.
  */
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -310,5 +310,156 @@ describe('D153 — the bill preview shows goods the workspace actually sells', (
     expect(bill).toContain('Chicken Fried Rice');
     expect(bill).toContain('Service charge');
     expect(bill).not.toContain('Cotton Shirt');
+  });
+});
+
+/**
+ * D157 — the two previews share the tab instead of stacking.
+ *
+ * ## The report
+ *
+ * D152 gave retail both previews by putting one under the other. A thermal
+ * bill is a metre of paper, so reaching the quotation meant scrolling past a
+ * whole receipt and neither document could be seen whole.
+ *
+ * ## What makes these assertions non-vacuous (D30)
+ *
+ * "Not stacked" is a claim about what is VISIBLE, and the panel that is hidden
+ * is still in the DOM — deliberately, so the A4 chooser keeps its selection.
+ * So `getByText`/`getByTitle` cannot state it: they find hidden nodes and would
+ * pass just as happily against the stacked layout this replaces.
+ *
+ * `getByRole` omits `hidden` subtrees, and its singular form throws on more
+ * than one match. `screen.getByRole('tabpanel')` therefore asserts EXACTLY ONE
+ * visible panel, and fails against the old layout for the right reason. Every
+ * case below reads through it, and pairs the document that must be on screen
+ * with the one that must not.
+ *
+ * The last two cases are the isolation halves: hardware and restaurant preview
+ * one document each and must gain no toggle at all. Each asserts the preview
+ * they DO have, so "no tabs" cannot pass because the page rendered nothing.
+ */
+describe('D157 — the Preview tab switches between the two documents', () => {
+  /** The one panel a user can actually see. Throws if the layout stacks. */
+  const visiblePanel = () => screen.getByRole('tabpanel');
+
+  const flipTo = async (name: string) => {
+    await act(async () => {
+      screen.getByRole('tab', { name }).click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  };
+
+  it('offers exactly two documents, bill first', async () => {
+    await open('Preview');
+
+    // An exact set, not a count: a third segment, a renamed one, or a reorder
+    // are all different products and all fail here. Bill first is the decision
+    // — it is the document that goes to a customer on every single sale.
+    expect(screen.getAllByRole('tab').map((t) => t.textContent?.trim())).toEqual([
+      'Printed bill',
+      'A4 documents',
+    ]);
+  });
+
+  it('shows the bill alone on arrival, not the quotation beneath it', async () => {
+    await open('Preview');
+
+    // POSITIVE — the bill is the one on screen…
+    expect(within(visiblePanel()).getByTitle('Bill preview')).toBeTruthy();
+    // …NEGATIVE — and the A4 chooser is NOT, which is the reported defect
+    // stated as an assertion. Under the stacked layout both were visible and
+    // `visiblePanel()` itself would have thrown.
+    expect(within(visiblePanel()).queryByLabelText('Document type')).toBeNull();
+
+    expect(screen.getByRole('tab', { name: 'Printed bill' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+  });
+
+  it('swaps to the A4 documents, and puts the bill away', async () => {
+    await open('Preview');
+    await flipTo('A4 documents');
+
+    // The mirror image of the case above, against the same render. A toggle
+    // that showed everything, or one that showed nothing, fails one half each.
+    expect(within(visiblePanel()).getByLabelText('Document type')).toBeTruthy();
+    expect(within(visiblePanel()).queryByTitle('Bill preview')).toBeNull();
+
+    expect(screen.getByRole('tab', { name: 'A4 documents' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('tab', { name: 'Printed bill' }).getAttribute('aria-selected')).toBe(
+      'false',
+    );
+  });
+
+  it('the A4 chooser keeps its document across a flip', async () => {
+    /*
+     * Why the hidden panel stays mounted rather than being rendered
+     * conditionally. `PreviewTab` holds the chosen document type in its own
+     * state, defaulting to 'quotation'; unmounting it on every flip would send
+     * an operator comparing a return slip against the bill back to the start
+     * each time. A `{cond ? <A/> : <B/>}` implementation resets it and fails.
+     */
+    await open('Preview');
+    await flipTo('A4 documents');
+
+    const chooser = screen.getByLabelText('Document type') as HTMLSelectElement;
+    await act(async () => {
+      chooser.value = 'return';
+      chooser.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // The control moved at all — without this the case could pass on a
+    // chooser that ignored the change and sat on its default throughout.
+    expect((screen.getByLabelText('Document type') as HTMLSelectElement).value).toBe('return');
+
+    await flipTo('Printed bill');
+    await flipTo('A4 documents');
+
+    expect((screen.getByLabelText('Document type') as HTMLSelectElement).value).toBe('return');
+  });
+
+  it('the choice survives a trip to another tab and back', async () => {
+    /*
+     * Why the state lives on the page rather than inside the Preview panel.
+     * The loop an operator actually works in is: change the logo, look at the
+     * bill, change it again — or the same against a quotation. State held in
+     * the panel is thrown away by the main tab bar's ternary and lands them
+     * back on the bill every time.
+     */
+    await open('Preview');
+    await flipTo('A4 documents');
+
+    for (const t of ['Branding', 'Preview']) {
+      await act(async () => {
+        screen.getByRole('button', { name: t }).click();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+
+    expect(within(visiblePanel()).getByLabelText('Document type')).toBeTruthy();
+    expect(within(visiblePanel()).queryByTitle('Bill preview')).toBeNull();
+  });
+
+  it('a hardware workspace gets no toggle, because it previews one document', async () => {
+    businessType = 'HARDWARE';
+    await open('Preview');
+
+    // NEGATIVE — no segmented control at all. A toggle with one option is a
+    // dead control, which is what D96 exists to remove.
+    expect(screen.queryAllByRole('tab')).toEqual([]);
+    // POSITIVE — and hardware's own A4 preview is untouched, so this cannot
+    // pass because the Preview tab rendered nothing.
+    expect(screen.getByLabelText('Document type')).toBeTruthy();
+  });
+
+  it('a restaurant gets no toggle either, and keeps its bill', async () => {
+    businessType = 'RESTAURANT';
+    await open('Preview');
+
+    expect(screen.queryAllByRole('tab')).toEqual([]);
+    expect(screen.getByTitle('Bill preview')).toBeTruthy();
   });
 });

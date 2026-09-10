@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth';
@@ -42,6 +43,7 @@ import {
   type DocumentSettings,
   type PreviewDocumentType,
 } from '@/lib/settings-api';
+import { cn } from '@/lib/utils';
 
 /*
  * D84 — "Charges" is restaurant-only: it edits RestaurantBranchConfig, which
@@ -87,6 +89,29 @@ function groupedTimeZones(): { region: string; zones: string[] }[] {
     .sort((a, b) => a.region.localeCompare(b.region));
 }
 type Tab = (typeof TABS)[number];
+
+/** D157 — the two documents a retail workspace can preview. */
+type PreviewSurface = 'bill' | 'a4';
+
+/**
+ * D157 — one segment of the preview toggle.
+ *
+ * The SEMANTICS come from `Tabs` (roving arrow keys, `role="tab"`,
+ * `aria-selected`, a `role="tabpanel"` that hides rather than unmounts).
+ * The LOOK is the segmented control this app already uses for theme
+ * preference, borrowed class for class rather than invented: a pill shell
+ * with the chosen segment raised onto `bg-surface`.
+ *
+ * `border-b-0` and `rounded-lg` are the two overrides that undo the
+ * primitive's underlined-tab default; `cn` is tailwind-merge, so the last
+ * class wins and the defaults drop out rather than fighting.
+ */
+function previewSegment(active: boolean): string {
+  return cn(
+    'h-9 rounded-lg border-b-0 px-4 transition-colors',
+    active ? 'bg-surface text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground',
+  );
+}
 
 /**
  * D96 — Charges and Hours edit `RestaurantBranchConfig`, a row a retail tenant
@@ -162,6 +187,14 @@ export default function SettingsPage() {
    */
   const [taxRate, setTaxRate] = React.useState('');
   const [tab, setTab] = React.useState<Tab>('Business');
+  /*
+   * D157 — which document the Preview tab is showing, for the one surface
+   * that prints both (retail). Held here rather than inside the Preview
+   * panel so the choice survives a trip to Branding and back, which is the
+   * loop an operator actually works in: change the logo, look at the bill,
+   * change it again.
+   */
+  const [previewSurface, setPreviewSurface] = React.useState<PreviewSurface>('bill');
   /*
    * D96 — the restaurant-only tabs appear only where their record exists.
    * While the profile is unresolved they are hidden, which is the safe way
@@ -494,19 +527,47 @@ export default function SettingsPage() {
         />
       ) : view.previewKind === 'THERMAL_BILL_AND_A4' ? (
         /*
-         * D152 — retail prints both, so it previews both. The bill comes
-         * first: it is the document that goes to a customer on every single
-         * sale, where a quotation is occasional.
+         * D152 — retail prints both, so it previews both.
+         *
+         * D157 — but ONE AT A TIME. They were stacked, and a thermal bill is
+         * a metre of paper: reaching the quotation meant scrolling past a
+         * whole receipt, and neither preview could be seen whole.
+         *
+         * The bill is the default because it goes to a customer on every
+         * single sale, where a quotation is occasional.
+         *
+         * Built on the same `Tabs` primitive the page's own tab bar uses
+         * rather than a pair of buttons, so it inherits the roving-focus
+         * keyboard behaviour and the tablist semantics for free — and so
+         * the inactive panel keeps its DOM, which is what stops the A4
+         * chooser losing its selected document type on every flip.
          */
-        <div className="space-y-6">
-          <BillPreviewTab
-            docs={docs}
-            set={set}
-            showCalibration={view.showBillCalibration}
-            timezone={timezone ?? DEFAULT_TIME_ZONE}
-            sampleKind={view.billSampleKind ?? 'FOOD_SERVICE'}
-          />
-          <PreviewTab docs={docs} showA4SaleDocument={view.showA4SaleDocument} />
+        <div className="space-y-4">
+          <Tabs value={previewSurface} onValueChange={(v) => setPreviewSurface(v as PreviewSurface)}>
+            <TabsList
+              aria-label="Which document to preview"
+              className="inline-flex gap-0.5 rounded-xl border border-border bg-canvas p-0.5"
+            >
+              <TabsTrigger value="bill" className={previewSegment(previewSurface === 'bill')}>
+                Printed bill
+              </TabsTrigger>
+              <TabsTrigger value="a4" className={previewSegment(previewSurface === 'a4')}>
+                A4 documents
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="bill" className="mt-4">
+              <BillPreviewTab
+                docs={docs}
+                set={set}
+                showCalibration={view.showBillCalibration}
+                timezone={timezone ?? DEFAULT_TIME_ZONE}
+                sampleKind={view.billSampleKind ?? 'FOOD_SERVICE'}
+              />
+            </TabsContent>
+            <TabsContent value="a4" className="mt-4">
+              <PreviewTab docs={docs} showA4SaleDocument={view.showA4SaleDocument} />
+            </TabsContent>
+          </Tabs>
         </div>
       ) : view.previewKind === 'SERVER_A4' ? (
         <PreviewTab docs={docs} showA4SaleDocument={view.showA4SaleDocument} />
