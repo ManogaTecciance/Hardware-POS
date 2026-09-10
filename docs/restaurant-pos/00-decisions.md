@@ -7212,9 +7212,9 @@ invisibility check (an ordinary `WHOLE` create in a hardware workspace
 notices nothing) and a second domain (food service is refused too, proving
 the registry is read).
 
-## D135 — a tenant picks its catalogue attribute pack — **SUPERSEDED by D138**
+## D135 — a tenant picks its catalogue attribute pack — **SUPERSEDED by D150**
 
-> **Withdrawn unbuilt, 2026-09-09.** D138 answers the same problem by letting a
+> **Withdrawn unbuilt, 2026-09-09.** D150 answers the same problem by letting a
 > tenant define its OWN field list rather than pick from lists we wrote, which
 > needs no `cataloguePack` column and no migration. The two traps this decision
 > identified were both real and are both answered there. Kept in full below
