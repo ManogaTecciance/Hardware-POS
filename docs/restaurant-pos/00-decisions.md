@@ -9084,8 +9084,13 @@ illustrate the same shop.
 
 ## D155 — a same-product offer says how close it is, and never blocks the sale
 
-**Status:** accepted and **built**, 2026-09-10. Frontend and shared only. No
-schema change, no migration, no server behaviour changed.
+> **SUPERSEDED by [D160](#d160) on 2026-09-10, the same day.** The
+> arithmetic below still stands and is still in the code; the POLICY does
+> not. The PO reversed it: every unfinished `BUY_X_GET_Y` now blocks payment,
+> same-product ones included. Read D160 before acting on anything here.
+
+**Status:** superseded. Was accepted and built 2026-09-10. Frontend and
+shared only. No schema change, no migration, no server behaviour changed.
 
 ### What was reported
 
@@ -9639,6 +9644,117 @@ Twelve mutations, each failing the case that carries its decision:
 | the branch card is never rendered | "asks where the stock lands" |
 | the cost cap is dropped | "refuses a cost the receipt line would reject" |
 | the quantity cap is dropped | "refuses an opening quantity the receipt line would reject" |
+
+---
+
+## D160 — every buy-X-get-Y offer blocks the sale until it is complete
+
+**Status:** accepted and **built**, 2026-09-10. **Supersedes the non-blocking
+half of [D155](#d155).** Frontend only. No schema change, no migration, no API
+change. Every business type.
+
+### What was asked
+
+> "that tie problem we fix earlier i want it to handle like we handle with like
+> 2 shirts 1 tie, same kind of lable with emoji, and proceed to payment needed
+> to block utill add that, every buy x get y promotion needed to handle like
+> that"
+
+### What D155 decided, and why it is reversed
+
+D155 asked the same question and answered it the other way, on my
+recommendation and with the PO's agreement at the time:
+
+> "You're totally right on the math — blocking a legitimate 5-tie sale would be
+> terrible UX. The upsell notice is a much more elegant and modern approach."
+
+The arithmetic behind that has not changed and is still in the code: a
+"buy 5 get 1" on ONE product is six for the price of five, so a customer
+holding five has earned nothing and owes nothing. `outstandingRewards` reports
+nothing for them, correctly.
+
+The PO has reversed the **policy** built on top of it. The reasoning is a
+merchandising one, and it is theirs to make: a customer who has reached the
+threshold of a free item must not be allowed to leave without it, and a till
+that treats a same-product offer more softly than a cross-product one teaches
+the cashier that some offers are optional.
+
+### The decision
+
+**Every unfinished `BUY_X_GET_Y` blocks payment, and says so identically.**
+
+One list (`incompleteOffers`), one notice, one gate. The muted D155 prompt is
+gone; both shapes now render the same primary-coloured 🎁 card with the same
+sentence and the same "Payment is unavailable until the offer is complete."
+
+### The cost, accepted with the decision
+
+With `buy 5 get 1`, the gate closes at **5, 11, 17 —** every basket one unit
+short of a complete group. A customer who wants exactly five ties cannot be
+served until a sixth is added. That is not a side effect; it is the decision.
+It is recorded here, in the code, and in the spec's assertion map, so nobody
+rediscovers it at a counter and files it as a bug.
+
+**Not blocked:** a basket nowhere near a threshold. One tie against a buy-five
+offer reports nothing, and so does one shirt against a buy-two. The customer
+has qualified for nothing, so there is nothing to complete — blocking there
+would refuse every small basket in the shop.
+
+### `incompleteOffers` is a union of outputs, not of arithmetic
+
+The two halves stay separate functions because they compute genuinely
+different things:
+
+- `outstandingRewards` — a shortfall against an **entitlement**. The customer
+  earned reward units they are not holding.
+- `rewardUpsells` — a **remainder** inside an incomplete group of a
+  same-product offer. Nothing is earned yet.
+
+Neither reduces to the other. Merging their OUTPUT is safe; merging the sums
+would not be. The union lives in `applier.ts` beside both halves rather than at
+the call site, because two lists merged by a caller is two places to forget
+one — and that failure would be silent and one-sided: a till that blocks one
+shape and not the other.
+
+### Assertions that were reversed, deliberately
+
+D16 forbids editing behavioural assertions to accommodate a **refactor**. This
+is an intentional policy reversal with this record behind it, and both
+assertions were made **stronger**, not relaxed:
+
+- `applier.spec.ts` had a case named *"NEVER blocks payment, at any quantity"*
+  asserting `{1,5,6,11,12} → all false`. It now pins where the gate **closes**:
+  `{1: false, 5: true, 6: false, 11: true, 12: false}`. "Never blocks" is
+  satisfied by a function that returns nothing; "blocks at 5 and 11 and nowhere
+  else" is not.
+- The till spec required **Proceed to Payment enabled** with the prompt on
+  screen, and required the prompt to be suppressed while a debt was live. Both
+  now assert the opposite, and a new case asserts both offers are **named
+  together** rather than one hidden — hiding one would leave a cashier
+  completing an offer and finding the button still disabled with no reason
+  given.
+
+### A vacuous test of my own, caught by mutation
+
+Every case I first wrote happened to need exactly **one** more unit, so a till
+that hard-coded `1` in the notice passed all of them. Found by mutating the
+count and watching nothing fail. A "buy 2 get 2" case with two in the basket
+now pins the number and the plural. Recorded because it is the exact D30
+failure mode, found in new work.
+
+### Mutation proof
+
+Seven mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the same-product half is dropped from the union (D155's behaviour) | all three "blocks" cases |
+| the cross-product half is dropped | the sameness case and the both-short case |
+| the till stops gating on unfinished offers | all three "blocks" cases |
+| the notice is not rendered | all three |
+| the notice always says "one" | *only* "counts how many are still needed" |
+| the 🎁 is dropped | the sameness case and the both-short case |
+| an offer nowhere near completion also blocks | both "says nothing" controls |
 
 ---
 

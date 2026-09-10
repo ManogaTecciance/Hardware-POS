@@ -21,6 +21,7 @@
 import {
   applyPromotions,
   distributeByLargestRemainder,
+  incompleteOffers,
   outstandingRewards,
   rewardEntitlements,
   rewardUpsells,
@@ -1503,12 +1504,22 @@ describe('D134a — measured lines bypass quantity-based promotions', () => {
  * satisfy the positive case; one returning nothing would satisfy every
  * negative. So the whole quantity range is walked in one expectation.
  *
- * Every case also asserts that payment stays open, in the same render as the
- * prompt. That is the distinction the feature exists for: `outstandingRewards`
- * is a debt and gates `canPay`, this is an offer and must not. Asserting them
- * together is what stops a later change quietly wiring this into the gate.
+ * ## D160 — this now gates payment, and D155 asserted it never would
+ *
+ * The case below was called "NEVER blocks payment, at any quantity" and
+ * required exactly that. The PO reversed the decision: a customer who
+ * qualified for a free item must not leave without it, and every
+ * BUY_X_GET_Y behaves the same way regardless of whether the reward is the
+ * same product or another one.
+ *
+ * The arithmetic here did not change — `rewardUpsells` reports the same
+ * quantities it always did. What changed is that the till reads it through
+ * `incompleteOffers` and refuses payment. The case is rewritten to pin the
+ * exact quantities where the gate now CLOSES, which is a stronger claim
+ * than the one it replaced: "never blocks" is satisfied by a function that
+ * returns nothing, where "blocks at 5 and 11 and nowhere else" is not.
  */
-describe('D155 — rewardUpsells', () => {
+describe('D155/D160 — rewardUpsells', () => {
   const sameProduct = (buyQty: number, getQty: number) =>
     rule({
       id: 'r_tie',
@@ -1528,7 +1539,9 @@ describe('D155 — rewardUpsells', () => {
     return {
       upsells: rewardUpsells({ lines, promotions: [promo] }),
       discount: applyPromotions({ lines, promotions: [promo] }).totalDiscount,
-      blocks: outstandingRewards({ lines, promotions: [promo] }).length > 0,
+      // D160 — what the TILL gates on, which is now the union rather than
+      // `outstandingRewards` alone.
+      blocks: incompleteOffers({ lines, promotions: [promo] }).length > 0,
     };
   };
 
@@ -1566,19 +1579,24 @@ describe('D155 — rewardUpsells', () => {
     ]);
   });
 
-  it('NEVER blocks payment, at any quantity — including where it prompts', () => {
+  it('blocks payment at exactly the quantities that are one unit short', () => {
     /*
-     * The reason this is a separate function from `outstandingRewards`. Five
-     * ties at full price is a real sale; refusing it would be worse than saying
-     * nothing at all, which is what the code did before.
+     * D160, and the reversal of what this case used to require.
+     *
+     * The accepted cost is visible right here in the map: at five and at
+     * eleven the sale is held until the free unit is added, so a customer
+     * who wants exactly five ties cannot be served without taking a sixth.
+     * The PO chose that over letting them leave the free one behind.
      */
     // Mapped rather than looped with a message: Jest's `expect` takes no label,
-    // and an exact map names the offending quantity in the failure output.
+    // and an exact map names the offending quantity in the failure output. The
+    // false entries matter as much as the true ones — a till that simply
+    // blocked everything would fail three of these five.
     expect(
       Object.fromEntries([1, 5, 6, 11, 12].map((q) => [q, at(q).blocks])),
-    ).toEqual({ 1: false, 5: false, 6: false, 11: false, 12: false });
-    // …and the positive control: a DIFFERENT-product reward still does block,
-    // so the assertion above cannot pass because blocking broke entirely.
+    ).toEqual({ 1: false, 5: true, 6: false, 11: true, 12: false });
+    // …and the control: a DIFFERENT-product reward blocks too, which is the
+    // whole point of D160 — the two shapes are one behaviour now.
     const crossOffer = rule({
       id: 'r_cross',
       name: 'Buy 2 Get 1',
@@ -1649,5 +1667,116 @@ describe('D155 — rewardUpsells', () => {
     // unit would be promising something the applier refuses to give.
     const lines = [{ ...item('l_tie', 'p_tie', 500, 5), manualDiscountAmount: 100 }];
     expect(rewardUpsells({ lines, promotions: [sameProduct(5, 1)] })).toEqual([]);
+  });
+});
+
+/**
+ * D160 — `incompleteOffers`, the one list the till gates on.
+ *
+ * ## Why this is asserted separately from its two halves
+ *
+ * Both halves already have their own coverage, and both are correct on their
+ * own terms. The property THIS function carries is that neither is forgotten:
+ * a union that dropped one half would still pass every test above, because
+ * every test above calls one half directly.
+ *
+ * So each case here holds a basket that is short on ONE of the two shapes and
+ * asserts the union reports it, plus a case short on BOTH that must report two.
+ * A union that returned only its first argument passes the cross-product case
+ * and fails the other two.
+ */
+describe('D160 — incompleteOffers', () => {
+  const sameProductRule = rule({
+    id: 'r_tie',
+    name: 'Tie',
+    type: 'BUY_X_GET_Y',
+    buyQuantity: 5,
+    getQuantity: 1,
+    percentageOff: 100,
+    items: [
+      { productId: 'p_tie', role: 'BUY', quantity: 1 },
+      { productId: 'p_tie', role: 'GET', quantity: 1 },
+    ],
+  });
+
+  const crossRule = rule({
+    id: 'r_cross',
+    name: 'Buy 2 Get 1',
+    type: 'BUY_X_GET_Y',
+    buyQuantity: 2,
+    getQuantity: 1,
+    percentageOff: 100,
+    items: [
+      { productId: 'p_shirt', role: 'BUY', quantity: 1 },
+      // NOT `p_tie`: the basket holds ties, so a tie reward would always be
+      // satisfied and the "both short at once" case below unreachable.
+      { productId: 'p_other', role: 'GET', quantity: 1 },
+    ],
+  });
+
+  it('reports a same-product offer that is one unit short', () => {
+    expect(
+      incompleteOffers({
+        lines: [item('l_tie', 'p_tie', 500, 5)],
+        promotions: [sameProductRule],
+      }),
+    ).toEqual([
+      { promotionId: 'r_tie', promotionName: 'Tie', productId: 'p_tie', needed: 1 },
+    ]);
+  });
+
+  it('reports a cross-product reward the basket has earned and is not holding', () => {
+    expect(
+      incompleteOffers({
+        lines: [item('l_shirt', 'p_shirt', 1000, 2)],
+        promotions: [crossRule],
+      }),
+    ).toEqual([
+      { promotionId: 'r_cross', promotionName: 'Buy 2 Get 1', productId: 'p_other', needed: 1 },
+    ]);
+  });
+
+  it('reports BOTH when both are short, and neither is dropped', () => {
+    /*
+     * The case the union exists for. Five ties is one short of the tie
+     * offer, and two shirts have earned a free `p_other` the basket is not
+     * holding. Two different shapes, both short, in one basket.
+     */
+    const offers = incompleteOffers({
+      lines: [item('l_shirt', 'p_shirt', 1000, 2), item('l_tie', 'p_tie', 500, 5)],
+      promotions: [sameProductRule, crossRule],
+    });
+
+    // An exact set of promotion ids: a union that returned only one argument,
+    // or listed one twice, fails here.
+    expect(offers.map((o) => o.promotionId).sort()).toEqual(['r_cross', 'r_tie']);
+  });
+
+  it('reports nothing for a basket that has qualified for nothing', () => {
+    /*
+     * The control that keeps the gate proportionate. One tie against a
+     * buy-five offer, and one shirt against a buy-two offer, have earned
+     * nothing — blocking there would refuse every small basket in the shop.
+     */
+    expect(
+      incompleteOffers({
+        lines: [item('l_tie', 'p_tie', 500, 1), item('l_shirt', 'p_shirt', 1000, 1)],
+        promotions: [sameProductRule, crossRule],
+      }),
+    ).toEqual([]);
+  });
+
+  it('reports nothing once every offer is complete', () => {
+    // Six ties: the sixth is free. And the cross reward is in the basket.
+    expect(
+      incompleteOffers({
+        lines: [
+          item('l_shirt', 'p_shirt', 1000, 2),
+          item('l_tie', 'p_tie', 500, 6),
+          item('l_other', 'p_other', 200, 1),
+        ],
+        promotions: [sameProductRule, crossRule],
+      }),
+    ).toEqual([]);
   });
 });

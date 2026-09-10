@@ -853,31 +853,33 @@ export interface RewardUpsell {
 }
 
 /**
- * D155 — offers the basket is one step short of, for a SAME-PRODUCT reward.
+ * D155/D160 — a SAME-PRODUCT reward the basket is one step short of.
  *
  * ## The gap this fills
  *
- * `outstandingRewards` deliberately reports nothing for a same-product BOGO,
- * and that is right: a "buy 5 get 1" on one product is six for the price of
- * five, so a customer holding five has earned nothing and owes nothing. The
- * till must not block their payment — five ties at full price is a real sale.
+ * `outstandingRewards` reports nothing for a same-product BOGO, because on
+ * its own terms nothing is owed: a "buy 5 get 1" is six for the price of
+ * five, so a customer holding five has earned nothing yet. The arithmetic
+ * there is unchanged and still correct.
  *
- * But it said nothing AT ALL, and that is the gap. The cashier could not see
- * that one more tie costs the customer nothing.
+ * What changed is what the TILL does about it.
  *
- * ## Why this is separate from `outstandingRewards`, not folded into it
+ * ## D160 — this now gates payment, and D155 said it never would
  *
- * They answer different questions and carry different authority.
+ * D155 called this an offer to decline and kept it out of `canPay`,
+ * reasoning that refusing a five-tie sale is hostile. The PO reversed that
+ * deliberately: a customer who qualified for a free item must not be let
+ * out of the shop without it, and every BUY_X_GET_Y is to behave the same
+ * way regardless of whether the reward is the same product or another one.
  *
- *  - `outstandingRewards` is a DEBT: the customer has earned something they
- *    are not holding, and completing the sale would pocket it. It gates
- *    payment (4.14).
- *  - this is an OFFER: nothing is owed, and the customer may decline it.
- *    It must never gate payment.
+ * The consequence is real and was accepted: with `buy 5 get 1`, a basket of
+ * exactly five, eleven, seventeen — each is one short of a group — cannot
+ * be paid for until the free unit is added.
  *
- * Returning them from one function would invite a caller to feed both into
- * `canPay` and refuse a legitimate five-tie sale — the exact hostility this
- * feature was chosen over. Two types, so the compiler keeps them apart.
+ * This function is still SEPARATE from `outstandingRewards` because the two
+ * arithmetics are genuinely different (an entitlement shortfall versus a
+ * remainder within a group). `incompleteOffers` below is the union, and is
+ * what a till should read: one list, one gate, nothing to keep in step.
  *
  * ## When it fires
  *
@@ -890,6 +892,65 @@ export interface RewardUpsell {
  * `outstandingRewards` the moment they are earned, and prompting before that
  * would be a second, weaker voice on the same offer.
  */
+/**
+ * D160 — every BUY_X_GET_Y this basket has not finished, as one list.
+ *
+ * ## Why this exists rather than two lists at the call site
+ *
+ * The till must now treat both shapes identically: the same notice, the same
+ * emoji, the same refusal to take payment. Two lists merged by the caller is
+ * two places to forget one of them — and the failure would be silent and
+ * one-sided, a cashier able to pay through a same-product offer but not a
+ * cross-product one, or the reverse.
+ *
+ * So the union lives here, next to both halves, and the till reads exactly
+ * one thing.
+ *
+ * ## The two halves are still computed separately, on purpose
+ *
+ *  - `outstandingRewards` — the customer EARNED reward units they are not
+ *    holding. A shortfall against an entitlement.
+ *  - `rewardUpsells` — the customer is inside an incomplete group of a
+ *    same-product offer. A remainder, not an entitlement.
+ *
+ * They are different sums and neither reduces to the other. Merging the
+ * OUTPUT is safe; merging the arithmetic would not be.
+ *
+ * ## What this deliberately does not report
+ *
+ * A basket nowhere near a threshold. One tie against `buy 5 get 1` returns
+ * nothing, and two shirts against `buy 5 get 1 tie` returns nothing: the
+ * customer has not qualified for anything, so there is nothing to complete
+ * and no reason to hold the sale. Blocking there would refuse every small
+ * basket in the shop.
+ */
+export function incompleteOffers(context: PromotionContext): IncompleteOffer[] {
+  return [
+    ...outstandingRewards(context).map((r) => ({
+      promotionId: r.promotionId,
+      promotionName: r.promotionName,
+      productId: r.productId,
+      needed: r.outstanding,
+    })),
+    ...rewardUpsells(context).map((u) => ({
+      promotionId: u.promotionId,
+      promotionName: u.promotionName,
+      productId: u.productId,
+      needed: u.needed,
+    })),
+  ];
+}
+
+/** One unfinished offer, whichever of the two shapes produced it (D160). */
+export interface IncompleteOffer {
+  promotionId: string;
+  promotionName: string;
+  /** The product the cashier must add more of. */
+  productId: string;
+  /** Units still to add before the offer is complete. Always > 0. */
+  needed: number;
+}
+
 export function rewardUpsells(context: PromotionContext): RewardUpsell[] {
   // D134a (`6.4`) — measured lines are excluded for the same reason they are
   // in `rewardEntitlements`: this runs BUY_X_GET_Y counting, and a rule that

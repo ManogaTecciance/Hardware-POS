@@ -61,7 +61,7 @@ import {
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
-import { outstandingRewards, rewardUpsells } from '@hardware-pos/shared';
+import { incompleteOffers } from '@hardware-pos/shared';
 
 import { isMeasured, stockCap, usePosCart } from '@/lib/pos-cart';
 import { MeasureNumpad } from '@/components/pos/measure-numpad';
@@ -410,23 +410,43 @@ export function PosRetailCheckout() {
    *     till asking.
    */
   /*
-   * D45 (4.14) — the cashier adds the reward; the till requires it.
+   * D160 — every BUY_X_GET_Y this basket has not finished, as ONE list.
+   *
+   * ## The cashier adds the reward; the till only requires it (D45, 4.14)
    *
    * 4.11–4.13 had the till add the free item itself, and it created more
-   * problems than it solved: which variant to give away, what to do when the
-   * entitlement moved, and an effect that fought its own state. The till now
-   * states what is owed and refuses payment until it is in the basket, which
-   * leaves the choice of product, variant, colour and size where it belongs —
-   * with the person serving the customer.
+   * problems than it solved: which variant to give away, what to do when
+   * the entitlement moved, and an effect that fought its own state. The
+   * till states what is owed and refuses payment until it is in the basket,
+   * which leaves the choice of product, variant, colour and size with the
+   * person serving the customer. D160 widens what counts as owed; it does
+   * not revisit that.
    *
-   * No effect and no cart writes: this is derived on every render from the cart
-   * and the rules, so it recalculates when either changes and cannot loop.
+   * ## What D160 changed
+   *
+   * D45 (4.14) blocked payment for a cross-product reward the customer had
+   * earned and was not holding. D155 added a same-product prompt beside it
+   * that deliberately did NOT block, on the reasoning that five ties at full
+   * price is a real sale and refusing it is hostile.
+   *
+   * The PO reversed that: a customer who qualified for a free item must not
+   * leave without it, and every reward offer behaves the same way whether
+   * the free item is the same product or a different one. So there is now
+   * one list, one notice and one gate — two lists merged here would be two
+   * places to forget one of them, and the failure would be silent.
+   *
+   * The accepted cost, stated because it is real: with `buy 5 get 1`, a
+   * basket of exactly five (or eleven, or seventeen) cannot be paid for
+   * until the free unit is added.
+   *
+   * No effect and no cart writes: derived on every render from the cart and
+   * the rules, so it recalculates when either changes and cannot loop.
    */
   const outstanding = React.useMemo(
     () =>
       data.promotionRules.length === 0
         ? []
-        : outstandingRewards({
+        : incompleteOffers({
             lines: cart.items.map((it) => {
               const line = computeLine(it);
               return {
@@ -437,41 +457,6 @@ export function PosRetailCheckout() {
                 lineSubtotal: line.lineSubtotal,
                 manualDiscountAmount: line.discountAmount,
                 // D134a (`6.4`) — same flag as `cart.ts` and the server.
-                isMeasured: it.product.quantityType === 'DECIMAL',
-              };
-            }),
-            promotions: data.promotionRules,
-          }),
-    [cart.items, data.promotionRules],
-  );
-
-  /*
-   * D155 — an offer the basket is one step short of.
-   *
-   * Deliberately NOT part of `canPay`. `outstanding` is a debt the customer
-   * has earned and the sale must not walk away from; this is an offer they
-   * have not reached and may decline. A same-product "buy 5 get 1" is six
-   * for the price of five, so somebody buying exactly five ties owes nothing
-   * — refusing their payment would be the hostility this replaced.
-   *
-   * Same shape as `outstanding` above, and for the same reason: it reads the
-   * cart the applier prices from, so the free unit it promises is the unit
-   * the applier will discount.
-   */
-  const upsells = React.useMemo(
-    () =>
-      data.promotionRules.length === 0
-        ? []
-        : rewardUpsells({
-            lines: cart.items.map((it) => {
-              const line = computeLine(it);
-              return {
-                id: it.lineKey,
-                productId: it.product.id,
-                unitPrice: linePrice(it),
-                quantity: it.quantity,
-                lineSubtotal: line.lineSubtotal,
-                manualDiscountAmount: line.discountAmount,
                 isMeasured: it.product.quantityType === 'DECIMAL',
               };
             }),
@@ -692,43 +677,30 @@ export function PosRetailCheckout() {
         ) : null}
       </div>
 
-      {/* D45 (4.14) — what the customer is owed, and how many are still to come.
-          Named per promotion, because two offers can be outstanding at once. */}
+      {/* D45 (4.14) / D160 — what the customer is owed, and how many are
+          still to come. Named per promotion, because two offers can be
+          outstanding at once.
+
+          D160 — ONE block for both shapes. A same-product "buy 5 get 1"
+          used to render a second, muted, non-blocking notice below this
+          one; the cashier now reads the same sentence and the same gift
+          whichever kind of offer is short, because a till that presents
+          the same situation two ways teaches nobody anything. */}
       {outstanding.length > 0 ? (
         <div className="mx-4 mb-2 space-y-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2.5">
           {outstanding.map((r) => (
             <div key={r.promotionId} className="text-xs">
               <p className="font-semibold text-primary">🎁 {r.promotionName}</p>
               <p className="mt-0.5 text-muted-foreground">
-                Add <span className="font-semibold text-foreground">{r.outstanding}</span>{' '}
+                Add <span className="font-semibold text-foreground">{r.needed}</span>{' '}
                 {outstandingLabel(r.productId)}
-                {r.outstanding === 1 ? '' : 's'} to complete this offer.
+                {r.needed === 1 ? '' : 's'} to complete this offer.
               </p>
             </div>
           ))}
           <p className="pt-0.5 text-[11px] font-medium text-primary/80">
             Payment is unavailable until the offer is complete.
           </p>
-        </div>
-      ) : null}
-
-      {/* D155 — how close an offer is, when nothing is owed.
-          Muted, not the primary colour the outstanding notice uses, and it
-          says what the customer GETS rather than what the till requires:
-          this is an offer to decline, not a debt to settle. Suppressed while
-          a reward really is outstanding, so the cashier reads one instruction
-          at a time and the blocking one wins. */}
-      {outstanding.length === 0 && upsells.length > 0 ? (
-        <div className="mx-4 mb-2 space-y-1.5 rounded-xl border border-border bg-surface px-3 py-2.5">
-          {upsells.map((u) => (
-            <p key={u.promotionId} className="text-xs text-muted-foreground">
-              Add <span className="font-semibold text-foreground">{u.needed}</span> more{' '}
-              <span className="font-semibold text-foreground">{outstandingLabel(u.productId)}</span>
-              {u.needed === 1 ? '' : 's'} and{' '}
-              {u.free === 1 ? 'one is' : `${u.free} are`} free —{' '}
-              <span className="font-medium">{u.promotionName}</span>.
-            </p>
-          ))}
         </div>
       ) : null}
 
