@@ -8145,6 +8145,135 @@ preview at all (D96).
 
 ---
 
+## D142 — a vertical declares the goods its document previews show
+
+**Status:** accepted and **built**, 2026-09-10. Preview/sample data only. No schema
+change, no migration, no change to any real document. **Completes D141**, which
+fixed the thermal bill's sample and deliberately left this one.
+
+### The problem D141 recorded and did not fix
+
+`SAMPLE_ITEMS` in `documents.service.ts` was a hardware catalogue — Portland
+Cement, TMT Steel Bar, PVC Pipe — and it was the **only** sample catalogue in the
+product. Every workspace's A4 preview used it, so a clothing shop opening
+`Settings → Preview` saw a quotation for building materials on its own
+letterhead.
+
+This is a **sales surface**, not an internal screen. A shop owner evaluating the
+product opens Preview to see what their quotation will look like; seeing another
+trade's goods is the moment they decide whether the product was built for them.
+That is why it was worth returning to.
+
+### Why D141 stopped, and what changed
+
+D141 fixed the thermal bill's sample cheaply because that document is rendered
+**client-side**, where a presentation resolver was already in the call path. The
+A4 document is rendered **server-side**, where none exists — so the server would
+have to choose a catalogue by business type, and `businessType === 'RETAIL'` in a
+service is exactly the if-chain **D56** confines to the domain registry.
+
+The way out is to stop treating it as a branch. **A vertical declares its own
+sample goods, and the server reads the registry.** There is no comparison to
+place anywhere, so there is nothing for D56 to forbid.
+
+### The decision
+
+```ts
+readonly catalogue: {
+  readonly attributeSchema: readonly AttributeField[];
+  readonly sampleItems?: readonly SampleCatalogueItem[];   // D142
+};
+```
+
+| Domain | Declares | Preview shows |
+|---|---|---|
+| **HARDWARE** | its original eight lines | **unchanged** |
+| **RETAIL** | clothing and groceries | its own trade |
+| **GENERAL** | nothing | neutral filler |
+| **RESTAURANT / CAFE / BAKERY / HOTEL** | nothing | neutral filler — and they never render the A4 preview at all (D96/D140) |
+
+### Why the field is optional, when its own block says required
+
+`DomainDescriptor.catalogue` documents itself as required *"so a new descriptor
+must SAY 'no attributes' rather than get it by omission; the silent-fallback
+failure mode is the one this whole module exists to end."*
+
+That rule is right, and this is the exception that proves its reasoning rather
+than an erosion of it. The failure mode it guards against is a vertical silently
+inheriting **another vertical's** answer — precisely the defect D142 fixes.
+
+**Omission here falls back to a NEUTRAL list**, not to hardware's. `Standard Item
+1`, `Standard Item 2`, and so on: dull, but it claims no trade. Silence therefore
+cannot hand anyone somebody else's goods, and the hazard the required rule exists
+for cannot occur.
+
+Making it required would instead have forced an edit to the **food-service and
+general descriptors** — templates another team owns — to declare something about
+a screen food service never even renders. The isolation rule that has governed
+this whole engagement says do not touch them, and a neutral fallback is what lets
+us honour it.
+
+### Hardware is provably unchanged, not promised unchanged
+
+Its eight lines were **lifted out and re-inserted character for character** — the
+patch that moved them read them from the source rather than retyping them, which
+is what makes byte-fidelity a fact rather than an intention.
+
+A test then renders hardware's preview at eight lines with the SKU column on and
+pins **every name, two SKUs and a price**. Names alone would pass for a list that
+kept the labels and lost the rows.
+
+Three mutations were run by hand, and each was caught:
+
+| Mutation | Caught by |
+|---|---|
+| retail declares nothing → falls back to neutral | 4 tests |
+| **hardware declares nothing** → silently regresses to filler | 4 tests |
+| the fallback becomes hardware's list → rebuilds the defect one level down | 3 tests |
+
+The second is the one that matters. Hardware belongs to another team, and a
+relocation that quietly dropped its list would be invisible to anyone reading the
+retail work.
+
+### Where the business type is read
+
+`DocumentsService` injects `BusinessProfileService` and calls `domainFor(...)`.
+**D28** forbids `ProductsService`, `SalesService` and `ReturnsService` from
+injecting it, so that a business rule is never decided by a profile branch inside
+a service. This service decides nothing about a transaction — it chooses which
+illustrative goods a preview draws — and it reads the registry rather than
+branching on the type. `DocumentsModule` imports `PlatformModule` explicitly even
+though that module is `@Global()`, following the precedent set in
+`providers.module.ts`: global only means "no re-import once it is in the graph",
+and something still has to put it there for a smaller graph to compile.
+
+### One deliberate behaviour change beyond retail
+
+**GENERAL's A4 preview moves from hardware goods to neutral filler.** It is the
+only workspace besides hardware and retail that renders this preview, and it
+declares no sample items.
+
+This is the intended consequence of choosing a neutral fallback over a hardware
+one, and it is an improvement — general trade is not a hardware store — but it is
+a change to a template we did not otherwise touch, and it is recorded here rather
+than left to be discovered.
+
+### What this does NOT decide
+
+**Whether a preview should show the tenant's own real products** instead of any
+declared list. That was the alternative considered and set aside: it needs a
+query and an empty-catalogue fallback, and it would have changed hardware's
+preview — an outcome the isolation rule made unattractive even though the result
+would arguably be better. It stays available as a later refinement.
+
+**The thermal bill keeps its own separate sample** (D141), selected by a
+presentation flag rather than by the descriptor. The two mechanisms now differ,
+which is worth revisiting if a third document surface ever appears; the goods
+themselves were deliberately kept in step, so a retail shop's two documents
+illustrate the same shop.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

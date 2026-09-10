@@ -1,4 +1,6 @@
 import { DocumentsService } from './documents.service';
+import { BUSINESS_TYPE_VALUES, domainFor, type BusinessType } from '@hardware-pos/shared';
+
 import { SettingsService } from '../settings/settings.service';
 
 /**
@@ -19,13 +21,29 @@ const prismaStub = {
 } as any;
 const pdfStub = { available: true, htmlToPdf: jest.fn(async () => null) } as any;
 
+/**
+ * D142 — the tenant's vertical, switchable per test.
+ *
+ * The preview's sample goods come from the domain registry now, so the
+ * business type is an INPUT to what gets rendered. Defaults to HARDWARE,
+ * which is what every preview showed before D142.
+ */
+let businessType: BusinessType = 'HARDWARE';
+const profilesStub = {
+  getEffectiveProfile: jest.fn(async () => ({ businessType })),
+} as any;
+
 function service() {
   const settings = new SettingsService(prismaStub);
-  return new DocumentsService(prismaStub, settings, pdfStub);
+  return new DocumentsService(prismaStub, settings, pdfStub, profilesStub);
 }
 
 describe('DocumentsService — A4 template preview', () => {
   const TENANT = 'tnt_1';
+
+  beforeEach(() => {
+    businessType = 'HARDWARE';
+  });
 
   it('renders LKR (Rs.) amounts, never $', async () => {
     const html = await service().previewHtml(TENANT, 'quotation');
@@ -145,6 +163,159 @@ describe('DocumentsService — A4 template preview', () => {
       expect(html).toContain('A &amp; B');
       expect(html).not.toContain('<script>x</script>');
       expect(html).toMatch(/class="billnote">[^<]*A &amp; B<br/);
+    });
+  });
+});
+
+/**
+ * D142 — a document preview is illustrated with the tenant's own trade.
+ *
+ * ## What makes these assertions non-vacuous
+ *
+ * The change moves a hard-coded list out of this service and into the domain
+ * registry. The risk that matters is not that retail fails to get its own goods
+ * — that is the visible half anyone would test — it is that **hardware's
+ * preview changes** while nobody is looking, because hardware belongs to
+ * another team and its eight lines were relocated rather than rewritten.
+ *
+ * So hardware is pinned item by item, on the rendered HTML, in the same
+ * expectation that proves retail differs. A test that only checked "retail sees
+ * clothing" would pass just as happily with hardware's preview destroyed.
+ *
+ * The registry walk is an exact map over BUSINESS_TYPE_VALUES, so a business
+ * type added later arrives here by name rather than silently inheriting
+ * whichever list it happens to resolve to.
+ */
+describe('D142 — sample goods come from the tenant’s vertical', () => {
+  const TENANT = 'tnt_1';
+
+  /** Hardware's eight lines, as they were before D142 moved them. */
+  const HARDWARE_NAMES = [
+    'Portland Cement 50kg',
+    'TMT Steel Bar 12mm (per length)',
+    'PVC Pipe 2 inch — 6m',
+    'Weathershield Emulsion Paint 4L',
+    'Door Lock Set — Stainless',
+    'Electrical Wire 1mm (per metre)',
+    'Angle Grinder 4 inch 720W',
+    'Safety Gloves — Nitrile',
+  ];
+
+  it('a hardware workspace previews exactly what it always did', async () => {
+    businessType = 'HARDWARE';
+    // Eight lines so every item is rendered, and the SKU column turned on:
+    // `5.10` made it off-by-default, and the SKUs are half of what proves
+    // the rows are the original ones rather than same-named replacements.
+    const html = await service().previewHtml(TENANT, 'quotation', { showSku: true }, 8);
+
+    for (const name of HARDWARE_NAMES) {
+      expect(html).toContain(name);
+    }
+    // …and their SKUs and a price, so a list that kept the names while losing
+    // the rest of each row would still fail.
+    expect(html).toContain('CEM-50');
+    expect(html).toContain('GLOV-STD');
+    expect(html).toContain('2,650.00');
+  });
+
+  it('a retail workspace previews clothing and groceries instead', async () => {
+    businessType = 'RETAIL';
+    const html = await service().previewHtml(TENANT, 'quotation', {}, 8);
+
+    // POSITIVE — both halves of what RETAIL covers.
+    expect(html).toContain('Cotton Shirt');
+    expect(html).toContain('Basmati Rice');
+    // NEGATIVE — and none of the trade it used to show. This is the reported
+    // defect, written as an assertion.
+    for (const name of HARDWARE_NAMES) {
+      expect(html).not.toContain(name);
+    }
+  });
+
+  it('a vertical that declares nothing gets neutral filler, never another trade', async () => {
+    /*
+     * GENERAL declares no sample items. The fallback must not be hardware's
+     * list — that would rebuild the exact defect one level down, and every
+     * future vertical would inherit it too.
+     */
+    businessType = 'GENERAL';
+    const html = await service().previewHtml(TENANT, 'quotation', {}, 6);
+
+    expect(html).toContain('Standard Item 1');
+    expect(html).toContain('Standard Item 2');
+    for (const name of HARDWARE_NAMES) {
+      expect(html).not.toContain(name);
+    }
+    expect(html).not.toContain('Cotton Shirt');
+  });
+
+  it('the whole registry is mapped, so a new business type cannot inherit silently', async () => {
+    const svc = service();
+    const seen: Record<string, string> = {};
+
+    for (const type of BUSINESS_TYPE_VALUES) {
+      businessType = type;
+      const html = await svc.previewHtml(TENANT, 'quotation', {}, 6);
+      seen[type] = html.includes('Portland Cement 50kg')
+        ? 'HARDWARE'
+        : html.includes('Cotton Shirt')
+          ? 'RETAIL'
+          : 'NEUTRAL';
+    }
+
+    expect(seen).toEqual({
+      HARDWARE: 'HARDWARE',
+      RETAIL: 'RETAIL',
+      // Food service never renders the A4 preview at all (D96/D140); it is
+      // walked here anyway so that changing its descriptor shows up.
+      RESTAURANT: 'NEUTRAL',
+      CAFE: 'NEUTRAL',
+      BAKERY: 'NEUTRAL',
+      HOTEL: 'NEUTRAL',
+      GENERAL: 'NEUTRAL',
+    });
+    expect(Object.keys(seen)).toHaveLength(BUSINESS_TYPE_VALUES.length);
+  });
+
+  it('the descriptor is the source, not a copy that happens to agree', async () => {
+    // Compared against the registry itself, so a list edited in the descriptor
+    // and forgotten here fails rather than drifting.
+    for (const type of ['HARDWARE', 'RETAIL'] as const) {
+      businessType = type;
+      const declared = domainFor(type).catalogue.sampleItems;
+      expect(declared).toBeDefined();
+      const html = await service().previewHtml(TENANT, 'quotation', { showSku: true }, 8);
+      for (const item of declared!) {
+        expect(html).toContain(item.sku);
+      }
+    }
+  });
+
+  describe('the resolution can actually fail', () => {
+    it('M1: pointing retail at hardware’s list is caught', async () => {
+      /*
+       * The mutation: retail resolves to hardware's goods — which is the state
+       * of the world before D142. Written out rather than described, and the
+       * shipped resolver asserted to differ from it.
+       */
+      const hardwareList = domainFor('HARDWARE').catalogue.sampleItems!;
+      const retailList = domainFor('RETAIL').catalogue.sampleItems!;
+
+      expect(retailList.map((i) => i.name)).not.toEqual(hardwareList.map((i) => i.name));
+      expect(hardwareList.map((i) => i.name)).toEqual(HARDWARE_NAMES);
+    });
+
+    it('M2: a hardware fallback would reach every undeclared vertical', async () => {
+      /*
+       * The tempting simplification — keep the old list as the default instead
+       * of a neutral one. It looks harmless because hardware and retail both
+       * declare their own; it bites GENERAL and every vertical added later.
+       */
+      businessType = 'GENERAL';
+      const html = await service().previewHtml(TENANT, 'quotation', {}, 6);
+      expect(domainFor('GENERAL').catalogue.sampleItems).toBeUndefined();
+      expect(html).not.toContain('Portland Cement 50kg');
+      expect(html).toContain('Standard Item 1');
     });
   });
 });

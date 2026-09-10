@@ -9,6 +9,7 @@ import {
   formatDateInTimeZone,
   formatDateTimeInTimeZone,
   documentPaymentMethods,
+  domainFor,
   paymentMethodLabel,
   safeTimeZone,
   saleLineLabel,
@@ -18,11 +19,13 @@ import {
   taxRateLabel,
   type ItemConditionCode,
   type ReturnReasonCode,
+  type SampleCatalogueItem,
   type TaxableLine,
 } from '@hardware-pos/shared';
 
 import { customerAddressLine } from '../../common/customer-display';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BusinessProfileService } from '../platform/business-profile.service';
 import { SettingsService } from '../settings/settings.service';
 import { DocumentSettings } from '../settings/settings.interfaces';
 import { QuotationDetail } from '../quotations/quotations.types';
@@ -130,16 +133,29 @@ const PREVIEW_NUMBERS: Record<PreviewDocumentType, string> = {
   exchange: 'EXC-2026-000042',
 };
 
-/** Sample hardware catalogue for template previews. Prices are LKR. */
-const SAMPLE_ITEMS: { name: string; sku: string; unit: string; unitPrice: number; pack?: number }[] = [
-  { name: 'Portland Cement 50kg', sku: 'CEM-50', unit: 'BAG', unitPrice: 2650 },
-  { name: 'TMT Steel Bar 12mm (per length)', sku: 'STL-12', unit: 'PCS', unitPrice: 1980 },
-  { name: 'PVC Pipe 2 inch — 6m', sku: 'PVC-2IN', unit: 'LENGTH', unitPrice: 1450 },
-  { name: 'Weathershield Emulsion Paint 4L', sku: 'PNT-WS4', unit: 'CAN', unitPrice: 5400 },
-  { name: 'Door Lock Set — Stainless', sku: 'LOCK-STD', unit: 'SET', unitPrice: 4850 },
-  { name: 'Electrical Wire 1mm (per metre)', sku: 'WIRE-1MM', unit: 'M', unitPrice: 95, pack: 10 },
-  { name: 'Angle Grinder 4 inch 720W', sku: 'GRND-4', unit: 'PCS', unitPrice: 9200 },
-  { name: 'Safety Gloves — Nitrile', sku: 'GLOV-STD', unit: 'PAIR', unitPrice: 640 },
+/**
+ * D142 — the sample goods shown when a vertical declares none of its own.
+ *
+ * This slot used to hold a hardware catalogue — Portland cement, TMT steel bar
+ * — and every workspace was previewed with it, so a clothing shop evaluating
+ * the product saw a quotation for building materials on its own letterhead.
+ * Those eight lines now live on the hardware descriptor, where they belong.
+ *
+ * What replaces them here is deliberately NEUTRAL. A fallback that named any
+ * real trade would put that trade in front of every vertical which has not
+ * declared its own — which is the exact defect being fixed, rebuilt one level
+ * down. Dull filler that claims no trade is the honest answer for "we do not
+ * know what this shop sells", and it still exercises what the preview is
+ * actually for: column widths, wrapping, the discount and tax rows, and the
+ * multiplied-quantity path.
+ */
+const NEUTRAL_SAMPLE_ITEMS: readonly SampleCatalogueItem[] = [
+  { name: 'Standard Item 1', sku: 'ITEM-001', unit: 'PCS', unitPrice: 2500 },
+  { name: 'Standard Item 2', sku: 'ITEM-002', unit: 'PCS', unitPrice: 1750 },
+  { name: 'Standard Item 3', sku: 'ITEM-003', unit: 'BOX', unitPrice: 4200 },
+  { name: 'Standard Item 4', sku: 'ITEM-004', unit: 'SET', unitPrice: 3100 },
+  { name: 'Standard Item 5', sku: 'ITEM-005', unit: 'PCS', unitPrice: 950, pack: 10 },
+  { name: 'Standard Item 6', sku: 'ITEM-006', unit: 'PKT', unitPrice: 1400 },
 ];
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -192,6 +208,15 @@ export class DocumentsService {
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
     private readonly pdf: PdfService,
+    /**
+     * D142 — read to resolve which vertical's sample goods to preview.
+     *
+     * D28 forbids `ProductsService`, `SalesService` and `ReturnsService` from
+     * injecting this, so that a business rule is never decided by a profile
+     * branch inside a service. This is document PRESENTATION, decides nothing
+     * about a transaction, and reads the registry rather than branching.
+     */
+    private readonly profiles: BusinessProfileService,
   ) {}
 
   /** Whether a server-side PDF engine (Puppeteer) is installed. */
@@ -276,6 +301,21 @@ export class DocumentsService {
     });
     // D141 — see `seller`: a missing name is not a reason to claim a trade.
     return tenant?.name ?? 'Your Business';
+  }
+
+  /**
+   * D142 — the sample goods for this tenant's vertical.
+   *
+   * Read from the DOMAIN REGISTRY, never branched on here. `domainFor` is the
+   * one place a business type may be compared (D56), and a `businessType ===`
+   * in this service is precisely the if-chain the registry exists to end.
+   *
+   * A descriptor that declares nothing gets the neutral list rather than
+   * another vertical's goods — see `NEUTRAL_SAMPLE_ITEMS`.
+   */
+  private async sampleItemsFor(tenantId: string): Promise<readonly SampleCatalogueItem[]> {
+    const profile = await this.profiles.getEffectiveProfile(tenantId);
+    return domainFor(profile.businessType).catalogue.sampleItems ?? NEUTRAL_SAMPLE_ITEMS;
   }
 
   // ── Sale / bill A4 ───────────────────────────────────────────
@@ -712,7 +752,14 @@ export class DocumentsService {
   ): Promise<string> {
     const fallbackName = await this.tenantName(tenantId);
     return renderA4Document(
-      this.buildSampleDocument(tenantId, type, overrides, lineCount, fallbackName),
+      this.buildSampleDocument(
+        tenantId,
+        type,
+        overrides,
+        lineCount,
+        fallbackName,
+        await this.sampleItemsFor(tenantId),
+      ),
     );
   }
 
@@ -740,9 +787,16 @@ export class DocumentsService {
      * every one of its other inputs is already resolved by its caller.
      */
     fallbackName = 'Your Business',
+    /**
+     * D142 — the goods to illustrate the sample with, resolved by the caller
+     * from the tenant's own vertical. Passed in for the same reason
+     * `fallbackName` is: this builder is synchronous and every other input
+     * it takes is already resolved.
+     */
+    sampleItems: readonly SampleCatalogueItem[] = NEUTRAL_SAMPLE_ITEMS,
   ): A4Document {
     const docs: DocumentSettings = { ...this.settings.getSettings(tenantId).documents, ...overrides };
-    const catalog = SAMPLE_ITEMS;
+    const catalog = sampleItems;
     const lines: DocLine[] = Array.from({ length: Math.max(1, lineCount) }, (_, i) => {
       const s = catalog[i % catalog.length];
       const quantity = ((i % 4) + 1) * (s.pack ?? 1);
