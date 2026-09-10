@@ -9823,6 +9823,124 @@ the same string.
 
 ---
 
+## D162 — the receipt says what crossed the counter, and what went back
+
+**Status:** accepted and **built**, 2026-09-10. **No schema change, no
+migration.** Retail/hardware till only.
+
+### What was reported
+
+A sale of **Rs 2,478** paid with **Rs 5,000**. The payment screen showed
+“Change Rs 2,522.00” twice. The printed bill showed:
+
+> Total **2,478** · Paid **2,478** · Balance **0.00** · Status PAID · Cash **2,478**
+
+The customer walked away with no record of the 5,000 they handed over or the
+2,522 they got back.
+
+### Where it was lost
+
+`pos/payment/page.tsx`:
+
+```ts
+if (mode === 'CASH') {
+  paidAmount = total;
+  payments = [{ method: 'CASH', amount: total }];   // the tender dies here
+}
+```
+
+`tendered` is local state, used for the on-screen change display and then
+discarded. It never reached the API, so no document could print it. The
+receipt was faithfully printing the only numbers it was given.
+
+### What this decision does NOT do, and why
+
+The obvious fix — “set Paid to 6,000 and Balance to the change” — breaks two
+things, both silently:
+
+1. **`balanceAmount` means money still OWED.** `credit.service` sums sales with
+   `balanceAmount > 0` to build the debtors list. Writing the change there puts
+   a walk-in customer on it, owing the shop's own money back.
+2. **`Payment.amount` feeds cash reconciliation.** `dashboard.repository`
+   groups payments by method and sums `amount`. Recording 5,000 would report
+   Rs 2,522 more cash in the drawer than went into it.
+
+The sale genuinely was **paid 2,478, owing 0**. The accounting was never wrong.
+What was missing is that the tender and the change were **never recorded as
+receipt facts**.
+
+Two lighter routes were checked and are closed: `Sale` has no JSON column to
+tuck them into, and `SalePaymentInputDto.amount` is `@IsPositive()`, so the
+change cannot be stored as a negative payment row either.
+
+### The decision
+
+**`POST /receipts/:saleId/customer` takes an optional `amountTendered`, and the
+template derives the change from it.**
+
+```
+Total            Rs. 2,478.00
+Paid             Rs. 2,478.00
+Balance          Rs.     0.00
+Cash received    Rs. 5,000.00      <- new
+Change           Rs. 2,522.00      <- new
+Status           PAID
+```
+
+- **The change is DERIVED, not sent.** The caller passes only what it observed.
+  A caller cannot make the paper print a change figure that does not follow
+  from the two amounts printed beside it.
+- **Nothing prints unless there is real change.** Exact money, an under-tender
+  (that is a balance, and the rows above already say so) and a sub-cent
+  rounding artefact all print nothing.
+- **The body is optional.** A card sale, a credit sale, every restaurant bill
+  and every REPRINT send nothing and render byte-for-byte as before.
+- `paidAmount`, `balanceAmount` and `Payment.amount` are untouched.
+
+### Deliberately out of scope: the reprint and the A4
+
+The tender is **not stored**, so:
+
+- a **reprint** from Sales history re-renders without it — `reprintCustomerReceipt`
+  calls the same endpoint with no body, and cannot honestly claim a tender it
+  never saw;
+- `/sales/:id` and the **A4 invoice** likewise show only what is stored.
+
+Persisting it needs two nullable columns on `Sale`, which is a shared table
+that hardware and restaurant both write to. The PO declined that scope for now,
+correctly: there is an **unresolved drift migration**
+(`20260828081727`) already making the API suite red, and stacking a new
+migration on top of it is how a schema gets into a state nobody can reason
+about. Recorded here as the known limit rather than half-done.
+
+One thing this DOES reach: `toReceiptContent` spreads the receipt data into
+`Receipt.content`, a JSON column, so the **original** receipt keeps a permanent
+record of the tender even though a reprint re-renders without it.
+
+### A redundant guard of my own, found by mutation
+
+The first version had two guards: `tendered <= total` and `change <= 0`. The
+second fully subsumes the first, so **no mutation could kill it** — which is
+the definition of a branch doing no work. Removed rather than covered with a
+test. Recorded because it is the D30 failure mode found in new code.
+
+### Mutation proof
+
+Five mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the rows are never printed (**the reported bug, restored**) | the value case and the derivation case |
+| the change guard is dropped | all three “prints neither” cases |
+| “Cash received” prints the total rather than the tender | the value case |
+| the change is computed the wrong way round | three cases |
+| the sub-cent guard is dropped | exact-money and rounding-artefact |
+
+`renderCustomerReceipt` had **no spec at all** before this, which is why every
+row it prints was unasserted and this went unnoticed.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

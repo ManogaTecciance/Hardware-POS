@@ -417,9 +417,23 @@ export default function PaymentPage() {
 
   const printReceipt = async () => {
     if (!completed || !receiptCtx) return;
+    /*
+     * D162 — the tender travels to the receipt, and nowhere else.
+     *
+     * The screen has shown "Change" since D74 and the paper never did,
+     * because `tendered` was local state used for that display and then
+     * dropped: the sale is completed with `amount: total`, which is
+     * correct (the difference was handed back and never entered the
+     * drawer), so the tender had no way to reach the printer.
+     *
+     * Sent only for CASH with real change. A card sale, an exact-money
+     * sale and an under-tender all send nothing and print as before.
+     */
+    const tenderToPrint =
+      mode === 'CASH' && change > 0 ? tenderedNum : undefined;
     setPrinting(true);
     try {
-      await printCustomerReceipt(session!, completed, receiptCtx);
+      await printCustomerReceipt(session!, completed, receiptCtx, tenderToPrint);
     } finally {
       setPrinting(false);
     }

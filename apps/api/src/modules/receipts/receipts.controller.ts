@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { ModuleKey, Receipt } from '@hardware-pos/database';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -7,6 +7,7 @@ import { RequirePermissions } from '../../common/decorators/permissions.decorato
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
+import { CustomerReceiptOptionsDto } from './dto/customer-receipt.dto';
 import { CustomerReceiptResult, ReceiptsService } from './receipts.service';
 
 // Phase 1.5.9 — receipts are the retail sale artefact. Every profile that
@@ -17,7 +18,14 @@ import { CustomerReceiptResult, ReceiptsService } from './receipts.service';
 export class ReceiptsController {
   constructor(private readonly receiptsService: ReceiptsService) {}
 
-  /** Generate the customer receipt. */
+  /**
+   * Generate the customer receipt.
+   *
+   * D162 — the body is OPTIONAL and usually absent. The till sends
+   * `amountTendered` so the paper can say what was handed over and what
+   * went back; the reprint path sends nothing, because the tender is not
+   * stored and a reprint cannot honestly claim one.
+   */
   @Post(':saleId/customer')
   @HttpCode(HttpStatus.CREATED)
   @RequirePermissions(Permission.SALE_CREATE)
@@ -25,8 +33,14 @@ export class ReceiptsController {
     @TenantId() tenantId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Param('saleId') saleId: string,
+    @Body() dto?: CustomerReceiptOptionsDto,
   ): Promise<CustomerReceiptResult> {
-    return this.receiptsService.generateCustomer(tenantId, saleId, user.id);
+    return this.receiptsService.generateCustomer(
+      tenantId,
+      saleId,
+      user.id,
+      dto?.amountTendered,
+    );
   }
 
   @Get('sale/:saleId')

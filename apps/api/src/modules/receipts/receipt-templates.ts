@@ -71,8 +71,68 @@ export interface CustomerReceiptData {
   paidAmount: number;
   balanceAmount: number;
   paymentStatus: string;
+  /**
+   * D162 — cash actually handed over, when it exceeded the total.
+   *
+   * Optional, and absent on every document that does not have one: a card
+   * sale, a credit sale, a restaurant bill, and every receipt REPRINTED
+   * later (the tender is not stored, so a reprint cannot know it). Absent
+   * means the receipt prints exactly as it did before this decision.
+   *
+   * This is a RECEIPT fact, not a money fact. `paidAmount` is still what
+   * settled the sale and `balanceAmount` is still what is owed — writing
+   * the tender into either would put a walk-in customer on the debtors
+   * list (`credit.service` sums `balanceAmount > 0`) and overstate the
+   * drawer in the dashboard's payment-method breakdown.
+   */
+  amountTendered?: number;
   payments: { method: string; amount: number }[];
   footer: string;
+}
+
+/**
+ * D162 — "Cash received" and "Change", for a sale that was over-tendered.
+ *
+ * ## Why the rows are computed here rather than sent
+ *
+ * The caller passes only what it observed — the amount handed over. The change
+ * is derived from it and the total, so the receipt cannot be made to print a
+ * change figure that does not follow from the two numbers beside it.
+ *
+ * ## Why nothing prints unless there is real change
+ *
+ * Exact money is the common case, and "Change Rs. 0.00" on every cash receipt
+ * is a row the reader has to check and discard every time. Under-tender is not
+ * change either — that is a partial payment, and `Paid` / `Balance` above
+ * already say so correctly.
+ *
+ * A restaurant bill, a card sale and every REPRINT pass nothing, so they render
+ * byte-for-byte as they did before D162.
+ */
+function changeRows(d: CustomerReceiptData): string {
+  const tendered = d.amountTendered;
+  if (tendered == null || !Number.isFinite(tendered)) return '';
+  const change = round2(tendered - d.total);
+  /*
+   * ONE guard, covering all three cases that must print nothing: exact
+   * money (change 0), an under-tender (change negative — that is a balance,
+   * and `Paid` / `Balance` above already say it), and a tender a fraction
+   * of a cent over, where "Rs. 0.00" would be worse than silence.
+   *
+   * A separate `tendered <= d.total` check stood here and was removed: it
+   * is fully subsumed by this one, so no mutation could kill it — which is
+   * the definition of a branch that is not doing any work.
+   */
+  if (change <= 0) return '';
+  return (
+    `<div class="row"><span>Cash received</span><span>${money(tendered, d.currency)}</span></div>` +
+    `<div class="row"><span>Change</span><span>${money(change, d.currency)}</span></div>`
+  );
+}
+
+/** Two decimal places, away from binary-float noise (`0.1 + 0.2`). */
+function round2(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 export function esc(value: unknown): string {
@@ -195,6 +255,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
       <div class="row grand"><span>Total</span><span>${money(d.total, d.currency)}</span></div>
       <div class="row"><span>Paid</span><span>${money(d.paidAmount, d.currency)}</span></div>
       <div class="row"><span>Balance</span><span>${money(d.balanceAmount, d.currency)}</span></div>
+      ${changeRows(d)}
       <div class="row"><span>Status</span><span>${esc(d.paymentStatus)}</span></div>
       ${payments}
     </div>

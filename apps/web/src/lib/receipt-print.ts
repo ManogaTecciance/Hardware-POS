@@ -297,16 +297,25 @@ export function openPrintWindow(html: string): void {
   printReceipt(html, { fitToContent: false });
 }
 
-/** Print the customer receipt: server-rendered, with a client-side fallback. */
+/**
+ * Print the customer receipt: server-rendered, with a client-side fallback.
+ *
+ * D162 — `amountTendered` is what the operator actually took, and it is
+ * sent only from the till, where it was observed. The server prints
+ * "Cash received" and "Change" from it and ignores it unless it exceeds the
+ * total; it changes no stored money. `reprintCustomerReceipt` below sends
+ * nothing, because a reprint has no honest tender to claim.
+ */
 export async function printCustomerReceipt(
   session: Session,
   sale: CompletedSale,
   ctx: ReceiptContext,
+  amountTendered?: number,
 ): Promise<void> {
   try {
     const res = await api.post<{ printJob: { html: string } }>(
       `/receipts/${sale.id}/customer`,
-      undefined,
+      amountTendered != null ? { amountTendered } : undefined,
       { token: session.token, tenantId: session.user.tenantId },
     );
     openPrintWindow(res.printJob.html);

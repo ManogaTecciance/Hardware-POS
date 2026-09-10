@@ -692,6 +692,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | ID | Test Case | Steps | Expected Result | Type | Status |
 |---|---|---|---|---|---|
+| DOC-050 | The receipt shows cash received and change (D162) | POS → a sale totalling e.g. Rs 2,478 → Cash → type **5,000** in Amount Received → Complete Payment → print the thermal receipt | The bill shows **Cash received Rs. 5,000.00** and **Change Rs. 2,522.00**, in ADDITION to Total / Paid / Balance. Before D162 the tender was discarded at the till and the paper showed only Paid 2,478 / Balance 0.00 | P | Not Run |
+| DOC-051 | Exact money prints no change rows (D162) | Same sale, type the exact total (or press **Exact**), complete, print | **No** Cash received or Change rows. “Change Rs. 0.00” on every cash receipt is a row the cashier has to read past every time | N | Not Run |
+| DOC-052 | An under-tender is a balance, not change (D162) | Take a PARTIAL payment below the total, complete, print | Paid and Balance show the real figures; **no** Change row, and no negative number anywhere | N | Not Run |
+| DOC-053 | Paid and Balance are unchanged by the tender (D162) | On the DOC-050 sale, open the sale in Sales, and check the customer's credit | Paid **2,478**, Balance **0.00**, and the customer owes **nothing**. If the customer appears to owe 2,522, the tender has been written into `balanceAmount` and the debtors list is corrupted | N | Not Run |
+| DOC-054 | The drawer total is not inflated (D162) | After DOC-050, open the dashboard's payment-method breakdown for today | Cash for that sale counts **2,478**, not 5,000. The 2,522 was handed back and never entered the drawer | N | Not Run |
+| DOC-055 | KNOWN LIMIT — a reprint shows no tender (D162) | Reprint the DOC-050 receipt from Sales history | Cash received and Change are **absent**. This is the recorded limit, not a defect: the tender is not stored, and a reprint cannot claim one it never saw. Persisting it needs a migration (see D162) | N | Not Run |
+| DOC-056 | Other documents are unaffected (D162) | Print a restaurant bill, and a card-paid retail receipt | Both render exactly as before — neither sends a tender, so neither gains a row | N | Not Run |
 | DOC-001 | Sale A4 document renders | Open printable invoice for a sale | Items, totals, payments, letterhead correct | P | Not Run |
 | DOC-002 | Customer block composes address | Sale for customer with street/city/state/zip/country | One joined "Bill to" address line; company + tax no. shown | P | Not Run |
 | DOC-003 | Walk-in shows placeholder party | Sale without customer | "Walk-in customer" block | P | Not Run |

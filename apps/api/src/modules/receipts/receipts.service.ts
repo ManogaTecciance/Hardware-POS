@@ -39,11 +39,19 @@ export class ReceiptsService {
 
   // ── generation ─────────────────────────────────────────────────────────────
 
-  /** Generate the customer receipt for a completed sale. */
+  /**
+   * Generate the customer receipt for a completed sale.
+   *
+   * D162 — `amountTendered` is passed through to the renderer and
+   * nowhere else. It does not touch `paidAmount`, `balanceAmount` or the
+   * `Payment` row: the sale really was settled for its total, and the
+   * difference was handed straight back over the counter.
+   */
   async generateCustomer(
     tenantId: string,
     saleId: string,
     userId: string | null,
+    amountTendered?: number,
   ): Promise<CustomerReceiptResult> {
     const sale = await this.loadCompletedSale(tenantId, saleId);
     const settings = this.settingsService.getSettings(tenantId);
@@ -53,6 +61,7 @@ export class ReceiptsService {
       settings.currency,
       settings.receiptFooter,
       safeTimeZone(settings.timezone),
+      amountTendered,
     );
     const receipt = await this.receiptsRepository.upsertReceipt(
       sale.id,
@@ -149,8 +158,14 @@ export class ReceiptsService {
     currency: string,
     footer: string,
     tz: string,
+    amountTendered?: number,
   ): CustomerReceiptData {
     return {
+      // D162 — spread into the stored `Receipt.content` too (it is a JSON
+      // column, so no migration), which means the ORIGINAL receipt keeps a
+      // record of the tender. A reprint re-renders without it, exactly as
+      // it does today.
+      ...(amountTendered != null ? { amountTendered } : {}),
       storeName: sale.tenant.name,
       saleNumber: sale.saleNumber,
       dateTime: formatReceiptDateTime(sale.completedAt ?? sale.createdAt, tz),
