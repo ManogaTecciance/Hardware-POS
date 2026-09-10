@@ -248,11 +248,27 @@ describe('changing the waiter on a table (D153)', () => {
   });
 
   it('D153a — searches once the list is long, and not before', async () => {
-    // Three staff: a search box would cost a tap and save none.
+    // Three staff: every row is on screen, and on a tablet a keyboard would
+    // cover them. Boundary asserted below, so the constant cannot drift
+    // unnoticed in either direction.
     render(<TableFloor session={session} branchId="brn_1" canManage />);
     await settle();
     fireEvent.click(await screen.findByRole('button', { name: /Change the waiter serving/ }));
     await waitFor(() => expect(listAssignableWaiters).toHaveBeenCalled());
+    expect(screen.queryByLabelText('Search staff by name')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // FIVE — still no box: one under the threshold, which is the half of a
+    // boundary a single "12 has it" case cannot prove.
+    listAssignableWaiters.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        id: `usr_five_${i}`,
+        name: `Five ${i}`,
+        openTableCount: 0,
+      })),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /Change the waiter serving/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Five 0/ })).toBeTruthy());
     expect(screen.queryByLabelText('Search staff by name')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 

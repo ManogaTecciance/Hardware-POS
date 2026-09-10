@@ -8916,8 +8916,13 @@ order the decision is made:
    query for the whole list (never one per person). "Serving now · 1 /
    Nimal Perera · 1 table" beside "No tables right now · 2" is the whole
    answer; the count is omitted at zero, because that IS the group.
-2. **A search box, but only past eight** (`SEARCH_FROM`). Below that it would
-   cost a tap and save none. Filtering is client-side on purpose: this is the
+2. **A search box, but only past six** (`SEARCH_FROM`; eight originally — the
+   PO asked twice about big floors, and six is where a tablet's list starts to
+   scroll). Below that it would cost a tap and save none. It is deliberately
+   NOT auto-focused: on a tablet, focus raises the on-screen keyboard over the
+   very list being read, and the commonest action here is tapping a name rather
+   than typing one — which is also why search is the FALLBACK for a big team
+   rather than the primary control. Filtering is client-side on purpose: this is the
    branch's floor staff — tens of rows, already fetched — and a round-trip per
    keystroke would add latency to a decision being made at the table. A query
    that matches nobody says so, rather than showing an empty panel that reads
@@ -8984,6 +8989,32 @@ supervisor reads the room — and so does everything about what each role may
 chips / 20 rows; waiter → 2 chips on both, 4 tables and 2 orders in the default
 view. Mutation-proven: stubbing `supervisesTheFloor` to `false` fails all four
 new cases (unit, floor, queue, picker) and nothing else.
+
+### D153b — the Change control is a chip, in the brand pair that survives dark
+
+**Reported by the PO, 2026-09-10**: *"In waiter change button, Change text color
+is not visible."*
+
+Two faults, both measured in the browser rather than eyeballed:
+
+- **Contrast.** As bare `text-primary` the link sat at **6.28:1** on the light
+  card and **2.49:1** on the dark one — a WCAG AA failure, and exactly the trap
+  the Orders status tabs recorded: `--sem-action-primary` is Kinetic Teal in
+  BOTH themes while the surface behind it goes dark. Now `bg-brand-100` /
+  `text-brand-700`, the pair already validated for that reason
+  (`--sem-brand-700` lifts to Flow Aqua under dark): **5.13:1 light, 6.14:1
+  dark**.
+- **Affordance.** At 12px, weight 500, no underline, immediately after the
+  waiter's name in muted grey, it read as part of the NAME rather than as
+  something to press — which on a tablet at arm's length is the same as
+  invisible. It is now a chip: filled, rounded, `font-semibold`, with its own
+  hit area.
+
+The measurement was a one-off (Playwright reading `getComputedStyle` and
+computing the WCAG ratio against the first opaque ancestor background), not a
+new permanent test: a spec asserting class names would pin the implementation
+without proving the contrast, and the honest version of this check needs a
+running stack. Recorded here so the next person can repeat it.
 
 ## Open decisions
 

@@ -902,10 +902,26 @@ function TableCard({
               text button rather than a menu item: mid-service, a guest is
               standing there, and the supervisor should not have to hunt. */}
           {onChangeWaiter ? (
+            /*
+             * A CHIP, and `brand-100`/`brand-700` rather than `text-primary`.
+             *
+             * Both halves were reported by the PO ("Change text color is not
+             * visible") and both measured: as bare teal text this sat at
+             * 6.28:1 on the light card but 2.49:1 on the dark one — the same
+             * trap the Orders status tabs hit, because `--sem-action-primary`
+             * is Kinetic Teal in BOTH themes while the card behind it goes
+             * dark. `--sem-brand-700` lifts to Flow Aqua under dark, and this
+             * pair is the one already validated at 6.14:1 there.
+             *
+             * The border and fill are the other half: at 12px with no
+             * underline it read as part of the waiter's name rather than as
+             * something to press, which on a tablet at arm's length is the
+             * same as invisible.
+             */
             <button
               type="button"
               onClick={onChangeWaiter}
-              className="shrink-0 font-medium text-primary underline-offset-2 hover:underline"
+              className="inline-flex h-6 shrink-0 items-center rounded-full bg-brand-100 px-2 text-[11px] font-semibold text-brand-700 transition-colors hover:bg-brand-200"
               aria-label={`Change the waiter serving ${table.label ?? table.code}`}
             >
               Change
@@ -1711,7 +1727,9 @@ function ArchiveTableDialog({
  *      the only honest reading of "here". It is also the same fact the floor
  *      behind the dialog is showing.
  *   2. A search box once the list passes {@link SEARCH_FROM}. Below that it
- *      would be a control that costs a tap and saves none.
+ *      would be a control that costs a tap and saves none — and it is NOT
+ *      auto-focused: on a tablet, focus raises the on-screen keyboard over the
+ *      list, and the commonest action here is tapping a name, not typing one.
  *   3. A capped, scrolling body. The dialog must not grow past the screen on
  *      the tablet this is used on.
  *
@@ -1719,7 +1737,12 @@ function ArchiveTableDialog({
  * tens of rows, already fetched — so a server round-trip per keystroke would
  * add latency to a decision being made in front of a guest.
  */
-const SEARCH_FROM = 8;
+/*
+ * Six, not eight (PO asked twice about big floors): at five names every row is
+ * on screen and a keyboard would cover them; by six the list starts to scroll
+ * on a tablet, which is the moment search earns its place.
+ */
+const SEARCH_FROM = 6;
 
 function ChangeWaiterDialog({
   session,
@@ -1865,7 +1888,6 @@ function ChangeWaiterDialog({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search staff by name…"
             aria-label="Search staff by name"
-            autoFocus
           />
         ) : null}
 
