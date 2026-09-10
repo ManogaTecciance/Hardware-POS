@@ -7685,6 +7685,45 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D153 — a kitchen ticket can be printed
+
+PO, 2026-09-10, with a sample of the format they wanted. A Print button on every
+card on the kitchen board, next to Details.
+
+**Four things left off the sample, at the PO's instruction**, and each is a
+deliberate absence rather than an oversight: no "KOT" heading (the paper comes
+off the kitchen printer and nothing else does, and the ticket number is the
+first thing on it); the table's NAME alone, with no "Table No." label and no
+customer (who is sitting there is the floor's business); no "Total Items"
+footer. The number column is headed "Item No.", not the sample's "Sl.No".
+
+**One thing added, and it is the reason the paper is worth printing.** Under
+each dish go its variation, its modifiers and its special instructions. A count
+of lines tells a kitchen nothing it cannot see; "no chilli" is the whole point.
+The instruction is marked and set apart from the choices, because on paper an
+order and a selection look alike until one of them is labelled.
+
+**The same font as the bill** (PO). A thermal roll is a fixed-pitch device and
+every other document off it is monospace, so a sans-serif KOT read as another
+system's paper and its columns stopped lining up against the bill beside it.
+The bill exports no CSS, so the stack is duplicated in source — and a test reads
+BOTH files and compares them, because a font changed on one side only is exactly
+the silent divergence that duplication invites.
+
+**Rendered as a pure function, printed through D78's iframe.** `printReceipt`
+already owns the frame, the geometry, the image wait and the cleanup, so this is
+a string builder plus a one-line caller. That split is what makes the format
+assertable without a printer: the only untested part is the browser's own
+dialog. The geometry is the tenant's roll (D99), carried in the document's meta
+tags, so the width it lays out at and the width it prints at cannot disagree.
+
+Printing is not a state change, and a test says so: the card does not start,
+bump or open anything. The button carries the ticket number in its accessible
+name, so a board of eight cards offers eight distinguishable Print buttons —
+and the spec pins that the button hands the printer ITS OWN ticket, which is the
+one defect here that would look entirely correct on screen while the paper came
+out for another table.
+
 ### D152 — the station split comes back, on the two conditions that make it safe
 
 PO, 2026-09-10: restore the per-station split, and with it "each order grouped by

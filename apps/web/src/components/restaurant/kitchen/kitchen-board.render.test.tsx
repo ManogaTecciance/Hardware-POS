@@ -84,6 +84,11 @@ vi.mock('@/lib/restaurant/api', () => ({
 // Sound is asserted against the chime module, same as the orders queue's
 // polling suite — jsdom has no AudioContext to listen to.
 const chime = vi.fn();
+const printKitchenTicketFn = vi.fn();
+vi.mock('@/lib/restaurant/kot-print', () => ({
+  printKitchenTicket: (...a: unknown[]) => printKitchenTicketFn(...a),
+}));
+
 vi.mock('@/lib/restaurant/new-order-chime', () => ({
   playNewOrderChime: () => chime(),
 }));
@@ -1126,6 +1131,50 @@ describe('station ribbon (D152)', () => {
  * describes a broken board: a strip that is always shown, a filter that hides
  * everything, and a memory that never forgets.
  */
+describe('printing a ticket (D153)', () => {
+  it('offers a Print button on every card and hands it THAT ticket', async () => {
+    outstandingRows = [
+      ticket({ id: 'tk_1', placeLabel: 'T1' }),
+      ticket({ id: 'tk_2', placeLabel: 'T2', ticketNumber: 'KOT-000099' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
+
+    // Every card, not just the first: a pass that prints does it for each
+    // ticket as it lands.
+    expect(screen.getAllByRole('button', { name: /^Print KOT-/ })).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print KOT-000099' }));
+
+    /*
+     * The ticket ITSELF goes to the printer, not a lookup by id and not the
+     * first row on the board. A button wired to the wrong card is the one
+     * defect here that looks completely correct on screen — the paper is
+     * simply for another table.
+     */
+    expect(printKitchenTicketFn).toHaveBeenCalledTimes(1);
+    expect(printKitchenTicketFn.mock.calls[0]![0]).toMatchObject({
+      ticketNumber: 'KOT-000099',
+      placeLabel: 'T2',
+    });
+  });
+
+  it('NEGATIVE — printing does not bump, start or open anything', async () => {
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /^Print KOT-/ }));
+
+    // Paper is not a state change. The card must be exactly where it was.
+    expect(startFn).not.toHaveBeenCalled();
+    expect(completeFn).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByText('T1')).toBeTruthy();
+  });
+});
+
 describe('the station filter (D152)', () => {
   const twoStations = () => [station('stn_1', 'Grill'), station('stn_2', 'Main Kitchen')];
 

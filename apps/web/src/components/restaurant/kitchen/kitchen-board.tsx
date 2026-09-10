@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, ChefHat, Clock, ListTree, RotateCcw, UtensilsCrossed } from 'lucide-react';
+import { Check, ChefHat, Clock, ListTree, Printer, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -12,6 +12,7 @@ import { ChipRow } from '@/components/ui/chip-row';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import { kitchen, kitchenStations } from '@/lib/restaurant/api';
+import { printKitchenTicket } from '@/lib/restaurant/kot-print';
 import { playNewOrderChime } from '@/lib/restaurant/new-order-chime';
 import {
   KITCHEN_TICKET_STATUS_LABELS,
@@ -793,6 +794,25 @@ function TicketCard({
                 </>
               )}
             </span>
+            {/*
+              D153 — the paper copy. Beside Details rather than in it: a pass
+              that prints does it for every ticket as it lands, and one that
+              does not never opens the dialog to find out.
+
+              Ghost and icon-led, like Details, so neither competes with the
+              bump verb below — the write action is still the whole bottom of
+              the card (D100).
+            */}
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={`Print ${ticket.ticketNumber}`}
+              className="shrink-0"
+              leftIcon={<Printer className="h-4 w-4" />}
+              onClick={() => printKitchenTicket(ticket)}
+            >
+              Print
+            </Button>
             <Button
               size="sm"
               variant="ghost"
