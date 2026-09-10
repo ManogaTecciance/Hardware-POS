@@ -48,7 +48,7 @@ export class RestaurantOrdersController {
     @Query('pageSize') pageSize?: string,
   ): Promise<OrdersPage> {
     const q: OrdersQuery = {
-      // D152 — anything that is not one of the two words is "decide for me",
+      // D157 — anything that is not one of the two words is "decide for me",
       // the same treatment every other filter here gives a mangled value.
       scope: scope === 'mine' || scope === 'all' ? scope : undefined,
       channel: parseChannel(channel),

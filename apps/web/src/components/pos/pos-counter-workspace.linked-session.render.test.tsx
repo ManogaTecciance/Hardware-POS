@@ -1,5 +1,5 @@
 /**
- * D150 — the POS opened on a table the floor already chose.
+ * D155 — the POS opened on a table the floor already chose.
  *
  * ## Why these claims
  *
@@ -250,7 +250,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('a session handed over by the floor plan (D150)', () => {
+describe('a session handed over by the floor plan (D155)', () => {
   it('opens bound to that table, named, with the rounds it already has', async () => {
     mount('ses_1');
     await settle();

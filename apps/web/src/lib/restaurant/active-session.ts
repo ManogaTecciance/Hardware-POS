@@ -4,7 +4,7 @@ import { diningAreas, openTables, restaurantTables, tableSessions } from './api'
 import type { DiningAreaView, OpenTableView, RestaurantTableView } from './types';
 
 /**
- * D150 — "which session is the POS taking orders onto", resolved in one place.
+ * D155 — "which session is the POS taking orders onto", resolved in one place.
  *
  * The dine-in POS learns its table two ways now: the waiter picks one from the
  * panel's grid, or the floor plan hands one over in the URL
@@ -47,7 +47,7 @@ export interface OpenSessionRow {
   tabName: string | null;
   activeOrderId: string | null;
   /**
-   * D151 — whose session this is, and what to call them. The picker opens on
+   * D156 — whose session this is, and what to call them. The picker opens on
    * the caller's own tables and offers the floor, so it needs both: the id to
    * decide, the name to say.
    */

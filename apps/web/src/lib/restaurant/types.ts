@@ -402,7 +402,7 @@ export interface OpenSessionView extends TableSessionView {
   activeOrderId: string | null;
   readyTicketIds: string[];
   /**
-   * D151 — whose table this is, in words. The floor and the POS picker open on
+   * D156 — whose table this is, in words. The floor and the POS picker open on
    * "my tables" and offer "all", so a session that is not yours has to be
    * attributable, and the users endpoint a name would come from is
    * `USER_MANAGE`-gated. Null when the session records no waiter, or when the
@@ -690,7 +690,7 @@ export interface UnifiedOrderView {
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
   /**
-   * D152 — whose order this is: the table's waiter for dine-in, the person who
+   * D157 — whose order this is: the table's waiter for dine-in, the person who
    * keyed it for takeaway, null for a third-party row (nobody on the floor
    * took it). What the queue's Mine/All filter is built on, and what names a
    * row that is not yours.

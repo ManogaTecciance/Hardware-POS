@@ -1,5 +1,5 @@
 /**
- * D150 — "order so far": what the table already has, and the void.
+ * D155 — "order so far": what the table already has, and the void.
  *
  * ## Why these claims
  *
@@ -142,7 +142,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('the order so far (D150)', () => {
+describe('the order so far (D155)', () => {
   it('lists the sent rounds newest first, with what the kitchen has done to each', async () => {
     mount(true);
     await settle();

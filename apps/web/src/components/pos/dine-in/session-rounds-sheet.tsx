@@ -38,7 +38,7 @@ interface Props {
 }
 
 /**
- * D150 — what is already on the table: the rounds, their kitchen status, and
+ * D155 — what is already on the table: the rounds, their kitchen status, and
  * the void.
  *
  * This is the half of the retired `/tables/session/[id]` screen that the POS

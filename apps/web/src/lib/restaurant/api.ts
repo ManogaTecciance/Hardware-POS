@@ -977,7 +977,7 @@ export const restaurantReports = {
 // ── Unified orders (Pilot Change 2 Slice D) ────────────────────────────────
 export interface OrdersQuery {
   /**
-   * D152 — whose orders. Omitted on a first load so the SERVER picks (mine
+   * D157 — whose orders. Omitted on a first load so the SERVER picks (mine
    * when the caller has any, else all) and reports what it chose; set once the
    * operator taps a chip, from then on riding in the URL like every other
    * filter on this screen.
@@ -1011,7 +1011,7 @@ export interface UnifiedOrdersPage {
    */
   readyHandoverCount: number;
   /**
-   * D152 — the numbers on the Mine/All chips, counted before the scope
+   * D157 — the numbers on the Mine/All chips, counted before the scope
    * narrowing so both are known whichever view is showing. `resolvedScope` is
    * what the server actually applied, which is how the screen knows which chip
    * to light up on a first load that did not ask for one.

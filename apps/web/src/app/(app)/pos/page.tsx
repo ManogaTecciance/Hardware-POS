@@ -37,7 +37,7 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
  *     gone.
  *   * `?mode=dine-in&sessionId=…` → the same workspace BOUND to that open
  *     table session: no picker, the table named in the header, and the
- *     floor one tap away (D150). This is where the floor plan's "View
+ *     floor one tap away (D155). This is where the floor plan's "View
  *     order" now lands; `/tables/session/[id]` redirects here, and
  *     `OrderEntry` — the photo-less menu grid it used to mount — is gone.
  *   * `?mode=third-party&externalOrderId=…` → still routes to the
@@ -81,7 +81,7 @@ export default function PosPage() {
   const raw = params.get('mode');
   const externalOrderId = params.get('externalOrderId');
   /*
-   * D150 — the open table session this POS is taking orders onto. Written by
+   * D155 — the open table session this POS is taking orders onto. Written by
    * the floor plan's "View order" and the orders queue's "Open in POS"; it was
    * read by neither end before, so the queue's link had been dropping a cashier
    * into the table picker since the day it shipped.
@@ -117,7 +117,7 @@ export default function PosPage() {
         // Keep the URL in sync so bookmarks + back-button work. Empty
         // mode drops the ?mode= param — Order Type modal re-opens.
         /*
-         * D150 — `sessionId` survives only while the mode is still dine-in. A
+         * D155 — `sessionId` survives only while the mode is still dine-in. A
          * dine-in-only role arrives with no `?mode=` at all, so this replace
          * runs on mount for exactly the role the deep link is FOR; dropping
          * the id here would unbind the table one render after the floor

@@ -110,7 +110,7 @@ export interface OpenSessionSummary extends TableSessionView {
    */
   readyTicketIds: string[];
   /**
-   * D151 — WHOSE table this is, in words the floor uses.
+   * D156 — WHOSE table this is, in words the floor uses.
    *
    * The floor and the POS picker both open on "my tables" and offer "all", so
    * every session that is not yours has to be attributable — and the one thing
@@ -524,7 +524,7 @@ export class TableSessionsService {
       }
     }
     /*
-     * D151 — whose table each one is, by name.
+     * D156 — whose table each one is, by name.
      *
      * One query for the whole page rather than a join: `waiterUserId` is a
      * loose reference with no FK (the schema's deliberate shape for user
