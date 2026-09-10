@@ -110,11 +110,26 @@ describe('D93 — the POS command gate', () => {
     expect(availableCommands(templateHolder('KITCHEN_STAFF')).map((c) => c.id)).not.toContain(
       'new-sale',
     );
-    // Positive control for that negative: they DO get the ungated commands, so
-    // the absence above is about the gate rather than an empty list.
+    /*
+     * Positive control for that negative: the absence above must be about the
+     * gate, not about an empty list.
+     *
+     * It used to be `dashboard`, the palette's one ungated command — until
+     * D142 gated that too, which would have left this negative passing for
+     * precisely the reason the control exists to rule out. Re-armed on the
+     * command kitchen staff genuinely hold (KOT_VIEW), so it still proves the
+     * filter returns something for this role.
+     */
     expect(availableCommands(templateHolder('KITCHEN_STAFF')).map((c) => c.id)).toContain(
+      'kitchen-history',
+    );
+    // NEGATIVE, D142: and the dashboard is no longer among them.
+    expect(availableCommands(templateHolder('KITCHEN_STAFF')).map((c) => c.id)).not.toContain(
       'dashboard',
     );
+    // …while a role that may see the floor still gets it — so the gate above
+    // is discriminating rather than simply closed.
+    expect(availableCommands(templateHolder('WAITER')).map((c) => c.id)).toContain('dashboard');
   });
 
   /*

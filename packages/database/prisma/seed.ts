@@ -718,9 +718,11 @@ async function seedRestaurant(passwordHash: string) {
       update: data,
       create: { id: m.id, tenantId: tenant.id, ...data },
     });
-    // Route every dish to a station. Without this link `generateTicketsForRound`
-    // drops the item silently (audit C1), so a seeded menu that looked fine
-    // would produce orders the kitchen never sees.
+    // Link every dish to a station. Since D147 this no longer decides whether
+    // the dish reaches the kitchen — a round is one ticket holding all of it,
+    // routed nowhere — so this is now seed REALISM rather than a safety net.
+    // It used to be the latter: an unlinked dish at a multi-station branch was
+    // dropped silently (audit C1), which is the defect D147 removed.
     await prisma.productStationLink.upsert({
       where: { productId_stationId: { productId: m.id, stationId: m.station } },
       update: {},

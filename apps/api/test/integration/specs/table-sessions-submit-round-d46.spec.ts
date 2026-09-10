@@ -5,8 +5,16 @@
  * the D46 wire: a round can now carry MENU_ITEM-sourced items (legacy
  * default) AND PRODUCT-sourced items with an optional ProductVariant
  * selection. The service resolves each source to a uniform snapshot, and
- * `KitchenService.generateTicketsForRound` reads the appropriate
- * station-link junction.
+ * `KitchenService.generateTicketForRound` copies that snapshot onto the KOT.
+ *
+ * D147 rewrote the K-series. It used to assert the station LOOKUP — that a
+ * PRODUCT-sourced item routed to its `ProductStationLink` station, and that
+ * an item linked to nothing fell into a silent unrouted bucket and reached
+ * the kitchen on no ticket. Both are now false BY DECISION rather than by
+ * regression: a round produces exactly ONE ticket carrying every one of its
+ * items, and that ticket stores `stationId: null`. The junctions themselves
+ * are untouched, and this spec still writes to both — they are what proves
+ * the ticket ignores them rather than that they stopped existing.
  *
  * D30 compliance — every rejection test has a paired positive control (the
  * same shape but with the required field valid), so a mutation that turned
@@ -19,9 +27,18 @@
  *   • The rejection tests each also assert that NO RestaurantOrderItem row
  *     was written — a validation that runs after the write would satisfy
  *     the "throws" assertion but leak state; the row-count guard catches it.
- *   • K1/K2/K3 are mirrored between the round-item table and the
- *     KitchenTicketItem table, so a lookup regression on the widened
- *     junction reads (Product vs MenuItem) surfaces on both sides.
+ *   • The K-series asserts D147 with the station links IN PLACE and asserted
+ *     present. "One ticket, belonging to no station" is worth nothing against
+ *     a fixture with nothing to route on: it would be green against the very
+ *     routing it proves gone, and against a build that cut one ticket only
+ *     because there was one station to cut it for.
+ *   • K2 additionally asserts the branch has MORE THAN ONE active station.
+ *     A branch with exactly one was the single case in which the retired
+ *     routing did not drop an unlinked dish, so without that assertion the
+ *     test would pass against the old behaviour too.
+ *   • K1/K3/K4 keep mirroring the round-item table against the
+ *     KitchenTicketItem table, so a snapshot regression on the widened source
+ *     reads (Product vs MenuItem) surfaces on both sides.
  */
 import {
   seedTenantRoles,
@@ -141,7 +158,13 @@ beforeEach(async () => {
   );
   orderId = orderRes.data.id;
 
-  // Kitchen stations + a printer link so KOT generation has a target.
+  /*
+   * Two kitchen stations, with two products linked to different ones. They no
+   * longer route anything (D147); they are here so the K-series can prove
+   * that a round spanning BOTH still lands on one ticket, and so the branch
+   * has more than one active station — the condition under which the retired
+   * routing dropped a dish that was linked to none.
+   */
   const grill = await prisma.kitchenStation.create({
     data: { tenantId: restaurant.tenantId, branchId, code: 'GRILL', name: 'Grill' },
   });
@@ -151,7 +174,8 @@ beforeEach(async () => {
   });
   barStationId = bar.id;
 
-  // Simple Product (no variants) — routed to Bar.
+  // Simple Product (no variants) — linked to Bar. D147: the link no longer
+  // routes; it is asserted still present by K1.
   const simple = await prisma.product.create({
     data: {
       tenantId: restaurant.tenantId,
@@ -171,7 +195,8 @@ beforeEach(async () => {
     data: { productId: simple.id, stationId: bar.id },
   });
 
-  // Variant Product (Small / Medium / Large-inactive) — routed to Grill.
+  // Variant Product (Small / Medium / Large-inactive) — linked to Grill, on
+  // the same terms as Fresh Juice above.
   const variantProduct = await prisma.product.create({
     data: {
       tenantId: restaurant.tenantId,
@@ -586,34 +611,77 @@ describe('D46 — submitRound accepts Product-sourced round items', () => {
   });
 });
 
-describe('D46 — KitchenService widens station lookup + prints variant name', () => {
-  it('K1: PRODUCT-sourced item routes to its ProductStationLink station', async () => {
+/*
+ * D46 + D147 — one KOT per round, carrying every item and its variant.
+ *
+ * The station links stay in the fixture throughout and are asserted PRESENT,
+ * because that is the only thing separating these tests from vacuous ones: a
+ * spec proving "one ticket, no station" against a fixture that linked nothing
+ * would be equally green against the per-station routing D147 removed.
+ */
+describe('D46/D147 — one KOT per round, carrying every item and its variant', () => {
+  it('K1: a round spanning TWO stations is ONE ticket, belonging to neither', async () => {
     const res = await submitRound({
       idempotencyKey: 'k1',
       items: [
+        // Linked to Grill…
         {
           sourceKind: 'PRODUCT',
           productId: variantProductId,
           productVariantId: variantMediumId,
           quantity: 1,
         },
+        // …and linked to Bar. Two stations, one round: the fixture that used
+        // to produce two separate cards on the board.
+        { sourceKind: 'PRODUCT', productId: simpleProductId, quantity: 1 },
       ],
     });
     expect(res.status).toBe(201);
 
-    // The variantProduct is linked ONLY to Grill.
     const tickets = await prisma.kitchenTicket.findMany({
       where: { roundId: res.data.id },
       include: { items: true },
     });
+    // POSITIVE — exactly one ticket, and it holds BOTH dishes.
     expect(tickets).toHaveLength(1);
-    expect(tickets[0].stationId).toBe(grillStationId);
-    // Not Bar — sanity check the lookup didn't scan every station.
-    expect(tickets[0].stationId).not.toBe(barStationId);
+    expect(tickets[0].items.map((i) => i.menuItemName).sort()).toEqual(['Burger', 'Fresh Juice']);
+    // NEGATIVE — it belongs to no station: not Grill, not Bar, none. This
+    // assertion replaces `stationId === grillStationId`, which D147 made
+    // false rather than merely inconvenient.
+    expect(tickets[0].stationId).toBeNull();
+
+    // D46, UNCHANGED by the merge: the variant snapshot is still on the KOT
+    // line, and only on the line that has a variant.
+    const burger = tickets[0].items.find((i) => i.menuItemName === 'Burger')!;
+    const juice = tickets[0].items.find((i) => i.menuItemName === 'Fresh Juice')!;
+    expect(burger.variantName).toBe('Medium');
+    expect(juice.variantName).toBeNull();
+
+    /*
+     * POSITIVE CONTROL (D30) — the links the old lookup routed on are still
+     * there, on two DIFFERENT stations. Without this, everything above would
+     * pass unchanged against a fixture that had nothing to split by.
+     */
+    const links = await prisma.productStationLink.findMany({
+      where: { productId: { in: [variantProductId, simpleProductId] } },
+      select: { stationId: true },
+    });
+    expect(links.map((l) => l.stationId).sort()).toEqual([grillStationId, barStationId].sort());
   });
 
-  it('K2: PRODUCT-sourced item with NO station link falls into the silent unrouted bucket (no ticket)', async () => {
-    // Drop the Grill link on this Product so it becomes unrouted.
+  it('K2: an item with NO station link is ON the ticket — it used to reach the kitchen on none', async () => {
+    /*
+     * THE DEFECT D147 FIXES, and the reason the split went rather than a
+     * consequence of removing it. The old routing dropped an item with no
+     * station link ENTIRELY unless the branch had exactly one active station;
+     * this branch has two, so the dish was ordered, billed and never cooked.
+     * It is the ordinary case rather than a corner one: the only place to
+     * make a link is the product wizard's branch-scoped Step 3 multi-select,
+     * which renders empty whenever no branch is selected.
+     *
+     * This test asserted the opposite until D147 — `kitchenTicket.count === 0`
+     * was pinned as correct, described as "the silent unrouted bucket".
+     */
     await prisma.productStationLink.deleteMany({
       where: { productId: variantProductId },
     });
@@ -629,10 +697,30 @@ describe('D46 — KitchenService widens station lookup + prints variant name', (
       ],
     });
     expect(res.status).toBe(201);
-    // The round persisted (positive: item row exists) but NO KOT was
-    // generated — matches the pre-D46 `__unrouted__` behaviour.
+
+    // POSITIVE — the round persisted AND the dish is on a ticket.
     expect(await prisma.restaurantOrderItem.count({ where: { roundId: res.data.id } })).toBe(1);
-    expect(await prisma.kitchenTicket.count({ where: { roundId: res.data.id } })).toBe(0);
+    const tickets = await prisma.kitchenTicket.findMany({
+      where: { roundId: res.data.id },
+      include: { items: true },
+    });
+    expect(tickets).toHaveLength(1);
+    expect(tickets[0].items.map((i) => i.menuItemName)).toEqual(['Burger']);
+    expect(tickets[0].stationId).toBeNull();
+    // The snapshot survives the round trip for an unlinked dish too.
+    expect(tickets[0].items[0].variantName).toBe('Medium');
+
+    /*
+     * The two preconditions, ASSERTED rather than assumed (D30). Without both
+     * this test would stay green against the routing it exists to prove gone:
+     *   • the dish genuinely has no station link, and
+     *   • the branch has more than one active station, so the retired
+     *     sole-station fallback could not have rescued it either.
+     */
+    expect(await prisma.productStationLink.count({ where: { productId: variantProductId } })).toBe(
+      0,
+    );
+    expect(await prisma.kitchenStation.count({ where: { branchId, isActive: true } })).toBe(2);
   });
 
   it('K3: KOT item for a variant-selected round item has variantName set to the snapshot', async () => {
@@ -656,35 +744,59 @@ describe('D46 — KitchenService widens station lookup + prints variant name', (
     expect(ktItems[0].variantName).toBe('Medium');
   });
 
-  it('K4: KOT item for a MENU_ITEM-sourced round item has variantName NULL', async () => {
+  it('K4: MENU_ITEM-sourced rows have variantName NULL, linked to a station or not', async () => {
     const menu = await prisma.menu.create({
       data: { tenantId: restaurant.tenantId, branchId, name: 'Menu2' },
     });
     const section = await prisma.menuSection.create({
       data: { tenantId: restaurant.tenantId, menuId: menu.id, name: 'Mains' },
     });
-    const item = await prisma.menuItem.create({
-      data: {
-        tenantId: restaurant.tenantId,
-        sectionId: section.id,
-        name: 'Legacy',
-        basePrice: '6.00',
-      },
-    });
-    // Route the MenuItem to a station so a KOT actually gets generated.
+    const mkItem = (name: string, basePrice: string) =>
+      prisma.menuItem.create({
+        data: { tenantId: restaurant.tenantId, sectionId: section.id, name, basePrice },
+      });
+    const linked = await mkItem('Legacy', '6.00');
+    const unlinked = await mkItem('Legacy Unrouted', '7.00');
+    /*
+     * The link stays on ONE of the two. It used to be here "so a KOT actually
+     * gets generated"; since D147 it is here for the opposite reason — to
+     * prove the MenuItemStationLink junction still exists and still accepts
+     * writes, and that generation IGNORES it. Both menu items land on the
+     * same ticket, and that ticket belongs to no station.
+     */
     await prisma.menuItemStationLink.create({
-      data: { menuItemId: item.id, stationId: grillStationId },
+      data: { menuItemId: linked.id, stationId: grillStationId },
     });
 
     const res = await submitRound({
       idempotencyKey: 'k4',
-      items: [{ menuItemId: item.id, quantity: 1 }],
+      items: [
+        { menuItemId: linked.id, quantity: 1 },
+        { menuItemId: unlinked.id, quantity: 1 },
+      ],
     });
     expect(res.status).toBe(201);
-    const ktItems = await prisma.kitchenTicketItem.findMany({
-      where: { ticket: { roundId: res.data.id } },
+
+    const tickets = await prisma.kitchenTicket.findMany({
+      where: { roundId: res.data.id },
+      include: { items: true },
     });
-    expect(ktItems).toHaveLength(1);
-    expect(ktItems[0].variantName).toBeNull();
+    expect(tickets).toHaveLength(1);
+    expect(tickets[0].stationId).toBeNull();
+    // POSITIVE — both legacy rows are on it, the UNLINKED one included…
+    expect(tickets[0].items.map((i) => i.menuItemName).sort()).toEqual([
+      'Legacy',
+      'Legacy Unrouted',
+    ]);
+    // …NEGATIVE — and neither carries a variant name: a MENU_ITEM row has no
+    // variant, and the kitchen must not infer one from price (D46, unchanged).
+    expect(tickets[0].items.map((i) => i.variantName)).toEqual([null, null]);
+    // POSITIVE CONTROL for the null station above — the link is still there,
+    // pointing at Grill, and was simply not consulted.
+    expect(
+      await prisma.menuItemStationLink.count({
+        where: { menuItemId: linked.id, stationId: grillStationId },
+      }),
+    ).toBe(1);
   });
 });

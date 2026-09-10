@@ -6,7 +6,19 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
-export const PAGE_SIZES = [10, 20, 30, 50];
+/**
+ * The rows-per-page choices, everywhere (PO, 2026-09-09).
+ *
+ * One list, three steps: a screenful, a scan, and a bulk look. It replaced
+ * three different lists that had drifted apart — the shared 10/20/30/50, the
+ * till's 20/30/40/50 and the orders queue's 25/50/75/100 — so the same control
+ * offered different numbers depending on which screen it sat on.
+ *
+ * The first entry is also the DEFAULT every list starts on, so it must stay
+ * the smallest: a screen defaulting to a size not in this list shows a
+ * rows-per-page control that disagrees with the page it is on.
+ */
+export const PAGE_SIZES = [20, 50, 100];
 
 /** How many numbered buttons before the list starts collapsing behind ellipses. */
 const MAX_SLOTS = 7;
@@ -91,6 +103,11 @@ export function Pagination({
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
             className="w-auto"
             disabled={disabled}
+            /* The words beside it are a plain span, not a <label>, so without
+               this a screen reader announces an unnamed combobox on every list
+               in the product. The orders queue's own copy of this control has
+               always carried the name; the shared one had not. */
+            aria-label="Rows per page"
           >
             {pageSizes.map((n) => (
               <option key={n} value={n}>

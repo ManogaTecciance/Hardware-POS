@@ -5,7 +5,7 @@ import type { BillSampleKind } from '@/lib/settings/document-presentation';
 /**
  * A sample bill for the Settings preview.
  *
- * ## Why it is per kind of trade (D141)
+ * ## Why it is per kind of trade (D153)
  *
  * The sample is what the operator actually inspects: whether the logo is too
  * wide, whether the note reads right, whether a long name wraps badly. A bill
@@ -13,7 +13,7 @@ import type { BillSampleKind } from '@/lib/settings/document-presentation';
  * bug — a clothing shop previewing "Grilled Seer" beside a service charge is
  * being shown a restaurant's bill with their name on it.
  *
- * D140 gave retail a thermal bill, so this list stopped being read only by
+ * D152 gave retail a thermal bill, so this list stopped being read only by
  * restaurants — which is how the food catalogue came to be shown to a shop.
  *
  * ## What differs beyond the names

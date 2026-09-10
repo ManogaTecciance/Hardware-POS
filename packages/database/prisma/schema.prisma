@@ -3214,11 +3214,17 @@ model KitchenPrinter {
 }
 
 model KitchenTicket {
-  id               String  @id @default(cuid())
-  tenantId         String
-  branchId         String
-  roundId          String
-  stationId        String
+  id       String @id @default(cuid())
+  tenantId String
+  branchId String
+  roundId  String
+
+  /// D147 — NULL on every ticket written since the station split was removed.
+  /// A round now produces exactly ONE ticket holding all of its items, so a
+  /// ticket no longer belongs to a station and must not claim one. Kept
+  /// nullable rather than dropped so the tickets cut before D147 keep the
+  /// station they were genuinely routed to.
+  stationId        String?
   primaryPrinterId String?
 
   ticketNumber String
@@ -3237,7 +3243,7 @@ model KitchenTicket {
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
   round          OrderRound      @relation(fields: [roundId], references: [id], onDelete: Cascade)
-  station        KitchenStation  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  station        KitchenStation? @relation(fields: [stationId], references: [id], onDelete: Cascade)
   primaryPrinter KitchenPrinter? @relation(fields: [primaryPrinterId], references: [id])
   completedBy    User?           @relation("KitchenTicketCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
 

@@ -6,7 +6,7 @@ import { SettingsService } from '../settings/settings.service';
 /**
  * Prisma stub.
  *
- * D141 — the preview path now makes exactly ONE query: the tenant's own name,
+ * D153 — the preview path now makes exactly ONE query: the tenant's own name,
  * used as the letterhead when a workspace has not set a business name. The
  * comment here used to say the path never touches the database, and leaving
  * that in place would have made the next person trust it.
@@ -22,11 +22,11 @@ const prismaStub = {
 const pdfStub = { available: true, htmlToPdf: jest.fn(async () => null) } as any;
 
 /**
- * D142 — the tenant's vertical, switchable per test.
+ * D154 — the tenant's vertical, switchable per test.
  *
  * The preview's sample goods come from the domain registry now, so the
  * business type is an INPUT to what gets rendered. Defaults to HARDWARE,
- * which is what every preview showed before D142.
+ * which is what every preview showed before D154.
  */
 let businessType: BusinessType = 'HARDWARE';
 const profilesStub = {
@@ -51,7 +51,7 @@ describe('DocumentsService — A4 template preview', () => {
     expect(html).not.toContain('$');
   });
 
-  it('D141 — falls back to a neutral name, never a vertical', async () => {
+  it('D153 — falls back to a neutral name, never a vertical', async () => {
     /*
      * The bug this fixes: a retail owner opening Preview saw a quotation
      * headed "Hardware POS", because that literal was the fallback for any
@@ -168,7 +168,7 @@ describe('DocumentsService — A4 template preview', () => {
 });
 
 /**
- * D142 — a document preview is illustrated with the tenant's own trade.
+ * D154 — a document preview is illustrated with the tenant's own trade.
  *
  * ## What makes these assertions non-vacuous
  *
@@ -186,10 +186,10 @@ describe('DocumentsService — A4 template preview', () => {
  * type added later arrives here by name rather than silently inheriting
  * whichever list it happens to resolve to.
  */
-describe('D142 — sample goods come from the tenant’s vertical', () => {
+describe('D154 — sample goods come from the tenant’s vertical', () => {
   const TENANT = 'tnt_1';
 
-  /** Hardware's eight lines, as they were before D142 moved them. */
+  /** Hardware's eight lines, as they were before D154 moved them. */
   const HARDWARE_NAMES = [
     'Portland Cement 50kg',
     'TMT Steel Bar 12mm (per length)',
@@ -266,7 +266,7 @@ describe('D142 — sample goods come from the tenant’s vertical', () => {
     expect(seen).toEqual({
       HARDWARE: 'HARDWARE',
       RETAIL: 'RETAIL',
-      // Food service never renders the A4 preview at all (D96/D140); it is
+      // Food service never renders the A4 preview at all (D96/D152); it is
       // walked here anyway so that changing its descriptor shows up.
       RESTAURANT: 'NEUTRAL',
       CAFE: 'NEUTRAL',
@@ -295,7 +295,7 @@ describe('D142 — sample goods come from the tenant’s vertical', () => {
     it('M1: pointing retail at hardware’s list is caught', async () => {
       /*
        * The mutation: retail resolves to hardware's goods — which is the state
-       * of the world before D142. Written out rather than described, and the
+       * of the world before D154. Written out rather than described, and the
        * shipped resolver asserted to differ from it.
        */
       const hardwareList = domainFor('HARDWARE').catalogue.sampleItems!;

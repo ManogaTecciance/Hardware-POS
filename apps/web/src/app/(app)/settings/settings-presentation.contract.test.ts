@@ -30,7 +30,7 @@ const SETTINGS_COMPONENTS = [
   'components/settings/bill-structure-card.tsx',
   'components/settings/charges-tab.tsx',
   'components/settings/hours-tab.tsx',
-  // D138 -- listed the day it was written. A component absent from this set
+  // D150 -- listed the day it was written. A component absent from this set
   // is a component the analyser never opens, and the suite would stay green
   // while the newest file on the screen decided for itself.
   'components/settings/business-details-tab.tsx',
@@ -45,7 +45,7 @@ describe('D96 — the document decision has one home', () => {
     const source = readComponents(WEB_SRC, [RESOLVER]).get(RESOLVER);
     expect(source).toBeDefined();
     /*
-     * D140 — asserted against STRIPPED source, and that is a correction.
+     * D152 — asserted against STRIPPED source, and that is a correction.
      * This case used to read the raw file, so a capability named only in a
      * doc comment satisfied it — the exact shape D30 calls out, and it was
      * live: after the discriminator moved, the raw-source assertion still
@@ -122,7 +122,7 @@ describe('D96 — the document decision has one home', () => {
 
   it('the retired discriminator is read by nothing at all', () => {
     /*
-     * D140 — `proformaBill` still exists, because a restaurant really does
+     * D152 — `proformaBill` still exists, because a restaurant really does
      * issue a pre-payment bill and a future feature may act on that. What it
      * must never again be is a stand-in for "prints on 80mm paper": that proxy
      * is what made retail unrepresentable, since a shop prints a slip and
@@ -157,7 +157,7 @@ describe('D96 — the document decision has one home', () => {
     const commentOnly =
       '// thermalBill a4Documents proformaBill\n/* businessType === "RESTAURANT" */\nexport const x = 1;';
     expect(/thermalBill|a4Documents/.test(stripComments(commentOnly))).toBe(false);
-    // D140 — the same proof for the retired name, because the empty-set case
+    // D152 — the same proof for the retired name, because the empty-set case
     // above would otherwise pass on a comment mentioning it.
     expect(/proformaBill/.test(stripComments(commentOnly))).toBe(false);
     expect(/businessType\s*===/.test(stripComments(commentOnly))).toBe(false);

@@ -16,7 +16,6 @@ import {
 
 import { PageHeader } from '@/components/page-header';
 import { InventoryTabs } from '@/components/products/inventory-tabs';
-import { SharedSubcategoryLibrary } from '@/components/products/shared-subcategory-library';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -43,6 +42,20 @@ import {
   type Subcategory,
 } from '@/lib/products-api';
 import { cn } from '@/lib/utils';
+
+/*
+ * Form limits mirror the category/subcategory DTOs
+ * (apps/api/src/modules/categories/dto) rather than inventing their own: name
+ * @MaxLength(120), description @MaxLength(500), sortOrder @IsInt @Min(0) over
+ * an int4 column. The client checks are for fast, in-place feedback only — the
+ * server stays the authority, and a 400 or a 409 it still returns (a name
+ * another till created a second ago, say) surfaces in the dialog's own error.
+ */
+const MAX_NAME_LENGTH = 120;
+const MAX_DESCRIPTION_LENGTH = 500;
+const MAX_SORT_ORDER = 2_147_483_647;
+
+type TaxonomyErrors = Partial<Record<'name' | 'description' | 'sortOrder' | 'categoryId', string>>;
 
 interface CatDialogState {
   open: boolean;
@@ -432,17 +445,13 @@ export default function CategoriesPage() {
               </table>
             </div>
           </Card>
-
-          <SharedSubcategoryLibrary
-            categories={categories.map((c) => ({ id: c.id, name: c.name }))}
-            canManage={canManage}
-          />
         </>
       )}
 
       <CategoryFormDialog
         open={catDialog.open}
         editing={catDialog.editing}
+        categories={categories}
         onClose={() => setCatDialog({ open: false, editing: null })}
         onSubmit={submitCategory}
       />
@@ -526,14 +535,150 @@ function SubcategoryList({
   );
 }
 
+/**
+ * Both dialogs validate against the same rules, so they share one validator.
+ *
+ * `takenNames` is pre-scoped by the caller because the two levels are unique
+ * over different sets: a category name is unique tenant-wide, a subcategory
+ * name only within its parent. Lowercased on both sides — the server compares
+ * case-insensitively, so accepting "Power Tools" next to "power tools" here
+ * would only move the rejection to the 409.
+ */
+function validateTaxonomyFields(values: {
+  name: string;
+  description: string;
+  sortOrder: string;
+  takenNames: Set<string>;
+}): TaxonomyErrors {
+  const errors: TaxonomyErrors = {};
+
+  const name = values.name.trim();
+  if (!name) {
+    errors.name = 'Name is required';
+  } else if (name.length > MAX_NAME_LENGTH) {
+    errors.name = `Name must be ${MAX_NAME_LENGTH} characters or fewer`;
+  } else if (values.takenNames.has(name.toLowerCase())) {
+    errors.name = `“${name}” already exists`;
+  }
+
+  if (values.description.trim().length > MAX_DESCRIPTION_LENGTH) {
+    errors.description = `Description must be ${MAX_DESCRIPTION_LENGTH} characters or fewer`;
+  }
+
+  // Blank is legitimate — it means "leave it at 0", which is what the payload
+  // sends. Anything typed has to survive the DTO's @IsInt @Min(0) and the
+  // column's int4 range; without this "abc" silently became 0, and a decimal
+  // or a negative came back from the server as an unexplained 400.
+  const sortOrder = values.sortOrder.trim();
+  if (sortOrder) {
+    const parsed = Number(sortOrder);
+    if (!Number.isInteger(parsed)) {
+      errors.sortOrder = 'Sort order must be a whole number';
+    } else if (parsed < 0) {
+      errors.sortOrder = 'Sort order cannot be negative';
+    } else if (parsed > MAX_SORT_ORDER) {
+      errors.sortOrder = `Sort order must be ${MAX_SORT_ORDER} or less`;
+    }
+  }
+
+  return errors;
+}
+
+/** `0` for a blank box, matching the placeholder and the column default. */
+function parseSortOrder(value: string): number {
+  const trimmed = value.trim();
+  return trimmed ? Number(trimmed) : 0;
+}
+
+/** Character counter, rendered only near the ceiling so it doesn't nag. */
+function lengthHint(value: string, max: number): React.ReactNode {
+  if (value.length < max * 0.8) return null;
+  return (
+    <span className={value.length >= max ? 'text-warning' : undefined}>
+      {value.length} / {max}
+    </span>
+  );
+}
+
+/**
+ * Focus (and scroll to) the first field a blocked submit flagged.
+ *
+ * Keyed on a tick rather than on the error map so pressing Create twice with
+ * the same fault re-focuses instead of sitting there looking inert.
+ * `scrollIntoView` is feature-checked: jsdom does not implement it.
+ */
+function useFocusFirstInvalid(tick: number, bodyRef: React.RefObject<HTMLDivElement | null>) {
+  React.useEffect(() => {
+    if (tick === 0) return;
+    const root = bodyRef.current;
+    if (!root) return;
+    const field = root.querySelector<HTMLElement>('[aria-invalid="true"]');
+    const target = field ?? root.querySelector<HTMLElement>('[role="alert"]');
+    if (!target) return;
+    if (typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    field?.focus({ preventScroll: true });
+  }, [tick, bodyRef]);
+}
+
+/** Label row + inline error, the shape the product wizard's steps use. */
+function Field({
+  label,
+  htmlFor,
+  required,
+  error,
+  hint,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  required?: boolean;
+  error?: string;
+  hint?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={htmlFor}>
+          {label}
+          {required ? (
+            <span className="text-danger" aria-hidden="true">
+              {' '}
+              *
+            </span>
+          ) : null}
+          {required ? <span className="sr-only"> (required)</span> : null}
+        </Label>
+        {/* Advisory only: the input's own maxLength is what enforces the cap,
+            and a screen reader gets the limit from that. */}
+        {hint ? (
+          <span aria-hidden="true" className="text-[11px] text-muted-foreground">
+            {hint}
+          </span>
+        ) : null}
+      </div>
+      {children}
+      {error ? (
+        <p className="text-xs text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function CategoryFormDialog({
   open,
   editing,
+  categories,
   onClose,
   onSubmit,
 }: {
   open: boolean;
   editing: CategoryNode | null;
+  categories: CategoryNode[];
   onClose: () => void;
   onSubmit: (values: { name: string; description: string; sortOrder: number }) => Promise<void>;
 }) {
@@ -542,6 +687,9 @@ function CategoryFormDialog({
   const [sortOrder, setSortOrder] = React.useState('0');
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [submitted, setSubmitted] = React.useState(false);
+  const [submitTick, setSubmitTick] = React.useState(0);
+  const bodyRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (open) {
@@ -550,12 +698,37 @@ function CategoryFormDialog({
       setSortOrder(String(editing?.sortOrder ?? 0));
       setSaving(false);
       setError(null);
+      setSubmitted(false);
+      setSubmitTick(0);
     }
   }, [open, editing]);
 
+  // Every category the tenant already has, active or not — the server's
+  // uniqueness check ignores isActive, so skipping inactive ones here would
+  // let through a name the API then rejects.
+  const takenNames = React.useMemo(
+    () =>
+      new Set(
+        categories.filter((c) => c.id !== editing?.id).map((c) => c.name.trim().toLowerCase()),
+      ),
+    [categories, editing],
+  );
+
+  // Errors follow the values once the operator has pressed Create: a frozen
+  // snapshot would leave a message standing under a field they just fixed.
+  const errors = React.useMemo(
+    () => (submitted ? validateTaxonomyFields({ name, description, sortOrder, takenNames }) : {}),
+    [submitted, name, description, sortOrder, takenNames],
+  );
+
+  useFocusFirstInvalid(submitTick, bodyRef);
+
   const submit = async () => {
-    if (!name.trim()) {
-      setError('Name is required');
+    setSubmitted(true);
+    setSubmitTick((tick) => tick + 1);
+    const found = validateTaxonomyFields({ name, description, sortOrder, takenNames });
+    if (Object.keys(found).length > 0) {
+      setError(null);
       return;
     }
     setSaving(true);
@@ -564,7 +737,7 @@ function CategoryFormDialog({
       await onSubmit({
         name: name.trim(),
         description: description.trim(),
-        sortOrder: Number(sortOrder) || 0,
+        sortOrder: parseSortOrder(sortOrder),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save category');
@@ -583,44 +756,64 @@ function CategoryFormDialog({
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!name.trim()} isLoading={saving}>
+          {/* Deliberately not disabled on an empty name: a dead button gives
+              the operator nothing to act on, where a blocked submit points at
+              the field and says what is wrong with it. */}
+          <Button onClick={submit} isLoading={saving}>
             {editing ? 'Save changes' : 'Create'}
           </Button>
         </>
       }
     >
-      <div className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="cat-name">Name *</Label>
+      <div ref={bodyRef} className="space-y-4">
+        <Field
+          label="Name"
+          htmlFor="cat-name"
+          required
+          error={errors.name}
+          hint={lengthHint(name, MAX_NAME_LENGTH)}
+        >
           <Input
             id="cat-name"
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Power Tools"
+            maxLength={MAX_NAME_LENGTH}
+            aria-invalid={!!errors.name}
           />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="cat-desc">Description</Label>
+        </Field>
+        <Field
+          label="Description"
+          htmlFor="cat-desc"
+          error={errors.description}
+          hint={lengthHint(description, MAX_DESCRIPTION_LENGTH)}
+        >
           <Textarea
             id="cat-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional"
             rows={3}
+            maxLength={MAX_DESCRIPTION_LENGTH}
+            aria-invalid={!!errors.description}
           />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="cat-sort">Sort order</Label>
+        </Field>
+        <Field label="Sort order" htmlFor="cat-sort" error={errors.sortOrder}>
           <Input
             id="cat-sort"
             inputMode="numeric"
             value={sortOrder}
             onChange={(e) => setSortOrder(e.target.value)}
             placeholder="0"
+            aria-invalid={!!errors.sortOrder}
           />
-        </div>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        </Field>
+        {error ? (
+          <p className="text-sm text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
     </Dialog>
   );
@@ -652,6 +845,9 @@ function SubcategoryFormDialog({
   const [sortOrder, setSortOrder] = React.useState('0');
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [submitted, setSubmitted] = React.useState(false);
+  const [submitTick, setSubmitTick] = React.useState(0);
+  const bodyRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (open) {
@@ -661,16 +857,41 @@ function SubcategoryFormDialog({
       setSortOrder(String(editing?.sortOrder ?? 0));
       setSaving(false);
       setError(null);
+      setSubmitted(false);
+      setSubmitTick(0);
     }
   }, [open, editing, defaultCategoryId]);
 
+  // Scoped to the parent currently selected, not the one being edited away
+  // from: on a move it is the destination the server checks for a clash.
+  const takenNames = React.useMemo(() => {
+    const parent = categories.find((c) => c.id === categoryId);
+    return new Set(
+      (parent?.subcategories ?? [])
+        .filter((s) => s.id !== editing?.id)
+        .map((s) => s.name.trim().toLowerCase()),
+    );
+  }, [categories, categoryId, editing]);
+
+  const validate = React.useCallback((): TaxonomyErrors => {
+    const found = validateTaxonomyFields({ name, description, sortOrder, takenNames });
+    if (!categoryId) found.categoryId = 'A parent category is required';
+    return found;
+  }, [name, description, sortOrder, takenNames, categoryId]);
+
+  const errors = React.useMemo(
+    () => (submitted ? validate() : ({} as TaxonomyErrors)),
+    [submitted, validate],
+  );
+
+  useFocusFirstInvalid(submitTick, bodyRef);
+
   const submit = async () => {
-    if (!name.trim()) {
-      setError('Name is required');
-      return;
-    }
-    if (!categoryId) {
-      setError('A parent category is required');
+    setSubmitted(true);
+    setSubmitTick((tick) => tick + 1);
+    const found = validate();
+    if (Object.keys(found).length > 0) {
+      setError(null);
       return;
     }
     setSaving(true);
@@ -680,7 +901,7 @@ function SubcategoryFormDialog({
         categoryId,
         name: name.trim(),
         description: description.trim(),
-        sortOrder: Number(sortOrder) || 0,
+        sortOrder: parseSortOrder(sortOrder),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save subcategory');
@@ -701,16 +922,20 @@ function SubcategoryFormDialog({
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!name.trim()} isLoading={saving}>
+          <Button onClick={submit} isLoading={saving}>
             {editing ? 'Save changes' : 'Create'}
           </Button>
         </>
       }
     >
-      <div className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="sub-cat">Parent category</Label>
-          <Select id="sub-cat" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+      <div ref={bodyRef} className="space-y-4">
+        <Field label="Parent category" htmlFor="sub-cat" required error={errors.categoryId}>
+          <Select
+            id="sub-cat"
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+            aria-invalid={!!errors.categoryId}
+          >
             <option value="" disabled>
               Select a category
             </option>
@@ -725,38 +950,55 @@ function SubcategoryFormDialog({
               Changing the parent category moves this subcategory.
             </p>
           ) : null}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="sub-name">Name *</Label>
+        </Field>
+        <Field
+          label="Name"
+          htmlFor="sub-name"
+          required
+          error={errors.name}
+          hint={lengthHint(name, MAX_NAME_LENGTH)}
+        >
           <Input
             id="sub-name"
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Cordless Drills"
+            maxLength={MAX_NAME_LENGTH}
+            aria-invalid={!!errors.name}
           />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="sub-desc">Description</Label>
+        </Field>
+        <Field
+          label="Description"
+          htmlFor="sub-desc"
+          error={errors.description}
+          hint={lengthHint(description, MAX_DESCRIPTION_LENGTH)}
+        >
           <Textarea
             id="sub-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional"
             rows={3}
+            maxLength={MAX_DESCRIPTION_LENGTH}
+            aria-invalid={!!errors.description}
           />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="sub-sort">Sort order</Label>
+        </Field>
+        <Field label="Sort order" htmlFor="sub-sort" error={errors.sortOrder}>
           <Input
             id="sub-sort"
             inputMode="numeric"
             value={sortOrder}
             onChange={(e) => setSortOrder(e.target.value)}
             placeholder="0"
+            aria-invalid={!!errors.sortOrder}
           />
-        </div>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        </Field>
+        {error ? (
+          <p className="text-sm text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
     </Dialog>
   );

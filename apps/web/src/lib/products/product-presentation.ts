@@ -93,7 +93,7 @@ export function resolveMeasuredGoods(businessType: BusinessType | null): boolean
 }
 
 /**
- * D139 — which sub-surfaces the Inventory tab bar offers this workspace.
+ * D151 — which sub-surfaces the Inventory tab bar offers this workspace.
  *
  * `Products → Attributes` and `Products → Barcodes` shipped for everyone, and
  * they are not for everyone: a kitchen barcodes nothing and keeps no library

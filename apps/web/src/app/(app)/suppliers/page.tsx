@@ -15,13 +15,11 @@ import {
 import { SupplierTable } from '@/components/suppliers/supplier-table';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Pagination } from '@/components/ui/pagination';
+import { PAGE_SIZES, Pagination } from '@/components/ui/pagination';
 import { useAuth } from '@/lib/auth';
 import { deriveSupplierAccess } from '@/lib/suppliers/access';
 import { fetchSuppliers } from '@/lib/suppliers/suppliers-api';
 import type { Supplier, SuppliersQuery } from '@/lib/suppliers/types';
-
-const PAGE_SIZE = 20;
 
 export default function SuppliersPage() {
   const { session } = useAuth();
@@ -31,6 +29,8 @@ export default function SuppliersPage() {
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [filters, setFilters] = React.useState<SuppliersQuery>({ sort: 'name' });
   const [page, setPage] = React.useState(1);
+  // D143a — adjustable, like every other list; it was fixed at 20.
+  const [pageSize, setPageSize] = React.useState(PAGE_SIZES[0]!);
 
   const [rows, setRows] = React.useState<Supplier[]>([]);
   const [total, setTotal] = React.useState(0);
@@ -47,11 +47,12 @@ export default function SuppliersPage() {
     return () => window.clearTimeout(t);
   }, [search]);
 
-  React.useEffect(() => setPage(1), [debouncedSearch, filters]);
+  // Resizing re-numbers every page, so the reader starts from 1.
+  React.useEffect(() => setPage(1), [debouncedSearch, filters, pageSize]);
 
   const query = React.useMemo<SuppliersQuery>(
-    () => ({ ...filters, search: debouncedSearch || undefined, page, pageSize: PAGE_SIZE }),
-    [filters, debouncedSearch, page],
+    () => ({ ...filters, search: debouncedSearch || undefined, page, pageSize }),
+    [filters, debouncedSearch, page, pageSize],
   );
 
   React.useEffect(() => {
@@ -78,7 +79,7 @@ export default function SuppliersPage() {
   }, [session, access.canView, query, reloadKey]);
 
   const filterCount = (filters.isActive !== undefined ? 1 : 0) + (filters.qbStatus ? 1 : 0);
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   if (session && !access.canView) {
     return (
@@ -176,10 +177,11 @@ export default function SuppliersPage() {
       {!error && !showEmpty ? (
         <Pagination
           page={page}
-          pageSize={PAGE_SIZE}
+          pageSize={pageSize}
           total={total}
           disabled={loading}
           onPageChange={setPage}
+          onPageSizeChange={setPageSize}
         />
       ) : null}
 

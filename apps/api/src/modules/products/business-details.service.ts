@@ -10,7 +10,7 @@ import { BusinessProfileService } from '../platform/business-profile.service';
 import { SettingsService } from '../settings/settings.service';
 
 /**
- * D138 — the tenant's own **business details**: the extra per-product fields
+ * D150 — the tenant's own **business details**: the extra per-product fields
  * the wizard collects into `Product.attributes` (D64).
  *
  * ## What this is NOT

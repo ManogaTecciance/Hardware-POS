@@ -23,6 +23,8 @@ import type {
   ChannelBreakdownRow,
   DiningAreaView,
   ExternalOrderView,
+  KitchenHistoryPage,
+  KitchenLaneCounts,
   KitchenPrinterKind,
   KitchenPrinterView,
   KitchenTicketStatus,
@@ -708,12 +710,50 @@ export const kitchen = {
   listTickets(
     session: Session,
     branchId: string,
-    /** D115 — `CANCELLED` is a pseudo-filter: order-side cancellation. */
-    status?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'ALL',
+    /**
+     * D115 — `CANCELLED` is a pseudo-filter: order-side cancellation.
+     * D142 — so is `COMPLETED_TODAY`: the Done lane cut to the shop's own day,
+     * which is the server's reckoning and not the browser's.
+     */
+    status?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY' | 'ALL',
   ) {
     const query = status && status !== 'ALL' ? `?status=${status}` : '';
     return api.get<KitchenTicketView[]>(
       `/restaurant/branches/${branchId}/kitchen-tickets${query}`,
+      auth(session),
+    );
+  },
+  /**
+   * D142b — the three lane counts, for the chips the board cannot count itself.
+   */
+  laneCounts(session: Session, branchId: string) {
+    return api.get<KitchenLaneCounts>(
+      `/restaurant/branches/${branchId}/kitchen-tickets/counts`,
+      auth(session),
+    );
+  },
+  /**
+   * D142 — every ticket this branch has bumped, today's included.
+   *
+   * A sibling of `listTickets` rather than an option on it: this one pages and
+   * searches, so it answers with an envelope where the board answers with a
+   * bare array, and widening the board's call would have made both callers
+   * carry a shape neither of them wants.
+   */
+  history(
+    session: Session,
+    branchId: string,
+    query: { page?: number; pageSize?: number; search?: string } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (query.page !== undefined) params.set('page', String(query.page));
+    if (query.pageSize !== undefined) params.set('pageSize', String(query.pageSize));
+    // An empty term is no term: sending `search=` would have the server treat
+    // the blank as a filter that matches nothing rather than as no filter.
+    if (query.search) params.set('search', query.search);
+    const qs = params.toString();
+    return api.get<KitchenHistoryPage>(
+      `/restaurant/branches/${branchId}/kitchen-tickets/history${qs ? `?${qs}` : ''}`,
       auth(session),
     );
   },

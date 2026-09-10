@@ -1,56 +1,73 @@
 'use client';
 
 /**
- * `<Sheet>` — bottom-anchored panel that behaves like a modal on tablets and
- * phones, and (with `side="right"`) like a drawer on wide viewports.
+ * `<Sheet>` — the app's wide popup panel. Centred, like every other modal.
  *
- * ## Why this exists — `<Dialog>` is not a sheet
+ * ## What it is, and why it is not `<Dialog>`
  *
- * `<Dialog>` centers a `max-w-md` card. Below `sm` it anchors to the bottom of
- * the viewport and top-rounds itself, which looks sheet-shaped but is not a
- * sheet: there is no drag handle, no snap point, no full-height option, and no
- * safe-area padding. It stays capped at 448px even on a 1024px iPad landscape,
- * which is exactly why the Modifier Picker and Payment Popup use vast dead
- * space today.
+ * `<Dialog>` is a `max-w-md` card: the right shape for a question. It stays
+ * capped at 448px even on a 1024px iPad landscape, which is why the modifier
+ * picker and the payment popup needed something else — they are WORKING
+ * surfaces, not questions, and they want the width.
  *
- * `<Drawer>` is a right-side slide-over — a persistent side panel, not a sheet.
+ * `<Sheet>` is that: a panel that scales to the viewport with a configurable
+ * `height` ("auto" / "half" / "full"), a body that scrolls, and a sticky
+ * footer that keeps the primary action visible while it does. `<Drawer>` is a
+ * different thing again — a right-side slide-over, a persistent side panel.
  *
- * `<Sheet>` fills the gap: a bottom sheet that scales to viewport width with a
- * configurable `height` ("auto" / "half" / "full"), respects safe-area insets
- * on iOS Safari (see `viewport-fit: cover` in `app/layout.tsx`), and traps
- * focus + Escape.
+ * ## It used to be a bottom sheet, and is not any more (PO, 2026-09-09)
+ *
+ * Everything below the header used to be anchored to `items-end`: the panel
+ * sat against the bottom edge at every width, on the reasoning that the
+ * operator's thumb is already there. The product owner's rule is that a popup
+ * belongs in the MIDDLE of the screen wherever it is read — reported against
+ * the dine-in bill, which filled the window from top to bottom with the scrim
+ * showing only above it.
+ *
+ * Three things went with the anchor, because each of them only made sense
+ * while the panel touched the bottom edge:
+ *
+ *   - the grab handle, a cue for a pull gesture that no longer applies;
+ *   - `rounded-t-2xl`, which was right only while the bottom corners were
+ *     off-screen;
+ *   - `pb-safe` on the footer, which measured an inset the panel no longer
+ *     reaches.
+ *
+ * The slide-up entrance became a grow-in for the same reason: a panel that
+ * rises from the bottom edge and halts in the middle looks like an animation
+ * that failed.
+ *
+ * The NAME is now a small lie — this is a centred panel, not a sheet. It is
+ * kept because renaming it touches eleven call sites for no behavioural gain;
+ * recorded here rather than left for someone to discover.
  *
  * ## Structure
  *
- *   overlay   — full-screen scrim, dismisses on click.
- *   panel     — rounded-t-2xl surface anchored to `items-end`.
- *   handle    — small pill above the header, cue that this is dismissible.
+ *   overlay   — full-screen scrim, centred, `p-4` so the panel clears the
+ *               screen edges; dismisses on click.
+ *   panel     — rounded surface, width-capped from `tab` up.
  *   header    — title + description + close X.
- *   body      — scrollable content (`overflow-y-auto` on `max-h`).
- *   footer    — sticky action row inside the panel, safe-area padded.
+ *   body      — scrollable content (`overflow-y-auto`, `min-h-0`).
+ *   footer    — sticky action row inside the panel.
  *
- * ## Behaviour that differs from `<Dialog>`
+ * ## Behaviour that still differs from `<Dialog>`
  *
- * - **Anchored to viewport bottom regardless of viewport width.** This is the
- *   whole point: on landscape tablet we still want the sheet to slide up from
- *   the bottom, because the operator's thumb is already there and the primary
- *   action lives at the bottom of the panel. Callers who want a centered card
- *   on desktop should keep using `<Dialog>`.
+ * - **Width.** `<Dialog>` is `max-w-md`; a Sheet scales and caps at
+ *   `tab:max-w-2xl`, and a caller can widen it further.
  *
- * - **`height='full'` claims 80dvh** (D85) — a common pattern for the
- *   modifier picker on portrait, where a menu item with 6+ modifier groups
- *   will not fit in a half sheet. It is the tallest a popup surface goes;
- *   the body scrolls beyond that rather than the panel growing.
+ * - **`height`.** A Dialog is as tall as its content under an 80dvh cap. A
+ *   Sheet can also claim a FIXED 60dvh or 80dvh, so a modifier picker does
+ *   not resize as groups expand.
  *
- * - **Sticky footer is inside the panel.** A `<Dialog>` footer is a normal
- *   flow child; sheet footers pin to the bottom of the panel so the primary
- *   action stays visible while the body scrolls. Safe-area padding is
- *   baked in.
+ * - **`height='full'` claims 80dvh** (D85) — the tallest any popup surface
+ *   goes; the body scrolls beyond that rather than the panel growing.
  *
- * - **No drag-to-dismiss (yet).** Deliberately: drag gestures + iOS pinch-to-
- *   dismiss + the OS home indicator on the same slide would conflict, and
- *   AxloPOS operators tap Cancel more predictably than they swipe. Adding it
- *   later is additive; removing it later would be a behaviour regression.
+ * - **Sticky footer.** A `<Dialog>` footer is a normal flow child; a Sheet
+ *   footer pins to the bottom of the panel so the primary action stays
+ *   visible while the body scrolls.
+ *
+ * - **Body scroll lock.** Restaurant tablets sit face-up on a bench, where a
+ *   brush past the panel edge would otherwise scroll the page underneath.
  */
 
 import { X } from 'lucide-react';
@@ -144,7 +161,16 @@ export function Sheet({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40"
+      /*
+       * CENTRED, at every width (PO, 2026-09-09). This was `items-end`, which
+       * is what made the bill panel sit against the bottom of the window with
+       * the scrim only above it. The instruction covers every popup surface,
+       * not just `<Dialog>`, so it applies here too.
+       *
+       * `p-4` so a panel that is nearly as tall as its 80dvh ceiling still
+       * floats clear of both edges instead of touching them.
+       */
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       onClick={dismissible ? onClose : undefined}
       role="presentation"
     >
@@ -155,27 +181,28 @@ export function Sheet({
         aria-describedby={description ? 'sheet-description' : undefined}
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          'flex w-full flex-col overflow-hidden rounded-t-2xl bg-surface shadow-pop outline-none',
-          // Sheet is always bottom-anchored; on tab-up we cap the width so
-          // it doesn't stretch to a 1440px monitor. `mx-auto` centres it
-          // inside the flex container so the anchor stays bottom-centre.
+          // Rounded on all four corners now that it floats: `rounded-t-2xl`
+          // was right only while the bottom two were off-screen.
+          'flex w-full flex-col overflow-hidden rounded-2xl bg-surface shadow-pop outline-none',
+          // Width is still capped on wide viewports so the panel does not
+          // stretch across a 1440px monitor.
           'tab:mx-auto tab:max-w-2xl',
-          // Slide-up entrance. Reduced-motion falls through to the global
-          // `prefers-reduced-motion` rule in globals.css which zeros
+          // Grow-in rather than slide-up: a panel that rises from the bottom
+          // edge and stops in the middle reads as an animation that did not
+          // finish. Reduced-motion falls through to the global
+          // `prefers-reduced-motion` rule in globals.css, which zeros
           // animation durations.
-          'motion-safe:animate-in motion-safe:slide-in-from-bottom motion-safe:duration-200',
+          'motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200',
           HEIGHT_CLASSES[height],
           className,
         )}
       >
-        {/* Grab handle — cue that this is a sheet. Aria-hidden so screen
-            readers announce the title, not this. */}
-        <div className="flex shrink-0 justify-center pt-2" aria-hidden="true">
-          <span className="h-1 w-10 rounded-full bg-border-strong/60" />
-        </div>
-
+        {/* The grab handle is gone with the bottom anchor. It was the cue that
+            the panel could be pulled from the edge of the screen; on a card
+            floating in the middle it points at a gesture that does not exist,
+            and it read as an unfinished drag affordance. */}
         {(title || description || dismissible) && (
-          <div className="flex shrink-0 items-start justify-between gap-4 px-6 pt-3 pb-2">
+          <div className="flex shrink-0 items-start justify-between gap-4 px-6 pt-5 pb-2">
             <div className="min-w-0">
               {title && (
                 <h2
@@ -213,8 +240,11 @@ export function Sheet({
           {children}
         </div>
 
+        {/* `pb-safe` went with the bottom anchor: the panel no longer reaches
+            the home indicator, so an inset that still measured it just added
+            stray padding under the actions on iOS. */}
         {footer && (
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-surface px-6 py-3 pb-safe">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-surface px-6 py-3">
             {footer}
           </div>
         )}

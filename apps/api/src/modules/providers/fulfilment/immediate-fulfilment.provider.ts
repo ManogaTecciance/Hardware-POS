@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { FulfilmentKind, Prisma } from '@hardware-pos/database';
 
-import type { ProjectedSaleItem } from '../../restaurant/settlement-projection';
+import type {
+  ProjectedPromotion,
+  ProjectedSaleItem,
+} from '../../restaurant/settlement-projection';
 import type { FulfilmentProvider, ReleaseOutcome, WorkUnitRef } from './fulfilment-provider';
 
 /**
@@ -23,6 +26,9 @@ export class ImmediateFulfilmentProvider implements FulfilmentProvider {
     _tx: Prisma.TransactionClient,
     _tenantId: string,
     ref: WorkUnitRef,
+    // A counter cart arrives already priced by `sales.service` — its lines
+    // carry their own promotion columns, so there is nothing to zip on here.
+    _promotionByLineId?: ReadonlyMap<string, ProjectedPromotion>,
   ): Promise<ProjectedSaleItem[]> {
     if (ref.kind !== 'CART') {
       throw new Error(`ImmediateFulfilmentProvider cannot settle a ${ref.kind} work unit`);

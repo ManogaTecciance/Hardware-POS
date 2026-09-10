@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import {
   FileText,
+  History,
   LayoutDashboard,
   Link2,
   Package,
@@ -84,7 +85,14 @@ const COMMANDS: Command[] = [
   { id: 'find-customer', label: 'Find a customer', hint: 'Customers', href: '/customers', icon: Users, keywords: 'client contact buyer', permission: Permission.CUSTOMER_READ },
   { id: 'add-customer', label: 'Add a customer', hint: 'Customers', href: '/customers/new', icon: UserPlus, keywords: 'create client new customer', permission: Permission.CUSTOMER_MANAGE },
   { id: 'quickbooks', label: 'Open QuickBooks & sync log', hint: 'Integrations', href: '/quickbooks', icon: Link2, keywords: 'accounting sync integration qbo', permission: Permission.QUICKBOOKS_READ },
-  { id: 'dashboard', label: 'Go to dashboard', hint: 'Overview', href: '/dashboard', icon: LayoutDashboard, keywords: 'home overview metrics' },
+  /*
+   * D142 — the palette mirrors the rail, and the rail no longer offers the
+   * service dashboard to a role that may not see the floor. Same any-of set as
+   * the nav entry: leaving this ungated would have handed kitchen staff the one
+   * door Ctrl+K still opened onto the whole restaurant.
+   */
+  { id: 'dashboard', label: 'Go to dashboard', hint: 'Overview', href: '/dashboard', icon: LayoutDashboard, keywords: 'home overview metrics', permission: [Permission.TABLE_VIEW, Permission.SALE_READ, Permission.REPORT_READ] },
+  { id: 'kitchen-history', label: 'Open ticket history', hint: 'Kitchen', href: '/kitchen/history', icon: History, keywords: 'kitchen ticket done bumped past history kot', permission: Permission.KOT_VIEW },
   { id: 'settings', label: 'Open settings', hint: 'System', href: '/settings', icon: Settings, keywords: 'preferences configuration', permission: Permission.SETTINGS_MANAGE },
 ];
 

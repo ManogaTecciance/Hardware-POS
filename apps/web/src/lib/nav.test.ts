@@ -16,7 +16,15 @@ import {
   RETAIL_NAVIGATION,
 } from '@hardware-pos/shared';
 
-import { ALL_NAV_ITEMS, holdsAnyOf, moduleForPath, resolveNavigation, type NavGroup } from './nav';
+import {
+  ALL_NAV_ITEMS,
+  activeNavHref,
+  holdsAnyOf,
+  moduleForPath,
+  redirectFor,
+  resolveNavigation,
+  type NavGroup,
+} from './nav';
 import { Permission, ROLE_PERMISSIONS, type UserRole } from './permissions';
 import type { ModuleKey } from './platform-api';
 
@@ -199,6 +207,8 @@ describe('Restaurant navigation', () => {
       'POS',
       'Orders',
       'Kitchen',
+      // D142 — the board's Done lane is today's; everything older is here.
+      'Ticket history',
       'Tables',
       // D47 — the reservation calendar.
       'Calendar',
@@ -263,6 +273,7 @@ describe('Restaurant navigation', () => {
       POS: false,
       Orders: false,
       Kitchen: false,
+      'Ticket history': false,
       Tables: false,
       Calendar: false,
       Menu: false,
@@ -793,19 +804,41 @@ describe('D93 — any-of permission gates', () => {
   });
 
   it('FAIL-OPEN TRIPWIRE — a user holding nothing sees only ungated destinations', () => {
+    /*
+     * The assertion that catches an any-of written as all-of-nothing.
+     *
+     * D142 took the food-service rail's last ungated destination away — the
+     * Dashboard is now gated on the floor/money/reporting set — so the
+     * restaurant half of this tripwire would have gone VACUOUS: an empty rail
+     * satisfies every "must not contain" below it, which is exactly the D30
+     * failure this test exists to catch. It is re-armed two ways instead:
+     * retail still has a genuinely ungated Dashboard and asserts it, and the
+     * restaurant side pairs its empty rail with a one-permission positive
+     * control proving the filter is discriminating rather than simply off.
+     */
     const rail = resolveNavigation({
       businessType: 'RESTAURANT',
       enabledModules: RESTAURANT_MODULES,
       hasPermission: () => false,
     });
 
-    // This is the assertion that catches an any-of written as all-of-nothing.
-    // Dashboard is genuinely ungated (shared core); everything else must go.
-    expect(labels(rail)).toEqual(['Dashboard']);
+    expect(labels(rail)).toEqual([]);
     for (const forbidden of ['POS', 'Settings', 'Reports', 'Kitchen', 'Sales', 'Tables']) {
       expect(labels(rail)).not.toContain(forbidden);
     }
-    // And the same for retail, where the blast radius includes QuickBooks.
+    // POSITIVE CONTROL for that empty list: one permission opens exactly the
+    // destinations it is the gate for, and nothing else. Without this, a
+    // resolver that returned [] unconditionally would pass every line above.
+    const onlyKot = resolveNavigation({
+      businessType: 'RESTAURANT',
+      enabledModules: RESTAURANT_MODULES,
+      hasPermission: (p) => p === Permission.KOT_VIEW,
+    });
+    expect(labels(onlyKot)).toEqual(['Kitchen', 'Ticket history']);
+
+    // And the same for retail, where the blast radius includes QuickBooks and
+    // the Dashboard is still deliberately ungated (D142 scoped the gate to the
+    // domain whose kitchen role may not see the floor).
     expect(
       labels(
         resolveNavigation({
@@ -815,6 +848,46 @@ describe('D93 — any-of permission gates', () => {
         }),
       ),
     ).toEqual(['Dashboard']);
+  });
+
+  it('D142 — the service dashboard is for whoever may see the floor, the money or the reports', () => {
+    const railFor = (held: Permission[]) =>
+      labels(
+        resolveNavigation({
+          businessType: 'RESTAURANT',
+          enabledModules: RESTAURANT_MODULES,
+          hasPermission: (p) => held.includes(p),
+        }),
+      );
+
+    // POSITIVE, one at a time: any ONE of the three opens it (D93 any-of).
+    for (const held of [Permission.TABLE_VIEW, Permission.SALE_READ, Permission.REPORT_READ]) {
+      expect(railFor([held])).toContain('Dashboard');
+    }
+    // NEGATIVE, on the exact set the kitchen holds: the board's own
+    // permissions do not open a floor screen…
+    expect(railFor([Permission.KOT_VIEW, Permission.KITCHEN_STATUS_UPDATE])).not.toContain(
+      'Dashboard',
+    );
+    // …and PLATFORM_PROFILE_READ, which every food-service template holds and
+    // which the dashboard's own table fetches accept, does not open it either.
+    // That is the whole distinction: the tiles being FETCHABLE by a role is not
+    // the same as the screen being theirs.
+    expect(railFor([Permission.PLATFORM_PROFILE_READ])).not.toContain('Dashboard');
+    // Positive control for those two negatives — the rail is not simply empty.
+    expect(railFor([Permission.KOT_VIEW, Permission.KITCHEN_STATUS_UPDATE])).toContain('Kitchen');
+  });
+
+  it('D142 — kitchen staff get the board and its history, and nothing else', () => {
+    // Built from the SHIPPED template rather than a hand-typed permission list,
+    // so a permission quietly added to the role shows up here.
+    const rail = labels(restaurantNav('KITCHEN_STAFF'));
+
+    expect(rail).toEqual(['Kitchen', 'Ticket history']);
+    // NEGATIVE, named: the floor, the money and the configuration all stay shut.
+    for (const forbidden of ['Dashboard', 'POS', 'Orders', 'Tables', 'Sales', 'Settings']) {
+      expect(rail).not.toContain(forbidden);
+    }
   });
 
   it('an ARRAY gate is any-of, not all-of', () => {
@@ -1084,5 +1157,121 @@ describe('2.8 — the Retail rail gates on capability, not on proxies', () => {
     // function refusing everything.
     expect(holdsAnyOf(undefined, { hasPermission: () => false })).toBe(true);
     expect(holdsAnyOf([Permission.SALE_CREATE], grantsEverything)).toBe(true);
+  });
+});
+
+/*
+ * D142a — exactly one rail entry reads as current.
+ *
+ * The prefix rule this replaced marked EVERY entry whose href is a prefix of
+ * the path, so a nested destination lit up two links at once and
+ * `aria-current="page"` claimed the reader was in two places.
+ */
+describe('activeNavHref', () => {
+  const restaurant = resolveNavigation({
+    businessType: 'RESTAURANT',
+    enabledModules: RESTAURANT_MODULES,
+    hasPermission: () => true,
+  });
+
+  it('picks the nested entry, not its parent, on a nested route', () => {
+    expect(activeNavHref(restaurant, '/kitchen/history')).toBe('/kitchen/history');
+  });
+
+  it('picks the parent on the parent’s own route', () => {
+    expect(activeNavHref(restaurant, '/kitchen')).toBe('/kitchen');
+  });
+
+  it('MUTATION PROOF — the prefix rule this replaced marked both, and is detected', () => {
+    // What the sidebar used to do, per item.
+    const marked = restaurant
+      .flatMap((g) => g.items)
+      .filter((i) => '/kitchen/history' === i.href || '/kitchen/history'.startsWith(`${i.href}/`))
+      .map((i) => i.href);
+
+    // The mutation lands: the old rule really does match two entries…
+    expect(marked.sort()).toEqual(['/kitchen', '/kitchen/history']);
+    // …and exactly one survives the shipped rule.
+    expect(marked.filter((h) => h === activeNavHref(restaurant, '/kitchen/history'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('still matches whole segments only, and nothing when the path is elsewhere', () => {
+    // NEGATIVE — `/kitchener` is not inside `/kitchen`.
+    expect(activeNavHref(restaurant, '/kitchener')).toBe('');
+    expect(activeNavHref(restaurant, '/nowhere')).toBe('');
+    // A deeper path under a destination still belongs to that destination.
+    expect(activeNavHref(restaurant, '/products/new')).toBe('/products');
+  });
+});
+
+/*
+ * D142 — where someone goes when they land on a screen their rail has not got.
+ *
+ * The three `null` cases are the whole risk: redirecting on an UNRESOLVED rail
+ * would bounce every user off the dashboard for the moment before the profile
+ * lands, and redirecting when the destination IS theirs would loop.
+ */
+describe('redirectFor', () => {
+  const rail = (hasPermission: (p: Permission) => boolean) =>
+    resolveNavigation({
+      businessType: 'RESTAURANT',
+      enabledModules: RESTAURANT_MODULES,
+      hasPermission,
+    });
+  const kitchenOnly = () => rail((p) => p === Permission.KOT_VIEW);
+
+  it('sends a kitchen user off the dashboard to the first screen they do have', () => {
+    expect(redirectFor(kitchenOnly(), '/dashboard')).toBe('/kitchen');
+  });
+
+  it('leaves them alone on a destination that IS theirs — including a nested one', () => {
+    expect(redirectFor(kitchenOnly(), '/kitchen')).toBeNull();
+    // Whole-segment matching, like the sidebar's active rule: the history page
+    // is its own entry, and a ticket detail below the board would be the board's.
+    expect(redirectFor(kitchenOnly(), '/kitchen/history')).toBeNull();
+  });
+
+  it('NEGATIVE — an unresolved rail redirects nobody', () => {
+    // resolveNavigation returns [] for an unresolved profile AND for an error;
+    // bouncing on either would throw people off the page mid-load.
+    expect(redirectFor([], '/dashboard')).toBeNull();
+    expect(
+      redirectFor(
+        resolveNavigation({ businessType: null, enabledModules: null, hasPermission: () => true }),
+        '/dashboard',
+      ),
+    ).toBeNull();
+  });
+
+  it('leaves a full rail alone on the dashboard — the owner is not redirected', () => {
+    const owner = rail(() => true);
+    expect(redirectFor(owner, '/dashboard')).toBeNull();
+  });
+
+  it('MUTATION PROOF — dropping the reachable check would loop, and is detected', () => {
+    /*
+     * The load-bearing clause is "is this destination already theirs". Drop it
+     * and the resolver sends an OWNER standing on /dashboard to /dashboard —
+     * a redirect to the page they are on, i.e. an infinite loop.
+     *
+     * Asserted against the SHIPPED function beside the mutant, rather than
+     * about the mutant alone: a proof that only exercised a local stand-in
+     * would say nothing about the code that runs.
+     */
+    const everything = () => true;
+    const full = rail(everything);
+    const withoutReachableCheck = (groups: ReturnType<typeof rail>) =>
+      groups.flatMap((g) => g.items)[0]?.href ?? null;
+
+    // The mutant really is a different answer — the mutation lands.
+    expect(withoutReachableCheck(full)).toBe('/dashboard');
+    expect(redirectFor(full, '/dashboard')).toBeNull();
+    expect(() => expect(withoutReachableCheck(full)).toBeNull()).toThrow();
+
+    // And on the case it is FOR, the two agree — so the check narrows the
+    // behaviour rather than replacing it.
+    expect(withoutReachableCheck(kitchenOnly())).toBe(redirectFor(kitchenOnly(), '/dashboard'));
   });
 });

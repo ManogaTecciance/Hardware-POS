@@ -23,8 +23,31 @@ export interface RestaurantChargeConfig {
   taxRatePercent: number;
 }
 
+/**
+ * What the promotion pass took off this bill, if anything.
+ *
+ * Split in two because the two halves land at different points in the
+ * arithmetic, exactly as they do on a retail sale:
+ *
+ * - `lineDiscount` reduces the goods, so the service charge and the tax follow
+ *   what the customer actually pays for food. `document-totals` was written
+ *   anticipating this ("when promotions reach the bill the charges follow what
+ *   the customer actually pays, in one place").
+ * - `orderDiscount` is D126's cart-level promotion, and comes off AFTER tax —
+ *   the asymmetry `sales.service` records as PO-confirmed. Restaurant bills
+ *   copy it rather than inventing a second rule for the same promotion.
+ */
+export interface RestaurantPromotionDiscounts {
+  lineDiscount: Prisma.Decimal;
+  orderDiscount: Prisma.Decimal;
+}
+
 export interface RestaurantTotals {
   subtotal: Prisma.Decimal;
+  /** Σ of the line-level promotion discounts. Zero when none applied. */
+  promotionLineDiscount: Prisma.Decimal;
+  /** D126 — the cart-level promotion, off the total after tax. */
+  promotionOrderDiscount: Prisma.Decimal;
   serviceChargeAmount: Prisma.Decimal;
   packagingCharge: Prisma.Decimal;
   taxAmount: Prisma.Decimal;
@@ -53,17 +76,33 @@ export function computeRestaurantTotals(
   subtotal: Prisma.Decimal,
   channel: RestaurantOrderChannel,
   config: RestaurantChargeConfig,
+  promotions?: RestaurantPromotionDiscounts,
 ): RestaurantTotals {
+  const lineDiscount = promotions?.lineDiscount ?? new Prisma.Decimal(0);
+  const orderDiscount = promotions?.orderDiscount ?? new Prisma.Decimal(0);
+
   /*
    * D59: delegated to the ONE document-totals engine. This wrapper keeps the
    * D52 call shape (a pre-summed subtotal, restaurant channel values) and its
    * spec passing verbatim — which is the parity proof that the shared engine
-   * reproduces the food-service pipeline exactly. A bill has no line or
-   * order discounts yet (D52 deferral), so the subtotal passes through as a
-   * single undiscounted line.
+   * reproduces the food-service pipeline exactly.
+   *
+   * The promotion pass arrives as a single FIXED line discount on that
+   * synthetic line, which is what makes the engine's `chargeBase` — and so the
+   * service charge and the tax — follow the discounted goods. Absent a
+   * promotion the discount is null and every figure is byte-identical to the
+   * D52 behaviour, which is why that spec still passes untouched.
    */
   const totals = computeDocumentTotals(
-    [{ unitPrice: subtotal, quantity: 1 }],
+    [
+      {
+        unitPrice: subtotal,
+        quantity: 1,
+        discountType: lineDiscount.greaterThan(0) ? 'FIXED' : null,
+        discountValue: lineDiscount.greaterThan(0) ? lineDiscount : null,
+        discountBasis: 'LINE',
+      },
+    ],
     channel as OrderChannel,
     {
       taxRatePercent: config.taxRatePercent,
@@ -74,11 +113,22 @@ export function computeRestaurantTotals(
       packagedChannels: PACKAGED_CHANNELS as readonly OrderChannel[],
     },
   );
+
+  /*
+   * The cart-level promotion can never take more than is left to pay. Without
+   * the clamp a "Rs 2,000 off" on a Rs 1,500 bill would produce a negative
+   * total, and a negative balance is a bill the payment path would let a guest
+   * be refunded against.
+   */
+  const orderTaken = Prisma.Decimal.min(orderDiscount, totals.total);
+
   return {
     subtotal,
+    promotionLineDiscount: totals.totalLineDiscount,
+    promotionOrderDiscount: orderTaken,
     serviceChargeAmount: totals.serviceChargeAmount,
     packagingCharge: totals.packagingCharge,
     taxAmount: totals.taxAmount,
-    total: totals.total,
+    total: totals.total.minus(orderTaken),
   };
 }

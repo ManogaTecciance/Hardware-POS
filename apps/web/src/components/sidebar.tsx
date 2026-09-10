@@ -5,7 +5,8 @@ import { usePathname } from 'next/navigation';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import * as React from 'react';
 
-import { resolveNavigation } from '@/lib/nav';
+import { BrandMark } from '@/components/brand-mark';
+import { activeNavHref, resolveNavigation } from '@/lib/nav';
 import { useAuth } from '@/lib/auth';
 import { useEffectiveProfile } from '@/lib/platform-profile';
 import { useSidebar } from '@/lib/sidebar';
@@ -20,10 +21,10 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
         collapsed ? 'justify-center px-0' : 'px-6',
       )}
     >
-      {/* The brand logo (same asset as the login page and the platform
-          console), not a generic glyph (PO request, 2026-08-17). */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/axlo-icon.svg" alt="" className="h-9 w-auto shrink-0" aria-hidden />
+      {/* The brand logo, not a generic glyph (PO request, 2026-08-17). D144 —
+          through `BrandMark`, because this rail is `bg-surface`: white in light
+          mode, where the white-filled SVG on its own was invisible. */}
+      <BrandMark className="h-9 w-auto shrink-0" />
       {!collapsed ? (
         <span className="text-base font-semibold tracking-tight">Axlo POS</span>
       ) : null}
@@ -60,6 +61,14 @@ function NavList({ collapsed, label }: { collapsed?: boolean; label: string }) {
     hasPermission,
   });
 
+  /*
+   * D142a — exactly one entry reads as current, by longest match. The old
+   * per-item prefix test lit up Kitchen AND Ticket history together on
+   * `/kitchen/history`; `aria-current="page"` on two links tells a screen
+   * reader the user is in two places at once.
+   */
+  const activeHref = activeNavHref(groups, pathname);
+
   if (groups.length === 0) {
     return (
       <nav className="flex-1 overflow-y-auto p-3" aria-label={label}>
@@ -84,7 +93,7 @@ function NavList({ collapsed, label }: { collapsed?: boolean; label: string }) {
           ) : null}
           <div className="space-y-1">
             {group.items.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const active = item.href === activeHref;
               return (
                 <Link
                   key={item.href}

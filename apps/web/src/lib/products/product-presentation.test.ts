@@ -458,7 +458,7 @@ describe('D101 — resolveItemStockPresentation', () => {
 });
 
 /**
- * D139 — which workspaces are offered the Attributes and Barcodes tabs.
+ * D151 — which workspaces are offered the Attributes and Barcodes tabs.
  *
  * ## What makes these assertions non-vacuous
  *
@@ -472,7 +472,7 @@ describe('D101 — resolveItemStockPresentation', () => {
  * point of the change and the one case a single shared flag could not express:
  * hardware keeps Barcodes and loses Attributes.
  */
-describe('D139 — catalogue sub-surface tabs', () => {
+describe('D151 — catalogue sub-surface tabs', () => {
   it('offers each tab to exactly the workspaces that asked for it', () => {
     const rows = BUSINESS_TYPE_VALUES.map((type) => [type, resolveCatalogueTabs(type)]);
 

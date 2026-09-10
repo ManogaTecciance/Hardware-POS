@@ -3,8 +3,11 @@
 import { Loader2, Receipt, SplitSquareHorizontal } from 'lucide-react';
 import * as React from 'react';
 
+import { saleLinePromotionNote } from '@hardware-pos/shared';
+
 import { ItemSplitAssigner } from '@/components/restaurant/billing/item-split-assigner';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/ui/confirm';
 import { Sheet } from '@/components/ui/sheet';
 import { type Session } from '@/lib/auth';
 import { billing, tableSessions } from '@/lib/restaurant/api';
@@ -63,6 +66,7 @@ export function TableBillSheet({
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const confirm = useConfirm();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -83,14 +87,28 @@ export function TableBillSheet({
     };
   }, [session, sessionId]);
 
-  const confirmUnsent = () =>
+  /*
+   * D145 — the app's own confirm, so this one is AWAITED. It has to be: the
+   * native dialog froze the same thread the bill preview and the floor's
+   * session poll run on, and Chrome drops it entirely after a few in a row —
+   * on a busy service that silently turns the guard below into a no-op.
+   *
+   * The guard itself is unchanged. A "no" still stops the close before the
+   * session is raised into a Sale, which is the only point at which the
+   * unsent items could still be sent.
+   */
+  const confirmUnsent = async () =>
     !hasUnsentDraft ||
-    window.confirm(
-      'The cart still has items that were never sent to the kitchen. They are NOT on this bill. Close the session anyway?',
-    );
+    (await confirm({
+      title: 'Close the session anyway?',
+      message:
+        'The cart still has items that were never sent to the kitchen. They are NOT on this bill.',
+      confirmLabel: 'Close session',
+      tone: 'danger',
+    }));
 
   const closeOnly = async () => {
-    if (busy || !confirmUnsent()) return;
+    if (busy || !(await confirmUnsent())) return;
     setBusy(true);
     setError(null);
     try {
@@ -105,7 +123,7 @@ export function TableBillSheet({
   };
 
   const closeAndSplit = async (splits: Parameters<typeof billing.splitByItems>[2]['splits']) => {
-    if (busy || !confirmUnsent()) return;
+    if (busy || !(await confirmUnsent())) return;
     setBusy(true);
     setError(null);
     let saleId: string;
@@ -243,6 +261,18 @@ export function TableBillSheet({
 
           <div className="space-y-1 border-t border-border pt-3 text-sm">
             <Row label="Subtotal" value={preview.subtotal} />
+            {/* The server prices the promotion over the WHOLE session — every
+                round, since a bundle spans them — so this is the figure the
+                close will write, not an estimate of it. */}
+            {Number(preview.promotionDiscount) > 0 ? (
+              <Row
+                // Same wording as the receipt, the A4 bill and the counter's
+                // running total — one vocabulary for one thing.
+                label={saleLinePromotionNote(preview.promotionName) ?? 'Promotion'}
+                value={preview.promotionDiscount}
+                tone="success"
+              />
+            ) : null}
             {Number(preview.serviceChargeAmount) > 0 ? (
               <Row label="Service charge" value={preview.serviceChargeAmount} />
             ) : null}
@@ -261,11 +291,29 @@ export function TableBillSheet({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'success';
+}) {
   return (
-    <div className="flex items-center justify-between text-muted-foreground">
+    <div
+      className={
+        tone === 'success'
+          ? 'flex items-center justify-between text-success'
+          : 'flex items-center justify-between text-muted-foreground'
+      }
+    >
       <span>{label}</span>
-      <span className="tabular-nums">{formatMoney(value)}</span>
+      {/* A deduction reads as one: the minus sits outside the formatter, which
+          would otherwise put it inside the currency ("Rs. -1,500.00"). */}
+      <span className="tabular-nums">
+        {tone === 'success' ? `- ${formatMoney(value)}` : formatMoney(value)}
+      </span>
     </div>
   );
 }

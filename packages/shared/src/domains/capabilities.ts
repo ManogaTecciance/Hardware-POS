@@ -75,7 +75,7 @@ export interface TenantCapabilities {
      */
     readonly measuredGoods?: boolean;
     /**
-     * D64 / D138 — the tenant defines its own **business details**: the extra
+     * D64 / D150 — the tenant defines its own **business details**: the extra
      * per-product fields Step 2 of the wizard collects into
      * `Product.attributes`.
      *
@@ -90,7 +90,7 @@ export interface TenantCapabilities {
      */
     readonly configurableBusinessDetails?: boolean;
     /**
-     * D139 — the reusable **attribute library** (`Products → Attributes`).
+     * D151 — the reusable **attribute library** (`Products → Attributes`).
      *
      * Naming "Size" and its options once, then reusing them across products,
      * pays for itself in a catalogue with many variants of the same few scales.
@@ -107,7 +107,7 @@ export interface TenantCapabilities {
      */
     readonly attributeLibrary?: boolean;
     /**
-     * D139 — **internal barcodes** (`Products → Barcodes`).
+     * D151 — **internal barcodes** (`Products → Barcodes`).
      *
      * Allocating EAN-13s from an in-store range, auditing them and printing
      * shelf labels is a stocked-goods activity (Phase 5, D125/D106). A kitchen
@@ -138,14 +138,14 @@ export interface TenantCapabilities {
      *
      * A food-service fact: the bill you bring to a table before anyone has
      * paid. **Not** a statement about paper. It was the Settings screen's
-     * A4-vs-thermal discriminator until D140, which is why retail could not
+     * A4-vs-thermal discriminator until D152, which is why retail could not
      * be moved to a thermal bill without asserting something false about it:
      * a shop rings up and prints a receipt, it issues no proforma.
      */
     readonly proformaBill: boolean;
     readonly splitByItem: boolean;
     /**
-     * D140 — the customer's BILL prints on an 80mm roll, not an A4 sheet.
+     * D152 — the customer's BILL prints on an 80mm roll, not an A4 sheet.
      *
      * This is the paper question, asked directly. A kitchen and a clothing
      * shop both hand over a slip from a till-top printer; they have almost
@@ -154,7 +154,7 @@ export interface TenantCapabilities {
      */
     readonly thermalBill?: boolean;
     /**
-     * D140 — the tenant issues A4 documents on a letterhead.
+     * D152 — the tenant issues A4 documents on a letterhead.
      *
      * Quotations and printed notes: the documents whose logo, accent colour,
      * signature block, stamp, page size and column set live on the Branding
@@ -185,7 +185,7 @@ export const RETAIL_CAPABILITIES: TenantCapabilities = {
     // "Seasonal") — the plan's original motivation for renaming menus.
     collections: true,
     components: false,
-    // D139 — hardware and retail both stock and label physical goods, so both
+    // D151 — hardware and retail both stock and label physical goods, so both
     // keep the Barcodes screen. `attributeLibrary` is deliberately NOT here:
     // this constant IS the hardware template, and only retail wants that tab,
     // so it is declared on the retail descriptor instead (the D134e pattern).
@@ -193,7 +193,7 @@ export const RETAIL_CAPABILITIES: TenantCapabilities = {
   },
   fulfilment: { kind: 'IMMEDIATE', stationRouting: false, rounds: false, channels: ['COUNTER'] },
   charges: { serviceCharge: false, packaging: false },
-  // D140 — hardware and retail both quote on a letterhead, so the A4 document
+  // D152 — hardware and retail both quote on a letterhead, so the A4 document
   // set is here. `thermalBill` is NOT: this constant is the hardware template,
   // hardware still prints its bill on A4, and only retail moved to a roll.
   documents: { proformaBill: false, splitByItem: false, a4Documents: true },
@@ -217,7 +217,7 @@ export const FOOD_SERVICE_CAPABILITIES: TenantCapabilities = {
     channels: ['DINE_IN', 'TAKEAWAY', 'ONLINE'],
   },
   charges: { serviceCharge: true, packaging: true },
-  // D140 — `thermalBill` states directly what `proformaBill` was standing in
+  // D152 — `thermalBill` states directly what `proformaBill` was standing in
   // for. Additive and behaviour-preserving: food service resolved to the
   // thermal surface before this line and resolves to it after. `a4Documents`
   // stays absent — a kitchen issues no quotation, which is the whole reason
@@ -233,7 +233,7 @@ export const GENERAL_CAPABILITIES: TenantCapabilities = {
     preparation: false,
     collections: false,
     components: false,
-    // D139 — unchanged: the general template showed both catalogue tabs before
+    // D151 — unchanged: the general template showed both catalogue tabs before
     // this decision and nothing asked for that to change. Stated explicitly
     // rather than inherited, because absent means false and silence here would
     // remove two working screens from a template nobody was talking about.
@@ -242,7 +242,7 @@ export const GENERAL_CAPABILITIES: TenantCapabilities = {
   },
   fulfilment: { kind: 'IMMEDIATE', stationRouting: false, rounds: false, channels: ['COUNTER'] },
   charges: { serviceCharge: false, packaging: false },
-  // D140 — unchanged: A4 documents, no thermal bill. Stated rather than
+  // D152 — unchanged: A4 documents, no thermal bill. Stated rather than
   // inherited, because absent means false and silence would quietly move a
   // template nobody was discussing onto a different surface.
   documents: { proformaBill: false, splitByItem: false, a4Documents: true },

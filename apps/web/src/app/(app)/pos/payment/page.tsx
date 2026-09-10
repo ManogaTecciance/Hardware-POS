@@ -122,7 +122,7 @@ export default function PaymentPage() {
   const [creditUnavailable, setCreditUnavailable] = React.useState(false);
   const [printAfter, setPrintAfter] = React.useState(true);
   /*
-   * D140 — does this workspace have an A4 bill at all?
+   * D152 — does this workspace have an A4 bill at all?
    *
    * A retail workspace's sale document is the thermal slip now, and this
    * screen was opening an A4 print window on EVERY completed sale — the
@@ -829,7 +829,7 @@ export default function PaymentPage() {
             ) : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
-              {/* D140 — absent where the workspace prints no A4 bill. Its
+              {/* D152 — absent where the workspace prints no A4 bill. Its
                   receipt still prints; what goes is the second, A4 copy of a
                   sale that is already on the roll. */}
               {canPrintA4 ? (

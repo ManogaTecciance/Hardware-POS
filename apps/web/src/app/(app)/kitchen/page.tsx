@@ -32,9 +32,11 @@ export default function KitchenPage() {
 
   return (
     <div className="space-y-6">
+      {/* No branch name: the pass is not a dining area, and "Main Dining —"
+          in front of the kitchen's own instruction read as if it were one. */}
       <PageHeader
         title="Kitchen"
-        description={`${session.branchName} — live tickets. Mark each one done when the food is up.`}
+        description="Live tickets. Mark each one done when the food is up."
       />
       <KitchenBoard session={session} branchId={session.branchId} />
     </div>

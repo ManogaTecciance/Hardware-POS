@@ -294,6 +294,37 @@ describe('templates are selected by business type', () => {
     expect(till.permissions).not.toContain(Permission.ORDER_SEND_TO_KITCHEN);
   });
 
+  it('the waiter can record WHO a takeaway is for, not just raise it (D146)', () => {
+    const waiter = RESTAURANT_ROLE_TEMPLATES.find((t) => t.key === 'WAITER')!;
+
+    /*
+     * The counter popup asks for a name and a phone and POSTs a customer, so a
+     * waiter holding TAKEAWAY_CREATE without CUSTOMER_MANAGE could start the
+     * order and then only finish it as a walk-in — the 403 reached the operator
+     * as "you don't have permission to create a customer".
+     */
+    expect(waiter.permissions).toContain(Permission.TAKEAWAY_CREATE);
+    expect(waiter.permissions).toContain(Permission.CUSTOMER_MANAGE);
+    expect(waiter.permissions).toContain(Permission.CUSTOMER_READ);
+
+    /*
+     * NEGATIVE — and this is the half that matters, because CUSTOMER_MANAGE is
+     * the only customer-write key and therefore wider than "create". It buys
+     * the waiter nothing on the money side: what the floor may not do is
+     * unchanged.
+     */
+    for (const withheld of [
+      Permission.PAYMENT_COLLECT,
+      Permission.SALE_READ,
+      Permission.REPORT_READ,
+      Permission.SETTINGS_MANAGE,
+      Permission.USER_MANAGE,
+      Permission.ORDER_VOID_SENT,
+    ]) {
+      expect(waiter.permissions).not.toContain(withheld);
+    }
+  });
+
   /**
    * D68 — kitchen staff work the board and nothing else. Asserted as an
    * EXACT set: a permission quietly added here is the difference between

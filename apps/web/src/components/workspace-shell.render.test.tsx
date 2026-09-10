@@ -33,11 +33,14 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+/** Mutable so a nested route can be asserted (D142a); reset in `beforeEach`. */
+let pathname = '/dashboard';
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push, replace, back: vi.fn(), refresh: vi.fn() }),
   useParams: () => ({}),
   useSearchParams: () => searchParams,
-  usePathname: () => '/dashboard',
+  usePathname: () => pathname,
 }));
 
 let role: UserRole = 'OWNER';
@@ -169,6 +172,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   role = 'OWNER';
+  pathname = '/dashboard';
   searchParams = new URLSearchParams();
   profileState = { status: 'ready', profile: profile('HARDWARE', LEGACY) };
   window.localStorage.clear();
@@ -223,8 +227,11 @@ describe('8.3 — the sidebar draws what the resolver returns', () => {
     // Tile Shop / retail keeps "Products". If both labels ever regress to
     // the same string, the sidebar disambiguation is gone. (D45 still holds:
     // the legacy /menu route has no entry — the label points at /products.)
-    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Menu']) {
-      const link = within(mainNav()).getByRole('link', { name: new RegExp(name, 'i') });
+    // Anchored: since D142 the rail carries both "Kitchen" and "Kitchen
+    // history", and a substring query would match two links and throw on the
+    // ambiguity rather than on anything real.
+    for (const name of ['POS', 'Orders', 'Tables', 'Kitchen', 'Ticket history', 'Menu']) {
+      const link = within(mainNav()).getByRole('link', { name: new RegExp(`^${name}$`, 'i') });
       expect({ name, hasSoon: /soon/i.test(link.textContent ?? '') }).toEqual({
         name,
         hasSoon: false,
@@ -342,6 +349,24 @@ describe('accessibility — the shell is navigable without sight or a mouse', ()
       expect((link.textContent ?? '').trim().length).toBeGreaterThan(0);
       expect(link.getAttribute('href')?.startsWith('/')).toBe(true);
     }
+  });
+
+  it('marks exactly ONE entry current, even on a nested route (D142a)', async () => {
+    // `/kitchen/history` sits under `/kitchen`, and both are rail entries. The
+    // per-item prefix rule this replaced marked both, so `aria-current="page"`
+    // told a screen reader the user was in two places at once.
+    pathname = '/kitchen/history';
+    profileState = { status: 'ready', profile: profile('RESTAURANT', RESTAURANT) };
+    render(<Sidebar />);
+    await settle();
+
+    const current = within(mainNav())
+      .getAllByRole('link')
+      .filter((l) => l.getAttribute('aria-current') === 'page');
+    expect(current.map((l) => l.textContent?.trim())).toEqual(['Ticket history']);
+    // POSITIVE CONTROL — the parent link IS rendered, so the single match above
+    // is about the rule and not about a missing entry.
+    expect(within(mainNav()).getByRole('link', { name: /^Kitchen$/i })).toBeTruthy();
   });
 
   it('the current page is marked with aria-current, not only a colour', async () => {

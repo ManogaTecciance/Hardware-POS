@@ -65,7 +65,7 @@ export class ProductAttributesService {
   /**
    * The fields this tenant collects. Empty = every key is refused.
    *
-   * D138 — delegated, so the tenant's own list and the domain's declared one
+   * D150 — delegated, so the tenant's own list and the domain's declared one
    * are resolved in exactly ONE place. Validation, the wizard's schema
    * endpoint and the Settings tab all end up here; a second copy of the
    * “override or default” rule is how a form and a refusal drift apart, which

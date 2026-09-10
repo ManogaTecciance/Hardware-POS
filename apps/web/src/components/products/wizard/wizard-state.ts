@@ -178,7 +178,13 @@ export interface WizardState {
   dietaryTags: string[];
   /** ModifierGroup ids linked to this product (Step 3, card A). */
   modifierGroupIds: string[];
-  /** KitchenStation ids the product routes to (Step 3, card C). */
+  /**
+   * KitchenStation ids linked to this product (Step 3, card C).
+   *
+   * LINKED to, not routed to: since D147 a round is one ticket and nothing
+   * consults these links at ticket time. They are recorded and still editable;
+   * they no longer decide anything.
+   */
   kitchenStationIds: string[];
   /**
    * Promotion ids the operator picked/linked in Step 3, card B.

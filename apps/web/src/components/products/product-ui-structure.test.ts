@@ -165,7 +165,7 @@ describe('inventory-mode decisions live in the resolver, not in JSX', () => {
     // "components must not compare a mode themselves" rule above continues to
     // enforce the boundary.
     //
-    // D139 added `inventory-tabs.tsx`. It calls the runtime resolver
+    // D151 added `inventory-tabs.tsx`. It calls the runtime resolver
     // (`resolveCatalogueTabs`) rather than only consuming a type, and that is
     // the point: the tab bar asks which catalogue sub-surfaces a workspace has
     // and reads flags back. It is an importer BECAUSE it refuses to decide for
@@ -313,6 +313,9 @@ describe('36/37 — nothing outside the product screens changed', () => {
     const shells = readComponents(SRC, [
       'app/(app)/tables/page.tsx',
       'app/(app)/kitchen/page.tsx',
+      // D142 — the history route is a shell like its neighbour: the screen's
+      // state, fetching and paging live in components/restaurant/kitchen.
+      'app/(app)/kitchen/history/page.tsx',
       'app/(app)/orders/page.tsx',
       'components/upcoming-feature.tsx',
     ]);

@@ -142,33 +142,46 @@ describe('what the page asks the server for', () => {
 });
 
 describe('the pager control', () => {
-  it('appears once there is more than one page, and says where you are', async () => {
+  it('says where you are, in the shared footer’s own words', async () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
 
-    expect(await screen.findByText(/Showing 1–25 of 80 orders/)).toBeTruthy();
-    expect(screen.getByText('Page 1 of 4')).toBeTruthy();
+    // D143a — the screen dropped its hand-rolled "Showing 1–25 of 80 orders"
+    // for the footer every other list renders.
+    expect(await screen.findByText('1–25 of 80')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Page 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Page 4' })).toBeTruthy();
   });
 
-  it('is absent when everything fits on one page', async () => {
+  it('still renders when everything fits one page — the sizes stay reachable', async () => {
     list.mockResolvedValue(pageOf(4, 4));
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(list).toHaveBeenCalled());
 
-    // The negative half: a pager that always rendered would pass the case
-    // above and clutter every short list.
-    expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
+    /*
+     * D143a answers O7 the way every `main` list already answers it. Hiding the
+     * footer on a short list also hid the ROWS-PER-PAGE control, so on a quiet
+     * branch the sizes could not be reached at all — which is how this was
+     * reported. The paging controls go inert instead of disappearing.
+     */
+    expect(screen.getByLabelText('Rows per page')).toBeTruthy();
+    expect(screen.getByText('1–4 of 4')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Next page' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it('advances, and writes the new page to the URL', async () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Next page' }));
 
     expect(writtenPage()).toBe('2');
   });
 
   it('cannot go back from the first page', async () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
-    const prev = (await screen.findByRole('button', { name: 'Previous' })) as HTMLButtonElement;
+    const prev = (await screen.findByRole('button', {
+      name: 'Previous page',
+    })) as HTMLButtonElement;
 
     expect(prev.disabled).toBe(true);
   });
@@ -178,10 +191,9 @@ describe('the pager control', () => {
     list.mockResolvedValue(pageOf(5, 80, { page: 4 }));
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
 
-    const next = (await screen.findByRole('button', { name: 'Next' })) as HTMLButtonElement;
+    const next = (await screen.findByRole('button', { name: 'Next page' })) as HTMLButtonElement;
     expect(next.disabled).toBe(true);
-    expect(screen.getByText('Page 4 of 4')).toBeTruthy();
-    expect(screen.getByText(/Showing 76–80 of 80 orders/)).toBeTruthy();
+    expect(screen.getByText('76–80 of 80')).toBeTruthy();
   });
 });
 
@@ -219,7 +231,7 @@ describe('counts come from the server, not the page of rows', () => {
 
     // Counting `rows` would say 25 — the page length — for a branch with 80
     // pending orders, and nothing on screen would reveal the difference.
-    expect(await screen.findByText(/of 80 orders/)).toBeTruthy();
+    expect(await screen.findByText('1–25 of 80')).toBeTruthy();
     /*
      * Two places show it — the Pending metric tile and the Pending tab pill —
      * and both used to count `rows`. Asserting on both is the point: either
@@ -255,12 +267,13 @@ describe('the page size comes from the server', () => {
     });
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
 
-    expect(await screen.findByText(/Showing 1–50 of 80 orders/)).toBeTruthy();
+    expect(await screen.findByText('1–50 of 80')).toBeTruthy();
     // 80 over 50 is two pages. A hardcoded 25 would say four.
-    expect(screen.getByText('Page 1 of 2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Page 2' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Page 3' })).toBeNull();
   });
 
-  it('hides the pager when the server returned everything in one page', async () => {
+  it('offers no second page when the server returned everything in one', async () => {
     list.mockResolvedValue({
       ...pageOf(40, 40),
       pageSize: 50,
@@ -269,9 +282,12 @@ describe('the page size comes from the server', () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(list).toHaveBeenCalled());
 
-    // 40 of 40 fits one 50-row page. Against a hardcoded 25 this would render
-    // a pager claiming two pages over a complete list.
-    expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
+    // 40 of 40 fits one 50-row page. Against a hardcoded 25 this would offer a
+    // second page over a complete list.
+    expect(screen.queryByRole('button', { name: 'Page 2' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Next page' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 });
 
@@ -283,7 +299,7 @@ describe('the request names its page size', () => {
     // Left to the server's default it was an unstated agreement between two
     // files, and invisible in devtools. Naming it puts the screen's intent in
     // the request.
-    expect(requestedQuery()?.pageSize).toBe(25);
+    expect(requestedQuery()?.pageSize).toBe(20);
   });
 
   it('still names it when paging', async () => {
@@ -291,7 +307,7 @@ describe('the request names its page size', () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(list).toHaveBeenCalled());
 
-    expect(requestedQuery()).toMatchObject({ page: 2, pageSize: 25 });
+    expect(requestedQuery()).toMatchObject({ page: 2, pageSize: 20 });
   });
 
   it('defers to the size the server actually used, not the one it asked for', async () => {
@@ -305,9 +321,9 @@ describe('the request names its page size', () => {
     });
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
 
-    expect(requestedQuery()?.pageSize).toBe(25);
-    // Asked for 25, served 50 — two pages, not four.
-    expect(await screen.findByText('Page 1 of 2')).toBeTruthy();
+    expect(requestedQuery()?.pageSize).toBe(20);
+    // Asked for 20, served 50 — two pages, not four.
+    expect(await screen.findByRole('button', { name: 'Page 2' })).toBeTruthy();
   });
 });
 
@@ -325,7 +341,9 @@ describe('the rows-per-page dropdown', () => {
     await waitFor(() => expect(list).toHaveBeenCalled());
 
     const select = screen.getByLabelText('Rows per page') as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(['25', '50', '75', '100']);
+    // One list for every footer in the product (2026-09-09); this screen used
+    // to offer 25/50/75/100 of its own.
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['20', '50', '100']);
 
     fireEvent.change(select, { target: { value: '50' } });
     const url = String(replace.mock.calls.at(-1)?.[0]);
@@ -343,22 +361,30 @@ describe('the rows-per-page dropdown', () => {
 
     currentParams = new URLSearchParams();
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
-    await waitFor(() => expect(requestedQuery()?.pageSize).toBe(25));
+    await waitFor(() => expect(requestedQuery()?.pageSize).toBe(20));
   });
 
   it('a mangled ?size degrades to the default instead of reaching the server', async () => {
     currentParams = new URLSearchParams('size=999');
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
-    await waitFor(() => expect(requestedQuery()?.pageSize).toBe(25));
+    await waitFor(() => expect(requestedQuery()?.pageSize).toBe(20));
   });
 
-  it('keeps the selector when a bigger size fits everything — only Prev/Next go', async () => {
+  it('keeps the selector when a bigger size fits everything — the steps just go inert', async () => {
     currentParams = new URLSearchParams('size=100');
     list.mockResolvedValue(pageOf(80, 80, { pageSize: 100 }));
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
 
     await waitFor(() => expect(screen.getByLabelText('Rows per page')).toBeTruthy());
-    expect(screen.queryByRole('button', { name: /previous/i })).toBeNull();
-    expect(screen.queryByRole('button', { name: /next/i })).toBeNull();
+    // D143a — the shared footer keeps its controls and disables them rather
+    // than removing them, so the row does not change width under the reader.
+    // Choosing a size that fits everything must never take the selector with it.
+    expect(
+      (screen.getByRole('button', { name: 'Previous page' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect((screen.getByRole('button', { name: 'Next page' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.queryByRole('button', { name: 'Page 2' })).toBeNull();
   });
 });

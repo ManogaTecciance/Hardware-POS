@@ -4,10 +4,35 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Sheet } from './sheet';
 
 /**
- * Sheet is the tablet-responsive primitive underneath modifier pickers,
- * payment popups, and wizard preview overlays. Every assertion here pairs
- * a positive with a negative so a component regressing to a `<Dialog>`-like
- * (no handle, no safe-area footer, no scroll body) shape fails visibly.
+ * Sheet is the wide popup primitive underneath modifier pickers, payment
+ * popups, the dine-in bill and wizard preview overlays. Every assertion here
+ * pairs a positive with a negative, so a regression fails visibly rather than
+ * passing because a string happens to be absent from both shapes.
+ *
+ * ## The bottom anchor is gone (PO, 2026-09-09)
+ *
+ * This file used to assert the OPPOSITE of what it now asserts on two points,
+ * and both were true when written: the panel carried a grab handle so it read
+ * as a sheet rather than a modal, and its footer carried `pb-safe` so the iOS
+ * home indicator could not eat the primary action.
+ *
+ * Both were consequences of the panel touching the bottom edge of the screen.
+ * The product owner's rule is that a popup belongs in the middle of the
+ * screen, reported against the dine-in bill filling the window top to bottom.
+ * A centred panel reaches no home indicator and affords no pull gesture, so
+ * neither claim survives. They are REWRITTEN to assert the new truth, not
+ * deleted — the point of each was that the shape is deliberate, and it still
+ * is; it is a different shape.
+ *
+ * ## Mutation proof (D30)
+ *
+ * Four mutants of sheet.tsx, run against this spec and reverted. All killed:
+ *
+ *   1. `items-center` back to `items-end` ........... 1 test fails
+ *   2. `rounded-2xl` back to `rounded-t-2xl` ........ 1 test fails
+ *   3. the grab handle restored ..................... 1 test fails
+ *   4. `pb-safe` restored on the footer ............. 1 test fails
+ *   5. `p-4` dropped from the overlay ............... 1 test fails
  */
 
 describe('Sheet', () => {
@@ -51,18 +76,63 @@ describe('Sheet', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
   });
 
-  it('renders a grab-handle so operators see it as a sheet, not a modal', () => {
-    // POSITIVE — the handle DOM is present.
+  it('carries no grab-handle, because there is no edge to pull it from', () => {
     const { container } = render(
       <Sheet open onClose={() => {}} title="Any">
         body
       </Sheet>,
     );
-    // The handle is a decorative aria-hidden strip; find via its class.
-    const handle = container.querySelector('[aria-hidden="true"] > span.rounded-full');
-    expect(handle).not.toBeNull();
-    // NEGATIVE — the handle is not a keyboard target (a11y noise if it were).
-    expect(handle?.getAttribute('tabindex')).toBeNull();
+    /*
+     * The inverse of what this test used to assert. The handle was the cue
+     * that the panel could be dragged up from the bottom of the screen; on a
+     * card floating in the middle it advertises a gesture that does not
+     * exist. Queried the same way the old positive was, so the two are
+     * genuinely opposite claims about the same DOM.
+     */
+    expect(container.querySelector('[aria-hidden="true"] > span.rounded-full')).toBeNull();
+    // POSITIVE CONTROL — the panel really did render, so the null above is
+    // about the handle and not about an empty container.
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Any' })).toBeTruthy();
+  });
+
+  it('is CENTRED on both axes, at every width', () => {
+    render(
+      <Sheet open onClose={() => {}} title="Any">
+        body
+      </Sheet>,
+    );
+    const overlay = screen.getByRole('dialog').parentElement!;
+
+    expect(overlay.className).toContain('items-center');
+    expect(overlay.className).toContain('justify-center');
+    /*
+     * The regression this exists for, named. `items-end` is what put the
+     * dine-in bill against the bottom of the window with the scrim only
+     * above it — and it would satisfy a check for "justify-center" all the
+     * same, because that is the other axis.
+     */
+    for (const pinned of ['items-end', 'items-start', 'items-baseline']) {
+      expect(overlay.className).not.toMatch(new RegExp(`(^|\\s)${pinned}(\\s|$)`));
+      // …and behind any breakpoint prefix, which is how it was written before.
+      expect(overlay.className).not.toMatch(new RegExp(`(^|\\s)[a-z-]+:${pinned}(\\s|$)`));
+    }
+    // Padding so a tall panel clears both screen edges instead of touching them.
+    expect(overlay.className).toMatch(/(^|\s)p-4(\s|$)/);
+  });
+
+  it('is rounded on all four corners, now that all four are on screen', () => {
+    render(
+      <Sheet open onClose={() => {}} title="Any">
+        body
+      </Sheet>,
+    );
+    const panel = screen.getByRole('dialog');
+
+    expect(panel.className).toMatch(/(^|\s)rounded-2xl(\s|$)/);
+    // `rounded-t-2xl` was correct only while the bottom two corners were
+    // below the fold. On a floating card it leaves two square corners.
+    expect(panel.className).not.toContain('rounded-t-2xl');
   });
 
   it('closes on Escape regardless of dismissible=false', () => {
@@ -146,18 +216,26 @@ describe('Sheet', () => {
     expect(container.querySelector('[role="dialog"]')?.className).not.toContain('100dvh');
   });
 
-  it('footer receives safe-area padding so iOS home indicator does not eat the primary action', () => {
+  it('footer takes no safe-area inset, because it no longer reaches the screen edge', () => {
     const { container } = render(
       <Sheet open onClose={() => {}} title="A" footer={<button>Pay</button>}>
         body
       </Sheet>,
     );
-    // The footer wrapper must carry `pb-safe`. A regression to a plain `pb-3`
-    // would look correct on jsdom but eat the Pay button on iOS Safari with
-    // viewport-fit: cover.
-    const footerWrapper = container.querySelector('.pb-safe');
-    expect(footerWrapper).not.toBeNull();
-    expect(footerWrapper?.textContent).toContain('Pay');
+    /*
+     * Also the inverse of what it used to assert, and for the same reason.
+     * `pb-safe` resolves to `env(safe-area-inset-bottom)`, which on iOS is
+     * non-zero wherever the element sits — so on a centred panel it added
+     * stray padding under the actions while protecting nothing.
+     *
+     * POSITIVE first: the footer exists, is pinned, and holds the action.
+     */
+    const footer = screen.getByRole('button', { name: 'Pay' }).parentElement!;
+    expect(footer.className).toContain('shrink-0');
+    expect(footer.className).toContain('border-t');
+    expect(footer.textContent).toContain('Pay');
+    // NEGATIVE — and the inset is gone from the whole panel, not just moved.
+    expect(container.querySelector('.pb-safe')).toBeNull();
   });
 
   it('locks body scroll while open and restores it on close', () => {

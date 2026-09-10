@@ -1,5 +1,5 @@
 /**
- * D138 — a tenant defines its own business details.
+ * D150 — a tenant defines its own business details.
  *
  * The extra per-product fields the wizard collects into `Product.attributes`
  * (D64) were declared per DOMAIN and hardcoded. A retail workspace sells

@@ -17,8 +17,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { LIVE_SESSION_STATUSES } from '../../common/live-sessions';
 import { DiningService, type OpenTableReleaseSummary } from '../dining/dining.service';
+import type { PricedDocument } from '../promotions/promotion-pricing';
+import { RestaurantPromotionPricingService } from '../promotions/restaurant-promotion-pricing.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
-import { assertProjectionMatchesSubtotal } from '../restaurant/settlement-projection';
+import {
+  assertProjectionMatchesSubtotal,
+  type ProjectedPromotion,
+} from '../restaurant/settlement-projection';
 import { TableServiceFulfilmentProvider } from '../providers/fulfilment/table-service-fulfilment.provider';
 import { RoundDepletionService } from '../providers/inventory/round-depletion.service';
 import { SettingsService } from '../settings/settings.service';
@@ -133,12 +138,23 @@ export interface SessionBillPreview {
     /** Unit price INCLUDING snapshotted modifier deltas, as the bill shows it. */
     unitPrice: string;
     quantity: string;
+    /** NET of any promotion on this line, so the lines sum to the total. */
     lineTotal: string;
+    /** What a promotion took off this line. "0.00" when none did. */
+    promotionDiscount: string;
+    promotionName: string | null;
     roundNumber: number | null;
     /** D72 — "no onions". Shown at the table and printed on the bill. */
     specialInstructions: string | null;
   }[];
   subtotal: string;
+  /**
+   * Every promotion on this bill, line-level and cart-level, as one figure —
+   * which is what the footer shows and what `Sale.totalDiscount` will hold.
+   */
+  promotionDiscount: string;
+  /** Named only when exactly one promotion applied; see `singlePromotionName`. */
+  promotionName: string | null;
   serviceChargeAmount: string;
   packagingCharge: string;
   taxAmount: string;
@@ -182,6 +198,8 @@ export class TableSessionsService {
     // D65 — submit-time stock depletion (Q4): the round transaction is where
     // "the kitchen got the ticket" and "the shelf count moved" must coincide.
     private readonly roundDepletion: RoundDepletionService,
+    // Promotions on the bill: the same applier retail charges through.
+    private readonly promotionPricing: RestaurantPromotionPricingService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────
@@ -359,38 +377,87 @@ export class TableSessionsService {
         taxRatePercent: true,
       },
     });
+    /*
+     * Promotions, over the WHOLE session rather than any one round.
+     *
+     * A bundle spans rounds and a BOGO counts across them, so the only honest
+     * evaluation set is every non-voided item on the table — which is exactly
+     * the set the close will price. That is what makes this a preview of the
+     * real number rather than a second opinion about it.
+     */
+    const promotion = await this.promotionPricing.priceOrderItems(
+      tenantId,
+      session.branchId,
+      RestaurantOrderChannel.DINE_IN,
+      items,
+    );
+    const promotionByItemId = new Map(promotion.lines.map((l) => [l.id, l]));
+
     const appSettings = this.settings.getSettings(tenantId);
-    const totals = computeRestaurantTotals(subtotal, RestaurantOrderChannel.DINE_IN, {
-      serviceChargePercent: config?.serviceChargePercent ?? new Prisma.Decimal(0),
-      serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
-      serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
-      packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
-      taxRatePercent:
-        config?.taxRatePercent != null
-          ? config.taxRatePercent.toNumber()
-          : appSettings.taxRatePercent,
-    });
+    const totals = computeRestaurantTotals(
+      subtotal,
+      RestaurantOrderChannel.DINE_IN,
+      {
+        serviceChargePercent: config?.serviceChargePercent ?? new Prisma.Decimal(0),
+        serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
+        serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
+        packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
+        taxRatePercent:
+          config?.taxRatePercent != null
+            ? config.taxRatePercent.toNumber()
+            : appSettings.taxRatePercent,
+      },
+      { lineDiscount: promotion.totalLineDiscount, orderDiscount: promotion.orderDiscountAmount },
+    );
 
     return {
       sessionId: session.id,
-      items: items.map((item) => ({
-        orderItemId: item.id,
-        name: item.menuItemName,
-        variantName: item.variantNameSnapshot,
-        // Modifiers are folded into the unit price, exactly as BillView does
-        // it — the two surfaces show a guest the same number for a line.
-        unitPrice: item.unitPrice.plus(item.modifierTotal).toFixed(2),
-        quantity: item.quantity.toFixed(3),
-        lineTotal: item.unitPrice.plus(item.modifierTotal).mul(item.quantity).toFixed(2),
-        roundNumber: item.round?.roundNumber ?? null,
-        specialInstructions: item.specialInstructions,
-      })),
+      items: items.map((item) => {
+        const won = promotionByItemId.get(item.id);
+        const gross = item.unitPrice.plus(item.modifierTotal).mul(item.quantity);
+        const discount = won?.promotionDiscountAmount ?? new Prisma.Decimal(0);
+        return {
+          orderItemId: item.id,
+          name: item.menuItemName,
+          variantName: item.variantNameSnapshot,
+          // Modifiers are folded into the unit price, exactly as BillView does
+          // it — the two surfaces show a guest the same number for a line.
+          unitPrice: item.unitPrice.plus(item.modifierTotal).toFixed(2),
+          quantity: item.quantity.toFixed(3),
+          // Net of the promotion, so the lines a waiter reads out add up to
+          // the total at the bottom of the same card.
+          lineTotal: gross.minus(discount).toFixed(2),
+          promotionDiscount: discount.toFixed(2),
+          promotionName: won?.promotionNameSnapshot ?? null,
+          roundNumber: item.round?.roundNumber ?? null,
+          specialInstructions: item.specialInstructions,
+        };
+      }),
       subtotal: totals.subtotal.toFixed(2),
+      promotionDiscount: totals.promotionLineDiscount
+        .plus(totals.promotionOrderDiscount)
+        .toFixed(2),
+      promotionName: this.singlePromotionName(promotion),
       serviceChargeAmount: totals.serviceChargeAmount.toFixed(2),
       packagingCharge: totals.packagingCharge.toFixed(2),
       taxAmount: totals.taxAmount.toFixed(2),
       total: totals.total.toFixed(2),
     };
+  }
+
+  /**
+   * The promotion to name on the bill footer, or null when more than one
+   * applied — several stackable promotions have no single honest label, and
+   * the per-line names carry the detail in that case.
+   */
+  private singlePromotionName(promotion: PricedDocument): string | null {
+    const names = new Set(
+      [
+        ...promotion.lines.map((l) => l.promotionNameSnapshot),
+        promotion.orderPromotionNameSnapshot,
+      ].filter((n): n is string => n !== null),
+    );
+    return names.size === 1 ? [...names][0]! : null;
   }
 
   /**
@@ -648,11 +715,12 @@ export class TableSessionsService {
         actorUserId,
       );
 
-      // Phase 6: generate KOTs inside the same transaction so a round and
-      // its tickets are visible together. D68 — the tickets ARE the
-      // delivery: they land QUEUED on the kitchen board the moment this
-      // transaction commits, with nothing downstream to go wrong.
-      await this.kitchen.generateTicketsForRound(tx, tenantId, session.branchId, round.id);
+      // Phase 6: generate the KOT inside the same transaction so a round and
+      // its ticket are visible together. D68 — the ticket IS the delivery: it
+      // lands QUEUED on the kitchen board the moment this transaction
+      // commits, with nothing downstream to go wrong. D147 — one ticket for
+      // the whole round, so no item of it can reach the board on none.
+      await this.kitchen.generateTicketForRound(tx, tenantId, session.branchId, round.id);
 
       const roundFull = await tx.orderRound.findUniqueOrThrow({
         where: { id: round.id },
@@ -762,20 +830,42 @@ export class TableSessionsService {
           taxRatePercent: true,
         },
       });
+      /*
+       * Promotions, priced inside the transaction over the same rows the
+       * projection below will settle. The preview the waiter showed the table
+       * ran the identical call, so the guest is charged what they were quoted
+       * unless the order itself changed in between.
+       */
+      const promotion = await this.promotionPricing.priceOrderItems(
+        tenantId,
+        session.branchId,
+        RestaurantOrderChannel.DINE_IN,
+        session.orders.flatMap((order) => order.items),
+        tx,
+      );
+      const promotionByItemId: ReadonlyMap<string, ProjectedPromotion> = new Map(
+        promotion.lines.map((l) => [l.id, l]),
+      );
+
       const appSettings = this.settings.getSettings(tenantId);
-      const totals = computeRestaurantTotals(subtotal, RestaurantOrderChannel.DINE_IN, {
-        serviceChargePercent: config?.serviceChargePercent ?? new Prisma.Decimal(0),
-        serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
-        serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
-        packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
-        // D59/Q5: the branch override wins when set; NULL inherits the
-        // tenant-wide rate. 0 is a real rate, which is why the column is
-        // nullable rather than defaulted.
-        taxRatePercent:
-          config?.taxRatePercent != null
-            ? config.taxRatePercent.toNumber()
-            : appSettings.taxRatePercent,
-      });
+      const totals = computeRestaurantTotals(
+        subtotal,
+        RestaurantOrderChannel.DINE_IN,
+        {
+          serviceChargePercent: config?.serviceChargePercent ?? new Prisma.Decimal(0),
+          serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
+          serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
+          packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
+          // D59/Q5: the branch override wins when set; NULL inherits the
+          // tenant-wide rate. 0 is a real rate, which is why the column is
+          // nullable rather than defaulted.
+          taxRatePercent:
+            config?.taxRatePercent != null
+              ? config.taxRatePercent.toNumber()
+              : appSettings.taxRatePercent,
+        },
+        { lineDiscount: promotion.totalLineDiscount, orderDiscount: promotion.orderDiscountAmount },
+      );
 
       // D52: the till that took the money. An explicit registerId wins; the
       // fallback is ordered by code so it is at least deterministic — the
@@ -807,11 +897,13 @@ export class TableSessionsService {
       // D61: collection goes through the fulfilment provider — an independent
       // query over the same rows the subtotal loop read, so the invariant
       // below compares two computations rather than one restated.
-      const projected = await this.fulfilment.collectSettlementLines(tx, tenantId, {
-        kind: 'TABLE_SESSION',
-        sessionId: session.id,
-      });
-      assertProjectionMatchesSubtotal(projected, subtotal);
+      const projected = await this.fulfilment.collectSettlementLines(
+        tx,
+        tenantId,
+        { kind: 'TABLE_SESSION', sessionId: session.id },
+        promotionByItemId,
+      );
+      assertProjectionMatchesSubtotal(projected, subtotal, totals.promotionLineDiscount);
       const sale = await tx.sale.create({
         data: {
           tenantId,
@@ -820,9 +912,17 @@ export class TableSessionsService {
           cashierId,
           saleNumber,
           subtotal,
-          // Discounts and promotions do not yet reach a restaurant bill — see
-          // D52's deferrals; there is no promotion pricing engine to call.
-          totalDiscount: new Prisma.Decimal(0),
+          /*
+           * The line-level promotions, which is what `discountedSubtotal =
+           * subtotal - totalDiscount` has to mean for the returns calculation
+           * to reverse a refund correctly. A cart-level promotion is NOT here:
+           * it lives in its own columns and comes off after tax, exactly as on
+           * a retail sale.
+           */
+          totalDiscount: totals.promotionLineDiscount,
+          promotionOrderDiscountAmount: totals.promotionOrderDiscount,
+          promotionOrderId: promotion.orderPromotionId,
+          promotionOrderNameSnapshot: promotion.orderPromotionNameSnapshot,
           taxAmount: totals.taxAmount,
           serviceChargeAmount: totals.serviceChargeAmount,
           packagingCharge: totals.packagingCharge,

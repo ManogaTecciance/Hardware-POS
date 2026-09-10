@@ -3,6 +3,7 @@
 import { Building2, Plus, Search, Users, X } from 'lucide-react';
 import * as React from 'react';
 
+import { BrandMark } from '@/components/brand-mark';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -41,8 +42,8 @@ export function PlatformConsoleScreen() {
       <header className="border-b border-border bg-surface">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/axlo-icon.svg" alt="" className="h-8 w-auto" aria-hidden />
+            {/* D144 — themed surface, so the mark follows the theme. */}
+            <BrandMark className="h-8 w-auto" />
             <div>
               <p className="text-base font-semibold tracking-tight">Axlo POS</p>
               <p className="text-xs text-muted-foreground">Workspaces and user administration</p>

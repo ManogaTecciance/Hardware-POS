@@ -38,6 +38,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_TIME_ZONE, domainFor } from '@hardware-pos/shared';
 
+import { ConfirmProvider } from '@/components/ui/confirm';
 import type { AppSettings } from '@/lib/settings-api';
 
 const session = {
@@ -164,8 +165,18 @@ vi.mock('@/lib/restaurant/api', () => ({
 
 const SettingsPage = (await import('./page')).default;
 
+/*
+ * D145 — the page asks its reset question through <ConfirmProvider>, which the
+ * authenticated shell mounts. `useConfirm` throws outside it rather than
+ * falling back to `window.confirm`, so every render here supplies it.
+ */
+
 async function openBusinessTab() {
-  render(<SettingsPage />);
+  render(
+    <ConfirmProvider>
+      <SettingsPage />
+    </ConfirmProvider>,
+  );
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -326,7 +337,11 @@ describe('3.15 — SETTINGS_MANAGE gates the rate', () => {
    */
   it('without SETTINGS_MANAGE the whole page is blocked, rate included', async () => {
     auth.canManage = false;
-    render(<SettingsPage />);
+    render(
+      <ConfirmProvider>
+        <SettingsPage />
+      </ConfirmProvider>,
+    );
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
     });

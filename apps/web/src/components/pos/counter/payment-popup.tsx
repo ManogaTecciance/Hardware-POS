@@ -150,7 +150,7 @@ export function PaymentPopup(props: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      // Step 1: create takeaway (also fires the KOT via kitchen.generateTicketsForRound).
+      // Step 1: create takeaway (also fires the KOT via kitchen.generateTicketForRound).
       const notesPieces: string[] = [];
       if (isDelivery && customer?.deliveryAddress) {
         notesPieces.push(`[Delivery] ${customer.deliveryAddress}`);

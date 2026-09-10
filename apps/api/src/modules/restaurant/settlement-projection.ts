@@ -34,6 +34,13 @@ export interface ProjectableOrderItem {
   }[];
 }
 
+/** What the promotion pass awarded one order item, keyed by its id. */
+export interface ProjectedPromotion {
+  promotionDiscountAmount: Prisma.Decimal;
+  promotionId: string | null;
+  promotionNameSnapshot: string | null;
+}
+
 export interface ProjectedSaleItem {
   productId: string | null;
   productVariantId: string | null;
@@ -45,6 +52,9 @@ export interface ProjectedSaleItem {
   notes: string | null;
   sourceKind: SaleItemSourceKind;
   sourceItemId: string;
+  promotionDiscountAmount: Prisma.Decimal;
+  promotionId: string | null;
+  promotionNameSnapshot: string | null;
   lineSubtotal: Prisma.Decimal;
   lineTotal: Prisma.Decimal;
   modifiers: {
@@ -55,9 +65,19 @@ export interface ProjectedSaleItem {
   }[];
 }
 
-export function projectOrderItems(items: readonly ProjectableOrderItem[]): ProjectedSaleItem[] {
+export function projectOrderItems(
+  items: readonly ProjectableOrderItem[],
+  /**
+   * Line-level promotion awards, by order-item id. Omitted (or missing an
+   * entry) means the line won nothing, which is every line on a bill with no
+   * live promotion — the D52-era behaviour, unchanged.
+   */
+  promotionByItemId?: ReadonlyMap<string, ProjectedPromotion>,
+): ProjectedSaleItem[] {
   return items.map((item) => {
-    const lineTotal = item.unitPrice.plus(item.modifierTotal).mul(item.quantity);
+    const lineSubtotal = item.unitPrice.plus(item.modifierTotal).mul(item.quantity);
+    const promotion = promotionByItemId?.get(item.id);
+    const promotionDiscountAmount = promotion?.promotionDiscountAmount ?? new Prisma.Decimal(0);
     return {
       productId: item.productId,
       productVariantId: item.productVariantId,
@@ -69,11 +89,18 @@ export function projectOrderItems(items: readonly ProjectableOrderItem[]): Proje
       notes: item.specialInstructions,
       sourceKind: SaleItemSourceKind.RESTAURANT_ORDER_ITEM,
       sourceItemId: item.id,
-      // Restaurant lines carry no line-level discount today (D52's deferral),
-      // so subtotal and total coincide. When promotions reach the bill they
-      // land here, in one place.
-      lineSubtotal: lineTotal,
-      lineTotal,
+      promotionDiscountAmount,
+      promotionId: promotion?.promotionId ?? null,
+      promotionNameSnapshot: promotion?.promotionNameSnapshot ?? null,
+      /*
+       * `lineTotal` is net of the promotion, and that is deliberate: it is what
+       * tax and the returns calculation read on a retail line, so a restaurant
+       * line must mean the same thing or a refund would reverse money the guest
+       * never paid. `promotionDiscountAmount` beside it is the mirror D123
+       * describes, never a second authority.
+       */
+      lineSubtotal,
+      lineTotal: lineSubtotal.minus(promotionDiscountAmount),
       modifiers: (item.modifiers ?? []).map((m) => ({
         modifierOptionId: m.modifierOptionId,
         optionName: m.optionName,
@@ -88,15 +115,34 @@ export function projectOrderItems(items: readonly ProjectableOrderItem[]): Proje
  * The D58 invariant: the projected lines must sum to the subtotal the
  * customer is being billed. A close that fails this aborts rather than
  * persisting a document that disagrees with itself.
+ *
+ * Stated against `lineSubtotal` rather than `lineTotal` now that a promotion
+ * can sit between them — `subtotal` is the goods before any discount on both
+ * sides of the comparison, so the identity check is unchanged for a bill with
+ * no promotion. The discount is checked as its own identity beside it: the
+ * figure the totals were computed from must be the figure the lines carry, or
+ * the bill's footer and its lines would tell the guest two different stories.
  */
 export function assertProjectionMatchesSubtotal(
   projected: readonly ProjectedSaleItem[],
   subtotal: Prisma.Decimal,
+  promotionLineDiscount: Prisma.Decimal = new Prisma.Decimal(0),
 ): void {
-  const sum = projected.reduce((acc, line) => acc.plus(line.lineTotal), new Prisma.Decimal(0));
+  const sum = projected.reduce((acc, line) => acc.plus(line.lineSubtotal), new Prisma.Decimal(0));
   if (!sum.equals(subtotal)) {
     throw new Error(
-      `D58 settlement projection mismatch: Σ lineTotal ${sum.toFixed(2)} != subtotal ${subtotal.toFixed(2)}. ` +
+      `D58 settlement projection mismatch: Σ lineSubtotal ${sum.toFixed(2)} != subtotal ${subtotal.toFixed(2)}. ` +
+        'Refusing to close — the settled document would disagree with the bill.',
+    );
+  }
+  const promotionSum = projected.reduce(
+    (acc, line) => acc.plus(line.promotionDiscountAmount),
+    new Prisma.Decimal(0),
+  );
+  if (!promotionSum.equals(promotionLineDiscount)) {
+    throw new Error(
+      `D58 settlement projection mismatch: Σ promotionDiscountAmount ${promotionSum.toFixed(2)} != ` +
+        `bill promotion discount ${promotionLineDiscount.toFixed(2)}. ` +
         'Refusing to close — the settled document would disagree with the bill.',
     );
   }

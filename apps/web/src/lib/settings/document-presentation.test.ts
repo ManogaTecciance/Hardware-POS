@@ -131,7 +131,7 @@ describe('resolveDocumentSettingsPresentation', () => {
     // Walks the real registry so a NEW business type shows up here rather than
     // silently taking whichever branch its capabilities happen to hit.
     //
-    // D138: it now walks BUSINESS_TYPE_VALUES rather than a hand-written list.
+    // D150: it now walks BUSINESS_TYPE_VALUES rather than a hand-written list.
     // The hand-written one had already fallen behind -- RETAIL was added in
     // D120 and never reached here, so the type this whole slice is about was
     // the one type the exhaustiveness test did not cover. A list that has to
@@ -151,7 +151,7 @@ describe('resolveDocumentSettingsPresentation', () => {
       BAKERY: 'THERMAL_BILL',
       HOTEL: 'THERMAL_BILL',
       GENERAL: 'A4_DOCUMENTS',
-      // D140 — retail's bill moved to the roll while its quotations stayed on
+      // D152 — retail's bill moved to the roll while its quotations stayed on
       // the letterhead, which is a surface neither of the original two could
       // express. Every OTHER row is unchanged by that work, and that is the
       // half of this assertion worth having.
@@ -194,7 +194,7 @@ describe('resolveDocumentSettingsPresentation', () => {
 });
 
 /**
- * D138 — which tenants may define their own business details.
+ * D150 — which tenants may define their own business details.
  *
  * ## What makes these assertions non-vacuous
  *
@@ -208,7 +208,7 @@ describe('resolveDocumentSettingsPresentation', () => {
  * business type arrives in this test as a failure, with a name, rather than
  * quietly inheriting whichever answer its capabilities happen to produce.
  */
-describe('D138 — the business-details tab', () => {
+describe('D150 — the business-details tab', () => {
   it('is offered to retail and to nobody else', () => {
     const flags = BUSINESS_TYPE_VALUES.map((type) => [
       type,
@@ -238,9 +238,9 @@ describe('D138 — the business-details tab', () => {
 
   it('is overlaid on the surface, not read out of it', () => {
     /*
-     * D140 rewrote this case, and the reason matters. It used to prove the
+     * D152 rewrote this case, and the reason matters. It used to prove the
      * overlay by pointing out that hardware and retail shared ONE surface
-     * constant, so a table-driven flag could not tell them apart. D140 gave
+     * constant, so a table-driven flag could not tell them apart. D152 gave
      * retail its own surface, so that premise is simply no longer true and the
      * old assertion would now pass for the wrong reason — retail is currently
      * the only domain with either property, so a table-driven flag would AGREE
@@ -300,7 +300,7 @@ describe('D138 — the business-details tab', () => {
 
     it('M5: the surface constants all declare the flag false, so the table cannot supply it', () => {
       /*
-       * D140 rewrote this proof for the reason given above: retail now has its
+       * D152 rewrote this proof for the reason given above: retail now has its
        * own surface, so "the table cannot tell hardware from retail" stopped
        * being true. The mutation it guards against is unchanged — somebody
        * deletes the overlay and reads `showBusinessDetailsTab` off the surface
@@ -328,7 +328,7 @@ describe('D138 — the business-details tab', () => {
 });
 
 /**
- * D140 — retail prints its bill on a roll and its quotations on a letterhead.
+ * D152 — retail prints its bill on a roll and its quotations on a letterhead.
  *
  * ## What makes these assertions non-vacuous
  *
@@ -346,7 +346,7 @@ describe('D138 — the business-details tab', () => {
  * surfaces they resolved to before this work. A third surface added to a
  * two-surface table is exactly the change that quietly moves a fourth tenant.
  */
-describe('D140 — the thermal bill beside the A4 documents', () => {
+describe('D152 — the thermal bill beside the A4 documents', () => {
   const retail = () =>
     resolveDocumentSettingsPresentation({ capabilities: domainFor('RETAIL').capabilities });
 
@@ -438,7 +438,7 @@ describe('D140 — the thermal bill beside the A4 documents', () => {
   describe('the routing can actually fail', () => {
     it('M6: routing on proformaBill puts retail back on A4, bill and all', () => {
       /*
-       * The shipped code before D140. `proformaBill` means "a pre-payment bill
+       * The shipped code before D152. `proformaBill` means "a pre-payment bill
        * is issued separately from the receipt" — false for retail, which is
        * why the proxy could not express a retail thermal bill at all.
        */

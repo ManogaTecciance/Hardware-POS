@@ -244,7 +244,7 @@ export class SettingsService implements OnModuleInit {
   }
 
   /**
-   * D138 — replace the tenant's business-detail field list.
+   * D150 — replace the tenant's business-detail field list.
    *
    * Its own method rather than a field on `UpdateCatalogueSettingsDto`, and
    * that is the point: removing a field that products still hold values for has

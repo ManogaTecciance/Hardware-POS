@@ -1,5 +1,5 @@
 /**
- * D138 — the Business details tab appears for retail, and for nobody else.
+ * D150 — the Business details tab appears for retail, and for nobody else.
  *
  * ## Why this is a separate file from `settings-tabs.render.test.tsx`
  *
@@ -28,6 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BUSINESS_TYPE_VALUES, domainFor, type BusinessType } from '@hardware-pos/shared';
 
+import { ConfirmProvider } from '@/components/ui/confirm';
 import type { AppSettings } from '@/lib/settings-api';
 
 const session = {
@@ -155,9 +156,18 @@ vi.mock('@/lib/products/business-details-api', () => ({
 
 const SettingsPage = (await import('./page')).default;
 
+/*
+ * D145 — the page asks its questions through <ConfirmProvider>, which the
+ * authenticated shell mounts. `useConfirm` throws outside it rather than
+ * falling back to `window.confirm`, so every render here supplies it.
+ */
 async function renderAs(type: BusinessType) {
   businessType = type;
-  render(<SettingsPage />);
+  render(
+    <ConfirmProvider>
+      <SettingsPage />
+    </ConfirmProvider>,
+  );
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -172,7 +182,7 @@ const businessDetailsTab = () =>
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
-describe('D138 — who is shown the Business details tab', () => {
+describe('D150 — who is shown the Business details tab', () => {
   it('a retail workspace is offered it', async () => {
     await renderAs('RETAIL');
 

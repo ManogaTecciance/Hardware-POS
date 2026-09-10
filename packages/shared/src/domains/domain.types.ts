@@ -31,7 +31,7 @@ import type { TenantCapabilities } from './capabilities.js';
 import type { NavGroupSpec } from './navigation.js';
 
 /**
- * D142 — one line of a sample document.
+ * D154 — one line of a sample document.
  *
  * Deliberately the shape the A4 renderer's line builder already consumed, so
  * moving the existing hardware list here was a relocation rather than a
@@ -100,11 +100,11 @@ export interface DomainDescriptor {
      */
     readonly attributeSchema: readonly AttributeField[];
     /**
-     * D142 — the goods this vertical's DOCUMENT PREVIEWS are illustrated with.
+     * D154 — the goods this vertical's DOCUMENT PREVIEWS are illustrated with.
      *
      * Settings → Preview renders a sample quotation so an operator can check
      * their letterhead, column widths and spacing before printing anything
-     * real. Until D142 that sample was one hard-coded hardware list, so a
+     * real. Until D154 that sample was one hard-coded hardware list, so a
      * clothing shop evaluating the product saw a quotation for Portland
      * cement and TMT steel bar on its own letterhead.
      *
@@ -113,7 +113,7 @@ export interface DomainDescriptor {
      * The comment on `catalogue` is right, and this is the exception that
      * proves its reasoning rather than an erosion of it. That rule exists
      * because a silent fallback hands a vertical **another vertical's**
-     * answer — which is exactly the defect D142 fixes.
+     * answer — which is exactly the defect D154 fixes.
      *
      * Omitting this field falls back to a NEUTRAL list (`Standard Item 1`
      * and so on), not to hardware's. Silence therefore produces honest

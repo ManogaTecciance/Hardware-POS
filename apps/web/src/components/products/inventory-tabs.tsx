@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils';
  * and D16 forbids editing an existing behavioural assertion to accommodate new
  * work. They are also catalogue sub-surfaces, which is what this bar is for.
  *
- * D139 — and those two are not for every workspace. Attributes (the reusable
+ * D151 — and those two are not for every workspace. Attributes (the reusable
  * variation library) is retail's; Barcodes (in-store EAN-13 allocation) is for
  * anyone who stocks and labels physical goods, so hardware keeps it and a
  * kitchen does not. The bar does NOT decide that: it reads flags from
@@ -51,7 +51,7 @@ interface Tab {
   matchPrefixes?: string[];
   disabled?: boolean;
   /**
-   * D139 — the flag that decides whether this workspace is offered the tab.
+   * D151 — the flag that decides whether this workspace is offered the tab.
    *
    * A KEY into the resolved presentation, not a boolean baked into the array:
    * the array is module-level and the answer is per-tenant, so a boolean here
@@ -66,7 +66,7 @@ const TABS: Tab[] = [
   { href: '/products', label: 'Products', matchPrefixes: ['/products/new'] },
   { href: '/products/categories', label: 'Categories' },
   { href: '/products/promotions', label: 'Promotions' },
-  // Phase 5 — D125 / D125a. Gated per workspace since D139.
+  // Phase 5 — D125 / D125a. Gated per workspace since D151.
   { href: '/products/attributes', label: 'Attributes', requires: 'showAttributes' },
   { href: '/products/barcodes', label: 'Barcodes', requires: 'showBarcodes' },
   // Stock + Purchases are placeholder tabs — the wording sets expectations,

@@ -34,11 +34,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
+import { useConfirm } from '@/components/ui/confirm';
 import { Input } from '@/components/ui/input';
 import { Toast, type ToastTone } from '@/components/ui/toast';
 import { productTypeLabel } from '@hardware-pos/shared';
 
-import { Pagination } from '@/components/ui/pagination';
+import { PAGE_SIZES, Pagination } from '@/components/ui/pagination';
 
 import { useAuth } from '@/lib/auth';
 import {
@@ -70,7 +71,6 @@ import { resolveScan, type ScanHit } from '@/lib/scan-resolver';
 import { useBarcodeScanner } from '@/lib/use-barcode-scanner';
 import { cn, formatMoney, round2 } from '@/lib/utils';
 
-const PAGE_SIZES = [20, 30, 40, 50];
 interface PendingLineApproval {
   /** D120 — which cart line to update. */
   lineKey: CartLineKey;
@@ -93,6 +93,7 @@ export function PosRetailCheckout() {
   const router = useRouter();
   const data = useCheckoutData(session!);
   const cart = usePosCart();
+  const confirm = useConfirm();
   const canAddCustomer = hasPermission(Permission.CUSTOMER_MANAGE);
   const canViewSales = hasPermission(Permission.SALE_READ);
   const canQuote = hasPermission(Permission.QUOTATION_READ);
@@ -573,8 +574,20 @@ export function PosRetailCheckout() {
               variant="ghost"
               size="sm"
               className="h-8 px-2 text-danger hover:bg-danger-soft hover:text-danger"
-              onClick={() => {
-                if (window.confirm('Clear all items from the cart?')) cart.clearCart();
+              onClick={async () => {
+                /*
+                 * D145 — the app's own confirm, so the answer is awaited rather
+                 * than taken from a call that froze the page. Deliberately still
+                 * the POSITIVE form this guard had: the cart is emptied only on a
+                 * yes, and Cancel, Escape or the overlay leave the basket alone.
+                 */
+                const ok = await confirm({
+                  title: 'Clear all items from the cart?',
+                  message: 'Every line goes, along with the selected customer and any discounts.',
+                  confirmLabel: 'Clear cart',
+                  tone: 'danger',
+                });
+                if (ok) cart.clearCart();
               }}
             >
               Clear

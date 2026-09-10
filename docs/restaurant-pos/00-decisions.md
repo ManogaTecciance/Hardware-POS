@@ -776,7 +776,7 @@ The domain supports it safely: `RestaurantOrderItem` / `KitchenTicketItem`
 carry `menuItemName / menuItemCode / unitPrice / modifierTotal` snapshots at
 submit time, and `menuItemId` on those rows is a **loose string reference**
 with no Prisma relation. Deleting a `MenuItem` does not cascade into finance
-or kitchen history.
+or ticket history.
 
 Split the two operations on the card `•••` menu:
 
@@ -7693,7 +7693,815 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
-## D138 — a tenant defines its own business details, and D135's packs are withdrawn
+### D149 — merging `merge/restaurant-changes`: how each clash was decided
+
+The ten commits that landed on the integration branch while this one was open
+(2026-09-09): four promotions decisions recorded there as D138–D141, a rewrite
+of the categories screen, a toolbar on `Dialog`, and three kitchen-board
+commits. Merged at `631f502`. In brief:
+
+**Both branches took D138–D141.** Theirs keep them: they are already on the
+shared branch and other people's commits cite them. This branch had never been
+pushed, so it moved — every record here shifted up by four (D138 → D142 …
+D144 → D148), 261 references across 72 files, in one pass so a rule could not
+feed its own output. Their citations and ours now resolve to different records
+with no overlap.
+
+**The station contradiction is the one thing this merge could not settle.**
+Two of their three kitchen commits are built ON the per-station split: the
+ribbon (35e94fa) exists to tell a cook which of several cards for one table is
+theirs, and the filter (6cbb36a) exists because "a station-split order already
+puts one table on several cards". D147 removed the split. After it every
+ticket carries `stationId: null`, so the ribbon would print nothing and every
+filter chip would count zero and hide the board. They cannot both ship.
+
+Resolved PROVISIONALLY in favour of D147, because it is the most recent product
+decision and was given directly after the PO saw the symptom, and because it
+also closed a defect their work does not address: at a branch with two or more
+stations an unlinked dish reached no ticket at all. Their ribbon, their chip
+strip, its per-branch memory and its chime scoping are removed from the working
+tree and preserved in history at those two shas. **This is the PO's call to
+confirm, not ours** — recorded here so the choice is visible rather than buried
+in a merge diff.
+
+Their third kitchen commit, ae11a7d, is pure layout and has nothing to do with
+stations. It survives whole, and the resolution was built by starting from
+THEIR file and removing the station affordances rather than porting their work
+onto ours, precisely so none of it was lost by hand. Two verifiers walked every
+line they added; one found a real loss — 35e94fa pinned that a ticket predating
+rounds must not print a bare "Round", the guard moved into the subtitle join we
+kept, and the test went out with the ribbon suite that happened to hold it. The
+test is restored, and the mutant that survived without it now dies.
+
+**Everything else auto-merged and was checked rather than trusted.** `Dialog`
+carries their toolbar and our centring together. `types.ts` took their
+promotion fields beside our `stationId` comment. Their 188-line rewrite of
+`table-sessions.service.ts` never touched the kitchen call, so D147's rename
+survived at both call sites. Their branch introduced no native dialog, so D145
+holds across the merge.
+
+**`shared-subcategory-library.tsx` was a modify/delete and their delete wins.**
+Their categories rewrite replaced it and `lib/category-assignments.ts`
+outright, and nothing imports either afterwards. Our only change to it was the
+D145 modal conversion, which is moot once the file is gone; the spec we wrote
+for it went with it.
+
+**One spec of ours was a genuine casualty.** Their counter now prices its own
+draft through `applyPromotions` over rules the catalogue ships, and our D145
+spec's catalogue mock predates that key, so the component threw before it
+rendered. The mock supplies an empty rule set — the questions the app asks
+before discarding a cart are the subject, and a live promotion would put a
+discount line in every total those tests read.
+
+**Left undone, deliberately:** their four decisions ship no `testcases.md`
+rows. Writing them from the outside would be guessing at what their authors
+meant to cover, so the catalogue is short by however many the promotions work
+deserves.
+
+Gates on the merged tree: typecheck 7/7, api unit 1438 across 89 suites, web
+unit 1337 across 98 files (2 skipped), integration 1158 across 54 suites, lint
+0 errors (13 warnings, all pre-existing). Playwright not run — it needs a live
+stack.
+
+### D142 — the kitchen board keeps today; the kitchen's history gets its own screen, and the pass loses the dashboard
+
+Three things the kitchen asked for, and they are one change: the Done lane had
+become a scroll of everything the branch had ever cooked, there was nowhere to
+look up a ticket from last week, and the one screen kitchen staff work was
+reached past a dashboard showing them every table in the restaurant.
+
+**Done means today, and the shop decides when today is.** The lane asks for a
+new pseudo-filter, `COMPLETED_TODAY`, beside `OUTSTANDING` and `CANCELLED`
+(D68, D115). `COMPLETED` itself is untouched: the KDS route, a bookmarked
+query and the history screen all still mean "every ticket ever bumped" by it.
+Widening the existing token in place would have left the four integration
+assertions that read `?status=COMPLETED` green while they quietly stopped
+proving anything — their tickets are completed seconds before they are read, so
+they cannot tell a today-scoped list from an unscoped one (D30).
+
+The window is `[midnight, next midnight)` in the TENANT's zone, resolved on the
+server per request — `lastNDaysInTimeZone(1, safeTimeZone(settings.timezone))`,
+the same read the dashboard's "today" makes. Three reasons it is not the
+browser's day: a kitchen screen is a wall-mounted tablet whose clock nobody
+audits; the board polls every five seconds and never reloads, so a window
+captured at mount would keep last night's tickets until somebody touched it,
+while one recomputed per request empties the lane at the shop's midnight
+unattended; and cutting on the SERVER's midnight would, on a UTC host serving a
+Colombo kitchen, hold last night's tickets on the lane until half past five in
+the morning. `KitchenModule` gains `SettingsModule` for it — Settings imports
+only AuditLog, which imports nothing, so the graph stays a DAG.
+
+D47's "the API lists by explicit `[from, to)` supplied by the client — the
+server does not guess the display timezone" is not contradicted: that rule is
+about a RANGE the operator chooses (the reservation book's day, the orders
+queue's window). "Today" here is not a chosen range but a property of the
+business, which is why the dashboard already resolves it the same way.
+
+**The history is the board's own rows, read back later.**
+`GET /restaurant/branches/:branchId/kitchen-tickets/history` — KOT_VIEW and the
+KITCHEN module, like the board: reading what was cooked is the same claim
+whether it happened ten minutes or ten weeks ago. It pages and searches in SQL
+on the shared pager (page/pageSize/`Paginated`), because the set only grows;
+the board's own list stays an unpaged array, which is why this is a sibling
+route rather than an option on the existing one. Search covers the four things
+a person actually remembers — the ticket number, the order it belonged to,
+where it was going (tab, table code, area) and what was on it — plus the
+station. Cancelled work is excluded on D115's reasoning: a record of what the
+kitchen COOKED should not be padded with what it was told to stop cooking.
+
+**Today's tickets are in the history too**, deliberately. The lane and the list
+overlap; splitting them cleanly by date would make the ticket bumped an hour
+ago findable in neither place once the lane scrolled, which is the failure the
+screen exists to prevent. The Done lane carries a link to it, because the cook
+who fails to find last night's ticket is looking at the lane, not at the rail.
+
+**Kitchen staff lose the dashboard.** The service dashboard is a floor board:
+open tables, bills requested, tables needing attention, with the kitchen queue
+as one tile of four. It was the only destination in the product with no gate at
+all, so it reached the one role whose template deliberately holds no `TABLE_*`,
+no `ORDER_*` and nothing with money in it — and, because the tables and areas
+reads only require `PLATFORM_PROFILE_READ`, it showed them the real floor
+rather than failing shut. The entry is now gated ANY-of on
+`[TABLE_VIEW, SALE_READ, REPORT_READ]` (D93): what the board actually shows,
+named as three capabilities rather than one proxy. Every food-service and hotel
+template holds at least `TABLE_VIEW`; `KITCHEN_STAFF` holds none of the three,
+and that is the whole of the change. The rail for kitchen staff is now exactly
+`Kitchen · Ticket history`.
+
+Three alternatives were rejected. A new `DASHBOARD_VIEW` permission would strip
+the dashboard from every TENANT-CREATED role silently and permanently, since
+`seedTenantRoles` only ever writes template keys and `PermissionResolver`
+refuses to union a role row with the enum defaults — a custom "Head chef" role
+would lose a screen nobody changed. A role-name check contradicts D28/D31 and
+would not survive the enum, which stores every restaurant template as `CASHIER`
+(`baseUserRoleFor`). Gating the RETAIL Dashboard the same way is deliberately
+NOT done: no retail role is in this position, and the rail's fail-open tripwire
+needs one genuinely ungated destination to be worth anything.
+
+**Where they land instead.** Login, `/` and the module gate's "back to safety"
+link all point at `/dashboard`. `redirectFor(groups, pathname)` — a pure
+resolver beside `moduleForPath`, in the shape D28/D31 asks for — answers where
+to send someone whose own rail does not offer the destination they landed on,
+and `null` in the three cases that matter: an UNRESOLVED rail (which is also
+what an error renders — never redirect on a guess, D31), a destination that IS
+theirs, and a rail with nothing to redirect to. Its one caller today is the
+dashboard page; kitchen staff land on the board.
+
+**Two D30 tripwires were re-armed rather than relaxed.** The rail's fail-open
+tripwire proved its point by exactly one ungated label surviving a user who
+holds nothing; with the food-service Dashboard gated its restaurant half would
+have asserted `[]`, which satisfies every "must not contain" below it. It now
+pairs the empty rail with a one-permission positive control (`KOT_VIEW` opens
+exactly Kitchen and Ticket history) and keeps the genuinely ungated retail
+Dashboard as the other half. The command palette's KITCHEN_STAFF negative used
+the ungated `dashboard` command as its positive control; it is re-armed on the
+new `kitchen-history` command, which that role does hold, with the dashboard's
+absence added as a named negative and a waiter's access to it as the proof the
+gate discriminates.
+
+The lane also stops sorting by when a ticket was RAISED. "What have we
+finished today" is answered newest-finished first, so `COMPLETED_TODAY` orders
+on `completedAt`; a ticket raised at 11:00 and bumped at 14:00 belongs above one
+raised at 13:00 and bumped at 13:30, which `createdAt` had backwards. The
+unscoped `COMPLETED` list keeps its old order, so nothing reading it changes.
+
+**Three consequences, named rather than discovered later.**
+
+*Recall reaches only today.* D100's recall is offered on the Done lane, which
+now holds one day — so a bump from before the shop's midnight can no longer be
+taken back through the UI. Deliberate: recalling yesterday's ticket would put
+stale work back on the pass, and a wrong bump is noticed in minutes, not days.
+The history screen therefore offers no verbs at all; it is a record.
+
+*A service that runs past midnight loses its lane mid-shift.* A kitchen still
+plating at 00:05 sees the Done lane empty and refill from zero. That is what
+"today" means, and the lane says so ("Nothing finished today yet. Earlier
+tickets are in Ticket history") with the link beside it. A shift-based window
+would be a different feature — it needs to know when service started, which
+nothing records.
+
+*The timestamps on both kitchen screens are still the VIEWER's.* Only the day
+boundary is the tenant's. On a tablet set to the shop's own zone — every real
+kitchen — the two agree; a laptop in another zone can show a stamp whose date
+looks a day off from the lane it is on. Matching the existing convention
+(`AppSettings.timezone` is documented as the zone printed DOCUMENTS use, while
+on-screen datetimes use the viewer's), not worth a divergence here.
+
+**Not changed.** The board's three lane names, its chime, its bump verb, the
+KDS route, the floor's "food is ready" badge (D112 reads COMPLETED tickets
+through its own Prisma query, not this endpoint), and the retail rail. No
+migration: `KitchenTicket.completedAt` has existed since the column and the
+`COMPLETED` enum value shipped in one migration, and `completeTicket` /
+`reopenTicket` are the only writers, so a COMPLETED row always carries the
+timestamp the window filters on.
+
+**No index, and what that actually costs.** `KitchenTicket` has
+`@@index([branchId])` and nothing on `completedAt`, so the history's
+`ORDER BY completedAt DESC` is a sort over the branch's matching rows, and the
+`count` beside it scans them again — the index narrows the set but cannot serve
+the order. That is acceptable at a branch's realistic volume (a busy kitchen
+writes a few hundred tickets a week) and it is the honest reason, not "the
+existing index carries it". A composite `(tenantId, branchId, completedAt)`
+index is the fix when a branch's history gets long enough to feel it; it is a
+migration and therefore its own decision, with a measurement attached.
+
+
+### D148 — the reservation book reaches the service dashboard, and the dashboard fits
+
+PO decision, 2026-09-09: "include a card that shows the upcoming reservations.
+Make sure that the new card does not make the dashboard scrollable. Instead
+everything should fit into the dashboard." Extended in the same session to the
+owner.
+
+**One card, three roles, no new dispatch.** The dashboard router picks on
+BUSINESS TYPE before it looks at a role, so in a table-service tenant the owner,
+the waiter and the restaurant cashier all land on the same service dashboard.
+Adding the card there is what "add it for the waiter and the cashier" and "add
+it for the owner too" both mean; no per-role branch was written, and none
+should be. All three templates already carry `RESERVATION_VIEW` (the owner by
+holding everything), which the spec asserts from the REAL templates rather than
+from sets it invents, so removing the key from the waiter fails a test instead
+of quietly emptying the card.
+
+**The window starts NOW, not at the top of the day.** A card headed "upcoming"
+whose first three rows are already seated is worse than no card. The list
+returns everything intersecting the window, so a booking that started ten
+minutes ago and has not been seated is still on it — which is the one the host
+most needs. Closed bookings are never requested, so a cancellation or a no-show
+cannot occupy a row.
+
+**Missing permission is its own state, not an empty card.** Someone without
+`RESERVATION_VIEW` is told the book is not theirs. An empty card asserts "no
+bookings tonight", and a host who believes that gives the table away; the two
+must not look alike. The server refuses the read either way — this is
+usability, as D31 has it, not security.
+
+**Fitting is a property of the layout, not of the card count.** The shell
+already gives `main` the only vertical scroll and a definite height, so the
+page is bounded to what it is given, the panel row absorbs the slack, and each
+panel scrolls INSIDE its own card. Adding a fourth panel then costs width and
+never height — which is the only way "one more card" can be a safe thing to
+say. Four rules carry that (`lg:h-full` on the page, `lg:flex-1` and
+`lg:auto-rows-fr` on the row, `lg:overflow-y-auto` on each body); each is
+asserted by its own test, and removing any ONE of them puts the scrollbar back
+while the other three still read correctly.
+
+Because the cards scroll themselves, the lists are no longer sliced to the
+first six or eight. Truncating hid work from the people the board is for.
+
+Height-constrained from `lg` up only. On a phone the summary tiles alone are
+taller than the viewport and four quarter-height panels would be unreadable, so
+there the page scrolls, which is the right answer at that width.
+
+### D147 — a round is one ticket, because nobody can say which station cooks what
+
+PO decision, 2026-09-09. Reported as "I added a huge order RO-000026, why did it
+break into 2 tickets in the kitchen page? It should be one single ticket because
+it is a single order for a single round."
+
+It split because D67 cut ONE TICKET PER STATION and kept doing so after D68
+replaced the printer with a board. That was right when a station meant a
+printer: the grill's paper could not also come out of the main kitchen's
+machine. On one shared screen it buys nothing, and it costs the pass the thing
+it most needs, which is the order as the guests will receive it. RO-000026 was
+one round of 15 lines and became KOT-000027 (Main Kitchen, 13) and KOT-000028
+(Grill, 2: Chicken Wings, Grilled Seer Fish).
+
+**The routing input is optional and defaults to nothing, which is the PO's
+actual reason.** A "Kitchen stations" multi-select does exist, on Step 3 of the
+product wizard, for restaurant tenants; it is branch-scoped and falls back to
+the signed-in user's branch, so for most users it does list the stations. But
+`kitchenStationIds` starts as `[]`, appears in no validation rule, and carries
+no warning, so a product saved without deliberately ticking a station has no
+link — and nothing on the screen says that this is the difference between a
+dish the kitchen sees and one it does not. Routing that decides whether food
+gets cooked cannot hang on a checkbox nobody is told to tick.
+
+**And the accident was silently destructive.** Read the D67 fallback it
+replaces: an item with no station link went to the sole active station, and
+where a branch had two or more, it went to NO ticket and was logged. The pilot
+branch has four (Bar, Grill, Main Kitchen, Pastry). So an unlinked dish was
+ordered, billed, and never shown to the kitchen — the exact failure D67's own
+comment called indefensible, reintroduced by the same mechanism one layer up.
+One ticket per round ends it structurally: there is no routing step left to fall
+off. This is the strongest argument for the change and it was not the one that
+prompted it.
+
+**`KitchenTicket.stationId` becomes nullable rather than dropped.** Tickets cut
+before today were genuinely routed and keep the station they were routed to;
+every ticket written from now on stores NULL. The migration only removes the NOT
+NULL, so no value moves and the foreign key is untouched.
+
+`generateTicketsForRound` is renamed `generateTicketForRound` and returns one id
+or null. The plural was about to become a lie, and neither call site read it.
+
+**The station catalogue, the links and the wizard control all stay.** They are
+no longer consulted at ticket time, which leaves the wizard's multi-select
+writing rows nothing reads — a loose end recorded here rather than quietly
+tidied, because removing a control the PO has not asked about is not this
+decision's business. Either give stations a job again or take the control out;
+both are open.
+
+The board and the history stop naming a station anywhere: the card subtitle, the
+history column, the per-item chip in the order dialog, and the history search
+leg. A field that is null on every new row is not worth a column.
+
+### D146 — the waiter may record who a takeaway is for
+
+D87 gave the waiter takeaway orders: a seated guest asking for something to take
+home is still the waiter's order to take. The counter's customer popup then asks
+for a name and a phone and POSTs a customer — which the waiter could not do. The
+403 surfaced as "You don't have permission to create a customer. Ask a manager,
+or Skip to continue as walk-in", so the one person holding the phone could raise
+the order and then only finish it as a walk-in.
+
+`CUSTOMER_MANAGE` is wider than "create", and that is granted knowingly. It is
+the ONLY customer-write key — there is no `CUSTOMER_CREATE` — and the
+permissions guard is all-of (`required.every(...)`), so a narrower key would
+need the route to accept either, which the guard cannot express today. It
+therefore also carries editing an existing customer and the bulk importer. The
+restaurant cashier standing at the same counter already holds exactly this key,
+so it adds no authority to the workspace that the floor did not already have.
+
+**What the waiter still may not do is unchanged** and is asserted as named
+negatives beside the grant: no `PAYMENT_COLLECT`, no `SALE_READ`, no
+`REPORT_READ`, no `SETTINGS_MANAGE`, no `USER_MANAGE`, no `ORDER_VOID_SENT`.
+Verified against the running API: the waiter's token now creates a customer
+(201) and is still refused a payment (403).
+
+A live tenant needs its role rows re-seeded before this reaches anyone —
+`seedTenantRoles` writes template permissions with `set`, so the pilot wants
+`prisma/backfill-tenant-roles.ts --write` (or a seed run, which is what the dev
+database got).
+
+### D145 — the app asks its own questions
+
+`window.confirm` and `window.prompt` are drawn by the BROWSER, so they carry
+neither the app's theme nor its wording, they cannot be made touch-sized on the
+tablets the POS runs on, Chrome suppresses them after a few in a row, and they
+BLOCK the main thread — the kitchen board's five-second poll and the cart's
+midnight rollover both stall behind one open confirm. Nine call sites used them:
+seven confirms and two prompts.
+
+`ConfirmProvider` mounts one dialog in the authenticated shell and hands out
+`useConfirm()` and `usePrompt()`, both promise-based. That shape is the point:
+every call site keeps its exact form —
+
+    if (!(await confirm({ title: 'Discard this basket?' }))) return;
+
+— so converting nine guards could not quietly change what any of them protected.
+Local dialog state at each site would have meant splitting nine handlers into an
+opener and a callback, which is nine chances to drop a branch.
+
+Escape, the overlay and Cancel all resolve the way the native dialogs did:
+`false`, and `null` for a prompt. A destructive question opens with CANCEL
+focused rather than the confirm — native `confirm` focuses OK, and on a tablet a
+stray Enter mid-sentence deleted the thing. `useConfirm` outside the provider
+THROWS rather than falling back to `window.confirm`: a silent fallback would
+reintroduce exactly what this replaces, on whichever screen forgot the provider.
+
+**Modals are centred at every width** (PO). `Dialog` was a bottom sheet below
+`sm` and a centred card above it; a modal that asks a question belongs in the
+middle of the screen wherever it is read, and on a wall-mounted tablet the
+bottom edge is the furthest thing from the reader's eye.
+
+**`Sheet` too — the first pass scoped this too narrowly.** It was left alone
+here on the reasoning that an edge-anchored panel is what a sheet is FOR. The
+PO reported it again against the dine-in bill, which filled the window top to
+bottom with the scrim showing only above it, and they are right: a wide working
+panel is still a popup, and the rule was about popups, not about one component.
+`Sheet` is now centred, and the grab handle, the top-only rounding and the
+footer's safe-area inset went with the anchor — each existed only because the
+panel touched the bottom edge. Its slide-up entrance became a grow-in, since a
+panel that rises from the edge and stops in the middle reads as an animation
+that failed. The name is now a small lie, kept only because renaming reaches
+eleven call sites for no behavioural gain.
+
+**Three surfaces are still edge-anchored, deliberately.** `Drawer` and the
+orders-page order detail are right-side slide-overs whose content assumes full
+height; the command palette opens near the top, which is what every palette
+does and where the eye goes on `Cmd+K`; and the retail POS cart is a
+bottom-anchored panel below `lg` only, on a phone, where a cart drawer is the
+convention and there is no room to float. None of these is a question being
+asked, which is what the rule is about. Recorded so the omission is a decision
+rather than an oversight — the first pass's mistake was leaving one unrecorded.
+
+The nine sites: the counter workspace's clear-draft and clear-all, the retail
+cart's Clear, a held basket's Discard, closing a dine-in table with unsent
+lines, deleting a shared subcategory, resetting document settings, and the
+variant matrix's two bulk actions (the prompts). Each was converted with its
+guard left as untouched context in the diff, so the `raw == null` the reorder
+bulk action needs — blank means "clear it", dismissal means "leave it" — did
+not collapse into `!raw`. Mutation-proved (D30): seven mutants of `confirm.tsx`
+against `confirm.render.test.tsx` and three of the centring against
+`dialog.render.test.tsx`, all killed; the per-site specs carry their own.
+
+### D144 — the brand mark follows the theme, because one asset cannot serve both
+
+The app chrome used a single logo, `/brand/axlo-icon.svg`, whose two chevrons
+are filled `#fff`. On the dark rail that reads; on the light rail — `bg-surface`
+resolves to white — the chevrons are white on white and the mark degrades to a
+bare gradient slash. The PWA icon `/web-app-manifest-512x512.png` is the same
+artwork inked `#000718`, i.e. the light-surface twin.
+
+`BrandMark` renders both and swaps them with the `dark:` variant, which
+globals.css binds to `[data-theme='dark']`. In CSS rather than in JavaScript on
+purpose: the theme attribute is set by the inline init script before first
+paint, so the right mark is painted immediately, there is nothing to rehydrate,
+and a hook could not have rendered the same thing on the server and the client.
+It is the first `dark:` utility in the app — everything else themes through
+semantic tokens — which is exactly what that variant was declared for.
+
+**The mapping is the opposite of the way it was asked for, and the ink is why.**
+The request was to use the manifest PNG *in dark mode*; its chevrons are
+`#000718` against a `#1a2433` surface, which would have replaced an invisible
+mark with a different invisible mark. Light gets the dark ink, dark gets the
+white ink. Flipping it is one line if the intent really was the other way.
+
+**The padding had to be trimmed, and this is the part worth remembering.** A PWA
+icon is 512×512 with the mark across the middle 67% and empty space above and
+below, which a launcher needs. Used raw at `h-9 w-auto` that drew a 36×36 box
+holding a 24px-tall mark next to a 36px-tall one — a third smaller, in a box
+17px narrower, so the wordmark beside it shifted on every theme flip. The
+screenshots looked fine one at a time, which is how it survived the first pass;
+measuring the rendered boxes is what caught it. `/brand/axlo-icon-light.png` is
+that artwork with the transparent padding cropped, so both assets carry the same
+ink aspect (1.483 against 1.482) and one class sizes them identically — measured
+at 53.4×36 in both themes. The manifest file is untouched: its padding is
+correct for what it is, and pointing a logo slot at an OS icon would have made
+any future icon change silently resize the chrome.
+
+**The login screen keeps the raw white asset**, and must. Its panels are
+hard-coded `bg-[#161d2f]` and `bg-[#1b2236]` in both themes, so a theme-aware
+mark there would blank the logo for a light-mode visitor — the same trap in
+reverse.
+
+### D143a — every list gets the same footer, and the kitchen's record gets a better name
+
+Three things, all in the same direction: one pagination footer, everywhere.
+
+**Quotations and Suppliers gained a rows-per-page control.** Both had a page
+size fixed in code (25 and 20) and so rendered no selector. They now hold the
+size in state like every other list and start on 20, which also retires the
+last page size in the product that no footer offered.
+
+**The restaurant orders queue uses the SHARED footer.** It was the one screen
+with its own — a rows-per-page select, "Showing 1–25 of 80 orders", and bare
+Previous/Next — which is what `testcases.md` UI-021 forbids anywhere and what
+kept O7 open. It now renders `Pagination` like the rest: numbered pages, the
+same range wording, the same control. The word "orders" leaves the range text;
+the `truncated` warning below it is unchanged.
+
+**And it renders even when everything fits one page**, which answers O7 the way
+every `main` list already answers it. This is the half that was actually
+reported: the queue hid the whole footer below 21 rows, so on a branch with
+eight orders the rows-per-page options were unreachable and looked absent. The
+paging steps go disabled rather than disappearing, so the row keeps its width.
+
+**"Kitchen history" is now "Ticket history".** The rail already says Kitchen
+directly above it, so the old label repeated its parent — which is also why the
+sidebar's double-highlight (D142a) showed up there first and why its tests need
+anchored queries. "Ticket" is the kitchen's own word for the thing the screen
+lists, the same reasoning D103 used in choosing "Menu". The route stays
+`/kitchen/history`: it is still the kitchen's history, the nesting is what earns
+the KITCHEN module gate for free, and a URL is worth more stable than tidy.
+
+**Neither kitchen screen leads with the branch name any more.** They read
+"Main Dining — live tickets…" and "Main Dining — every ticket finished here…",
+which named a dining AREA on the two screens that have nothing to do with one.
+The pass is not a room; the subtitles now say what the screen is for.
+
+### D143 — one rows-per-page list: 20, 50, 100
+
+PO, 2026-09-09. Three lists had drifted apart — the shared `10/20/30/50`, the
+retail till's own `20/30/40/50` and the orders queue's `25/50/75/100` — so the
+same control offered different numbers depending on which screen it sat on.
+There is now one list, in `components/ui/pagination.tsx`, and the two local
+copies are deleted rather than edited to match: a second copy is how they
+diverged in the first place.
+
+**The first entry is the default every list starts on**, so it has to stay the
+smallest. A screen defaulting to a size the options do not contain renders a
+`<select>` whose value matches no `<option>`, and the browser then shows the
+first one — a footer claiming 20 rows over a page of 25. Every screen with a
+size control already defaulted to 20; the orders queue's 25 moved with it, which
+also means a bookmarked `?size=25` degrades to the default instead of being
+honoured. The two lists with no size control at all (quotations at 25,
+suppliers at 20) are untouched: no options to standardise, and changing a fixed
+page size is a different decision.
+
+**Found while testing it:** the shared control had no accessible name — the
+words beside it are a plain `<span>`, not a `<label>` — so every list footer in
+the product announced an unnamed combobox. The orders queue's own copy had
+always carried `aria-label="Rows per page"`; the shared one now does too.
+
+The tests assert the WIRING as well as the constant, because asserting the
+exported list alone would have said nothing about the two screens that rendered
+their own.
+
+### D142b — every lane chip carries a number, whichever lane is open
+
+The board fetches ONE lane's tickets at a time — To make and Preparing share
+the outstanding list, Done is its own read — so it could only count the lane it
+was looking at. From To make, the Done chip carried no number; from Done, To
+make and Preparing carried none. Reported as "Done has no count", which is the
+half a cook standing at the pass sees.
+
+Fetching both lists every poll was the obvious fix and the wrong one: the Done
+list is a whole day of tickets with their items, and pushing that down every
+five seconds to render one integer is exactly the payload a wall tablet on shop
+wifi cannot spare. Instead
+`GET /restaurant/branches/:branchId/kitchen-tickets/counts` returns all three as
+three `count`s in one transaction — consistent with each other as well as with
+the lists, where two separate queries could count a ticket bumped between them
+twice or not at all.
+
+**The counts cannot drift from the lanes**, because the `where` ladder that
+defines each lane was extracted (`whereForFilter`) and both readers use it. To
+make and Preparing are the client's split of OUTSTANDING, so the counts narrow
+that same clause by status rather than restating it; Done reuses the day window.
+Two copies of "what is outstanding" is how a chip comes to promise three tickets
+the list does not have.
+
+**The lane you are looking at still counts itself.** A chip whose lane shares
+the current fetch is derived from the list already in hand, so an optimistic
+bump moves both outstanding chips at once instead of lagging up to five seconds
+behind the poll; only the lanes the board is not fetching read the server's
+numbers. Both halves are mutation-proved: reverting to the old rule fails the
+three-chip tests, and reading the server for every lane fails the optimistic one.
+
+The counts request is best-effort and fires after the list. A chip without a
+number is a smaller problem than a board that will not load, so a failing count
+leaves the last known numbers on screen and never takes the tickets down with
+it.
+
+### D142a — the rail marks one place, and a history row opens the whole order
+
+Three things the kitchen asked for after using D142.
+
+**One entry is current, not two.** The sidebar marked every entry whose href is
+a PREFIX of the path, which was invisible while no destination was nested and
+wrong the moment one was: standing on `/kitchen/history` lit up Kitchen and
+Ticket history together, and `aria-current="page"` on two links tells a screen
+reader the reader is in two places. `activeNavHref(groups, pathname)` — a pure
+resolver beside `moduleForPath`, using the same longest-match-on-whole-segments
+rule that one already used — answers with the single entry, and the sidebar
+renders from it. Mutation-proved: restoring the per-item prefix test turns the
+shell spec red.
+
+**A history row shows when the ticket STARTED as well as when it finished**,
+with the turnaround under the finish ("25 min on the pass"), which is the
+number a kitchen is actually judged on and could not be read off one stamp.
+
+Started is the ticket's `createdAt` — when the round was sent and the ticket
+reached the kitchen. It is deliberately NOT D113's "Start preparing" press:
+that moment is a status change with no timestamp behind it
+(`startTicket` writes `status` alone), so recording it means a migration AND
+leaves every ticket already in the history blank, which is the opposite of what
+a history screen is for. If the cook-time-versus-queue-time split turns out to
+matter, it is a column, a decision and a backfill of its own.
+
+**A row opens the whole order.** A kitchen ticket is one STATION's share of an
+order, so the row — like the board card — shows only the items that station
+cooked. `TicketOrderDialog` (D83) already answers "what did this table actually
+order", across every station and round, with quantities, variants, modifiers
+and special instructions; it moved out of `kitchen-board.tsx` into its own
+module so the history opens the same dialog rather than growing a second answer
+to the same question. The ticket number is a button — the keyboard and
+screen-reader path — and the row click is a mouse convenience over the same
+action, ignoring clicks that land on something interactive or that end a text
+selection, which is the line the sales list already draws.
+
+### D138 — promotions reach the restaurant bill (D52's deferral, lifted)
+
+**Asked for by the PO, 2026-09-09**, after a promotion configured on a
+food-service tenant took nothing off an order placed at the POS.
+
+**Why it did nothing.** D52 deferred promotion pricing on a restaurant bill
+with a reason that has since expired: "the promotions module exports only
+`isPromotionActive`, an activity-window predicate. There is no promotion
+*pricing* engine anywhere, so applying them is a feature to design, not a bug
+to fix." D123 then built one —
+`packages/shared/src/promotions/applier.ts` — and retail has charged
+promotions through it since. What was left was wiring, and the absence of it
+was invisible from the admin screens: a promotion could be created,
+activated, badged on a menu card by the POS catalogue, and still never touch
+a bill. `/pos` sends a TABLE_SERVICE tenant to `PosCounterWorkspace`, which
+settles through the table-session and takeaway paths, and both wrote
+`totalDiscount: 0` with no promotion pass at all.
+
+**What now happens.** Both restaurant settlement paths and both of their
+previews price promotions through the same applier retail uses:
+
+- the dine-in running bill (`GET /table-sessions/:id/bill-preview`),
+- the dine-in close (`POST /table-sessions/:id/close`),
+- the counter/takeaway settle (`takeaway.settle`, which is what D110's
+  counter payment calls),
+- and the till's own cart preview in `PosCounterWorkspace`.
+
+`RestaurantPromotionPricingService` owns the two reads (the tenant's live
+promotions, which products are sold by measure) and delegates the decision to
+the pure layer, so a bill and its preview cannot disagree.
+
+**Channel is passed, never assumed.** `isPromotionActive` refuses a
+channel-scoped promotion when the context names no channel, so a caller that
+omitted it would silently price nothing — the same class of failure D56
+found. Dine-in passes `DINE_IN`, takeaway passes `TAKEAWAY`: the values the
+till's own catalogue read already sends, so the badge on a menu card and the
+discount on the bill are decided by one predicate over one set of inputs.
+
+**Where the money lands.** Line-level promotions reduce the goods, so the
+service charge and the tax follow what the guest actually pays for food —
+which is what `document-totals.ts` was written anticipating ("when promotions
+reach the bill the charges follow what the customer actually pays, in one
+place"). A D126 cart-level promotion comes off AFTER tax, the asymmetry
+`sales.service` records as PO-confirmed; restaurant bills copy that rule
+rather than inventing a second one for the same promotion. On the settled
+`Sale`, line promotions are `totalDiscount` — which is what
+`discountedSubtotal = subtotal - totalDiscount` has to mean for
+`returns.calc` to reverse a refund correctly — and the cart-level one uses
+its own `promotionOrder*` columns.
+
+**No migration.** `SaleItem.promotionDiscountAmount` / `promotionId` /
+`promotionNameSnapshot` and `Sale.promotionOrder*` have existed since D123
+and D126. This slice writes columns that were already there.
+
+**The invariant moved with it.** `assertProjectionMatchesSubtotal` compared
+`Σ lineTotal` to the subtotal, which a promotion sitting between subtotal and
+total would break. It now compares `Σ lineSubtotal` (unchanged for a bill
+with no promotion) and checks the discount as its own identity beside it, so
+a settled document whose lines and footer disagree still refuses to persist.
+
+**Dine-in's cart card is deliberately NOT priced.** In dine-in mode the
+running-bill card shows the round the waiter is adding, not the bill; the
+bill is every round on the table and a bundle spans them. Pricing one round
+there would show a figure the close then computes differently. The table's
+bill sheet reads the server's preview, which prices the whole session.
+
+**Still deferred.** Manual order-level discounts on a restaurant bill (D52's
+second deferral) are untouched — they need the manager-approval flow retail
+has, and are a separate piece of work.
+
+**A known divergence, stated rather than hidden.** A counter line's manual
+discount is client-side only — `RestaurantOrderItem` has no discount column,
+which `pos-counter-workspace` has documented since the pilot. The cart
+preview honours D123's rule (a manually discounted line is invisible to
+promotions); the server, which never receives that discount, sees an
+undiscounted line and may award a promotion on it. The preview and the bill
+can therefore differ on a manually discounted line, in a flow where they
+already differed because the manual discount itself never reaches the Sale.
+The preview keeps the D123 rule rather than dropping it, so the day a
+restaurant line discount is persisted the behaviour is already correct.
+
+### D139 — a promotion's schedule is read on the tenant's clock, and its dates are whole days
+
+Two defects found while tracing D138, both of which made a correctly
+configured promotion quietly not fire.
+
+**1. An end date lost its final day.** The editor's Start/End are
+`type="date"`, so `'2026-09-30'` reaches the service and `new Date()` parses
+it as `2026-09-30T00:00:00Z`. The evaluator compared it as an instant —
+`now > endsOn` — so "ends 30 Sep" expired at 00:00 UTC ON the 30th. For a
+Colombo tenant that is 05:30 local: the promotion was dead for all but the
+first five and a half hours of the day it was meant to run. `startsOn` had
+the mirror-image fault, holding a promotion back until 05:30 local on its
+first day.
+
+An operator setting a date means a whole day, inclusive, in their own zone.
+Both bounds are now compared as `YYYY-MM-DD` calendar dates: the stored
+value's UTC date (which IS the date typed, because a bare date parses as UTC
+midnight) against today's date in the tenant's zone. Lexicographic order on
+that format is chronological, so the comparison needs no date arithmetic.
+
+*Not fixed by changing what is stored.* Writing `endsOn` as end-of-day would
+need the tenant's zone at write time AND a backfill of every existing row,
+and would leave two readings of the column in the codebase at once. Reading
+the column as what it has always been — a calendar date — needs neither.
+
+**2. The schedule was evaluated on the server's clock.** `isPromotionActive`
+has accepted `tenantTimeZone` since D45 and no caller passed one, so every
+day-of-week and time-of-day window was read in the host's zone. On a UTC
+server an 11:00–15:00 lunch promotion for a Colombo tenant was live
+16:30–20:30 their time — the offer ran through the evening and was off at
+lunch. The optional parameter nobody passed is the failure shape: it type-
+checked, it ran, and it was wrong.
+
+Every call site now passes it, from `SettingsService.getSettings(tenantId)
+.timezone` (guarded by `safeTimeZone`, and the same value every document
+formatter already uses): the retail sale, the sellable/POS-catalogue read,
+the restaurant pricing service (D138), and the `onlyCurrentlyValid` list.
+The list route resolves it inside the service rather than taking it as an
+argument, for the reason above — an optional parameter is a thing a caller
+forgets.
+
+**Mutation-proven.** Restoring the two instant-comparison lines fails exactly
+three of the new date cases and leaves the rest green; the proof is recorded
+inline in `promotions.evaluator.spec.ts` beside the cases it justifies (D30).
+
+**Scope.** The evaluator's host-zone fallback stays for a caller with no
+tenant context, and matches how `MenuAvailability` windows are still read.
+No migration, no stored value changed.
+
+### D140 — Buy X, Get Y is composed as a sentence, not a field grid
+
+**Asked for by the PO, 2026-09-09**: "i feel now ui is confusing."
+
+**What was confusing, precisely.** The editor asked for Buy quantity, Get
+quantity and "Percentage off (100 = free)" in one row of boxes, then for
+products in a flat list where every row carried a Role dropdown. Three
+failures came out of that shape, and all three were silent:
+
+- Every product landed as BUY (the picker's role heuristic), and a
+  BUY_X_GET_Y with no GET item is skipped whole by the applier —
+  `buyXGetYOutcome` returns null when `getIds` is empty. No badge, no
+  discount, no error. The operator who reported this had exactly that.
+- The picker deduped on product id alone, so one product could hold only one
+  role — making "buy 2 shirts, get a third free", the commonest BOGO there
+  is, impossible to express. The server has always accepted the pair
+  (`@@unique([promotionId, productId, role])`) and the applier has a branch
+  for it; only the editor blocked it.
+- "100 = free" asked an operator to encode the ordinary case as a magic
+  number. The one who reported this typed 7, and got a promotion that took
+  7% off the "free" item.
+
+**The shape now.** Two labelled sections — "Customer buys" and "Customer
+gets" — which is what Shopify, Square, Lightspeed, Toast and Loyverse all
+converge on. The section a product sits in IS its role, so there is no role
+attribute to notice; each quantity sits beside the thing it counts; the
+reward is Free (default) or a percentage; a "Same product as above" checkbox
+covers the same-item case in one tap; and the offer is read back in one line
+("Buy 2 × Shirt, get 1 × Tie free.") as it is composed.
+
+Choosing in the Buy section REPLACES rather than appends, because the server
+allows exactly one BUY item on this type — composing a second and being
+refused at save time was reachable before. The save is blocked with a message
+naming the missing half rather than passing an incomplete offer to the server
+for an API-shaped rejection.
+
+**Free means 100, decided once.** In the payload, not in the radio's handler.
+The first cut wrote '100' into the field when the radio changed, which looked
+equivalent and was not: a form left on its default Free had never run that
+handler, so it sent `percentageOff: null` and the server refused it. Caught by
+the new render spec before it shipped.
+
+**No schema, API or data change.** The wire payload is byte-identical to what
+the old form produced for the same offer; the other three promotion types keep
+the shared product list unchanged.
+
+### D141 — a money-off promotion states its scope; a threshold it cannot honour is unreachable
+
+**Asked by the PO, 2026-09-09**, looking at the Amount-off form.
+
+**The defect.** `minimumSpend` is read in exactly ONE place in the pricing
+engine — `resolveOrderPromotion`, which only ever sees rules that
+`isCartLevel` accepts, i.e. `FIXED_AMOUNT_DISCOUNT` with no items. The
+product-scoped path (`applyFixedAmount`) never looks at it. The editor and the
+server both accepted a threshold BESIDE a product list, so this saved happily:
+
+    Amount off      100
+    Minimum spend   10,000
+    Products        Chicken Kottu
+
+and took 100 off that dish on a 300-rupee basket, forever, with nothing
+anywhere saying the 10,000 had been dropped. The figure was accepted,
+validated, stored, and never consulted.
+
+**The shape it came from.** D126 defines a cart-level money-off as one with no
+products, which made the scope an emergent property of an empty list — a real
+choice expressed as an ABSENCE, and explained only in a paragraph under the
+fields. That is the same shape D140 removed from Buy X, Get Y, and it is what
+allowed the impossible combination to be composed at all.
+
+**Now.** "What it discounts" is an explicit choice — the whole cart, or
+specific products — and the fields follow it. Whole cart shows Minimum spend
+and no product list; Specific products shows the list and no threshold.
+Switching clears what the other mode owned, because a leftover item would
+silently make a cart-level rule product-scoped, and a leftover threshold would
+persist a number that can never be read. The payload sends `minimumSpend` only
+on a cart-level rule, so an older draft cannot smuggle one through either. The
+offer is read back in one line, as on the BOGO form.
+
+Saving a product-scoped rule with no products is now refused, naming the
+alternative ("or switch to the whole cart"). It used to save — as a cart-level
+promotion, which is not what the operator had selected.
+
+**No schema, API or data change.** Cart-level still means "no items" on the
+wire. Existing rows reopen in the right mode, read from that same shape.
+
+**Not changed: the engine.** Whether a product-scoped money-off SHOULD honour
+a threshold is a product question, not a bug — the editor now matches what the
+engine does rather than promising what it does not.
+
+<!--
+  D150-D154 were authored as D138-D142 on `feature/retail-template-v2`
+  and renumbered on 2026-09-10 when `feature/post-merge-changes-reshin`
+  was merged in. D138-D141 there had arrived from
+  `merge/restaurant-changes` and D142-D148 were that branch's own,
+  already renumbered once to make room. The unpushed side moved, so no
+  existing commit message points at a decision that changed meaning.
+-->
+
+## D150 — a tenant defines its own business details, and D135's packs are withdrawn
 
 **Status:** accepted and **built**, 2026-09-09. **Retail only.** No schema change,
 no migration. **Supersedes D135**, which is withdrawn unbuilt.
@@ -7837,7 +8645,7 @@ seed, not a schema.
 
 ---
 
-## D139 — the Inventory tab bar is per workspace: Attributes and Barcodes are not for everyone
+## D151 — the Inventory tab bar is per workspace: Attributes and Barcodes are not for everyone
 
 **Status:** accepted and **built**, 2026-09-09. No schema change, no migration,
 no route removed, no API gate changed.
@@ -7945,7 +8753,7 @@ in the spec.
 
 ---
 
-## D140 — retail's bill prints on a roll; its quotations stay on the letterhead
+## D152 — retail's bill prints on a roll; its quotations stay on the letterhead
 
 **Status:** accepted and **built**, 2026-09-09. Frontend only. No schema change,
 no migration, no route removed, no server behaviour changed.
@@ -8063,7 +8871,7 @@ not what was asked for; it is recorded here rather than fixed in passing.
 
 ---
 
-## D141 — a preview shows the operator's own trade, and their own name
+## D153 — a preview shows the operator's own trade, and their own name
 
 **Status:** accepted and **built**, 2026-09-09. Preview/sample data only. No
 schema change, no migration, no change to any real document.
@@ -8087,7 +8895,7 @@ also reads as a bug, because it is one.
 
 `buildSampleBill` held one hard-coded catalogue, and it was a menu. That was
 correct while food service was the only domain that previewed a thermal bill.
-**D140 gave retail a thermal bill the day before**, and this list stopped being
+**D152 gave retail a thermal bill the day before**, and this list stopped being
 read only by restaurants.
 
 The service charge and the table are the same defect wearing different clothes:
@@ -8145,13 +8953,13 @@ preview at all (D96).
 
 ---
 
-## D142 — a vertical declares the goods its document previews show
+## D154 — a vertical declares the goods its document previews show
 
 **Status:** accepted and **built**, 2026-09-10. Preview/sample data only. No schema
-change, no migration, no change to any real document. **Completes D141**, which
+change, no migration, no change to any real document. **Completes D153**, which
 fixed the thermal bill's sample and deliberately left this one.
 
-### The problem D141 recorded and did not fix
+### The problem D153 recorded and did not fix
 
 `SAMPLE_ITEMS` in `documents.service.ts` was a hardware catalogue — Portland
 Cement, TMT Steel Bar, PVC Pipe — and it was the **only** sample catalogue in the
@@ -8164,9 +8972,9 @@ product opens Preview to see what their quotation will look like; seeing another
 trade's goods is the moment they decide whether the product was built for them.
 That is why it was worth returning to.
 
-### Why D141 stopped, and what changed
+### Why D153 stopped, and what changed
 
-D141 fixed the thermal bill's sample cheaply because that document is rendered
+D153 fixed the thermal bill's sample cheaply because that document is rendered
 **client-side**, where a presentation resolver was already in the call path. The
 A4 document is rendered **server-side**, where none exists — so the server would
 have to choose a catalogue by business type, and `businessType === 'RETAIL'` in a
@@ -8181,7 +8989,7 @@ place anywhere, so there is nothing for D56 to forbid.
 ```ts
 readonly catalogue: {
   readonly attributeSchema: readonly AttributeField[];
-  readonly sampleItems?: readonly SampleCatalogueItem[];   // D142
+  readonly sampleItems?: readonly SampleCatalogueItem[];   // D154
 };
 ```
 
@@ -8190,7 +8998,7 @@ readonly catalogue: {
 | **HARDWARE** | its original eight lines | **unchanged** |
 | **RETAIL** | clothing and groceries | its own trade |
 | **GENERAL** | nothing | neutral filler |
-| **RESTAURANT / CAFE / BAKERY / HOTEL** | nothing | neutral filler — and they never render the A4 preview at all (D96/D140) |
+| **RESTAURANT / CAFE / BAKERY / HOTEL** | nothing | neutral filler — and they never render the A4 preview at all (D96/D152) |
 
 ### Why the field is optional, when its own block says required
 
@@ -8200,7 +9008,7 @@ failure mode is the one this whole module exists to end."*
 
 That rule is right, and this is the exception that proves its reasoning rather
 than an erosion of it. The failure mode it guards against is a vertical silently
-inheriting **another vertical's** answer — precisely the defect D142 fixes.
+inheriting **another vertical's** answer — precisely the defect D154 fixes.
 
 **Omission here falls back to a NEUTRAL list**, not to hardware's. `Standard Item
 1`, `Standard Item 2`, and so on: dull, but it claims no trade. Silence therefore
@@ -8266,7 +9074,7 @@ query and an empty-catalogue fallback, and it would have changed hardware's
 preview — an outcome the isolation rule made unattractive even though the result
 would arguably be better. It stays available as a later refinement.
 
-**The thermal bill keeps its own separate sample** (D141), selected by a
+**The thermal bill keeps its own separate sample** (D153), selected by a
 presentation flag rather than by the descriptor. The two mechanisms now differ,
 which is worth revisiting if a third document surface ever appears; the goods
 themselves were deliberately kept in step, so a retail shop's two documents
@@ -8284,8 +9092,9 @@ illustrate the same shop.
 | O4 | Pilot restaurant: which tenant, how many branches, which printers, which channels. | Phase 4 |
 | O5 | Commercial model (per-branch / per-register / per-module) — blocks subscription and entitlement design. | before entitlements |
 | O6 | `InventoryReceiptLine.productVariant`: `RESTRICT` (what the database has since D44) or `SetNull` (what the schema implies)? Until answered, `migrate diff` keeps emitting the FK pair and it keeps being stripped (D110). | next migration |
-| O7 | Should a list's pager hide when the rows fit one page? Their Orders screen does; every `main` list renders it (D110). | UI polish |
+| O7 | ~~Should a list's pager hide when the rows fit one page?~~ **Answered 2026-09-09 (D143a): no — every footer renders, with the paging steps disabled. The orders queue's hiding also hid its rows-per-page control, so a short list made the sizes unreachable.** | closed |
 | O8 | Cancelling a counter order that D117 has settled and paid: refuse it, or record the refund? The takeaway status write has no transition guard (D119). | before the next restaurant deploy |
 | O9 | How does the counter hand over a takeaway whose ticket the kitchen never bumped? The stepper D113/D117 named is gone (2026-08-10); handover is offered on READY only (D119). | before the next restaurant deploy |
 | O10 | Should the clothing Retail template (D120) offer the Salesperson, the hardware-only owner-equivalent of D108? It seeds Owner + Cashier today (D136). | before the first Retail workspace |
 | O11 | Their 5.10 (D136a) takes the SKU line off every 80mm SALES receipt (the return receipt still prints it) and turns the A4 SKU column's default off; both reach the Tile Shop, and a workspace that never saved its documents settings loses the column. Keep, or exempt the QuickBooks pilot (D16)? | before the next production deploy |
+| O12 | `startOfDayInTimeZone` resolves a local midnight that DST SKIPS backwards, so in a zone whose transition is at 00:00 (Cuba, Chile) a business day computed from it is an hour short at the end — the Done lane (D142), the dashboard's "today" and every `lastNDaysInTimeZone` report. Found by review, pre-existing, no tenant is in such a zone today. Fix the helper, or leave it? | before a tenant in Cuba/Chile |

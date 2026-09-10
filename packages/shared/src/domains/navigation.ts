@@ -26,6 +26,7 @@ export const NAV_ICON_NAMES = [
   'ChefHat',
   'ClipboardCheck',
   'FileText',
+  'History',
   'LayoutDashboard',
   'Link2',
   'ListChecks',
@@ -211,7 +212,32 @@ export const RETAIL_NAVIGATION: readonly NavGroupSpec[] = [
 export const FOOD_SERVICE_NAVIGATION: readonly NavGroupSpec[] = [
   {
     label: null,
-    items: [{ href: '/dashboard', label: 'Dashboard', icon: 'LayoutDashboard' }],
+    items: [
+      {
+        href: '/dashboard',
+        label: 'Dashboard',
+        icon: 'LayoutDashboard',
+        /*
+         * D142 — the service dashboard is a FLOOR board: open tables, bills
+         * requested, tables needing attention, with the kitchen queue as one
+         * tile among four. Until now it was the one destination in the product
+         * with no gate at all, so it reached the one role that may not see the
+         * floor: kitchen staff, whose template deliberately holds no TABLE_*,
+         * no ORDER_* and nothing with money in it. They were being shown every
+         * table in the restaurant on the way to the only screen they work.
+         *
+         * ANY-of (D93), naming what the board actually shows rather than one
+         * proxy permission: the floor, the money, or the reporting behind the
+         * tiles. Every food-service and hotel template holds at least
+         * TABLE_VIEW; KITCHEN_STAFF holds none of the three, which is the
+         * whole of the change. The retail Dashboard entry is deliberately
+         * left ungated — no retail role is in this position, and the rail's
+         * fail-open tripwire still needs one genuinely ungated destination to
+         * be worth anything.
+         */
+        permission: [Permission.TABLE_VIEW, Permission.SALE_READ, Permission.REPORT_READ],
+      },
+    ],
   },
   {
     label: 'Service',
@@ -254,6 +280,24 @@ export const FOOD_SERVICE_NAVIGATION: readonly NavGroupSpec[] = [
         href: '/kitchen',
         label: 'Kitchen',
         icon: 'ChefHat',
+        permission: Permission.KOT_VIEW,
+        module: 'KITCHEN',
+      },
+      {
+        /*
+         * D142 — where the board's Done lane used to grow without limit. The
+         * lane now answers "what did we finish today"; every ticket the branch
+         * has ever bumped, today's included, is looked up here instead.
+         *
+         * Nested under /kitchen on purpose: `moduleForPath` matches by longest
+         * prefix, so the KITCHEN gate is inherited rather than re-declared,
+         * and a sibling top-level route would have resolved to no module at
+         * all. Same permission as the board — reading what was cooked is the
+         * same claim whether it happened ten minutes or ten weeks ago.
+         */
+        href: '/kitchen/history',
+        label: 'Ticket history',
+        icon: 'History',
         permission: Permission.KOT_VIEW,
         module: 'KITCHEN',
       },

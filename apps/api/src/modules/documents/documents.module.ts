@@ -8,7 +8,7 @@ import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
 
 @Module({
-  // D142 — PlatformModule for the business profile, which decides whose
+  // D154 — PlatformModule for the business profile, which decides whose
   // sample goods a document preview is illustrated with. Imported explicitly
   // even though it is @Global(): global only means "no re-import once it is in
   // the graph", and something still has to put it there for a smaller graph.

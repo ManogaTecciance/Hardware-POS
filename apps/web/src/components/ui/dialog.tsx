@@ -11,12 +11,26 @@ interface DialogProps {
   title?: string;
   description?: string;
   children: React.ReactNode;
+  /**
+   * A control bar pinned between the header and the scrolling body — a search
+   * box, typically.
+   *
+   * Here rather than as a `position: sticky` child of the body because sticky
+   * only hides what passes behind its own painted box: every transparent strip
+   * around it (the body's own padding, a `space-y` gap to the first row) turns
+   * into a slot where rows are seen sliding past, and closing them one at a
+   * time is whack-a-mole. A `shrink-0` sibling of the scroller cannot have the
+   * problem — the body clips at its own edge, and there is nothing above that
+   * edge to see through. The body's top padding is dropped when a toolbar is
+   * present, so the first row meets the toolbar with no gap between them.
+   */
+  toolbar?: React.ReactNode;
   footer?: React.ReactNode;
   className?: string;
 }
 
 /**
- * Lightweight modal (overlay + centered card). Closes on Escape / overlay click.
+ * Lightweight modal (overlay + centred card). Closes on Escape / overlay click.
  *
  * ## Height (D85)
  *
@@ -32,7 +46,16 @@ interface DialogProps {
  *
  * The cap is a MAXIMUM. A short dialog is still only as tall as its content.
  */
-export function Dialog({ open, onClose, title, description, children, footer, className }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  description,
+  children,
+  toolbar,
+  footer,
+  className,
+}: DialogProps) {
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -44,14 +67,27 @@ export function Dialog({ open, onClose, title, description, children, footer, cl
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 sm:items-center sm:p-4"
+      /*
+       * Centred at EVERY width (PO, 2026-09-09). This used to be
+       * `items-end … sm:items-center`: a bottom sheet on a phone and a centred
+       * card from `sm` up. A modal that asks a question belongs in the middle
+       * of the screen wherever it is read, and on a wall-mounted tablet the
+       * bottom edge is the furthest thing from the person's eye.
+       *
+       * `p-4` at every width too, so the card never touches the screen edge —
+       * the padding used to be skipped on mobile because the sheet was flush
+       * to the bottom by design.
+       */
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         className={cn(
-          'flex max-h-[80dvh] w-full max-w-md flex-col rounded-t-2xl bg-surface shadow-xl sm:rounded-2xl',
+          // Rounded on all four corners now that it floats at every width; it
+          // was `rounded-t-2xl` for the sheet, whose bottom corners were off-screen.
+          'flex max-h-[80dvh] w-full max-w-md flex-col rounded-2xl bg-surface shadow-xl',
           className,
         )}
         onClick={(e) => e.stopPropagation()}
@@ -73,10 +109,21 @@ export function Dialog({ open, onClose, title, description, children, footer, cl
             <X className="h-5 w-5" />
           </button>
         </div>
+        {toolbar ? <div className="shrink-0 px-6 pb-3 pt-1">{toolbar}</div> : null}
         {/* min-h-0 is what actually lets this scroll: a flex child's default
             min-height is its content, which would push the card past the cap
             rather than overflow inside it. */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-6 pt-2">{children}</div>
+        <div
+          className={cn(
+            'min-h-0 flex-1 overflow-y-auto p-6',
+            // The toolbar owns the gap above the content when there is one;
+            // leaving the body's own padding there would put a transparent
+            // band under the toolbar for content to scroll through.
+            toolbar ? 'pt-0' : 'pt-2',
+          )}
+        >
+          {children}
+        </div>
         {footer ? (
           // flex-wrap: wide button sets (long labels, formatted amounts) wrap
           // onto extra lines instead of overflowing past the card edge.

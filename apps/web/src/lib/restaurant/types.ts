@@ -462,12 +462,20 @@ export interface SessionBillPreview {
     variantName: string | null;
     unitPrice: string;
     quantity: string;
+    /** NET of any promotion on this line, so the lines sum to the total. */
     lineTotal: string;
+    /** What a promotion took off this line. "0.00" when none did. */
+    promotionDiscount: string;
+    promotionName: string | null;
     roundNumber: number | null;
     /** D72 — "no onions". Shown at the table and printed on the bill. */
     specialInstructions: string | null;
   }[];
   subtotal: string;
+  /** Line-level and cart-level promotions as one figure, for the footer. */
+  promotionDiscount: string;
+  /** Named only when exactly one promotion applied. */
+  promotionName: string | null;
   serviceChargeAmount: string;
   packagingCharge: string;
   taxAmount: string;
@@ -490,7 +498,6 @@ export interface KitchenOrderView {
     modifierNames: string[];
     specialInstructions: string | null;
     roundNumber: number | null;
-    stationName: string | null;
   }[];
 }
 
@@ -500,8 +507,14 @@ export interface KitchenTicketView {
   ticketNumber: string;
   branchId: string;
   roundId: string;
-  stationId: string;
-  stationName: string;
+  /*
+   * D147 — a ticket is now the WHOLE round, so nothing routes it to one
+   * station and every ticket cut after that decision stores no station at
+   * all. The column survives, nullable, only so tickets cut BEFORE it keep
+   * the station they were genuinely sent to; no screen reads it, which is
+   * why there is no `stationName` beside it any more.
+   */
+  stationId: string | null;
   status: KitchenTicketStatus;
   /** D68 — where the food is going. The board is the only delivery. */
   orderNumber: string | null;
@@ -519,6 +532,32 @@ export interface KitchenTicketView {
   completedAt: string | null;
   completedByName: string | null;
   createdAt: string;
+}
+
+/**
+ * D142b — what each of the board's three lane chips says.
+ *
+ * The board fetches one lane at a time, so it can only count the lane it is
+ * looking at; these come from the server so the other two chips have a number
+ * too, counted over the same rows the lists return.
+ */
+export interface KitchenLaneCounts {
+  toMake: number;
+  preparing: number;
+  doneToday: number;
+}
+
+/**
+ * D142 — one page of the kitchen's history. The standard envelope every other
+ * list in the product returns, over the same ticket view the board renders:
+ * the history is the board's own rows read back later, not a second shape of
+ * the truth.
+ */
+export interface KitchenHistoryPage {
+  items: KitchenTicketView[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface KitchenPrinterView {

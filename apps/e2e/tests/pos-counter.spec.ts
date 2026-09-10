@@ -64,8 +64,22 @@ async function signInAsRestaurantOwner(page: import('@playwright/test').Page) {
 }
 
 /** Menu item picker used by all three golden paths. Reused so a rename lives once. */
+/*
+ * KNOWN FIXTURE GAP, pre-existing and NOT introduced by D147.
+ *
+ * `MENU_ITEM_WITH_MODIFIERS` matches nothing the seed creates: the restaurant
+ * seed has no "Chicken Kottu", and more importantly it links NO product to a
+ * modifier group at all, so there is no seeded dish that can open the
+ * Customise dialog this path drives. Every test below that picks it therefore
+ * times out in `pickMenuItem` — loudly and red, never green, so it hides
+ * nothing. Closing it means giving a seeded dish a Size/Extras group, which is
+ * a seed change with its own blast radius and its own decision to make.
+ *
+ * `SIMPLE_MENU_ITEM` WAS wrong in the same way and is now fixed: the seed
+ * creates "Devilled Cashew", singular, so the plural matched nothing.
+ */
 const MENU_ITEM_WITH_MODIFIERS = /chicken kottu/i;
-const SIMPLE_MENU_ITEM = /devilled cashews/i;
+const SIMPLE_MENU_ITEM = /devilled cashew/i;
 
 /**
  * Pick a menu item by using the POS search box — reliable because it
@@ -337,15 +351,77 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
     // Either way it is not null and not UNPAID.
     expect(['PAID', 'PARTIAL']).toContain(found?.paymentStatus);
 
-    // KOT existed — we know it did because the counter workspace waits for
-    // takeaway.create to succeed before continuing, and that endpoint
-    // always calls kitchen.generateTicketsForRound in the same tx. Prove
-    // it externally by looking for a kitchen ticket for this branch after
-    // the order landed.
-    const tickets = await api.get<Array<{ id: string; ticketNumber: string }>>(
-      `/restaurant/branches/${RESTAURANT_SEED.branchId}/kitchen-tickets`,
-    );
-    expect(tickets.length).toBeGreaterThan(0);
+    /*
+     * D147 — the round is ONE ticket, and it carries every line of it.
+     *
+     * The counter workspace waits for `takeaway.create` to succeed before it
+     * shows the completion screen, and that endpoint calls
+     * `kitchen.generateTicketForRound` inside the same transaction; this is
+     * the external proof that the call produced what it claims to.
+     *
+     * It used to read the branch's whole board and assert `length > 0`,
+     * which any well-used dev database satisfies out of yesterday's tickets
+     * whether or not THIS order ever reached the pass — green while proving
+     * nothing (D30). Narrowed to the order just placed, it pins the
+     * decision instead: two lines went in as one round, so exactly one KOT
+     * comes back carrying both of them.
+     *
+     * What the old per-station split did to this same order depended on the
+     * catalogue, and both outcomes were wrong. A dish the seed routes to a
+     * station made its own card, so an order whose two dishes cook in
+     * different places arrived as two (RO-000026, one round of 15 lines,
+     * came out as KOT-000027 and KOT-000028). A dish with NO station link
+     * — which is every product the wizard creates, because its station
+     * multi-select is branch-scoped and renders empty — reached the board on
+     * no card at all: this branch has four active stations, so the
+     * single-station fallback did not save it, and the dish was ordered,
+     * paid for and never cooked.
+     *
+     * Proven by mutation (the block was replayed against fabricated board
+     * payloads, since a browser run needs a live stack): it goes red on the
+     * split (two KOTs for the order), on the drop (no KOT for the order,
+     * only yesterday's on the branch), on a ticket that still carries a
+     * station, on a ticket carrying the same dish twice, and on a payload
+     * that puts `stationName` back on the wire. The `length > 0` assertion
+     * this replaced stayed GREEN on the first four of those.
+     */
+    const board = await api.get<
+      Array<{
+        id: string;
+        ticketNumber: string;
+        orderNumber: string | null;
+        stationId: string | null;
+        items: Array<{ menuItemName: string }>;
+      }>
+    >(`/restaurant/branches/${RESTAURANT_SEED.branchId}/kitchen-tickets`);
+    const ticketsForOrder = board.filter((t) => t.orderNumber === orderNumber);
+    // Ticket NUMBERS, not a count: a failure names the KOTs that were cut, so
+    // "two tickets" is distinguishable from "none" without a re-run.
+    expect(
+      ticketsForOrder.map((t) => t.ticketNumber),
+      `${orderNumber} is a single round and must be a single KOT`,
+    ).toHaveLength(1);
+    const kot = ticketsForOrder[0];
+    // Two cart lines, two ticket lines — "every one of its items" is the half
+    // of the contract that the names below cannot express, because a ticket
+    // carrying one dish twice would satisfy them just as well.
+    expect(kot.items, `${kot.ticketNumber} must carry both lines of the round`).toHaveLength(2);
+    const dishes = kot.items.map((i) => i.menuItemName);
+    expect(
+      dishes.some((name) => MENU_ITEM_WITH_MODIFIERS.test(name)),
+      `the customised dish must be on ${kot.ticketNumber}, which reads ${dishes.join(' / ')}`,
+    ).toBeTruthy();
+    expect(
+      dishes.some((name) => SIMPLE_MENU_ITEM.test(name)),
+      `the second dish must be on the SAME ticket, which reads ${dishes.join(' / ')}`,
+    ).toBeTruthy();
+    // The ticket belongs to no station, and the board is not told about one.
+    // `stationId` is the positive control for the negative beside it: the key
+    // is present and null, so "no stationName" is a claim about a real ticket
+    // payload rather than about an object that has no fields at all.
+    expect(kot.stationId, 'a ticket cut since D147 belongs to no station').toBeNull();
+    expect('stationId' in kot, 'the board still ships the (nullable) column').toBe(true);
+    expect('stationName' in kot, 'D147 took stationName off the ticket view').toBe(false);
 
     await api.ctx.dispose();
   });

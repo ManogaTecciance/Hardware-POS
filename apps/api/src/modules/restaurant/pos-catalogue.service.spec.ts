@@ -66,7 +66,9 @@ function buildService(products: any[], promotions: any[] = [], tagSpellings: str
       capabilities: FOOD_SERVICE_CAPABILITIES,
     })),
   };
-  const sellable = new SellableService(prisma as any, repo, profiles as any);
+  // D139 — pinned tenant zone, so the evaluator is not reading the CI host's.
+  const settings = { getSettings: () => ({ timezone: 'Asia/Colombo' }) };
+  const sellable = new SellableService(prisma as any, repo, profiles as any, settings as any);
   return {
     service: new PosCatalogueService(sellable),
     findMany,

@@ -1,5 +1,5 @@
 /**
- * D140 — a retail workspace's Settings: thermal bill, A4 quotations.
+ * D152 — a retail workspace's Settings: thermal bill, A4 quotations.
  *
  * ## Why a separate file from `settings-presentation.render.test.tsx`
  *
@@ -27,6 +27,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { domainFor, type BusinessType } from '@hardware-pos/shared';
 
+import { ConfirmProvider } from '@/components/ui/confirm';
 import type { AppSettings } from '@/lib/settings-api';
 
 const session = {
@@ -116,7 +117,7 @@ vi.mock('@/lib/restaurant/api', () => ({
   },
 }));
 
-// The Business details tab is retail-only (D138) and would issue a request the
+// The Business details tab is retail-only (D150) and would issue a request the
 // moment it mounts. Its own spec covers it; here it must not be the thing that
 // decides whether the page renders.
 vi.mock('@/lib/products/business-details-api', () => ({
@@ -139,8 +140,17 @@ vi.mock('@/lib/platform-profile', () => ({
 
 const SettingsPage = (await import('./page')).default;
 
+/*
+ * D145 — the page asks its questions through <ConfirmProvider>, which the
+ * authenticated shell mounts. `useConfirm` throws outside it rather than
+ * falling back to `window.confirm`, so every render here supplies it.
+ */
 async function open(tab: string) {
-  render(<SettingsPage />);
+  render(
+    <ConfirmProvider>
+      <SettingsPage />
+    </ConfirmProvider>,
+  );
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -157,7 +167,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('D140 — the Branding tab keeps the letterhead retail still quotes on', () => {
+describe('D152 — the Branding tab keeps the letterhead retail still quotes on', () => {
   it('retail keeps the signature, stamp, accent colour and logo placement', async () => {
     await open('Branding');
 
@@ -183,7 +193,7 @@ describe('D140 — the Branding tab keeps the letterhead retail still quotes on'
   });
 });
 
-describe('D140 — the Layout tab gains the bill without losing the page', () => {
+describe('D152 — the Layout tab gains the bill without losing the page', () => {
   it('retail gets the bill summary AND the A4 page setup', async () => {
     await open('Layout');
 
@@ -206,7 +216,7 @@ describe('D140 — the Layout tab gains the bill without losing the page', () =>
   });
 });
 
-describe('D140 — the Preview tab shows both documents', () => {
+describe('D152 — the Preview tab shows both documents', () => {
   it('retail previews the bill it prints and the quotation it sends', async () => {
     await open('Preview');
 
@@ -256,7 +266,7 @@ describe('D140 — the Preview tab shows both documents', () => {
   });
 });
 
-describe('D141 — the bill preview shows goods the workspace actually sells', () => {
+describe('D153 — the bill preview shows goods the workspace actually sells', () => {
   it('retail sees a shop basket, not a restaurant menu', async () => {
     await open('Preview');
     const bill = (screen.getByTitle('Bill preview') as HTMLIFrameElement).srcdoc;

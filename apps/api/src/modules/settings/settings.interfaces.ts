@@ -62,7 +62,7 @@ export interface CatalogueSettings {
   /** `5.8` — label geometry, per tenant and (via the settings row) per branch. */
   label: LabelSettings;
   /**
-   * D138 — the tenant's own **business details**: the extra per-product
+   * D150 — the tenant's own **business details**: the extra per-product
    * fields the wizard collects into `Product.attributes`.
    *
    * `undefined` means “this tenant has not defined any”, and the domain's

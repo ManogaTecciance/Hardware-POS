@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { domainFor } from '@hardware-pos/shared';
 
+import { ConfirmProvider } from '@/components/ui/confirm';
 import type { AppSettings } from '@/lib/settings-api';
 
 const session = {
@@ -139,8 +140,18 @@ vi.mock('@/lib/restaurant/api', () => ({
 
 const SettingsPage = (await import('./page')).default;
 
+/*
+ * D145 — the page asks its reset question through <ConfirmProvider>, which the
+ * authenticated shell mounts. `useConfirm` throws outside it rather than
+ * falling back to `window.confirm`, so every render here supplies it.
+ */
+
 async function openTab(name: string) {
-  render(<SettingsPage />);
+  render(
+    <ConfirmProvider>
+      <SettingsPage />
+    </ConfirmProvider>,
+  );
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });

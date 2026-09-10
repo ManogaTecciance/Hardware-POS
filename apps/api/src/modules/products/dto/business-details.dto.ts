@@ -14,7 +14,7 @@ import {
 import { ATTRIBUTE_FIELD_TYPES, type AttributeFieldType } from '@hardware-pos/shared';
 
 /**
- * D138 — `PUT /products/business-details`.
+ * D150 — `PUT /products/business-details`.
  *
  * Structural rules that are ABOUT the list — duplicate keys, an empty dropdown,
  * a removal that would orphan stored values — live in `BusinessDetailsService`,

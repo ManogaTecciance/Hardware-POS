@@ -2,6 +2,7 @@ import { Prisma } from '@hardware-pos/database';
 
 import { KitchenService, KitchenTicketNotFoundError } from './kitchen.service';
 import type { PrismaService } from '../../prisma/prisma.service';
+import type { SettingsService } from '../settings/settings.service';
 
 /**
  * `reopenTicket` — D100's recall verb, the inverse of the bump.
@@ -31,7 +32,11 @@ function fullRow(status: 'QUEUED' | 'COMPLETED') {
     ticketNumber: 'KOT-000042',
     branchId: BRANCH,
     roundId: 'rnd_1',
-    stationId: 'stn_1',
+    // D147 — a ticket cut since the per-station split was removed belongs to
+    // no station, and TICKET_INCLUDE no longer joins one. The fixture says so
+    // too: a `station: { name: … }` here would let the projection go on
+    // reading a relation production has stopped selecting (D30).
+    stationId: null,
     status,
     completedAt: null,
     createdAt: new Date('2026-09-03T12:00:00Z'),
@@ -45,7 +50,6 @@ function fullRow(status: 'QUEUED' | 'COMPLETED') {
         specialInstructions: null,
       },
     ],
-    station: { name: 'Grill' },
     completedBy: null,
     round: {
       roundNumber: 1,
@@ -78,7 +82,12 @@ function makeService(ticketRow: { id: string; status: string; roundId?: string }
     $transaction: (fn: (tx: unknown) => unknown) => fn(tx),
     user: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as PrismaService;
-  return { service: new KitchenService(prisma), tx, update };
+  // D142 — the service reads the tenant's timezone to cut the Done lane on
+  // the shop's day. Recall never asks for it, so the stub only has to exist.
+  const settings = {
+    getSettings: () => ({ timezone: 'Asia/Colombo' }),
+  } as unknown as SettingsService;
+  return { service: new KitchenService(prisma, settings), tx, update };
 }
 
 describe('KitchenService.reopenTicket (D100)', () => {

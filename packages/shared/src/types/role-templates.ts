@@ -135,6 +135,23 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
       Permission.SALE_CREATE,
       Permission.PRODUCT_READ,
       Permission.CUSTOMER_READ,
+      /*
+       * D146 — the waiter takes takeaway orders (D87), and a takeaway order
+       * asks who it is for. Without this the counter popup offered the name
+       * and phone field, posted it, and came back "You don't have permission
+       * to create a customer" — the order could only go through as a walk-in,
+       * so the one person holding the phone could not record whose food it was.
+       *
+       * `CUSTOMER_MANAGE` is wider than "create": it is the ONLY customer-write
+       * key (there is no CUSTOMER_CREATE) and the permissions guard is all-of,
+       * so it also carries editing an existing customer and the bulk importer.
+       * Granted knowingly rather than splitting the key: the restaurant cashier
+       * standing at the same counter already holds exactly this, so it adds no
+       * authority to the workspace that the floor did not already have. A
+       * narrower CUSTOMER_CREATE would need the route to accept either key,
+       * which the all-of guard cannot express today.
+       */
+      Permission.CUSTOMER_MANAGE,
       Permission.TABLE_VIEW,
       Permission.TABLE_OPEN,
       Permission.TABLE_CLOSE,

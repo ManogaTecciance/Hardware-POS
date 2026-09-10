@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, Package, Search } from 'lucide-react';
+import { AlertTriangle, Package, Search, X } from 'lucide-react';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import {
 } from '@hardware-pos/shared';
 import { fetchProducts, type ManagedProduct } from '@/lib/products-api';
 import { formatMoney } from '@/lib/restaurant/labels';
+import { normalizeSearchTerm } from '@/lib/search-term';
 
 interface Props {
   session: Session;
@@ -57,6 +58,16 @@ export function ProductSelectorDialog({
   description = 'Pick an inventory product to surface on this menu. The product stays the inventory authority — menu name and menu price are set on the next step.',
 }: Props) {
   const [q, setQ] = React.useState('');
+  /*
+   * What is actually SENT. `q.trim()` left internal runs intact, and every
+   * search here is matched with a literal `contains` on the server — so
+   * "Fried   Rice" off a tablet keyboard found nothing for an item that
+   * plainly exists. The shared normaliser is what the products screen and the
+   * POS menu browser already send; the input keeps showing what was typed.
+   *
+   * It is also the effect key, so re-spacing a term issues no second request.
+   */
+  const term = normalizeSearchTerm(q);
   const [rows, setRows] = React.useState<ManagedProduct[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -68,7 +79,7 @@ export function ProductSelectorDialog({
     const t = setTimeout(async () => {
       try {
         const page = await fetchProducts(session, {
-          search: q.trim() || undefined,
+          search: term || undefined,
           isActive: 'true',
           pageSize: 20,
           page: 1,
@@ -87,7 +98,51 @@ export function ProductSelectorDialog({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q, session]);
+  }, [term, session]);
+
+  /*
+   * The search bar is the dialog's TOOLBAR, not a sticky child of its body.
+   *
+   * Sticky was the first attempt and it kept leaking: a sticky element only
+   * hides what passes behind its own painted box, so the body's padding and
+   * the gap to the first row each became a strip where rows were seen sliding
+   * through, and closing them one at a time was whack-a-mole. As a `shrink-0`
+   * sibling of the scroller the problem cannot occur — the list clips at the
+   * body's own edge and there is nothing above it to see through.
+   */
+  const searchBar = (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search by product name or SKU…"
+        // The placeholder is not an accessible name — it disappears the moment
+        // anyone types, leaving the field unlabelled.
+        aria-label="Search products"
+        autoFocus
+        className={q === '' ? 'pl-9 pr-24' : 'pl-9 pr-28'}
+      />
+      {/* One right-hand cluster, so the busy note and the clear control cannot
+          land on top of each other at any width. */}
+      <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
+        {loading ? <span className="text-xs text-muted-foreground">Searching…</span> : null}
+        {q !== '' ? (
+          // Same affordance the products screen and the POS menu browser give:
+          // selecting the text and deleting it is awkward on a tablet, and
+          // clearing is how you get back to the full list.
+          <button
+            type="button"
+            onClick={() => setQ('')}
+            aria-label="Clear search"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
 
   return (
     <Dialog
@@ -95,6 +150,7 @@ export function ProductSelectorDialog({
       onClose={onBack}
       title={title}
       description={description}
+      toolbar={searchBar}
       footer={
         <Button variant="ghost" onClick={onBack}>
           Back
@@ -103,22 +159,6 @@ export function ProductSelectorDialog({
       className="max-w-2xl"
     >
       <div className="space-y-3">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by product name or SKU…"
-            autoFocus
-            className="pl-9"
-          />
-          {loading ? (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-              Searching…
-            </span>
-          ) : null}
-        </div>
-
         {error ? (
           <p className="flex items-center gap-2 rounded-md border border-danger/40 bg-danger-soft p-2 text-sm text-danger">
             <AlertTriangle className="h-4 w-4" />
@@ -126,11 +166,7 @@ export function ProductSelectorDialog({
           </p>
         ) : null}
 
-        <ul
-          className="max-h-[60vh] space-y-2 overflow-y-auto"
-          role="listbox"
-          aria-label="Product search results"
-        >
+        <ul className="space-y-2" role="listbox" aria-label="Product search results">
           {!loading && rows.length === 0 ? (
             <li className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
               {q

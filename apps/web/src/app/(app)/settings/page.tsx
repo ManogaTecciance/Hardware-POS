@@ -9,6 +9,7 @@ import { availableTimeZones, DEFAULT_TIME_ZONE, timeZoneOffsetLabel } from '@har
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { useConfirm } from '@/components/ui/confirm';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
@@ -50,7 +51,7 @@ import {
  * D90 — "Hours" likewise: it edits the branch's opening hours, which only a
  * food-service tenant has. Appended for the same reason.
  *
- * D138 — "Business details" is retail-only for now, and appended for the
+ * D150 — "Business details" is retail-only for now, and appended for the
  * third time for the third time's reason: a bookmark on any existing tab
  * still lands where it did.
  */
@@ -96,7 +97,7 @@ type Tab = (typeof TABS)[number];
 const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours'];
 
 /**
- * D138 — the tab is shown only where the business type offers the feature.
+ * D150 — the tab is shown only where the business type offers the feature.
  *
  * A SECOND list rather than a member of the one above, because they are
  * different questions with different answers: Charges and Hours ask whether a
@@ -115,7 +116,7 @@ const CONFIGURABLE_CATALOGUE_TABS: readonly Tab[] = ['Business details'];
  * bottom of the viewport, so it sat on top of the Save button that does apply
  * to what they just edited. Two Save buttons, the visible one wrong.
  */
-// D138 — Business details writes `TenantSettings`, not the document profile.
+// D150 — Business details writes `TenantSettings`, not the document profile.
 const SELF_SAVING_TABS: readonly Tab[] = [
   'Charges',
   'Hours',
@@ -133,6 +134,7 @@ const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
 export default function SettingsPage() {
   const { session, hasPermission } = useAuth();
   const canManage = hasPermission(Permission.SETTINGS_MANAGE);
+  const confirm = useConfirm();
   /*
    * D96 — one resolver call, one prop. Every tab below reads flags; none of
    * them compares a capability, a business type or an inventory mode, which is
@@ -264,7 +266,17 @@ export default function SettingsPage() {
 
   const reset = async () => {
     if (!session) return;
-    if (!window.confirm('Reset all document settings to defaults? This cannot be undone.')) return;
+    // D145 — the app's own confirm, awaited: the guard is the same one
+    // `window.confirm` gave, and nothing below it runs until it answers.
+    if (
+      !(await confirm({
+        title: 'Reset all document settings to defaults?',
+        message: 'This cannot be undone.',
+        confirmLabel: 'Reset',
+        tone: 'danger',
+      }))
+    )
+      return;
     setSaving(true);
     try {
       const next = await resetSettings(session);
@@ -452,7 +464,7 @@ export default function SettingsPage() {
         )
       ) : tab === 'Business details' ? (
         /*
-         * D138 — its own save button, for the same reason Charges has one: it
+         * D150 — its own save button, for the same reason Charges has one: it
          * writes `TenantSettings.data.catalogue`, which the sticky document bar
          * below knows nothing about. Unlike Charges it needs no branch — the
          * fields a business tracks are the same in every one of its shops, so
@@ -482,7 +494,7 @@ export default function SettingsPage() {
         />
       ) : view.previewKind === 'THERMAL_BILL_AND_A4' ? (
         /*
-         * D140 — retail prints both, so it previews both. The bill comes
+         * D152 — retail prints both, so it previews both. The bill comes
          * first: it is the document that goes to a customer on every single
          * sale, where a quotation is occasional.
          */
@@ -933,7 +945,7 @@ function LayoutTab({
    * rows appear when they are non-zero, and a continuous roll has no page to
    * lay out.
    *
-   * D140 — and the two are no longer mutually exclusive. This was an early
+   * D152 — and the two are no longer mutually exclusive. This was an early
    * RETURN, because every workspace that printed a bill printed ONLY a bill.
    * Retail broke that: its sale is a slip and its quotation is a letterhead,
    * so it needs the summary AND the page controls, and an early return would
@@ -1028,7 +1040,7 @@ function LayoutTab({
 }
 
 /**
- * D140 — `showA4SaleDocument` decides whether "Invoice / Bill" is offered.
+ * D152 — `showA4SaleDocument` decides whether "Invoice / Bill" is offered.
  *
  * A retail workspace prints its sale on a roll now, so an A4 invoice is a
  * document it cannot produce. Previewing one is the dead control D96 was
@@ -1085,7 +1097,7 @@ function PreviewTab({
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">
-          {/* D140 -- associated with its control. The label was floating, so
+          {/* D152 -- associated with its control. The label was floating, so
               the chooser had no accessible name: a screen reader announced an
               unlabelled combobox, and it could not be found by its label. */}
           <Label htmlFor="preview-document-type">Document type</Label>

@@ -188,7 +188,16 @@ function fakeProfiles(channels: string[] = ['COUNTER']) {
 
 function buildService(prismaFake: any, auditFake: any, profilesFake: any = fakeProfiles()) {
   const repo = fakeRepository(prismaFake);
-  return new PromotionsService(prismaFake as any, repo, auditFake as any, profilesFake as any);
+  // D139 — a fixed tenant zone, so `onlyCurrentlyValid` here means the same
+  // thing on every machine that runs this suite.
+  const settingsFake = { getSettings: () => ({ timezone: 'Asia/Colombo' }) };
+  return new PromotionsService(
+    prismaFake as any,
+    repo,
+    auditFake as any,
+    profilesFake as any,
+    settingsFake as any,
+  );
 }
 
 const TENANT = 'tnt_1';

@@ -1,5 +1,5 @@
 /**
- * D139 — the Inventory tab bar, per workspace.
+ * D151 — the Inventory tab bar, per workspace.
  *
  * ## What makes these assertions non-vacuous (D30)
  *
@@ -72,7 +72,7 @@ const PLACEHOLDERS = ['Stock', 'Purchases'];
 
 afterEach(cleanup);
 
-describe('D139 — which catalogue tabs a workspace is shown', () => {
+describe('D151 — which catalogue tabs a workspace is shown', () => {
   it('retail keeps the full bar, exactly as it was', () => {
     // The PO was explicit: retail is unchanged. Asserted as the whole sequence
     // so a tab lost anywhere in it fails here, not just the two that are gated.
