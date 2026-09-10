@@ -13,16 +13,23 @@ import type { KitchenOrderView, KitchenTicketView } from '@/lib/restaurant/types
  * grouped by round.
  *
  * Extracted from the kitchen board by D142a so the history screen opens the
- * SAME dialog. A ticket is ONE ROUND of an order (D147), so the card and the
- * history row both show a slice — this round, not the two the table ate an
- * hour ago; this is the only place either can see what the table actually
- * ordered, and a second copy of it would be a second answer to that question.
+ * SAME dialog. A ticket is ONE STATION's share of one round (D152), so the card
+ * and the history row both show a slice — this station's dishes from this
+ * round, not the curry the main kitchen is plating alongside them and not the
+ * two rounds the table ate an hour ago; this is the only place either can see
+ * what the table actually ordered, and a second copy of it would be a second
+ * answer to that question.
  *
- * D147 — the item lines no longer carry a station chip. A ticket is not
- * routed to a station any more, so "who else is working on this table" is
- * answered by the round headings alone; the chip's other state said "no
- * station" in warning colours on the dish nobody had linked to one, which was
- * most of them, and read as a fault on the plate rather than on the setup.
+ * D152 — the station is back on the item lines, and it is what makes this view
+ * worth opening: a card shows only what THIS station is making, which is right
+ * for cooking and wrong for timing. The grill cannot otherwise tell whether it
+ * is plating alone or alongside a curry the main kitchen has not started.
+ *
+ * What does NOT come back is the chip's other state. Before D147 an item with
+ * no station link printed "no station" in warning colours, which was most of
+ * them and read as a fault on the plate rather than on the setup. D152 settles
+ * that at the routing end — an unlinked dish cooks at Main — so an item the
+ * join cannot name is simply left unlabelled rather than flagged.
  */
 export function TicketOrderDialog({
   session,
@@ -111,6 +118,15 @@ export function TicketOrderDialog({
                         {trimQuantity(item.quantity)}× {item.name}
                         {item.variantName ? ` (${item.variantName})` : ''}
                       </span>
+                      {/* D152 — the station is what makes this view worth
+                          opening: it says who else is working on this table.
+                          Muted, never the warning tone the pre-D147 chip used
+                          for its empty half — see the note at the top. */}
+                      {item.stationName ? (
+                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                          {item.stationName}
+                        </span>
+                      ) : null}
                       {item.modifierNames.length > 0 ? (
                         <span className="block text-xs text-muted-foreground">
                           {item.modifierNames.join(', ')}

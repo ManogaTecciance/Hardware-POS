@@ -45,6 +45,8 @@ import type { ComponentDraft, WizardState } from './wizard-state';
  *   C. Availability & Kitchen — Active switch (surfacing what already exists
  *                               on the state), Kitchen stations multi-select,
  *                               and a read-only summary of Step 1's prep time.
+ *                               D152 made the station a REQUIRED choice and
+ *                               made Main its default; see the card itself.
  *
  * The three cards render only when the wizard shell tells us the tenant is
  * Restaurant (`businessKind === 'RESTAURANT'`). All internal reads for
@@ -88,6 +90,7 @@ export function StepRestaurantAdditions({
       ) : null}
       <AvailabilityKitchenCard
         state={state}
+        errors={errors}
         session={session}
         branchId={branchId}
         onChange={onChange}
@@ -699,13 +702,22 @@ function PromotionsCard({
 
 // ── Card C: Availability & Kitchen ───────────────────────────────────────────
 
+/**
+ * D152 — the branch's fallback station. One per branch, `code: 'MAIN'`, and
+ * the API upserts it at ticket time, so it is the one code the wizard may
+ * assume exists wherever stations exist at all.
+ */
+const MAIN_STATION_CODE = 'MAIN';
+
 function AvailabilityKitchenCard({
   state,
+  errors,
   session,
   branchId,
   onChange,
 }: {
   state: WizardState;
+  errors: Record<string, string>;
   session: Session;
   branchId: string | null;
   onChange: (patch: Partial<WizardState>) => void;
@@ -746,6 +758,38 @@ function AvailabilityKitchenCard({
     };
   }, [session, effectiveBranchId]);
 
+  /**
+   * D152 — Main is preselected when the catalogue lands with nothing chosen.
+   *
+   * This is the PO's "default selection for when a station cannot be decided",
+   * and it is what stops the new requirement from being an obstacle: someone
+   * who does not care about routing accepts Main and moves on.
+   *
+   * The hard part is telling "nothing chosen YET" from "deliberately cleared",
+   * because both are an empty array. The discriminator is deliberately NOT the
+   * selection — it is the ARRIVAL of the list: the default is applied at most
+   * once, on the first render where a station catalogue exists, and the ref
+   * remembers that it has been spent even when it decided to do nothing. So an
+   * operator who unticks Main afterwards keeps an empty selection (and gets the
+   * required-field message), while a hydrated product that already has links
+   * (edit mode resolves before this card ever mounts) is never clobbered.
+   *
+   * `state.kitchenStationIds` is in the dep list for the linter's benefit; the
+   * ref, not the deps, is what makes this fire once.
+   *
+   * No MAIN in the list means no default — a branch that named its stations
+   * something else gets the required-field message rather than a guess, which
+   * is the whole point of D152 over D147's silent routing.
+   */
+  const mainDefaultSpent = React.useRef(false);
+  React.useEffect(() => {
+    if (mainDefaultSpent.current || stations.length === 0) return;
+    mainDefaultSpent.current = true;
+    if (state.kitchenStationIds.length > 0) return;
+    const main = stations.find((s) => s.code.trim().toUpperCase() === MAIN_STATION_CODE);
+    if (main) onChange({ kitchenStationIds: [main.id] });
+  }, [stations, state.kitchenStationIds, onChange]);
+
   const toggleStation = (id: string) => {
     onChange({
       kitchenStationIds: state.kitchenStationIds.includes(id)
@@ -753,6 +797,10 @@ function AvailabilityKitchenCard({
         : [...state.kitchenStationIds, id],
     });
   };
+
+  // D152 — raised by `validateStep('pricing')`, so the message the operator
+  // reads here is the same one that held Continue shut.
+  const stationError = errors['kitchenStationIds'];
 
   return (
     <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -783,9 +831,16 @@ function AvailabilityKitchenCard({
         </div>
       </div>
 
-      {/* Kitchen stations — multi-select. */}
+      {/* Kitchen stations — multi-select, and required since D152: the round
+          is cut into one ticket per station, so the dish has to say which
+          station cooks it. */}
       <div className="space-y-2">
-        <span className="text-sm font-medium">Kitchen stations</span>
+        <span className="text-sm font-medium">
+          Kitchen stations
+          <span className="text-danger" aria-hidden="true">
+            *
+          </span>
+        </span>
         {loading ? (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:hidden" aria-hidden="true" />
@@ -796,8 +851,15 @@ function AvailabilityKitchenCard({
             {error}
           </p>
         ) : stations.length === 0 ? (
+          /* D152 — the empty branch says so, and says what happens anyway. A
+             required field the operator has no way to fill would strand the
+             product; the shell leaves the rule off in this case (see
+             `ValidateContext.hasKitchenStations`) and the server routes the
+             item to Main regardless. */
           <p className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-muted-foreground">
-            No active kitchen stations for the selected branch.
+            This branch has no kitchen stations yet. Add one in Restaurant settings to route
+            this item — until then the kitchen prepares it at Main, and saving is not held up
+            for a list that cannot be filled.
           </p>
         ) : (
           <ul className="space-y-1.5" role="group" aria-label="Kitchen stations">
@@ -825,6 +887,16 @@ function AvailabilityKitchenCard({
             })}
           </ul>
         )}
+
+        {/* A group-level message with no input of its own — the same shape
+            `variations-empty` and `pricing-none-enabled` take, and the shell's
+            blocked-Continue effect scrolls to `[role="alert"]` for exactly
+            these. */}
+        {stationError ? (
+          <p className="text-xs text-danger" role="alert">
+            {stationError}
+          </p>
+        ) : null}
       </div>
 
       {/* Read-only summary of Step 1's prep time so the operator can verify. */}

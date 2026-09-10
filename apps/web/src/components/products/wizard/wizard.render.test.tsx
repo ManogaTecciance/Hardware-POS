@@ -15,9 +15,9 @@
  * `validateStep` here and pass its output as the `errors` prop, which is what
  * the shell does at runtime.
  */
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConfirmProvider } from '@/components/ui/confirm';
 import type { CategoryNode } from '@/lib/products-api';
@@ -40,10 +40,96 @@ import {
   validateStep,
   visibleSteps,
   type StepKey,
+  type ValidateContext,
   type WizardState,
 } from './wizard-state';
 import { StepAttributes } from './step-attributes';
 import type { AttributeField } from '@hardware-pos/shared';
+
+import { putProductStations } from '@/lib/products/product-stations-api';
+import type { KitchenStationView } from '@/lib/restaurant/types';
+
+import { persistRestaurantLinks, ProductWizard } from './product-wizard';
+import { StepRestaurantAdditions } from './step-restaurant-additions';
+
+/*
+ * ── D152 doubles ───────────────────────────────────────────────────────────
+ *
+ * Everything below this line exists for the station work. Card C and the
+ * wizard shell are the only things in this spec that reach a network client at
+ * all — the four step components the rest of the file exercises take their
+ * data as props — so these mocks are inert for every test that predates D152.
+ *
+ * `vi.hoisted` because the factories are called during the import phase, and a
+ * `let` declared beside them would still be in its temporal dead zone.
+ */
+const doubles = vi.hoisted(() => ({
+  /** Rows `restaurantApi.kitchenStations.list` resolves with. Set per test. */
+  stations: [] as unknown[],
+  /** The profile the shell resolves. Restaurant + LOCAL unless a test says otherwise. */
+  profile: {
+    status: 'ready',
+    inventoryMode: 'LOCAL',
+    profile: {
+      businessType: 'RESTAURANT',
+      capabilities: { catalogue: { components: false } },
+    },
+  } as unknown,
+}));
+
+vi.mock('@/lib/restaurant/api', () => ({
+  kitchenStations: { list: () => Promise.resolve(doubles.stations) },
+  modifierGroups: { list: () => Promise.resolve([]), create: () => Promise.resolve({}) },
+}));
+
+vi.mock('@/lib/auth', () => ({
+  // Card C falls back to the auth session's branch when the shell passes none.
+  useAuth: () => ({
+    session: { token: 't', user: { tenantId: 'tnt_x' }, branchId: 'br_main' },
+  }),
+}));
+
+vi.mock('@/lib/platform-profile', () => ({
+  PlatformProfileProvider: ({ children }: { children: React.ReactNode }) => children,
+  useEffectiveProfile: () => doubles.profile,
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {}, back: () => {}, replace: () => {}, refresh: () => {} }),
+  usePathname: () => '/products/new',
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock('@/lib/products/promotions-api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/products/promotions-api')>()),
+  fetchPromotions: () => Promise.resolve({ items: [], total: 0 }),
+}));
+
+vi.mock('@/lib/products/product-stations-api', () => ({
+  fetchProductStations: vi.fn(() => Promise.resolve({ stations: [] })),
+  putProductStations: vi.fn(() => Promise.resolve({ stations: [] })),
+}));
+
+vi.mock('@/lib/products/product-modifiers-api', () => ({
+  fetchProductModifierGroups: vi.fn(() => Promise.resolve({ modifierGroups: [] })),
+  putProductModifierGroups: vi.fn(() => Promise.resolve({ modifierGroups: [] })),
+}));
+
+vi.mock('@/lib/products/components-api', () => ({
+  fetchProductComponents: vi.fn(() => Promise.resolve({ components: [] })),
+  putProductComponents: vi.fn(() => Promise.resolve({ components: [] })),
+}));
+
+vi.mock('@/lib/products/branches-api', () => ({ fetchBranches: () => Promise.resolve([]) }));
+vi.mock('@/lib/products/attributes-api', () => ({
+  fetchProductAttributeSchema: () => Promise.resolve({ fields: [] }),
+}));
+vi.mock('@/lib/products/attribute-library-api', () => ({
+  fetchAttributeLibrary: () => Promise.resolve([]),
+}));
+vi.mock('@/lib/settings-api', () => ({
+  fetchSettings: () => Promise.resolve({ taxRatePercent: 15 }),
+}));
 
 afterEach(cleanup);
 
@@ -1647,5 +1733,423 @@ describe('D101 — restaurant Track stock', () => {
 
     const on = buildCreateInput(restaurantState({ trackInventory: true }), null);
     expect(on.trackStock).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D152 — the station becomes a required choice when a menu item is created
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * D152 reverses D147 and restores the per-station ticket split. It is only safe
+ * to restore because the station is now CHOSEN on the menu item and defaults to
+ * Main — D147's complaint was, verbatim, that the multi-select "starts empty,
+ * is in no validation rule and carries no warning".
+ *
+ * So each half is proved in both directions here: the rule fires where the
+ * control exists and never where it does not; the Main default lands once and
+ * never fights the operator; the PUT happens on every save including the empty
+ * one that clears the links.
+ */
+
+/** A branch station row, shaped like the catalogue endpoint returns them. */
+function stationRow(id: string, code: string, name: string): KitchenStationView {
+  return {
+    id,
+    branchId: 'br_main',
+    code,
+    name,
+    category: 'KITCHEN',
+    isActive: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+const ST_MAIN = stationRow('st_main', 'MAIN', 'Main');
+const ST_GRILL = stationRow('st_grill', 'GRILL', 'Grill');
+const ST_BAR = stationRow('st_bar', 'BAR', 'Bar');
+
+/** A session that names a branch — card C and the shell are both branch-scoped. */
+const branchSession = {
+  token: 't',
+  user: { tenantId: 'tnt_x' },
+  branchId: 'br_main',
+} as never;
+
+/** Let the mocked catalogue promises and the effects that consume them settle. */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+describe('D152 — validateStep requires a station on a restaurant product', () => {
+  /** A step-3-clean restaurant dish, so only the station can be at fault. */
+  const dish = (over: Partial<WizardState> = {}): WizardState => {
+    const s = initialState();
+    s.foodType = 'FOOD';
+    s.simple = { ...s.simple, sku: 'DISH-1', unitPrice: '10' };
+    return { ...s, ...over };
+  };
+  const pricing = (s: WizardState, ctx: Partial<ValidateContext> = {}) =>
+    validateStep('pricing', s, {
+      inventoryMode: 'LOCAL',
+      businessKind: 'RESTAURANT',
+      hasKitchenStations: true,
+      ...ctx,
+    });
+
+  it('refuses an empty selection, and passes the moment a station is picked', () => {
+    const errs = pricing(dish());
+    // POSITIVE: the error exists, on step 3, keyed to the field.
+    expect(errs['kitchenStationIds']).toMatch(/kitchen station/i);
+    // It says what to DO, and names the default the card preselects — a bare
+    // "required" would send the operator hunting for a control they did not
+    // know existed.
+    expect(errs['kitchenStationIds']).toMatch(/main/i);
+
+    // NEGATIVE: one station is enough and nothing else on the step objects, so
+    // the message above is the station rule and not some other field's.
+    expect(pricing(dish({ kitchenStationIds: ['st_main'] }))).toEqual({});
+    // NEGATIVE: it is a STEP 3 rule. Step 1 must not carry it, or the operator
+    // is blocked on Continue by a card two steps away.
+    expect(
+      validateStep('details', dish(), {
+        inventoryMode: 'LOCAL',
+        businessKind: 'RESTAURANT',
+        hasKitchenStations: true,
+      })['kitchenStationIds'],
+    ).toBeUndefined();
+  });
+
+  it('is a RESTAURANT rule only — no tenant is blocked on a card it cannot see', () => {
+    // NEGATIVE, for every non-restaurant reading of the tenant.
+    expect(pricing(dish(), { businessKind: 'RETAIL' })['kitchenStationIds']).toBeUndefined();
+    expect(pricing(dish(), { businessKind: null })['kitchenStationIds']).toBeUndefined();
+    expect(pricing(dish(), { businessKind: undefined })['kitchenStationIds']).toBeUndefined();
+    // ...and the rest of the map stays clean too, so a RETAIL save is not
+    // blocked by the station rule under a different key.
+    expect(pricing(dish(), { businessKind: 'RETAIL' })).toEqual({});
+
+    // POSITIVE CONTROL: the very same state IS refused for a restaurant. Without
+    // this the three negatives above would pass just as happily if the rule had
+    // been deleted outright.
+    expect(pricing(dish())['kitchenStationIds']).toBeDefined();
+  });
+
+  it('never blocks on a catalogue that cannot satisfy it', () => {
+    // NEGATIVE: a branch with no stations, and an unresolved catalogue (loading,
+    // failed fetch, or no branch on the session) — an unsatisfiable rule is not
+    // a rule, and an unresolved one defaults to not blocking like every other
+    // unresolved fact in this wizard.
+    expect(pricing(dish(), { hasKitchenStations: false })['kitchenStationIds']).toBeUndefined();
+    expect(pricing(dish(), { hasKitchenStations: null })['kitchenStationIds']).toBeUndefined();
+    expect(pricing(dish(), { hasKitchenStations: undefined })['kitchenStationIds']).toBeUndefined();
+
+    // POSITIVE CONTROL, same state: with a catalogue present it is refused.
+    expect(pricing(dish())['kitchenStationIds']).toBeDefined();
+  });
+});
+
+describe('D152 — card C: Main is the default, and it is chosen once', () => {
+  /** Render card C alone with a live state container, and expose that state. */
+  function renderCardC(options: { initial?: WizardState; errors?: Record<string, string> } = {}) {
+    const seen: { current: WizardState } = { current: options.initial ?? initialState() };
+    function Harness() {
+      const h = useHarness(options.initial ?? initialState());
+      seen.current = h.state;
+      return (
+        <StepRestaurantAdditions
+          state={h.state}
+          errors={options.errors ?? {}}
+          session={branchSession}
+          branchId="br_main"
+          showRecipe={false}
+          onChange={h.patch}
+        />
+      );
+    }
+    const utils = renderWithConfirm(<Harness />);
+    return { ...utils, seen };
+  }
+
+  const stationBox = (name: RegExp) =>
+    screen.getByRole('checkbox', { name }) as HTMLInputElement;
+
+  beforeEach(() => {
+    doubles.stations = [];
+  });
+
+  it('preselects the MAIN-coded station when the catalogue lands with nothing chosen', async () => {
+    doubles.stations = [ST_GRILL, ST_MAIN, ST_BAR];
+    const { seen } = renderCardC();
+    await settle();
+
+    // POSITIVE: Main is selected, in the state and on screen.
+    expect(seen.current.kitchenStationIds).toEqual(['st_main']);
+    expect(stationBox(/route to main/i).checked).toBe(true);
+
+    // NEGATIVE: it is MAIN by CODE — not "everything", and not "the first row",
+    // which here is Grill and would have been the answer to either mistake.
+    expect(stationBox(/route to grill/i).checked).toBe(false);
+    expect(stationBox(/route to bar/i).checked).toBe(false);
+  });
+
+  it('makes no guess when the branch has no station coded MAIN', async () => {
+    doubles.stations = [ST_GRILL, ST_BAR];
+    const first = renderCardC();
+    await settle();
+
+    // NEGATIVE: nothing is chosen for the operator. Guessing "the first one" is
+    // exactly the accidental routing D147 was removed over.
+    expect(first.seen.current.kitchenStationIds).toEqual([]);
+    expect(stationBox(/route to grill/i).checked).toBe(false);
+
+    // POSITIVE CONTROL: the same catalogue plus a MAIN row does default, so the
+    // negative above is about the missing code and not about a dead effect.
+    cleanup();
+    doubles.stations = [ST_GRILL, ST_BAR, ST_MAIN];
+    const second = renderCardC();
+    await settle();
+    expect(second.seen.current.kitchenStationIds).toEqual(['st_main']);
+  });
+
+  it('never clobbers a selection that was already made', async () => {
+    doubles.stations = [ST_GRILL, ST_MAIN];
+    const chosen = renderCardC({
+      initial: { ...initialState(), kitchenStationIds: ['st_grill'] },
+    });
+    await settle();
+
+    // NEGATIVE: an edit hydrated with Grill keeps Grill; Main is not added.
+    expect(chosen.seen.current.kitchenStationIds).toEqual(['st_grill']);
+    expect(stationBox(/route to main/i).checked).toBe(false);
+
+    // POSITIVE CONTROL: the identical catalogue defaults to Main when the
+    // product arrives with nothing — so "kept Grill" is a decision, not a
+    // default that never ran.
+    cleanup();
+    const empty = renderCardC();
+    await settle();
+    expect(empty.seen.current.kitchenStationIds).toEqual(['st_main']);
+  });
+
+  it('does not re-apply Main after the operator deliberately clears it', async () => {
+    doubles.stations = [ST_MAIN, ST_GRILL];
+    const { seen } = renderCardC();
+    await settle();
+    expect(seen.current.kitchenStationIds).toEqual(['st_main']);
+
+    // The operator unticks Main. "Nothing chosen yet" and "cleared on purpose"
+    // are the same empty array, so the default is spent on the list ARRIVING,
+    // never on the selection being empty.
+    fireEvent.click(stationBox(/route to main/i));
+    expect(seen.current.kitchenStationIds).toEqual([]);
+
+    // Several more renders — each one re-runs the effect that could put Main
+    // back. A single assertion right after the click would pass even if the
+    // default were keyed on the empty selection.
+    fireEvent.click(stationBox(/route to grill/i));
+    expect(seen.current.kitchenStationIds).toEqual(['st_grill']);
+    fireEvent.click(stationBox(/route to grill/i));
+    await settle();
+
+    expect(seen.current.kitchenStationIds).toEqual([]);
+    expect(stationBox(/route to main/i).checked).toBe(false);
+  });
+
+  it('shows the shell’s required-station message, and shows nothing when there is none', async () => {
+    // A catalogue with no MAIN, so the empty selection the message complains
+    // about is the state the card is genuinely in.
+    doubles.stations = [ST_GRILL, ST_BAR];
+    const state = { ...initialState(), foodType: 'FOOD' as const };
+    const errors = validateStep('pricing', state, {
+      inventoryMode: 'LOCAL',
+      businessKind: 'RESTAURANT',
+      hasKitchenStations: true,
+    });
+    // Guards the seam: a renamed key would otherwise make the render assertion
+    // below inspect an error that no longer exists.
+    expect(errors['kitchenStationIds']).toBeDefined();
+
+    renderCardC({ initial: state, errors });
+    await settle();
+
+    // POSITIVE: the operator reads the same wording that held Continue shut.
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe(errors['kitchenStationIds']);
+    // The field advertises itself as required before they get there.
+    expect(document.body.textContent).toMatch(/Kitchen stations\*/);
+
+    // NEGATIVE: with no error in the map the card is quiet — the alert is the
+    // shell's message, not decoration the card always paints.
+    cleanup();
+    renderCardC({ initial: state, errors: {} });
+    await settle();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/pick Main if you are not sure/i);
+  });
+
+  it('says so when the branch has no stations, and the rule stands down for it', async () => {
+    doubles.stations = [];
+    const { seen } = renderCardC();
+    await settle();
+
+    // POSITIVE: the operator is told what happened and what happens anyway.
+    expect(document.body.textContent).toMatch(/no kitchen stations yet/i);
+    expect(document.body.textContent).toMatch(/prepares it at Main/i);
+
+    // NEGATIVE: nothing pretends to be tickable, and nothing was auto-chosen.
+    expect(screen.queryByRole('checkbox', { name: /route to/i })).toBeNull();
+    expect(seen.current.kitchenStationIds).toEqual([]);
+
+    // ...and the shell's rule stands down for exactly this case, so the save is
+    // not held on a list that cannot be filled. Paired with the positive that
+    // the same state IS refused once a catalogue exists.
+    const s = { ...initialState(), foodType: 'FOOD' as const };
+    const base = { inventoryMode: 'LOCAL' as const, businessKind: 'RESTAURANT' as const };
+    expect(
+      validateStep('pricing', s, { ...base, hasKitchenStations: false })['kitchenStationIds'],
+    ).toBeUndefined();
+    expect(
+      validateStep('pricing', s, { ...base, hasKitchenStations: true })['kitchenStationIds'],
+    ).toBeDefined();
+  });
+
+  it('a retail Step 3 renders no station control at all — the rule has nothing to police', async () => {
+    doubles.stations = [ST_MAIN, ST_GRILL];
+    render(
+      <StepPricingInventory
+        state={{ ...initialState(), simple: { ...initialState().simple, sku: 'X', unitPrice: '1' } }}
+        errors={{}}
+        branches={branches}
+        showOpeningStock={true}
+        businessKind="RETAIL"
+        session={branchSession}
+        branchId="br_main"
+        onChange={() => {}}
+      />,
+    );
+    await settle();
+
+    // NEGATIVE: no card, no checkbox, no asterisk.
+    expect(screen.queryByRole('checkbox', { name: /route to/i })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/kitchen stations/i);
+
+    // POSITIVE CONTROL: the identical props with RESTAURANT do render it, so
+    // the absence above is the business kind and not a broken fixture.
+    cleanup();
+    render(
+      <StepPricingInventory
+        state={{ ...initialState(), simple: { ...initialState().simple, sku: 'X', unitPrice: '1' } }}
+        errors={{}}
+        branches={branches}
+        showOpeningStock={true}
+        businessKind="RESTAURANT"
+        session={branchSession}
+        branchId="br_main"
+        onChange={() => {}}
+      />,
+    );
+    await settle();
+    expect(screen.getByRole('checkbox', { name: /route to main/i })).toBeTruthy();
+  });
+});
+
+describe('D152 — the wizard shell carries the station fact into validation', () => {
+  beforeEach(() => {
+    doubles.stations = [ST_MAIN, ST_GRILL];
+  });
+
+  /** Walk a fresh restaurant product from Step 1 to Step 3. */
+  async function reachStepThree() {
+    renderWithConfirm(
+      <ProductWizard mode="create" session={branchSession} categories={categoryTree} />,
+    );
+    await settle();
+    fireEvent.change(screen.getByLabelText(/product name/i), {
+      target: { value: 'Mix Kottu' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: /food/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^continue$/i })); // → Variations
+    fireEvent.click(screen.getByRole('button', { name: /^continue$/i })); // → Pricing
+    await settle();
+    fireEvent.change(screen.getByLabelText(/^sku/i), { target: { value: 'KOT-1' } });
+    fireEvent.change(screen.getByLabelText(/selling price/i), { target: { value: '850' } });
+  }
+
+  it('blocks Continue on Step 3 once the operator clears the station, and lets it through when one is picked', async () => {
+    await reachStepThree();
+
+    // The shell resolved the branch catalogue, so card C preselected Main —
+    // which is the point of the default: the required field is already answered.
+    expect((screen.getByRole('checkbox', { name: /route to main/i }) as HTMLInputElement).checked)
+      .toBe(true);
+
+    // Clear it deliberately, then try to move on.
+    fireEvent.click(screen.getByRole('checkbox', { name: /route to main/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+    await settle();
+
+    // POSITIVE: the shell's own context reached the validator — the message is
+    // on screen and the wizard did not advance.
+    expect(document.body.textContent).toMatch(/pick Main if you are not sure/i);
+    expect(screen.getByRole('checkbox', { name: /route to grill/i })).toBeTruthy();
+
+    // NEGATIVE: pick any station and the block lifts on the same screen (the
+    // shell re-runs validation as the state changes) and Continue advances.
+    fireEvent.click(screen.getByRole('checkbox', { name: /route to grill/i }));
+    await settle();
+    expect(document.body.textContent).not.toMatch(/pick Main if you are not sure/i);
+    fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+    await settle();
+    expect(screen.getByRole('button', { name: /save product/i })).toBeTruthy();
+  });
+});
+
+describe('D152 — the station links are saved on every save', () => {
+  beforeEach(() => {
+    vi.mocked(putProductStations).mockReset();
+    vi.mocked(putProductStations).mockResolvedValue({ stations: [] });
+  });
+
+  const dish = (kitchenStationIds: string[]): WizardState => ({
+    ...initialState(),
+    foodType: 'FOOD',
+    kitchenStationIds,
+  });
+
+  it('PUTs the picked stations', async () => {
+    const note = await persistRestaurantLinks(branchSession, 'prod_1', dish(['st_main', 'st_grill']), {
+      putComponents: false,
+    });
+    expect(vi.mocked(putProductStations).mock.calls).toEqual([
+      [branchSession, 'prod_1', ['st_main', 'st_grill']],
+    ]);
+    // Nothing failed, so the caller keeps its plain success wording.
+    expect(note).toBeNull();
+  });
+
+  it('PUTs the EMPTY set too — clearing every station used to leave the old links behind', async () => {
+    await persistRestaurantLinks(branchSession, 'prod_1', dish([]), { putComponents: false });
+    // The regression this replaces: the call was skipped when the selection was
+    // empty, so the screen said "no stations" and the database kept the old
+    // ones. Exactly one PUT, carrying the empty replacement.
+    expect(vi.mocked(putProductStations).mock.calls).toEqual([[branchSession, 'prod_1', []]]);
+  });
+
+  it('reports a failed station PUT whatever was selected', async () => {
+    vi.mocked(putProductStations).mockRejectedValue(new Error('500'));
+    // Including the empty case: a clear that did not stick is the same lie as a
+    // link that did not stick, and the old failure accounting could not see it.
+    expect(
+      await persistRestaurantLinks(branchSession, 'prod_1', dish([]), { putComponents: false }),
+    ).toMatch(/kitchen or modifier links failed/i);
+    expect(
+      await persistRestaurantLinks(branchSession, 'prod_1', dish(['st_main']), {
+        putComponents: false,
+      }),
+    ).toMatch(/kitchen or modifier links failed/i);
   });
 });

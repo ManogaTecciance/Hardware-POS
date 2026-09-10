@@ -40,6 +40,7 @@ import {
   fetchProductStations,
   putProductStations,
 } from '@/lib/products/product-stations-api';
+import { kitchenStations as kitchenStationsApi } from '@/lib/restaurant/api';
 import {
   defaultRoleForPromotionType,
   fetchPromotion,
@@ -169,6 +170,41 @@ export function ProductWizard(props: Props) {
   // D65 — the recipe card exists only for tenants whose capabilities declare
   // it. Unresolved profile → no card, same fail-safe as everything else.
   const showRecipe = profile?.capabilities.catalogue.components === true;
+  /*
+   * D152 — can the branch's station requirement be satisfied at all?
+   *
+   * The station is a required choice now (see `validateStep`), and the shell
+   * owns validation facts, so the shell resolves this one — the same way it
+   * resolves `businessKind`, `showRecipe` and the tax rate rather than letting
+   * a step component decide (D31). It has to hold on Save, which validates
+   * every step at once, so it cannot depend on card C having been mounted.
+   *
+   * `null` is UNRESOLVED and never blocks: loading, a failed request, a
+   * non-restaurant tenant, or a session with no branch. The card fetches the
+   * catalogue again for its own list and its own Main default — one extra GET,
+   * deliberately, rather than threading a prop through Step 3, which is shared
+   * with every other business type.
+   */
+  const [hasKitchenStations, setHasKitchenStations] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    const stationBranchId = session.branchId;
+    if (businessKind !== 'RESTAURANT' || !stationBranchId) {
+      setHasKitchenStations(null);
+      return;
+    }
+    let active = true;
+    kitchenStationsApi
+      .list(session, stationBranchId)
+      .then((rows) => {
+        if (active) setHasKitchenStations(rows.some((r) => r.isActive));
+      })
+      .catch(() => {
+        if (active) setHasKitchenStations(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session, businessKind]);
   // `showOpeningStock` gates the opening-stock column, the branch select, and
   // the "opening stock only on LOCAL" info banner in Step 3. Reading it from
   // the resolver's `managementMode` — not from `inventoryMode` — keeps D31's
@@ -348,7 +384,19 @@ export function ProductWizard(props: Props) {
     [attributeSchema],
   );
   const currentStep = wizardSteps[Math.min(stepIndex, wizardSteps.length - 1)]!.key;
-  const validateCtx = { inventoryMode, businessKind, attributeSchema };
+  /*
+   * ONE validation context, memoised.
+   *
+   * It used to be a plain literal here plus a second, hand-copied literal in
+   * the live-revalidation effect below — which meant the map the operator READ
+   * could disagree with the map that decided whether Continue moved. D152 was
+   * about to add a third fact to both. A memo keyed on the same primitives the
+   * effect used as deps behaves identically and leaves one place to add to.
+   */
+  const validateCtx = React.useMemo(
+    () => ({ inventoryMode, businessKind, attributeSchema, hasKitchenStations }),
+    [inventoryMode, businessKind, attributeSchema, hasKitchenStations],
+  );
 
   /**
    * `keepErrors` exists for one caller: Save on the Review step, which jumps
@@ -413,8 +461,8 @@ export function ProductWizard(props: Props) {
    */
   React.useEffect(() => {
     if (!attempted) return;
-    setErrors(validateStep(currentStep, state, { inventoryMode, businessKind, attributeSchema }));
-  }, [attempted, state, currentStep, inventoryMode, businessKind, attributeSchema]);
+    setErrors(validateStep(currentStep, state, validateCtx));
+  }, [attempted, state, currentStep, validateCtx]);
 
   const onBack = () => {
     if (stepIndex === 0) {
@@ -749,8 +797,13 @@ async function runCreate(
  * modifier-groups and stations are the wizard's own PUT-replacements and
  * always run first so the failure surface is limited to "the promotion links
  * didn't stick" when it happens.
+ *
+ * Exported for testing: the station PUT is unconditional as of D152 and that
+ * is a claim about a call, not about a rendered tree — a spy on this function
+ * proves it, where the shell around it would need a mock of every products/*
+ * client to reach the same line.
  */
-async function persistRestaurantLinks(
+export async function persistRestaurantLinks(
   session: Session,
   productId: string,
   state: WizardState,
@@ -760,10 +813,19 @@ async function persistRestaurantLinks(
     state.modifierGroupIds.length > 0 || state.hasVariations /* empty PUT is safe */
       ? putProductModifierGroups(session, productId, state.modifierGroupIds).catch(() => null)
       : Promise.resolve(null);
-  const stationPromise =
-    state.kitchenStationIds.length > 0
-      ? putProductStations(session, productId, state.kitchenStationIds).catch(() => null)
-      : Promise.resolve(null);
+  /*
+   * D152 — ALWAYS PUT, even for an empty selection.
+   *
+   * The call used to be skipped when nothing was selected, so clearing every
+   * station left the OLD links in place: the screen said one thing and the
+   * database said another, and the round would keep printing at a station the
+   * operator had removed. The endpoint replaces the set, so `[]` is how "no
+   * stations" is saved. Nothing is lost by saving it — the API routes an
+   * unlinked item to the branch's Main station.
+   */
+  const stationPromise = putProductStations(session, productId, state.kitchenStationIds).catch(
+    () => null,
+  );
   // D65 — replace-all recipe PUT, same degrade-to-toast policy as the others.
   const componentsPromise = options.putComponents
     ? putProductComponents(session, productId, buildComponentsPayload(state)).catch(() => null)
@@ -825,7 +887,7 @@ async function persistRestaurantLinks(
 
   const linkFailures =
     (mgResult === null && state.modifierGroupIds.length > 0 ? 1 : 0) +
-    (ksResult === null && state.kitchenStationIds.length > 0 ? 1 : 0) +
+    (ksResult === null ? 1 : 0) +
     (compResult === null && options.putComponents ? 1 : 0);
 
   if (promoFailures > 0 && linkFailures === 0) {

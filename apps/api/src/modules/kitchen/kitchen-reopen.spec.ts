@@ -32,11 +32,13 @@ function fullRow(status: 'QUEUED' | 'COMPLETED') {
     ticketNumber: 'KOT-000042',
     branchId: BRANCH,
     roundId: 'rnd_1',
-    // D147 — a ticket cut since the per-station split was removed belongs to
-    // no station, and TICKET_INCLUDE no longer joins one. The fixture says so
-    // too: a `station: { name: … }` here would let the projection go on
-    // reading a relation production has stopped selecting (D30).
-    stationId: null,
+    // D152 — the split is back, so TICKET_INCLUDE joins the station again and
+    // a ticket cut from now on carries one. The fixture says so, because a
+    // row without it would let a projection that had QUIETLY DROPPED the
+    // station keep passing here (D30) — the recall response is what repaints
+    // the card, ribbon and all.
+    stationId: 'stn_grill',
+    station: { name: 'Grill' },
     status,
     completedAt: null,
     createdAt: new Date('2026-09-03T12:00:00Z'),
@@ -108,6 +110,10 @@ describe('KitchenService.reopenTicket (D100)', () => {
     expect(view.status).toBe('QUEUED');
     expect(view.completedAt).toBeNull();
     expect(view.completedByName).toBeNull();
+    // D152 — and the card the recall repaints still knows which line it is on.
+    // The recall clears the COMPLETION record, not the routing.
+    expect(view.stationId).toBe('stn_grill');
+    expect(view.stationName).toBe('Grill');
   });
 
   it('writes nothing when the ticket was never completed', async () => {

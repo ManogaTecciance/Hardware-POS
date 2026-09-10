@@ -362,28 +362,24 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
      * It used to read the branch's whole board and assert `length > 0`,
      * which any well-used dev database satisfies out of yesterday's tickets
      * whether or not THIS order ever reached the pass — green while proving
-     * nothing (D30). Narrowed to the order just placed, it pins the
-     * decision instead: two lines went in as one round, so exactly one KOT
-     * comes back carrying both of them.
+     * nothing (D30). Narrowed to the order just placed, it pins the decision
+     * instead.
      *
-     * What the old per-station split did to this same order depended on the
-     * catalogue, and both outcomes were wrong. A dish the seed routes to a
-     * station made its own card, so an order whose two dishes cook in
-     * different places arrived as two (RO-000026, one round of 15 lines,
-     * came out as KOT-000027 and KOT-000028). A dish with NO station link
-     * — which is every product the wizard creates, because its station
-     * multi-select is branch-scoped and renders empty — reached the board on
-     * no card at all: this branch has four active stations, so the
-     * single-station fallback did not save it, and the dish was ordered,
-     * paid for and never cooked.
+     * D152 restored the per-station split that D147 had removed, so this
+     * block now asserts the opposite of what it did an hour ago — and the
+     * thing worth pinning has changed with it. The number of KOTs an order
+     * yields is a property of the CATALOGUE (how many stations its dishes
+     * route to), not of the code, so asserting "one" or "two" would pin the
+     * seed rather than the behaviour. What must hold for every order, on
+     * every catalogue, is that EVERY line reaches SOME ticket exactly once.
      *
-     * Proven by mutation (the block was replayed against fabricated board
-     * payloads, since a browser run needs a live stack): it goes red on the
-     * split (two KOTs for the order), on the drop (no KOT for the order,
-     * only yesterday's on the branch), on a ticket that still carries a
-     * station, on a ticket carrying the same dish twice, and on a payload
-     * that puts `stationName` back on the wire. The `length > 0` assertion
-     * this replaced stayed GREEN on the first four of those.
+     * That is the invariant D147 was created to protect and D152 has to keep
+     * by other means: before D147, a dish with no station link at a
+     * multi-station branch reached the board on no card at all — ordered,
+     * paid for and never cooked — and this branch has four active stations,
+     * so the old single-station fallback never saved it. D152's Main station
+     * catches those instead. With 703 of the catalogue's 737 products
+     * carrying no link, that fallback is doing nearly all of the work here.
      */
     const board = await api.get<
       Array<{
@@ -391,37 +387,53 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
         ticketNumber: string;
         orderNumber: string | null;
         stationId: string | null;
+        stationName: string | null;
         items: Array<{ menuItemName: string }>;
       }>
     >(`/restaurant/branches/${RESTAURANT_SEED.branchId}/kitchen-tickets`);
     const ticketsForOrder = board.filter((t) => t.orderNumber === orderNumber);
     // Ticket NUMBERS, not a count: a failure names the KOTs that were cut, so
-    // "two tickets" is distinguishable from "none" without a re-run.
+    // "three tickets" is distinguishable from "none" without a re-run.
     expect(
       ticketsForOrder.map((t) => t.ticketNumber),
-      `${orderNumber} is a single round and must be a single KOT`,
+      `${orderNumber} must reach the pass on at least one KOT`,
+    ).not.toHaveLength(0);
+
+    /*
+     * THE INVARIANT: the union of every ticket's lines is exactly the round's
+     * two lines. This catches the drop (a dish on no ticket), the duplicate
+     * (a dish on two tickets, which a station link pointing two ways would
+     * cause), and a ticket carrying the same dish twice — none of which the
+     * per-ticket checks below can express on their own.
+     */
+    const dishes = ticketsForOrder.flatMap((t) => t.items.map((i) => i.menuItemName));
+    expect(
+      dishes,
+      `every line of ${orderNumber} must be on exactly one KOT; the board reads ${dishes.join(' / ')}`,
+    ).toHaveLength(2);
+    expect(
+      dishes.filter((name) => MENU_ITEM_WITH_MODIFIERS.test(name)),
+      `the customised dish must be cut exactly once, not dropped and not duplicated`,
     ).toHaveLength(1);
-    const kot = ticketsForOrder[0];
-    // Two cart lines, two ticket lines — "every one of its items" is the half
-    // of the contract that the names below cannot express, because a ticket
-    // carrying one dish twice would satisfy them just as well.
-    expect(kot.items, `${kot.ticketNumber} must carry both lines of the round`).toHaveLength(2);
-    const dishes = kot.items.map((i) => i.menuItemName);
     expect(
-      dishes.some((name) => MENU_ITEM_WITH_MODIFIERS.test(name)),
-      `the customised dish must be on ${kot.ticketNumber}, which reads ${dishes.join(' / ')}`,
-    ).toBeTruthy();
-    expect(
-      dishes.some((name) => SIMPLE_MENU_ITEM.test(name)),
-      `the second dish must be on the SAME ticket, which reads ${dishes.join(' / ')}`,
-    ).toBeTruthy();
-    // The ticket belongs to no station, and the board is not told about one.
-    // `stationId` is the positive control for the negative beside it: the key
-    // is present and null, so "no stationName" is a claim about a real ticket
-    // payload rather than about an object that has no fields at all.
-    expect(kot.stationId, 'a ticket cut since D147 belongs to no station').toBeNull();
-    expect('stationId' in kot, 'the board still ships the (nullable) column').toBe(true);
-    expect('stationName' in kot, 'D147 took stationName off the ticket view').toBe(false);
+      dishes.filter((name) => SIMPLE_MENU_ITEM.test(name)),
+      `the second dish must be cut exactly once`,
+    ).toHaveLength(1);
+
+    /*
+     * And every ticket belongs to a station. D152's rule is that there is no
+     * path on which a line reaches no station: an unlinked dish lands on
+     * Main. `stationId` non-null is the machine-readable half; `stationName`
+     * is the half the board actually prints on the ribbon, and asserting the
+     * key is PRESENT is what stops the view quietly dropping it again.
+     */
+    for (const t of ticketsForOrder) {
+      expect(t.stationId, `${t.ticketNumber} must belong to a station (D152)`).not.toBeNull();
+      expect('stationName' in t, `${t.ticketNumber} must ship stationName for the ribbon`).toBe(
+        true,
+      );
+      expect(t.stationName, `${t.ticketNumber} must name its station`).toBeTruthy();
+    }
 
     await api.ctx.dispose();
   });

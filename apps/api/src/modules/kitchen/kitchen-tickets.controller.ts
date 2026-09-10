@@ -97,9 +97,10 @@ export class KitchenTicketsController {
    * D83 — the whole order behind a ticket, for the board's Details view.
    *
    * KOT_VIEW, like the board: this is the same information the kitchen
-   * already receives, assembled across the order's ROUNDS instead of one
-   * round at a time. (It read "across stations" until D147 made a ticket the
-   * whole round; rounds are what a card is a slice of now.)
+   * already receives, assembled across the order's ROUNDS AND STATIONS
+   * instead of one station's slice of one round. (D147 had narrowed this to
+   * rounds alone, a ticket then belonging to no station; D152 put the split
+   * back and the station annotation with it.)
    */
   @Get(':ticketId/order')
   @RequirePermissions(Permission.KOT_VIEW)
@@ -133,20 +134,19 @@ export class KitchenTicketsController {
     try {
       const updated = await this.service.startTicket(tenantId, branchId, ticketId);
       /*
-       * D147 — `stationId` is no longer recorded here (nor on complete or
-       * reopen below). A ticket cut since the split was removed belongs to no
-       * station, so the key would be null on every entry written from now on,
-       * and a permanently-null field reads as data that went missing rather
-       * than data that stopped existing. Nothing is lost for the pre-D147
-       * tickets that DO carry one: `entityId` is the ticket, and the ticket
-       * row still holds the station it was routed to.
+       * D152 — `stationId` is recorded again here, and on complete and reopen
+       * below. D147 had dropped it because every ticket cut after it belonged
+       * to no station and the key would have been null forever; with the split
+       * back it names the line that took the food, which is the question an
+       * audit trail gets asked about a bump. Null survives only for a ticket
+       * raised during the D147 window.
        */
       await this.audit.record(tenantId, {
         userId: actor.id,
         action: 'KITCHEN_TICKET_STARTED',
         entityType: 'KitchenTicket',
         entityId: ticketId,
-        metadata: { ticketNumber: updated.ticketNumber },
+        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
       });
       return updated;
     } catch (err) {
@@ -170,7 +170,7 @@ export class KitchenTicketsController {
         action: 'KITCHEN_TICKET_COMPLETED',
         entityType: 'KitchenTicket',
         entityId: ticketId,
-        metadata: { ticketNumber: updated.ticketNumber },
+        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
       });
       return updated;
     } catch (err) {
@@ -198,7 +198,7 @@ export class KitchenTicketsController {
         action: 'KITCHEN_TICKET_REOPENED',
         entityType: 'KitchenTicket',
         entityId: ticketId,
-        metadata: { ticketNumber: updated.ticketNumber },
+        metadata: { ticketNumber: updated.ticketNumber, stationId: updated.stationId },
       });
       return updated;
     } catch (err) {

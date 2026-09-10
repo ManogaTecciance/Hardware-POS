@@ -7685,6 +7685,77 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D152 — the station split comes back, on the two conditions that make it safe
+
+PO, 2026-09-10: restore the per-station split, and with it "each order grouped by
+the station that will be preparing the order"; the station is CHOSEN when a menu
+item is created; and there is a station called "Main" that is the default when a
+station cannot be decided. This supersedes D147.
+
+**D147 was right about the reason and wrong to be permanent.** Its objection was
+never to the split itself — a grill screen showing only grill work is what a
+station is for. It was that nothing dependable said which station cooked a dish:
+the wizard's multi-select started empty, sat in no validation rule and warned
+nobody, so routing ran on an accident. And the accident was destructive: an
+unlinked dish at a multi-station branch reached no ticket at all. The PO has now
+removed both halves of that objection, so the split returns.
+
+**Nothing can be dropped, and that is structural rather than promised.** There is
+no `continue`, no filter and no conditional between resolving an item's targets
+and writing its ticket rows. An item whose links give no usable station gets
+`[mainStationId]`. D67's sole-station fallback is gone with the drop it excused.
+
+**"Usable" is doing real work there, and two holes were found before it existed.**
+Both junctions are tenant-wide and neither is rewritten when a station changes,
+so a link can name a station belonging to another BRANCH, or one since ARCHIVED.
+Either left the item's station list non-empty, so Main never fired and the ticket
+was written to a station this branch's board cannot select — the chip strip lists
+only the branch's active stations, and a board pinned to a station shows nothing
+else. Ordered, billed, never seen: D147's failure through a different door. Both
+link queries now constrain `station: { branchId, isActive: true }`, so an
+unusable link leaves the item unrouted and the unrouted path already ends at
+Main. Found by an adversarial verifier, not by the change's author.
+
+**Main.** Per branch, `code: 'MAIN'`, name "Main", upserted at round-submit time
+rather than assumed, because a branch created before D152 — or one whose seed
+never ran — has no such row and a read that came back empty would have to drop
+the item or throw. `isActive` is restated on the upsert, since an archived Main
+would vanish from the strip while still receiving tickets; the NAME is not, so an
+operator's rename survives. Deliberately distinct from the demo's "Main Kitchen".
+
+One consequence to hear once: at a branch with a single station, an unlinked dish
+now creates Main rather than going to that sole station, so the chip strip appears
+the first time it happens. That follows from the no-drop rule and is not a defect.
+
+**The station is now required on a menu item**, for restaurant tenants only —
+a rule that blocked a hardware product on a field it cannot see would be worse
+than the gap it closes — and Main is preselected, so the requirement is never an
+obstacle: someone who does not care accepts Main and moves on. The wizard now
+ALWAYS writes the links, so clearing them actually clears them; it used to skip
+the PUT on an empty selection and silently leave the old links in place.
+
+**The column stays nullable.** Tickets cut during the D147 window genuinely
+belonged to no station, and inventing one for them would be a lie, so there is no
+backfill and every reader still handles null. The ribbon then carries the round
+alone; the history prints the table's own em dash; the dialog leaves the line
+unlabelled. None of them says "Main", because those tickets held every station's
+items.
+
+**Restored from the original commits rather than reinvented** — 35e94fa's ribbon
+and 6cbb36a's filter strip, comments included, adapted where the ground had
+moved. Everything gained in between survives and was mutation-proved
+individually: ae11a7d's card layout, D142b's lane counts, D142's today-only Done
+lane and its history link, D150's every-lane history.
+
+One collision needed a call. D142b puts a count on every lane chip; 6cbb36a says
+the lane counts follow the station cut. They meet on the lane the board is not
+fetching, whose count comes from the server and is branch-wide. Under a cut that
+chip now goes bare rather than promising a lane the cook cannot reach. On every
+unfiltered board all three numbers behave exactly as D142b left them.
+
+The history keeps everything D150 gave it and regains its Station column and the
+station leg of its search.
+
 ### D151 — the header loses its search bar, and the screen stops naming a counter
 
 Two PO requests on 2026-09-10, both removals of things that were taking up room

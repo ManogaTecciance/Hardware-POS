@@ -1,6 +1,6 @@
 /**
  * The kitchen board after D100 — age escalation, a kitchen-sized bump, and
- * recall.
+ * recall — and after D152, which puts the station back on it.
  *
  * Everything is pinned in pairs, because each half alone is also what a
  * broken board produces:
@@ -17,9 +17,13 @@
  *   alone still describes a row of cards whose buttons fail to line up; the
  *   provenance row is pinned by what its row does NOT contain (the timer),
  *   which is the whole of what moving it changed.
- * - D147's "no station on the card" is asserted against a fixture that still
- *   CARRIES one on the wire, so the negative has something to catch, and the
- *   pair is mutation-proved at the foot of the file.
+ * - D152's ribbon is pinned by where it sits as well as by what it says:
+ *   "the station is on the card" passes on the pre-D68 board too, where the
+ *   station was the first grey item of a truncated subtitle, so every ribbon
+ *   assertion is paired with the subtitle no longer carrying it.
+ * - The station FILTER's every half has a passing twin that describes a broken
+ *   board: a strip that is always shown, a filter that hides everything, and a
+ *   memory that never forgets.
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
@@ -27,7 +31,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '@/lib/auth';
-import type { KitchenTicketView } from '@/lib/restaurant/types';
+import type { KitchenStationView, KitchenTicketView } from '@/lib/restaurant/types';
 
 // ── boundaries ───────────────────────────────────────────────────────────────
 
@@ -60,6 +64,7 @@ const startFn = vi.fn();
 const completeFn = vi.fn();
 const reopenFn = vi.fn();
 const orderFn = vi.fn();
+const stationsFn = vi.fn();
 vi.mock('@/lib/restaurant/api', () => ({
   kitchen: {
     listTickets: (...args: unknown[]) => listFn(...args),
@@ -68,6 +73,11 @@ vi.mock('@/lib/restaurant/api', () => ({
     reopen: (...args: unknown[]) => reopenFn(...args),
     order: (...args: unknown[]) => orderFn(...args),
     laneCounts: (...args: unknown[]) => laneCountsFn(...args),
+  },
+  // D152 — the strip's list comes from the stations endpoint, never from the
+  // tickets on screen, so it is a boundary of its own.
+  kitchenStations: {
+    list: (...args: unknown[]) => stationsFn(...args),
   },
 }));
 
@@ -93,9 +103,11 @@ function ticket(overrides: Partial<KitchenTicketView> & { id: string }): Kitchen
     ticketNumber: 'KOT-000001',
     branchId: 'brn_1',
     roundId: 'rnd_1',
-    // D147 — a ticket is the whole round and is routed to no station, so
-    // every ticket cut since that decision carries none.
-    stationId: null,
+    // D152 — a ticket is one station's share of a round again, so every ticket
+    // cut since that decision names the station that cooks it. `stn_1`/'Grill'
+    // matches the single station the stations endpoint is stubbed with below.
+    stationId: 'stn_1',
+    stationName: 'Grill',
     status: 'QUEUED',
     orderNumber: 'RO-000010',
     placeLabel: 'T1 · Main',
@@ -119,33 +131,50 @@ function ticket(overrides: Partial<KitchenTicketView> & { id: string }): Kitchen
 }
 
 /**
- * D147 — a row that still CARRIES a station, exactly as an older server sent
- * it (and as every ticket cut before the decision still stores).
+ * A ticket cut during the D147 window: ONE whole round, routed to no station at
+ * all, and the column was never made required so it is still on the wire.
  *
- * The negatives in the D147 suite say the board prints no station anywhere.
- * Against a fixture with no station in it those would be VACUOUS — green on a
- * board that had simply been handed nothing to print, which is the shape D30
- * forbids. So the wire keeps the field the view type no longer declares: the
- * moment any of the card, its subtitle or the Details dialog renders a station
- * again, "Grill" is on screen and these tests go red. Proven by mutation at
- * the bottom of this file.
+ * D152 restores the split without a migration or a backfill, which is exactly
+ * why these have to be renderable: the board and the history both still carry
+ * them, and a screen that assumed the station away would blow up on the oldest
+ * rows in the table.
  */
-function withStationOnTheWire(t: KitchenTicketView, stationName = 'Grill'): KitchenTicketView {
-  return { ...t, stationId: 'stn_grill', stationName } as KitchenTicketView;
+function d147WindowTicket(
+  overrides: Partial<KitchenTicketView> & { id: string },
+): KitchenTicketView {
+  return ticket({ stationId: null, stationName: null, ...overrides });
+}
+
+function station(id: string, name: string): KitchenStationView {
+  return {
+    id,
+    branchId: 'brn_1',
+    code: name.toUpperCase().replace(/\s+/g, '_'),
+    name,
+    category: 'FOOD',
+    isActive: true,
+    createdAt: minutesAgo(60),
+    updatedAt: minutesAgo(60),
+  };
 }
 
 /**
- * Nowhere in `root` does the string `station` appear — neither a station NAME
- * the wire carried nor the "no station" warning the old dialog printed.
+ * Nowhere in `root` does the pre-D147 "no station" warning appear.
  *
- * Shared so the mutation proof at the foot of this file can be run against the
- * pre-D147 markup and shown to fail: an assertion no fixture can break is not
- * an assertion.
+ * D152 brings the station chip back but NOT that half of it: an item nobody
+ * linked to a station cooks at Main now, so a warning on the dish would
+ * describe the setup and read as a fault on the plate. This is an ABSENCE
+ * claim, so it is shared with the mutation proof at the foot of this file,
+ * where it is shown to fail against the markup it forbids — an assertion no
+ * fixture can break is not an assertion (D30).
  */
-function expectNoStationAnywhere(root: HTMLElement, name = 'Grill') {
-  expect(root.textContent ?? '').not.toContain(name);
-  expect(root.textContent ?? '').not.toMatch(/station/i);
+function expectNoUnroutedWarning(root: HTMLElement) {
+  expect(root.textContent ?? '').not.toMatch(/no station/i);
 }
+
+/** The text of one filter chip, whitespace-normalised, count included. */
+const chipText = (name: RegExp) =>
+  screen.getByRole('button', { name }).textContent?.replace(/\s+/g, ' ').trim() ?? '';
 
 /** Mutable rows, so a verb can empty them and the reload stays honest. */
 let outstandingRows: KitchenTicketView[] = [];
@@ -163,7 +192,15 @@ beforeEach(() => {
   completeFn.mockReset();
   reopenFn.mockReset();
   orderFn.mockReset();
+  stationsFn.mockReset();
   chime.mockReset();
+  /*
+   * D152 — ONE station by default, so the station strip stays hidden and every
+   * test written before the filter existed still describes the board it meant
+   * to. The filter's own tests opt into more.
+   */
+  stationsFn.mockImplementation(() => Promise.resolve([station('stn_1', 'Grill')]));
+  window.localStorage.clear();
   orderFn.mockImplementation(() => new Promise(() => undefined));
   /*
    * D142 — the Done lane asks for `COMPLETED_TODAY`, not `COMPLETED`. Keyed on
@@ -392,8 +429,7 @@ describe('the Details dialog', () => {
           modifierNames: [],
           specialInstructions: null,
           roundNumber: 1,
-          // Still on the wire, unread since D147 — left here so this test's
-          // dialog is also handed a station it must not print.
+          // D152 — read again, and pinned by the dialog's own suite below.
           stationName: 'Grill',
         },
       ],
@@ -599,7 +635,9 @@ describe('card layout', () => {
 
     const title = screen.getByText('T1');
     const timer = screen.getByText('2 min');
-    const provenance = screen.getByText('RO-000010 · round 1 · Nimal');
+    // D152 — the order and the waiter. The station and the round are on the
+    // ribbon above, which the station-ribbon suite pins.
+    const provenance = screen.getByText('RO-000010 · Nimal');
     const headerRow = title.parentElement as HTMLElement;
 
     // Positive: the place shares its row with the timer, which is the pair
@@ -650,9 +688,6 @@ describe('card layout', () => {
  * while leaving To make empty from Done is the same bug facing the other way.
  */
 describe('the lane chips (D142b)', () => {
-  const chipText = (name: RegExp) =>
-    screen.getByRole('button', { name }).textContent?.replace(/\s+/g, ' ') ?? '';
-
   it('shows all three counts from the outstanding lanes', async () => {
     outstandingRows = [
       ticket({ id: 'tk_1' }),
@@ -777,157 +812,254 @@ describe('the Done lane is today’s (D142)', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+
 /*
- * D147 — one ticket per round, and nothing on it names a station.
+ * D152 — the station ribbon, restored from 35e94fa.
  *
- * A ticket used to be one STATION's share of a round, which split a single
- * send across several cards and — because there is no reachable screen for
- * linking a dish to a station, and this branch has four — silently dropped
- * every unlinked dish before it ever reached the board. The round is the unit
- * now: one card, every item on it, no station anywhere.
+ * A station-split round puts the SAME table on two cards, and the station is
+ * the only thing telling a cook which of them is theirs. D68 put it in the
+ * subtitle, where it was the first grey item of a truncated run: present and
+ * unreadable, which made the split look like a bug rather than the routing
+ * working. It rides a ribbon across the top of the card instead, with the round
+ * pinned at the far end.
  *
- * Both halves, always. The positive says what the card DOES print (the exact
- * subtitle, every dish of the round); the negative says the station the wire
- * still carries is not on screen. Either alone passes on a broken board: a
- * card that printed nothing at all would satisfy the negative, and a card that
- * kept the station would satisfy the positive.
+ * Pinned in pairs, like everything else here, because each half alone also
+ * describes a broken card:
+ *
+ * - "Grill is on the card" passes on the D68 board too. The ribbon assertion is
+ *   therefore paired with the subtitle no longer carrying it, which is what
+ *   actually changed.
+ * - The split-order case is the reason the ribbon exists: one table, two
+ *   stations, two cards. Asserting one station name would pass on a board that
+ *   rendered a single card and dropped the other.
+ * - The separator pair guards the join: dropping the station from the front of
+ *   the dotted run is exactly what a prefix-per-part build would turn into a
+ *   leading " · ".
  */
-describe('one ticket per round (D147)', () => {
-  it('names the order, the round and the waiter — and no station', async () => {
-    outstandingRows = [withStationOnTheWire(ticket({ id: 'tk_1' }))];
-    const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+describe('station ribbon (D152)', () => {
+  it('promotes the station out of the subtitle into a ribbon atop the card', async () => {
+    outstandingRows = [ticket({ id: 'tk_st', placeLabel: 'T1', stationName: 'Grill' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
-    await waitFor(() => expect(screen.getByText('T1 · Main')).toBeTruthy());
-    // POSITIVE — the whole line under the place, exactly as it now reads.
-    expect(screen.getByText('RO-000010 · round 1 · Nimal')).toBeTruthy();
-    // NEGATIVE — against a row that is still handing the board a station.
-    expectNoStationAnywhere(container);
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    // Positive: the station is its own ribbon, not loose text.
+    const station = screen.getByText('Grill');
+    const ribbon = station.parentElement as HTMLElement;
+    expect(ribbon.className).toContain('bg-brand-50');
+
+    // Negative: the subtitle it used to lead is still there, without it.
+    const subtitle = screen.getByText('RO-000010 · Nimal');
+    expect(subtitle.textContent).not.toContain('Grill');
+
+    /*
+     * Placement, pinned three ways. "The station is on the card somewhere"
+     * passes with it back in the grey run it came from, so pin the ribbon to
+     * the top: it is the card's FIRST child, it precedes the place, and the
+     * place is not inside it. Any one of these alone still allows the old
+     * position.
+     */
+    const title = screen.getByText('T1');
+    const card = title.closest('.rounded-2xl') as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.firstElementChild).toBe(ribbon);
+    expect(station.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ribbon.contains(title)).toBe(false);
+    // The ribbon only sits flush inside the card's rounded corners because the
+    // card clips it — without this it reads as a stripe laid over the corner.
+    expect(card.className).toContain('overflow-hidden');
+    // ae11a7d's full-height column survives the ribbon sitting above it.
+    expect(card.className).toContain('h-full');
+    expect(card.className).toContain('flex-col');
   });
 
-  it('opens the subtitle with the order, never with a stray separator', async () => {
-    // The station used to lead this line, so every ` · ` after it was a
-    // PREFIX. Removing the first element without removing its separator would
-    // read "· round 2" on every card — invisible to a test that only asserts
-    // the round is mentioned, which is why the line is pinned whole.
+  it('tells two cards of one station-split order apart', async () => {
+    // The same table, the same round, routed to two stations — the case that
+    // made the grey subtitle insufficient, and the case D147 removed.
     outstandingRows = [
-      withStationOnTheWire(
-        ticket({ id: 'tk_1', orderNumber: null, roundNumber: 2, waiterName: null }),
-      ),
+      ticket({ id: 'tk_a', placeLabel: 'T4', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+      ticket({ id: 'tk_b', placeLabel: 'T4', stationId: 'stn_1', stationName: 'Grill' }),
     ];
-    const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
-    await waitFor(() => expect(screen.getByText('T1 · Main')).toBeTruthy());
-    const subtitle = screen.getByText(/round 2/);
-    expect(subtitle.textContent).toBe('round 2');
-    expectNoStationAnywhere(container);
+    await waitFor(() => expect(screen.getAllByText('T4')).toHaveLength(2));
+    expect(screen.getByText('Main Kitchen')).toBeTruthy();
+    expect(screen.getByText('Grill')).toBeTruthy();
+    // Each card carries ONE station's band, not both: the split is only useful
+    // if a cook can take a card as entirely theirs.
+    const cards = screen.getAllByText('T4').map((el) => el.closest('.rounded-2xl') as HTMLElement);
+    expect(within(cards[0]!).queryByText('Grill')).toBeNull();
+    expect(within(cards[1]!).queryByText('Main Kitchen')).toBeNull();
   });
 
-  it('joins every surviving part on a full card, and starts a thin one at its first', async () => {
-    // The join, seen from both ends on one board: the full ticket keeps the
-    // whole dotted run, and the ticket missing its first part starts at the
-    // next survivor rather than at " · ".
+  it('never leaves a dangling separator when the subtitle loses a part', async () => {
     outstandingRows = [
-      withStationOnTheWire(ticket({ id: 'tk_full', placeLabel: 'T1' })),
-      withStationOnTheWire(ticket({ id: 'tk_thin', placeLabel: 'T2', orderNumber: null })),
+      ticket({ id: 'tk_full', placeLabel: 'T1' }),
+      ticket({ id: 'tk_thin', placeLabel: 'T2', orderNumber: null }),
     ];
-    const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
     await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
 
     // Positive: a full ticket still joins every survivor.
-    expect(screen.getByText('RO-000010 · round 1 · Nimal')).toBeTruthy();
-    // Negative: a thin one carries no leading separator.
-    const thin = screen.getByText('round 1 · Nimal');
-    expect(thin.textContent).toBe('round 1 · Nimal');
-    expectNoStationAnywhere(container);
+    expect(screen.getByText('RO-000010 · Nimal')).toBeTruthy();
+    // Negative: a thin one starts at its first surviving part, not at " · ".
+    const thin = screen.getByText('Nimal');
+    expect(thin.textContent).toBe('Nimal');
   });
 
-  it('leaves the round out rather than printing a bare "round null"', async () => {
+  it('carries the round at the far end of the ribbon, opposite the station', async () => {
+    outstandingRows = [ticket({ id: 'tk_r', placeLabel: 'T1', roundNumber: 2 })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    // Positive: both ends of the ONE ribbon, station first.
+    const station = screen.getByText('Grill');
+    const round = screen.getByText('Round 2');
+    expect(station.parentElement).toBe(round.parentElement);
+    expect(station.compareDocumentPosition(round) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The station is the half that gives; a round number never needs to.
+    expect(station.className).toContain('truncate');
+    expect(round.className).toContain('shrink-0');
+
+    // Negative: the round MOVED to the ribbon rather than being shown twice.
+    expect(screen.getByText('RO-000010 · Nimal').textContent).not.toContain('Round');
+  });
+
+  it('leaves the round half empty rather than printing a bare "Round"', async () => {
+    // A ticket predating rounds. The station half must still render, which is
+    // what separates "no round" from "no ribbon".
+    outstandingRows = [ticket({ id: 'tk_nr', placeLabel: 'T1', roundNumber: null })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    expect(screen.getByText('Grill')).toBeTruthy();
+    expect(screen.queryByText(/Round/)).toBeNull();
+  });
+
+  it('keeps the band for a D147-window ticket, and names no station on it', async () => {
     /*
-     * Their branch pinned this and it very nearly went out with the ribbon
-     * (35e94fa: "The round is null-guarded, or a ticket predating rounds
-     * prints a bare 'Round'"). The GUARD moved into the join above when the
-     * ribbon that carried the round was removed, so the claim outlived the
-     * test that proved it — deleting the guard left this whole spec green.
-     *
-     * A ticket predating rounds is the case: `roundNumber` is null on the
-     * wire, and an unguarded template would put "round null" on the pass.
+     * D152 restores the split with no migration and no backfill, so a ticket
+     * cut during the D147 window is still on the board carrying no station at
+     * all. The band stays for its round — inventing "Main" for a ticket that
+     * actually holds every station's items would be a worse answer than an
+     * empty half — and it must not print the word "null" doing it.
      */
     outstandingRows = [
-      withStationOnTheWire(ticket({ id: 'tk_noround', placeLabel: 'T9', roundNumber: null })),
+      d147WindowTicket({ id: 'tk_win', placeLabel: 'T-OLD', roundNumber: 3 }),
+      ticket({ id: 'tk_new', placeLabel: 'T-NEW' }),
     ];
     const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
-    await waitFor(() => expect(screen.getByText('T9')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('T-OLD')).toBeTruthy());
 
-    // POSITIVE — the other two parts still join, which is what separates
-    // "this ticket has no round" from "this ticket has no subtitle".
-    const line = screen.getByText('RO-000010 · Nimal');
-    expect(line.textContent).toBe('RO-000010 · Nimal');
-    // NEGATIVE — the word never reaches the card at all, in any casing.
-    expect(screen.queryByText(/round/i)).toBeNull();
-    expectNoStationAnywhere(container);
+    // Positive: the band is there and it is the round's.
+    const round = screen.getByText('Round 3');
+    const ribbon = round.parentElement as HTMLElement;
+    expect(ribbon.className).toContain('bg-brand-50');
+    // Negative: nothing else is on it — no name, and no rendered `null`.
+    expect(ribbon.textContent).toBe('Round 3');
+    expect(container.textContent ?? '').not.toContain('null');
+
+    // Positive control, same board: a D152 ticket beside it DOES name its
+    // station, so the empty half above is this ticket's own doing.
+    expect(screen.getByText('Grill')).toBeTruthy();
   });
 
-  it('puts every dish of the round on ONE card, whichever station used to cook it', async () => {
+  it('drops the band entirely when there is neither a station nor a round', async () => {
+    // The one card with nothing to put on a ribbon: a coloured empty stripe is
+    // furniture, and worse, it reads as a station whose name failed to load.
+    outstandingRows = [
+      d147WindowTicket({ id: 'tk_bare', placeLabel: 'T-BARE', roundNumber: null }),
+    ];
+    const bare = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-BARE')).toBeTruthy());
+    // Positive control: the card itself rendered, dish and all.
+    expect(screen.getByText(/1× Kottu/)).toBeTruthy();
+    expect(bare.container.querySelector('.bg-brand-50')).toBeNull();
+    cleanup();
+
+    // …and the pair: an ordinary ticket on the same board DOES get one, so the
+    // absence above is the guard and not a ribbon that never renders.
+    outstandingRows = [ticket({ id: 'tk_ok', placeLabel: 'T-OK' })];
+    const ok = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-OK')).toBeTruthy());
+    expect(ok.container.querySelector('.bg-brand-50')).toBeTruthy();
+  });
+
+  it('puts every dish of THIS station’s share of the round on its one card', async () => {
     /*
      * RO-000026 in the dev database: one round of fifteen lines that became
      * KOT-000027 (Main Kitchen) and KOT-000028 (Grill — Chicken Wings and
-     * Grilled Seer Fish). Those three dishes now arrive on one ticket, and the
-     * card has to show all three: the pass plates the round, not a station's
-     * corner of it.
+     * Grilled Seer Fish). D152 splits it that way again, and the grill's card
+     * has to carry BOTH of its dishes: the split is per station, never per
+     * dish, or a cook is reading two cards for one pan.
      */
     outstandingRows = [
-      withStationOnTheWire(
-        ticket({
-          id: 'tk_round',
-          items: [
-            {
-              id: 'i1',
-              menuItemName: 'Chicken Wings',
-              variantName: null,
-              quantity: '2.000',
-              modifierNames: [],
-              specialInstructions: null,
-            },
-            {
-              id: 'i2',
-              menuItemName: 'Grilled Seer Fish',
-              variantName: null,
-              quantity: '1.000',
-              modifierNames: [],
-              specialInstructions: null,
-            },
-            {
-              id: 'i3',
-              menuItemName: 'Kottu',
-              variantName: null,
-              quantity: '3.000',
-              modifierNames: [],
-              specialInstructions: null,
-            },
-          ],
-        }),
-        // Not the default 'Grill' here: "Grilled Seer Fish" CONTAINS it, and a
-        // negative that a dish name can trip is a false alarm waiting to
-        // happen. The wire carries the other half of the real split instead.
-        'Main Kitchen',
-      ),
+      ticket({
+        id: 'tk_grill',
+        placeLabel: 'T1 · Main',
+        stationId: 'stn_1',
+        stationName: 'Grill',
+        items: [
+          {
+            id: 'i1',
+            menuItemName: 'Chicken Wings',
+            variantName: null,
+            quantity: '2.000',
+            modifierNames: [],
+            specialInstructions: null,
+          },
+          {
+            id: 'i2',
+            menuItemName: 'Grilled Seer Fish',
+            variantName: null,
+            quantity: '1.000',
+            modifierNames: [],
+            specialInstructions: null,
+          },
+        ],
+      }),
+      ticket({
+        id: 'tk_main',
+        placeLabel: 'T1 · Main',
+        stationId: 'stn_2',
+        stationName: 'Main Kitchen',
+        items: [
+          {
+            id: 'i3',
+            menuItemName: 'Kottu',
+            variantName: null,
+            quantity: '3.000',
+            modifierNames: [],
+            specialInstructions: null,
+          },
+        ],
+      }),
     ];
-    const { container } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
-    await waitFor(() => expect(screen.getByText('T1 · Main')).toBeTruthy());
-    // ONE card — the split is what D147 removed, so the count is the claim.
-    expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(1);
-    const card = screen.getByText('T1 · Main').closest('.rounded-2xl') as HTMLElement;
-    expect(within(card).getByText(/2× Chicken Wings/)).toBeTruthy();
-    expect(within(card).getByText(/1× Grilled Seer Fish/)).toBeTruthy();
-    expect(within(card).getByText(/3× Kottu/)).toBeTruthy();
-    expectNoStationAnywhere(container, 'Main Kitchen');
+    await waitFor(() => expect(screen.getAllByText('T1 · Main')).toHaveLength(2));
+    // Two cards, one per station — the split D147 removed and D152 restores.
+    expect(screen.getAllByRole('button', { name: /details/i })).toHaveLength(2);
+
+    const grillCard = screen.getByText('Grill').closest('.rounded-2xl') as HTMLElement;
+    // POSITIVE — the station's whole share, both dishes, on the one card.
+    expect(within(grillCard).getByText(/2× Chicken Wings/)).toBeTruthy();
+    expect(within(grillCard).getByText(/1× Grilled Seer Fish/)).toBeTruthy();
+    // NEGATIVE — and not the other station's, which is the point of splitting.
+    expect(within(grillCard).queryByText(/3× Kottu/)).toBeNull();
+
+    const mainCard = screen.getByText('Main Kitchen').closest('.rounded-2xl') as HTMLElement;
+    expect(within(mainCard).getByText(/3× Kottu/)).toBeTruthy();
+    expect(within(mainCard).queryByText(/2× Chicken Wings/)).toBeNull();
   });
 
-  it('the Details dialog lists the order by round, with no station chip and no "no station" warning', async () => {
-    outstandingRows = [withStationOnTheWire(ticket({ id: 'tk_1', placeLabel: 'T7' }))];
+  it('the Details dialog names the station on each item line, and flags none as unrouted', async () => {
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T7' })];
     orderFn.mockImplementation(() =>
       Promise.resolve({
         ticketId: 'tk_1',
@@ -945,9 +1077,9 @@ describe('one ticket per round (D147)', () => {
             modifierNames: [],
             specialInstructions: null,
             roundNumber: 1,
-            // Still on the wire, and deliberately so: the chip's absence has
-            // to be the component's doing, not the fixture's.
-            stationName: 'Grill',
+            // The card shows only the grill's share; the dialog is where the
+            // pass sees that the main kitchen has a Kottu on the same table.
+            stationName: 'Main Kitchen',
           },
           {
             id: 'oi_2',
@@ -957,9 +1089,9 @@ describe('one ticket per round (D147)', () => {
             modifierNames: [],
             specialInstructions: null,
             roundNumber: 2,
-            // The other half of the old chip: an unlinked dish used to be
-            // labelled "no station" in warning colours, which described the
-            // setup and read as a fault on the plate.
+            // A dish the join could not name. Under D152 it cooks at Main
+            // rather than nowhere, so the line is simply left unlabelled — the
+            // pre-D147 "no station" warning does NOT come back with the chip.
             stationName: null,
           },
         ],
@@ -971,13 +1103,423 @@ describe('one ticket per round (D147)', () => {
     fireEvent.click(screen.getByRole('button', { name: /details/i }));
 
     const dialog = await screen.findByRole('dialog');
-    // POSITIVE — the rounds and their dishes are what the dialog is for.
+    // POSITIVE — the rounds, their dishes, and the station on the line.
     await waitFor(() => expect(within(dialog).getByText('Round 1')).toBeTruthy());
     expect(within(dialog).getByText('Round 2')).toBeTruthy();
     expect(within(dialog).getByText(/1× Kottu/)).toBeTruthy();
     expect(within(dialog).getByText(/1× Watalappan/)).toBeTruthy();
-    // NEGATIVE — neither state of the chip survives.
-    expectNoStationAnywhere(dialog);
+    expect(within(dialog).getByText('Main Kitchen')).toBeTruthy();
+    // NEGATIVE — the warning half of the old chip stays gone.
+    expectNoUnroutedWarning(dialog);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/*
+ * D152 — the station filter, restored from 6cbb36a.
+ *
+ * A station-split order already puts one table on several cards. On a wall
+ * screen mounted at the grill, most of the board is somebody else's work.
+ *
+ * Pinned in pairs throughout, because every half here has a passing twin that
+ * describes a broken board: a strip that is always shown, a filter that hides
+ * everything, and a memory that never forgets.
+ */
+describe('the station filter (D152)', () => {
+  const twoStations = () => [station('stn_1', 'Grill'), station('stn_2', 'Main Kitchen')];
+
+  it('offers no strip when the branch has a single station', async () => {
+    // One station is no routing decision, so the strip would be furniture.
+    stationsFn.mockImplementation(() => Promise.resolve([station('stn_1', 'Grill')]));
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /All stations/ })).toBeNull();
+  });
+
+  it('offers the strip once there is a choice to make', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: /All stations/ })).toBeTruthy());
+    expect(screen.getByRole('button', { name: /Main Kitchen/ })).toBeTruthy();
+  });
+
+  it('lists the stations the endpoint gave it, not the ones the tickets happen to name', async () => {
+    /*
+     * Deriving the strip from the tickets on screen is less code, but a chip
+     * that vanishes when its last ticket is bumped and returns when the next
+     * lands is unusable on a screen nobody is holding.
+     */
+    stationsFn.mockImplementation(() =>
+      Promise.resolve([...twoStations(), station('stn_3', 'Pastry')]),
+    );
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T1', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    // POSITIVE — an idle station keeps its chip, reading zero.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pastry 0' })).toBeTruthy());
+    /*
+     * NEGATIVE — and the strip is the endpoint's list, not the tickets'. Only
+     * Grill has a ticket here, so a board deriving its chips from what is on
+     * screen would show Grill alone; the three names below are what proves the
+     * chips came from the fetch.
+     *
+     * This assertion used to name "Pantry", which appears nowhere in this
+     * test's fixture — it passed because the thing was never there, which no
+     * mutation of the component could change. That is the vacuity D30 forbids.
+     * The archived case it was copied from lives in the next test, where the
+     * fixture really does contain Pantry.
+     */
+    /*
+     * The EXACT strip, as a set. Only Grill has a ticket, so a board deriving
+     * its chips from what is on screen would show "All stations" and Grill and
+     * stop — the two idle chips are the whole proof that the list came from
+     * the endpoint. An exact set says that and also says nothing extra crept
+     * in, which a bag of positives cannot.
+     *
+     * The negative here used to name "Pantry", which this fixture never
+     * contained, so no change to the component could have failed it — the
+     * vacuity D30 forbids. The archived-station case it was copied from is the
+     * next test, where Pantry really is in the list.
+     */
+    const stationChips = screen
+      .getAllByRole('button')
+      .map((b) => b.textContent ?? '')
+      .filter((n) => /All stations|Grill|Main Kitchen|Pastry/.test(n));
+    // `textContent` runs the name and the count together; the accessible name
+    // spaces them. Either is fine to assert on, as long as the set is exact.
+    expect(stationChips.sort()).toEqual(['All stations1', 'Grill1', 'Main Kitchen0', 'Pastry0']);
+    expect(stationsFn).toHaveBeenCalledWith(SESSION, 'brn_1');
+  });
+
+  it('leaves an archived station off the strip even while its tickets are on the board', async () => {
+    // The endpoint answers with archived rows too when asked; the board asks
+    // for the live ones and drops anything inactive that reaches it anyway.
+    stationsFn.mockImplementation(() =>
+      Promise.resolve([...twoStations(), { ...station('stn_old', 'Pantry'), isActive: false }]),
+    );
+    outstandingRows = [
+      ticket({ id: 'tk_o', placeLabel: 'T-OLD', stationId: 'stn_old', stationName: 'Pantry' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // POSITIVE — the ticket is still cooked, so it is still on the board.
+    await waitFor(() => expect(screen.getByText('T-OLD')).toBeTruthy());
+    // NEGATIVE — but the retired station is not a filter anyone can pick.
+    expect(screen.queryByRole('button', { name: /Pantry/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /All stations/ })).toBeTruthy();
+  });
+
+  it('cuts the board to one station and leaves the other tickets out', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // Positive control: unfiltered, the board carries both.
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+    expect(screen.getByText('T-MAIN')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+
+    // Positive: the chosen station survives. Negative: the other one goes.
+    await waitFor(() => expect(screen.queryByText('T-GRILL')).toBeNull());
+    expect(screen.getByText('T-MAIN')).toBeTruthy();
+  });
+
+  it('never lets a stationless ticket fall off every view', async () => {
+    /*
+     * D152's hard rule reaches the screen too. A D147-window ticket belongs to
+     * no station, so it cannot be claimed by a station chip — but it must stay
+     * visible SOMEWHERE, and that somewhere is "All stations".
+     */
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      d147WindowTicket({ id: 'tk_win', placeLabel: 'T-OLD' }),
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // POSITIVE — unfiltered, it is on the board and counted with everything.
+    await waitFor(() => expect(screen.getByText('T-OLD')).toBeTruthy());
+    expect(chipText(/All stations/)).toContain('2');
+
+    // NEGATIVE — and it is not silently claimed by whichever station is picked.
+    fireEvent.click(screen.getByRole('button', { name: /^Grill/ }));
+    await waitFor(() => expect(screen.queryByText('T-OLD')).toBeNull());
+    expect(screen.getByText('T-GRILL')).toBeTruthy();
+
+    // …and back out of the cut, it is where it was.
+    fireEvent.click(screen.getByRole('button', { name: /All stations/ }));
+    await waitFor(() => expect(screen.getByText('T-OLD')).toBeTruthy());
+  });
+
+  it('counts the lane per station, not the whole board', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g1', placeLabel: 'T1', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_g2', placeLabel: 'T2', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m1', placeLabel: 'T3', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /All stations/ })).toBeTruthy());
+    // Each chip counts its own station; All counts every one of them.
+    expect(screen.getByRole('button', { name: /All stations 3/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Grill 2/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Main Kitchen 1/ })).toBeTruthy();
+
+    // And the lane strip follows the cut, or it would advertise work the
+    // board is not showing.
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen 1/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /To make 1/ })).toBeTruthy());
+
+    /*
+     * The STATION chips do NOT follow the cut, and this is where that is
+     * pinned. They answer "where is the work?", so each must keep counting its
+     * own station across the whole lane — a strip that counted only the
+     * selection would read "Grill 0" to a cook standing at Main Kitchen while
+     * the grill holds two, which is the one thing the strip exists to prevent.
+     *
+     * Asserted AFTER the click on purpose: before it, scoped and unscoped
+     * agree, so the same assertions above cannot tell the two apart.
+     */
+    expect(screen.getByRole('button', { name: /^Grill 2/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /All stations 3/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Main Kitchen 1/ })).toBeTruthy();
+  });
+
+  it('withholds the branch-wide lane count the cut makes untrue, and keeps the ones it can', async () => {
+    /*
+     * D142b's other-lane numbers come from the server, which counts the BRANCH
+     * — it knows nothing of the station this screen was mounted at. Under a cut
+     * it would promise a lane the cook cannot reach, so the chip goes bare
+     * rather than lying, on exactly the reasoning the lane counts follow the
+     * cut at all. Both halves: the countable lanes must still carry numbers, or
+     * this would pass on a board that had simply lost its chips.
+     */
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    laneCountsFn.mockResolvedValue({ toMake: 2, preparing: 0, doneToday: 7 });
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // Unfiltered, D142b is untouched: Done carries the server's number.
+    // Matched on the ACCESSIBLE NAME, which is the whole chip — label and
+    // count — so "Done 7" cannot be satisfied by a chip that lost its number.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 7' })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+
+    // POSITIVE — the lanes this board fetches still count, cut to the station.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'To make 1' })).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Preparing 0' })).toBeTruthy();
+    // NEGATIVE — and the branch-wide number is withheld rather than promising
+    // seven cards on a lane that will show at most this station's share.
+    expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Done \d/ })).toBeNull();
+  });
+
+  it('says which station is empty rather than looking like an empty kitchen', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T1', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+
+    // Positive: the station is named, so a forgotten filter is visible...
+    await waitFor(() => expect(screen.getByText(/Nothing for Main Kitchen/)).toBeTruthy());
+    // ...and there is a way back out of it.
+    fireEvent.click(screen.getByRole('button', { name: /Show all stations/ }));
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+  });
+
+  it('still points a filtered, empty Done lane at the history (D142)', async () => {
+    // D142's mitigation for cutting the lane to today is the way out of it, and
+    // the station cut must not swallow that: on a filtered board "nothing here"
+    // would otherwise read as "nothing was ever cooked".
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    doneRows = [ticket({ id: 'tk_d', placeLabel: 'T9', status: 'COMPLETED', stationId: 'stn_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Main Kitchen/ })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done/ }));
+
+    // POSITIVE — the station is named…
+    await waitFor(() => expect(screen.getByText(/Nothing for Main Kitchen/)).toBeTruthy());
+    // …and D142's pointer at everything older is still on the card.
+    expect(screen.getByText(/Earlier tickets are in Ticket history/)).toBeTruthy();
+  });
+
+  it('remembers the station across a remount, per branch', async () => {
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    const first = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+    await waitFor(() => expect(screen.queryByText('T-GRILL')).toBeNull());
+    first.unmount();
+
+    // Positive: the same branch comes back on the station it was left on.
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-MAIN')).toBeTruthy());
+    expect(screen.queryByText('T-GRILL')).toBeNull();
+    cleanup();
+
+    // Negative: a DIFFERENT branch is not dragged along with it.
+    render(<KitchenBoard session={SESSION} branchId="brn_2" />);
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+  });
+
+  it('drops a remembered station that no longer exists, and keeps one that does', async () => {
+    // The screen was left on a station that has since been archived. Rather
+    // than filtering to nothing for ever with no clue why, the selection goes.
+    window.localStorage.setItem('kitchen.stationFilter.brn_1', 'stn_gone');
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // POSITIVE — the board comes back whole.
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+    expect(screen.getByText('T-MAIN')).toBeTruthy();
+    cleanup();
+
+    // NEGATIVE — and a remembered station that IS still live is left alone, so
+    // the clearing above is the archived check and not a memory that never
+    // survives a mount.
+    window.localStorage.setItem('kitchen.stationFilter.brn_1', 'stn_2');
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-MAIN')).toBeTruthy());
+    expect(screen.queryByText('T-GRILL')).toBeNull();
+  });
+
+  it('does not clear a remembered station just because the list failed to arrive', async () => {
+    /*
+     * An empty list is also what a failed fetch looks like. Clearing on it
+     * would throw away a deliberate choice every time the endpoint blinked, so
+     * the archived check waits for a list that actually arrived.
+     */
+    window.localStorage.setItem('kitchen.stationFilter.brn_1', 'stn_2');
+    stationsFn.mockImplementation(() => Promise.reject(new Error('503')));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // The cut the cook chose is still in force…
+    await waitFor(() => expect(screen.getByText('T-MAIN')).toBeTruthy());
+    expect(screen.queryByText('T-GRILL')).toBeNull();
+    // …and there is no strip, because the board never learned what to offer.
+    expect(screen.queryByRole('button', { name: /All stations/ })).toBeNull();
+  });
+
+  it('keeps the board when the station list cannot be fetched', async () => {
+    // The filter is a convenience; the board is the job.
+    stationsFn.mockImplementation(() => Promise.reject(new Error('403')));
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /All stations/ })).toBeNull();
+    expect(screen.queryByText(/Failed to load kitchen tickets/)).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/*
+ * The chime, once a station is chosen (D152).
+ *
+ * Both halves in one test on purpose. "It does not ring for another station"
+ * passes on a board whose chime is simply broken, so the same filtered screen
+ * must be shown ringing for its own arrival immediately afterwards.
+ */
+describe('the chime under a station filter (D152)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('hears its own station and stays deaf to the others', async () => {
+    stationsFn.mockImplementation(() =>
+      Promise.resolve([station('stn_1', 'Grill'), station('stn_2', 'Main Kitchen')]),
+    );
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /^Grill/ }));
+    // Let the station switch re-baseline before anything arrives.
+    await vi.advanceTimersByTimeAsync(5000);
+    chime.mockReset();
+
+    // Negative: a dessert landing on another station is not this screen's work.
+    outstandingRows = [
+      ...outstandingRows,
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(chime).not.toHaveBeenCalled();
+
+    // Positive: its own station still rings, so the silence above is a filter
+    // and not a broken chime.
+    outstandingRows = [
+      ...outstandingRows,
+      ticket({ id: 'tk_g2', placeLabel: 'T-GRILL-2', stationId: 'stn_1', stationName: 'Grill' }),
+    ];
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(chime).toHaveBeenCalled();
+  });
+
+  it('re-baselines on a station switch instead of ringing for the reveal', async () => {
+    stationsFn.mockImplementation(() =>
+      Promise.resolve([station('stn_1', 'Grill'), station('stn_2', 'Main Kitchen')]),
+    );
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T-GRILL')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /^Grill/ }));
+    await waitFor(() => expect(screen.queryByText('T-MAIN')).toBeNull());
+    chime.mockReset();
+
+    // Widening the view reveals a ticket this screen has never counted. That
+    // is a change of view, not an arrival, and must not ring.
+    fireEvent.click(screen.getByRole('button', { name: /All stations/ }));
+    await waitFor(() => expect(screen.getByText('T-MAIN')).toBeTruthy());
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(chime).not.toHaveBeenCalled();
   });
 });
 
@@ -986,69 +1528,91 @@ describe('one ticket per round (D147)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /*
- * The D147 negatives above are absence claims, and an absence claim is the
- * easiest kind of test to leave vacuous. Two things are shown here:
+ * `expectNoUnroutedWarning` is the one blanket ABSENCE claim left in this file
+ * after D152 put the station back on screen, and an absence claim is the
+ * easiest kind of test to leave vacuous. It is shown below to fail against the
+ * exact markup it forbids, rendered verbatim.
  *
- * 1. `expectNoStationAnywhere` genuinely fails on the markup this slice
- *    removed — the pre-D147 subtitle and the pre-D147 station chip, rendered
- *    verbatim below.
- * 2. `withStationOnTheWire` really does put a station in front of the
- *    component, so the assertion is looking at a fixture that COULD break it.
+ * Beyond it, the real components were mutated on a scratch copy taken outside
+ * the repo and this suite re-run against each mutation; every one went red
+ * where it should and green again on restore. What each killed:
  *
- * Beyond these, the real components were mutated on a scratch copy taken
- * outside the repo and this suite re-run against each mutation; every one went
- * red where it should and green again on restore. What each killed:
- *
- * - The station back at the head of the provenance line (as it read before
- *   D147) — all four D147 card negatives.
- * - The station chip back on ticket-order-dialog.tsx's item lines — the D147
- *   dialog negative. Both halves of the old chip come back together, so the
- *   "no station" warning is covered with the name.
- * - `h-full` off the Card — "pins the actions to the bottom". Separately,
- *   `mt-auto` off the actions block — the SAME one test, which is why the
- *   pair is asserted together: either mutation alone still lines the cards up
- *   wrong, and either assertion alone would miss one of them.
- * - The provenance line moved back inside the header row beside the timer —
- *   "gives the provenance line a row of its own".
- * - `shrink-0` off the completion time, letting it truncate with the name —
- *   "keeps the ticket number and Details on one line".
- * - Every chip reading the SERVER count, the fetched lanes included — "moves
- *   the active lane's chip on a bump" (D142b's optimistic half). Dropping the
- *   server counts entirely, back to counting only the open lane, killed all
- *   four chip tests.
+ * - The ribbon demoted below the title, inside CardContent — "promotes the
+ *   station out of the subtitle into a ribbon atop the card" (the
+ *   `firstElementChild` half).
+ * - The ribbon's two ends swapped, round first — "carries the round at the far
+ *   end of the ribbon".
+ * - The round's null guard dropped, printing a bare "Round" — "leaves the round
+ *   half empty".
+ * - The station put back at the head of the provenance line, as D68 had it —
+ *   "promotes the station…" (the subtitle half) and "carries the round…".
+ * - `overflow-hidden` off the Card — "promotes the station…". Separately,
+ *   `h-full` off the Card and `mt-auto` off the actions each fail "pins the
+ *   actions to the bottom", which is why that pair is asserted together.
+ * - `hasRibbon` forced true — "drops the band entirely when there is neither a
+ *   station nor a round"; forced false — the six ribbon tests plus its pair.
+ * - The station chip left off the dialog's item lines — "the Details dialog
+ *   names the station on each item line".
+ * - The dialog's null branch printing the pre-D147 "no station" warning again —
+ *   the same test's negative half.
+ * - The station cut never applied (`scoped` = `tickets`) — "cuts the board to
+ *   one station", "counts the lane per station", "never lets a stationless
+ *   ticket fall off every view", "says which station is empty" and both
+ *   remembered-station tests.
+ * - The strip shown for a single station (`stations.length > 0`) — "offers no
+ *   strip when the branch has a single station".
+ * - `isActive` no longer filtered off the station list — "leaves an archived
+ *   station off the strip".
+ * - The choice never persisted (`selectStation` without the localStorage
+ *   write) — "remembers the station across a remount".
+ * - The chime ignoring the station (`heard` = `next`) — "hears its own station
+ *   and stays deaf to the others"; the station dropped from the baseline key —
+ *   "re-baselines on a station switch".
+ * - The archived cleanup running before the list arrives (the
+ *   `stations.length === 0` guard removed) — "does not clear a remembered
+ *   station just because the list failed to arrive".
+ * - The archived cleanup removed entirely — "drops a remembered station that no
+ *   longer exists".
+ * - `laneCount` reading the server count under a cut — "withholds the
+ *   branch-wide lane count the cut makes untrue"; the server counts dropped
+ *   altogether — all four D142b chip tests.
  * - `COMPLETED` in place of `COMPLETED_TODAY` — "asks the server for the
- *   day-scoped lane" and seven other tests that reach the Done lane, since the
+ *   day-scoped lane" and the other tests that reach the Done lane, since the
  *   fixture answers that token with the OUTSTANDING rows rather than pretending
  *   both are the same lane.
  * - The lane cut ignoring IN_PROGRESS — five lane tests, the control that says
  *   `inLane` is doing the work the counts and the board both read from.
  */
-describe('the D147 negatives can actually fail', () => {
-  it('catches the subtitle this slice removed', () => {
-    const { container } = render(
-      // The line as it stood before D147: station first, everything else a
-      // ` · ` prefix hanging off it.
-      <p>{`Grill · RO-000010 · round 1 · Nimal`}</p>,
-    );
-    expect(() => expectNoStationAnywhere(container)).toThrow();
-  });
-
-  it('catches both states of the station chip this slice removed', () => {
-    const named = render(<span>Grill</span>);
-    expect(() => expectNoStationAnywhere(named.container)).toThrow();
+describe('the D152 dialog negative can actually fail', () => {
+  it('catches the pre-D147 "no station" warning, in either casing', () => {
+    const lower = render(<span>no station</span>);
+    expect(() => expectNoUnroutedWarning(lower.container)).toThrow();
     cleanup();
 
-    // The warning state matched no station NAME, which is why the assertion
-    // also refuses the word itself — otherwise "no station" would slip past.
-    const unnamed = render(<span>no station</span>);
-    expect(() => expectNoStationAnywhere(unnamed.container)).toThrow();
+    const upper = render(<span>No Station</span>);
+    expect(() => expectNoUnroutedWarning(upper.container)).toThrow();
   });
 
-  it('hands the component a station to print, so the negatives are not vacuous', () => {
-    const row = withStationOnTheWire(ticket({ id: 'tk_1' })) as KitchenTicketView & {
-      stationName?: string;
-    };
-    expect(row.stationName).toBe('Grill');
-    expect(row.stationId).toBe('stn_grill');
+  it('passes on the markup D152 actually renders, so it is not simply always red', () => {
+    // The restored chip: a named station in muted tones, and nothing at all
+    // where the join found no name.
+    const { container } = render(
+      <li>
+        <span>1× Kottu</span>
+        <span className="bg-muted text-muted-foreground">Main Kitchen</span>
+      </li>,
+    );
+    expect(() => expectNoUnroutedWarning(container)).not.toThrow();
+  });
+
+  it('hands the board a D147-window ticket, so the ribbon guard is not vacuous', () => {
+    // If this fixture quietly grew a station back, the "no name on the band"
+    // assertions above would be describing a card that never had one.
+    const row = d147WindowTicket({ id: 'tk_win' });
+    expect(row.stationId).toBeNull();
+    expect(row.stationName).toBeNull();
+    // …and the ordinary fixture DOES carry one, or the ribbon's positive half
+    // would be asserting against an empty band.
+    expect(ticket({ id: 'tk_ok' }).stationName).toBe('Grill');
   });
 });

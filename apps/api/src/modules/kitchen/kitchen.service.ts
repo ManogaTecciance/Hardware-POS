@@ -15,6 +15,19 @@ import { paginate } from '../../common/pagination';
 import { withTabName } from '../../common/place-label';
 import { SettingsService } from '../settings/settings.service';
 
+/*
+ * D152 — the station every unlinked item routes to, per branch.
+ *
+ * Named here rather than inline because three things have to agree on it: the
+ * upsert below, the seed, and the specs that prove an unlinked item reaches
+ * it. `MAIN` is the `code` — `@@unique([branchId, code])` is what makes the
+ * upsert safe — and 'Main' is only the name it is BORN with; an operator may
+ * rename it, and the code is what identifies it afterwards.
+ */
+export const MAIN_STATION_CODE = 'MAIN';
+export const MAIN_STATION_NAME = 'Main';
+export const MAIN_STATION_CATEGORY = 'KITCHEN';
+
 /** D83 — every item on the order a ticket belongs to, for the kitchen. */
 export interface KitchenOrderView {
   ticketId: string;
@@ -31,6 +44,12 @@ export interface KitchenOrderView {
     modifierNames: string[];
     specialInstructions: string | null;
     roundNumber: number | null;
+    /*
+     * D152 — which station received it, back with the split. NULL only for an
+     * item whose ticket was cut during the D147 window, when a ticket belonged
+     * to no station to annotate from.
+     */
+    stationName: string | null;
   }[];
 }
 
@@ -54,12 +73,16 @@ export interface KitchenTicketView {
   branchId: string;
   roundId: string;
   /*
-   * D147 — NULL on every ticket cut since the per-station split was removed:
-   * a round is ONE ticket now, and a ticket that belongs to no station must
-   * not claim one. Non-null only on tickets raised BEFORE D147, which keep
-   * the station they were genuinely routed to.
+   * D152 — a REAL station on every ticket written from now on: the split is
+   * back, and a ticket is one station's slice of the round.
+   *
+   * Both fields stay nullable, and the column with them. The tickets cut
+   * during the D147 window belong to no station and there is no backfill —
+   * inventing one for them would be a claim about where food went that nobody
+   * can make — so the screens tolerate null rather than assuming it away.
    */
   stationId: string | null;
+  stationName: string | null;
   status: KitchenTicketStatus;
   /*
    * D68 — the board is the ONLY place this ticket is ever delivered, so it
@@ -128,96 +151,226 @@ export class KitchenService {
   }
 
   /**
-   * D147 — ONE ticket per round, carrying every item of that round.
+   * D152 — ONE TICKET PER STATION the round's items route to. This restores
+   * the split D147 removed, and supersedes it.
    *
-   * It used to be one ticket per KITCHEN STATION the round's items routed to,
-   * so a single order for a single round arrived on the board as several
-   * separate cards (RO-000026, one round of 15 lines, became KOT-000027 with
-   * 13 of them and KOT-000028 with 2). The split is gone because the routing
-   * it rested on was never reachable: the only place to link a dish to a
-   * station is the product wizard's Step 3 multi-select, which is
-   * branch-scoped and renders EMPTY when no branch is selected, so products
-   * are created with no station link at all.
+   * D147's objection was not to the split but to the routing under it: the
+   * only place to link a dish to a station was a wizard step that renders
+   * empty when no branch is selected, so dishes were created linked to
+   * nothing — and an unlinked item at a multi-station branch reached NO
+   * ticket at all. Ordered, billed, never cooked. Routing on those links was
+   * routing on an accident.
    *
-   * WHAT THIS FIXES, and it is worse than the duplicate cards: the old
-   * routing DROPPED an item with no station link unless the branch happened
-   * to have exactly one active station (the D67 fallback). The affected
-   * branch has four, so an unlinked dish reached the kitchen board on NO
-   * ticket whatsoever — ordered, billed, and never cooked. Every item of the
-   * round is now on the one ticket, so there is nothing left to drop.
+   * Both halves of that objection are gone. The station is CHOSEN when the
+   * menu item is created, so a link is the normal case; and every branch has
+   * a `MAIN` station that anything still unlinked routes to.
    *
-   * The station catalogue and both link junctions (MenuItemStationLink,
-   * ProductStationLink) stay in the schema and in the wizard; they simply no
-   * longer influence what the kitchen receives.
+   * NOTHING IS EVER DROPPED. There is no path through this method on which a
+   * round item fails to reach a ticket: `mainStationId` is resolved before the
+   * grouping and is what an empty link list falls back to, so the target list
+   * is never empty and no item can be skipped. This REPLACES D67's
+   * `soleStationId`/`unrouted` pair, which routed unlinked items only when the
+   * branch happened to have exactly one active station and silently discarded
+   * them — with a warning nobody reads — at every branch with two or more.
    *
-   * Returns the new ticket's id, or null for a round with no items — a round
-   * with nothing on it must not burn a KOT number or put an empty card on the
-   * pass.
+   * Returns one id per ticket written. Empty for a round with no items: a
+   * round with nothing on it must not burn a KOT number or put an empty card
+   * on the pass.
    */
-  async generateTicketForRound(
+  async generateTicketsForRound(
     tx: Prisma.TransactionClient,
     tenantId: string,
     branchId: string,
     roundId: string,
-  ): Promise<string | null> {
+  ): Promise<string[]> {
     const items = await tx.restaurantOrderItem.findMany({
       where: { tenantId, roundId },
       /*
        * The round's own order — the sequence the waiter keyed the lines in is
-       * the sequence the kitchen reads them in. `createdAt` alone cannot give
-       * it: a round's items are all written inside ONE transaction, so
-       * Postgres stamps every one of them with the same instant. The id
-       * tiebreak restores the insertion order (a cuid's timestamp+counter
-       * prefix increments per row) and, more importantly, makes the order
-       * TOTAL — without it two lines could swap places between two reads.
+       * the sequence the kitchen reads them in, on each station's ticket.
+       * `createdAt` alone cannot give it: a round's items are all written
+       * inside ONE transaction, so Postgres stamps every one of them with the
+       * same instant. The id tiebreak restores the insertion order (a cuid's
+       * timestamp+counter prefix increments per row) and, more importantly,
+       * makes the order TOTAL — without it two lines could swap places
+       * between two reads.
        */
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
+        menuItemId: true,
         menuItemName: true,
         quantity: true,
         specialInstructions: true,
-        // D46 — the operator-selected variant, snapshotted at submit.
+        // D60 — the Product is what routing keys off when the line carries
+        // one; D46 — the variant snapshot is what the ticket prints.
+        productId: true,
         variantNameSnapshot: true,
         modifiers: { select: { optionName: true } },
       },
     });
-    if (items.length === 0) return null;
+    if (items.length === 0) return [];
 
-    // One document number for the round, not one per station.
-    const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
-    const ticketNumber = `KOT-${padSequence(seq)}`;
-    const ticket = await tx.kitchenTicket.create({
-      data: {
-        tenantId,
-        branchId,
-        roundId,
-        // D147 — written explicitly rather than left to the column default,
-        // because "this ticket belongs to no station" is the claim being
-        // made, not an omission.
-        stationId: null,
-        ticketNumber,
-        status: KitchenTicketStatus.QUEUED,
-      },
-    });
+    /*
+     * D60 — routing keys off the PRODUCT whenever the line carries one,
+     * regardless of sourceKind: the catalogue-convergence backfill stamps
+     * `productId` onto MENU_ITEM-sourced lines and copies their station
+     * links to `ProductStationLink`, so one junction serves everything. The
+     * MenuItemStationLink lookup remains only as the fallback for an
+     * unmigrated legacy line (productId null), and dies with the deferred
+     * drop.
+     */
+    const menuItemIds = [
+      ...new Set(items.filter((i) => i.productId === null).map((i) => i.menuItemId)),
+    ];
+    const productIds = [
+      ...new Set(
+        items
+          .filter((i): i is typeof i & { productId: string } => i.productId !== null)
+          .map((i) => i.productId),
+      ),
+    ];
+    /*
+     * D152 — a link only counts if its station is one THIS branch can cook at.
+     *
+     * Both junctions are tenant-wide and neither is rewritten when a station
+     * changes, so a link can point at a station belonging to another branch,
+     * or at one that has since been archived. Left unfiltered, either makes
+     * `stationIds` non-empty, so Main never fires and the ticket is written to
+     * a station this branch's board cannot select — the chip strip lists only
+     * the branch's ACTIVE stations, and a board pinned to a station shows
+     * nothing else. The dish would be ordered, billed and never seen: exactly
+     * the failure D147 was created to stop, arriving through a different door.
+     *
+     * Filtering here rather than after the fact is what keeps the no-drop rule
+     * structural: a link that does not survive this `where` leaves the item
+     * with no station, and the line below sends it to Main like any other
+     * unrouted dish.
+     */
+    const usableStation = { station: { branchId, isActive: true } };
+    const [menuItemStationLinks, productStationLinks] = await Promise.all([
+      menuItemIds.length
+        ? tx.menuItemStationLink.findMany({
+            where: { menuItemId: { in: menuItemIds }, ...usableStation },
+            select: { menuItemId: true, stationId: true },
+          })
+        : Promise.resolve([]),
+      productIds.length
+        ? tx.productStationLink.findMany({
+            where: { productId: { in: productIds }, ...usableStation },
+            select: { productId: true, stationId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const stationsByMenuItem = new Map<string, string[]>();
+    for (const link of menuItemStationLinks) {
+      const list = stationsByMenuItem.get(link.menuItemId) ?? [];
+      list.push(link.stationId);
+      stationsByMenuItem.set(link.menuItemId, list);
+    }
+    const stationsByProduct = new Map<string, string[]>();
+    for (const link of productStationLinks) {
+      const list = stationsByProduct.get(link.productId) ?? [];
+      list.push(link.stationId);
+      stationsByProduct.set(link.productId, list);
+    }
+
+    const mainStationId = await this.resolveMainStation(tx, tenantId, branchId);
+
+    // Aggregate items per station.
+    const perStation = new Map<string, typeof items>();
     for (const item of items) {
-      await tx.kitchenTicketItem.create({
+      // Look up in the junction that matches the item's source (D60).
+      const stationIds = item.productId
+        ? stationsByProduct.get(item.productId) ?? []
+        : stationsByMenuItem.get(item.menuItemId) ?? [];
+      /*
+       * D152 — Main is the answer whenever the links give none, and the
+       * reason this list can never be empty. "No item is dropped" is
+       * structural here, not a promise: there is no `continue`, no filter and
+       * no conditional between this line and the write below.
+       */
+      const targets = stationIds.length > 0 ? stationIds : [mainStationId];
+      for (const stationId of targets) {
+        const list = perStation.get(stationId) ?? [];
+        list.push(item);
+        perStation.set(stationId, list);
+      }
+    }
+
+    const ticketIds: string[] = [];
+    for (const [stationId, stationItems] of perStation) {
+      // One document number PER TICKET: two stations cooking one round are two
+      // cards on the pass, and two cards sharing a KOT number cannot be told
+      // apart by the people calling them out.
+      const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
+      const ticketNumber = `KOT-${padSequence(seq)}`;
+      const ticket = await tx.kitchenTicket.create({
         data: {
           tenantId,
-          ticketId: ticket.id,
-          menuItemName: item.menuItemName,
-          // D46 — print the variant selection ("MEDIUM", "LARGE") on
-          // the KOT verbatim from the round-item snapshot. NULL when
-          // the round item has no variant (a MENU_ITEM row or a
-          // non-variant Product); the kitchen must not infer the
-          // variant from selling price.
-          variantName: item.variantNameSnapshot,
-          quantity: item.quantity,
-          modifierNames: item.modifiers.map((m) => m.optionName),
-          specialInstructions: item.specialInstructions,
+          branchId,
+          roundId,
+          stationId,
+          ticketNumber,
+          status: KitchenTicketStatus.QUEUED,
         },
       });
+      for (const item of stationItems) {
+        await tx.kitchenTicketItem.create({
+          data: {
+            tenantId,
+            ticketId: ticket.id,
+            menuItemName: item.menuItemName,
+            // D46 — print the variant selection ("MEDIUM", "LARGE") on
+            // the KOT verbatim from the round-item snapshot. NULL when
+            // the round item has no variant (a MENU_ITEM row or a
+            // non-variant Product); the kitchen must not infer the
+            // variant from selling price.
+            variantName: item.variantNameSnapshot,
+            quantity: item.quantity,
+            modifierNames: item.modifiers.map((m) => m.optionName),
+            specialInstructions: item.specialInstructions,
+          },
+        });
+      }
+      ticketIds.push(ticket.id);
     }
-    return ticket.id;
+    return ticketIds;
+  }
+
+  /**
+   * D152 — the branch's Main station, created if it is not there.
+   *
+   * UPSERTED rather than read, because Main must exist wherever a round is
+   * submitted and there is no migration that put it in: a tenant provisioned
+   * before D152, or one whose seed never ran, has no MAIN row, and a read that
+   * came back empty would leave the fallback with nowhere to send an unlinked
+   * item — the exact failure D152 exists to end. `@@unique([branchId, code])`
+   * is what makes doing this on every submit safe and idempotent.
+   *
+   * `isActive` is restated on the way through: an archived Main disappears
+   * from the board's station filter while still receiving tickets, and Main is
+   * the one station in a branch that must never be unreachable. The NAME is
+   * deliberately NOT restated — an operator who renames Main to "Hot line"
+   * meant it, and this is not the place to argue.
+   */
+  private async resolveMainStation(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    branchId: string,
+  ): Promise<string> {
+    const main = await tx.kitchenStation.upsert({
+      where: { branchId_code: { branchId, code: MAIN_STATION_CODE } },
+      update: { isActive: true },
+      create: {
+        tenantId,
+        branchId,
+        code: MAIN_STATION_CODE,
+        name: MAIN_STATION_NAME,
+        category: MAIN_STATION_CATEGORY,
+      },
+      select: { id: true },
+    });
+    return main.id;
   }
 
   /**
@@ -426,11 +579,15 @@ export class KitchenService {
         },
       },
       /*
-       * The four things a person actually remembers about a ticket: its own
-       * number, the order it belonged to, where it was going, and what was on
-       * it. Searching the dish name matters most — "which table had the
-       * lamprais that came back" is the question this screen gets asked, and
-       * no ticket number is remembered alongside it.
+       * The five things a person actually remembers about a ticket: its own
+       * number, the order it belonged to, where it was going, what was on it,
+       * and — with D152's split back — which station cooked it. Searching the
+       * dish name matters most: "which table had the lamprais that came back"
+       * is the question this screen gets asked, and no ticket number is
+       * remembered alongside it. The station leg is the one that answers "what
+       * did the grill have on last Friday", which a station-split board makes
+       * askable again; it simply matches nothing on the D147-window tickets,
+       * which carry no station.
        */
       ...(search
         ? {
@@ -451,6 +608,7 @@ export class KitchenService {
                 },
               },
               { items: { some: { menuItemName: { contains: search, mode: 'insensitive' } } } },
+              { station: { name: { contains: search, mode: 'insensitive' } } },
             ],
           }
         : {}),
@@ -529,10 +687,11 @@ export class KitchenService {
    * every non-voided item on the order, labelled with the round it came in
    * on, so the pass can see the table as the guests will.
    *
-   * D147 narrowed what this adds, and did not remove it: a ticket is now the
-   * whole ROUND rather than one station's slice of it, so the extra a reader
-   * gets here is the order's OTHER rounds. The per-item station annotation is
-   * gone with the split — a ticket belongs to no station to annotate from.
+   * D152 restored the split, and with it the per-item station annotation: a
+   * ticket is one station's slice of one round again, so what a reader gains
+   * here is both the order's OTHER rounds and the other STATIONS' work on
+   * this one. (D147 had removed the annotation, there being no station to
+   * annotate from; that is no longer true.)
    *
    * Read-only and KOT_VIEW gated, like the board itself. Deliberately NOT
    * routed through the table-session read: that one is scoped to the waiter
@@ -585,6 +744,26 @@ export class KitchenService {
       },
     });
 
+    /*
+     * Which station each item went to, read back from the tickets rather
+     * than re-derived from the routing links: the links can be edited after
+     * the fact, and the ticket is what the kitchen actually received.
+     *
+     * D152 — a ticket cut during the D147 window carries no station, so it
+     * annotates nothing and its items keep the null the view type allows.
+     * Borrowing another ticket's name for them would be a claim about where
+     * food went that no row in the database supports.
+     */
+    const tickets = await this.prisma.kitchenTicket.findMany({
+      where: { tenantId, round: { orderId: round.orderId } },
+      select: { station: { select: { name: true } }, items: { select: { menuItemName: true } } },
+    });
+    const stationByName = new Map<string, string>();
+    for (const t of tickets) {
+      if (!t.station) continue;
+      for (const item of t.items) stationByName.set(item.menuItemName, t.station.name);
+    }
+
     const table = order.session?.table;
     const waiter = order.session?.waiterUserId
       ? await this.prisma.user.findUnique({
@@ -615,6 +794,7 @@ export class KitchenService {
         modifierNames: item.modifiers.map((m) => m.optionName),
         specialInstructions: item.specialInstructions,
         roundNumber: item.round?.roundNumber ?? null,
+        stationName: stationByName.get(item.menuItemName) ?? null,
       })),
     };
   }
@@ -852,9 +1032,11 @@ export class KitchenTicketNotFoundError extends Error {
  */
 const TICKET_INCLUDE = {
   items: true,
-  // D147 — no `station`: a ticket cut since the split was removed belongs to
-  // none, and the board, the history table and the ticket dialog have all
-  // stopped naming one.
+  // D152 — the station is joined again: the board's card ribbon, its station
+  // filter, the history table and the ticket dialog all name one. Optional in
+  // the schema, so the projection reads it through `?.` — a D147-window ticket
+  // joins nothing here and lands as null.
+  station: { select: { name: true } },
   completedBy: { select: { name: true } },
   round: {
     select: {
@@ -888,6 +1070,7 @@ function toView(
     branchId: row.branchId,
     roundId: row.roundId,
     stationId: row.stationId,
+    stationName: row.station?.name ?? null,
     status: row.status,
     orderNumber: row.round?.order?.orderNumber ?? null,
     // The synthetic walk-in table backs every counter and takeaway order;

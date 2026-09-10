@@ -40,9 +40,15 @@ function ticket(over: Partial<KitchenTicketView> = {}): KitchenTicketView {
     ticketNumber: 'K-000123',
     branchId: 'brn_1',
     roundId: 'rnd_1',
-    // D147 — a ticket is the whole round and is routed to no station, so
-    // every ticket cut since that decision carries none.
-    stationId: null,
+    /*
+     * D152 — a ticket is one STATION's share of a round again, so every ticket
+     * cut since that decision names the section that cooked it. Main at worst:
+     * an item whose menu item links to no station routes to the branch's Main
+     * rather than falling out of the round, so nothing raised from now on
+     * arrives here unrouted.
+     */
+    stationId: 'stn_hot',
+    stationName: 'Hot line',
     status: 'COMPLETED',
     orderNumber: 'O-000045',
     placeLabel: 'T3 · Garden',
@@ -66,35 +72,30 @@ function ticket(over: Partial<KitchenTicketView> = {}): KitchenTicketView {
 }
 
 /**
- * D147 — a row that still CARRIES a station, exactly as an older server sent
- * it (and as every ticket cut before the decision still stores).
+ * D152 — a ticket cut during the D147 WINDOW, when a round was ONE ticket routed
+ * nowhere.
  *
- * The negatives below say the table names no station. Against a fixture with
- * no station in it they would be VACUOUS — green on a table that had simply
- * been handed nothing to print, which is the shape D30 forbids. So the wire
- * keeps the field the view type no longer declares: if the Station column, or
- * the dialog's chip, ever comes back, "Hot line" is on screen and these tests
- * go red. Proven by mutation at the foot of this file.
+ * `KitchenTicket.stationId` stayed nullable through that window and D152 adds no
+ * backfill, so these rows still reach this screen with no station at all and the
+ * table has to say so. Every other fixture in this file carries one, and that is
+ * the point: the em-dash assertions below are asserted in the SAME table as a
+ * row that prints a real name, so neither direction can be green merely because
+ * the column was handed nothing — the shape D30 forbids. Proven by mutation at
+ * the foot of this file.
  */
-function withStationOnTheWire(
-  t: KitchenTicketView,
-  stationName = 'Hot line',
-): KitchenTicketView {
-  return { ...t, stationId: 'stn_hot', stationName } as KitchenTicketView;
+function fromTheD147Window(t: KitchenTicketView): KitchenTicketView {
+  return { ...t, stationId: null, stationName: null };
 }
 
 /**
- * Nowhere in `root` does the station appear — neither the NAME the wire
- * carried nor the word itself (the dialog's other chip state read "no
- * station", and a name-only check would let that back in).
+ * What the Station cell of `row` prints.
  *
- * Shared so the mutation proof at the foot of this file can run it against the
- * markup this slice removed and show it fail: an assertion no fixture can
- * break is not an assertion.
+ * Located through the header by `cellUnder` rather than by index, and throwing
+ * when the column is gone, so a deleted Station column fails these assertions
+ * instead of turning them into claims about `undefined` (D30).
  */
-function expectNoStationAnywhere(root: HTMLElement, name = 'Hot line') {
-  expect(root.textContent ?? '').not.toContain(name);
-  expect(root.textContent ?? '').not.toMatch(/station/i);
+function stationOn(row: HTMLElement): string {
+  return cellUnder(row, 'Station').textContent?.trim() ?? '';
 }
 
 function page(items: KitchenTicketView[], over: Record<string, unknown> = {}) {
@@ -110,11 +111,12 @@ function rowFor(ticketNumber: string): HTMLElement {
  * The cell under a NAMED column, located through the header rather than a
  * hard-coded index.
  *
- * The D150 assertions turn on which cell holds the dash, and a positional index
- * quietly reads the wrong one the moment the columns move — this table has
- * already lost one (D147). Throwing rather than returning nothing is D30's rule
- * for an analyser handed no input: a missing column must fail the test, not
- * turn it into an assertion about `undefined`.
+ * The D150 and D152 assertions turn on which cell holds the dash, and a
+ * positional index quietly reads the wrong one the moment the columns move —
+ * this table has already lost a column (D147) and got it back (D152). Throwing
+ * rather than returning nothing is D30's rule for an analyser handed no input: a
+ * missing column must fail the test, not turn it into an assertion about
+ * `undefined`.
  */
 function cellUnder(row: HTMLElement, column: string): HTMLElement {
   const headers = screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim());
@@ -186,8 +188,7 @@ async function type(term: string) {
 
 describe('what the screen shows', () => {
   it('renders a finished ticket with where it went, what was on it and who bumped it', async () => {
-    // The row is handed a station it must not print (D147).
-    history.mockResolvedValue(page([withStationOnTheWire(ticket())]));
+    history.mockResolvedValue(page([ticket()]));
     render(<KitchenHistory session={SESSION} branchId="brn_1" />);
 
     await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
@@ -196,9 +197,13 @@ describe('what the screen shows', () => {
     expect(within(row).getByText(/O-000045 · Round 2/)).toBeTruthy();
     expect(within(row).getByText('2 × Chicken Kottu')).toBeTruthy();
     expect(within(row).getByText('Chef Perera')).toBeTruthy();
-    // NEGATIVE — a ticket is the whole round, so the row has no station to
-    // name; the fixture is still carrying one, so this can genuinely fail.
-    expectNoStationAnywhere(row);
+    /*
+     * D152 rewrote this claim. It used to be `expectNoStationAnywhere(row)` —
+     * the D147 negative that a whole-round ticket had no station to name. A
+     * ticket is one station's share again, so the section that cooked it is on
+     * the row, and the old assertion is not weakened but inverted.
+     */
+    expect(stationOn(row)).toBe('Hot line');
   });
 
   /*
@@ -432,15 +437,13 @@ describe('every lane, not just Done (D150)', () => {
 
 describe('opening a record', () => {
   /*
-   * D147 rewrote what this test claims. A ticket used to be one STATION's
-   * share of a round, so the dialog's job was to show the stations either
-   * side of it; a ticket is now the whole round, so its job is to show the
-   * ROUNDS either side of it — the two courses this table has already eaten,
-   * which the row still cannot show. The station chips it used to assert are
-   * asserted absent instead: the wire below still carries them.
+   * What this dialog is for, across two decisions. A ticket is one STATION's
+   * share of one ROUND again (D152), so the row shows a slice twice over and
+   * this is the only place either screen can see what the table actually
+   * ordered — every round of it, including the two courses eaten an hour ago.
    */
   it('shows the WHOLE order behind the ticket — every round of it, not just this ticket’s', async () => {
-    history.mockResolvedValue(page([withStationOnTheWire(ticket())]));
+    history.mockResolvedValue(page([ticket()]));
     orderFn.mockResolvedValue({
       ticketId: 'tkt_1',
       ticketNumber: 'K-000123',
@@ -467,10 +470,10 @@ describe('opening a record', () => {
           modifierNames: [],
           specialInstructions: null,
           roundNumber: 2,
-          // The chip's OTHER state: an unlinked dish used to be labelled "no
-          // station" in warning colours, which described the setup and read
-          // as a fault on the plate. `expectNoStationAnywhere` refuses the
-          // word as well as the name, so that half cannot creep back either.
+          // D152 — the per-item order view carries `stationName` again, and it
+          // is nullable for the same reason the row's is: an item on a round
+          // cut during the D147 window was routed nowhere. Both states are on
+          // the wire here so whatever the dialog does with them is exercised.
           stationName: null,
         },
       ],
@@ -490,10 +493,19 @@ describe('opening a record', () => {
     expect(within(dialog).getByText('No egg')).toBeTruthy();
     expect(within(dialog).getByText('Round 1')).toBeTruthy();
     expect(within(dialog).getByText('Round 2')).toBeTruthy();
-    // NEGATIVE (D147) — the per-item station chip is gone, both of its
-    // states. The items above still arrive with a station on them, so a chip
-    // that came back would put "Hot line" inside this dialog.
-    expectNoStationAnywhere(dialog);
+    /*
+     * D152 rewrote what this test used to end with. The last assertion here was
+     * `expectNoStationAnywhere(dialog)` — D147's claim that the per-item station
+     * chip was gone in both of its states. Stations are back and the item view
+     * carries `stationName` again, so that claim is simply false and cannot
+     * stand. It is not weakened into silence but MOVED: the chip is
+     * ticket-order-dialog.tsx's own markup, asserted where that component lives,
+     * and what the HISTORY screen owns about the dialog is what the assertions
+     * above pin — that opening a row fetches THAT ticket's order and lays out
+     * every round of it. The station claim this spec owns is on the row, in
+     * "the station on the row (D152)" below, against a table that renders both
+     * a routed ticket and an unrouted one.
+     */
   });
 
   it('opens from a click anywhere on the row, and closes again', async () => {
@@ -513,9 +525,10 @@ describe('opening a record', () => {
     // NEGATIVE first — nothing is open until something is clicked.
     expect(screen.queryByRole('dialog')).toBeNull();
 
-    // The dishes cell: a plain, non-interactive cell, which is what the row
-    // shortcut is for. It used to be the Station cell, which D147 removed.
-    fireEvent.click(screen.getByText('2 × Chicken Kottu'));
+    // The Station cell: a plain, non-interactive cell, which is what the row
+    // shortcut is for. D147 removed it and the click moved to the dishes cell;
+    // D152 gives it back, so the shortcut is exercised where it started.
+    fireEvent.click(screen.getByText('Hot line'));
     const dialog = await screen.findByRole('dialog');
 
     // Escape rather than either Close control: the dialog offers two (a header
@@ -644,30 +657,48 @@ describe('summariseItems', () => {
 });
 
 /*
- * D147 — the table's columns, as an exact SET.
+ * D152 — the table's columns, as an exact SET, and where the restored one sits.
  *
- * A ticket is the whole round now and is routed to no station, so the Station
- * column has nothing to put in it. The set is asserted whole rather than by
- * absence: "there is no Station column" alone would still pass on a table that
- * had lost the Items column too, or on one that had renamed Station to
- * "Kitchen". And the two full-width rows are checked against the header count
- * rather than against the literal 6, because a stale `colSpan` is exactly the
- * damage removing a column does — the empty state would sit under a phantom
- * seventh column and pull the row wider than the table.
+ * A ticket is one station's share of a round again, so the Station column is
+ * back between Items and Started: with the dishes it cooked, not out past the
+ * stamps, which answer a different question. The set is asserted whole rather
+ * than by presence — "there is a Station column" alone would still pass on a
+ * table that had lost Items, or on one that had put the station at the end — and
+ * its two neighbours are pinned as well, because a column in the wrong place is
+ * exactly what a restore gets wrong. The two full-width rows are checked against
+ * the header COUNT rather than the literal 7, because a stale `colSpan` is
+ * exactly the damage adding a column does: the empty state would stop one column
+ * short of the table's right edge.
  */
-describe('the columns (D147)', () => {
+describe('the columns (D152)', () => {
   const headerNames = () =>
     screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim());
 
-  it('offers exactly Ticket, Where, Items, Started, Finished and By', async () => {
-    history.mockResolvedValue(page([withStationOnTheWire(ticket())]));
+  it('offers exactly Ticket, Where, Items, Station, Started, Finished and By', async () => {
+    history.mockResolvedValue(page([ticket()]));
     render(<KitchenHistory session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
 
-    expect(headerNames()).toEqual(['Ticket', 'Where', 'Items', 'Started', 'Finished', 'By']);
-    // NEGATIVE, spelled out as well as implied by the set above, because this
-    // is the column the decision removed.
-    expect(screen.queryByRole('columnheader', { name: 'Station' })).toBeNull();
+    expect(headerNames()).toEqual([
+      'Ticket',
+      'Where',
+      'Items',
+      'Station',
+      'Started',
+      'Finished',
+      'By',
+    ]);
+    /*
+     * POSITIVE, spelled out as well as implied by the set above, because this is
+     * the column the decision restored — and WHERE it sits is part of what was
+     * restored, so its two neighbours are named rather than left to the set.
+     */
+    expect(screen.getByRole('columnheader', { name: 'Station' })).toBeTruthy();
+    expect(headerNames().indexOf('Station')).toBe(headerNames().indexOf('Items') + 1);
+    expect(headerNames().indexOf('Started')).toBe(headerNames().indexOf('Station') + 1);
+    // NEGATIVE — D147's six-column shape, which is what this table looked like
+    // an hour ago and what a half-applied restore would leave behind.
+    expect(headerNames()).not.toEqual(['Ticket', 'Where', 'Items', 'Started', 'Finished', 'By']);
   });
 
   it('spans the empty state across every column the header actually has', async () => {
@@ -676,6 +707,9 @@ describe('the columns (D147)', () => {
     const cell = await screen.findByText(/No tickets have reached this kitchen yet/);
     const td = cell.closest('td')!;
     expect(Number(td.getAttribute('colspan'))).toBe(headerNames().length);
+    // The header count is now SEVEN, named so this stays a statement about the
+    // restored column rather than a tautology of the table against itself.
+    expect(headerNames()).toHaveLength(7);
   });
 
   it('spans the loading row across them too', async () => {
@@ -685,23 +719,110 @@ describe('the columns (D147)', () => {
 
     const td = (await screen.findByText(/Loading history…/)).closest('td')!;
     expect(Number(td.getAttribute('colspan'))).toBe(headerNames().length);
+    expect(headerNames()).toHaveLength(7);
   });
 
-  it('searches by ticket, order, place and dish — and no longer by station', async () => {
-    // A row that IS carrying a station, so the screen-wide negative below has
-    // something to catch rather than passing on an empty table.
-    history.mockResolvedValue(page([withStationOnTheWire(ticket())]));
-    const { container } = render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+  it('searches by ticket, order, table, station and dish — the station leg is back', async () => {
+    history.mockResolvedValue(page([ticket()]));
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
 
-    // POSITIVE — the four legs the term still has, named where the operator
-    // reads them. The server's other legs are pinned in the API's own suite;
-    // what this screen owns is the promise it makes about them.
+    /*
+     * D152 rewrote this claim. The hint read "Search ticket, order, table, or
+     * dish…" while the term had no station leg; the leg is back on the server,
+     * so a hint that still listed four things would send a cook who remembers
+     * only "the grill" away from a search that would have answered them.
+     *
+     * The equality is what makes this a claim: `toContain('station')` would pass
+     * on a hint that merely mentioned the word. The server's own legs are pinned
+     * in the API's suite; what this screen owns is the promise it makes.
+     */
     const box = searchBox() as HTMLInputElement;
-    expect(box.placeholder).toBe('Search ticket, order, table, or dish…');
-    // NEGATIVE — nothing anywhere on the screen offers a station to search by,
-    // or names one on the row it just rendered.
-    expectNoStationAnywhere(container);
+    expect(box.placeholder).toBe('Search ticket, order, table, station, or dish…');
+    // NEGATIVE — the D147 wording, four legs and no station, is not what the
+    // box says any more.
+    expect(box.placeholder).not.toBe('Search ticket, order, table, or dish…');
+  });
+});
+
+/*
+ * D152 — the station on the row, and the fact that it is NULLABLE.
+ *
+ * Both rows are rendered into ONE table deliberately, exactly as D150's dashes
+ * are. A dash asserted on a table where nothing ever prints a station name would
+ * be green with the Station column deleted outright — the vacuous shape D30
+ * forbids. Beside a row that does print a name, the dash means what it says.
+ * Proven by mutation at the foot of this file.
+ */
+describe('the station on the row (D152)', () => {
+  /** Cut today: routed to a station, the branch's Main at worst. */
+  const routed = () =>
+    ticket({
+      id: 'tkt_r',
+      ticketNumber: 'K-000301',
+      stationId: 'stn_grill',
+      stationName: 'Grill',
+    });
+
+  /** Cut during the D147 window: routed nowhere, and never backfilled. */
+  const unrouted = () => fromTheD147Window(ticket({ id: 'tkt_u', ticketNumber: 'K-000302' }));
+
+  async function renderBothKinds() {
+    history.mockResolvedValue(page([routed(), unrouted()]));
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('K-000301')).toBeTruthy());
+  }
+
+  it('names the section that cooked the ticket', async () => {
+    await renderBothKinds();
+
+    expect(stationOn(rowFor('K-000301'))).toBe('Grill');
+  });
+
+  it('prints the table’s em dash for a ticket that reached no station', async () => {
+    await renderBothKinds();
+
+    /*
+     * NEGATIVE, against a row that genuinely carries no station — and in the
+     * same table as one that does, so a dash here cannot be the column being
+     * absent. Deliberately NOT "no station": D152's Main means an unrouted DISH
+     * no longer exists, so warning wording would describe a fault that cannot
+     * happen, on the one ticket old enough to be innocent of it.
+     */
+    expect(stationOn(rowFor('K-000302'))).toBe('—');
+    expect(within(rowFor('K-000302')).queryByText(/no station/i)).toBeNull();
+    expect(within(rowFor('K-000302')).queryByText(/unrouted/i)).toBeNull();
+    // …and the other direction in the same breath.
+    expect(stationOn(rowFor('K-000301'))).not.toBe('—');
+  });
+
+  it('keeps each row’s OWN station — the column is not one value painted down it', async () => {
+    history.mockResolvedValue(page([routed(), ticket(), unrouted()]));
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('K-000301')).toBeTruthy());
+
+    /*
+     * Three different answers in one column. A cell that hard-coded a name, or
+     * read the first row's station for every row, would pass "names the section"
+     * above on its own and fail here — which is the whole reason a second
+     * station is in the fixture at all.
+     */
+    expect(stationOn(rowFor('K-000301'))).toBe('Grill');
+    expect(stationOn(rowFor('K-000123'))).toBe('Hot line');
+    expect(stationOn(rowFor('K-000302'))).toBe('—');
+  });
+
+  it('does not read the station off the Where cell, or the Where cell off the station', async () => {
+    await renderBothKinds();
+
+    /*
+     * The two cells that could plausibly be confused for one another — both name
+     * a place. A Station cell falling back to `placeLabel` (a fallback that
+     * looks reasonable and is wrong) would put "T3 · Garden" here, and the
+     * unrouted row's dash is what catches it.
+     */
+    expect(stationOn(rowFor('K-000302'))).not.toContain('T3');
+    expect(cellUnder(rowFor('K-000301'), 'Where').textContent ?? '').not.toContain('Grill');
   });
 });
 
@@ -710,57 +831,142 @@ describe('the columns (D147)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /*
- * The D147 assertions above are absence claims, which are the easiest kind to
- * leave vacuous. Three things are shown here:
+ * D152's station claims are one positive and one ABSENCE — the em dash on a
+ * ticket that reached no station — and the absence is the easy one to leave
+ * vacuous. Four things are shown inline:
  *
- * 1. `expectNoStationAnywhere` genuinely fails on the markup this slice
- *    removed — the Station cell and both states of the dialog's chip.
- * 2. `withStationOnTheWire` really does hand the screen a station, so the
- *    assertions are looking at a fixture that COULD break them.
- * 3. The column set is an equality, so a column quietly added back — under
- *    any name — fails it.
+ * 1. `stationOn` refuses to inspect a table that has lost the Station column,
+ *    rather than reporting an empty string that would satisfy nothing and
+ *    silently weaken the dash (D30's "fail when the analyser inspects nothing").
+ * 2. The dash assertion genuinely fails on a row that DOES name a station, so
+ *    it is not green merely because the column prints nothing anywhere.
+ * 3. The fixtures really do carry both kinds — a routed ticket and an unrouted
+ *    one — so neither direction is asserted against a table that could not
+ *    break it.
+ * 4. The column set is an equality anchored to a POSITION, so a Station column
+ *    restored under the wrong name, or in the wrong place, fails it.
  *
- * Beyond these, the real component was mutated outside the repo and the suite
- * re-run: restoring the Station <th>/<td> pair to kitchen-history.tsx turned
- * this file red, and restoring it with the old colSpan={7} turned the two span
- * assertions red as well (both killed); the repo was restored from the scratch
- * copy afterwards.
+ * Beyond these, the real component was mutated outside the repo and this spec
+ * re-run against each mutant:
+ *
+ *  1. The Station <th>/<td> pair removed and colSpan dropped back to 6 — the
+ *     whole D147 shape — KILLED (9 tests).
+ *  2. The cell falling back to "no station", D147's warning wording — KILLED.
+ *  3. The cell falling back to `t.placeLabel`, the plausible-looking wrong
+ *     fallback, both cells naming a place — KILLED (including the Where/Station
+ *     confusion test written for exactly this).
+ *  4. colSpan left at 6 with the column added — the stale-span damage — KILLED.
+ *  5. The column moved to the END, after By, so the set is present but the
+ *     position is wrong — KILLED.
+ *  6. The search hint left at D147's "Search ticket, order, table, or dish…" —
+ *     KILLED.
+ *  7. The cell hard-coded to "Hot line" rather than reading the row — KILLED.
+ *  8. The header renamed "Kitchen" with the cell left in place — KILLED.
+ *  9. The <td> removed but the <th> left, so every cell after Items shifts one
+ *     column left — KILLED, and by the D150 dashes as well as by these.
+ *
+ * The repo was restored from the untouched copy afterwards, verified by hash.
  */
-describe('the D147 negatives can actually fail', () => {
-  it('catches the Station cell this slice removed', () => {
+describe('the D152 station claims can actually fail', () => {
+  /** A table shaped like the real one, whose single row NAMES a station. */
+  function routedRow(): HTMLElement {
     const { container } = render(
       <table>
+        <thead>
+          <tr>
+            {['Ticket', 'Where', 'Items', 'Station', 'Started', 'Finished', 'By'].map((h) => (
+              <th key={h} scope="col">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
         <tbody>
           <tr>
-            <td className="whitespace-nowrap px-4 py-3">Hot line</td>
+            <td>K-000302</td>
+            <td>T3 · Garden</td>
+            <td>2 × Chicken Kottu</td>
+            <td>Hot line</td>
+            <td>1:40 PM</td>
+            <td>—</td>
+            <td>—</td>
           </tr>
         </tbody>
       </table>,
     );
-    expect(() => expectNoStationAnywhere(container)).toThrow();
+    return container.querySelector('tbody tr')! as HTMLElement;
+  }
+
+  it('catches a station named where the em dash belongs', () => {
+    const row = routedRow();
+
+    expect(stationOn(row)).toBe('Hot line');
+    // The dash assertion, run against a row that breaks it.
+    expect(() => expect(stationOn(row)).toBe('—')).toThrow();
   });
 
-  it('catches both states of the dialog chip this slice removed', () => {
-    const named = render(<span>Hot line</span>);
-    expect(() => expectNoStationAnywhere(named.container)).toThrow();
-    cleanup();
+  it('refuses to inspect a table that has lost the Station column', () => {
+    const { container } = render(
+      <table>
+        <thead>
+          <tr>
+            {['Ticket', 'Where', 'Items', 'Started', 'Finished', 'By'].map((h) => (
+              <th key={h} scope="col">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>K-000302</td>
+            <td>T3 · Garden</td>
+            <td>2 × Chicken Kottu</td>
+            <td>1:40 PM</td>
+            <td>—</td>
+            <td>—</td>
+          </tr>
+        </tbody>
+      </table>,
+    );
+    const row = container.querySelector('tbody tr')! as HTMLElement;
 
-    const unnamed = render(<span>no station</span>);
-    expect(() => expectNoStationAnywhere(unnamed.container)).toThrow();
+    /*
+     * The D147 shape. Note what would happen WITHOUT the throw: the Finished
+     * cell now sits at the index Station used to hold and already reads "—", so
+     * a positional helper would report the dash and the whole "prints the em
+     * dash" test would pass on a table with no Station column at all. That is
+     * the exact vacuity D30 forbids, and it is one index away at all times.
+     */
+    expect(() => stationOn(row)).toThrow(/would inspect nothing/);
   });
 
-  it('catches a Station column added back to the set, under any name', () => {
-    const withStation = ['Ticket', 'Where', 'Items', 'Station', 'Started', 'Finished', 'By'];
+  it('catches a Station column restored under the wrong name or in the wrong place', () => {
+    const expected = ['Ticket', 'Where', 'Items', 'Station', 'Started', 'Finished', 'By'];
     const renamed = ['Ticket', 'Where', 'Items', 'Kitchen', 'Started', 'Finished', 'By'];
-    const expected = ['Ticket', 'Where', 'Items', 'Started', 'Finished', 'By'];
-    expect(() => expect(withStation).toEqual(expected)).toThrow();
+    const atTheEnd = ['Ticket', 'Where', 'Items', 'Started', 'Finished', 'By', 'Station'];
+    const stillD147 = ['Ticket', 'Where', 'Items', 'Started', 'Finished', 'By'];
+
     expect(() => expect(renamed).toEqual(expected)).toThrow();
+    expect(() => expect(atTheEnd).toEqual(expected)).toThrow();
+    expect(() => expect(stillD147).toEqual(expected)).toThrow();
+    // …and the neighbour assertions catch the misplacement on their own, so the
+    // position is pinned twice over rather than only by the set's ordering.
+    expect(() => expect(atTheEnd.indexOf('Station')).toBe(atTheEnd.indexOf('Items') + 1)).toThrow();
   });
 
-  it('hands the screen a station to print, so the negatives are not vacuous', () => {
-    const row = withStationOnTheWire(ticket()) as KitchenTicketView & { stationName?: string };
-    expect(row.stationName).toBe('Hot line');
-    expect(row.stationId).toBe('stn_hot');
+  it('hands the screen both a routed ticket and an unrouted one, so neither direction is vacuous', () => {
+    const now = ticket();
+    expect(now.stationName).toBe('Hot line');
+    expect(now.stationId).toBe('stn_hot');
+
+    const old = fromTheD147Window(ticket());
+    expect(old.stationName).toBeNull();
+    expect(old.stationId).toBeNull();
+    // The rest of the ticket is untouched, so a row that fails the dash test
+    // fails it over the station and nothing else.
+    expect(old.ticketNumber).toBe(now.ticketNumber);
+    expect(old.status).toBe(now.status);
   });
 });
 
@@ -791,13 +997,20 @@ describe('the D147 negatives can actually fail', () => {
  * The repo was restored from the scratch copy afterwards.
  */
 describe('the D150 dashes can actually fail', () => {
-  /** A table shaped like the real one, whose single row is FINISHED. */
+  /**
+   * A table shaped like the real one, whose single row is FINISHED.
+   *
+   * Kept in step with the real header — D152 put Station back between Items and
+   * Started — because `cellUnder` reads by index off the header it is given: a
+   * fixture one column out of date would hand these proofs the wrong cell and
+   * make them pass or fail for a reason that has nothing to do with D150.
+   */
   function finishedRow(): HTMLElement {
     const { container } = render(
       <table>
         <thead>
           <tr>
-            {['Ticket', 'Where', 'Items', 'Started', 'Finished', 'By'].map((h) => (
+            {['Ticket', 'Where', 'Items', 'Station', 'Started', 'Finished', 'By'].map((h) => (
               <th key={h} scope="col">
                 {h}
               </th>
@@ -809,6 +1022,7 @@ describe('the D150 dashes can actually fail', () => {
             <td>K-000201</td>
             <td>T3 · Garden</td>
             <td>2 × Chicken Kottu</td>
+            <td>Hot line</td>
             <td>1:40 PM</td>
             <td>
               2:05 PM<div>25 min on the pass</div>
@@ -846,5 +1060,7 @@ describe('the D150 dashes can actually fail', () => {
     // cell, and a test that carried on would be asserting about nothing.
     expect(() => cellUnder(row, 'Finished')).toThrow(/would inspect nothing/);
     expect(() => cellUnder(row, 'By')).toThrow(/would inspect nothing/);
+    // The column D152 restored is held to the same rule.
+    expect(() => cellUnder(row, 'Station')).toThrow(/would inspect nothing/);
   });
 });

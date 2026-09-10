@@ -48,10 +48,20 @@ const DEFAULT_PAGE_SIZE = 20;
  * No polling. A record of what already happened does not move under the reader,
  * and a five-second refresh would fight the operator's paging.
  *
- * D147 — six columns, not seven. A ticket is a whole round rather than one
- * station's share of it, so there is no station to name here and no station
- * leg in the search: the term still matches the ticket number, the order
- * number, where it went and the dishes on it.
+ * D152 — seven columns, and the seventh is the station again. D147 cut a round
+ * down to ONE ticket routed nowhere, because there was no dependable place to
+ * say which station cooks a dish. The station is now chosen when a menu item is
+ * created, and a branch's "Main" catches anything still undecided, so a ticket
+ * is one station's share of a round once more — and "which section cooked that"
+ * is a question this record can answer again. The station rejoins the search
+ * term too, beside the ticket number, the order number, where it went and the
+ * dishes on it.
+ *
+ * The station is NULLABLE here and stays that way. A ticket cut during the D147
+ * window was routed to no station and nothing was backfilled, so those rows have
+ * no name to print and get the same em dash this table uses everywhere else for
+ * a value it simply does not have — not "no station", which would describe a
+ * routing fault that D152 has made impossible.
  */
 export function KitchenHistory({ session, branchId }: Props) {
   const [rows, setRows] = React.useState<KitchenTicketView[]>([]);
@@ -140,7 +150,9 @@ export function KitchenHistory({ session, branchId }: Props) {
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search ticket, order, table, or dish…"
+          // D152 — the station is a search leg again. A cook asked "what did the
+          // grill send out on Friday" has the station and nothing else to type.
+          placeholder="Search ticket, order, table, station, or dish…"
           // The server refuses a longer term with a 400 (D142's DTO). Stopping
           // it here turns a pasted paragraph into a search that finds nothing,
           // rather than into an error banner.
@@ -186,6 +198,12 @@ export function KitchenHistory({ session, branchId }: Props) {
                 <th scope="col" className="px-4 py-3 font-medium">
                   Items
                 </th>
+                {/* D152 — between what was cooked and when it started: the
+                    station belongs with the dishes it cooked, not out beyond
+                    the stamps that answer a different question. */}
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Station
+                </th>
                 <th scope="col" className="px-4 py-3 font-medium">
                   Started
                 </th>
@@ -200,13 +218,13 @@ export function KitchenHistory({ session, branchId }: Props) {
             <tbody className="divide-y divide-border">
               {status === 'loading' ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
                     Loading history…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
                     {/* Three different facts, and saying the wrong one is worse
                         than saying nothing: the request failed, nothing matched
                         the term, or this kitchen has genuinely been sent
@@ -264,6 +282,12 @@ export function KitchenHistory({ session, branchId }: Props) {
                       </div>
                     </td>
                     <td className="px-4 py-3">{summariseItems(t)}</td>
+                    {/* D152 — which section cooked this share of the round. A
+                        ticket cut during the D147 window carries no station and
+                        none was backfilled, so it reads as the em dash the rest
+                        of this table uses for a value it does not have; every
+                        ticket cut since carries a real one, Main at worst. */}
+                    <td className="whitespace-nowrap px-4 py-3">{t.stationName ?? '—'}</td>
                     {/* When the ticket reached the kitchen and work on it began
                         — the other end of the turnaround the pass is judged on. */}
                     <td className="whitespace-nowrap px-4 py-3">

@@ -179,11 +179,20 @@ export interface WizardState {
   /** ModifierGroup ids linked to this product (Step 3, card A). */
   modifierGroupIds: string[];
   /**
-   * KitchenStation ids linked to this product (Step 3, card C).
+   * KitchenStation ids this product ROUTES to (Step 3, card C).
    *
-   * LINKED to, not routed to: since D147 a round is one ticket and nothing
-   * consults these links at ticket time. They are recorded and still editable;
-   * they no longer decide anything.
+   * D152 restores the per-station split D147 removed, and restores the meaning
+   * of this field with it: a round is cut into one ticket per station its
+   * items route to, and these links are the routing input. That is why the
+   * choice is now REQUIRED for a restaurant tenant (see `validateStep`) and
+   * why the card preselects Main — D147's objection was precisely that this
+   * control started empty, sat in no validation rule and warned nobody, so
+   * routing on it was routing on an accident.
+   *
+   * An item that reaches save with no station is still never dropped: the API
+   * routes it to the branch's Main station (D152). The rule below exists so
+   * the operator gets to DECIDE where a dish is cooked, not so the dish
+   * survives — that part is the server's job and it holds either way.
    */
   kitchenStationIds: string[];
   /**
@@ -467,6 +476,20 @@ export interface ValidateContext {
    * client validation here is usability, not authority.
    */
   attributeSchema?: readonly AttributeField[];
+  /**
+   * D152 — does the branch have a kitchen-station catalogue to pick FROM?
+   *
+   * The station is a required choice for a restaurant product, but only where
+   * the operator can actually make it. A branch with no active station cannot
+   * satisfy the rule at all, and a Continue button held shut by a list that
+   * cannot be filled is worse than the gap the rule closes — the card says so
+   * on screen instead, and the server still routes the item to Main.
+   *
+   * Resolved by the SHELL, which owns every other validation fact too (D31).
+   * Absent or `null` means UNRESOLVED and never blocks: the same fail-safe
+   * `inventoryMode: null` and `businessKind: null` already take.
+   */
+  hasKitchenStations?: boolean | null;
 }
 
 export const MAX_COMBINATIONS = 500;
@@ -637,6 +660,32 @@ export function validateStep(
     if (state.quantityType === 'DECIMAL' && !state.unitOfMeasure.trim()) {
       errors['unitOfMeasure'] =
         'Name the unit this is sold in — for example kg, g or L.';
+    }
+
+    /*
+     * D152 — a restaurant dish must name the station that cooks it.
+     *
+     * This is the half of the reversal that makes the per-station split safe
+     * again. D147 removed the split because this field started empty, was in
+     * no rule and carried no warning; requiring it here is what turns the
+     * links from an accident into an answer. It is a cheap requirement, not an
+     * obstacle: the card preselects Main the moment the catalogue lands, so an
+     * operator who does not care accepts Main and moves on.
+     *
+     * Two guards, and both are load-bearing:
+     *  - RESTAURANT only. The card is not rendered for any other business
+     *    kind, and blocking a hardware product on a field it cannot see is
+     *    worse than the gap it closes.
+     *  - `hasKitchenStations === true`. An unsatisfiable rule is not a rule;
+     *    see `ValidateContext.hasKitchenStations`.
+     */
+    if (
+      ctx.businessKind === 'RESTAURANT' &&
+      ctx.hasKitchenStations === true &&
+      state.kitchenStationIds.length === 0
+    ) {
+      errors['kitchenStationIds'] =
+        'Choose the kitchen station that prepares this item — pick Main if you are not sure.';
     }
 
     if (state.hasVariations) {

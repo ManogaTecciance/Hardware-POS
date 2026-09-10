@@ -19,11 +19,17 @@
  *   • Idempotency is proven by identity of the recorded completer, not by
  *     absence of an error — a second call that silently rewrote the name
  *     would still "succeed".
- *   • D147's "one card per round" is asserted on the ROWS as well as on the
- *     board, and always with the station links the retired split routed on
- *     left in the fixture and asserted PRESENT. "One ticket, belonging to no
- *     station" proves nothing against a fixture that had nothing to route on
- *     — it would be green against the very routing it exists to prove gone.
+ *   • D152's per-station split is asserted on the ROWS as well as on the
+ *     board, and never by counting alone: each ticket is matched to the
+ *     station it claims AND to the dishes that station's links actually
+ *     route, and the union of the tickets' items is asserted equal to the
+ *     round's own items. "Two tickets" is satisfiable by a fixture that lost
+ *     a dish between them; "exactly these dishes, and no others" is not.
+ *   • The Main fallback is asserted at a branch holding four other active
+ *     stations, one of them NAMED "Main Kitchen" on a different code. An
+ *     unlinked dish reaching a ticket proves nothing at a one-station branch
+ *     — D67's retired sole-station sweep did that much — and a build
+ *     resolving Main by display name would send it to the demo hot line.
  */
 import {
   seedTenantRoles,
@@ -53,14 +59,14 @@ interface TicketView {
   ticketNumber: string;
   status: string;
   /**
-   * D147 — NULL on every ticket this spec cuts: a round is one ticket now, and
-   * a ticket that belongs to no station must not claim one. It stays on the
-   * wire (retyped) because a ticket raised BEFORE D147 genuinely still carries
-   * the station it was routed to. `stationName` is gone from the view
-   * altogether, so it is deliberately NOT declared here; the tests assert its
-   * absence from the payload rather than trusting this type.
+   * D152 — a REAL station on every ticket this spec cuts: the split is back,
+   * and a ticket is one station's slice of one round again. Both fields stay
+   * NULLABLE and so does the column — the tickets cut during the D147 window
+   * belong to no station and there is no backfill — so the assertions below
+   * name the station they expect rather than leaning on the type.
    */
   stationId: string | null;
+  stationName: string | null;
   orderNumber: string | null;
   placeLabel: string | null;
   roundNumber: number | null;
@@ -234,10 +240,11 @@ beforeEach(async () => {
   });
   productId = product.id;
   /*
-   * D147 — this link is left here ON PURPOSE and the tests assert it is still
-   * present. Station links did not go away; they stopped routing. Asserting
-   * "the ticket belongs to no station" against a fixture that had never linked
-   * anything would be a vacuous test (D30).
+   * D152 — this link ROUTES again. It stayed in the fixture through the D147
+   * window (where the tests asserted it was present and ignored), so the
+   * assertions that now read 'Pass' off a card are reading the effect of a
+   * link this fixture really makes — not a default, and not the Main
+   * fallback, which would have said 'Main'.
    */
   await prisma.productStationLink.create({ data: { productId: product.id, stationId } });
 });
@@ -256,13 +263,13 @@ describe('D68 — a sent round lands on the kitchen board', () => {
     const ticket = res.data[0]!;
     expect(ticket.status).toBe('QUEUED');
     /*
-     * D147 — this assertion read `stationName === 'Pass'` and is now false by
-     * decision: the card names no station. The product IS linked to Pass (the
-     * fixture makes that link, and the row read below asserts it survives),
-     * which is what makes the null meaningful rather than incidental.
+     * D152 — back to the truth this line asserted before D147, which had
+     * rewritten it to `stationId === null` + "no `stationName` on the wire".
+     * The product is linked to Pass and to nothing else, so both halves are
+     * the LINK's doing; the Main fallback would have said 'Main' here.
      */
-    expect(ticket.stationId).toBeNull();
-    expect(ticket).not.toHaveProperty('stationName');
+    expect(ticket.stationId).toBe(stationId);
+    expect(ticket.stationName).toBe('Pass');
     expect(ticket.placeLabel).toBe('T7 · Terrace');
     expect(ticket.orderNumber).toMatch(/^RO-\d+$/);
     expect(ticket.roundNumber).toBe(1);
@@ -284,11 +291,12 @@ describe('D68 — a sent round lands on the kitchen board', () => {
       select: { primaryPrinterId: true, stationId: true },
     });
     expect(stored.primaryPrinterId).toBeNull();
-    // D147 in the COLUMN, not only in the projection.
-    expect(stored.stationId).toBeNull();
-    // POSITIVE CONTROL for that null: the link exists and was simply not
-    // consulted. Without it the null would also hold for a fixture that had
-    // nothing to consult.
+    // D152 in the COLUMN, not only in the projection: a board that computed a
+    // station name over a row still carrying null would read identically from
+    // up there, and the ribbon would go blank on the next reload.
+    expect(stored.stationId).toBe(stationId);
+    // POSITIVE CONTROL for that id — the link the generator read is really
+    // there. Without it, `stationId` could only have been guessed.
     expect(await prisma.productStationLink.count({ where: { productId, stationId } })).toBe(1);
   });
 
@@ -296,8 +304,9 @@ describe('D68 — a sent round lands on the kitchen board', () => {
     await sendRound();
     await sendRound();
     const res = await board();
-    // D147 collapsed the STATION split and nothing else: two rounds are still
-    // two cards, and an order is never folded into a single ticket.
+    // D152 split the ROUND across stations; it did not merge rounds. Beef
+    // Steak routes to Pass and nowhere else, so each round is still exactly
+    // one card here — and an order is never folded into a single ticket.
     expect(res.data).toHaveLength(2);
     expect(res.data.map((t) => t.roundNumber).sort()).toEqual([1, 2]);
     // Oldest first: a kitchen works a queue.
@@ -306,26 +315,47 @@ describe('D68 — a sent round lands on the kitchen board', () => {
 });
 
 /*
- * D147 — a round is ONE card, whatever its dishes would have routed to.
+ * D152 — the split is back: one ticket per station, and nothing lands on none.
  *
- * The board used to show a single order for a single round as several
- * separate cards, one per kitchen station the items routed to (RO-000026, one
- * round of 15 lines, arrived as KOT-000027 with 13 and KOT-000028 with 2).
- * The routing behind that was never reachable — the only place to link a dish
- * to a station is the product wizard's branch-scoped Step 3 multi-select,
- * which renders empty when no branch is selected — and worse than
- * unreachable: an item with no link was DROPPED unless the branch happened to
- * have exactly one active station.
+ * D147 had collapsed it. A round became ONE card carrying every dish, with
+ * `stationId` null, because the routing underneath was not dependable: the
+ * only place to link a dish to a station was the product wizard's
+ * branch-scoped Step 3 multi-select, which renders empty when no branch is
+ * selected, so dishes were created linked to nothing — and an item linked to
+ * nothing reached NO ticket at all unless the branch happened to have exactly
+ * one active station (D67's sole-station sweep). Ordered, billed, never
+ * cooked.
  *
- * So this block is deliberately hostile to the claim it makes. Four active
- * stations, three products linked to three DIFFERENT ones, and a fourth
- * linked to nothing: the exact fixture the retired routing would have split
- * three ways while silently losing the fourth dish.
+ * D152 removes both halves of that objection rather than the split: the
+ * station is CHOSEN when the menu item is created, and every branch has a
+ * `MAIN` station that anything still unlinked routes to. So the cards come
+ * back, and the drop does not.
+ *
+ * This block is written to be hostile to its own claim (D30):
+ *
+ *   • FOUR active stations before a round is sent, FIVE after — the submit
+ *     creates Main. The count is load-bearing in both directions: D67's sweep
+ *     rescued an unlinked dish only at a branch with exactly ONE active
+ *     station, so "it reached a ticket" proved at a one-station branch would
+ *     be indistinguishable from the behaviour D152 replaces.
+ *   • One of those stations is NAMED "Main Kitchen", on code `KIT` — the
+ *     seed's demo hot line, deliberately distinct from Main. The fallback
+ *     resolves by CODE, so every "on Main" assertion below names the id of
+ *     the `MAIN`-coded row and asserts the hot line received nothing. A build
+ *     that matched the display name would fail here and nowhere else.
+ *   • Every split assertion is paired with a UNION check — the multiset of
+ *     the tickets' items against the round's own items. "Two tickets" is
+ *     satisfiable by a fixture that lost a dish between them; "exactly these
+ *     dishes, in these quantities, and no others" is not.
  */
-describe('D147 — a round is one card, whatever its dishes would have routed to', () => {
+describe('D152 — one ticket per station, and no dish reaches the pass on none', () => {
   let grillProductId: string;
   let pastryProductId: string;
   let unlinkedProductId: string;
+  let grillStationId: string;
+  let pastryStationId: string;
+  /** The seed's demo hot line: called "Main Kitchen", coded `KIT`, NOT Main. */
+  let hotLineStationId: string;
 
   const mkProduct = async (name: string, sku: string, station: string | null) => {
     const product = await prisma.product.create({
@@ -349,86 +379,274 @@ describe('D147 — a round is one card, whatever its dishes would have routed to
     return product.id;
   };
 
+  const mkStation = async (code: string, name: string) =>
+    (
+      await prisma.kitchenStation.create({
+        data: { tenantId: restaurant.tenantId, branchId, code, name },
+      })
+    ).id;
+
   beforeEach(async () => {
     /*
-     * FOUR active stations, the shape of the branch that reported this (Bar,
-     * Grill, Main Kitchen, Pastry — the outer fixture's 'Pass' stands in for
-     * the fourth). The COUNT is load-bearing: the routing D147 removed had
-     * exactly one escape hatch for a dish linked to nothing, and it was a
-     * branch with exactly ONE active station. At four there was no escape.
+     * FOUR active stations, the shape of the branch that reported the D147
+     * defect (Bar, Grill, Main Kitchen, Pastry — the outer fixture's 'Pass'
+     * stands in for the fourth). None of them is coded `MAIN`: Main does not
+     * exist here until a round is submitted, which is what lets these tests
+     * assert it was CREATED rather than found.
      */
-    const mkStation = async (code: string, name: string) =>
-      (
-        await prisma.kitchenStation.create({
-          data: { tenantId: restaurant.tenantId, branchId, code, name },
-        })
-      ).id;
-    const grillId = await mkStation('GRILL', 'Grill');
-    const pastryId = await mkStation('PASTRY', 'Pastry');
-    await mkStation('MAIN', 'Main Kitchen');
+    grillStationId = await mkStation('GRILL', 'Grill');
+    pastryStationId = await mkStation('PASTRY', 'Pastry');
+    hotLineStationId = await mkStation('KIT', 'Main Kitchen');
 
-    grillProductId = await mkProduct('Grilled Seer Fish', 'RST-SEER', grillId);
-    pastryProductId = await mkProduct('Watalappan', 'RST-WATA', pastryId);
-    // Linked to nothing at all. This is the ORDINARY case rather than a corner
-    // one: with the wizard's multi-select empty, every product is created this
-    // way.
+    grillProductId = await mkProduct('Grilled Seer Fish', 'RST-SEER', grillStationId);
+    pastryProductId = await mkProduct('Watalappan', 'RST-WATA', pastryStationId);
+    // Linked to nothing at all — still the ordinary case for anything created
+    // before D152 put the station on the menu-item form.
     unlinkedProductId = await mkProduct('Chicken Kottu', 'RST-KOTTU', null);
   });
 
-  const sendMixedRound = () =>
+  const send = (idempotencyKey: string, items: { productId: string; quantity: string }[]) =>
     http.request<{ id: string }>('POST', `/restaurant/orders/${orderId}/rounds`, {
       token: ownerToken(),
       body: {
-        idempotencyKey: 'd143-mixed',
-        items: [
-          // Pass, Grill, Pastry — and one dish belonging to no station.
-          { sourceKind: 'PRODUCT', productId, quantity: '1' },
-          { sourceKind: 'PRODUCT', productId: grillProductId, quantity: '1' },
-          { sourceKind: 'PRODUCT', productId: pastryProductId, quantity: '1' },
-          { sourceKind: 'PRODUCT', productId: unlinkedProductId, quantity: '1' },
-        ],
+        idempotencyKey,
+        items: items.map((i) => ({ sourceKind: 'PRODUCT', ...i })),
       },
     });
 
-  it('shows one card holding every dish, where three stations meant three cards', async () => {
-    const sent = await sendMixedRound();
+  const ticketsFor = (roundId: string) =>
+    prisma.kitchenTicket.findMany({
+      where: { roundId },
+      include: { items: true, station: true },
+    });
+
+  /** `{ 'Grill': ['Grilled Seer Fish'], … }` — which station got which dishes. */
+  const dishesByStation = (rows: Awaited<ReturnType<typeof ticketsFor>>) =>
+    Object.fromEntries(
+      rows.map((t) => [
+        // '(no station)' rather than a throw: a D147-window ticket legitimately
+        // has none, and a regression that produced one here must READ as that
+        // rather than as a crashed test.
+        t.station?.name ?? '(no station)',
+        t.items.map((i) => i.menuItemName).sort(),
+      ]),
+    );
+
+  /*
+   * The claim a lucky fixture cannot satisfy: what the KITCHEN received,
+   * against what the WAITER sent, as multisets. Dish names alone would let a
+   * dropped second helping through, so the key carries every field a KOT line
+   * copies from its round line — the variant snapshot (D46) and the quantity
+   * included.
+   */
+  const sentByTheWaiter = async (roundId: string) =>
+    (
+      await prisma.restaurantOrderItem.findMany({
+        where: { roundId },
+        select: { menuItemName: true, variantNameSnapshot: true, quantity: true },
+      })
+    )
+      .map((i) => `${i.menuItemName}|${i.variantNameSnapshot ?? '—'}|${i.quantity.toFixed(3)}`)
+      .sort();
+
+  const receivedByTheKitchen = async (roundId: string) =>
+    (
+      await prisma.kitchenTicketItem.findMany({
+        where: { ticket: { roundId } },
+        select: { menuItemName: true, variantName: true, quantity: true },
+      })
+    )
+      .map((i) => `${i.menuItemName}|${i.variantName ?? '—'}|${i.quantity.toFixed(3)}`)
+      .sort();
+
+  const mainStation = () =>
+    prisma.kitchenStation.findFirstOrThrow({ where: { branchId, code: 'MAIN' } });
+
+  it('two stations mean two cards again, each holding only its own station’s dishes', async () => {
+    const sent = await send('d152-two-stations', [
+      { productId, quantity: '1' }, // Beef Steak → Pass (outer fixture)
+      { productId: grillProductId, quantity: '1' }, // Grilled Seer Fish → Grill
+    ]);
     expect(sent.status).toBe(201);
 
-    // POSITIVE — one card on the board, carrying the whole round.
+    const rows = await ticketsFor(sent.data.id);
+    // POSITIVE — two rows, one per station, each carrying ONLY its own dish.
+    expect(rows).toHaveLength(2);
+    expect(dishesByStation(rows)).toEqual({
+      Pass: ['Beef Steak'],
+      Grill: ['Grilled Seer Fish'],
+    });
+    // The same claim on the IDS, so it cannot pass on two stations that happen
+    // to share a display name.
+    expect([...rows.map((t) => t.stationId)].sort()).toEqual([stationId, grillStationId].sort());
+
+    /*
+     * NEGATIVE — the D147 shape, named as the thing that must not come back:
+     * no ticket holds both dishes, and none of them belongs to no station.
+     * Counting rows alone would leave "two tickets" green against a build that
+     * cut one collapsed card and one empty one.
+     */
+    expect(rows.some((t) => t.items.length > 1)).toBe(false);
+    expect(rows.every((t) => t.stationId !== null)).toBe(true);
+    // Two cards on the pass are two KOT numbers: two cards sharing one cannot
+    // be told apart by the people calling them out.
+    expect(new Set(rows.map((t) => t.ticketNumber)).size).toBe(2);
+    rows.forEach((t) => expect(t.ticketNumber).toMatch(/^KOT-\d+$/));
+
+    // …and the board says the same, station NAME and all — the ribbon the
+    // card draws reads from this.
+    const cards = (await board('?status=OUTSTANDING')).data;
+    expect(cards).toHaveLength(2);
+    expect([...cards.map((c) => c.stationName)].sort()).toEqual(['Grill', 'Pass']);
+    expect([...cards.map((c) => c.id)].sort()).toEqual([...rows.map((r) => r.id)].sort());
+
+    /*
+     * NOTHING DROPPED between the two of them. The round's lines are PINNED
+     * rather than merely compared with the tickets': two equal EMPTY lists
+     * would satisfy a bare comparison, so a generator that wrote no items at
+     * all has to fail here rather than pass.
+     */
+    const roundLines = await sentByTheWaiter(sent.data.id);
+    expect(roundLines).toEqual(['Beef Steak|—|1.000', 'Grilled Seer Fish|—|1.000']);
+    expect(await receivedByTheKitchen(sent.data.id)).toEqual(roundLines);
+
+    /*
+     * POSITIVE CONTROL (D30) — the links the split routes on are really there,
+     * on two DIFFERENT stations. Delete them and the round would land on Main
+     * as one card, which is a shape this test must not be able to accept.
+     */
+    const links = await prisma.productStationLink.findMany({
+      where: { productId: { in: [productId, grillProductId] } },
+      select: { stationId: true },
+    });
+    expect([...links.map((l) => l.stationId)].sort()).toEqual([stationId, grillStationId].sort());
+  });
+
+  it('a dish linked to NO station lands on Main — the drop D147 removed the split over', async () => {
+    /*
+     * THE DEFECT, and the reason the split went rather than a side effect of
+     * removing it: at a branch with more than one active station the old
+     * routing put an item with no station link on NO ticket at all. It was
+     * ordered, it was billed, and the kitchen never saw it.
+     *
+     * The preconditions are ASSERTED BEFORE the round, not after, because the
+     * submit itself changes two of them — it creates Main, taking the branch
+     * from four active stations to five.
+     */
+    expect(await prisma.productStationLink.count({ where: { productId: unlinkedProductId } })).toBe(
+      0,
+    );
+    expect(await prisma.kitchenStation.count({ where: { branchId, isActive: true } })).toBe(4);
+    expect(await prisma.kitchenStation.count({ where: { branchId, code: 'MAIN' } })).toBe(0);
+
+    const sent = await send('d152-unlinked', [{ productId: unlinkedProductId, quantity: '3' }]);
+    expect(sent.status).toBe(201);
+
+    // POSITIVE — Main was BORN here (it was not there a moment ago), and the
+    // round's one ticket belongs to it. The count is asserted before the row
+    // is read so a missing Main fails as an assertion, not as a thrown query.
+    expect(await prisma.kitchenStation.count({ where: { branchId, code: 'MAIN' } })).toBe(1);
+    const main = await mainStation();
+    const rows = await ticketsFor(sent.data.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.stationId).toBe(main.id);
+    expect(rows[0]!.items.map((i) => i.menuItemName)).toEqual(['Chicken Kottu']);
+    expect(rows[0]!.items[0]!.quantity.toFixed(3)).toBe('3.000');
+
+    // Main is what the contract says it is, and it is REACHABLE — an archived
+    // Main would take tickets while vanishing from the board's station filter.
+    expect({
+      code: main.code,
+      name: main.name,
+      category: main.category,
+      isActive: main.isActive,
+    }).toEqual({ code: 'MAIN', name: 'Main', category: 'KITCHEN', isActive: true });
+
+    /*
+     * NEGATIVE, and the one that separates "resolved by code" from "resolved
+     * by whatever is called Main": the branch's "Main Kitchen" hot line is a
+     * different row on a different code, and it received nothing.
+     */
+    expect(rows[0]!.stationId).not.toBe(hotLineStationId);
+    expect(await prisma.kitchenTicket.count({ where: { stationId: hotLineStationId } })).toBe(0);
+
+    // …and the card names it, which is what the pass reads.
     const cards = (await board('?status=OUTSTANDING')).data;
     expect(cards).toHaveLength(1);
-    expect(cards[0]!.items.map((i) => i.menuItemName).sort()).toEqual([
-      'Beef Steak',
-      'Chicken Kottu',
-      'Grilled Seer Fish',
-      'Watalappan',
-    ]);
+    expect(cards[0]!.stationId).toBe(main.id);
+    expect(cards[0]!.stationName).toBe('Main');
 
+    // …and the one line the waiter sent is the one line the kitchen got,
+    // PINNED rather than merely compared: two equal empty lists would satisfy
+    // a bare comparison between the two sides.
+    const roundLines = await sentByTheWaiter(sent.data.id);
+    expect(roundLines).toEqual(['Chicken Kottu|—|3.000']);
+    expect(await receivedByTheKitchen(sent.data.id)).toEqual(roundLines);
+  });
+
+  it('NOTHING IS DROPPED — a mixed round’s tickets hold exactly the round’s dishes', async () => {
     /*
-     * The same claim on the ROWS. Asserting only the board would leave "one
-     * card" true of a build that still cut three tickets and happened to list
-     * one of them — a filter hiding siblings looks identical from up here.
+     * The fixture the retired routing would have split three ways while
+     * silently losing the last two dishes. Five lines across three linked
+     * stations and two dishes linked to nothing; the two orphans must share
+     * ONE Main ticket rather than getting a card each, so the pass reads Main
+     * as a station and not as a pile of singletons.
      */
-    const rows = await prisma.kitchenTicket.findMany({
-      where: { roundId: sent.data.id },
-      include: { items: true },
+    const papadumId = await mkProduct('Papadum', 'RST-PAPADUM', null);
+    expect(await prisma.kitchenStation.count({ where: { branchId, isActive: true } })).toBe(4);
+
+    const sent = await send('d152-mixed', [
+      { productId, quantity: '1' }, // Pass
+      { productId: grillProductId, quantity: '2' }, // Grill
+      { productId: pastryProductId, quantity: '1' }, // Pastry
+      { productId: unlinkedProductId, quantity: '1' }, // → Main
+      { productId: papadumId, quantity: '4' }, // → Main, same ticket
+    ]);
+    expect(sent.status).toBe(201);
+
+    const main = await mainStation();
+    const rows = await ticketsFor(sent.data.id);
+    // POSITIVE — four cards for five dishes: three linked stations and Main.
+    expect(rows).toHaveLength(4);
+    expect(dishesByStation(rows)).toEqual({
+      Pass: ['Beef Steak'],
+      Grill: ['Grilled Seer Fish'],
+      Pastry: ['Watalappan'],
+      Main: ['Chicken Kottu', 'Papadum'],
     });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.items).toHaveLength(4);
-    // NEGATIVE — it belongs to no station, in the column and on the wire, and
-    // the card names none.
-    expect(rows[0]!.stationId).toBeNull();
-    expect(cards[0]!.stationId).toBeNull();
-    expect(cards[0]!).not.toHaveProperty('stationName');
-    // ONE document number for the round, not one per station.
-    expect(rows[0]!.ticketNumber).toMatch(/^KOT-\d+$/);
-    expect(cards[0]!.ticketNumber).toBe(rows[0]!.ticketNumber);
+    expect([...rows.map((t) => t.stationId)].sort()).toEqual(
+      [stationId, grillStationId, pastryStationId, main.id].sort(),
+    );
 
     /*
-     * POSITIVE CONTROL, and the assertion that makes the two negatives above
-     * mean anything (D30): the links the old split routed on are STILL THERE,
-     * three products across three DIFFERENT stations. Delete them and this
-     * test would still pass while proving nothing.
+     * THE CLAIM THAT CANNOT BE SATISFIED BY A LUCKY FIXTURE — the union of the
+     * tickets' items IS the round's items, quantity and variant included. A
+     * card count can be right while a dish is missing; this cannot.
+     */
+    const roundLines = await sentByTheWaiter(sent.data.id);
+    expect(roundLines).toEqual([
+      'Beef Steak|—|1.000',
+      'Chicken Kottu|—|1.000',
+      'Grilled Seer Fish|—|2.000',
+      'Papadum|—|4.000',
+      'Watalappan|—|1.000',
+    ]);
+    expect(await receivedByTheKitchen(sent.data.id)).toEqual(roundLines);
+
+    // NEGATIVE — neither shape this replaces: not one collapsed card (D147),
+    // and not a card per dish (which is what "Main aggregates" rules out).
+    expect(rows.some((t) => t.items.length === 5)).toBe(false);
+    expect(rows.every((t) => t.stationId !== null)).toBe(true);
+    expect(new Set(rows.map((t) => t.ticketNumber)).size).toBe(4);
+    // The hot line is still not Main, with four other stations in play.
+    expect(await prisma.kitchenTicket.count({ where: { stationId: hotLineStationId } })).toBe(0);
+
+    /*
+     * POSITIVE CONTROLS (D30). Without these, everything above would hold for
+     * a fixture with nothing to route on and nothing to fall back from:
+     *   • three links, on three DIFFERENT stations, still present, and
+     *   • two dishes genuinely linked to none, at a branch that now has five
+     *     active stations, so no sole-station sweep could have placed them.
      */
     const links = await prisma.productStationLink.findMany({
       where: { productId: { in: [productId, grillProductId, pastryProductId] } },
@@ -436,48 +654,66 @@ describe('D147 — a round is one card, whatever its dishes would have routed to
     });
     expect(links).toHaveLength(3);
     expect(new Set(links.map((l) => l.stationId)).size).toBe(3);
+    expect(
+      await prisma.productStationLink.count({
+        where: { productId: { in: [unlinkedProductId, papadumId] } },
+      }),
+    ).toBe(0);
+    expect(await prisma.kitchenStation.count({ where: { branchId, isActive: true } })).toBe(5);
   });
 
-  it('puts a dish linked to NO station on the board — the defect D147 fixes', async () => {
-    /*
-     * Named, because it is the reason the split went rather than a side
-     * effect of removing it: at a branch with more than one active station
-     * the old routing put an item with no station link on NO ticket at all.
-     * It was ordered, it was billed, and the kitchen never saw it.
-     */
-    const sent = await http.request<{ id: string }>(
-      'POST',
-      `/restaurant/orders/${orderId}/rounds`,
-      {
-        token: ownerToken(),
-        body: {
-          idempotencyKey: 'd143-unlinked',
-          items: [{ sourceKind: 'PRODUCT', productId: unlinkedProductId, quantity: '3' }],
-        },
-      },
-    );
-    expect(sent.status).toBe(201);
+  it('creates Main when the branch has none, reuses it after, and leaves a rename alone', async () => {
+    // POSITIVE — it is not there to begin with, so what follows is a creation
+    // and not a lucky seed.
+    expect(await prisma.kitchenStation.count({ where: { branchId, code: 'MAIN' } })).toBe(0);
 
-    // POSITIVE — it reaches the pass, on its own card, with its quantity.
-    const cards = (await board('?status=OUTSTANDING')).data;
-    expect(cards).toHaveLength(1);
-    expect(cards[0]!.items.map((i) => i.menuItemName)).toEqual(['Chicken Kottu']);
-    expect(cards[0]!.items[0]!.quantity).toBe('3.000');
-    expect(cards[0]!.stationId).toBeNull();
-    // …and a row backs it, so "on the board" is not a projection artefact.
-    expect(await prisma.kitchenTicket.count({ where: { roundId: sent.data.id } })).toBe(1);
+    const first = await send('d152-main-1', [{ productId: unlinkedProductId, quantity: '1' }]);
+    expect(first.status).toBe(201);
+    const main = await mainStation();
+    expect({ name: main.name, category: main.category, isActive: main.isActive }).toEqual({
+      name: 'Main',
+      category: 'KITCHEN',
+      isActive: true,
+    });
+    expect((await ticketsFor(first.data.id))[0]!.stationId).toBe(main.id);
+
+    // …and a second round REUSES it: `@@unique([branchId, code])` is what makes
+    // upserting on every submit safe, and a second row would split the pass's
+    // Main lane in two.
+    const second = await send('d152-main-2', [{ productId: unlinkedProductId, quantity: '1' }]);
+    expect(second.status).toBe(201);
+    expect(await prisma.kitchenStation.count({ where: { branchId, code: 'MAIN' } })).toBe(1);
+    expect((await ticketsFor(second.data.id))[0]!.stationId).toBe(main.id);
 
     /*
-     * The two preconditions, ASSERTED rather than assumed (D30). Without both
-     * this test would stay green against the very routing it proves gone:
-     *   • the dish genuinely has no station link, and
-     *   • the branch has more than one active station, so the retired
-     *     sole-station fallback could not have rescued it either.
+     * The two halves of the upsert's `update`, asserted against each other.
+     * An operator renames Main and archives it; the next round must
+     *   • restate `isActive` — an archived Main keeps taking tickets while
+     *     disappearing from the board's station filter, and Main is the one
+     *     station in a branch that must never be unreachable — and
+     *   • leave the NAME alone. Someone who renamed Main to "Hot line" meant
+     *     it, and the submit is not the place to argue.
+     * Testing only the first would stay green against an upsert that restated
+     * the name as well, which is the mistake worth catching here.
      */
-    expect(await prisma.productStationLink.count({ where: { productId: unlinkedProductId } })).toBe(
-      0,
-    );
-    expect(await prisma.kitchenStation.count({ where: { branchId, isActive: true } })).toBe(4);
+    await prisma.kitchenStation.update({
+      where: { id: main.id },
+      data: { name: 'Hot line', isActive: false },
+    });
+    const third = await send('d152-main-3', [{ productId: unlinkedProductId, quantity: '1' }]);
+    expect(third.status).toBe(201);
+
+    const after = await prisma.kitchenStation.findUniqueOrThrow({ where: { id: main.id } });
+    expect(after.isActive).toBe(true); // restated
+    expect(after.name).toBe('Hot line'); // NOT restated
+    expect(await prisma.kitchenStation.count({ where: { branchId, code: 'MAIN' } })).toBe(1);
+
+    const thirdRows = await ticketsFor(third.data.id);
+    expect(thirdRows).toHaveLength(1);
+    expect(thirdRows[0]!.stationId).toBe(main.id);
+    // …and the card carries the operator's own label, not the born one.
+    const card = (await board('?status=OUTSTANDING')).data.find((c) => c.id === thirdRows[0]!.id)!;
+    expect(card.stationName).toBe('Hot line');
   });
 });
 
@@ -1128,13 +1364,13 @@ describe('D142 — today on the board, everything in the history', () => {
     // The context a printed KOT used to carry, still on the row weeks later.
     expect(items[0]!.items[0]!.menuItemName).toBeTruthy();
     /*
-     * D147 — this line asserted `stationName` was truthy, which is now false
-     * by decision rather than by regression: a ticket belongs to no station to
-     * name. Rewritten to the new truth, and to the context the history screen
-     * actually has to carry — where the food went, and whose order it was.
+     * D152 — the station is back on the history row, and this line is back to
+     * the truth it asserted before D147 rewrote it to "no `stationName`, null
+     * `stationId`". Beef Steak is linked to Pass and nothing else, so 'Pass'
+     * is what the LINK produced: an unrouted dish would read 'Main'.
      */
-    expect(items[0]!).not.toHaveProperty('stationName');
-    expect(items[0]!.stationId).toBeNull();
+    expect(items[0]!.stationName).toBe('Pass');
+    expect(items[0]!.stationId).toBe(stationId);
     expect(items[0]!.placeLabel).toBe('T7 · Terrace');
     expect(items[0]!.orderNumber).toMatch(/^RO-\d+$/);
   });
@@ -1193,6 +1429,22 @@ describe('D142 — today on the board, everything in the history', () => {
     const fragment = dish.slice(0, 4).toLowerCase();
     expect((await history(`?search=${encodeURIComponent(fragment)}`)).data.total).toBe(1);
     expect((await history()).data.total).toBe(1);
+    /*
+     * D152 — and a fourth way in: the STATION that cooked it. This leg left
+     * the search with the split and comes back with it, and it is the one that
+     * answers "what did the grill have on last Friday". 'pass' matches no KOT
+     * number, no RO number, no dish name and no part of "T7 · Terrace", so a
+     * hit here can only have come through the station join.
+     */
+    expect((await history('?search=pass')).data.total).toBe(1);
+    /*
+     * NEGATIVE, paired — 'main' is a station this branch really HAS (the
+     * submit created it) and it did not cook this ticket. Without this the
+     * positive above would also hold for a leg that matched any station in the
+     * branch rather than the ticket's own.
+     */
+    expect(await prisma.kitchenStation.count({ where: { branchId, code: 'MAIN' } })).toBe(1);
+    expect((await history('?search=main')).data.total).toBe(0);
     // NEGATIVE — a term that matches nothing returns nothing, so the positives
     // above are not simply an unfiltered list.
     expect((await history('?search=zzzznotathing')).data.total).toBe(0);

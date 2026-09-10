@@ -576,15 +576,32 @@ async function seedRestaurant(passwordHash: string) {
   }
 
   // ── Kitchen stations ─────────────────────────────────────────
+  //
+  // D152 — `MAIN` comes first and is not optional. Every branch has one,
+  // because it is where a menu item with no station link routes: the API
+  // upserts it at submit time rather than trusting this seed, and seeding it
+  // here keeps a freshly seeded tenant's five stations identical to a
+  // long-running one's. It is deliberately NOT 'Main Kitchen' below — that is
+  // a hot line the demo menu routes dishes to on purpose, and collapsing the
+  // two would hide whether the fallback or a real link put a dish on a card.
   const stations = [
+    { id: 'kst_resto_main', code: 'MAIN', name: 'Main', category: 'KITCHEN' },
     { id: 'kst_resto_kitchen', code: 'KIT', name: 'Main Kitchen', category: 'KITCHEN' },
     { id: 'kst_resto_grill', code: 'GRL', name: 'Grill', category: 'GRILL' },
     { id: 'kst_resto_bar', code: 'BAR', name: 'Bar', category: 'BAR' },
     { id: 'kst_resto_dessert', code: 'DST', name: 'Pastry', category: 'DESSERT' },
   ];
   for (const st of stations) {
+    /*
+     * Keyed on (branchId, code), not on the fixed id. D152's API UPSERTS the
+     * MAIN station at round-submit time and gives it a cuid, so on any
+     * database the app has already run against, a seed keyed on
+     * `kst_resto_main` would find nothing, try to create, and die on
+     * `@@unique([branchId, code])`. The create still pins the fixed id, so a
+     * fresh seed produces the same ids the product links below reference.
+     */
     await prisma.kitchenStation.upsert({
-      where: { id: st.id },
+      where: { branchId_code: { branchId: branch.id, code: st.code } },
       update: { name: st.name, category: st.category, isActive: true },
       create: {
         id: st.id,
@@ -718,11 +735,14 @@ async function seedRestaurant(passwordHash: string) {
       update: data,
       create: { id: m.id, tenantId: tenant.id, ...data },
     });
-    // Link every dish to a station. Since D147 this no longer decides whether
-    // the dish reaches the kitchen — a round is one ticket holding all of it,
-    // routed nowhere — so this is now seed REALISM rather than a safety net.
-    // It used to be the latter: an unlinked dish at a multi-station branch was
-    // dropped silently (audit C1), which is the defect D147 removed.
+    // Link every dish to a station: D152 routes a round to one ticket PER
+    // STATION again, so this is what decides which card each dish lands on.
+    //
+    // It is no longer a SAFETY net, which is the part worth remembering. Before
+    // D147 an unlinked dish at a multi-station branch was dropped silently
+    // (audit C1) and seeding these links was the only thing hiding it. D152
+    // catches an unlinked dish at Main instead, so a seed that forgot one would
+    // now be merely unrealistic rather than invisible.
     await prisma.productStationLink.upsert({
       where: { productId_stationId: { productId: m.id, stationId: m.station } },
       update: {},

@@ -498,6 +498,13 @@ export interface KitchenOrderView {
     modifierNames: string[];
     specialInstructions: string | null;
     roundNumber: number | null;
+    /*
+     * D152 — the station that cooks this dish, back on the item line. Nullable
+     * because the join can find nothing: a dish whose menu item carries no
+     * station link cooks at Main (D152), but that fallback is the TICKET's
+     * routing, not a link on the item, so the item itself still answers null.
+     */
+    stationName: string | null;
   }[];
 }
 
@@ -508,13 +515,18 @@ export interface KitchenTicketView {
   branchId: string;
   roundId: string;
   /*
-   * D147 — a ticket is now the WHOLE round, so nothing routes it to one
-   * station and every ticket cut after that decision stores no station at
-   * all. The column survives, nullable, only so tickets cut BEFORE it keep
-   * the station they were genuinely sent to; no screen reads it, which is
-   * why there is no `stationName` beside it any more.
+   * D152 — a round is split per station again, so every ticket cut from now on
+   * names the one station that cooks it; an item whose menu item carries no
+   * station link routes to the branch's Main station rather than being dropped,
+   * which is what D147 removed the split to avoid.
+   *
+   * Both stay NULLABLE, and the screens tolerate null rather than assuming it
+   * away: the column was never made required (no migration, no backfill), so a
+   * ticket cut during the D147 window — one whole round, routed nowhere —
+   * carries neither. Those tickets are still on the board and in the history.
    */
   stationId: string | null;
+  stationName: string | null;
   status: KitchenTicketStatus;
   /** D68 — where the food is going. The board is the only delivery. */
   orderNumber: string | null;

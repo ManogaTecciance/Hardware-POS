@@ -165,6 +165,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD-048 | Measured goods are refused outside RETAIL by the server (D134e) | As a hardware owner POST /v1/products with `quantityType: "DECIMAL"`; PATCH an already-DECIMAL hardware product's name only, then set it back to WHOLE; repeat the create on a RETAIL workspace | Hardware create is 400 `MEASURED_GOODS_NOT_OFFERED` (the wizard hides the control, the API refuses the assertion); the rename and the switch to WHOLE both succeed — the rule is "you may not assert measured here", not "no measured row may exist"; the RETAIL create is 201 | N | Not Run |
 | PROD-049 | Variations come from the attribute library (D125/5.11) | On a RETAIL workspace with a "Size" definition bound to Apparel and an unbound "Colour": Add Product → category Apparel → Variations; pick Size and tick S, M; change the category; also add a hand-typed "Fit" | The picker offers Size and Colour (unbound applies everywhere) and not another category's scales; ticked options become the rows, nothing is adopted wholesale; after the category change a definition it no longer offers is unmapped (`attributeDefinitionId` null) while the typed options stay; the saved product carries the ids on Size and none on Fit; a hardware workspace with no library still gets the free-text fields | P | Not Run |
 | PROD-050 | Products search collapses whitespace and can be cleared; categories live on the tab (D137) | Type "rice  curry" (two spaces) in the products search; press the Clear control; look for a Categories button in the header and open the Categories tab | The list matches "Rice Curry"; the field has the accessible name "Search products" and empties on Clear; there is no Categories button in the header and the tab reaches /products/categories | P | Not Run |
+| PROD-051 | A menu item must name the station that prepares it (D152) | On a restaurant tenant, create a product and try to continue past step 3 without choosing a kitchen station; then do the same on a hardware tenant | The restaurant wizard blocks with a message naming what to do; the hardware wizard has no such field and is never blocked by it | P | Not Run |
+| PROD-052 | Main is preselected, and a real choice is not overridden (D152) | Open step 3 on a restaurant product; then pick Grill and let the step reload | Main is ticked when nothing was chosen, so the requirement is never an obstacle. Once Grill is picked it stays picked, and clearing every station and saving really does clear the links | P | Not Run |
 
 ## PIMP — Product Bulk Import
 
@@ -732,13 +734,15 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | KIT-016 | A history record opens the whole order (D142a) | Click a history row, and separately tab to the ticket number and press Enter; then press Escape | Both open the same dialog showing EVERY item the table ordered across stations and rounds — quantities, variants, modifiers and special instructions — not just this ticket's station share; Escape closes it; a click that ends a text selection does not open it | P | Not Run |
 | KIT-017 | Every lane chip carries its count (D142b) | With work queued, work started and tickets bumped today, read the three chips from To make, then from Preparing, then from Done | All three chips show a number on every tab — To make, Preparing and Done — and each matches the list that lane shows when opened | P | Not Run |
 | KIT-018 | The chips move with a bump, not with the poll (D142b) | Press Start preparing, then Mark done, watching the chips | To make and Preparing change immediately, without waiting for the five-second refresh; Done's number follows on the next poll | P | Not Run |
-| KIT-019 | One round is one ticket (D147) | Send a round whose items belong to several kitchen stations — for example a curry, a fried rice and something off the grill — and watch the kitchen board | Exactly ONE card appears, carrying every line of the round with its quantities, variants and modifiers; the round never splits into a card per station however many stations the branch has | P | Not Run |
-| KIT-020 | A dish nobody linked to a station still reaches the kitchen (D147) | At a branch with two or more active stations, create a product WITHOUT touching the wizard's Kitchen stations multi-select, order it, and send the round | The dish is on the board. Before D147 it appeared on no ticket at all and was only logged, so it was ordered and billed but never cooked | P | Not Run |
-| KIT-021 | Nothing on the board or the history names a station (D147) | Read a board card and its Details dialog, then the ticket-history table and its search box | No station appears anywhere: no subtitle station, no per-item station chip, no Station column, and searching a station name matches nothing on that ground alone | P | Not Run |
-| KIT-022 | Tickets cut before D147 keep their station in the data | Query a KitchenTicket row written before the change and one written after | The old row still carries its stationId, the new one carries NULL; the migration removed only the NOT NULL and moved no value | P | Not Run |
+| KIT-019 | An order is grouped by the station that cooks it (D152) | Send a round whose items belong to several stations — a curry, a fried rice and something off the grill — and watch the kitchen board | One card per STATION, each carrying only that station's dishes. Every dish of the round is on exactly one card: none is missing and none appears twice | P | Not Run |
+| KIT-020 | An unlinked dish reaches the kitchen at Main (D152) | At a branch with several stations, create a product WITHOUT choosing a station (or use one whose station was archived, or one linked only to another branch's station), order it and send the round | The dish is on a card for the Main station. Before D152 the first case reached no card at all and the other two reached a card no chip on that board could select | P | Not Run |
+| KIT-021 | The board and the history name the station (D152) | Read a board card, its Details dialog, the ticket-history table and its search box | The card carries a ribbon naming its station with the round at the far end; each item line in the dialog names its station; the history has a Station column and searching a station name matches | P | Not Run |
+| KIT-022 | Tickets cut during the D147 window name no station | Query a KitchenTicket row written between D147 and D152 and open it on the board and the history | It carries a NULL station and is shown as such — the ribbon carries the round alone, the history prints an em dash, the dialog leaves the line unlabelled. None of them invents "Main", because that ticket really did hold every station's items | P | Not Run |
 | KIT-023 | The ticket history holds every lane (D150) | With work queued, work started and work bumped, open Ticket history | All three appear. A To make and a Preparing ticket each show their lane badge, a dash under Finished and a dash under By; a bumped one shows its finish stamp and the time it spent on the pass | P | Not Run |
 | KIT-024 | Unfinished work sorts to the top (D150) | On a branch with several pending and several finished tickets, read the first page | Pending tickets come first, newest-raised first, then finished ones newest-finished first. Paging forward and back never repeats or skips a row | P | Not Run |
 | KIT-025 | Cancelled work still stays out, in every lane (D115/D150) | Cancel a round, an order, and a takeaway whose ticket was never bumped; open Ticket history | None of the three appears, even though they are no longer excluded by being unfinished. The cancelled filter on the board still shows them | P | Not Run |
+| KIT-026 | The station filter cuts the board and the chime (D152) | On a multi-station branch pick a station chip, bump work at another station, then reload the page | The board shows only that station's cards, its choice survives the reload, and the chime stays silent for other stations. Each chip still counts its own station across the lane, so no chip reads zero while that station holds work | P | Not Run |
+| KIT-027 | Main is created when it is needed (D152) | On a branch that has never had a Main station, send a round containing an unlinked dish | A station coded MAIN named "Main" appears and the dish is on its card. Sending a second such round creates no duplicate | P | Not Run |
 | KIT-008 | Yesterday's tickets are in the history, and so are today's (D142) | Open Ticket history from the rail, and from the "Older tickets" link on the Done lane | Both reach /kitchen/history; the list holds the ticket bumped yesterday AND the one bumped minutes ago, newest first, with where it went, its items, its station, when it was finished and by whom | P | Not Run |
 | KIT-009 | Ticket history pages and searches on the server (D142) | With more than one page of finished tickets: change the rows-per-page, go to page 2, then search a dish name, a ticket number and a table code | Each request carries page/pageSize/search to GET …/kitchen-tickets/history; searching returns to page 1; a term with a double space still matches; a term that matches nothing reads "No tickets match “…”" rather than the empty-branch wording | P | Not Run |
 | KIT-010 | Cancelled work is in neither the lane nor the history (D115/D142) | Cancel an order whose ticket was already bumped; check the Done lane and Ticket history | The ticket appears in neither; it remains visible on the board's Cancelled lane | N | Not Run |
@@ -868,20 +872,20 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | AUTH | 15 | CUST | 36 |
 | PERM | 17 | CIMP | 10 |
 | DASH | 28 | SUP | 15 |
-| PROD | 50 | SIMP | 8 |
+| PROD | 52 | SIMP | 8 |
 | PIMP | 13 | QB | 31 |
 | POS | 62 | SET | 31 |
 | PAY | 41 | DOC | 22 |
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
-| RET | 18 | KIT | 25 |
+| RET | 18 | KIT | 27 |
 | EXC-T | 12 | ADM | 15 |
 | EXC-D | 4 | UI | 35 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 652 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 656 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

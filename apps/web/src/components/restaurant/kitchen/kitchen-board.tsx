@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
-import { kitchen } from '@/lib/restaurant/api';
+import { kitchen, kitchenStations } from '@/lib/restaurant/api';
 import { playNewOrderChime } from '@/lib/restaurant/new-order-chime';
 import {
   KITCHEN_TICKET_STATUS_LABELS,
@@ -19,7 +19,11 @@ import {
   formatElapsed,
   formatTime,
 } from '@/lib/restaurant/labels';
-import type { KitchenLaneCounts, KitchenTicketView } from '@/lib/restaurant/types';
+import type {
+  KitchenLaneCounts,
+  KitchenStationView,
+  KitchenTicketView,
+} from '@/lib/restaurant/types';
 
 interface Props {
   session: Session;
@@ -104,7 +108,7 @@ const URGENCY_TIMER_CLASS: Record<Urgency, string> = {
  * being sent, and this screen is the ONLY place it is ever delivered —
  * nothing prints. That raises the bar on what a card has to carry: the pass
  * cannot plate a dish it can see but cannot place, so each ticket names its
- * table, its order and its round the way a printed KOT used to.
+ * table, its order, its station and its round the way a printed KOT used to.
  *
  * Kitchen staff start a ticket when they take it (D113 — Preparing), mark
  * it done when the food is up, and recall it when the bump was wrong
@@ -142,6 +146,23 @@ export function KitchenBoard({ session, branchId }: Props) {
   const [counts, setCounts] = React.useState<KitchenLaneCounts | null>(null);
 
   /*
+   * D152 — the station filter. `null` is every station.
+   *
+   * The list comes from the stations endpoint rather than from the tickets on
+   * screen: a chip that vanishes when its last ticket is bumped, and returns
+   * when the next one lands, is unusable on a wall-mounted screen. Kitchen
+   * staff already hold PLATFORM_PROFILE_READ, which is what that endpoint
+   * requires, so the strip is available to exactly the people who need it.
+   *
+   * A failed fetch leaves the list empty and the strip hidden. The board is
+   * the job; the filter is a convenience, and must never be able to take the
+   * board down with it.
+   */
+  const [stations, setStations] = React.useState<KitchenStationView[]>([]);
+  const [stationId, setStationId] = React.useState<string | null>(null);
+  const stationStorageKey = `kitchen.stationFilter.${branchId}`;
+
+  /*
    * Ticket ids seen on the last poll, per filter — the chime's memory (same
    * rule as the orders queue: null until the first response lands, so opening
    * the board never dings, and a filter switch re-baselines instead of
@@ -151,31 +172,100 @@ export function KitchenBoard({ session, branchId }: Props) {
    * another arrives — exactly the arrival the pass must hear.
    */
   const chimeBaseline = React.useRef<{
-    key: (typeof FETCH_FOR)[Filter];
+    /** `<fetch filter>|<station id or ALL>` — see the chime block in `load`. */
+    key: string;
     ids: Set<string>;
   } | null>(null);
+
+  /*
+   * Restore the screen's own station after a reload. A kitchen board is
+   * mounted at a station and left there, so making the cook re-pick Grill
+   * every refresh defeats the filter. Read in an effect, not in a useState
+   * initialiser: this component server-renders, and localStorage does not
+   * exist there.
+   */
+  React.useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(stationStorageKey);
+      if (saved) setStationId(saved);
+    } catch {
+      // Private mode or blocked storage. An unremembered filter is fine.
+    }
+  }, [stationStorageKey]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void kitchenStations
+      .list(session, branchId)
+      .then((rows) => {
+        if (!cancelled) setStations(rows.filter((st) => st.isActive));
+      })
+      .catch(() => {
+        if (!cancelled) setStations([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, branchId]);
+
+  /*
+   * A remembered station that has since been archived would otherwise filter
+   * the board down to nothing for ever, with no clue why. Only drop it once
+   * the list has actually arrived: an empty list is also what a failed fetch
+   * looks like, and that must not silently clear the cook's selection.
+   */
+  React.useEffect(() => {
+    if (stations.length === 0 || stationId === null) return;
+    if (!stations.some((st) => st.id === stationId)) setStationId(null);
+  }, [stations, stationId]);
+
+  const selectStation = React.useCallback(
+    (next: string | null) => {
+      setStationId(next);
+      try {
+        if (next) window.localStorage.setItem(stationStorageKey, next);
+        else window.localStorage.removeItem(stationStorageKey);
+      } catch {
+        // Not remembering the choice is survivable; failing the click is not.
+      }
+    },
+    [stationStorageKey],
+  );
 
   const load = React.useCallback(async () => {
     // D115 — keyed on the FETCH, not the tab: To make ↔ Preparing share the
     // outstanding list, so flipping between them keeps the baseline and a
     // genuine arrival rings on either; Done re-baselines as before.
     const fetchFilter = FETCH_FOR[filter];
+    /*
+     * D152 — the chime answers "is there work for THIS screen?", so it hears
+     * only the selected station. A grill screen ringing for a dessert is
+     * noise, and silencing that is most of the reason to mount a filtered
+     * board.
+     *
+     * The station is part of the baseline key for the same reason the fetch
+     * filter is: switching Grill → All reveals tickets this screen has never
+     * seen, which is a change of view, not an arrival. Re-baseline instead of
+     * ringing.
+     */
+    const chimeKey = `${fetchFilter}|${stationId ?? 'ALL'}`;
     try {
       const next = await kitchen.listTickets(session, branchId, fetchFilter);
       setTickets(next);
       setStatus('ready');
+      const heard = stationId ? next.filter((t) => t.stationId === stationId) : next;
       const prev = chimeBaseline.current;
       // Only outstanding work rings: a ticket appearing on Done is someone
       // bumping, not work arriving. A recall by ANOTHER screen does ring —
       // it lands on the outstanding list as a ticket the pass has not seen.
       if (
         fetchFilter === 'OUTSTANDING' &&
-        prev?.key === fetchFilter &&
-        next.some((t) => !prev.ids.has(t.id))
+        prev?.key === chimeKey &&
+        heard.some((t) => !prev.ids.has(t.id))
       ) {
         playNewOrderChime();
       }
-      chimeBaseline.current = { key: fetchFilter, ids: new Set(next.map((t) => t.id)) };
+      chimeBaseline.current = { key: chimeKey, ids: new Set(heard.map((t) => t.id)) };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load kitchen tickets');
       setStatus('error');
@@ -191,7 +281,7 @@ export function KitchenBoard({ session, branchId }: Props) {
     } catch {
       /* keep whatever the last successful poll reported */
     }
-  }, [session, branchId, filter]);
+  }, [session, branchId, filter, stationId]);
 
   React.useEffect(() => {
     void load();
@@ -286,9 +376,20 @@ export function KitchenBoard({ session, branchId }: Props) {
         ? rows.filter((t) => t.status === 'IN_PROGRESS')
         : rows;
 
-  /** The lane the active tab shows. There is no further cut: every ticket a
-      branch is working on belongs on this board, one card per round (D147). */
-  const visible = inLane(tickets, filter);
+  /*
+   * D152 — the station cut comes FIRST and everything downstream reads from
+   * it, so the lane counts describe the board actually on screen. A strip
+   * reading "To make 11" above two visible cards is worse than no count at
+   * all.
+   *
+   * A ticket cut during the D147 window carries no station, so it belongs to
+   * no chip and shows only under "All stations". It is never invisible on
+   * every view, which is the property that matters.
+   */
+  const scoped = stationId ? tickets.filter((t) => t.stationId === stationId) : tickets;
+
+  /** The lane the active tab shows, after the station cut. */
+  const visible = inLane(scoped, filter);
 
   /** Which server count belongs to which chip. */
   const COUNT_KEY: Record<Filter, keyof KitchenLaneCounts> = {
@@ -306,11 +407,30 @@ export function KitchenBoard({ session, branchId }: Props) {
    * lane takes the server's count — which is what the board could not know
    * before, and why "Done" showed nothing from To make, and To make and
    * Preparing showed nothing from Done.
+   *
+   * D152 — with one exception, and it is the same rule the station cut is
+   * built on. The server's count is BRANCH-wide; it knows nothing of the
+   * station this screen was mounted at. Under a station cut it would promise
+   * a lane the cook cannot reach — "Done 7" on a board that will show two —
+   * so the chip goes bare rather than lying. Every unfiltered board, which is
+   * every single-station branch and every board on "All stations", keeps all
+   * three numbers exactly as D142b left them.
    */
-  const laneCount = (key: Filter): number | null =>
-    FETCH_FOR[key] === FETCH_FOR[filter]
-      ? inLane(tickets, key).length
-      : (counts?.[COUNT_KEY[key]] ?? null);
+  const laneCount = (key: Filter): number | null => {
+    if (FETCH_FOR[key] === FETCH_FOR[filter]) return inLane(scoped, key).length;
+    return stationId ? null : (counts?.[COUNT_KEY[key]] ?? null);
+  };
+
+  /*
+   * D152 — station counts are for the CURRENT lane across every station, so
+   * they answer "where is the work?" while the lane strip answers "what state
+   * is it in?". Deliberately not scoped by `stationId`: a chip that only ever
+   * counted its own selection would read zero on every station but one.
+   */
+  const inLaneAllStations = inLane(tickets, filter);
+  const stationCount = (id: string): number =>
+    inLaneAllStations.filter((t) => t.stationId === id).length;
+  const selectedStationName = stations.find((st) => st.id === stationId)?.name ?? null;
 
   return (
     <div className="space-y-4">
@@ -361,6 +481,48 @@ export function KitchenBoard({ session, branchId }: Props) {
         )}
       </div>
 
+      {/*
+       * D152 — only worth a strip when there is a routing decision to make.
+       * One station means every ticket is already this screen's, and a lone
+       * "All stations" chip beside it would be furniture. Same reasoning as
+       * D67's single-station fallback on the routing side.
+       */}
+      {stations.length > 1 ? (
+        <ChipRow
+          ariaLabel="Filter by kitchen station"
+          activeKey={stationId ?? 'ALL'}
+          className="min-w-0"
+        >
+          {[{ id: null as string | null, name: 'All stations' }, ...stations].map((st) => {
+            const active = stationId === st.id;
+            const count = st.id === null ? inLaneAllStations.length : stationCount(st.id);
+            return (
+              <button
+                key={st.id ?? 'ALL'}
+                type="button"
+                onClick={() => selectStation(st.id)}
+                data-active={active}
+                aria-pressed={active}
+                className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors ${
+                  active
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-foreground hover:bg-border'
+                }`}
+              >
+                {st.name}
+                <span
+                  className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs ${
+                    active ? 'bg-primary-foreground/20' : 'bg-border'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </ChipRow>
+      ) : null}
+
       {error ? (
         <Card>
           <CardContent className="py-3 text-sm text-danger">{error}</CardContent>
@@ -382,15 +544,37 @@ export function KitchenBoard({ session, branchId }: Props) {
       ) : visible.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            {filter === 'TO_MAKE'
-              ? 'Nothing to make. New tickets appear here as waiters send them.'
-              : filter === 'PREPARING'
-                ? canUpdate
-                  ? 'Nothing on the stove. Start a ticket from To make.'
-                  : // D94 — the till reads the board but holds no verb; do not send
-                    // it to a button it does not have.
-                    'Nothing on the stove.'
-                : 'Nothing finished today yet. Earlier tickets are in Ticket history.'}
+            {/* D152 — naming the station matters more than the lane copy here:
+                an empty board is otherwise indistinguishable from a filter the
+                cook forgot they left on. */}
+            {selectedStationName ? (
+              <>
+                Nothing for {selectedStationName} on this lane.{' '}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() => selectStation(null)}
+                >
+                  Show all stations
+                </button>
+                {/* D142 — the Done lane holds TODAY wherever the station cut
+                    lands, so the way to the rest survives the filter: without
+                    it, "today only" reads as a defect on a filtered board too. */}
+                {filter === 'COMPLETED' ? ' Earlier tickets are in Ticket history.' : null}
+              </>
+            ) : filter === 'TO_MAKE' ? (
+              'Nothing to make. New tickets appear here as waiters send them.'
+            ) : filter === 'PREPARING' ? (
+              canUpdate ? (
+                'Nothing on the stove. Start a ticket from To make.'
+              ) : (
+                // D94 — the till reads the board but holds no verb; do not send
+                // it to a button it does not have.
+                'Nothing on the stove.'
+              )
+            ) : (
+              'Nothing finished today yet. Earlier tickets are in Ticket history.'
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -426,18 +610,19 @@ export function KitchenBoard({ session, branchId }: Props) {
 }
 
 /**
- * One card — one round, whole (D147).
+ * One card — one station's share of a round (D152).
  *
- * A card used to be one STATION's share of a round, so a single "send" broke
- * the table across as many cards as it had stations, and the grill could not
- * tell whether it was plating alone or alongside a curry the main kitchen had
- * not started. Worse, a dish linked to no station reached no card at all: with
- * more than one station in the branch the routing had nowhere to put it, so it
- * was ordered, billed and never cooked. There is no reachable screen for
- * linking a dish to a station, which made that the ordinary case rather than
- * the edge one. The round is now the unit: every item a waiter confirmed in it
- * is on this card, and the Details dialog remains the way to see the rest of
- * the ORDER — the earlier rounds this card is not.
+ * D147 made the card the whole round because routing was an accident: a dish
+ * linked to no station reached no card at all, so at a multi-station branch it
+ * was ordered, billed and never cooked, and there was no screen on which anyone
+ * could have linked it. D152 removes both halves of that — the station is
+ * chosen when the menu item is created, and anything still undecided routes to
+ * the branch's Main station — so the split comes back with nothing able to fall
+ * through it. A table with a grill dish and a curry is two cards again, which
+ * is what lets each cook see their own work and only their own.
+ *
+ * The Details dialog remains the way to see the rest of the ORDER: the other
+ * stations' share of this round, and the rounds the table ate an hour ago.
  */
 function TicketCard({
   ticket,
@@ -463,29 +648,53 @@ function TicketCard({
   // dish been waiting?", which a done dish no longer is.
   const urgency: Urgency = done ? 'fresh' : urgencyOf(ticket.createdAt, new Date());
   /*
-   * D147 — order, round, waiter. This line is built as a FILTERED JOIN rather
-   * than as fragments each prefixed with ` · `: the prefix form was only ever
-   * safe while its first part was always present, and it emits a leading
-   * separator the moment that part goes missing — which, with the station gone
-   * from every ticket, is now the ordinary card. Nothing left is guaranteed
-   * either (a takeaway before its order number lands carries none of the
-   * three), which is why an empty line is dropped instead of printed.
+   * The provenance line: order, waiter. D152 sends the station and the round
+   * up to the ribbon, so neither is duplicated here.
+   *
+   * Built as a FILTERED JOIN rather than as fragments each prefixed with ` · `:
+   * the prefix form was only ever safe while its first part was always present,
+   * and it emits a leading separator the moment that part goes missing — a
+   * takeaway before its order number lands carries neither part, which is why
+   * an empty line is dropped instead of printed.
    */
-  const provenance = [
-    ticket.orderNumber,
-    ticket.roundNumber ? `round ${ticket.roundNumber}` : null,
-    ticket.waiterName,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const provenance = [ticket.orderNumber, ticket.waiterName].filter(Boolean).join(' · ');
+  /*
+   * D152 — a ticket cut during the D147 window was routed to no station at all
+   * and carries no name for one. The band still earns its place on those: the
+   * round is on it, and inventing "Main" for a ticket that holds every
+   * station's items would be a worse answer than an empty half.
+   */
+  const hasRibbon = Boolean(ticket.stationName) || Boolean(ticket.roundNumber);
   return (
     // The board is a grid, so the row stretches every card to its tallest
     // member. `h-full` is what makes this card ACCEPT that height, and without
     // it the actions' `mt-auto` below has nothing to push against — the two
     // only line a row's buttons up as a pair.
+    //
+    // `overflow-hidden` is what lets the ribbon below sit flush and take the
+    // rounded corners from this parent. The urgency border still wraps both,
+    // so a late ticket reads as one object.
     <Card
-      className={`flex h-full flex-col ${done ? 'opacity-70' : (URGENCY_CARD_CLASS[urgency] ?? '')}`}
+      className={`flex h-full flex-col overflow-hidden ${done ? 'opacity-70' : (URGENCY_CARD_CLASS[urgency] ?? '')}`}
     >
+      {/* D68 put the station in the subtitle, where it was the first grey item
+          in a truncated four-part run. A station-split order puts the SAME
+          table on two cards (D152) and the station is the only thing telling a
+          cook which of them is theirs, so it runs as a ribbon across the top:
+          the one position that survives a narrow column, reads before the card
+          is fully in view, and never competes with the place for the eye.
+          `bg-brand-50` deliberately avoids the info/warning/success tones the
+          status badge uses, so station identity never reads as ticket state. */}
+      {hasRibbon ? (
+        <div className="flex items-center justify-between gap-2 bg-brand-50 px-4 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700">
+          {/* The station can be long ("Main Kitchen") and the round never is, so
+              the station takes the truncation and the round is pinned. */}
+          <span className="truncate">{ticket.stationName}</span>
+          {/* Absent on a legacy ticket that predates rounds, and the ribbon must
+              not then render a bare "Round". */}
+          {ticket.roundNumber ? <span className="shrink-0">Round {ticket.roundNumber}</span> : null}
+        </div>
+      ) : null}
       <CardContent className="flex flex-1 flex-col space-y-3 p-4">
         <div>
           <div className="flex items-start justify-between gap-2">

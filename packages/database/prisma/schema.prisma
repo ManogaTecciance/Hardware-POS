@@ -3219,11 +3219,17 @@ model KitchenTicket {
   branchId String
   roundId  String
 
-  /// D147 — NULL on every ticket written since the station split was removed.
-  /// A round now produces exactly ONE ticket holding all of its items, so a
-  /// ticket no longer belongs to a station and must not claim one. Kept
-  /// nullable rather than dropped so the tickets cut before D147 keep the
-  /// station they were genuinely routed to.
+  /// D152 — set on every ticket written since the station split came back. A
+  /// round produces one ticket PER STATION, and a dish whose links name no
+  /// usable station is routed to the branch's `MAIN` station rather than
+  /// dropped, so there is no path that leaves this empty.
+  ///
+  /// NULLABLE only because of the window between D147 and D152, when a round
+  /// was one stationless ticket. Those rows are left as they are — there is no
+  /// backfill, because inventing a station for a ticket that genuinely held
+  /// every station's items would be a lie — so every reader still handles
+  /// null. Flipping the column back to NOT NULL would need that backfill
+  /// first, and buys nothing the code does not already guarantee.
   stationId        String?
   primaryPrinterId String?
 
