@@ -35,7 +35,13 @@
  *      failed, 2 passed;
  *   4. D152b: the pre-D152b data-driven default restored
  *      (`mineCount > 0 ? 'mine' : 'all'`) — 2 failed, 4 passed: the
- *      no-tables-of-mine case and the first-paint case.
+ *      no-tables-of-mine case and the first-paint case;
+ *   5. D151a: the server's name taken from the SCOPED session the card renders
+ *      (`servedBy={s?.waiterName}`) instead of the branch snapshot — 2 failed,
+ *      5 passed: a colleague's table goes anonymous the moment the operator
+ *      narrows to their own;
+ *   6. D151a: the pre-D151a "only when it is not mine" rule restored — 2
+ *      failed, 5 passed.
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import * as React from 'react';
@@ -242,10 +248,14 @@ describe('whose tables the floor shows (D151)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'All tables · 2' }));
 
     await waitFor(() => expect(shownSessionIds().sort()).toEqual(['mine', 'theirs']));
-    // Whose it is, by name — the whole reason the All view is usable. And only
-    // the colleague's: my own card does not carry my own name.
+    /*
+     * D151a — EVERY occupied table names its server, mine included (PO: "in
+     * tables can you add serve waiter name"). A floor plan that named everyone
+     * except the reader is a strange thing to hold up in front of a colleague,
+     * and the room is what this view is for.
+     */
     expect(screen.getByText('Sunil')).toBeTruthy();
-    expect(screen.queryByText('Nimal')).toBeNull();
+    expect(screen.getByText('Nimal')).toBeTruthy();
   });
 
   it('goes back to mine, so the chips are a filter and not a one-way door', async () => {
@@ -257,7 +267,37 @@ describe('whose tables the floor shows (D151)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'My tables · 1' }));
     await waitFor(() => expect(shownSessionIds()).toEqual(['mine']));
-    expect(screen.queryByText('Sunil')).toBeNull();
+    /*
+     * D151a — the colleague's table is still NAMED under "mine"; what the chip
+     * takes away is the order, not the attribution. Asserted together, because
+     * the pair is the rule: a name with no View order beside it is "somebody
+     * else is on that table", which is the question a waiter asks about M3.
+     */
+    expect(screen.getByText('Sunil')).toBeTruthy();
+    expect(shownSessionIds()).not.toContain('theirs');
+  });
+
+  it('D151a — names the server on a table it will not let you open', async () => {
+    /*
+     * The half of "add serve waiter name" that a scoped floor makes easy to get
+     * wrong: the name must come from the branch's sessions, not from the ones
+     * the chip is showing, or a colleague's table goes back to being an
+     * anonymous "In service" the moment the operator narrows to their own.
+     *
+     * Asserted as the PAIR, on the same card, in the default scope: the name is
+     * there AND the order is not reachable.
+     */
+    render(<TableFloor session={session} branchId="brn_1" canManage />);
+    await settle();
+
+    // Default scope — only my own order is reachable…
+    await waitFor(() => expect(shownSessionIds()).toEqual(['mine']));
+    // …and yet both tables say who is on them.
+    expect(screen.getByText('Sunil')).toBeTruthy();
+    expect(screen.getByText('Nimal')).toBeTruthy();
+
+    // NEGATIVE — a name is not an entry point: no second View order appeared.
+    expect(screen.getAllByRole('link', { name: 'View order' })).toHaveLength(1);
   });
 
   it('D152b — STAYS on my tables when none are mine, and names what All holds', async () => {

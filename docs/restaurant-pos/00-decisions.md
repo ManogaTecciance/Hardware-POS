@@ -8800,6 +8800,40 @@ the till re-choosing All every shift, but it would also make the opening view
 depend on who used the tablet last — the opposite of "my orders and my tables by
 default".
 
+### D151a — the floor names the waiter serving every table
+
+**Asked by the PO, 2026-09-10**: *"In tables, can you add serve waiter name?"*
+
+**What was there.** D151 put a name on a table card only when the session was
+NOT the reader's own, reasoning that your own name on your own cards is a word
+you already know repeated down the screen. True as far as it goes, and wrong
+about what a floor plan is for: it is the shared picture of the room, read over
+somebody's shoulder at the pass and by whoever is covering, and one that names
+everybody except the reader is a strange thing to hold up. Every mainstream
+floor plan (Toast, Square, TouchBistro) puts the server on the table, full stop.
+
+**Now.** Every occupied table carries `👤 <name>` — the physical card under its
+seats/elapsed line, an arrangement listing each tab as `Tab: Name`. Two things
+about where the name comes from:
+
+- it is read from the UNSCOPED snapshot, so a colleague's table is named even
+  under "My tables". What the chip governs is what you can WORK on, not what you
+  can see: a named table with no View order beside it is exactly the answer to
+  "who do I ask about M3", and it was the old behaviour that made a colleague's
+  table go anonymous the moment a waiter narrowed to their own;
+- it is null-safe by the same rule as everywhere else (D151): a session with no
+  waiter recorded, or one whose user no longer resolves, shows no line rather
+  than "Unknown".
+
+`UserRound` rather than the `Users` icon the seat count uses — one counts
+covers, the other names a person, and two lines under one icon read as a single
+fact split in half.
+
+**Unchanged:** the POS picker still names only the tables that are not yours. A
+chip there is 44px of a scrolling strip carrying a table name, an elapsed time
+and a cover count already; the reader's own name in that space is the noise
+D151 was right about.
+
 ## Open decisions
 
 | ID | Question | Needed by |

@@ -1,6 +1,17 @@
 'use client';
 
-import { Archive, Building2, ConciergeBell, DoorOpen, Link2, MoreVertical, Pencil, Plus, Users } from 'lucide-react';
+import {
+  Archive,
+  Building2,
+  ConciergeBell,
+  DoorOpen,
+  Link2,
+  MoreVertical,
+  Pencil,
+  Plus,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -28,7 +39,6 @@ import {
 import {
   countAll,
   countMine,
-  otherWaiterLabel,
   resolveOwnerScope,
   sessionsVisibleTo,
   type SessionOwnerScope,
@@ -336,6 +346,26 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   const ownerScope = resolveOwnerScope(ownerChoice);
   /** Whether the first load has landed, so a `0` on a chip is an answer. */
   const countsKnown = status !== 'loading';
+  /*
+   * D151a — who is serving each table, read from the UNSCOPED snapshot.
+   *
+   * The PO asked for the server's name on the Tables screen, and a floor plan
+   * reads the way every other one does: the room always says who is on a
+   * table, and the Mine/All chips govern what you can WORK on rather than what
+   * you can see. So a colleague's table under "My tables" still carries their
+   * name — it just has no View order — which is also the answer to "who do I
+   * ask about M3".
+   */
+  const servedByTable = React.useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const [tableId, sessions] of snapshot.sessionsByTableId) {
+      const names = sessions
+        .map((session) => session.waiterName?.trim() || null)
+        .filter((name): name is string => name !== null);
+      if (names.length > 0) map.set(tableId, names);
+    }
+    return map;
+  }, [snapshot.sessionsByTableId]);
   const visibleSessions = React.useMemo(
     () => sessionsVisibleTo(snapshot.sessionsByTableId, ownerScope, currentUserId),
     [snapshot.sessionsByTableId, ownerScope, currentUserId],
@@ -469,7 +499,8 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                       key={t.id}
                       table={t}
                       sessions={tabs}
-                      currentUserId={currentUserId}
+                      // D151a — every tab's server, from the unscoped snapshot.
+                      allTabs={snapshot.sessionsByTableId.get(t.id) ?? []}
                       // D112 — a joined party's food rings too: unanswered bumps across every tab.
                       readyCount={tabs.reduce((n, s) => n + unansweredReady(s, ackedReady), 0)}
                       onViewOrder={ackReady}
@@ -580,9 +611,12 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                           key={t.id}
                           table={t}
                           session={s}
-                          // D151 — so the card can say whose table it is when
-                          // the floor is showing everyone's.
-                          currentUserId={currentUserId}
+                          /*
+                           * D151a — the name comes from the unscoped snapshot,
+                           * so it is there whether or not this session is one
+                           * the current scope lets the operator open.
+                           */
+                          servedBy={servedByTable.get(t.id)?.[0] ?? null}
                           readyCount={s ? unansweredReady(s, ackedReady) : 0}
                           onViewOrder={() => s && ackReady(s)}
                           canOpen={canOpenTable}
@@ -721,7 +755,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
 function TableCard({
   table,
   session,
-  currentUserId,
+  servedBy,
   readyCount,
   onViewOrder,
   canOpen,
@@ -735,8 +769,13 @@ function TableCard({
 }: {
   table: RestaurantTableView;
   session: OpenSessionView | null;
-  /** D151 — who is looking, so a colleague's table can be named as theirs. */
-  currentUserId: string;
+  /**
+   * D151a — the waiter serving this table, named. Present whenever the branch
+   * has a session on it, including one the current scope is not showing, and
+   * including the operator's own — a floor plan that named everybody except
+   * you would be a strange thing to read over somebody's shoulder.
+   */
+  servedBy: string | null;
   /** D112 — bumped tickets this device has not answered; >0 shows the bell. */
   readyCount: number;
   /** Tapping View order answers the badge for this session on this device. */
@@ -795,13 +834,13 @@ function TableCard({
           <span className="ml-auto">Open {formatElapsed(session.openedAt)}</span>
         ) : null}
       </div>
-      {/* D151 — a colleague's table, named. Only when it is NOT yours: a card
-          that labelled your own tables with your own name would put the word
-          you already know on every card and bury the ones that matter. */}
-      {session && otherWaiterLabel(session, currentUserId) ? (
+      {/* D151a — who is serving it. `UserRound`, not the `Users` above: that
+          one counts covers, this one names a person, and two lines under the
+          same icon read as one fact split in half. */}
+      {servedBy ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="truncate">{otherWaiterLabel(session, currentUserId)}</span>
+          <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{servedBy}</span>
         </p>
       ) : null}
       {/* D50 — why this table is Reserved. Naming the holders is what stops an
@@ -1568,7 +1607,7 @@ function ArchiveTableDialog({
 function OpenTableCard({
   table,
   sessions,
-  currentUserId,
+  allTabs,
   readyCount,
   onViewOrder,
   canOpen,
@@ -1579,8 +1618,12 @@ function OpenTableCard({
   table: OpenTableView;
   /** D104 — every live tab on this arrangement, not just the first. */
   sessions: OpenSessionView[];
-  /** D151 — who is looking, so another waiter's tab can be named as theirs. */
-  currentUserId: string;
+  /**
+   * D151a — every tab the BRANCH has on this arrangement, scope or no scope,
+   * so the "served by" line names all of them while the buttons above it stay
+   * scoped to what the operator may open.
+   */
+  allTabs: OpenSessionView[];
   /** D112 — see TableCard: unanswered bumped tickets across this arrangement's tabs. */
   readyCount: number;
   /** Tapping a tab's link answers the badge for THAT tab on this device. */
@@ -1667,17 +1710,18 @@ function OpenTableCard({
             </Button>
           );
         })}
-        {/* One line for the tabs that are not yours, under the buttons they
-            belong to: a name inside a 44px button on a one-cell-wide card
-            pushes the elapsed time — the part that decides whether to walk
-            over — off the chip. */}
-        {sessions.some((s) => otherWaiterLabel(s, currentUserId)) ? (
+        {/* Who is serving each tab, under the buttons they belong to: a name
+            inside a 44px button on a one-cell-wide card pushes the elapsed
+            time — the part that decides whether to walk over — off the chip.
+            D151a: every tab, not only other people's, and read from the
+            unscoped list so the line does not change with the chips. */}
+        {allTabs.some((s) => s.waiterName?.trim()) ? (
           <p className="flex items-start gap-1 text-xs text-muted-foreground">
-            <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <UserRound className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span className="min-w-0">
-              {sessions
+              {allTabs
                 .map((s) => {
-                  const owner = otherWaiterLabel(s, currentUserId);
+                  const owner = s.waiterName?.trim();
                   if (!owner) return null;
                   return s.tabName ? `${s.tabName}: ${owner}` : owner;
                 })
