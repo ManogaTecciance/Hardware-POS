@@ -117,13 +117,17 @@ const URGENCY_TIMER_CLASS: Record<Urgency, string> = {
  * neither is the money. Start/done ripple to the round and any takeaway
  * profile server-side, which is what moves the Orders queue.
  *
- * Polls every 5 s. Shorter cadences read as jitter on a wall-mounted screen;
- * longer ones leave a dish sitting unseen while a table waits. The poll
- * doubles as the age-escalation tick: every refresh re-renders the cards,
- * which is where the timers and colours advance — and as the chime's watch:
- * a poll that brings an unseen ticket onto "To make" rings the same
- * new-order chime the orders queue uses, because a wall-mounted board is
+ * Polls every 5 s, in ONE request (D154): shorter cadences read as jitter on a
+ * wall-mounted screen; longer ones leave a dish sitting unseen while a table
+ * waits. The poll doubles as the age-escalation tick: every refresh re-renders
+ * the cards, which is where the timers and colours advance — and as the
+ * chime's watch: a poll that brings an unseen ticket onto "To make" rings the
+ * same new-order chime the orders queue uses, because a wall-mounted board is
  * not being stared at between tickets (mainstream KDS units beep).
+ *
+ * D154 — and it stops while the tab is hidden, coming back the moment it is
+ * looked at again. Nothing on this screen is worth refreshing for a tab
+ * nobody is reading.
  */
 export function KitchenBoard({ session, branchId }: Props) {
   const { hasPermission } = useAuth();
@@ -143,6 +147,9 @@ export function KitchenBoard({ session, branchId }: Props) {
    * D142b — the counts for the lanes this board is NOT fetching. The active
    * lane keeps deriving its own from the list it already has, so a bump moves
    * its chip instantly instead of waiting up to five seconds for the poll.
+   *
+   * D154 — they ride in the ticket read's envelope now, off the same snapshot,
+   * rather than arriving from a second request behind it.
    */
   const [counts, setCounts] = React.useState<KitchenLaneCounts | null>(null);
 
@@ -172,6 +179,17 @@ export function KitchenBoard({ session, branchId }: Props) {
    * count would stay flat when one ticket is bumped in the same poll that
    * another arrives — exactly the arrival the pass must hear.
    */
+  /*
+   * D154 — which fetch the rows currently on screen answer.
+   *
+   * The failed-poll path below keeps the last good cards, and that is right
+   * only while the board is still asking the SAME question. After a lane
+   * switch it is not: the rows in state answer the lane the cook just left,
+   * and `inLane` would re-label them as the new one — a queued card sitting
+   * on Done offering "Start preparing", counted by the Done chip.
+   */
+  const loadedFetch = React.useRef<(typeof FETCH_FOR)[Filter] | null>(null);
+
   const chimeBaseline = React.useRef<{
     /** `<fetch filter>|<station id or ALL>` — see the chime block in `load`. */
     key: string;
@@ -251,10 +269,24 @@ export function KitchenBoard({ session, branchId }: Props) {
      */
     const chimeKey = `${fetchFilter}|${stationId ?? 'ALL'}`;
     try {
+      /*
+       * D154 — ONE request per tick. The lane counts come back with the
+       * tickets, so the board no longer chases `kitchen.laneCounts` after
+       * every list read (the client keeps that call for anything wanting the
+       * numbers alone). Beyond the halved traffic it is one server snapshot,
+       * so the cards and the chips can no longer disagree about a ticket
+       * bumped between two reads.
+       */
       const next = await kitchen.listTickets(session, branchId, fetchFilter);
-      setTickets(next);
+      setTickets(next.items);
+      setCounts(next.counts);
       setStatus('ready');
-      const heard = stationId ? next.filter((t) => t.stationId === stationId) : next;
+      loadedFetch.current = fetchFilter;
+      // The banner is about the LAST poll, not about the mount. Without this a
+      // single bad tick left a red error standing over a board that recovered
+      // seconds later and went on working for the rest of the shift.
+      setError(null);
+      const heard = stationId ? next.items.filter((t) => t.stationId === stationId) : next.items;
       const prev = chimeBaseline.current;
       // Only outstanding work rings: a ticket appearing on Done is someone
       // bumping, not work arriving. A recall by ANOTHER screen does ring —
@@ -269,18 +301,27 @@ export function KitchenBoard({ session, branchId }: Props) {
       chimeBaseline.current = { key: chimeKey, ids: new Set(heard.map((t) => t.id)) };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load kitchen tickets');
-      setStatus('error');
-    }
-    /*
-     * Best effort, and deliberately after the list: a chip without a number is
-     * a smaller problem than a board that will not load, so a failing count
-     * must not take the tickets down with it. The last known numbers stay on
-     * screen rather than blinking out on one bad poll.
-     */
-    try {
-      setCounts(await kitchen.laneCounts(session, branchId));
-    } catch {
-      /* keep whatever the last successful poll reported */
+      /*
+       * D154 — the last good poll STAYS on screen. Two reads used to make this
+       * automatic for the numbers: the counts call swallowed its own error, so
+       * a failing count left the chips reading whatever they last knew. One
+       * read makes that hedge moot, and the property it protected has to be
+       * kept deliberately instead — neither `tickets` nor `counts` is cleared
+       * here, and the board stays `ready` so it goes on rendering them. A wall
+       * board that blanks the pass's work on one bad poll is worse than a
+       * board showing five-second-old cards under a banner saying so.
+       *
+       * Two cases have nothing worth keeping and fall through to the error
+       * card. A board that has NEVER loaded, because leaving it `loading`
+       * would spin for ever on a branch whose kitchen read is refused
+       * outright. And a board whose rows answer a DIFFERENT lane: showing the
+       * cook the tab they just left, relabelled as the one they chose, is
+       * worse than showing them nothing — the verbs on those cards belong to
+       * the other lane, and the chip would count them for this one.
+       */
+      setStatus((cur) =>
+        cur === 'loading' || loadedFetch.current !== fetchFilter ? 'error' : cur,
+      );
     }
   }, [session, branchId, filter, stationId]);
 
@@ -288,9 +329,30 @@ export function KitchenBoard({ session, branchId }: Props) {
     void load();
   }, [load]);
 
+  /*
+   * D154 — the 5 s poll runs only while the board is actually on a screen. A
+   * board left open overnight was asking ~1,440 times an hour whether anything
+   * had changed, for nobody. `focus`/`visibilitychange` refetch on the way
+   * back, so returning to the board never means reading tickets as stale as
+   * the time away — on a pass, where the poll IS the delivery, waiting out the
+   * remainder of an interval is exactly the wrong four seconds.
+   *
+   * Same shape as the orders queue (orders-page.tsx) and the dashboard
+   * (use-dashboard-data.ts); this is that idea written once more, not a third
+   * dialect of it.
+   */
   React.useEffect(() => {
-    const t = setInterval(() => void load(), 5000);
-    return () => clearInterval(t);
+    const loadIfVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    const t = setInterval(loadIfVisible, 5000);
+    window.addEventListener('focus', loadIfVisible);
+    document.addEventListener('visibilitychange', loadIfVisible);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', loadIfVisible);
+      document.removeEventListener('visibilitychange', loadIfVisible);
+    };
   }, [load]);
 
   /*

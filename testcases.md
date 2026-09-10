@@ -746,6 +746,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | KIT-028 | A kitchen ticket prints from its card (D153) | Press Print on a card on the kitchen board | The print dialog opens with a ticket carrying the KOT number on the left and the date and time on the right, the table name (or Takeaway), then Item No. / Item Name / Qty. It prints in the same font as the bill, and no heading, customer name or "Total Items" appears | P | Not Run |
 | KIT-029 | Modifiers and instructions print under their dish (D153) | Print a ticket for a round containing a customised dish with a variation, addons and a special instruction | Each appears directly under that dish, not at the foot of the ticket: the variation and addons on one line, the instruction marked and set apart. A dish with nothing to add carries no blank line | P | Not Run |
 | KIT-030 | Printing changes nothing (D153) | Press Print on a queued card, then on a done card | The card stays exactly where it was in its lane, no dialog opens and no status changes. Each card's Print button prints THAT card's ticket, not the first on the board | P | Not Run |
+| KIT-031 | The board stops polling when nobody is looking (D154) | Open the kitchen board, switch to another tab for a minute, then come back. Watch the network panel | No requests while the tab is hidden, and one immediately on return rather than a wait for the next tick. Switching windows away and back does the same | P | Not Run |
+| KIT-032 | A tick costs one request (D154) | Watch the network panel with the board open and visible | One request per five seconds, not two. The lane chips still carry their numbers on every lane, and the numbers agree with the cards | P | Not Run |
+| KIT-033 | A failed poll keeps the pass working (D154) | With the board loaded, take the API offline for one tick, then restore it | The cards and the chips stay on screen under an error banner, not a blank board. The banner clears on the next good poll. Switching lanes while offline shows the error card instead, never the previous lane's cards relabelled | P | Not Run |
 | KIT-008 | Yesterday's tickets are in the history, and so are today's (D142) | Open Ticket history from the rail, and from the "Older tickets" link on the Done lane | Both reach /kitchen/history; the list holds the ticket bumped yesterday AND the one bumped minutes ago, newest first, with where it went, its items, its station, when it was finished and by whom | P | Not Run |
 | KIT-009 | Ticket history pages and searches on the server (D142) | With more than one page of finished tickets: change the rows-per-page, go to page 2, then search a dish name, a ticket number and a table code | Each request carries page/pageSize/search to GET …/kitchen-tickets/history; searching returns to page 1; a term with a double space still matches; a term that matches nothing reads "No tickets match “…”" rather than the empty-branch wording | P | Not Run |
 | KIT-010 | Cancelled work is in neither the lane nor the history (D115/D142) | Cancel an order whose ticket was already bumped; check the Done lane and Ticket history | The ticket appears in neither; it remains visible on the board's Cancelled lane | N | Not Run |
@@ -882,13 +885,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
-| RET | 18 | KIT | 30 |
+| RET | 18 | KIT | 33 |
 | EXC-T | 12 | ADM | 15 |
 | EXC-D | 4 | UI | 35 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 659 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 662 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

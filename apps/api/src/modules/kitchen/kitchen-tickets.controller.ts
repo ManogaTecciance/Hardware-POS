@@ -15,6 +15,7 @@ import {
   KitchenLaneCounts,
   KitchenOrderView,
   KitchenService,
+  KitchenTicketListView,
   KitchenTicketNotFoundError,
   KitchenTicketView,
 } from './kitchen.service';
@@ -34,13 +35,23 @@ export class KitchenTicketsController {
     private readonly audit: AuditLogService,
   ) {}
 
+  /**
+   * D154 — one lane's tickets AND all three chips' numbers, in one request.
+   *
+   * The board polls this every five seconds and used to follow each tick with
+   * a second call to `counts`. The envelope halves that traffic, and — the
+   * part that is a fix rather than a saving — the counts come from the SAME
+   * snapshot as the cards, so a ticket bumped mid-tick can no longer be on a
+   * chip and off the pass at once. `counts` is the branch's whatever
+   * `?status=` says (D142b).
+   */
   @Get()
   @RequirePermissions(Permission.KOT_VIEW)
   list(
     @TenantId() tenantId: string,
     @Param('branchId') branchId: string,
     @Query('status') status?: string,
-  ): Promise<KitchenTicketView[]> {
+  ): Promise<KitchenTicketListView> {
     return this.service.listTicketsForBranch(tenantId, branchId, parseFilter(status));
   }
 
@@ -54,6 +65,12 @@ export class KitchenTicketsController {
    * on: "To make" and "Preparing" carried numbers while "Done" carried none,
    * and standing on Done it was the other two that went blank. Declared above
    * the `:ticketId` routes, and KOT_VIEW like every other read here.
+   *
+   * D154 — the BOARD stopped calling this: its counts now ride along with the
+   * list. The route is unchanged and stays, because "give me only the numbers"
+   * is a legitimate and much cheaper question than "give me the lane", and
+   * nothing is served by making a caller who wants three integers read every
+   * ticket and its items to get them.
    */
   @Get('counts')
   @RequirePermissions(Permission.KOT_VIEW)

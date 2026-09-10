@@ -67,6 +67,24 @@ export interface KitchenLaneCounts {
   doneToday: number;
 }
 
+/**
+ * D154 — what ONE tick of the board reads: the open lane's tickets and all
+ * three chips' numbers together.
+ *
+ * The board polls every five seconds and used to spend TWO requests on each
+ * tick — the list, then the counts. Riding the counts along halves that, and
+ * the transaction below turns "the cards and the chips agree" from something
+ * the timing usually gives us into something the read guarantees.
+ *
+ * `counts` is the BRANCH's, not the filter's: D142b's rule is that every lane
+ * chip carries its number whichever lane is open, so these must not move when
+ * `?status=` does.
+ */
+export interface KitchenTicketListView {
+  items: KitchenTicketView[];
+  counts: KitchenLaneCounts;
+}
+
 export interface KitchenTicketView {
   id: string;
   ticketNumber: string;
@@ -455,57 +473,27 @@ export class KitchenService {
   }
 
   /**
-   * D68/D115/D142 — the board's read, one lane at a time.
-   */
-  async listTicketsForBranch(
-    tenantId: string,
-    branchId: string,
-    filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY',
-  ): Promise<KitchenTicketView[]> {
-    const where = this.whereForFilter(tenantId, branchId, filter);
-
-    const rows = await this.prisma.kitchenTicket.findMany({
-      where,
-      /*
-       * Oldest first while outstanding: a kitchen works a queue, and the dish
-       * that has been waiting longest is the one that goes next.
-       *
-       * Done and Cancelled read newest first — they answer "what just
-       * happened", not "what is next". D142: the day-scoped lane sorts by when
-       * the food was FINISHED, because that is now what the lane is about; a
-       * ticket raised at 11:00 and bumped at 14:00 belongs above one raised at
-       * 13:00 and bumped at 13:30, which sorting by `createdAt` got backwards.
-       * The unscoped COMPLETED list keeps `createdAt` so nothing that reads it
-       * today changes underneath.
-       */
-      orderBy:
-        filter === 'COMPLETED_TODAY'
-          ? [{ completedAt: 'desc' as const }, { id: 'desc' as const }]
-          : {
-              createdAt:
-                filter === KitchenTicketStatus.COMPLETED || filter === 'CANCELLED'
-                  ? ('desc' as const)
-                  : ('asc' as const),
-            },
-      include: TICKET_INCLUDE,
-    });
-    const waiters = await this.waiterNames(rows);
-    return rows.map((row) => toView(row, waiters));
-  }
-
-  /**
-   * D142b — the three lane counts in one round trip.
+   * D142b — the three lane counts, as the ONE definition both readers use.
    *
    * `To make` and `Preparing` are the client's split of the OUTSTANDING lane
    * (not started / started), so they are counted the same way here: the
    * outstanding `where`, narrowed by status. `Done` is the day-scoped lane.
-   * Three counts in one transaction, so the numbers are consistent with each
-   * other as well as with the lists — a ticket bumped between two separate
-   * queries would otherwise be counted twice or not at all.
+   *
+   * D154 — extracted so the standalone counts route and the board's list read
+   * cannot drift apart. Two copies of "what is preparing" is how a chip comes
+   * to promise three tickets the list does not have, and having them written
+   * out twice in one file is the shortest road there.
+   *
+   * Returns the queries UNAWAITED, as a fixed-length tuple, because both
+   * callers hand them straight to `$transaction` — a caller that awaited one
+   * here would be taking its own snapshot, which is the thing D154 removed.
    */
-  async laneCountsForBranch(tenantId: string, branchId: string): Promise<KitchenLaneCounts> {
+  private laneCountQueries(
+    tenantId: string,
+    branchId: string,
+  ): [Prisma.PrismaPromise<number>, Prisma.PrismaPromise<number>, Prisma.PrismaPromise<number>] {
     const outstanding = this.whereForFilter(tenantId, branchId, 'OUTSTANDING');
-    const [toMake, preparing, doneToday] = await this.prisma.$transaction([
+    return [
       this.prisma.kitchenTicket.count({
         where: {
           ...outstanding,
@@ -522,7 +510,99 @@ export class KitchenService {
       this.prisma.kitchenTicket.count({
         where: this.whereForFilter(tenantId, branchId, 'COMPLETED_TODAY'),
       }),
-    ]);
+    ];
+  }
+
+  /**
+   * D68/D115/D142 — the board's read, one lane at a time.
+   *
+   * D154 — and the three lane counts with it, in ONE transaction.
+   *
+   * The counts used to be a second request on a second snapshot, five seconds
+   * of polling apart from nothing in particular: a ticket bumped between the
+   * two reads left the card gone while the chip still counted it, or the card
+   * on the pass while the chip had already moved on. One snapshot makes the
+   * cards and the numbers agree BY CONSTRUCTION rather than by luck, and it is
+   * the half of D154 that is a correctness fix rather than a traffic cut.
+   *
+   * The counts are the BRANCH's and do not vary with `filter` (D142b): the
+   * board shows all three chips whichever lane is open. `waiterNames` still
+   * runs afterwards — it needs the rows before it knows which users to read,
+   * and user names are not what a ticket snapshot is protecting.
+   */
+  async listTicketsForBranch(
+    tenantId: string,
+    branchId: string,
+    filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY',
+  ): Promise<KitchenTicketListView> {
+    const where = this.whereForFilter(tenantId, branchId, filter);
+
+    const [rows, toMake, preparing, doneToday] = await this.prisma.$transaction([
+      this.prisma.kitchenTicket.findMany({
+        where,
+        /*
+         * Oldest first while outstanding: a kitchen works a queue, and the dish
+         * that has been waiting longest is the one that goes next.
+         *
+         * Done and Cancelled read newest first — they answer "what just
+         * happened", not "what is next". D142: the day-scoped lane sorts by when
+         * the food was FINISHED, because that is now what the lane is about; a
+         * ticket raised at 11:00 and bumped at 14:00 belongs above one raised at
+         * 13:00 and bumped at 13:30, which sorting by `createdAt` got backwards.
+         * The unscoped COMPLETED list keeps `createdAt` so nothing that reads it
+         * today changes underneath.
+         */
+        orderBy:
+          filter === 'COMPLETED_TODAY'
+            ? [{ completedAt: 'desc' as const }, { id: 'desc' as const }]
+            : {
+                createdAt:
+                  filter === KitchenTicketStatus.COMPLETED || filter === 'CANCELLED'
+                    ? ('desc' as const)
+                    : ('asc' as const),
+              },
+        include: TICKET_INCLUDE,
+      }),
+      ...this.laneCountQueries(tenantId, branchId),
+      ],
+      /*
+       * D154 — REPEATABLE READ, or the promise above is not one.
+       *
+       * Prisma's batch transaction runs at the connection default, which is
+       * Postgres READ COMMITTED, where every statement takes its OWN snapshot.
+       * A bump committing between the list and the first count would still be
+       * seen by one and not the other — the same disagreement two HTTP reads
+       * had, narrowed to microseconds but not removed. One snapshot for all
+       * four statements is what makes "the cards and the chips cannot
+       * disagree" true rather than merely likely.
+       *
+       * Free here: four read-only statements against one branch's tickets take
+       * no locks and have nothing to serialise against.
+       */
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    const waiters = await this.waiterNames(rows);
+    return {
+      items: rows.map((row) => toView(row, waiters)),
+      counts: { toMake, preparing, doneToday },
+    };
+  }
+
+  /**
+   * D142b — the three lane counts in one round trip.
+   *
+   * D154 folded these into the list read so a board tick costs one request,
+   * and this route STAYS: it is the cheap read for anything that wants only
+   * the numbers, and the board is not the only caller a kitchen ever has.
+   * Both paths now share `laneCountQueries`, so "the counts" has exactly one
+   * definition — and one transaction, so the three numbers are consistent
+   * with each other as well as with the lists. A ticket bumped between two
+   * separate queries would otherwise be counted twice or not at all.
+   */
+  async laneCountsForBranch(tenantId: string, branchId: string): Promise<KitchenLaneCounts> {
+    const [toMake, preparing, doneToday] = await this.prisma.$transaction(
+      this.laneCountQueries(tenantId, branchId),
+    );
     return { toMake, preparing, doneToday };
   }
 

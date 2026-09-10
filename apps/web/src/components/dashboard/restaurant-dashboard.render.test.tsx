@@ -34,6 +34,16 @@
  * four rules that together keep the page off a scrollbar, and each is caught
  * by exactly one test. That is the evidence that the four assertions are
  * independent rather than four spellings of the same check.
+ *
+ * D154 adds the kitchen read's envelope, and two more mutants, applied and
+ * reverted the same way. Both were killed:
+ *
+ *   9. the `.catch` moved BEHIND the `.items` read ......... 1 test fails
+ *  10. the envelope passed on without unwrapping `.items` .. 10 tests fail
+ *
+ * Mutant 9 is the one this spec exists for: it is invisible for as long as the
+ * kitchen answers, and takes the WHOLE dashboard down the first time it does
+ * not — a fallback of the wrong shape is a fallback that does not fall back.
  */
 import { RESTAURANT_ROLE_TEMPLATES, ROLE_PERMISSIONS } from '@hardware-pos/shared';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -124,6 +134,77 @@ const BOOKINGS = [
   },
 ];
 
+/**
+ * D154 — the kitchen list answers an ENVELOPE now: the lane, plus the board's
+ * three lane counts. The dashboard wants the tickets and nothing else, which
+ * is precisely why the shape is worth a fixture — a card reading `.items` off
+ * a bare array gets `undefined`, and `undefined.length` is the whole page.
+ *
+ * The counts are deliberately NOT the length of `items`: they are the branch's
+ * lanes, not this filtered read's tally, and nothing on this screen may read
+ * them.
+ */
+function kitchenPage(items: unknown[] = []) {
+  return { items, counts: { toMake: 12, preparing: 3, doneToday: 40 } };
+}
+
+/** Two outstanding tickets, as the OUTSTANDING lane returns them (D119). */
+const TICKETS = [
+  {
+    id: 'kot_1',
+    ticketNumber: 'KOT-000001',
+    branchId: 'brn_1',
+    roundId: 'rnd_1',
+    stationId: null,
+    stationName: null,
+    status: 'QUEUED',
+    orderNumber: 'RO-000010',
+    placeLabel: 'T3',
+    roundNumber: 1,
+    waiterName: 'Nimal',
+    items: [
+      {
+        id: 'it_1',
+        menuItemName: 'Kottu',
+        variantName: null,
+        quantity: '1.000',
+        modifierNames: [],
+        specialInstructions: null,
+      },
+    ],
+    completedAt: null,
+    completedByName: null,
+    createdAt: '2026-09-09T12:00:00.000Z',
+  },
+  {
+    id: 'kot_2',
+    ticketNumber: 'KOT-000002',
+    branchId: 'brn_1',
+    roundId: 'rnd_2',
+    stationId: null,
+    stationName: null,
+    // D113 — started, and still work the kitchen owes: the card counts it.
+    status: 'IN_PROGRESS',
+    orderNumber: 'RO-000011',
+    placeLabel: 'T7',
+    roundNumber: 1,
+    waiterName: 'Nimal',
+    items: [
+      {
+        id: 'it_2',
+        menuItemName: 'Rice',
+        variantName: null,
+        quantity: '2.000',
+        modifierNames: [],
+        specialInstructions: null,
+      },
+    ],
+    completedAt: null,
+    completedByName: null,
+    createdAt: '2026-09-09T12:05:00.000Z',
+  },
+];
+
 const TABLES = [
   { id: 'tbl_3', areaId: 'area_1', branchId: 'brn_1', kind: 'STANDARD', code: '3', label: null, capacity: 6, positionX: null, positionY: null, status: 'AVAILABLE', isActive: true, createdByUserId: null },
   { id: 'tbl_7', areaId: 'area_1', branchId: 'brn_1', kind: 'STANDARD', code: '7', label: 'Window', capacity: 2, positionX: null, positionY: null, status: 'AVAILABLE', isActive: true, createdByUserId: null },
@@ -133,7 +214,7 @@ beforeEach(() => {
   granted = new Set(['reservation:view', 'kot:view', 'takeaway:view']);
   listAreas.mockResolvedValue([{ id: 'area_1', branchId: 'brn_1', name: 'Main', createdByUserId: null }]);
   listTables.mockResolvedValue(TABLES);
-  listTickets.mockResolvedValue([]);
+  listTickets.mockResolvedValue(kitchenPage());
   listTakeaway.mockResolvedValue([]);
   listReservations.mockResolvedValue(BOOKINGS);
 });
@@ -150,6 +231,20 @@ async function mount() {
 
 const reservationCard = () =>
   screen.getByRole('heading', { name: 'Upcoming reservations' }).closest('div.rounded-2xl')!;
+
+const kitchenCard = () =>
+  screen.getByRole('heading', { name: 'Kitchen queue' }).closest('div.rounded-2xl')! as HTMLElement;
+
+/**
+ * The summary tile of that name — the label is a `<p>`, while the panel below
+ * carries the same words as a heading, so the tile is picked by the element
+ * the card cannot be.
+ */
+const summaryTile = (label: string) => {
+  const p = screen.getAllByText(label).find((el) => el.tagName === 'P');
+  if (!p) throw new Error(`no "${label}" summary tile — this spec is inspecting nothing`);
+  return p.closest('div.rounded-2xl')! as HTMLElement;
+};
 
 describe('the upcoming reservations card', () => {
   it('lists the bookings soonest first, with time, guest, table and party size', async () => {
@@ -213,6 +308,56 @@ describe('the upcoming reservations card', () => {
      */
     expect(screen.queryByText(/Nothing booked in the next 24 hours\./)).toBeNull();
     expect(listReservations).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * D154 — the kitchen list answers an envelope, and this screen reads `.items`.
+ *
+ * Both halves, because each alone is also a broken dashboard: a card that
+ * reads the tickets correctly and dies on a failed read is the regression the
+ * fan-out's per-promise catch was written to prevent, and a card that
+ * degrades quietly while never showing a ticket is indistinguishable from a
+ * kitchen nobody can reach.
+ */
+describe('the kitchen queue reads the D154 envelope', () => {
+  it('counts and lists the tickets out of `items`', async () => {
+    listTickets.mockResolvedValue(kitchenPage(TICKETS));
+    await mount();
+
+    // The tile counts the ITEMS…
+    expect(within(summaryTile('Kitchen queue')).getByText('2')).toBeTruthy();
+    // …and the panel lists them, so the number is not coming from somewhere
+    // else on the page that happens to say two.
+    expect(within(kitchenCard()).getByText('KOT-000001')).toBeTruthy();
+    expect(within(kitchenCard()).getByText('KOT-000002')).toBeTruthy();
+    expect(within(kitchenCard()).queryByText('Kitchen queue is empty.')).toBeNull();
+    // NEGATIVE — the envelope's lane counts are the BOARD's, and nothing here
+    // may read them: 12 outstanding on a card showing two tickets would be a
+    // number the dashboard cannot substantiate.
+    expect(within(summaryTile('Kitchen queue')).queryByText('12')).toBeNull();
+    // D119 — OUTSTANDING, not QUEUED: a started ticket is still work owed,
+    // and KOT-000002 above is the one that proves the lane carries it.
+    expect(listTickets).toHaveBeenCalledWith(SESSION, 'brn_1', 'OUTSTANDING');
+  });
+
+  it('degrades to an empty queue when the kitchen read fails, rather than taking the page down', async () => {
+    listTickets.mockRejectedValue(new Error('kitchen unreachable'));
+    await mount();
+
+    /*
+     * The fallback has to be the shape the caller consumes. A `.catch(() =>
+     * [])` sitting BEHIND a `.items` read would hand the dashboard
+     * `undefined`, and `undefined.length` throws inside the fan-out's own try
+     * — so the one unreachable card would take every other card with it,
+     * which is the exact failure that catch exists to absorb.
+     */
+    expect(within(kitchenCard()).getByText('Kitchen queue is empty.')).toBeTruthy();
+    expect(within(summaryTile('Kitchen queue')).getByText('0')).toBeTruthy();
+    // POSITIVE CONTROL — the rest of the dashboard is alive and populated, so
+    // the line above is a degraded card and not a page-wide error state.
+    expect(within(reservationCard() as HTMLElement).getByText(/Nimal Perera/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Service dashboard' })).toBeTruthy();
   });
 });
 

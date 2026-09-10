@@ -118,7 +118,19 @@ export function RestaurantDashboard({ session }: { session: Session }) {
         // IN_PROGRESS, and it is still work the kitchen owes. Counting QUEUED
         // alone read "Kitchen queue 0" with every ticket on the stove (D119).
         const queuedTickets = hasPermission('kot:view')
-          ? await kitchen.listTickets(session, branchId, 'OUTSTANDING').catch(() => [])
+          ? await kitchen
+              .listTickets(session, branchId, 'OUTSTANDING')
+              /*
+               * D154 — the read answers an envelope now (tickets + the board's
+               * lane counts); this card wants the tickets. Taking `.items`
+               * INSIDE the chain, ahead of the catch, is what keeps the
+               * fallback the same shape as the success: a `.catch(() => [])`
+               * behind a `.items` read would hand the dashboard `undefined`
+               * and throw on `.length` the one time the kitchen is
+               * unreachable — the exact failure this catch exists to absorb.
+               */
+              .then((res) => res.items)
+              .catch(() => [] as KitchenTicketView[])
           : [];
         const takeawayOrders = hasPermission('takeaway:view')
           ? await takeaway.list(session, branchId).catch(() => [])

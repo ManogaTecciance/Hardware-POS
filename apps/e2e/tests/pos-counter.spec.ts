@@ -380,18 +380,24 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
      * so the old single-station fallback never saved it. D152's Main station
      * catches those instead. With 703 of the catalogue's 737 products
      * carrying no link, that fallback is doing nearly all of the work here.
+     *
+     * D154 — this route answers with an ENVELOPE now: one tick of the board
+     * is the lane's tickets plus all three lane chips, so the board no longer
+     * spends a second request on `.../counts`. The KOT invariant below is
+     * untouched; it reads `.items` because that is where the tickets are.
      */
-    const board = await api.get<
-      Array<{
+    const board = await api.get<{
+      items: Array<{
         id: string;
         ticketNumber: string;
         orderNumber: string | null;
         stationId: string | null;
         stationName: string | null;
         items: Array<{ menuItemName: string }>;
-      }>
-    >(`/restaurant/branches/${RESTAURANT_SEED.branchId}/kitchen-tickets`);
-    const ticketsForOrder = board.filter((t) => t.orderNumber === orderNumber);
+      }>;
+      counts: { toMake: number; preparing: number; doneToday: number };
+    }>(`/restaurant/branches/${RESTAURANT_SEED.branchId}/kitchen-tickets`);
+    const ticketsForOrder = board.items.filter((t) => t.orderNumber === orderNumber);
     // Ticket NUMBERS, not a count: a failure names the KOTs that were cut, so
     // "three tickets" is distinguishable from "none" without a re-run.
     expect(
@@ -434,6 +440,22 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
       );
       expect(t.stationName, `${t.ticketNumber} must name its station`).toBeTruthy();
     }
+
+    /*
+     * D154 — and the other half of the envelope arrived populated.
+     *
+     * Asserting only that `counts` is present would be satisfied by three
+     * zeroes, which is what a board whose chips had quietly stopped counting
+     * would send. This order's KOTs were cut seconds ago and nobody has
+     * touched them, so every one of them is on the To make lane right now:
+     * the chip cannot be smaller than the cards this very test just proved
+     * exist. Read against a shared seed database, a floor is the strongest
+     * claim available — an equality would pin the state of the box.
+     */
+    expect(
+      board.counts.toMake,
+      `the To make chip must count at least ${orderNumber}'s ${ticketsForOrder.length} new KOT(s)`,
+    ).toBeGreaterThanOrEqual(ticketsForOrder.length);
 
     await api.ctx.dispose();
   });

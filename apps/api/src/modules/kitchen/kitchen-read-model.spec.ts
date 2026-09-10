@@ -89,7 +89,19 @@ function makeService(rows = [ticketRow()]) {
     findFirst: jest
       .fn()
       .mockResolvedValue({ id: TICKET, ticketNumber: 'KOT-000027', roundId: 'rnd_1' }),
-    count: jest.fn().mockResolvedValue(rows.length),
+    /*
+     * D154 — the list read now issues the three lane counts alongside it, and
+     * they are stubbed DISTINCT on purpose: three equal numbers would let a
+     * mapping that put `preparing` where `toMake` belongs pass (D30 §"two
+     * counts happen to be equal"). What each count MEANS is pinned in
+     * `kitchen-lane-counts.spec.ts`; here they only have to be told apart.
+     */
+    count: jest
+      .fn()
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(9)
+      .mockResolvedValue(rows.length),
   };
   const prisma = {
     kitchenTicket,
@@ -143,7 +155,20 @@ describe('the ticket view (D152)', () => {
   it('projects the whole card AND names the station that cooks it', async () => {
     const { service } = makeService();
 
-    const [view] = await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING');
+    /*
+     * D154 — this read `const [view] = await …` until the list grew its
+     * envelope, and the destructure is now false rather than merely unfashion-
+     * able: the call returns `{ items, counts }`, so the old spelling would
+     * hand `view` undefined. Rewritten to the new truth (D16), and the
+     * envelope is asserted here rather than assumed — a projection test that
+     * silently read `res.items` of `undefined` would fail with a TypeError
+     * that says nothing about what broke.
+     */
+    const res = await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING');
+
+    expect(Array.isArray(res)).toBe(false);
+    expect(res.counts).toEqual({ toMake: 4, preparing: 2, doneToday: 9 });
+    const [view] = res.items;
 
     // POSITIVE — everything D68 put on the card is still on it. Without this
     // half, "it has a stationName" would also be true of a view that had lost
@@ -168,7 +193,8 @@ describe('the ticket view (D152)', () => {
      */
     const { service } = makeService([ticketRow(null, null)]);
 
-    const [view] = await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING');
+    // D154 — through the envelope, like every other reader of this list.
+    const [view] = (await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING')).items;
 
     expect(view!.stationId).toBeNull();
     expect(view!.stationName).toBeNull();

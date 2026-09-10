@@ -24,6 +24,11 @@
  * - The station FILTER's every half has a passing twin that describes a broken
  *   board: a strip that is always shown, a filter that hides everything, and a
  *   memory that never forgets.
+ * - D154's poll is asserted against the API mocks' CALL COUNTS, because a poll
+ *   that never pauses and one that never resumes render the same board — and
+ *   "one request per tick" is invisible on screen by definition. Both halves
+ *   again: hidden must stop the interval, and coming back must refetch at once
+ *   rather than waiting out the remainder of one.
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
@@ -31,7 +36,11 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '@/lib/auth';
-import type { KitchenStationView, KitchenTicketView } from '@/lib/restaurant/types';
+import type {
+  KitchenLaneCounts,
+  KitchenStationView,
+  KitchenTicketView,
+} from '@/lib/restaurant/types';
 
 // ── boundaries ───────────────────────────────────────────────────────────────
 
@@ -72,6 +81,16 @@ vi.mock('@/lib/restaurant/api', () => ({
     complete: (...args: unknown[]) => completeFn(...args),
     reopen: (...args: unknown[]) => reopenFn(...args),
     order: (...args: unknown[]) => orderFn(...args),
+    /*
+     * D154 — the board stopped calling this, and the standalone endpoint
+     * STAYED (other callers want the numbers without the tickets). It is kept
+     * on the mock deliberately: a suite that simply dropped it would make
+     * "the board never calls laneCounts" untestable — the board would throw
+     * on the missing function and fail for the wrong reason — so the spy is
+     * present, answers a value nothing on screen could be mistaken for, and
+     * is asserted silent. Its ability to record is proven at the foot of this
+     * file.
+     */
     laneCounts: (...args: unknown[]) => laneCountsFn(...args),
   },
   // D152 — the strip's list comes from the stations endpoint, never from the
@@ -184,15 +203,39 @@ const chipText = (name: RegExp) =>
 /** Mutable rows, so a verb can empty them and the reload stays honest. */
 let outstandingRows: KitchenTicketView[] = [];
 let doneRows: KitchenTicketView[] = [];
+/*
+ * D142b's other-lane numbers, which D154 moved into the ticket read's own
+ * envelope. Mutable for the same reason the rows are: a later poll must be
+ * able to bring different numbers, or "the counts ride along on every tick"
+ * would be asserted against a constant.
+ */
+let serverCounts: KitchenLaneCounts = { toMake: 0, preparing: 0, doneToday: 0 };
+
+/**
+ * jsdom pins `visibilityState` to 'visible'; D154's poll gate needs it
+ * movable. Defined once for the file, and reset to 'visible' before every
+ * test so only the tests that hide the tab ever see it hidden.
+ */
+let visibility: DocumentVisibilityState = 'visible';
+Object.defineProperty(document, 'visibilityState', {
+  configurable: true,
+  get: () => visibility,
+});
 
 beforeEach(() => {
   canUpdate = true;
   outstandingRows = [];
   doneRows = [];
+  serverCounts = { toMake: 0, preparing: 0, doneToday: 0 };
+  visibility = 'visible';
   listFn.mockReset();
   laneCountsFn.mockReset();
-  // D142b — the chips the board is not fetching read these.
-  laneCountsFn.mockResolvedValue({ toMake: 0, preparing: 0, doneToday: 0 });
+  /*
+   * D154 — the board must not read this. It answers numbers no chip could
+   * legitimately show, so a board that quietly went back to the second request
+   * would not merely be "still green": the counts on screen would change.
+   */
+  laneCountsFn.mockResolvedValue({ toMake: 911, preparing: 911, doneToday: 911 });
   startFn.mockReset();
   completeFn.mockReset();
   reopenFn.mockReset();
@@ -213,8 +256,17 @@ beforeEach(() => {
    * unbounded fetch would serve OUTSTANDING rows here and fail loudly, rather
    * than passing on a fixture that answered both.
    */
+  /*
+   * D154 — one read, one envelope: the lane the board asked for, and the
+   * BRANCH's three lane counts beside it. The counts deliberately do not vary
+   * with `filter` here, because they do not vary with it on the server either
+   * (D142b — every chip carries its number whichever lane is open).
+   */
   listFn.mockImplementation((_s: unknown, _b: unknown, filter: unknown) =>
-    Promise.resolve(filter === 'COMPLETED_TODAY' ? doneRows : outstandingRows),
+    Promise.resolve({
+      items: filter === 'COMPLETED_TODAY' ? doneRows : outstandingRows,
+      counts: serverCounts,
+    }),
   );
   completeFn.mockImplementation((_s: unknown, _b: unknown, id: unknown) => {
     outstandingRows = outstandingRows.filter((t) => t.id !== id);
@@ -699,7 +751,7 @@ describe('the lane chips (D142b)', () => {
       ticket({ id: 'tk_2', status: 'IN_PROGRESS' }),
       ticket({ id: 'tk_3', status: 'IN_PROGRESS' }),
     ];
-    laneCountsFn.mockResolvedValue({ toMake: 1, preparing: 2, doneToday: 7 });
+    serverCounts = { toMake: 1, preparing: 2, doneToday: 7 };
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
     // The two lanes sharing this fetch are counted from the list in hand…
@@ -715,7 +767,7 @@ describe('the lane chips (D142b)', () => {
       ticket({ id: 'd1', status: 'COMPLETED', completedAt: minutesAgo(5) }),
       ticket({ id: 'd2', status: 'COMPLETED', completedAt: minutesAgo(9) }),
     ];
-    laneCountsFn.mockResolvedValue({ toMake: 4, preparing: 3, doneToday: 2 });
+    serverCounts = { toMake: 4, preparing: 3, doneToday: 2 };
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(listFn).toHaveBeenCalled());
 
@@ -735,7 +787,7 @@ describe('the lane chips (D142b)', () => {
     });
     // The server count is deliberately STALE — the active lanes must not read
     // it, or an optimistic bump would sit on the old number for five seconds.
-    laneCountsFn.mockResolvedValue({ toMake: 99, preparing: 99, doneToday: 0 });
+    serverCounts = { toMake: 99, preparing: 99, doneToday: 0 };
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(chipText(/^To make/)).toContain('2'));
 
@@ -750,21 +802,296 @@ describe('the lane chips (D142b)', () => {
     expect(chipText(/^Preparing/)).not.toContain('99');
   });
 
-  it('keeps the last numbers when a counts poll fails, rather than blanking them', async () => {
-    outstandingRows = [ticket({ id: 'tk_1' })];
-    laneCountsFn.mockResolvedValueOnce({ toMake: 1, preparing: 0, doneToday: 5 });
+  /*
+   * D154 rewrote "keeps the last numbers when a COUNTS poll fails": there is
+   * no separate counts poll to fail any more, so the assertion as written
+   * described a request the board no longer makes. The property it protected —
+   * one bad poll must not blank what the last good one put on screen — is now
+   * the whole read's to keep, and is asserted over the cards AND the numbers
+   * together in "one tick, one request (D154)" below.
+   */
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/*
+ * D154 — one tick, one request; and no tick at all while nobody is looking.
+ *
+ * The board polled every 5 s and spent TWO requests on it (the lane, then the
+ * lane counts), and it never stopped: left open overnight it asked ~1,440
+ * times an hour whether anything had changed, for an empty room. Neither half
+ * of that is visible on screen, which is why every assertion here is about
+ * CALLS — a board fetching twice and a board fetching once render the same
+ * cards, and so do a poll that never pauses and a poll that never resumes.
+ *
+ * Paired throughout, on the same rule as the rest of this file: "it stopped
+ * polling" is also what a dead interval looks like, so every silence is
+ * followed by the fetch that proves the timer was alive; and "the counts are
+ * right" is also true of a board still paying for them separately, so the
+ * abandoned endpoint answers a number nothing on screen could show.
+ */
+describe('one tick, one request (D154)', () => {
+  beforeEach(() => {
+    // Scoped to this suite: the rest of the file runs on real timers.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Let one full 5 s poll interval elapse (and its fetch settle). */
+  async function tickPoll() {
+    await vi.advanceTimersByTimeAsync(5000);
+  }
+
+  /** Wait until the ticket read has been hit exactly `calls` times. */
+  async function settle(calls: number) {
+    await waitFor(() => expect(listFn).toHaveBeenCalledTimes(calls));
+  }
+
+  it('spends ONE request per tick, and never the second one', async () => {
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
-    await waitFor(() => expect(chipText(/^Done/)).toContain('5'));
+    await settle(1);
+    // Positive control: the counted fetch is a real one — the board drew it.
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
 
-    laneCountsFn.mockRejectedValue(new Error('offline'));
-    fireEvent.click(screen.getByRole('button', { name: /^Preparing/ }));
+    await tickPoll();
+    await settle(2);
+    await tickPoll();
+    await settle(3);
 
-    // The board is still up and Done still says what it last knew — a chip
-    // without a number is a smaller problem than a board that fell over.
-    await waitFor(() => expect(chipText(/^Done/)).toContain('5'));
-    expect(screen.queryByText(/Failed to load kitchen tickets/)).toBeNull();
+    // NEGATIVE — the standalone counts endpoint is no part of a tick…
+    expect(laneCountsFn).not.toHaveBeenCalled();
+    // …and neither is anything else. The stations read fires ONCE, at mount,
+    // which is what makes this a claim about the tick's whole cost rather
+    // than about `listTickets` alone.
+    expect(stationsFn).toHaveBeenCalledTimes(1);
+    // An exact SET of calls rather than a total: a board that had started
+    // fetching a second lane per tick would keep any count-based assertion
+    // green by simply being wrong twice as fast.
+    expect(listFn.mock.calls.map((c) => c[2])).toEqual([
+      'OUTSTANDING',
+      'OUTSTANDING',
+      'OUTSTANDING',
+    ]);
+  });
+
+  it('takes the other lane’s number from the ticket read, not from a second call', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    serverCounts = { toMake: 1, preparing: 0, doneToday: 7 };
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // POSITIVE — the envelope's count is what the lane the board is NOT
+    // fetching reads. Matched on the whole accessible name, so a chip that
+    // merely lost its number cannot satisfy it.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 7' })).toBeTruthy());
+    // NEGATIVE — and the number the abandoned endpoint would have supplied is
+    // nowhere on the strip. 911 is reachable only through `kitchen.laneCounts`.
+    expect(screen.queryByRole('button', { name: /911/ })).toBeNull();
+    expect(laneCountsFn).not.toHaveBeenCalled();
+
+    // The counts ride along on EVERY tick, not only the first: a board that
+    // read them once at mount would look identical until the kitchen moved.
+    serverCounts = { toMake: 1, preparing: 0, doneToday: 8 };
+    await tickPoll();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 8' })).toBeTruthy());
+  });
+
+  it('does not poll a hidden tab', async () => {
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await settle(1);
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await tickPoll();
+    await tickPoll();
+
+    // Two full intervals, zero fetches.
+    expect(listFn).toHaveBeenCalledTimes(1);
+
+    // POSITIVE CONTROL — the interval is still ALIVE. Unhiding without
+    // dispatching anything means the next tick is the interval's own, so the
+    // silence above was the gate and not a timer this test had torn down.
+    visibility = 'visible';
+    await tickPoll();
+    await settle(2);
+  });
+
+  it('refetches the moment the board is looked at again, not when the interval next comes round', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await settle(1);
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await tickPoll();
+    expect(listFn).toHaveBeenCalledTimes(1);
+
+    // A ticket lands while nobody is looking.
+    outstandingRows = [...outstandingRows, ticket({ id: 'tk_2', placeLabel: 'T2' })];
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    // No 5 s wait: the catch-up fetch fires on the event itself. On a pass,
+    // where this poll IS the delivery, the remainder of an interval is
+    // exactly the wrong four seconds to spend.
+    await settle(2);
+    await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
+  });
+
+  it('comes back on window focus too, and still only when the tab is visible', async () => {
+    outstandingRows = [ticket({ id: 'tk_1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await settle(1);
+
+    // POSITIVE — focus alone refetches: a board can be uncovered without the
+    // document ever changing visibility (another window moved off it).
+    window.dispatchEvent(new Event('focus'));
+    await settle(2);
+
+    // NEGATIVE — and it is the GATE that answers, not the event. A focus
+    // event while the tab is hidden fetches nothing, or the listener would be
+    // a second, ungated poll wearing a different name.
+    visibility = 'hidden';
+    window.dispatchEvent(new Event('focus'));
+    await tickPoll();
+    expect(listFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT keep them when the failed read was for a different lane', async () => {
+    /*
+     * The limit of "keep the last good cards", and a regression this very
+     * change introduced before a verifier caught it.
+     *
+     * Keeping the rows is right while the board is still asking the same
+     * question. After a lane switch it is not: the rows in state answer the
+     * tab the cook just left, and the lane split would relabel them as the one
+     * they chose — a QUEUED card sitting on Done, offering "Start preparing",
+     * and counted by the Done chip. Showing the wrong lane's work is worse
+     * than showing none.
+     */
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    // Switch to Done, and let THAT read fail.
+    listFn.mockRejectedValue(new Error('offline'));
+    fireEvent.click(screen.getByRole('button', { name: /^Done/ }));
+    await settle(2);
+
+    // The queued card is gone rather than relabelled, and its verb with it.
+    expect(screen.queryByText('T1')).toBeNull();
+    expect(screen.queryByRole('button', { name: /start preparing/i })).toBeNull();
+    /*
+     * TWO copies of the message, where the keep-the-cards test above asserts
+     * exactly one. That difference IS the behaviour: one copy is the banner
+     * over a board still showing work, two is the banner plus the error card
+     * that replaced the lane. The contrast is what makes both tests mean
+     * something.
+     */
+    expect(screen.getAllByText('offline')).toHaveLength(2);
+  });
+
+  it('clears the banner once a later poll succeeds', async () => {
+    /*
+     * The banner is about the LAST poll. Before D154 a failed poll blanked the
+     * board, so a stale banner was moot; now the board stays up, and an error
+     * that never cleared would stand over a working pass for the rest of the
+     * shift.
+     */
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    listFn.mockRejectedValue(new Error('offline'));
+    await tickPoll();
+    await settle(2);
+    expect(screen.getAllByText('offline').length).toBeGreaterThan(0);
+
+    // …the network comes back.
+    listFn.mockResolvedValue({ items: outstandingRows, counts: serverCounts });
+    await tickPoll();
+    await settle(3);
+
+    expect(screen.queryByText('offline')).toBeNull();
+    expect(screen.getByText('T1')).toBeTruthy();
+  });
+
+  it('stops listening on unmount, so a screen mounted all shift leaks nothing', async () => {
+    /*
+     * Named on purpose. The cleanup IS killed today by a mutation, but only
+     * through cross-test pollution — forty boards from earlier tests still
+     * listening — so an `it.only` or a reorder would silently un-cover it.
+     * This asserts the claim directly, and kills all three cleanup mutants by
+     * name: the interval, the focus listener and the visibilitychange one.
+     */
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    const { unmount } = render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    const afterMount = listFn.mock.calls.length;
+
+    unmount();
+
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    await tickPoll();
+
+    // Not one more read: not from the interval, not from either listener.
+    expect(listFn.mock.calls.length).toBe(afterMount);
+  });
+
+  it('keeps the last cards and the last numbers when a poll fails', async () => {
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1' })];
+    serverCounts = { toMake: 1, preparing: 0, doneToday: 5 };
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 5' })).toBeTruthy());
+
+    listFn.mockRejectedValue(new Error('offline'));
+    await tickPoll();
+    await settle(2);
+
+    // The cards the last good poll brought are still on the pass…
+    expect(screen.getByText('T1')).toBeTruthy();
+    // …and so is every number. Two reads used to make this automatic for the
+    // chips — the counts call swallowed its own error — and one read has to
+    // keep it deliberately. Both lanes: the one counted from the list in hand
+    // and the one that came from the envelope.
+    expect(screen.getByRole('button', { name: 'To make 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Done 5' })).toBeTruthy();
+    // The failure is still SAID — in the banner above the cards rather than
+    // instead of them. Exactly one place says it: a second copy would mean
+    // the board had fallen through to the error card and blanked the lane.
+    expect(screen.getAllByText('offline')).toHaveLength(1);
+  });
+
+  it('says so when the FIRST load fails, where there is nothing to keep', async () => {
+    listFn.mockRejectedValue(new Error('offline'));
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    // The pair to the test above, and the reason "keep what was there" is
+    // guarded on ever having loaded: a board with nothing behind it must say
+    // it failed, not spin on "Loading tickets…" for ever. Two copies of the
+    // message here — the banner AND the error card — against one above.
+    await waitFor(() => expect(screen.getAllByText('offline')).toHaveLength(2));
+    expect(screen.queryByText(/Loading tickets/)).toBeNull();
+  });
+
+  it('POSITIVE CONTROL — the silent laneCounts spy can actually record a call', async () => {
+    /*
+     * Every `laneCounts` negative above rests on this: the spy is wired to the
+     * module the board imports, so "never called" is a fact about the board
+     * and not about a mock nothing could reach in the first place.
+     */
+    const { kitchen } = await import('@/lib/restaurant/api');
+    await kitchen.laneCounts(SESSION, 'brn_1');
+    expect(laneCountsFn).toHaveBeenCalledTimes(1);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /*
  * D142 — the Done lane holds today, and says where the rest went.
@@ -1362,7 +1689,7 @@ describe('the station filter (D152)', () => {
       ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
       ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
     ];
-    laneCountsFn.mockResolvedValue({ toMake: 2, preparing: 0, doneToday: 7 });
+    serverCounts = { toMake: 2, preparing: 0, doneToday: 7 };
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
     // Unfiltered, D142b is untouched: Done carries the server's number.
@@ -1631,6 +1958,41 @@ describe('the chime under a station filter (D152)', () => {
  *   both are the same lane.
  * - The lane cut ignoring IN_PROGRESS — five lane tests, the control that says
  *   `inLane` is doing the work the counts and the board both read from.
+ *
+ * D154's own mutants, run the same way — pristine copies taken outside the
+ * repo, the suite re-run against each mutation, the files restored
+ * byte-for-byte afterwards. All twelve were killed:
+ *
+ * - The visibility gate removed, so the poll never pauses — "does not poll a
+ *   hidden tab", and both catch-up tests, which then count a fetch nobody
+ *   asked for.
+ * - The `focus`/`visibilitychange` listeners removed with the gate KEPT —
+ *   "refetches the moment the board is looked at again" and "comes back on
+ *   window focus too". That pair is the whole difference between a poll that
+ *   pauses and one that has stalled.
+ * - The second request put back (`kitchen.laneCounts` after the list) — "spends
+ *   ONE request per tick", "takes the other lane's number from the ticket
+ *   read", the failed-poll test, both D142b chip tests and D152's withheld
+ *   count: the 911 the abandoned spy answers reaches the strip.
+ * - `setCounts(next.counts)` dropped — the same five bar the request-count one.
+ *   The chips go bare rather than wrong, which is why the two are separate
+ *   mutants and not one.
+ * - `setStatus('error')` made unconditional on a failed poll — "keeps the last
+ *   cards and the last numbers when a poll fails": the lane blanks and the
+ *   message appears twice.
+ * - The status left alone entirely on failure — "says so when the FIRST load
+ *   fails", which then spins on "Loading tickets…" for ever.
+ * - `setTickets([])` added to the catch, counts kept — the same failed-poll
+ *   test from the other side, and the half a numbers-only assertion would miss.
+ * - The chime baseline built from an empty set instead of the response rows —
+ *   "stays silent when the poll returns the same tickets" and both D152 chime
+ *   tests: the control that says the chime still keys off THIS response.
+ * - The envelope rendered in place of `.items` — 59 of the 65 tests here, which
+ *   is the shape check the rest of the file performs for nothing.
+ * - In api.ts, `listTickets` typed back to `KitchenTicketView[]` — not a test
+ *   failure but a tsc one, in BOTH callers (`.items`/`.counts` on an array).
+ *   That is what makes the envelope's type load-bearing rather than decorative,
+ *   since every test in this file mocks the client and would never see it.
  */
 describe('the D152 dialog negative can actually fail', () => {
   it('catches the pre-D147 "no station" warning, in either casing', () => {

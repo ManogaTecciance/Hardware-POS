@@ -7685,6 +7685,62 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D154 — the kitchen board's tick costs one request, and stops when nobody is looking
+
+PO, 2026-09-10, after asking what websockets would buy here. These are the two
+cheap halves of that answer, taken on their own: they cut the board's polling
+traffic by well over half, change no architecture, and leave the push question
+exactly where it was.
+
+**One request, not two.** The board polled the ticket list and then the lane
+counts. The list read now answers with `{ items, counts }` and the second call
+is gone. The counts are the BRANCH's lanes and deliberately do not narrow with
+`?status=` — D142b's rule is that every chip carries its number whichever lane
+is open.
+
+Beyond the halved traffic it is one snapshot, and that is a correctness gain
+the traffic argument nearly hid: two reads could disagree about a ticket bumped
+between them, leaving the card gone while the chip still counted it. Pinned at
+REPEATABLE READ, because Prisma's batch transaction otherwise runs at Postgres
+READ COMMITTED where each statement takes its own snapshot — the disagreement
+would have been narrowed to microseconds rather than removed, and the comment
+claiming otherwise would have been false. Four read-only statements against one
+branch take no locks, so it is free.
+
+`GET …/kitchen-tickets/counts` stays. It has its own tests and a route-matrix
+entry, and it is a legitimate cheap read for anything wanting numbers alone. It
+shares one definition of the three queries with the list read, and an
+integration test pins the two exposures to each other so they cannot drift.
+
+`/kds/board` answers with the same envelope. The first cut kept its bare array
+on the reasoning that it has no chips, which left two routes serving one service
+read in two shapes with nothing pinning the difference on purpose — and made it
+pay for three counts it discarded. Nothing consumes that route today, so the
+divergence bought nobody anything.
+
+**It stops when hidden**, in exactly the shape the orders queue already used: a
+visibility gate on the interval plus `focus` and `visibilitychange` listeners,
+so it catches up the moment someone looks rather than waiting out the interval.
+A board left open overnight was asking about 1,440 times an hour whether
+anything had changed, for nobody.
+
+Two consequences worth recording. The chime pauses with the poll, so a KDS
+tablet that sleeps its screen goes silent until it wakes and then rings once for
+everything that arrived; that is inherent in what was asked for. And a failed
+poll now keeps the last good cards and numbers on screen under a banner rather
+than blanking the pass — a wall board showing five-second-old work beats one
+showing none.
+
+**That last one introduced a regression, caught by a verifier and not by its
+author.** Keeping the rows is right only while the board is asking the SAME
+question. After a lane switch it is not: the rows answer the tab the cook just
+left, and the lane split relabelled them as the one they chose — a queued card
+sitting on Done offering "Start preparing", counted by the Done chip. The board
+now remembers which fetch its rows answer and falls through to the error card
+when they answer a different one. The banner also clears on the next good poll,
+which it never did; that was harmless while a failure blanked the board and
+became a permanent red banner over a working pass once it did not.
+
 ### D153 — a kitchen ticket can be printed
 
 PO, 2026-09-10, with a sample of the format they wanted. A Print button on every

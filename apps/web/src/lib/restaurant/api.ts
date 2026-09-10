@@ -706,6 +706,27 @@ export const tableSessions = {
 };
 
 // ── Kitchen ─────────────────────────────────────────────────────────────────
+
+/**
+ * D154 — what one board tick reads: the lane the board is showing, and the
+ * three lane counts alongside it.
+ *
+ * The counts ride WITH the tickets rather than following in a second request,
+ * which halves a 5 s poll's traffic — but the reason they are in the same
+ * envelope rather than merely in the same round trip is correctness. Two reads
+ * see two moments: a ticket bumped between them leaves the card gone while the
+ * chip still counts it, or the reverse. One envelope is one snapshot, so the
+ * cards and the numbers agree by construction.
+ *
+ * `counts` is always the BRANCH's three lanes and never varies with `status`:
+ * D142b's rule is that every lane chip carries its number whichever lane is
+ * open, so these cannot be the filtered read's own tally.
+ */
+export interface KitchenTicketListResult {
+  items: KitchenTicketView[];
+  counts: KitchenLaneCounts;
+}
+
 export const kitchen = {
   listTickets(
     session: Session,
@@ -718,13 +739,19 @@ export const kitchen = {
     status?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY' | 'ALL',
   ) {
     const query = status && status !== 'ALL' ? `?status=${status}` : '';
-    return api.get<KitchenTicketView[]>(
+    return api.get<KitchenTicketListResult>(
       `/restaurant/branches/${branchId}/kitchen-tickets${query}`,
       auth(session),
     );
   },
   /**
    * D142b — the three lane counts, for the chips the board cannot count itself.
+   *
+   * D154 moved the BOARD off this and onto the counts `listTickets` now
+   * carries, so the poll is one request. The endpoint and this wrapper stay:
+   * they are the cheap read for anything that wants the numbers WITHOUT the
+   * tickets, and making a caller fetch a whole lane to learn three integers
+   * would be the same waste D154 just removed, pointed the other way.
    */
   laneCounts(session: Session, branchId: string) {
     return api.get<KitchenLaneCounts>(
@@ -737,9 +764,10 @@ export const kitchen = {
    * past the Done lane: work still on the pass is on this screen too.
    *
    * A sibling of `listTickets` rather than an option on it: this one pages and
-   * searches, so it answers with an envelope where the board answers with a
-   * bare array, and widening the board's call would have made both callers
-   * carry a shape neither of them wants.
+   * searches, so its envelope carries `total`/`page`/`pageSize` where the
+   * board's (D154) carries the lane counts. Two reads with genuinely different
+   * questions; folding them together would make both callers carry half a
+   * shape they never asked for.
    */
   history(
     session: Session,
@@ -791,7 +819,9 @@ export const kitchen = {
   },
   kdsBoard(session: Session, branchId: string, status?: KitchenTicketStatus) {
     const query = status ? `?status=${status}` : '';
-    return api.get<KitchenTicketView[]>(
+    // D154 — the same envelope `listTickets` answers with: one service read,
+    // one shape on both routes. A caller wanting only the cards reads `items`.
+    return api.get<KitchenTicketListResult>(
       `/restaurant/branches/${branchId}/kds/board${query}`,
       auth(session),
     );

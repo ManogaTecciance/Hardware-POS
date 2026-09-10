@@ -116,16 +116,38 @@ async function sendRound(instructions: string | null = null) {
   });
 }
 
+/** D142b — the three lane chips' numbers, wherever they are read from. */
+interface LaneCounts {
+  toMake: number;
+  preparing: number;
+  doneToday: number;
+}
+
+/**
+ * D154 — ONE TICK of the board: the open lane's cards AND all three chips.
+ *
+ * This answered with a bare array until D154, and the board followed every
+ * tick with a second call to `counts`. The reads below therefore go through
+ * `.items`; what they assert about the tickets is unchanged, because the
+ * tickets are.
+ */
 const board = (query = '') =>
-  http.request<TicketView[]>(
+  http.request<{ items: TicketView[]; counts: LaneCounts }>(
     'GET',
     `/restaurant/branches/${branchId}/kitchen-tickets${query}`,
     { token: kitchenToken() },
   );
 
-/** D142b — the three lane chips' numbers. */
+/**
+ * D142b — the same three numbers from the route that answers ONLY them.
+ *
+ * D154 moved the board off this route and deliberately left it standing: it
+ * is the cheap read for a caller that wants the chips without the lane. Which
+ * is precisely why the two exposures now have to be pinned to each other —
+ * see the last test in this file.
+ */
 const laneCounts = () =>
-  http.request<{ toMake: number; preparing: number; doneToday: number }>(
+  http.request<LaneCounts>(
     'GET',
     `/restaurant/branches/${branchId}/kitchen-tickets/counts`,
     { token: kitchenToken() },
@@ -256,11 +278,11 @@ describe('D68 — a sent round lands on the kitchen board', () => {
 
     const res = await board();
     expect(res.status).toBe(200);
-    expect(res.data).toHaveLength(1);
+    expect(res.data.items).toHaveLength(1);
 
     // POSITIVE — the ticket is the delivery, so it has to be legible on its
     // own: a dish the pass cannot place never leaves the kitchen.
-    const ticket = res.data[0]!;
+    const ticket = res.data.items[0]!;
     expect(ticket.status).toBe('QUEUED');
     /*
      * D152 — back to the truth this line asserted before D147, which had
@@ -282,7 +304,7 @@ describe('D68 — a sent round lands on the kitchen board', () => {
     const attempts = await prisma.kitchenPrintAttempt.count({
       where: { tenantId: restaurant.tenantId },
     });
-    expect({ ticketsOnBoard: res.data.length, printAttempts: attempts }).toEqual({
+    expect({ ticketsOnBoard: res.data.items.length, printAttempts: attempts }).toEqual({
       ticketsOnBoard: 1,
       printAttempts: 0,
     });
@@ -307,10 +329,10 @@ describe('D68 — a sent round lands on the kitchen board', () => {
     // D152 split the ROUND across stations; it did not merge rounds. Beef
     // Steak routes to Pass and nowhere else, so each round is still exactly
     // one card here — and an order is never folded into a single ticket.
-    expect(res.data).toHaveLength(2);
-    expect(res.data.map((t) => t.roundNumber).sort()).toEqual([1, 2]);
+    expect(res.data.items).toHaveLength(2);
+    expect(res.data.items.map((t) => t.roundNumber).sort()).toEqual([1, 2]);
     // Oldest first: a kitchen works a queue.
-    expect(res.data[0]!.roundNumber).toBe(1);
+    expect(res.data.items[0]!.roundNumber).toBe(1);
   });
 });
 
@@ -495,7 +517,7 @@ describe('D152 — one ticket per station, and no dish reaches the pass on none'
 
     // …and the board says the same, station NAME and all — the ribbon the
     // card draws reads from this.
-    const cards = (await board('?status=OUTSTANDING')).data;
+    const cards = (await board('?status=OUTSTANDING')).data.items;
     expect(cards).toHaveLength(2);
     expect([...cards.map((c) => c.stationName)].sort()).toEqual(['Grill', 'Pass']);
     expect([...cards.map((c) => c.id)].sort()).toEqual([...rows.map((r) => r.id)].sort());
@@ -571,7 +593,7 @@ describe('D152 — one ticket per station, and no dish reaches the pass on none'
     expect(await prisma.kitchenTicket.count({ where: { stationId: hotLineStationId } })).toBe(0);
 
     // …and the card names it, which is what the pass reads.
-    const cards = (await board('?status=OUTSTANDING')).data;
+    const cards = (await board('?status=OUTSTANDING')).data.items;
     expect(cards).toHaveLength(1);
     expect(cards[0]!.stationId).toBe(main.id);
     expect(cards[0]!.stationName).toBe('Main');
@@ -712,7 +734,9 @@ describe('D152 — one ticket per station, and no dish reaches the pass on none'
     expect(thirdRows).toHaveLength(1);
     expect(thirdRows[0]!.stationId).toBe(main.id);
     // …and the card carries the operator's own label, not the born one.
-    const card = (await board('?status=OUTSTANDING')).data.find((c) => c.id === thirdRows[0]!.id)!;
+    const card = (await board('?status=OUTSTANDING')).data.items.find(
+      (c) => c.id === thirdRows[0]!.id,
+    )!;
     expect(card.stationName).toBe('Hot line');
   });
 });
@@ -720,7 +744,7 @@ describe('D152 — one ticket per station, and no dish reaches the pass on none'
 describe('D68 — kitchen staff complete tickets', () => {
   it('completing moves the ticket off the outstanding board and records who', async () => {
     await sendRound();
-    const ticketId = (await board()).data[0]!.id;
+    const ticketId = (await board()).data.items[0]!.id;
 
     const done = await http.request<TicketView>(
       'POST',
@@ -735,14 +759,14 @@ describe('D68 — kitchen staff complete tickets', () => {
     // POSITIVE + NEGATIVE on the same read: gone from one list, present in
     // the other. Asserting only its disappearance would also pass if the
     // ticket had been deleted.
-    expect((await board('?status=OUTSTANDING')).data).toHaveLength(0);
-    const completed = (await board('?status=COMPLETED')).data;
+    expect((await board('?status=OUTSTANDING')).data.items).toHaveLength(0);
+    const completed = (await board('?status=COMPLETED')).data.items;
     expect(completed.map((t) => t.id)).toEqual([ticketId]);
   });
 
   it('completing twice does not rewrite who finished it', async () => {
     await sendRound();
-    const ticketId = (await board()).data[0]!.id;
+    const ticketId = (await board()).data.items[0]!.id;
     const url = `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`;
 
     const first = await http.request<TicketView>('POST', url, { token: kitchenToken() });
@@ -756,7 +780,7 @@ describe('D68 — kitchen staff complete tickets', () => {
 
   it('a ticket from another branch is 404, not silently completed', async () => {
     await sendRound();
-    const ticketId = (await board()).data[0]!.id;
+    const ticketId = (await board()).data.items[0]!.id;
     const otherBranch = await prisma.branch.create({
       data: { tenantId: restaurant.tenantId, name: 'Second', code: 'SEC' },
     });
@@ -779,24 +803,24 @@ describe('D68 — kitchen staff complete tickets', () => {
 
   it('a pre-D68 ticket left on PRINTED still counts as outstanding', async () => {
     await sendRound();
-    const ticketId = (await board()).data[0]!.id;
+    const ticketId = (await board()).data.items[0]!.id;
     // Simulate a row written before printing was withdrawn.
     await prisma.kitchenTicket.update({
       where: { id: ticketId },
       data: { status: 'PRINTED' },
     });
 
-    const outstanding = (await board('?status=OUTSTANDING')).data;
+    const outstanding = (await board('?status=OUTSTANDING')).data.items;
     expect(outstanding.map((t) => t.id)).toEqual([ticketId]);
     // NEGATIVE — and it is not being counted as finished work.
-    expect((await board('?status=COMPLETED')).data).toHaveLength(0);
+    expect((await board('?status=COMPLETED')).data.items).toHaveLength(0);
   });
 });
 
 describe('D68 — the kitchen role reaches the board and nothing else', () => {
   it('kitchen staff can complete a ticket but cannot close the table or take payment', async () => {
     await sendRound();
-    const ticketId = (await board()).data[0]!.id;
+    const ticketId = (await board()).data.items[0]!.id;
 
     // POSITIVE — the job they are rostered to.
     const done = await http.request(
@@ -1015,13 +1039,13 @@ describe('D113 — start/preparing ripples to the round and the Orders queue', (
 
   it('start → IN_PROGRESS everywhere; bump → READY; recall → back to PENDING', async () => {
     await sendRound();
-    const ticketId = (await board()).data[0]!.id;
+    const ticketId = (await board()).data.items[0]!.id;
     expect(await unifiedFor(orderId)).toBe('PENDING');
 
     const started = await verb(ticketId, 'start');
     expect(started.data.status).toBe('IN_PROGRESS');
     // Starting is not bumping: the ticket is still outstanding work…
-    expect((await board('?status=OUTSTANDING')).data.map((t) => t.id)).toEqual([ticketId]);
+    expect((await board('?status=OUTSTANDING')).data.items.map((t) => t.id)).toEqual([ticketId]);
     // …and the queue already says the kitchen is on it.
     expect(await unifiedFor(orderId)).toBe('IN_PROGRESS');
 
@@ -1039,7 +1063,7 @@ describe('D113 — start/preparing ripples to the round and the Orders queue', (
 
   it('start is idempotent, and a stale start never un-completes a bumped ticket', async () => {
     await sendRound();
-    const ticketId = (await board()).data[0]!.id;
+    const ticketId = (await board()).data.items[0]!.id;
 
     await verb(ticketId, 'start');
     const again = await verb(ticketId, 'start');
@@ -1065,7 +1089,7 @@ describe('D113 — start/preparing ripples to the round and the Orders queue', (
       },
     );
     expect(created.data.status).toBe('PLACED');
-    const takeawayTicket = (await board('?status=OUTSTANDING')).data.find(
+    const takeawayTicket = (await board('?status=OUTSTANDING')).data.items.find(
       (t) => t.orderNumber === created.data.orderNumber,
     )!;
 
@@ -1103,8 +1127,10 @@ describe('D113 — start/preparing ripples to the round and the Orders queue', (
  * must not, with the pre-cancel reads as the positive controls.
  */
 describe('D115 — cancelled work leaves the board and lands in its own lane', () => {
+  // D154 — the same envelope the board reads; this describe's own reader
+  // because it goes through the kitchen token deliberately.
   const boardAs = (query: string) =>
-    http.request<TicketView[]>(
+    http.request<{ items: TicketView[]; counts: LaneCounts }>(
       'GET',
       `/restaurant/branches/${branchId}/kitchen-tickets${query}`,
       { token: kitchenToken() },
@@ -1123,7 +1149,7 @@ describe('D115 — cancelled work leaves the board and lands in its own lane', (
         },
       },
     );
-    const t = (await boardAs('?status=OUTSTANDING')).data.find(
+    const t = (await boardAs('?status=OUTSTANDING')).data.items.find(
       (x) => x.orderNumber === created.data.orderNumber,
     )!;
     return { profileId: created.data.id, ticketId: t.id };
@@ -1138,13 +1164,15 @@ describe('D115 — cancelled work leaves the board and lands in its own lane', (
   it('an outstanding ticket disappears from To make and appears under Cancelled', async () => {
     const { profileId, ticketId } = await createTakeaway('d108-a');
     // Positive control — on the board before the cancel, in no Cancelled lane.
-    expect((await boardAs('?status=OUTSTANDING')).data.map((t) => t.id)).toContain(ticketId);
-    expect((await boardAs('?status=CANCELLED')).data).toHaveLength(0);
+    expect((await boardAs('?status=OUTSTANDING')).data.items.map((t) => t.id)).toContain(ticketId);
+    expect((await boardAs('?status=CANCELLED')).data.items).toHaveLength(0);
 
     await cancel(profileId);
 
-    expect((await boardAs('?status=OUTSTANDING')).data.map((t) => t.id)).not.toContain(ticketId);
-    expect((await boardAs('?status=CANCELLED')).data.map((t) => t.id)).toEqual([ticketId]);
+    expect((await boardAs('?status=OUTSTANDING')).data.items.map((t) => t.id)).not.toContain(
+      ticketId,
+    );
+    expect((await boardAs('?status=CANCELLED')).data.items.map((t) => t.id)).toEqual([ticketId]);
   });
 
   it('a completed ticket of a cancelled order leaves Done for Cancelled too', async () => {
@@ -1154,12 +1182,14 @@ describe('D115 — cancelled work leaves the board and lands in its own lane', (
       `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/complete`,
       { token: kitchenToken() },
     );
-    expect((await boardAs('?status=COMPLETED')).data.map((t) => t.id)).toContain(ticketId);
+    expect((await boardAs('?status=COMPLETED')).data.items.map((t) => t.id)).toContain(ticketId);
 
     await cancel(profileId);
 
-    expect((await boardAs('?status=COMPLETED')).data.map((t) => t.id)).not.toContain(ticketId);
-    expect((await boardAs('?status=CANCELLED')).data.map((t) => t.id)).toContain(ticketId);
+    expect((await boardAs('?status=COMPLETED')).data.items.map((t) => t.id)).not.toContain(
+      ticketId,
+    );
+    expect((await boardAs('?status=CANCELLED')).data.items.map((t) => t.id)).toContain(ticketId);
   });
 });
 
@@ -1205,7 +1235,7 @@ describe('D117 — settle creates the Sale without handing over', () => {
     expect(again.data.finalSaleId).toBe(settled.data.finalSaleId);
 
     // The kitchen still drives a settled order: start → IN_KITCHEN, bump → READY.
-    const t = (await board('?status=OUTSTANDING')).data.find(
+    const t = (await board('?status=OUTSTANDING')).data.items.find(
       (x) => x.orderNumber === created.data.orderNumber,
     )!;
     await http.request(
@@ -1272,7 +1302,7 @@ describe('D112 — open-sessions carries the session\'s bumped tickets', () => {
 
   it('readyTicketIds is empty before the bump, the ticket id after, empty again on recall', async () => {
     await sendRound();
-    const ticketId = (await board()).data[0]!.id;
+    const ticketId = (await board()).data.items[0]!.id;
 
     // NEGATIVE — queued food is not ready food.
     const before = (await openSessions()).data.find((s) => s.id === sessionId);
@@ -1317,15 +1347,15 @@ describe('D112 — open-sessions carries the session\'s bumped tickets', () => {
 describe('D142 — today on the board, everything in the history', () => {
   it('drops yesterday’s ticket from Done and keeps it in the history', async () => {
     await sendRound();
-    const todayTicket = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const todayTicket = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await bump(todayTicket);
 
     await sendRound();
-    const oldTicket = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const oldTicket = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await bump(oldTicket);
     await backdate(oldTicket, 3);
 
-    const lane = (await board('?status=COMPLETED_TODAY')).data.map((t) => t.id);
+    const lane = (await board('?status=COMPLETED_TODAY')).data.items.map((t) => t.id);
     // POSITIVE: today's bump is on the lane…
     expect(lane).toContain(todayTicket);
     // …NEGATIVE: three days ago is not.
@@ -1333,7 +1363,7 @@ describe('D142 — today on the board, everything in the history', () => {
 
     // And the ticket still exists, in both of the places it should: the
     // unscoped COMPLETED list the KDS route and a bookmark still mean…
-    const everCompleted = (await board('?status=COMPLETED')).data.map((t) => t.id);
+    const everCompleted = (await board('?status=COMPLETED')).data.items.map((t) => t.id);
     expect(everCompleted).toEqual(expect.arrayContaining([todayTicket, oldTicket]));
     // …and the history, which is what the screen reads.
     const past = (await history()).data;
@@ -1346,12 +1376,12 @@ describe('D142 — today on the board, everything in the history', () => {
 
   it('reads newest-finished first, and carries who bumped it', async () => {
     await sendRound();
-    const first = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const first = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await bump(first);
     await backdate(first, 5);
 
     await sendRound();
-    const second = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const second = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await bump(second);
 
     const items = (await history()).data.items;
@@ -1379,7 +1409,7 @@ describe('D142 — today on the board, everything in the history', () => {
     const ticketIds: string[] = [];
     for (let i = 0; i < 3; i += 1) {
       await sendRound();
-      const id = (await board('?status=OUTSTANDING')).data[0]!.id;
+      const id = (await board('?status=OUTSTANDING')).data.items[0]!.id;
       await bump(id);
       ticketIds.push(id);
     }
@@ -1418,7 +1448,7 @@ describe('D142 — today on the board, everything in the history', () => {
 
   it('searches the ticket number and the dish, and narrows rather than empties', async () => {
     await sendRound();
-    const ticketId = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const ticketId = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     const bumped = await bump(ticketId);
     const ticketNumber = bumped.data.ticketNumber;
     const dish = bumped.data.items[0]!.menuItemName;
@@ -1452,7 +1482,7 @@ describe('D142 — today on the board, everything in the history', () => {
 
   it('leaves cancelled work out of both the lane and the history (D115)', async () => {
     await sendRound();
-    const ticketId = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const ticketId = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await bump(ticketId);
     // POSITIVE first, so the negatives below cannot pass on an empty branch.
     expect((await history()).data.items.map((t) => t.id)).toContain(ticketId);
@@ -1462,10 +1492,12 @@ describe('D142 — today on the board, everything in the history', () => {
       data: { status: 'CANCELLED' },
     });
 
-    expect((await board('?status=COMPLETED_TODAY')).data.map((t) => t.id)).not.toContain(ticketId);
+    expect((await board('?status=COMPLETED_TODAY')).data.items.map((t) => t.id)).not.toContain(
+      ticketId,
+    );
     expect((await history()).data.items.map((t) => t.id)).not.toContain(ticketId);
     // …and it is still findable where cancelled work belongs.
-    expect((await board('?status=CANCELLED')).data.map((t) => t.id)).toContain(ticketId);
+    expect((await board('?status=CANCELLED')).data.items.map((t) => t.id)).toContain(ticketId);
   });
 
   it('D150 — holds To make and Preparing as well, with the unfinished first', async () => {
@@ -1478,16 +1510,18 @@ describe('D142 — today on the board, everything in the history', () => {
      * lanes had themselves stopped splitting anything.
      */
     await sendRound();
-    const queued = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const queued = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await sendRound();
-    const preparing = (await board('?status=OUTSTANDING')).data.find((t) => t.id !== queued)!.id;
+    const preparing = (await board('?status=OUTSTANDING')).data.items.find(
+      (t) => t.id !== queued,
+    )!.id;
     await http.request(
       'POST',
       `/restaurant/branches/${branchId}/kitchen-tickets/${preparing}/start`,
       { token: kitchenToken() },
     );
     await sendRound();
-    const done = (await board('?status=OUTSTANDING')).data.find(
+    const done = (await board('?status=OUTSTANDING')).data.items.find(
       (t) => t.id !== queued && t.id !== preparing,
     )!.id;
     await bump(done);
@@ -1533,10 +1567,10 @@ describe('D142 — today on the board, everything in the history', () => {
      * the lanes as well, which is the one thing D142 says must not happen: the
      * history got wider, the lanes did not.
      */
-    expect([...(await board('?status=OUTSTANDING')).data.map((t) => t.id)].sort()).toEqual(
+    expect([...(await board('?status=OUTSTANDING')).data.items.map((t) => t.id)].sort()).toEqual(
       [queued, preparing].sort(),
     );
-    expect((await board('?status=COMPLETED_TODAY')).data.map((t) => t.id)).toEqual([done]);
+    expect((await board('?status=COMPLETED_TODAY')).data.items.map((t) => t.id)).toEqual([done]);
   });
 
   it('D115/D150 — cancelled work stays out even in the states D150 let in', async () => {
@@ -1548,9 +1582,11 @@ describe('D142 — today on the board, everything in the history', () => {
      * left QUEUED, which is the state where nothing else is keeping them out.
      */
     await sendRound();
-    const kept = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const kept = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await sendRound();
-    const calledOff = (await board('?status=OUTSTANDING')).data.find((t) => t.id !== kept)!.id;
+    const calledOff = (await board('?status=OUTSTANDING')).data.items.find(
+      (t) => t.id !== kept,
+    )!.id;
 
     // POSITIVE first — D150 puts both queued tickets in the history, so the
     // negatives below cannot pass on an empty branch, and cannot pass by the
@@ -1586,14 +1622,14 @@ describe('D142 — today on the board, everything in the history', () => {
 
     // …and both are still findable where cancelled work belongs, so the zeroes
     // above are an exclusion from THIS list rather than a deletion.
-    expect([...(await board('?status=CANCELLED')).data.map((t) => t.id)].sort()).toEqual(
+    expect([...(await board('?status=CANCELLED')).data.items.map((t) => t.id)].sort()).toEqual(
       [kept, calledOff].sort(),
     );
   });
 
   it('is the kitchen’s to read — the same permission as the board', async () => {
     await sendRound();
-    await bump((await board('?status=OUTSTANDING')).data[0]!.id);
+    await bump((await board('?status=OUTSTANDING')).data.items[0]!.id);
 
     // POSITIVE — the kitchen-staff token, holding KOT_VIEW and nothing on the
     // floor, reads its own history.
@@ -1670,22 +1706,24 @@ describe('D142b — the lane counts', () => {
     // One queued, one started, one bumped — every lane non-empty, so no count
     // can pass by being zero.
     await sendRound();
-    const queued = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const queued = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await sendRound();
-    const starting = (await board('?status=OUTSTANDING')).data.find((t) => t.id !== queued)!.id;
+    const starting = (await board('?status=OUTSTANDING')).data.items.find(
+      (t) => t.id !== queued,
+    )!.id;
     await http.request(
       'POST',
       `/restaurant/branches/${branchId}/kitchen-tickets/${starting}/start`,
       { token: kitchenToken() },
     );
     await sendRound();
-    const bumped = (await board('?status=OUTSTANDING')).data.find(
+    const bumped = (await board('?status=OUTSTANDING')).data.items.find(
       (t) => t.id !== queued && t.id !== starting,
     )!.id;
     await bump(bumped);
 
-    const outstanding = (await board('?status=OUTSTANDING')).data;
-    const done = (await board('?status=COMPLETED_TODAY')).data;
+    const outstanding = (await board('?status=OUTSTANDING')).data.items;
+    const done = (await board('?status=COMPLETED_TODAY')).data.items;
     const counts = (await laneCounts()).data;
 
     expect(counts.toMake).toBe(outstanding.filter((t) => t.status !== 'IN_PROGRESS').length);
@@ -1697,7 +1735,7 @@ describe('D142b — the lane counts', () => {
 
   it('counts the DAY on Done, like the lane does', async () => {
     await sendRound();
-    const old = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const old = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     await bump(old);
     expect((await laneCounts()).data.doneToday).toBe(1);
 
@@ -1706,15 +1744,15 @@ describe('D142b — the lane counts', () => {
     // NEGATIVE — out of today's window, out of the count, exactly as it is out
     // of the lane. A count over every COMPLETED row would still say 1.
     expect((await laneCounts()).data.doneToday).toBe(0);
-    expect((await board('?status=COMPLETED_TODAY')).data).toHaveLength(0);
+    expect((await board('?status=COMPLETED_TODAY')).data.items).toHaveLength(0);
     // …and it is still there unscoped, so the zero above is a window and not a
     // deletion.
-    expect((await board('?status=COMPLETED')).data.map((t) => t.id)).toContain(old);
+    expect((await board('?status=COMPLETED')).data.items.map((t) => t.id)).toContain(old);
   });
 
   it('leaves cancelled work out of every count, like every lane (D115)', async () => {
     await sendRound();
-    const ticketId = (await board('?status=OUTSTANDING')).data[0]!.id;
+    const ticketId = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     expect((await laneCounts()).data.toMake).toBe(1);
 
     await prisma.restaurantOrder.update({
@@ -1724,7 +1762,7 @@ describe('D142b — the lane counts', () => {
 
     const counts = (await laneCounts()).data;
     expect(counts).toEqual({ toMake: 0, preparing: 0, doneToday: 0 });
-    expect((await board('?status=CANCELLED')).data.map((t) => t.id)).toContain(ticketId);
+    expect((await board('?status=CANCELLED')).data.items.map((t) => t.id)).toContain(ticketId);
   });
 
   it('is the kitchen’s to read, like the board', async () => {
@@ -1753,5 +1791,104 @@ describe('D142b — the lane counts', () => {
       },
     );
     expect(refused.status).toBe(403);
+  });
+});
+
+/*
+ * D154 — the chips ride along with the cards, and the two exposures of them
+ * cannot drift apart.
+ *
+ * A board tick used to be TWO requests: the lane, then `counts`. The list now
+ * answers with both, and `counts` deliberately stays for a caller that wants
+ * the three integers without reading every ticket and its items to get them.
+ * Two routes serving the same three numbers is precisely the shape that rots
+ * — one gets a new lane rule, a new exclusion, a new day boundary, and the
+ * other quietly does not — so the claim worth pinning is that they cannot.
+ *
+ * It has to be an integration test. A unit test can prove the service builds
+ * both from one shared query; it cannot prove that the two ROUTES, with their
+ * own guards, their own params and their own serialisation, hand a caller the
+ * same numbers over real rows.
+ */
+describe('D154 — the list envelope carries the counts route’s own numbers', () => {
+  it('matches the counts endpoint on every lane filter, cards or no cards', async () => {
+    /*
+     * Seven rounds, arranged so the three chips hold three DIFFERENT non-zero
+     * numbers AND so the Done chip is genuinely day-scoped. Equality between
+     * two objects of three zeroes is satisfied by a build that counts nothing
+     * at all; equality between {1,1,1} and {1,1,1} survives two of the chips
+     * being transposed; and a fixture whose only bumped ticket was bumped
+     * today cannot tell D142's "finished today" from "finished ever" on
+     * EITHER exposure — the mutant that drops the day bound from the counts
+     * route alone survives such a fixture, which is how this arrangement was
+     * arrived at rather than by preference.
+     */
+    for (let i = 0; i < 7; i += 1) await sendRound();
+    const queue = (await board('?status=OUTSTANDING')).data.items.map((t) => t.id);
+    expect(queue).toHaveLength(7);
+
+    await bump(queue[0]!); // Done TODAY: 1
+    await bump(queue[1]!);
+    await backdate(queue[1]!, 3); // Completed, but not today — chip must not see it.
+    for (const id of [queue[2]!, queue[3]!]) {
+      await http.request('POST', `/restaurant/branches/${branchId}/kitchen-tickets/${id}/start`, {
+        token: kitchenToken(),
+      });
+    } // Preparing: 2 — which leaves three still To make.
+
+    const standalone = (await laneCounts()).data;
+    // POSITIVE — the standalone route's numbers, NAMED. Without this anchor an
+    // equality between the two exposures is satisfied by both being wrong
+    // together, which is exactly what a change to the shared query would do.
+    expect(standalone).toEqual({ toMake: 3, preparing: 2, doneToday: 1 });
+
+    /*
+     * EVERY lane, the ones the numbers are not about included. D142b's rule
+     * is that a chip carries its number whichever lane is open, so the
+     * envelope's counts must not move with `?status=`. A test that only read
+     * the default lane would pass just as happily against a build that
+     * counted the FILTERED rows.
+     */
+    const lanes = [
+      '',
+      '?status=OUTSTANDING',
+      '?status=COMPLETED_TODAY',
+      '?status=COMPLETED',
+      '?status=CANCELLED',
+    ];
+    for (const filter of lanes) {
+      const tick = await board(filter);
+      expect(tick.status).toBe(200);
+      // The lane travels INSIDE the compared value: jest's `expect` takes no
+      // message argument, and a bare `toEqual` failing on the fifth iteration
+      // would not say which `?status=` produced the mismatch.
+      expect({ filter, counts: tick.data.counts }).toEqual({ filter, counts: standalone });
+    }
+
+    /*
+     * …and those were five DIFFERENT reads. Without this, a build that
+     * ignored `?status=` entirely — answering the whole board five times —
+     * would satisfy every assertion above.
+     *
+     * The Cancelled lane is the sharpest: ZERO cards, and the chips still say
+     * 3/2/1, a shape no count-what-I-returned implementation can produce.
+     * That it is empty here is a fact about this fixture, not a claim that
+     * the filter selects nothing — the D115 describe above puts a real ticket
+     * into it and reads it back.
+     */
+    const cancelled = await board('?status=CANCELLED');
+    expect(cancelled.data.items).toHaveLength(0);
+    expect(cancelled.data.counts).toEqual({ toMake: 3, preparing: 2, doneToday: 1 });
+    // The day bound is live in the LIST as well as in the chip: two tickets
+    // have been bumped, one of them yesterday-ish, and only one is on Done.
+    expect((await board('?status=COMPLETED_TODAY')).data.items.map((t) => t.id)).toEqual([
+      queue[0]!,
+    ]);
+    expect([...(await board('?status=COMPLETED')).data.items.map((t) => t.id)].sort()).toEqual(
+      [queue[0]!, queue[1]!].sort(),
+    );
+    expect([...(await board('?status=OUTSTANDING')).data.items.map((t) => t.id)].sort()).toEqual(
+      [...queue.slice(2)].sort(),
+    );
   });
 });
