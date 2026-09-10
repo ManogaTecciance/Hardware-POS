@@ -61,6 +61,10 @@ const { OrderDetailDrawer } = await import('./order-detail-drawer');
 
 /** The row the user's screenshot showed: takeaway, taken over the phone. */
 const ROW: UnifiedOrderView = {
+  // D152 — the counter user who keyed it. Not this spec's subject, but the row
+  // shape carries it now and a fixture missing it would not be a real row.
+  staffUserId: 'usr_till',
+  staffName: 'Restaurant Cashier',
   id: 'ord_1',
   channel: 'TAKEAWAY',
   source: 'PHONE_ORDER',

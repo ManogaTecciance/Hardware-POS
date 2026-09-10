@@ -18,6 +18,12 @@ import {
   type OpenSessionRow,
 } from '@/lib/restaurant/active-session';
 import { tableSessions } from '@/lib/restaurant/api';
+import {
+  isMySession,
+  otherWaiterLabel,
+  resolveOwnerScope,
+  type SessionOwnerScope,
+} from '@/lib/restaurant/session-ownership';
 import { TABLE_STATUS_LABELS, formatElapsed } from '@/lib/restaurant/labels';
 import { seatsFree } from '@/lib/restaurant/types';
 import type {
@@ -276,6 +282,12 @@ function Picker({
    * not loaded yet".
    */
   const [selected, setSelected] = React.useState<string | null>(null);
+  /**
+   * D151 — whose running tables the strip lists. Null until a chip is tapped;
+   * `resolveOwnerScope` then defaults it from the data, so a waiter lands on
+   * their own tables and a cashier (who opens none) still sees the floor.
+   */
+  const [ownerChoice, setOwnerChoice] = React.useState<SessionOwnerScope | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -361,6 +373,20 @@ function Picker({
   };
 
   /*
+   * D151 — whose running tables the strip lists. `mineOpen` is also what the
+   * default reads: a waiter with tables of their own opens on those, and anyone
+   * with none (a cashier at the till) opens on the floor rather than on an
+   * empty strip that looks like a branch with no parties in it.
+   */
+  const mineOpen = React.useMemo(
+    () => open.filter((s) => isMySession(s, session.user.id)),
+    [open, session.user.id],
+  );
+  // D152b — mine unless the waiter said otherwise; the data never moves it.
+  const ownerScope = resolveOwnerScope(ownerChoice);
+  const shownOpen = ownerScope === 'mine' ? mineOpen : open;
+
+  /*
    * D92 — Open is a destination in the same strip, so it spans every floor:
    * a waiter carrying two tables in two rooms should not have to remember
    * which room to look in.
@@ -402,15 +428,22 @@ function Picker({
    * last-wins: the earlier party simply vanished from the grid, which is the
    * worst failure available here because nothing about it looks wrong.
    */
-  const mySessionsByTable = React.useMemo(() => {
+  /*
+   * D151 — keyed off the SHOWN set, not every session the server returned. With
+   * "Mine" selected this is exactly the pre-D151 map (the scoped read), so an
+   * occupied table that is somebody else's stays drawn-and-greyed; switching to
+   * "All" is what makes it tappable. Reading `open` here instead would have let
+   * the room grid ignore the chips the strip above it is obeying.
+   */
+  const shownSessionsByTable = React.useMemo(() => {
     const map = new Map<string, OpenSessionRow[]>();
-    for (const s of open) {
+    for (const s of shownOpen) {
       const list = map.get(s.tableId) ?? [];
       list.push(s);
       map.set(s.tableId, list);
     }
     return map;
-  }, [open]);
+  }, [shownOpen]);
 
   /** Resume a session the user already has — the strip and the grid share it. */
   const resume = React.useCallback(
@@ -465,10 +498,13 @@ function Picker({
           <div>
             <p className="text-sm font-semibold">Which table?</p>
             <p className="text-xs text-muted-foreground">
-              {/* D70 — "yours" is the honest word: the server only returns
-                  sessions this user opened, unless they supervise the floor. */}
+              {/* D151 — "yours" was the whole truth before the floor became
+                  readable (D70 scoped the read to the caller). It is now the
+                  DEFAULT rather than the limit, so the copy says which view
+                  the strip is starting from and where the rest is. */}
               Seat a free table from a floor, or pick Open to carry on with a
-              running one. Tables another waiter is serving are shown, greyed.
+              running one. Open tables starts with yours — switch to All for the
+              whole floor, where each table names the waiter serving it.
             </p>
           </div>
           <Button
@@ -489,26 +525,72 @@ function Picker({
           </p>
         ) : (
           <>
-            {/* Open sessions sit ABOVE the filter and are never filtered: this
-                is the "carry on where I was" list, it is short, and hiding a
-                running table behind a filter the waiter set for a different
-                reason is how a party gets forgotten. */}
+            {/* Open sessions sit ABOVE the area filter and are never narrowed by
+                it: this is the "carry on where I was" list, it is short, and
+                hiding a running table behind a filter the waiter set for a
+                different reason is how a party gets forgotten. D151 gives it
+                the ONE filter it should have — whose tables — defaulted to the
+                caller's own. */}
             {open.length > 0 ? (
               /* D91 — labelled as a group: the same table can appear here AND
-                 in the room below (this strip crosses areas and ignores every
-                 filter), so "the T2 chip" is ambiguous without a name for the
-                 section it is in. */
-              <div role="group" aria-label="Your open tables">
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Your open tables
-                </p>
+                 in the room below (this strip crosses areas and ignores the
+                 area filter), so "the T2 chip" is ambiguous without a name for
+                 the section it is in. */
+              <div role="group" aria-label="Open tables">
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Open tables
+                  </p>
+                  {/* Only when there is something to choose between: on a floor
+                      where every running table is the caller's own, two chips
+                      that filter nothing would be a control that lies. */}
+                  {mineOpen.length !== open.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        data-active={ownerScope === 'mine'}
+                        onClick={() => setOwnerChoice('mine')}
+                        className={`inline-flex h-8 items-center rounded-full px-3 text-xs font-medium transition-colors ${
+                          ownerScope === 'mine'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-foreground hover:bg-border'
+                        }`}
+                      >
+                        Mine · {mineOpen.length}
+                      </button>
+                      <button
+                        type="button"
+                        data-active={ownerScope === 'all'}
+                        onClick={() => setOwnerChoice('all')}
+                        className={`inline-flex h-8 items-center rounded-full px-3 text-xs font-medium transition-colors ${
+                          ownerScope === 'all'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-foreground hover:bg-border'
+                        }`}
+                      >
+                        All · {open.length}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                {/* D152b — the same "empty is a real state" line the queue
+                    carries: under Mine with none of your own, the strip would
+                    otherwise be a labelled blank next to a chip saying there
+                    are sixteen. */}
+                {shownOpen.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    None of the {open.length} running tables are yours — tap All to see them.
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
-                  {open.map((s) => {
+                  {shownOpen.map((s) => {
                     const table = labels.get(s.tableId);
                     // D104 — two tabs on one arrangement are two chips here,
                     // and the tab's name is the only thing that tells them
                     // apart: the table name is identical on both.
                     const name = table ? tabLabel(table, s.tabName) : undefined;
+                    // D151 — whose table, when it is not the caller's.
+                    const owner = otherWaiterLabel(s, session.user.id);
                     return (
                       <button
                         key={s.id}
@@ -529,6 +611,7 @@ function Picker({
                         >
                           {formatElapsed(s.openedAt)}
                           {s.guestCount ? ` · ${s.guestCount}` : ''}
+                          {owner ? ` · ${owner}` : ''}
                         </span>
                       </button>
                     );
@@ -678,7 +761,7 @@ function Picker({
                               // A physical table still carries at most one of
                               // the waiter's tabs (D104 relaxed the rule for
                               // arrangements only), so the first is the only.
-                              mine={mySessionsByTable.get(t.id)?.[0]}
+                              mine={shownSessionsByTable.get(t.id)?.[0]}
                               activeId={activeId}
                               busyId={busyId}
                               unavailableTitle={unavailableTitle(t)}

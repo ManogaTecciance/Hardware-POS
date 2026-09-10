@@ -65,6 +65,19 @@ export interface OrderView {
   saleId: string | null;
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
+  /**
+   * D152 — whose order this is, on the floor or at the counter.
+   *
+   * Dine-in: the table's waiter (`TableSession.waiterUserId`), falling back to
+   * whoever sent the first round for a session opened without one. Takeaway:
+   * the round's submitter, which is the person who keyed the order. Third
+   * party: NULL, and deliberately — a platform order belongs to nobody on the
+   * floor until someone accepts it, and attributing it to whoever happened to
+   * look would make "my orders" a lie.
+   */
+  staffUserId: string | null;
+  /** The name behind `staffUserId`; null when it is absent or unresolvable. */
+  staffName: string | null;
 }
 
 /** One priced line on the order detail — snapshots, never live menu prices. */
@@ -127,6 +140,18 @@ export interface OrderDetailView extends OrderView {
 }
 
 export interface OrdersQuery {
+  /**
+   * D152 — whose orders. `'mine'` narrows to the caller's own attribution
+   * (see {@link OrderView.staffUserId}); `'all'` is the whole branch.
+   *
+   * Absent means "decide for me", which is what the Orders screen sends on a
+   * first load: the service answers `mine` when the caller has any and `all`
+   * when they do not, and says which in {@link OrdersPage.resolvedScope}. The
+   * default lives HERE rather than in the client because only the server can
+   * count the caller's rows, and a client that had to ask first would either
+   * flicker through the wrong list or spend two requests on every arrival.
+   */
+  scope?: 'mine' | 'all';
   channel?: UnifiedChannel | 'ALL';
   status?: UnifiedOrderStatus | 'ALL';
   paymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | 'ALL';
@@ -171,6 +196,17 @@ export interface OrdersPage {
    * open and re-baseline on the same filter changes that move the counts.
    */
   readyHandoverCount: number;
+  /**
+   * D152 — how many rows are the caller's own, and how many exist at all,
+   * counted BEFORE the scope narrowing (and after channel/date/payment/search,
+   * like `statusCounts`). They are the numbers on the Mine/All chips, so both
+   * are needed whichever scope is active — a chip that could not name the size
+   * of the other view is a control the operator has to try to understand.
+   */
+  mineCount: number;
+  allCount: number;
+  /** Which scope the service actually applied — the caller may not have asked. */
+  resolvedScope: 'mine' | 'all';
 }
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -211,6 +247,13 @@ export class RestaurantOrdersService {
     tenantId: string,
     branchId: string,
     query: OrdersQuery = {},
+    /**
+     * D152 — who is asking, for the `mine` scope. Optional so every existing
+     * caller (and every spec written before the scope existed) keeps working:
+     * without an actor there is nobody to be "mine", so the scope resolves to
+     * `all` and the counts say zero rather than guessing.
+     */
+    actorUserId: string | null = null,
   ): Promise<OrdersPage> {
     const pageSize = Math.min(Math.max(query.pageSize ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
     const page = Math.max(query.page ?? 1, 1);
@@ -250,7 +293,12 @@ export class RestaurantOrdersService {
             select: { menuItemName: true, quantity: true },
           },
           rounds: {
-            select: { status: true },
+            // D152 — `submittedByUserId` is the counter's attribution: a
+            // takeaway order has no session, so the person who sent its first
+            // round is the person whose order it is. Ordered so "first" is the
+            // round the operator sent first and not whichever row came back.
+            select: { status: true, submittedByUserId: true },
+            orderBy: { roundNumber: 'asc' },
           },
           takeawayProfile: {
             select: {
@@ -316,17 +364,71 @@ export class RestaurantOrdersService {
       );
     }
 
-    // Tallied on `base` — every filter EXCEPT status — so selecting one tab
+    /*
+     * D152 — the names behind the attributions. One query for the page's
+     * distinct staff ids, the same shape `kitchen.service.waiterNames` uses and
+     * for the same reason: `TableSession.waiterUserId` and
+     * `OrderRound.submittedByUserId` are loose columns with no relation, so
+     * there is nothing to include. Skipped entirely when no row is attributed,
+     * which is also what keeps this off the third-party-only path.
+     */
+    const staffIds = [...new Set(base.map((r) => r.staffUserId).filter((id): id is string => !!id))];
+    if (staffIds.length > 0) {
+      const staff = await this.prisma.user.findMany({
+        where: { tenantId, id: { in: staffIds } },
+        select: { id: true, name: true },
+      });
+      const nameById = new Map(staff.map((u) => [u.id, u.name] as const));
+      for (const r of base) {
+        r.staffName = r.staffUserId ? nameById.get(r.staffUserId) ?? null : null;
+      }
+    }
+
+    /*
+     * D152 — whose orders, resolved before anything is counted.
+     *
+     * `mineCount`/`allCount` are tallied on the unscoped base so both chips can
+     * carry a number; everything after this point — the status tabs, the ready
+     * bell, the page — describes the SCOPED list, because a tab that counted
+     * orders the list is not showing would read as a broken filter.
+     */
+    const mineCount = actorUserId
+      ? base.filter((r) => r.staffUserId === actorUserId).length
+      : 0;
+    const allCount = base.length;
+    /*
+     * D152b — MINE unless the caller asked for the floor.
+     *
+     * This used to widen itself when the caller had no rows of their own, on
+     * the reasoning that an empty queue reads as a broken one. The count only
+     * exists after the request, so the screen answered "mine", then moved to
+     * "all" a beat later — reported as "it's working backward". The empty list
+     * is the honest answer; the screen offers the way over rather than taking
+     * it, and `allCount` below is what tells the operator there is somewhere
+     * to go.
+     */
+    const resolvedScope: 'mine' | 'all' = query.scope ?? 'mine';
+    /*
+     * With no actor there is nobody to be "mine", so the narrowing cannot
+     * apply — an unauthenticated internal caller (and every spec written
+     * before the scope existed) still sees the branch.
+     */
+    const scoped =
+      resolvedScope === 'mine' && actorUserId
+        ? base.filter((r) => r.staffUserId === actorUserId)
+        : base;
+
+    // Tallied on `scoped` — every filter EXCEPT status — so selecting one tab
     // does not zero the others.
     const statusCounts = emptyStatusCounts();
     let readyHandoverCount = 0;
-    for (const r of base) {
+    for (const r of scoped) {
       statusCounts[r.unifiedStatus] += 1;
       // D114 — see the field's doc: counter-owned readiness only.
       if (r.unifiedStatus === 'READY' && r.channel !== 'DINE_IN') readyHandoverCount += 1;
     }
 
-    const filtered = status === 'ALL' ? base : base.filter((r) => r.unifiedStatus === status);
+    const filtered = status === 'ALL' ? scoped : scoped.filter((r) => r.unifiedStatus === status);
 
     /*
      * Sorted newest first across channels BEFORE paging, so page 2 continues
@@ -351,6 +453,9 @@ export class RestaurantOrdersService {
       truncated,
       statusCounts,
       readyHandoverCount,
+      mineCount,
+      allCount,
+      resolvedScope,
     };
   }
 
@@ -491,11 +596,13 @@ function restaurantOrderBaseView(
     orderNumber: string;
     status: RestaurantOrderStatus;
     createdAt: Date;
-    rounds: { status: string }[];
+    rounds: { status: string; submittedByUserId?: string | null }[];
     // D104 — the tab's name rides alongside the table, so two parties sharing
     // one arrangement are two distinguishable rows in this list.
     session: {
       tabName: string | null;
+      // D152 — the table's waiter: whose dine-in order this is.
+      waiterUserId?: string | null;
       table: { code: string; label: string | null } | null;
     } | null;
     takeawayProfile: {
@@ -554,6 +661,20 @@ function restaurantOrderBaseView(
       name: i.menuItemName,
       qty: Number(i.quantity),
     })),
+    /*
+     * D152 — the table's waiter first, the first round's submitter second.
+     *
+     * The order matters: a dine-in order belongs to whoever is SERVING the
+     * table, not to whichever colleague keyed the last round while covering
+     * them. The fallback catches a session opened without a waiter (seeded and
+     * pre-D69 rows) and every takeaway order, which has no session at all.
+     */
+    staffUserId:
+      o.session?.waiterUserId ??
+      o.rounds.find((r) => r.submittedByUserId)?.submittedByUserId ??
+      null,
+    // Resolved by the caller, which looks up every id on the page at once.
+    staffName: null,
   };
 }
 
@@ -619,6 +740,13 @@ function externalOrderBaseView(e: {
     // schema; the UI shows the total as the only summary.
     itemCount: 0,
     itemPreview: [],
+    /*
+     * D152 — nobody's, on purpose. A platform order arrives without a person
+     * behind it, and attributing it to whoever is looking would put rows in
+     * "my orders" that the operator never took.
+     */
+    staffUserId: null,
+    staffName: null,
   };
 }
 

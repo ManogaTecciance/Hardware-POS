@@ -8546,6 +8546,260 @@ close), the floor plan itself, and the food-ready badge and its per-device ack
 (D112) — the ack still fires on the same tap, now carrying the waiter into the
 POS.
 
+### D151 — a waiter opens on their own tables and can see the floor
+
+**Asked by the PO, 2026-09-10**: *"In waiter view he needs to see his orders by
+default in his view, and can also see other orders. Follow the best approach the
+industry follows."*
+
+**What was there.** D70 withheld `TABLE_SESSION_VIEW_ALL` from the Waiter
+template, so `GET /open-sessions` returned a waiter only the sessions they had
+opened, and every session-addressed route answered 404 for anyone else's. Its
+reasoning was the mixing: *"a floor list that mixes them is how a table gets
+served twice or not at all."*
+
+**Why that was the wrong instrument.** The objection is about DEFAULTS, and it
+was answered with blindness. Table service is a shared floor: a waiter covers a
+colleague's section during a break, a shift changes mid-service, and a guest
+flags down whoever walks past to ask where their starter is. None of that was
+possible — not even reading the order to answer the question — and the only way
+to see a colleague's table was to walk to a supervisor's screen. Every
+mainstream POS (Toast, Square, Lightspeed) ships the opposite shape: the floor
+shows everything, the server's own tables are the default view, and a toggle
+widens it.
+
+**Now.** The Waiter template carries `TABLE_SESSION_VIEW_ALL`, and both
+waiter-facing surfaces default to "mine":
+
+- `/tables` — a **My tables · n / All tables · n** chip pair above the area
+  strip (its own row: whose and where are two questions, and D91/D92 settled
+  that one strip carries one selection). Under "mine" a colleague's table is
+  drawn exactly as it was before — status badge, no View order — so the
+  pre-D151 screen is literally the default state.
+- The POS dine-in picker — the same two chips over its open-tables strip, and
+  the room grid honours them, so an occupied table that is someone else's stays
+  greyed until All is chosen.
+- Both name the other waiter. `OpenSessionSummary` gained `waiterName` (one
+  extra query per page, the same shape the kitchen board's `waiterNames` uses,
+  because `TableSession.waiterUserId` is a loose column with no relation): a
+  cuid cannot be read out loud, and the users endpoint a client would resolve a
+  name through is `USER_MANAGE`-gated.
+
+The default is resolved, not hardcoded: `resolveOwnerScope` opens on "mine"
+when the caller has a session of their own and on "all" when they do not, and an
+explicit chip wins from then on. Both halves matter — a cashier or an owner owns
+no sessions, and defaulting them to "mine" would have replaced their whole-floor
+view with an empty screen; a choice that did not stick would be undone by the
+next 8 s poll while the waiter was reading a colleague's order.
+
+**What this also opens, deliberately.** `sessionScope()` gates reads AND the
+session-addressed writes, so a waiter can now also create an order on, and close,
+a colleague's table. That is the point rather than a side effect: a waiter who
+can SEE a table and then cannot add the round the guests just asked for has been
+handed a door onto a 403, which D93 says not to build. Sending a round never
+checked ownership in the first place (only `ORDER_SEND_TO_KITCHEN`), and every
+one of these routes is audited with the actor's id — accountability lives in the
+audit trail, not in pretending the table is invisible. `ORDER_VOID_SENT` and
+`TABLE_TRANSFER`/`TABLE_MERGE` stay absent from the template: seeing a
+colleague's table does not make their mistakes yours to erase.
+
+**The scope mechanism stays, and is still tested.** It is keyed on a permission
+and a tenant can compose a role without it through RolesApi, so the server-side
+narrowing is unchanged. No seeded template lacks the key any more, which would
+have left `sessionScope()` asserted in one direction only — so the integration
+spec now builds a custom role without it (`TRAINEE_WAITER`) and pins the
+narrowing through the same routes, reads and writes both.
+
+**Not changed:** the floor plan's food-ready badge and its per-device ack (D112
+— under "all" a colleague's ready food does badge, which is information a waiter
+covering them wants), the kitchen board, the orders queue (its rows carry no
+waiter attribution today, so it has no "mine" to offer — recorded as a gap, not
+a feature), and the bill/split permissions.
+
+**Dev note.** Granting a template permission does not reach an existing
+workspace: role ROWS hold the permissions, so
+`prisma/backfill-tenant-roles.ts <slug> --write` is what re-applies a template
+to a tenant that already exists. Also added `prisma/add-staff.ts`
+(`db:add-staff`) — adding a user to an existing tenant had no path at all
+(`POST /v1/users` still throws `NotImplementedException`), which is how a
+restaurant with one waiter account stays a restaurant with one waiter account.
+
+### D152 — the Orders queue answers "which of these are mine"
+
+**Asked by the PO, 2026-09-10**, correcting D151's reading: *"I told you to check
+ORDERS. A waiter handling orders needs to easily check what are HIS orders.
+You added it for table management. Check what the industry does for both — is
+that even necessary? — and it is needed on the Orders tab."*
+
+**The misread, and what was actually wrong.** D151 put "my tables" on the floor
+plan and the POS picker, which is a real control (see below) but not the one
+that was asked for. The Orders tab — the live queue a waiter watches to see what
+is cooking, ready or unpaid — has always listed the WHOLE branch with no
+attribution of any kind: forty rows across three channels, no way to find the
+four that are yours, and no column saying whose any of them are. D151's own
+record named that gap and left it; this closes it.
+
+**Industry, both surfaces.** Mainstream POS carries the split on both screens
+and they answer different questions: Toast's floor plan has a My tables toggle
+AND its Orders/Tickets list defaults to the logged-in server; Square for
+Restaurants filters tickets by employee; TouchBistro opens a server on their own
+tables and their own open tickets. So the floor filter stays — it is the
+"where am I working" view — and the queue gets the one this decision is about:
+"what is happening to my orders".
+
+**Attribution.** Each queue row now carries `staffUserId` + `staffName`:
+- dine-in — the table's waiter (`TableSession.waiterUserId`), falling back to
+  the first round's `submittedByUserId` for a session opened without one. The
+  order matters: a dine-in order belongs to whoever is SERVING the table, not to
+  a colleague who keyed one round while covering.
+- takeaway — the first round's submitter, i.e. whoever keyed it at the counter.
+- third party — NULL, deliberately. A platform order has nobody behind it, and
+  attributing it to whoever is looking would put rows in "my orders" that the
+  operator never took. It stays in the branch total and out of "mine".
+
+Names resolve in one query for the page's distinct ids (the same shape
+`kitchen.service.waiterNames` uses, and for the same reason: both columns are
+loose references with no relation).
+
+**The filter.** `GET …/orders?scope=mine|all`, defaulted BY THE SERVER when the
+parameter is absent: mine when the caller has any, all when they do not, and the
+envelope says which in `resolvedScope`. Server-side because the list is paged —
+a client-side filter would narrow one page of twenty-five and report it as the
+total — and because only the server can count the caller's rows in time to pick
+the default on the first request, which is what keeps a waiter from watching the
+whole room flash past before their own list arrives.
+
+`mineCount` and `allCount` ride in the envelope, counted before the narrowing,
+so both chips can carry a number. Everything else — the status tabs, the metric
+cards, the ready tally, the pager — is computed AFTER it, because a tab that
+counts rows the list is not showing reads as a broken filter.
+
+**On screen.** `ORDERS  [My orders · n] [All orders · n]`, above the channel
+chips and below the status tabs, and a row that is not yours carries the name
+beside its elapsed time (your own does not: your own name repeated down the
+whole list is noise). Verified against the running stack as a waiter: the tab
+opens on 2 rows with `My orders · 2` lit and every count reading 2; tapping
+`All orders · 36` shows the room, each colleague's row named ("Restaurant
+Owner", "Restaurant Cashier"), and writes `?scope=all` so a shared link opens
+what the sender saw.
+
+**Not changed:** the queue's permissions (`TABLE_VIEW` + the TABLE_MANAGEMENT
+module — everyone who could see the queue still can, and "mine" is a filter
+rather than a boundary), the 8 s poll, the drawer, and the D114 ready bell's
+rule about which channels count.
+
+**Known limit.** A takeaway order settled by one person and keyed by another is
+attributed to whoever keyed it; there is no second staff column to say who took
+the money. Fine for the queue's question ("which are mine to chase"), and worth
+revisiting only if a shift-report needs the other one.
+
+### D152a — the default must not flicker: "mine" is the state a screen OPENS in
+
+**Reported by the PO, 2026-09-10**, on both surfaces at once: *"Set my orders and
+my tables by default. Now when a waiter navigates to Tables and Orders, for a
+second it's in All tables / All orders, then navigates to My."*
+
+**The cause, one shape in two places.** Both defaults were computed from a count
+that does not exist yet on the first paint:
+
+- the floor plan and the POS picker called `resolveOwnerScope(chosen, mineCount)`
+  with a plain number, and before the first response `mineCount` is 0 — which the
+  resolver could not tell from "this operator genuinely has no tables", the one
+  case that is *supposed* to widen the view. So every arrival rendered ALL and
+  snapped to MINE a fetch later;
+- the Orders queue seeded `appliedScope` to `'all'` because the server names the
+  scope in `resolvedScope` and that has not arrived either.
+
+Neither was a data bug — the lists were right within a few hundred milliseconds.
+It was worse than a cosmetic wobble in one way that matters on a tablet: the
+first thing a waiter sees on arrival is the room's forty rows, so the screen
+teaches them that "All" is where they are, and the counts under it (status tabs,
+metric cards) belong to a view they are about to leave.
+
+**Now.** `mineCount` is `number | null`, where null means *not counted yet* and
+resolves to `mine`; the two callers pass null while their first load is in
+flight (`status === 'loading'` on the floor, the picker's own `loading`). The
+Orders queue seeds `appliedScope` from the URL when a shared link names one and
+from `'mine'` otherwise. Its chips also hold their counts back until a response
+lands — "My orders · 0" before anybody has counted states the till's answer
+early.
+
+An explicit choice still wins over "not known yet", so a shared `?scope=all`
+link is not narrowed by a slow first load.
+
+**What still flips, and why it must.** Someone who owns nothing — a cashier, an
+owner, a waiter before their first table — opens on MINE and widens once the
+count arrives. That direction cannot be known any sooner without asking the
+server twice, and it lands on the correct view rather than away from it. The
+alternative (remembering the last scope per device) was left out deliberately:
+it would make the opening view depend on who used the tablet last, which is the
+opposite of the request.
+
+**Measured, not reasoned.** Playwright samples the chips every 50 ms from the
+first frame on both routes: `/tables` → chips-not-rendered, MINE (no counts),
+MINE (My tables · 4 / All tables · 16); `/orders` → chips-not-rendered, MINE,
+MINE (My orders · 2 / All orders · 36). No sample reads ALL on the way in. Each
+of the three fixes was reverted in turn to confirm the new render cases fail
+without it (1 failed, 5 passed, three times).
+
+### D152b — "mine" is the default, and nothing widens it on the operator's behalf
+
+**Reported by the PO, 2026-09-10**, immediately after D152a: *"Now it's working
+backward — firstly it navigates to my tables and then automatically to all
+tables."*
+
+**Why there were two flickers, not one.** The default was data-driven —
+`mineCount > 0 ? 'mine' : 'all'` on the client, and the same test on the server
+for the queue — and the count only exists after the first response. D152a fixed
+one direction (opening on ALL and snapping to mine, by teaching the resolver
+that "not counted yet" is not "empty"). What was left was the other direction,
+which fires for anyone who genuinely owns nothing at that moment: a waiter
+before their first table, a supervisor, a till. They watched the screen answer
+"my tables" and then move itself to "all".
+
+Both were the same mistake: a *default* that keeps thinking after the screen has
+already answered the question. The original reason for it — an empty "my tables"
+reads as a broken screen — is real, but widening is the wrong remedy, because it
+trades a moment's confusion for the operator losing track of which view they are
+in (and of what the counts above the list belong to).
+
+**Now.** `resolveOwnerScope(chosen)` takes nothing but the operator's choice and
+returns `mine` when there is none; the API's `resolvedScope` is
+`query.scope ?? 'mine'`. Neither can move after the first paint, on any data.
+`mineCount`/`allCount` are still reported and still drawn on the chips, but they
+only label the choice now — they no longer make it.
+
+**The empty state is spoken for, since it can no longer be avoided.**
+- The Orders queue, under Mine with nothing of yours: *"None of this branch's
+  orders are yours right now."* plus a **Show all N orders** button, which is
+  one tap and carries the count that makes it worth taking.
+- The POS picker's strip: *"None of the N running tables are yours — tap All to
+  see them."*
+- The floor plan needs no such line: it draws the room either way (only the
+  View-order links are scoped), and the `All tables · 16` chip beside
+  `My tables · 0` says where the parties are. Counts now appear on both chips as
+  soon as the first load lands, ZERO included — a zero is the answer that used
+  to be papered over.
+
+Counts stay absent (rather than showing `· 0`) until that first response, for
+the D152a reason: stating an answer before anybody counted is the same class of
+lie in miniature.
+
+**Measured on the running stack**, sampling the chips every 50 ms from the first
+frame, for both kinds of operator:
+
+    waiter WITH tables  /tables  MINE → MINE (My tables · 4 / All tables · 16)
+    waiter WITH tables  /orders  MINE → MINE (My orders · 2 / All orders · 36)
+    waiter with NONE    /tables  MINE → MINE (My tables · 0 / All tables · 16)
+    waiter with NONE    /orders  MINE → MINE (My orders · 0 / All orders · 36)
+
+No sample reads ALL on the way in, in either direction, for either operator.
+
+**Deliberately not done:** remembering the last scope per device. It would stop
+the till re-choosing All every shift, but it would also make the opening view
+depend on who used the tablet last — the opposite of "my orders and my tables by
+default".
+
 ## Open decisions
 
 | ID | Question | Needed by |

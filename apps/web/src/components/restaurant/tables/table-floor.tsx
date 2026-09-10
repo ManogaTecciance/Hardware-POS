@@ -25,6 +25,14 @@ import {
   TABLE_STATUS_TONES,
   formatElapsed,
 } from '@/lib/restaurant/labels';
+import {
+  countAll,
+  countMine,
+  otherWaiterLabel,
+  resolveOwnerScope,
+  sessionsVisibleTo,
+  type SessionOwnerScope,
+} from '@/lib/restaurant/session-ownership';
 import { seatsFree } from '@/lib/restaurant/types';
 import type {
   DiningAreaView,
@@ -129,6 +137,13 @@ export function TableFloor({ session, branchId, canManage }: Props) {
     error?: string;
   }>({ status: 'loading', snapshot: EMPTY });
   const [selectedArea, setSelectedArea] = React.useState<string | 'ALL'>('ALL');
+  /*
+   * D151 — "my tables" or the whole floor. Null until a chip is tapped, which
+   * is what lets `resolveOwnerScope` default from the data without overriding
+   * an operator who has asked for something: a poll must not pull a waiter
+   * back to their own tables while they are looking at the room.
+   */
+  const [ownerChoice, setOwnerChoice] = React.useState<SessionOwnerScope | null>(null);
   const [showNewArea, setShowNewArea] = React.useState(false);
   const [showNewTable, setShowNewTable] = React.useState<{ areaId: string } | null>(null);
   const [openTarget, setOpenTarget] = React.useState<RestaurantTableView | null>(null);
@@ -304,8 +319,73 @@ export function TableFloor({ session, branchId, canManage }: Props) {
       ? snapshot.areas
       : snapshot.areas.filter((a) => a.id === selectedArea);
 
+  /*
+   * D151 — whose tables are on screen.
+   *
+   * The server now returns the branch's sessions to a waiter too, so the
+   * narrowing that used to happen in the query happens here instead — and
+   * `sessionsVisibleTo` is applied to the MAP rather than at each card, because
+   * the floor reads it in three places (a table card, an arrangement's tabs,
+   * the ready badge) and a scope honoured in two of them is a table that is
+   * hidden and still rings.
+   */
+  const mineCount = countMine(snapshot.sessionsByTableId, currentUserId);
+  const allCount = countAll(snapshot.sessionsByTableId);
+  // D152b — mine unless the operator said otherwise. Nothing about the data
+  // moves it, so there is no paint at which the answer changes under them.
+  const ownerScope = resolveOwnerScope(ownerChoice);
+  /** Whether the first load has landed, so a `0` on a chip is an answer. */
+  const countsKnown = status !== 'loading';
+  const visibleSessions = React.useMemo(
+    () => sessionsVisibleTo(snapshot.sessionsByTableId, ownerScope, currentUserId),
+    [snapshot.sessionsByTableId, ownerScope, currentUserId],
+  );
+  /*
+   * The chips are offered only to someone the server will actually answer with
+   * other people's tables (D70's key, which the waiter template now carries,
+   * D151). Without it every session returned is already theirs, and a pair of
+   * chips that filter nothing is a control that lies about what it does.
+   */
+  const canSeeWholeFloor = hasPermission(Permission.TABLE_SESSION_VIEW_ALL);
+
   return (
     <div className="space-y-4">
+      {/* D151 — whose tables. Its own row above the area strip, deliberately
+          not folded into it: these are two different questions (whose, and
+          where), and D91/D92 settled that one strip carries ONE selection —
+          mixing them was what made the picker unreadable. Counts on the chips
+          because "My tables 3 · All 7" is the whole answer a waiter wants
+          before they decide which to look at. */}
+      {canSeeWholeFloor ? (
+        <div
+          role="group"
+          aria-label="Whose tables to show"
+          className="flex items-center gap-3"
+        >
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Tables
+          </span>
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {/* D152b — counts appear once the first load has landed, and then
+                include ZERO: "My tables · 0" beside "All tables · 16" is the
+                whole story for a waiter who has not seated anybody, and it is
+                the state that used to be papered over by widening the view.
+                Before that they are absent rather than zero, which would be
+                stating the answer before anybody counted. */}
+            <AreaChip
+              label={countsKnown ? `My tables · ${mineCount}` : 'My tables'}
+              active={ownerScope === 'mine'}
+              onClick={() => setOwnerChoice('mine')}
+            />
+            <AreaChip
+              label={countsKnown ? `All tables · ${allCount}` : 'All tables'}
+              active={ownerScope === 'all'}
+              onClick={() => setOwnerChoice('all')}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {/* Area filter + management actions.
           The chip strip is wrapped in <ChipRow> so branches with 8+ dining
           areas scroll horizontally on tablet portrait instead of wrapping to
@@ -383,12 +463,13 @@ export function TableFloor({ session, branchId, canManage }: Props) {
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                 {snapshot.openTables.map((t) => {
-                  const tabs = snapshot.sessionsByTableId.get(t.id) ?? [];
+                  const tabs = visibleSessions.get(t.id) ?? [];
                   return (
                     <OpenTableCard
                       key={t.id}
                       table={t}
                       sessions={tabs}
+                      currentUserId={currentUserId}
                       // D112 — a joined party's food rings too: unanswered bumps across every tab.
                       readyCount={tabs.reduce((n, s) => n + unansweredReady(s, ackedReady), 0)}
                       onViewOrder={ackReady}
@@ -493,12 +574,15 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                     {tables.map((t) => {
                       // A physical table still carries at most one tab.
-                      const s = snapshot.sessionsByTableId.get(t.id)?.[0] ?? null;
+                      const s = visibleSessions.get(t.id)?.[0] ?? null;
                       return (
                         <TableCard
                           key={t.id}
                           table={t}
                           session={s}
+                          // D151 — so the card can say whose table it is when
+                          // the floor is showing everyone's.
+                          currentUserId={currentUserId}
                           readyCount={s ? unansweredReady(s, ackedReady) : 0}
                           onViewOrder={() => s && ackReady(s)}
                           canOpen={canOpenTable}
@@ -637,6 +721,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
 function TableCard({
   table,
   session,
+  currentUserId,
   readyCount,
   onViewOrder,
   canOpen,
@@ -650,6 +735,8 @@ function TableCard({
 }: {
   table: RestaurantTableView;
   session: OpenSessionView | null;
+  /** D151 — who is looking, so a colleague's table can be named as theirs. */
+  currentUserId: string;
   /** D112 — bumped tickets this device has not answered; >0 shows the bell. */
   readyCount: number;
   /** Tapping View order answers the badge for this session on this device. */
@@ -708,6 +795,15 @@ function TableCard({
           <span className="ml-auto">Open {formatElapsed(session.openedAt)}</span>
         ) : null}
       </div>
+      {/* D151 — a colleague's table, named. Only when it is NOT yours: a card
+          that labelled your own tables with your own name would put the word
+          you already know on every card and bury the ones that matter. */}
+      {session && otherWaiterLabel(session, currentUserId) ? (
+        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{otherWaiterLabel(session, currentUserId)}</span>
+        </p>
+      ) : null}
       {/* D50 — why this table is Reserved. Naming the holders is what stops an
           operator unreserving something that is reserved for another reason:
           a table with no line here has no unreserve control at all. */}
@@ -1472,6 +1568,7 @@ function ArchiveTableDialog({
 function OpenTableCard({
   table,
   sessions,
+  currentUserId,
   readyCount,
   onViewOrder,
   canOpen,
@@ -1482,6 +1579,8 @@ function OpenTableCard({
   table: OpenTableView;
   /** D104 — every live tab on this arrangement, not just the first. */
   sessions: OpenSessionView[];
+  /** D151 — who is looking, so another waiter's tab can be named as theirs. */
+  currentUserId: string;
   /** D112 — see TableCard: unanswered bumped tickets across this arrangement's tabs. */
   readyCount: number;
   /** Tapping a tab's link answers the badge for THAT tab on this device. */
@@ -1568,6 +1667,25 @@ function OpenTableCard({
             </Button>
           );
         })}
+        {/* One line for the tabs that are not yours, under the buttons they
+            belong to: a name inside a 44px button on a one-cell-wide card
+            pushes the elapsed time — the part that decides whether to walk
+            over — off the chip. */}
+        {sessions.some((s) => otherWaiterLabel(s, currentUserId)) ? (
+          <p className="flex items-start gap-1 text-xs text-muted-foreground">
+            <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0">
+              {sessions
+                .map((s) => {
+                  const owner = otherWaiterLabel(s, currentUserId);
+                  if (!owner) return null;
+                  return s.tabName ? `${s.tabName}: ${owner}` : owner;
+                })
+                .filter((line): line is string => line !== null)
+                .join(' · ')}
+            </span>
+          </p>
+        ) : null}
         {canSeat && canOpen ? (
           <Button
             size="md"

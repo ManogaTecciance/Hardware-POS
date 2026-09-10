@@ -105,6 +105,10 @@ function openSession(readyTicketIds: string[]): OpenSessionView {
     activeOrderId: 'ord_1',
     tabName: null,
     readyTicketIds,
+    // D151 — the session's own waiter. `usr_1` IS the signed-in user in this
+    // spec, so every session here is "mine" and the ownership filter is a
+    // no-op: these cases stay about the badge, as they were written.
+    waiterName: 'Restaurant Waiter',
   };
 }
 

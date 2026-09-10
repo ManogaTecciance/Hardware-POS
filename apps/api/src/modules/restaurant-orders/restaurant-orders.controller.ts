@@ -2,9 +2,11 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ModuleKey } from '@hardware-pos/database';
 
 import { BranchScope, BranchScopeKind } from '../../common/decorators/branch-scope.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
+import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
 import {
   OrderDetailView,
@@ -33,7 +35,9 @@ export class RestaurantOrdersController {
   @BranchScope(BranchScopeKind.BRANCH_SCOPED)
   list(
     @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
     @Param('branchId') branchId: string,
+    @Query('scope') scope?: string,
     @Query('channel') channel?: string,
     @Query('status') status?: string,
     @Query('paymentStatus') paymentStatus?: string,
@@ -44,6 +48,9 @@ export class RestaurantOrdersController {
     @Query('pageSize') pageSize?: string,
   ): Promise<OrdersPage> {
     const q: OrdersQuery = {
+      // D152 — anything that is not one of the two words is "decide for me",
+      // the same treatment every other filter here gives a mangled value.
+      scope: scope === 'mine' || scope === 'all' ? scope : undefined,
       channel: parseChannel(channel),
       status: parseStatus(status),
       paymentStatus: parsePayment(paymentStatus),
@@ -56,7 +63,7 @@ export class RestaurantOrdersController {
       page: toPositiveInt(page),
       pageSize: toPositiveInt(pageSize),
     };
-    return this.service.listOrders(tenantId, branchId, q);
+    return this.service.listOrders(tenantId, branchId, q, actor.id);
   }
 
   /**

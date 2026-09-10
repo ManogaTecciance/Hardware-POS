@@ -46,6 +46,13 @@ export interface OpenSessionRow {
   /** D104 — this tab's own name; null unless an arrangement is being shared. */
   tabName: string | null;
   activeOrderId: string | null;
+  /**
+   * D151 — whose session this is, and what to call them. The picker opens on
+   * the caller's own tables and offers the floor, so it needs both: the id to
+   * decide, the name to say.
+   */
+  waiterUserId: string | null;
+  waiterName: string | null;
 }
 
 /**
