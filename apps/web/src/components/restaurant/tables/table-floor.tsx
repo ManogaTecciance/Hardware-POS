@@ -121,7 +121,7 @@ const EMPTY: Snapshot = {
 };
 
 /**
- * D150 — where "View order" goes: the POS, bound to this session.
+ * D155 — where "View order" goes: the POS, bound to this session.
  *
  * One URL shape, built in one place, because the floor has two cards that link
  * to it (a physical table, and every tab on an arrangement) and they used to
@@ -137,7 +137,7 @@ const posHref = (sessionId: string): string =>
  * Layout: an area filter across the top, then one section per area with a
  * responsive card grid. Cards show table code + capacity + status. When a
  * session is open on the table, the card also shows the elapsed time since
- * open plus a "View order" link into the dine-in POS for that session (D150).
+ * open plus a "View order" link into the dine-in POS for that session (D155).
  * Available tables expose an "Open table" action (Phase D) gated on
  * `TABLE_OPEN`.
  */
@@ -151,7 +151,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   }>({ status: 'loading', snapshot: EMPTY });
   const [selectedArea, setSelectedArea] = React.useState<string | 'ALL'>('ALL');
   /*
-   * D151 — "my tables" or the whole floor. Null until a chip is tapped, which
+   * D156 — "my tables" or the whole floor. Null until a chip is tapped, which
    * is what lets `resolveOwnerScope` default from the data without overriding
    * an operator who has asked for something: a poll must not pull a waiter
    * back to their own tables while they are looking at the room.
@@ -174,7 +174,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   const canArchiveOwnArea = hasPermission(Permission.DINING_AREA_ARCHIVE_OWN);
   const canEditOwnTable = hasPermission(Permission.TABLE_EDIT_OWN);
   /*
-   * D153 — "the guests have asked for someone else." Owner-held (the Waiter
+   * D159 — "the guests have asked for someone else." Owner-held (the Waiter
    * template deliberately lacks it), so the control below is invisible to the
    * floor and the server refuses it besides.
    */
@@ -343,7 +343,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
       : snapshot.areas.filter((a) => a.id === selectedArea);
 
   /*
-   * D151 — whose tables are on screen.
+   * D156 — whose tables are on screen.
    *
    * The server now returns the branch's sessions to a waiter too, so the
    * narrowing that used to happen in the query happens here instead — and
@@ -355,9 +355,9 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   const mineCount = countMine(snapshot.sessionsByTableId, currentUserId);
   const allCount = countAll(snapshot.sessionsByTableId);
   /*
-   * D152b — mine unless the operator said otherwise; nothing about the data
+   * D157b — mine unless the operator said otherwise; nothing about the data
    * moves it, so there is no paint at which the answer changes under them.
-   * D152c — except that a supervisor has no "mine" worth defaulting to: the
+   * D157c — except that a supervisor has no "mine" worth defaulting to: the
    * floor is their view, and they never see the chips to change it.
    */
   const supervises = supervisesTheFloor(session.user.role);
@@ -365,7 +365,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   /** Whether the first load has landed, so a `0` on a chip is an answer. */
   const countsKnown = status !== 'loading';
   /*
-   * D151a — who is serving each table, read from the UNSCOPED snapshot.
+   * D156a — who is serving each table, read from the UNSCOPED snapshot.
    *
    * The PO asked for the server's name on the Tables screen, and a floor plan
    * reads the way every other one does: the room always says who is on a
@@ -391,14 +391,14 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   /*
    * The chips are offered only to someone the server will actually answer with
    * other people's tables (D70's key, which the waiter template now carries,
-   * D151). Without it every session returned is already theirs, and a pair of
+   * D156). Without it every session returned is already theirs, and a pair of
    * chips that filter nothing is a control that lies about what it does.
    */
   const canSeeWholeFloor = hasPermission(Permission.TABLE_SESSION_VIEW_ALL) && !supervises;
 
   return (
     <div className="space-y-4">
-      {/* D151 — whose tables. Its own row above the area strip, deliberately
+      {/* D156 — whose tables. Its own row above the area strip, deliberately
           not folded into it: these are two different questions (whose, and
           where), and D91/D92 settled that one strip carries ONE selection —
           mixing them was what made the picker unreadable. Counts on the chips
@@ -414,7 +414,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
             Tables
           </span>
           <div className="flex min-w-0 flex-wrap gap-2">
-            {/* D152b — counts appear once the first load has landed, and then
+            {/* D157b — counts appear once the first load has landed, and then
                 include ZERO: "My tables · 0" beside "All tables · 16" is the
                 whole story for a waiter who has not seated anybody, and it is
                 the state that used to be papered over by widening the view.
@@ -517,7 +517,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                       key={t.id}
                       table={t}
                       sessions={tabs}
-                      // D151a — every tab's server, from the unscoped snapshot.
+                      // D156a — every tab's server, from the unscoped snapshot.
                       allTabs={snapshot.sessionsByTableId.get(t.id) ?? []}
                       // D112 — a joined party's food rings too: unanswered bumps across every tab.
                       readyCount={tabs.reduce((n, s) => n + unansweredReady(s, ackedReady), 0)}
@@ -630,13 +630,13 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                           table={t}
                           session={s}
                           /*
-                           * D151a — the name comes from the unscoped snapshot,
+                           * D156a — the name comes from the unscoped snapshot,
                            * so it is there whether or not this session is one
                            * the current scope lets the operator open.
                            */
                           servedBy={servedByTable.get(t.id)?.[0] ?? null}
                           /*
-                           * D153 — reassigning needs the SESSION, and the card
+                           * D159 — reassigning needs the SESSION, and the card
                            * renders the scoped one; this comes off the branch
                            * snapshot so a supervisor can change the waiter on a
                            * table they are not serving, which is every table.
@@ -821,14 +821,14 @@ function TableCard({
   table: RestaurantTableView;
   session: OpenSessionView | null;
   /**
-   * D151a — the waiter serving this table, named. Present whenever the branch
+   * D156a — the waiter serving this table, named. Present whenever the branch
    * has a session on it, including one the current scope is not showing, and
    * including the operator's own — a floor plan that named everybody except
    * you would be a strange thing to read over somebody's shoulder.
    */
   servedBy: string | null;
   /**
-   * D153 — opens the reassign picker. Undefined when the reader may not
+   * D159 — opens the reassign picker. Undefined when the reader may not
    * reassign, or when the table has no live session to hand over: the name
    * then stays a label, which is what it is for everyone but a supervisor.
    */
@@ -891,14 +891,14 @@ function TableCard({
           <span className="ml-auto">Open {formatElapsed(session.openedAt)}</span>
         ) : null}
       </div>
-      {/* D151a — who is serving it. `UserRound`, not the `Users` above: that
+      {/* D156a — who is serving it. `UserRound`, not the `Users` above: that
           one counts covers, this one names a person, and two lines under the
           same icon read as one fact split in half. */}
       {servedBy ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{servedBy}</span>
-          {/* D153 — on the name, because that is the thing being changed. A
+          {/* D159 — on the name, because that is the thing being changed. A
               text button rather than a menu item: mid-service, a guest is
               standing there, and the supervisor should not have to hunt. */}
           {onChangeWaiter ? (
@@ -955,7 +955,7 @@ function TableCard({
             cards without an action don't jitter the grid row. */}
         {session ? (
           <Button asChild size="md" fullWidth variant="secondary">
-            {/* D150 — into the POS, bound to this session. The table is already
+            {/* D155 — into the POS, bound to this session. The table is already
                 chosen by the tap that got here, so the POS opens on the menu
                 with no picker in front of it. */}
             <Link href={posHref(session.id)} onClick={onViewOrder}>
@@ -1689,7 +1689,7 @@ function ArchiveTableDialog({
 }
 
 /**
- * D153 — hand an open table to a different waiter.
+ * D159 — hand an open table to a different waiter.
  *
  * The list is the SERVER's answer to "who can serve here" (roles carrying
  * ORDER_SEND_TO_KITCHEN, on this branch), not a client-side guess, so the
@@ -1699,11 +1699,11 @@ function ArchiveTableDialog({
  *
  * Every round keeps the waiter who SENT it — this changes who is responsible
  * from now on, which is what a guest asking for someone else means, and the
- * table moves between the two waiters' "my tables" (D151) and their "my
- * orders" (D152) on the next poll.
+ * table moves between the two waiters' "my tables" (D156) and their "my
+ * orders" (D157) on the next poll.
  */
 /**
- * D153 — hand an open table to a different waiter.
+ * D159 — hand an open table to a different waiter.
  *
  * The list is the SERVER's answer to "who can serve here" (roles carrying
  * ORDER_SEND_TO_KITCHEN, on this branch), not a client-side guess, so the
@@ -1713,10 +1713,10 @@ function ArchiveTableDialog({
  *
  * Every round keeps the waiter who SENT it — this changes who is responsible
  * from now on, which is what a guest asking for someone else means, and the
- * table moves between the two waiters' "my tables" (D151) and their "my
- * orders" (D152) on the next poll.
+ * table moves between the two waiters' "my tables" (D156) and their "my
+ * orders" (D157) on the next poll.
  *
- * ## D153a — what a list of fifteen needs that a list of three does not
+ * ## D159a — what a list of fifteen needs that a list of three does not
  *
  * A restaurant runs more waiters than fit a dialog, so three things carry the
  * long case, in the order a supervisor actually decides:
@@ -1881,7 +1881,7 @@ function ChangeWaiterDialog({
           </div>
         ) : null}
 
-        {/* D153a — offered only when the list is long enough to need it. */}
+        {/* D159a — offered only when the list is long enough to need it. */}
         {candidates.length >= SEARCH_FROM ? (
           <Input
             value={query}
@@ -1934,7 +1934,7 @@ function OpenTableCard({
   /** D104 — every live tab on this arrangement, not just the first. */
   sessions: OpenSessionView[];
   /**
-   * D151a — every tab the BRANCH has on this arrangement, scope or no scope,
+   * D156a — every tab the BRANCH has on this arrangement, scope or no scope,
    * so the "served by" line names all of them while the buttons above it stay
    * scoped to what the operator may open.
    */
@@ -2028,7 +2028,7 @@ function OpenTableCard({
         {/* Who is serving each tab, under the buttons they belong to: a name
             inside a 44px button on a one-cell-wide card pushes the elapsed
             time — the part that decides whether to walk over — off the chip.
-            D151a: every tab, not only other people's, and read from the
+            D156a: every tab, not only other people's, and read from the
             unscoped list so the line does not change with the chips. */}
         {allTabs.some((s) => s.waiterName?.trim()) ? (
           <p className="flex items-start gap-1 text-xs text-muted-foreground">

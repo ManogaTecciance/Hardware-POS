@@ -1,7 +1,7 @@
 import { TableSessionsService } from './table-sessions.service';
 
 /**
- * D153 — handing an open table to a different waiter.
+ * D159 — handing an open table to a different waiter.
  *
  * The PO's case: mid-service a party asks for someone else, and the shift
  * supervisor has to be able to answer. The route is owner-held; what this spec
@@ -56,7 +56,7 @@ interface Stub {
   /** Roles whose permission set includes order:send-to-kitchen. */
   servingRoleIds: string[];
   staff: { id: string; name: string }[];
-  /** D153a — open sessions per waiter, as the grouped count returns them. */
+  /** D159a — open sessions per waiter, as the grouped count returns them. */
   openTables?: { waiterUserId: string; count: number }[];
 }
 
@@ -74,7 +74,7 @@ function serviceWith(stub: Stub) {
     async (_args: { where: Record<string, unknown> }) => stub.staff,
   );
   const sessionFindFirst = jest.fn(async () => stub.sessionRow);
-  /** D153a — the per-waiter open-table tally, as one grouped query. */
+  /** D159a — the per-waiter open-table tally, as one grouped query. */
   const sessionGroupBy = jest.fn(async (_args: unknown) =>
     (stub.openTables ?? []).map((row) => ({
       waiterUserId: row.waiterUserId,
@@ -118,7 +118,7 @@ const CAN_SERVE: Stub = {
   ],
 };
 
-describe('D153 — reassigning the waiter on an open session', () => {
+describe('D159 — reassigning the waiter on an open session', () => {
   it('writes the new waiter, and ONLY the waiter, on the addressed session', async () => {
     const { service, sessionUpdate } = serviceWith(CAN_SERVE);
 
@@ -171,7 +171,7 @@ describe('D153 — reassigning the waiter on an open session', () => {
   });
 });
 
-describe('D153 — who the branch can put on a table', () => {
+describe('D159 — who the branch can put on a table', () => {
   it('asks for users whose ROLE can send to the kitchen, scoped to the branch', async () => {
     const { service, userFindMany, roleFindMany } = serviceWith(CAN_SERVE);
 
@@ -191,7 +191,7 @@ describe('D153 — who the branch can put on a table', () => {
     ]);
   });
 
-  it('D153a — reports how many open tables each of them already holds', async () => {
+  it('D159a — reports how many open tables each of them already holds', async () => {
     /*
      * The number is what makes a fifteen-waiter picker decidable: mid-service
      * the supervisor is choosing who has room, not who exists. There is no

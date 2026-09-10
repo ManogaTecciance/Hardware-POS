@@ -192,7 +192,7 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
        */
       Permission.PRODUCT_AVAILABILITY_SET,
       /*
-       * D151 — the waiter CAN see the floor, and opens on their own tables.
+       * D156 — the waiter CAN see the floor, and opens on their own tables.
        *
        * This supersedes D70's withholding of the key. D70's objection was the
        * MIXING ("a floor list that mixes them is how a table gets served twice

@@ -1,7 +1,7 @@
 import { RestaurantOrdersService } from './restaurant-orders.service';
 
 /**
- * D152 — "whose orders", on the queue the floor actually works from.
+ * D157 — "whose orders", on the queue the floor actually works from.
  *
  * The Orders screen has always shown every order on the branch with no way to
  * find your own, which is the gap the PO reported: a waiter mid-service wants
@@ -30,7 +30,7 @@ import { RestaurantOrdersService } from './restaurant-orders.service';
  *      4 failed, 5 passed (it moves who owns a dine-in row, so the default
  *      scope and the counts move with it);
  *   2. `resolvedScope` defaulting to `'all'` — 1 failed, 8 passed: a waiter
- *      opens on the whole room, which is the report that started D152;
+ *      opens on the whole room, which is the report that started D157;
  *   3. the status tallies computed on the unscoped base — 1 failed, 8 passed:
  *      tabs that count rows the list is not showing;
  *   4. `allCount` reported from the scoped list — 3 failed, 6 passed: the All
@@ -152,7 +152,7 @@ function serviceWith(rows: Row[], externals: ExternalRow[] = []) {
   return { service: new RestaurantOrdersService(prisma), userFindMany };
 }
 
-describe('D152 — whose orders the queue shows', () => {
+describe('D157 — whose orders the queue shows', () => {
   it('attributes a dine-in order to the table\'s waiter, not the round\'s sender', async () => {
     const { service } = serviceWith([dineIn('ord_a', WAITER, OTHER)]);
     const page = await service.listOrders('tnt', 'brn', { scope: 'all' }, WAITER);
@@ -209,7 +209,7 @@ describe('D152 — whose orders the queue shows', () => {
     expect(page.total).toBe(1);
   });
 
-  it('D152b — stays on MINE when the caller has none, and says how many exist', async () => {
+  it('D157b — stays on MINE when the caller has none, and says how many exist', async () => {
     const { service } = serviceWith([dineIn('ord_theirs', OTHER), takeaway('ord_t', OTHER)]);
     const page = await service.listOrders('tnt', 'brn', {}, WAITER);
 

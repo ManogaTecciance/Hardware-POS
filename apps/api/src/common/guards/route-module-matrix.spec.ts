@@ -355,7 +355,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'PATCH /restaurant/reservations/:reservationId': { module: 'RESERVATIONS', guard: 'ENFORCED', scope: T },
   'POST /restaurant/reservations/:reservationId/status': { module: 'RESERVATIONS', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/table-sessions': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: B },
-  // D153 — reassigning a table's waiter, and the picker's staff list. Both are
+  // D159 — reassigning a table's waiter, and the picker's staff list. Both are
   // addressed by branch and BRANCH_SCOPED for it: the staff a branch can put on
   // a table, and the sessions it may reassign, are the branch's own.
   'GET /restaurant/branches/:branchId/assignable-waiters': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: B },

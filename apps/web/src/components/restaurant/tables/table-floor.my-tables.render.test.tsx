@@ -1,5 +1,5 @@
 /**
- * D151 — the floor opens on MY tables, and the whole floor is one tap away.
+ * D156 — the floor opens on MY tables, and the whole floor is one tap away.
  *
  * ## Why these claims
  *
@@ -15,7 +15,7 @@
  *     once All is tapped;
  *   - "All shows everything" is indistinguishable from "the filter does
  *     nothing" unless Mine is proven to hide the same card;
- *   - D152b: a default computed from the data moved AFTER the first paint in
+ *   - D157b: a default computed from the data moved AFTER the first paint in
  *     one direction or the other (the two flickers the PO reported), so the
  *     no-tables-of-mine case is asserted to STAY on mine with the All chip
  *     naming what is there — the screen offers the room rather than taking the
@@ -33,14 +33,14 @@
  *      whole room) — 2 failed, 3 passed;
  *   3. `resolveOwnerScope` ignoring `chosen` (the poll-stomping shape) — 3
  *      failed, 2 passed;
- *   4. D152b: the pre-D152b data-driven default restored
+ *   4. D157b: the pre-D157b data-driven default restored
  *      (`mineCount > 0 ? 'mine' : 'all'`) — 2 failed, 4 passed: the
  *      no-tables-of-mine case and the first-paint case;
- *   5. D151a: the server's name taken from the SCOPED session the card renders
+ *   5. D156a: the server's name taken from the SCOPED session the card renders
  *      (`servedBy={s?.waiterName}`) instead of the branch snapshot — 2 failed,
  *      5 passed: a colleague's table goes anonymous the moment the operator
  *      narrows to their own;
- *   6. D151a: the pre-D151a "only when it is not mine" rule restored — 2
+ *   6. D156a: the pre-D156a "only when it is not mine" rule restored — 2
  *      failed, 5 passed.
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -149,7 +149,7 @@ const ses = (
   }) as OpenSessionView;
 
 /*
- * D152c — the enum role a restaurant WAITER actually carries (their authority
+ * D157c — the enum role a restaurant WAITER actually carries (their authority
  * comes from the custom role row). Said explicitly because the whole my/all
  * control now depends on it: an owner-level role sees none of it.
  */
@@ -189,7 +189,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('whose tables the floor shows (D151)', () => {
+describe('whose tables the floor shows (D156)', () => {
   it('opens on my tables, and says so on the chip', async () => {
     render(<TableFloor session={session} branchId="brn_1" canManage />);
     await settle();
@@ -207,7 +207,7 @@ describe('whose tables the floor shows (D151)', () => {
     expect(screen.getByRole('button', { name: 'All tables · 2' })).toBeTruthy();
   });
 
-  it('D152a — is already on My tables on the FIRST paint, before any data lands', async () => {
+  it('D157a — is already on My tables on the FIRST paint, before any data lands', async () => {
     /*
      * The PO's report: "for a second it's in all tables, all orders, then
      * navigates to my". `mineCount` was a plain number, and before the first
@@ -258,7 +258,7 @@ describe('whose tables the floor shows (D151)', () => {
 
     await waitFor(() => expect(shownSessionIds().sort()).toEqual(['mine', 'theirs']));
     /*
-     * D151a — EVERY occupied table names its server, mine included (PO: "in
+     * D156a — EVERY occupied table names its server, mine included (PO: "in
      * tables can you add serve waiter name"). A floor plan that named everyone
      * except the reader is a strange thing to hold up in front of a colleague,
      * and the room is what this view is for.
@@ -277,7 +277,7 @@ describe('whose tables the floor shows (D151)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'My tables · 1' }));
     await waitFor(() => expect(shownSessionIds()).toEqual(['mine']));
     /*
-     * D151a — the colleague's table is still NAMED under "mine"; what the chip
+     * D156a — the colleague's table is still NAMED under "mine"; what the chip
      * takes away is the order, not the attribution. Asserted together, because
      * the pair is the rule: a name with no View order beside it is "somebody
      * else is on that table", which is the question a waiter asks about M3.
@@ -286,7 +286,7 @@ describe('whose tables the floor shows (D151)', () => {
     expect(shownSessionIds()).not.toContain('theirs');
   });
 
-  it('D152c — an OWNER gets the room, and no my/all chips at all', async () => {
+  it('D157c — an OWNER gets the room, and no my/all chips at all', async () => {
     /*
      * The PO's report: the owner's Tables tab was showing "My tables · 6" —
      * six tables that are theirs only because they opened them while covering
@@ -303,12 +303,12 @@ describe('whose tables the floor shows (D151)', () => {
     expect(screen.queryByRole('button', { name: /^My tables/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /^All tables/ })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Whose tables to show' })).toBeNull();
-    // The names stay (D151a) — that is how a supervisor reads the room.
+    // The names stay (D156a) — that is how a supervisor reads the room.
     expect(screen.getByText('Sunil')).toBeTruthy();
     expect(screen.getByText('Nimal')).toBeTruthy();
   });
 
-  it('D151a — names the server on a table it will not let you open', async () => {
+  it('D156a — names the server on a table it will not let you open', async () => {
     /*
      * The half of "add serve waiter name" that a scoped floor makes easy to get
      * wrong: the name must come from the branch's sessions, not from the ones
@@ -331,7 +331,7 @@ describe('whose tables the floor shows (D151)', () => {
     expect(screen.getAllByRole('link', { name: 'View order' })).toHaveLength(1);
   });
 
-  it('D152b — STAYS on my tables when none are mine, and names what All holds', async () => {
+  it('D157b — STAYS on my tables when none are mine, and names what All holds', async () => {
     /*
      * The second flicker the PO reported: this case used to widen itself once
      * the count landed, so a cashier (or a waiter before their first table)

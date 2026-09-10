@@ -8484,7 +8484,7 @@ wire. Existing rows reopen in the right mode, read from that same shape.
 a threshold is a product question, not a bug — the editor now matches what the
 engine does rather than promising what it does not.
 
-### D150 — a table's order is taken on the POS; "View order" opens it there
+### D155 — a table's order is taken on the POS; "View order" opens it there
 
 **Asked by the PO, 2026-09-10**, looking at the floor plan: *"View order navigates
 to another view — there is no image view there. Remove that and use the POS
@@ -8546,7 +8546,7 @@ close), the floor plan itself, and the food-ready badge and its per-device ack
 (D112) — the ack still fires on the same tap, now carrying the waiter into the
 POS.
 
-### D151 — a waiter opens on their own tables and can see the floor
+### D156 — a waiter opens on their own tables and can see the floor
 
 **Asked by the PO, 2026-09-10**: *"In waiter view he needs to see his orders by
 default in his view, and can also see other orders. Follow the best approach the
@@ -8575,7 +8575,7 @@ waiter-facing surfaces default to "mine":
   strip (its own row: whose and where are two questions, and D91/D92 settled
   that one strip carries one selection). Under "mine" a colleague's table is
   drawn exactly as it was before — status badge, no View order — so the
-  pre-D151 screen is literally the default state.
+  pre-D156 screen is literally the default state.
 - The POS dine-in picker — the same two chips over its open-tables strip, and
   the room grid honours them, so an occupied table that is someone else's stays
   greyed until All is chosen.
@@ -8624,19 +8624,19 @@ to a tenant that already exists. Also added `prisma/add-staff.ts`
 (`POST /v1/users` still throws `NotImplementedException`), which is how a
 restaurant with one waiter account stays a restaurant with one waiter account.
 
-### D152 — the Orders queue answers "which of these are mine"
+### D157 — the Orders queue answers "which of these are mine"
 
-**Asked by the PO, 2026-09-10**, correcting D151's reading: *"I told you to check
+**Asked by the PO, 2026-09-10**, correcting D156's reading: *"I told you to check
 ORDERS. A waiter handling orders needs to easily check what are HIS orders.
 You added it for table management. Check what the industry does for both — is
 that even necessary? — and it is needed on the Orders tab."*
 
-**The misread, and what was actually wrong.** D151 put "my tables" on the floor
+**The misread, and what was actually wrong.** D156 put "my tables" on the floor
 plan and the POS picker, which is a real control (see below) but not the one
 that was asked for. The Orders tab — the live queue a waiter watches to see what
 is cooking, ready or unpaid — has always listed the WHOLE branch with no
 attribution of any kind: forty rows across three channels, no way to find the
-four that are yours, and no column saying whose any of them are. D151's own
+four that are yours, and no column saying whose any of them are. D156's own
 record named that gap and left it; this closes it.
 
 **Industry, both surfaces.** Mainstream POS carries the split on both screens
@@ -8693,7 +8693,7 @@ attributed to whoever keyed it; there is no second staff column to say who took
 the money. Fine for the queue's question ("which are mine to chase"), and worth
 revisiting only if a shift-report needs the other one.
 
-### D152a — the default must not flicker: "mine" is the state a screen OPENS in
+### D157a — the default must not flicker: "mine" is the state a screen OPENS in
 
 **Reported by the PO, 2026-09-10**, on both surfaces at once: *"Set my orders and
 my tables by default. Now when a waiter navigates to Tables and Orders, for a
@@ -8742,15 +8742,15 @@ MINE (My orders · 2 / All orders · 36). No sample reads ALL on the way in. Eac
 of the three fixes was reverted in turn to confirm the new render cases fail
 without it (1 failed, 5 passed, three times).
 
-### D152b — "mine" is the default, and nothing widens it on the operator's behalf
+### D157b — "mine" is the default, and nothing widens it on the operator's behalf
 
-**Reported by the PO, 2026-09-10**, immediately after D152a: *"Now it's working
+**Reported by the PO, 2026-09-10**, immediately after D157a: *"Now it's working
 backward — firstly it navigates to my tables and then automatically to all
 tables."*
 
 **Why there were two flickers, not one.** The default was data-driven —
 `mineCount > 0 ? 'mine' : 'all'` on the client, and the same test on the server
-for the queue — and the count only exists after the first response. D152a fixed
+for the queue — and the count only exists after the first response. D157a fixed
 one direction (opening on ALL and snapping to mine, by teaching the resolver
 that "not counted yet" is not "empty"). What was left was the other direction,
 which fires for anyone who genuinely owns nothing at that moment: a waiter
@@ -8782,7 +8782,7 @@ only label the choice now — they no longer make it.
   to be papered over.
 
 Counts stay absent (rather than showing `· 0`) until that first response, for
-the D152a reason: stating an answer before anybody counted is the same class of
+the D157a reason: stating an answer before anybody counted is the same class of
 lie in miniature.
 
 **Measured on the running stack**, sampling the chips every 50 ms from the first
@@ -8800,11 +8800,11 @@ the till re-choosing All every shift, but it would also make the opening view
 depend on who used the tablet last — the opposite of "my orders and my tables by
 default".
 
-### D151a — the floor names the waiter serving every table
+### D156a — the floor names the waiter serving every table
 
 **Asked by the PO, 2026-09-10**: *"In tables, can you add serve waiter name?"*
 
-**What was there.** D151 put a name on a table card only when the session was
+**What was there.** D156 put a name on a table card only when the session was
 NOT the reader's own, reasoning that your own name on your own cards is a word
 you already know repeated down the screen. True as far as it goes, and wrong
 about what a floor plan is for: it is the shared picture of the room, read over
@@ -8821,7 +8821,7 @@ about where the name comes from:
   can see: a named table with no View order beside it is exactly the answer to
   "who do I ask about M3", and it was the old behaviour that made a colleague's
   table go anonymous the moment a waiter narrowed to their own;
-- it is null-safe by the same rule as everywhere else (D151): a session with no
+- it is null-safe by the same rule as everywhere else (D156): a session with no
   waiter recorded, or one whose user no longer resolves, shows no line rather
   than "Unknown".
 
@@ -8832,9 +8832,9 @@ fact split in half.
 **Unchanged:** the POS picker still names only the tables that are not yours. A
 chip there is 44px of a scrolling strip carrying a table name, an elapsed time
 and a cover count already; the reader's own name in that space is the noise
-D151 was right about.
+D156 was right about.
 
-### D153 — a supervisor can change the waiter serving a table
+### D159 — a supervisor can change the waiter serving a table
 
 **Asked by the PO, 2026-09-10**: *"During serving, someone can complain they need
 to change their waiter. Can you add the owner to that option — he can change the
@@ -8863,7 +8863,7 @@ manager to do this composes a role with the key through RolesApi.
 keeps the `submittedByUserId` it was sent with, so the history still says who
 fired which course, and the bill is untouched — this is responsibility from here
 on, which is what a guest asking for someone else means. Because the floor plan
-(D151), the POS picker and the Orders queue (D152) all read the session's
+(D156), the POS picker and the Orders queue (D157) all read the session's
 waiter, the table AND its order move to the new waiter's "mine" and leave the
 old one's on the next poll, with no second wiring.
 
@@ -8879,7 +8879,7 @@ against that same list rather than trusting the client, and refuses with 400
 session on another branch or tenant (404, never a cross-tenant oracle), and a
 target who cannot serve.
 
-**On screen.** The served-by name D151a put on each table card gains a
+**On screen.** The served-by name D156a put on each table card gains a
 **Change** link for holders of the key; it opens a picker listing the branch's
 servers with the current one shown, disabled, as "On this table" — "changing" to
 the same person is the one action that would look like it worked and do nothing.
@@ -8897,7 +8897,7 @@ lists four assignable waiters, a waiter gets 403 on the list, a reassign to a
 kitchen user is refused 400, and a real reassign + restore left two audit rows
 naming both directions.
 
-### D153a — the picker answers "who has room", not just "who exists"
+### D159a — the picker answers "who has room", not just "who exists"
 
 **Asked by the PO, 2026-09-10**, on seeing the reassign dialog: *"Change waiter
 is showing now — but what happens if waiters are more than 10? What is the best
@@ -8946,16 +8946,16 @@ whose count was missing (an older server, a trimmed payload) in NEITHER group �
 so it silently vanished from the picker. The second group is now the complement
 of the first, and the case is pinned.
 
-### D152c — "my tables / my orders" is the floor's control, not the office's
+### D157c — "my tables / my orders" is the floor's control, not the office's
 
 **Reported by the PO, 2026-09-10**: *"Now the owner is showing the tab as My
 orders and My tables — how does that happen? My order / my table is for waiters
 only."*
 
-**Correct, and it was a straight miss.** D151 gated the floor's chips on
+**Correct, and it was a straight miss.** D156 gated the floor's chips on
 `TABLE_SESSION_VIEW_ALL`, which reads as "can see other people's tables" and is
 therefore held by every supervisor — so the control appeared for the owner too,
-and D152b's default then opened them on "My tables · 6": six tables that are
+and D157b's default then opened them on "My tables · 6": six tables that are
 theirs only because they opened them while covering (or while testing). An owner
 does not carry a section. "Mine" is a question a SERVER asks.
 
@@ -8978,10 +8978,10 @@ by a screen reader, which makes it a lie about the state rather than an absence.
 (Caught by its own test, which found the element the CSS was "hiding".)
 
 The Orders queue asks for `scope=all` EXPLICITLY for a supervisor, because the
-server's default is `mine` (D152b) and the client is the only place that knows
+server's default is `mine` (D157b) and the client is the only place that knows
 whose screen it is.
 
-**Unchanged:** the served-by names (D151a) stay on every card — that is how a
+**Unchanged:** the served-by names (D156a) stay on every card — that is how a
 supervisor reads the room — and so does everything about what each role may
 *do*. This is a view default, not authorization.
 
@@ -8990,7 +8990,7 @@ chips / 20 rows; waiter → 2 chips on both, 4 tables and 2 orders in the defaul
 view. Mutation-proven: stubbing `supervisesTheFloor` to `false` fails all four
 new cases (unit, floor, queue, picker) and nothing else.
 
-### D153b — the Change control is a chip, in the brand pair that survives dark
+### D159b — the Change control is a chip, in the brand pair that survives dark
 
 **Reported by the PO, 2026-09-10**: *"In waiter change button, Change text color
 is not visible."*

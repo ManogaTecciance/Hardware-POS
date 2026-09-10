@@ -143,7 +143,7 @@ export class SessionNotOpenError extends BadRequestException {
   }
 }
 /**
- * D153 — the chosen person cannot be put on a table.
+ * D159 — the chosen person cannot be put on a table.
  *
  * 400, not 404: the user may well exist and be perfectly real — what they lack
  * is a role that can send a round to the kitchen, and saying so is more use to

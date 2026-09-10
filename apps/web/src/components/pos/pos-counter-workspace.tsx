@@ -60,7 +60,7 @@ interface Props {
   branchId: string;
   initialMode: PosMode | null;
   /**
-   * D150 — the open table session this POS is bound to, handed over in the URL
+   * D155 — the open table session this POS is bound to, handed over in the URL
    * (`?sessionId=`) by the floor plan's "View order" or the orders queue's
    * "Open in POS". Present means the table was ALREADY chosen, so the picker
    * never appears: the screen opens on the menu, where the waiter was going.
@@ -167,7 +167,7 @@ export function PosCounterWorkspace({
   );
 
   /*
-   * D150 — voiding a line the kitchen already has is a different act from
+   * D155 — voiding a line the kitchen already has is a different act from
    * building a round, and a different permission (`ORDER_VOID_SENT`). The
    * waiter templates hold the send; the supervisor holds the void.
    */
@@ -180,7 +180,7 @@ export function PosCounterWorkspace({
   const [dineInError, setDineInError] = React.useState<string | null>(null);
   /** D71 — the bill sheet: review, split, close. */
   const [billOpen, setBillOpen] = React.useState(false);
-  /** D150 — the rounds sheet: what the table already has, and the void. */
+  /** D155 — the rounds sheet: what the table already has, and the void. */
   const [roundsOpen, setRoundsOpen] = React.useState(false);
   const [closedBill, setClosedBill] = React.useState<{
     saleId: string;
@@ -190,7 +190,7 @@ export function PosCounterWorkspace({
   /** D83 — the finalised bill, shown as soon as the table closes. */
   const [showClosedBill, setShowClosedBill] = React.useState(false);
 
-  // ── D150: the session the floor handed over ────────────────────────────
+  // ── D155: the session the floor handed over ────────────────────────────
   /*
    * Held in state rather than read straight off the prop for two reasons, and
    * both are bugs if it is not:
@@ -259,7 +259,7 @@ export function PosCounterWorkspace({
   }, [linkedSessionId, mode, session, branchId]);
 
   /*
-   * D150 — how many rounds the TABLE has, not how many this device sent.
+   * D155 — how many rounds the TABLE has, not how many this device sent.
    *
    * `roundsSent` was a counter that started at 0 on every mount, so a table
    * with four rounds on it read "nothing sent yet" to the next waiter who
@@ -642,7 +642,7 @@ export function PosCounterWorkspace({
   const placeOrder = isDineIn ? () => void sendRound() : openCustomer;
   const canPlace = isDineIn ? canSendToKitchen && tableSession !== null : canPlaceTakeaway;
   /*
-   * D150 — bound to one table for this visit.
+   * D155 — bound to one table for this visit.
    *
    * Dropped the moment the link cannot be honoured (closed, or the read
    * failed): the picker comes back, because a waiter standing in front of a
@@ -674,7 +674,7 @@ export function PosCounterWorkspace({
         <PageHeader
           title="POS"
           description={
-            /* D150 — bound to a table, the header says which one. "Counter 1" is
+            /* D155 — bound to a table, the header says which one. "Counter 1" is
                the till's description and reads as the wrong room entirely when
                the screen was opened from table nine. */
             lockedToTable && tableSession
@@ -683,7 +683,7 @@ export function PosCounterWorkspace({
           }
         />
         <div className="flex items-center gap-2">
-          {/* D150 — the way out of a table-bound POS is the floor, the same
+          {/* D155 — the way out of a table-bound POS is the floor, the same
               place the waiter came from. The old order-entry screen carried
               exactly this link and it is the only navigation the flow needs. */}
           {lockedToTable ? (
@@ -691,7 +691,7 @@ export function PosCounterWorkspace({
               <Link href="/tables">Back to floor</Link>
             </Button>
           ) : null}
-          {/* D87 — no Change chip when there is nothing to change to. D150 — and
+          {/* D87 — no Change chip when there is nothing to change to. D155 — and
               none while bound to a table: changing the order type would strand
               the screen between a table it no longer serves and a counter order
               it was not opened for. Back to floor is the way out. */}
@@ -705,7 +705,7 @@ export function PosCounterWorkspace({
           rather than navigating, so the menu never unmounts mid-order. */}
       {isDineIn ? (
         <>
-          {/* D150 — the three things a handed-over session can be. Each says
+          {/* D155 — the three things a handed-over session can be. Each says
               what happened and offers the next move; none of them drops the
               waiter into a picker without a word, which is what ignoring the
               id did. */}
@@ -950,7 +950,7 @@ export function PosCounterWorkspace({
         />
       </Sheet>
 
-      {/* D150 — what the table already has: every sent round, its kitchen
+      {/* D155 — what the table already has: every sent round, its kitchen
           status, and the void. The half of the retired order-entry screen the
           POS never had. */}
       {isDineIn && roundsOpen && tableSession ? (
@@ -990,7 +990,7 @@ export function PosCounterWorkspace({
             setDraft([]);
             setIdempotencyKey(cryptoRandomKey());
             /*
-             * D150 — let go of the link. The session the URL names has just
+             * D155 — let go of the link. The session the URL names has just
              * become a Sale; holding it would re-resolve into "no longer open"
              * and put that card in front of a waiter who is looking at the bill
              * for it. Released here, the screen is an ordinary dine-in POS

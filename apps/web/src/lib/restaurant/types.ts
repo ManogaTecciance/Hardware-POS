@@ -399,7 +399,7 @@ export interface TableSessionView {
  * D70-scoped to the sessions the caller may see).
  */
 /**
- * D153/D153a — somebody this branch can be handed a table, and how many they
+ * D159/D159a — somebody this branch can be handed a table, and how many they
  * already hold. The count is what makes a long list decidable: the supervisor
  * wants the colleague who is here and has room, and with no clock-in in this
  * schema "here" reads as "already serving something".
@@ -414,7 +414,7 @@ export interface OpenSessionView extends TableSessionView {
   activeOrderId: string | null;
   readyTicketIds: string[];
   /**
-   * D151 — whose table this is, in words. The floor and the POS picker open on
+   * D156 — whose table this is, in words. The floor and the POS picker open on
    * "my tables" and offer "all", so a session that is not yours has to be
    * attributable, and the users endpoint a name would come from is
    * `USER_MANAGE`-gated. Null when the session records no waiter, or when the
@@ -702,7 +702,7 @@ export interface UnifiedOrderView {
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
   /**
-   * D152 — whose order this is: the table's waiter for dine-in, the person who
+   * D157 — whose order this is: the table's waiter for dine-in, the person who
    * keyed it for takeaway, null for a third-party row (nobody on the floor
    * took it). What the queue's Mine/All filter is built on, and what names a
    * row that is not yours.

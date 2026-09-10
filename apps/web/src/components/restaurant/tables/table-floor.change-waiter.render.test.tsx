@@ -1,9 +1,9 @@
 /**
- * D153 — changing the waiter on a table, from the floor.
+ * D159 — changing the waiter on a table, from the floor.
  *
  * The PO's case: mid-service the guests ask for someone else, and the owner has
  * to be able to answer without stopping service. The control lives on the
- * served-by name D151a put on the card, because that is the thing being
+ * served-by name D156a put on the card, because that is the thing being
  * changed.
  *
  * ## Why these claims
@@ -27,7 +27,7 @@
  *   3. `reassignWaiter` called with the session's TABLE id instead of the
  *      session id — 1 failed, 3 passed.
  *
- * D153a mutations (long-list handling), same method:
+ * D159a mutations (long-list handling), same method:
  *   4. the second group filtered on `openTableCount === 0` instead of the
  *      complement of the first — 1 failed, 6 passed: a row with no count
  *      vanishes from the picker (this was a real defect, caught here);
@@ -153,7 +153,7 @@ beforeEach(() => {
   listOpenTables.mockResolvedValue([]);
   listOpen.mockResolvedValue([SESSION_ON_IT]);
   listAssignableWaiters.mockResolvedValue([
-    // D153a — the payload carries each waiter's current load.
+    // D159a — the payload carries each waiter's current load.
     { id: 'usr_nimal', name: 'Nimal Perera', openTableCount: 2 },
     { id: 'usr_sunil', name: 'Sunil Fernando', openTableCount: 3 },
     { id: 'usr_kamala', name: 'Kamala Jayasuriya', openTableCount: 0 },
@@ -166,12 +166,12 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('changing the waiter on a table (D153)', () => {
+describe('changing the waiter on a table (D159)', () => {
   it('offers Change beside the name, and hands the session to the picked waiter', async () => {
     render(<TableFloor session={session} branchId="brn_1" canManage />);
     await settle();
 
-    // The name is there (D151a) and, for a holder of the permission, so is the
+    // The name is there (D156a) and, for a holder of the permission, so is the
     // way to change it.
     await waitFor(() => expect(screen.getByText('Nimal Perera')).toBeTruthy());
     fireEvent.click(await screen.findByRole('button', { name: /Change the waiter serving Table one/ }));
@@ -183,7 +183,7 @@ describe('changing the waiter on a table (D153)', () => {
 
     /*
      * The waiter already on the table is shown ONCE, as context, and is not a
-     * choice at all (D153a made it a plain row rather than a disabled button —
+     * choice at all (D159a made it a plain row rather than a disabled button —
      * "changing" to the same person is the one action that would look like it
      * worked and do nothing). Asserted as the pair: the name is present, and
      * not as something pressable.
@@ -205,7 +205,7 @@ describe('changing the waiter on a table (D153)', () => {
     await waitFor(() => expect(listOpen.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
-  it('D153a — groups by who is actually serving, and shows each load', async () => {
+  it('D159a — groups by who is actually serving, and shows each load', async () => {
     /*
      * With fifteen waiters the question is not "who exists" but "who is here
      * and has room". There is no clock-in in this schema, so "here" reads as
@@ -232,7 +232,7 @@ describe('changing the waiter on a table (D153)', () => {
     expect(free.textContent).not.toMatch(/Nimal Perera/);
   });
 
-  it('D153a — a countless row is still offered rather than dropped', async () => {
+  it('D159a — a countless row is still offered rather than dropped', async () => {
     /*
      * `openTableCount` is guaranteed by the current server; a row that arrives
      * without one (an older API, a trimmed payload) must still be pickable. The
@@ -247,7 +247,7 @@ describe('changing the waiter on a table (D153)', () => {
     expect(await screen.findByRole('button', { name: /Sunil Fernando/ })).toBeTruthy();
   });
 
-  it('D153a — searches once the list is long, and not before', async () => {
+  it('D159a — searches once the list is long, and not before', async () => {
     // Three staff: every row is on screen, and on a tablet a keyboard would
     // cover them. Boundary asserted below, so the constant cannot drift
     // unnoticed in either direction.

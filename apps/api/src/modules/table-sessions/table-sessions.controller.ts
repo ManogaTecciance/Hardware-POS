@@ -94,7 +94,7 @@ export class TableSessionsController {
    * straight to the order-entry screen. Read-only, TABLE_VIEW gated.
    */
   /**
-   * D153 — who this branch can put on a table, for the reassign picker.
+   * D159 — who this branch can put on a table, for the reassign picker.
    *
    * Gated on the reassign permission rather than on a read key: the only
    * reason to enumerate the floor's staff here is to hand a table to one of
@@ -111,7 +111,7 @@ export class TableSessionsController {
   }
 
   /**
-   * D153 — the guests have asked for a different waiter.
+   * D159 — the guests have asked for a different waiter.
    *
    * Not scoped by D70's `sessionScope`: the point of the permission is that the
    * holder acts on somebody ELSE's table, so narrowing it to their own would

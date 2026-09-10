@@ -3,7 +3,7 @@ import { isAdminLevelRole, type UserRole } from '@hardware-pos/shared';
 import type { OpenSessionView } from './types';
 
 /**
- * D151 — "my tables" or "the whole floor", resolved in one place.
+ * D156 — "my tables" or "the whole floor", resolved in one place.
  *
  * Table service has two questions about a running session and they have
  * different answers: *which tables am I responsible for* (nearly always what a
@@ -16,19 +16,19 @@ import type { OpenSessionView } from './types';
  *
  * A pure resolver, per D28/D31: the screens read a result. The previous shape
  * had no resolver because there was no choice — the server simply withheld
- * other waiters' sessions (D70), which is what D151 reversed.
+ * other waiters' sessions (D70), which is what D156 reversed.
  */
 
 export type SessionOwnerScope = 'mine' | 'all';
 
 /**
- * D152c — whose screens carry the my/all control at all.
+ * D157c — whose screens carry the my/all control at all.
  *
  * "My tables" and "My orders" are a SERVER's question: which of the room am I
  * responsible for. An owner does not serve tables — they watch the floor — so
  * for them the control was offering a filter over a set that is theirs only by
  * accident (a table they opened while covering, or while testing), and the
- * D152b default then opened them on that accident instead of on the room.
+ * D157b default then opened them on that accident instead of on the room.
  *
  * Read off the enum role rather than off permissions, and that is the whole
  * point: an owner holds EVERY permission, including the waiter's, so no
@@ -48,13 +48,13 @@ export function supervisesTheFloor(role: UserRole): boolean {
  * visit — an operator who asked for the floor must not be pulled back to their
  * own tables by the next poll.
  *
- * D152b — the default is "mine", full stop, and nothing widens it on the
+ * D157b — the default is "mine", full stop, and nothing widens it on the
  * operator's behalf.
  *
  * It used to depend on the data: mine when the caller had a session, all when
  * they had none, on the reasoning that an empty "my tables" reads as a broken
  * screen. That produced two flickers in a row, because the count arrives after
- * the first paint — D152a fixed the first direction (opening on ALL and
+ * the first paint — D157a fixed the first direction (opening on ALL and
  * snapping to mine) and left the second, which the PO then reported: "it's
  * working backward — first my tables, then automatically all tables".
  *
@@ -117,7 +117,7 @@ export function countAll(byTable: ReadonlyMap<string, OpenSessionView[]>): numbe
 }
 
 /**
- * D152 — what to call an ORDER that is not yours, on the Orders queue.
+ * D157 — what to call an ORDER that is not yours, on the Orders queue.
  *
  * Same rule as {@link otherWaiterLabel} and deliberately the same silence: a
  * row of your own needs no name (it would be your own name down the whole

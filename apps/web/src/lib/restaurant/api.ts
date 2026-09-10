@@ -655,8 +655,8 @@ export const tableSessions = {
     );
   },
   /**
-   * D153 — who this branch can put on a table (the reassign picker's list).
-   * D153a — with how many tables each already holds, which is what makes a
+   * D159 — who this branch can put on a table (the reassign picker's list).
+   * D159a — with how many tables each already holds, which is what makes a
    * fifteen-waiter list decidable rather than merely complete.
    */
   listAssignableWaiters(session: Session, branchId: string) {
@@ -665,7 +665,7 @@ export const tableSessions = {
       auth(session),
     );
   },
-  /** D153 — hand an open session to a different waiter. */
+  /** D159 — hand an open session to a different waiter. */
   reassignWaiter(session: Session, branchId: string, sessionId: string, waiterUserId: string) {
     return api.post<TableSessionView>(
       `/restaurant/branches/${branchId}/table-sessions/${sessionId}/waiter`,
@@ -997,7 +997,7 @@ export const restaurantReports = {
 // ── Unified orders (Pilot Change 2 Slice D) ────────────────────────────────
 export interface OrdersQuery {
   /**
-   * D152 — whose orders. Omitted on a first load so the SERVER picks (mine
+   * D157 — whose orders. Omitted on a first load so the SERVER picks (mine
    * when the caller has any, else all) and reports what it chose; set once the
    * operator taps a chip, from then on riding in the URL like every other
    * filter on this screen.
@@ -1031,7 +1031,7 @@ export interface UnifiedOrdersPage {
    */
   readyHandoverCount: number;
   /**
-   * D152 — the numbers on the Mine/All chips, counted before the scope
+   * D157 — the numbers on the Mine/All chips, counted before the scope
    * narrowing so both are known whichever view is showing. `resolvedScope` is
    * what the server actually applied, which is how the screen knows which chip
    * to light up on a first load that did not ask for one.

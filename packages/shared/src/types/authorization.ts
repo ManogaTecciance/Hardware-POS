@@ -135,7 +135,7 @@ export const Permission = {
   TABLE_SESSION_VIEW_ALL: 'table-session:view:all',
   TABLE_OPEN: 'table:open',
   /**
-   * D153 — reassign the waiter serving an OPEN session.
+   * D159 — reassign the waiter serving an OPEN session.
    *
    * Its own key rather than `TABLE_TRANSFER`: that one is reserved for moving a
    * table's order to another TABLE, which is a different act with different

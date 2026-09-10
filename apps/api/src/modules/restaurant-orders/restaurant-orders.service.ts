@@ -66,7 +66,7 @@ export interface OrderView {
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
   /**
-   * D152 — whose order this is, on the floor or at the counter.
+   * D157 — whose order this is, on the floor or at the counter.
    *
    * Dine-in: the table's waiter (`TableSession.waiterUserId`), falling back to
    * whoever sent the first round for a session opened without one. Takeaway:
@@ -141,7 +141,7 @@ export interface OrderDetailView extends OrderView {
 
 export interface OrdersQuery {
   /**
-   * D152 — whose orders. `'mine'` narrows to the caller's own attribution
+   * D157 — whose orders. `'mine'` narrows to the caller's own attribution
    * (see {@link OrderView.staffUserId}); `'all'` is the whole branch.
    *
    * Absent means "decide for me", which is what the Orders screen sends on a
@@ -197,7 +197,7 @@ export interface OrdersPage {
    */
   readyHandoverCount: number;
   /**
-   * D152 — how many rows are the caller's own, and how many exist at all,
+   * D157 — how many rows are the caller's own, and how many exist at all,
    * counted BEFORE the scope narrowing (and after channel/date/payment/search,
    * like `statusCounts`). They are the numbers on the Mine/All chips, so both
    * are needed whichever scope is active — a chip that could not name the size
@@ -248,7 +248,7 @@ export class RestaurantOrdersService {
     branchId: string,
     query: OrdersQuery = {},
     /**
-     * D152 — who is asking, for the `mine` scope. Optional so every existing
+     * D157 — who is asking, for the `mine` scope. Optional so every existing
      * caller (and every spec written before the scope existed) keeps working:
      * without an actor there is nobody to be "mine", so the scope resolves to
      * `all` and the counts say zero rather than guessing.
@@ -293,7 +293,7 @@ export class RestaurantOrdersService {
             select: { menuItemName: true, quantity: true },
           },
           rounds: {
-            // D152 — `submittedByUserId` is the counter's attribution: a
+            // D157 — `submittedByUserId` is the counter's attribution: a
             // takeaway order has no session, so the person who sent its first
             // round is the person whose order it is. Ordered so "first" is the
             // round the operator sent first and not whichever row came back.
@@ -365,7 +365,7 @@ export class RestaurantOrdersService {
     }
 
     /*
-     * D152 — the names behind the attributions. One query for the page's
+     * D157 — the names behind the attributions. One query for the page's
      * distinct staff ids, the same shape `kitchen.service.waiterNames` uses and
      * for the same reason: `TableSession.waiterUserId` and
      * `OrderRound.submittedByUserId` are loose columns with no relation, so
@@ -385,7 +385,7 @@ export class RestaurantOrdersService {
     }
 
     /*
-     * D152 — whose orders, resolved before anything is counted.
+     * D157 — whose orders, resolved before anything is counted.
      *
      * `mineCount`/`allCount` are tallied on the unscoped base so both chips can
      * carry a number; everything after this point — the status tabs, the ready
@@ -397,7 +397,7 @@ export class RestaurantOrdersService {
       : 0;
     const allCount = base.length;
     /*
-     * D152b — MINE unless the caller asked for the floor.
+     * D157b — MINE unless the caller asked for the floor.
      *
      * This used to widen itself when the caller had no rows of their own, on
      * the reasoning that an empty queue reads as a broken one. The count only
@@ -601,7 +601,7 @@ function restaurantOrderBaseView(
     // one arrangement are two distinguishable rows in this list.
     session: {
       tabName: string | null;
-      // D152 — the table's waiter: whose dine-in order this is.
+      // D157 — the table's waiter: whose dine-in order this is.
       waiterUserId?: string | null;
       table: { code: string; label: string | null } | null;
     } | null;
@@ -662,7 +662,7 @@ function restaurantOrderBaseView(
       qty: Number(i.quantity),
     })),
     /*
-     * D152 — the table's waiter first, the first round's submitter second.
+     * D157 — the table's waiter first, the first round's submitter second.
      *
      * The order matters: a dine-in order belongs to whoever is SERVING the
      * table, not to whichever colleague keyed the last round while covering
@@ -741,7 +741,7 @@ function externalOrderBaseView(e: {
     itemCount: 0,
     itemPreview: [],
     /*
-     * D152 — nobody's, on purpose. A platform order arrives without a person
+     * D157 — nobody's, on purpose. A platform order arrives without a person
      * behind it, and attributing it to whoever is looking would put rows in
      * "my orders" that the operator never took.
      */

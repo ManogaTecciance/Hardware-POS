@@ -1,5 +1,5 @@
 /**
- * D151 — the my-tables / all-tables resolver.
+ * D156 — the my-tables / all-tables resolver.
  *
  * Two screens read it (the floor plan and the POS picker) and the failures it
  * prevents are both silent: a default that ignored the operator's choice would
@@ -50,11 +50,11 @@ const byTable = new Map<string, OpenSessionView[]>([
 ]);
 
 describe('resolveOwnerScope', () => {
-  it('D152b — defaults to mine, and takes NO input that could move it', () => {
+  it('D157b — defaults to mine, and takes NO input that could move it', () => {
     /*
      * The two flickers this closes, in order: the default used to be computed
      * from `mineCount`, which is zero before the first response — so a screen
-     * opened on ALL and snapped to mine (D152a), and once that was fixed by
+     * opened on ALL and snapped to mine (D157a), and once that was fixed by
      * distinguishing "not counted yet", the OTHER direction showed up for an
      * operator who genuinely owns none: mine, then automatically all
      * ("it's working backward"). A default that moves after the screen has
@@ -76,10 +76,10 @@ describe('resolveOwnerScope', () => {
   });
 });
 
-describe('supervisesTheFloor (D152c)', () => {
+describe('supervisesTheFloor (D157c)', () => {
   it('separates the office from the floor by ROLE, which is the only thing that can', () => {
     // An owner watches the room; "my tables" for them is a table they opened
-    // while covering, and D152b would have opened them on that accident.
+    // while covering, and D157b would have opened them on that accident.
     expect(supervisesTheFloor('OWNER')).toBe(true);
     expect(supervisesTheFloor('ADMIN')).toBe(true);
     // D108 — the salesperson IS the owner, permission for permission.

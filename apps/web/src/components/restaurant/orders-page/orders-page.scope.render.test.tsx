@@ -1,5 +1,5 @@
 /**
- * D152 — "My orders / All orders" on the queue.
+ * D157 — "My orders / All orders" on the queue.
  *
  * The PO's report: a waiter working the floor could not find their own orders
  * here — the tab has always listed the whole branch. The scope is the server's
@@ -48,7 +48,7 @@ const { OrdersPage } = await import('./orders-page');
 
 const ME = 'usr_me';
 
-/** D152c — the enum role a restaurant waiter carries; an owner is asserted below. */
+/** D157c — the enum role a restaurant waiter carries; an owner is asserted below. */
 const SESSION = {
   token: 'tok',
   user: {
@@ -137,7 +137,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('whose orders the queue shows (D152)', () => {
+describe('whose orders the queue shows (D157)', () => {
   it('asks for no scope on a first load, and lights the one the server applied', async () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
 
@@ -154,7 +154,7 @@ describe('whose orders the queue shows (D152)', () => {
     expect(all.getAttribute('data-active')).toBe('false');
   });
 
-  it('D152a — lights My orders on the FIRST paint, before the response lands', async () => {
+  it('D157a — lights My orders on the FIRST paint, before the response lands', async () => {
     /*
      * Same defect as the floor plan's, different cause: `appliedScope` is
      * seeded before any response exists, and it was seeded 'all'. So the queue
@@ -209,7 +209,7 @@ describe('whose orders the queue shows (D152)', () => {
     );
   });
 
-  it('D152b — an empty My orders offers the branch instead of widening itself', async () => {
+  it('D157b — an empty My orders offers the branch instead of widening itself', async () => {
     /*
      * The second flicker: the server used to answer "all" for a caller with
      * nothing of their own, so the queue lit Mine (its seeded state) and then
@@ -237,12 +237,12 @@ describe('whose orders the queue shows (D152)', () => {
     expect(replace.mock.calls.at(-1)![0] as string).toContain('scope=all');
   });
 
-  it('D152c — an OWNER asks for the whole queue and gets no chips', async () => {
+  it('D157c — an OWNER asks for the whole queue and gets no chips', async () => {
     /*
      * Same report as the floor's: the owner's Orders tab was defaulting to "My
      * orders". Their own rows exist only because they keyed something while
      * covering. The client asks for `all` EXPLICITLY (the server's default is
-     * "mine" since D152b) and hides the control, so there is nothing to
+     * "mine" since D157b) and hides the control, so there is nothing to
      * misread and nothing to switch back to.
      */
     const OWNER = {

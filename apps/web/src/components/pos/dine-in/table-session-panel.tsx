@@ -86,7 +86,7 @@ function isOpenTable(status: RestaurantTableStatus): boolean {
 }
 
 // `tabLabel`, `ActiveTableSession` and the open-session row moved to
-// `lib/restaurant/active-session.ts` (D150) — the floor plan's deep link needs
+// `lib/restaurant/active-session.ts` (D155) — the floor plan's deep link needs
 // the same label resolution this picker does, and it has no picker to get it
 // from. Re-exported above so existing importers are unchanged.
 
@@ -97,12 +97,12 @@ interface Props {
   onPick: (picked: ActiveTableSession) => void;
   /** D71 — opens the bill sheet: full order, totals, split, close. */
   onOpenBill: () => void;
-  /** D150 — opens the rounds sheet: what is already on the table, and voids. */
+  /** D155 — opens the rounds sheet: what is already on the table, and voids. */
   onOpenRounds: () => void;
   /** Rounds already sent to the kitchen on this session, for the strip. */
   roundsSent: number;
   /**
-   * D150 — the table was chosen BEFORE this screen, on the floor plan, and the
+   * D155 — the table was chosen BEFORE this screen, on the floor plan, and the
    * POS is bound to it for this visit. The picker is then not collapsed, it is
    * absent: offering "change table" on a screen reached by tapping one table's
    * View order is an answer to a question nobody asked, and the way back is
@@ -144,7 +144,7 @@ export function TableSessionPanel({
   }, [active]);
 
   // A locked panel never shows the grid — not even while the link resolves,
-  // where a flash of "Which table?" is exactly the question D150 removed.
+  // where a flash of "Which table?" is exactly the question D155 removed.
   const showPicker = !locked && (active === null || expanded);
 
   return (
@@ -230,7 +230,7 @@ function ActiveStrip({
               Change table
             </Button>
           ) : null}
-          {/* D150 — what is already on the table: every sent round, its kitchen
+          {/* D155 — what is already on the table: every sent round, its kitchen
               status, and the void. The waiter arriving from the floor's "View
               order" came to read this, so it is the strip's primary action. */}
           <Button size="sm" variant="secondary" onClick={onOpenRounds}>
@@ -284,7 +284,7 @@ function Picker({
    */
   const [selected, setSelected] = React.useState<string | null>(null);
   /**
-   * D151 — whose running tables the strip lists. Null until a chip is tapped;
+   * D156 — whose running tables the strip lists. Null until a chip is tapped;
    * `resolveOwnerScope` then defaults it from the data, so a waiter lands on
    * their own tables and a cashier (who opens none) still sees the floor.
    */
@@ -294,7 +294,7 @@ function Picker({
     setLoading(true);
     try {
       /*
-       * D150 — the furniture and its label map come from the shared resolver,
+       * D155 — the furniture and its label map come from the shared resolver,
        * which the floor plan's deep link reads too. The two used to be one
        * inline block here, and a deep-linked session would have had to
        * re-derive it (or settle for a session number on the strip).
@@ -374,7 +374,7 @@ function Picker({
   };
 
   /*
-   * D151 — whose running tables the strip lists. `mineOpen` is also what the
+   * D156 — whose running tables the strip lists. `mineOpen` is also what the
    * default reads: a waiter with tables of their own opens on those, and anyone
    * with none (a cashier at the till) opens on the floor rather than on an
    * empty strip that looks like a branch with no parties in it.
@@ -384,8 +384,8 @@ function Picker({
     [open, session.user.id],
   );
   /*
-   * D152b — mine unless the waiter said otherwise; the data never moves it.
-   * D152c — a supervisor works the whole room: the strip opens on every
+   * D157b — mine unless the waiter said otherwise; the data never moves it.
+   * D157c — a supervisor works the whole room: the strip opens on every
    * running table and carries no chips to narrow it.
    */
   const supervises = supervisesTheFloor(session.user.role);
@@ -435,8 +435,8 @@ function Picker({
    * worst failure available here because nothing about it looks wrong.
    */
   /*
-   * D151 — keyed off the SHOWN set, not every session the server returned. With
-   * "Mine" selected this is exactly the pre-D151 map (the scoped read), so an
+   * D156 — keyed off the SHOWN set, not every session the server returned. With
+   * "Mine" selected this is exactly the pre-D156 map (the scoped read), so an
    * occupied table that is somebody else's stays drawn-and-greyed; switching to
    * "All" is what makes it tappable. Reading `open` here instead would have let
    * the room grid ignore the chips the strip above it is obeying.
@@ -504,7 +504,7 @@ function Picker({
           <div>
             <p className="text-sm font-semibold">Which table?</p>
             <p className="text-xs text-muted-foreground">
-              {/* D151 — "yours" was the whole truth before the floor became
+              {/* D156 — "yours" was the whole truth before the floor became
                   readable (D70 scoped the read to the caller). It is now the
                   DEFAULT rather than the limit, so the copy says which view
                   the strip is starting from and where the rest is. */}
@@ -534,7 +534,7 @@ function Picker({
             {/* Open sessions sit ABOVE the area filter and are never narrowed by
                 it: this is the "carry on where I was" list, it is short, and
                 hiding a running table behind a filter the waiter set for a
-                different reason is how a party gets forgotten. D151 gives it
+                different reason is how a party gets forgotten. D156 gives it
                 the ONE filter it should have — whose tables — defaulted to the
                 caller's own. */}
             {open.length > 0 ? (
@@ -579,7 +579,7 @@ function Picker({
                     </div>
                   ) : null}
                 </div>
-                {/* D152b — the same "empty is a real state" line the queue
+                {/* D157b — the same "empty is a real state" line the queue
                     carries: under Mine with none of your own, the strip would
                     otherwise be a labelled blank next to a chip saying there
                     are sixteen. */}
@@ -595,7 +595,7 @@ function Picker({
                     // and the tab's name is the only thing that tells them
                     // apart: the table name is identical on both.
                     const name = table ? tabLabel(table, s.tabName) : undefined;
-                    // D151 — whose table, when it is not the caller's.
+                    // D156 — whose table, when it is not the caller's.
                     const owner = otherWaiterLabel(s, session.user.id);
                     return (
                       <button

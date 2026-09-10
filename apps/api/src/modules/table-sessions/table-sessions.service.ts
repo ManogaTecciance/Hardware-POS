@@ -99,7 +99,7 @@ export interface RoundView {
  * the session, if any).
  */
 /**
- * D153/D153a — somebody this branch can be given a table, and how many they
+ * D159/D159a — somebody this branch can be given a table, and how many they
  * already hold. The count is what makes a long list decidable: a supervisor
  * moving a party wants the colleague who is here and has room, and "here" is
  * knowable only as "already serving something".
@@ -124,7 +124,7 @@ export interface OpenSessionSummary extends TableSessionView {
    */
   readyTicketIds: string[];
   /**
-   * D151 — WHOSE table this is, in words the floor uses.
+   * D156 — WHOSE table this is, in words the floor uses.
    *
    * The floor and the POS picker both open on "my tables" and offer "all", so
    * every session that is not yours has to be attributable — and the one thing
@@ -341,7 +341,7 @@ export class TableSessionsService {
   }
 
   /**
-   * D153 — the people this branch can put on a table.
+   * D159 — the people this branch can put on a table.
    *
    * "Who can serve" is a permission question, so it is answered from the ROLE
    * ROWS rather than from a name convention or the enum column: any active user
@@ -379,7 +379,7 @@ export class TableSessionsService {
     if (staff.length === 0) return [];
 
     /*
-     * D153a — how many tables each of them is already carrying.
+     * D159a — how many tables each of them is already carrying.
      *
      * A list of names is enough to pick from until a branch has fifteen
      * waiters, at which point the supervisor's real question is not "who
@@ -410,13 +410,13 @@ export class TableSessionsService {
   }
 
   /**
-   * D153 — put a different waiter on an open session.
+   * D159 — put a different waiter on an open session.
    *
    * Only the SESSION moves. Every round keeps the `submittedByUserId` it was
    * sent with, so the history still says who fired which course, and the bill
    * is untouched: this is a change of responsibility from here on, not a
    * rewriting of what happened. The floor plan, the POS picker and the Orders
-   * queue all read the session's waiter (D151/D152), so the table and its
+   * queue all read the session's waiter (D156/D157), so the table and its
    * order move to the new waiter's "mine" and leave the old one's in the same
    * beat.
    *
@@ -649,7 +649,7 @@ export class TableSessionsService {
       }
     }
     /*
-     * D151 — whose table each one is, by name.
+     * D156 — whose table each one is, by name.
      *
      * One query for the whole page rather than a join: `waiterUserId` is a
      * loose reference with no FK (the schema's deliberate shape for user

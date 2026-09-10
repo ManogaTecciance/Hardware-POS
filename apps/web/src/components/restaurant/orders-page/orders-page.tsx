@@ -125,15 +125,15 @@ export function OrdersPage({ session, branchId }: Props) {
     : ORDERS_PAGE_SIZE;
   const openId = params.get('open');
   /*
-   * D152 — whose orders. Absent means "the server decides" (mine when this
+   * D157 — whose orders. Absent means "the server decides" (mine when this
    * operator has any, else all), which is what a waiter opening the tab gets;
    * a tap writes it, and from then on it rides in the URL like every other
    * filter here, so a shared link shows what the sender was looking at.
    */
   const scopeRaw = params.get('scope');
   /*
-   * D152c — a supervisor asks for the whole queue explicitly rather than
-   * letting the server's "mine" default (D152b) apply: "my orders" is a
+   * D157c — a supervisor asks for the whole queue explicitly rather than
+   * letting the server's "mine" default (D157b) apply: "my orders" is a
    * server's question, and an owner's own row is an accident of covering.
    * They see no chips either, so the URL is the only place this can come from.
    */
@@ -159,12 +159,12 @@ export function OrdersPage({ session, branchId }: Props) {
    */
   const [pageSize, setPageSize] = React.useState(ORDERS_PAGE_SIZE);
   /*
-   * D152 — the chip numbers, and which scope the server applied. Held from the
+   * D157 — the chip numbers, and which scope the server applied. Held from the
    * response rather than derived from `rows`: the list is one page, and the
    * scope may have been chosen by the server rather than by the URL.
    */
   /*
-   * D152a — null until a response lands, so the chips read "My orders" rather
+   * D157a — null until a response lands, so the chips read "My orders" rather
    * than "My orders · 0" for the length of one fetch. Zero is a real answer at
    * the till (they own none), and a chip that shows it before anybody has
    * counted is stating that answer early.
@@ -172,7 +172,7 @@ export function OrdersPage({ session, branchId }: Props) {
   const [mineCount, setMineCount] = React.useState<number | null>(null);
   const [allCount, setAllCount] = React.useState<number | null>(null);
   /*
-   * D152a — MINE before the first response, not 'all'.
+   * D157a — MINE before the first response, not 'all'.
    *
    * The server picks the default and reports it in `resolvedScope`, which does
    * not exist until the request comes back; seeding this 'all' lit the All chip
@@ -183,7 +183,7 @@ export function OrdersPage({ session, branchId }: Props) {
    * known any sooner.
    */
   const [appliedScope, setAppliedScope] = React.useState<'mine' | 'all'>(scope ?? 'mine');
-  /** D152c — the chips are the floor's control; the office does not get them. */
+  /** D157c — the chips are the floor's control; the office does not get them. */
   const showScopeChips = !supervises;
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -227,7 +227,7 @@ export function OrdersPage({ session, branchId }: Props) {
       router.replace(`/orders${q}`);
     }, 250);
     return () => clearTimeout(t);
-    // `scope` is in the list because the rebuilt query carries it (D152a): a
+    // `scope` is in the list because the rebuilt query carries it (D157a): a
     // search typed while "All orders" is active must not silently drop back to
     // the default scope. The early return above keeps the extra runs free.
   }, [localSearch, scope, channel, status, partner, payment, from, to, requestedSize, search, router]);
@@ -393,7 +393,7 @@ export function OrdersPage({ session, branchId }: Props) {
 
       {/* Metrics strip */}
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-        {/* D152 — the hint has to say WHOSE, because the number is scoped: a
+        {/* D157 — the hint has to say WHOSE, because the number is scoped: a
             card reading "2 · Today · this branch" over a branch running
             thirty-six is not a rounding difference, it is the wrong claim. */}
         <Metric
@@ -465,10 +465,10 @@ export function OrdersPage({ session, branchId }: Props) {
             </ChipRow>
           </div>
 
-          {/* D152 — whose orders. First, because it frames every count below it:
+          {/* D157 — whose orders. First, because it frames every count below it:
               the status tabs and the ready bell describe the SCOPED list, so a
               reader who has not noticed which view they are in would misread
-              every number on the screen. D152c — NOT RENDERED for a supervisor,
+              every number on the screen. D157c — NOT RENDERED for a supervisor,
               rather than hidden with a class: a control that is only invisible
               is still in the tab order and still readable by a screen reader,
               which makes it a lie about the state rather than an absence. */}
@@ -718,7 +718,7 @@ export function OrdersPage({ session, branchId }: Props) {
       ) : filteredByPartner.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            {/* D152b — an empty MY ORDERS is a normal state (a shift that has
+            {/* D157b — an empty MY ORDERS is a normal state (a shift that has
                 not started, a supervisor who takes none), and it used to be
                 "solved" by silently widening the view. Say what is empty and
                 offer the way over instead: the count is the evidence that
@@ -775,7 +775,7 @@ export function OrdersPage({ session, branchId }: Props) {
               <p className="text-xs text-muted-foreground">
                 {formatElapsed(r.createdAt)}
                 {r.pickupAt ? ` · Pickup ${new Date(r.pickupAt).toLocaleTimeString()}` : ''}
-                {/* D152 — whose order, when it is not yours. Only then: the
+                {/* D157 — whose order, when it is not yours. Only then: the
                     operator's own name on every one of their own rows is a word
                     they already know, repeated down the whole list. */}
                 {staffLabel(r, session.user.id) ? ` · ${staffLabel(r, session.user.id)}` : ''}
@@ -900,7 +900,7 @@ function Metric({
 }
 
 function buildQuery(f: {
-  /** D152 — omitted (undefined) means "let the server decide whose". */
+  /** D157 — omitted (undefined) means "let the server decide whose". */
   scope?: 'mine' | 'all';
   channel: UnifiedChannel | 'ALL';
   status: UnifiedOrderStatus | 'ALL';
