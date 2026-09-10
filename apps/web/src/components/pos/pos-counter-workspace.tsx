@@ -1,12 +1,15 @@
 'use client';
 
-import { AlertTriangle, ChevronUp, Percent, ReceiptText, ShoppingCart, Trash2 } from 'lucide-react';
+import { AlertTriangle, ChevronUp, Loader2, Percent, ReceiptText, ShoppingCart, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
 import { applyPromotions, type PromotionRule } from '@hardware-pos/shared';
 
 import { PageHeader } from '@/components/page-header';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { useConfirm } from '@/components/ui/confirm';
 import { Sheet } from '@/components/ui/sheet';
 import { ApiError } from '@/lib/api';
@@ -14,6 +17,7 @@ import { useAuth, type Session } from '@/lib/auth';
 import { discountLimitFor, withinDiscountLimit, Permission } from '@/lib/permissions';
 import { useEffectiveProfile } from '@/lib/platform-profile';
 import { setProductAvailability } from '@/lib/products-api';
+import { resolveLinkedSession } from '@/lib/restaurant/active-session';
 import { restaurantConfig, tableSessions, takeaway } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { MenuItemView } from '@/lib/restaurant/types';
@@ -21,6 +25,7 @@ import type { MenuItemView } from '@/lib/restaurant/types';
 import { CustomerCapturePopup, type ChosenCustomer } from './counter/customer-capture-popup';
 import { BillDialog } from '@/components/restaurant/billing/bill-dialog';
 
+import { SessionRoundsSheet, flattenSubmittedRounds } from './dine-in/session-rounds-sheet';
 import { TableBillSheet } from './dine-in/table-bill-sheet';
 import { TableSessionPanel, type ActiveTableSession } from './dine-in/table-session-panel';
 import { ItemDiscountDialog, type LineDiscount } from './counter/item-discount-dialog';
@@ -54,6 +59,13 @@ interface Props {
   session: Session;
   branchId: string;
   initialMode: PosMode | null;
+  /**
+   * D150 — the open table session this POS is bound to, handed over in the URL
+   * (`?sessionId=`) by the floor plan's "View order" or the orders queue's
+   * "Open in POS". Present means the table was ALREADY chosen, so the picker
+   * never appears: the screen opens on the menu, where the waiter was going.
+   */
+  linkedSessionId?: string | null;
   onModeChange: (mode: PosMode | null) => void;
 }
 
@@ -86,7 +98,13 @@ interface Props {
  *   * Cash tendered/change is displayed but the payment row records
  *     only the amount actually charged.
  */
-export function PosCounterWorkspace({ session, branchId, initialMode, onModeChange }: Props) {
+export function PosCounterWorkspace({
+  session,
+  branchId,
+  initialMode,
+  linkedSessionId: linkedSessionIdProp = null,
+  onModeChange,
+}: Props) {
   const router = useRouter();
   // D145 — the app's own confirm. The two questions below are asked on a
   // tablet at the counter, where the browser's dialog is untappably small and
@@ -148,6 +166,13 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
     resolveInitialPosMode(initialMode, availableModes),
   );
 
+  /*
+   * D150 — voiding a line the kitchen already has is a different act from
+   * building a round, and a different permission (`ORDER_VOID_SENT`). The
+   * waiter templates hold the send; the supervisor holds the void.
+   */
+  const canVoidSent = hasPermission(Permission.ORDER_VOID_SENT);
+
   // ── D69: dine-in session state ─────────────────────────────────────────
   const [tableSession, setTableSession] = React.useState<ActiveTableSession | null>(null);
   const [roundsSent, setRoundsSent] = React.useState(0);
@@ -155,6 +180,8 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const [dineInError, setDineInError] = React.useState<string | null>(null);
   /** D71 — the bill sheet: review, split, close. */
   const [billOpen, setBillOpen] = React.useState(false);
+  /** D150 — the rounds sheet: what the table already has, and the void. */
+  const [roundsOpen, setRoundsOpen] = React.useState(false);
   const [closedBill, setClosedBill] = React.useState<{
     saleId: string;
     table: string;
@@ -162,6 +189,98 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   } | null>(null);
   /** D83 — the finalised bill, shown as soon as the table closes. */
   const [showClosedBill, setShowClosedBill] = React.useState(false);
+
+  // ── D150: the session the floor handed over ────────────────────────────
+  /*
+   * Held in state rather than read straight off the prop for two reasons, and
+   * both are bugs if it is not:
+   *
+   *   - the URL is rewritten under us. A dine-in-only role lands with no
+   *     `?mode=`, the sole-mode effect below calls `onModeChange`, and the page
+   *     replaces the URL — so a prop read during render would unbind the table
+   *     of the one role this flow exists for.
+   *   - a close has to let go of it. The session no longer exists, and
+   *     re-resolving it would put a "this session is closed" card in front of a
+   *     waiter who has just been shown the bill.
+   *
+   * `takenRef` is what makes the release stick: the id is adopted once, so
+   * clearing it cannot be undone by the same prop arriving again on the next
+   * render.
+   */
+  const [linkedSessionId, setLinkedSessionId] = React.useState<string | null>(null);
+  const takenRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!linkedSessionIdProp || takenRef.current === linkedSessionIdProp) return;
+    takenRef.current = linkedSessionIdProp;
+    setLinkedSessionId(linkedSessionIdProp);
+  }, [linkedSessionIdProp]);
+
+  /**
+   * What became of that id. `closed` and `failed` are shown rather than
+   * swallowed: a link that silently fell back to the picker would tell a
+   * waiter who tapped one table's View order that the POS simply ignored them.
+   */
+  const [linkState, setLinkState] = React.useState<'none' | 'loading' | 'ready' | 'closed' | 'failed'>(
+    'none',
+  );
+  const [linkError, setLinkError] = React.useState<string | null>(null);
+  /** The Sale a closed session was billed into, when the server knows it. */
+  const [linkedSaleId, setLinkedSaleId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    /*
+     * Dine-in only, and the guard earns its keep: D93 clamps `?mode=dine-in` to
+     * null for a role that cannot send to a kitchen, so a cashier opening a
+     * shared link gets the order-type chooser — and resolving a table behind it
+     * would spend four reads on a session they will never take an order onto.
+     */
+    if (!linkedSessionId || mode !== 'DINE_IN') return;
+    let cancelled = false;
+    setLinkState('loading');
+    void (async () => {
+      const result = await resolveLinkedSession(session, branchId, linkedSessionId);
+      if (cancelled) return;
+      if (result.ok) {
+        setTableSession(result.active);
+        setLinkState('ready');
+        return;
+      }
+      if (result.reason === 'not-open') {
+        setLinkedSaleId(result.finalSaleId);
+        setLinkState('closed');
+        return;
+      }
+      setLinkError(result.message);
+      setLinkState('failed');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [linkedSessionId, mode, session, branchId]);
+
+  /*
+   * D150 — how many rounds the TABLE has, not how many this device sent.
+   *
+   * `roundsSent` was a counter that started at 0 on every mount, so a table
+   * with four rounds on it read "nothing sent yet" to the next waiter who
+   * picked it up — wrong in the one place it is read out loud. One detail read
+   * per table selection settles it; a send still bumps the number optimistically
+   * and the rounds sheet corrects it from the same endpoint.
+   */
+  const activeSessionId = tableSession?.id ?? null;
+  React.useEffect(() => {
+    if (!activeSessionId) return;
+    let cancelled = false;
+    void tableSessions
+      .getDetail(session, activeSessionId)
+      .then((detail) => {
+        if (!cancelled) setRoundsSent(flattenSubmittedRounds(detail).length);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, session]);
 
   // D45: Restaurant / Cafe / Bakery tenants read the new POS catalogue
   // endpoint (Products the wizard published as POS-sellable). Retail
@@ -522,6 +641,15 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
   const isDineIn = mode === 'DINE_IN';
   const placeOrder = isDineIn ? () => void sendRound() : openCustomer;
   const canPlace = isDineIn ? canSendToKitchen && tableSession !== null : canPlaceTakeaway;
+  /*
+   * D150 — bound to one table for this visit.
+   *
+   * Dropped the moment the link cannot be honoured (closed, or the read
+   * failed): the picker comes back, because a waiter standing in front of a
+   * billed table still has four others and the alternative is a dead screen.
+   */
+  const lockedToTable =
+    isDineIn && linkedSessionId !== null && (linkState === 'loading' || linkState === 'ready');
 
   // First tap: pick a mode. No mode = the Order Type modal shows — unless
   // there is only one mode this role can use, in which case asking is a
@@ -545,10 +673,30 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
       <div className="flex flex-wrap items-end justify-between gap-3">
         <PageHeader
           title="POS"
-          description={`${session.branchName} · Counter 1`}
+          description={
+            /* D150 — bound to a table, the header says which one. "Counter 1" is
+               the till's description and reads as the wrong room entirely when
+               the screen was opened from table nine. */
+            lockedToTable && tableSession
+              ? `${session.branchName} · ${tableSession.tableLabel}`
+              : `${session.branchName} · Counter 1`
+          }
         />
-        {/* D87 — no Change chip when there is nothing to change to. */}
-        {soleMode ? null : <PosModeChip mode={mode} onChange={resetMode} />}
+        <div className="flex items-center gap-2">
+          {/* D150 — the way out of a table-bound POS is the floor, the same
+              place the waiter came from. The old order-entry screen carried
+              exactly this link and it is the only navigation the flow needs. */}
+          {lockedToTable ? (
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/tables">Back to floor</Link>
+            </Button>
+          ) : null}
+          {/* D87 — no Change chip when there is nothing to change to. D150 — and
+              none while bound to a table: changing the order type would strand
+              the screen between a table it no longer serves and a counter order
+              it was not opened for. Back to floor is the way out. */}
+          {soleMode || lockedToTable ? null : <PosModeChip mode={mode} onChange={resetMode} />}
+        </div>
       </div>
 
       {/* D69 — dine-in's one structural difference from a counter order: the
@@ -557,10 +705,55 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
           rather than navigating, so the menu never unmounts mid-order. */}
       {isDineIn ? (
         <>
+          {/* D150 — the three things a handed-over session can be. Each says
+              what happened and offers the next move; none of them drops the
+              waiter into a picker without a word, which is what ignoring the
+              id did. */}
+          {linkState === 'loading' ? (
+            <Card>
+              <CardContent className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Opening this table&rsquo;s
+                order…
+              </CardContent>
+            </Card>
+          ) : null}
+          {linkState === 'closed' ? (
+            <Card>
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+                <span>
+                  That table session is no longer open — it has been billed, or another waiter
+                  closed it. Pick a table below to carry on.
+                </span>
+                <span className="flex items-center gap-2">
+                  {linkedSaleId ? (
+                    <Button size="sm" variant="outline" onClick={() => router.push(`/bills/${linkedSaleId}`)}>
+                      View bill
+                    </Button>
+                  ) : null}
+                  <Button asChild size="sm" variant="ghost">
+                    <Link href="/tables">Back to floor</Link>
+                  </Button>
+                </span>
+              </CardContent>
+            </Card>
+          ) : null}
+          {linkState === 'failed' ? (
+            <Card>
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+                <span className="text-danger">
+                  {linkError ?? 'Could not open that table.'} Pick a table below to carry on.
+                </span>
+                <Button asChild size="sm" variant="ghost">
+                  <Link href="/tables">Back to floor</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
           <TableSessionPanel
             session={session}
             branchId={branchId}
             active={tableSession}
+            locked={lockedToTable}
             onPick={(picked) => {
               setTableSession(picked);
               setRoundsSent(0);
@@ -568,6 +761,7 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
               setDineInError(null);
             }}
             onOpenBill={() => setBillOpen(true)}
+            onOpenRounds={() => setRoundsOpen(true)}
             roundsSent={roundsSent}
           />
           {dineInError ? (
@@ -756,6 +950,20 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
         />
       </Sheet>
 
+      {/* D150 — what the table already has: every sent round, its kitchen
+          status, and the void. The half of the retired order-entry screen the
+          POS never had. */}
+      {isDineIn && roundsOpen && tableSession ? (
+        <SessionRoundsSheet
+          session={session}
+          sessionId={tableSession.id}
+          tableLabel={tableSession.tableLabel}
+          canVoid={canVoidSent}
+          onClose={() => setRoundsOpen(false)}
+          onLoaded={setRoundsSent}
+        />
+      ) : null}
+
       {/* D71 — the waiter's bill: the full order, the real totals, and the
           split, without leaving the screen they take orders on. */}
       {isDineIn && billOpen && tableSession ? (
@@ -781,6 +989,16 @@ export function PosCounterWorkspace({ session, branchId, initialMode, onModeChan
             setRoundsSent(0);
             setDraft([]);
             setIdempotencyKey(cryptoRandomKey());
+            /*
+             * D150 — let go of the link. The session the URL names has just
+             * become a Sale; holding it would re-resolve into "no longer open"
+             * and put that card in front of a waiter who is looking at the bill
+             * for it. Released here, the screen is an ordinary dine-in POS
+             * again and the picker offers the next table.
+             */
+            setLinkedSessionId(null);
+            setLinkState('none');
+            setRoundsOpen(false);
           }}
         />
       ) : null}

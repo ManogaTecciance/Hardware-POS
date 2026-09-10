@@ -100,13 +100,25 @@ const EMPTY: Snapshot = {
 };
 
 /**
+ * D150 — where "View order" goes: the POS, bound to this session.
+ *
+ * One URL shape, built in one place, because the floor has two cards that link
+ * to it (a physical table, and every tab on an arrangement) and they used to
+ * compose the path independently. The table is chosen by the tap that follows
+ * this link, so the POS opens on the menu rather than on a picker.
+ */
+const posHref = (sessionId: string): string =>
+  `/pos?mode=dine-in&sessionId=${encodeURIComponent(sessionId)}`;
+
+/**
  * Visual floor plan grouped by dining area.
  *
  * Layout: an area filter across the top, then one section per area with a
  * responsive card grid. Cards show table code + capacity + status. When a
  * session is open on the table, the card also shows the elapsed time since
- * open plus a "View order" link to the order-entry screen. Available tables
- * expose an "Open table" action (Phase D) gated on `TABLE_OPEN`.
+ * open plus a "View order" link into the dine-in POS for that session (D150).
+ * Available tables expose an "Open table" action (Phase D) gated on
+ * `TABLE_OPEN`.
  */
 export function TableFloor({ session, branchId, canManage }: Props) {
   const { hasPermission } = useAuth();
@@ -722,7 +734,10 @@ function TableCard({
             cards without an action don't jitter the grid row. */}
         {session ? (
           <Button asChild size="md" fullWidth variant="secondary">
-            <Link href={`/tables/session/${session.id}`} onClick={onViewOrder}>
+            {/* D150 — into the POS, bound to this session. The table is already
+                chosen by the tap that got here, so the POS opens on the menu
+                with no picker in front of it. */}
+            <Link href={posHref(session.id)} onClick={onViewOrder}>
               View order
             </Link>
           </Button>
@@ -1539,7 +1554,7 @@ function OpenTableCard({
                screen, rather than letting the label spill past the button. */
             <Button key={s.id} asChild size="md" fullWidth variant="secondary">
               <Link
-                href={`/tables/session/${s.id}`}
+                href={posHref(s.id)}
                 onClick={() => onViewOrder(s)}
                 className="min-w-0 gap-1 px-3"
                 title={`${label} · ${elapsed}`}

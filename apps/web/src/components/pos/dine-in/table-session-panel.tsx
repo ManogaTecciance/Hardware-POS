@@ -10,7 +10,14 @@ import { ChipRow } from '@/components/ui/chip-row';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { type Session } from '@/lib/auth';
-import { diningAreas, openTables, restaurantTables, tableSessions } from '@/lib/restaurant/api';
+import {
+  activeSessionFrom,
+  loadBranchFurniture,
+  tabLabel,
+  type ActiveTableSession,
+  type OpenSessionRow,
+} from '@/lib/restaurant/active-session';
+import { tableSessions } from '@/lib/restaurant/api';
 import { TABLE_STATUS_LABELS, formatElapsed } from '@/lib/restaurant/labels';
 import { seatsFree } from '@/lib/restaurant/types';
 import type {
@@ -19,6 +26,8 @@ import type {
   RestaurantTableStatus,
   RestaurantTableView,
 } from '@/lib/restaurant/types';
+
+export type { ActiveTableSession };
 
 /**
  * D92 — the running sessions, addressed like a dining area.
@@ -69,31 +78,10 @@ function isOpenTable(status: RestaurantTableStatus): boolean {
   return OPEN_STATUSES.includes(status);
 }
 
-/**
- * D104 — what a tab is called: the table, then this party's own name.
- *
- * Mirrors `withTabName` on the server (`apps/api/src/common/place-label.ts`),
- * which composes the same thing for the kitchen ticket and the bill. The two
- * are deliberately separate implementations of a one-line rule rather than a
- * shared package: what the waiter reads on a chip and what the pass reads on a
- * ticket are allowed to diverge later, and a shared helper would make that
- * change look riskier than it is.
- */
-function tabLabel(tableName: string, tabName: string | null | undefined): string {
-  const tab = tabName?.trim();
-  return tab ? `${tableName} · ${tab}` : tableName;
-}
-
-/** The session the POS is currently taking orders onto. */
-export interface ActiveTableSession {
-  id: string;
-  sessionNumber: string;
-  tableLabel: string;
-  openedAt: string;
-  guestCount: number | null;
-  /** Lazily created on the first send — null until then. */
-  orderId: string | null;
-}
+// `tabLabel`, `ActiveTableSession` and the open-session row moved to
+// `lib/restaurant/active-session.ts` (D150) — the floor plan's deep link needs
+// the same label resolution this picker does, and it has no picker to get it
+// from. Re-exported above so existing importers are unchanged.
 
 interface Props {
   session: Session;
@@ -102,8 +90,18 @@ interface Props {
   onPick: (picked: ActiveTableSession) => void;
   /** D71 — opens the bill sheet: full order, totals, split, close. */
   onOpenBill: () => void;
+  /** D150 — opens the rounds sheet: what is already on the table, and voids. */
+  onOpenRounds: () => void;
   /** Rounds already sent to the kitchen on this session, for the strip. */
   roundsSent: number;
+  /**
+   * D150 — the table was chosen BEFORE this screen, on the floor plan, and the
+   * POS is bound to it for this visit. The picker is then not collapsed, it is
+   * absent: offering "change table" on a screen reached by tapping one table's
+   * View order is an answer to a question nobody asked, and the way back is
+   * the floor, which the header carries.
+   */
+  locked?: boolean;
 }
 
 /**
@@ -126,7 +124,9 @@ export function TableSessionPanel({
   active,
   onPick,
   onOpenBill,
+  onOpenRounds,
   roundsSent,
+  locked = false,
 }: Props) {
   const [expanded, setExpanded] = React.useState(false);
 
@@ -136,7 +136,9 @@ export function TableSessionPanel({
     if (active) setExpanded(false);
   }, [active]);
 
-  const showPicker = active === null || expanded;
+  // A locked panel never shows the grid — not even while the link resolves,
+  // where a flash of "Which table?" is exactly the question D150 removed.
+  const showPicker = !locked && (active === null || expanded);
 
   return (
     <div className="space-y-2">
@@ -145,8 +147,10 @@ export function TableSessionPanel({
           active={active}
           roundsSent={roundsSent}
           expanded={expanded}
+          canChangeTable={!locked}
           onToggle={() => setExpanded((v) => !v)}
           onOpenBill={onOpenBill}
+          onOpenRounds={onOpenRounds}
         />
       ) : null}
       {showPicker ? (
@@ -168,14 +172,18 @@ function ActiveStrip({
   active,
   roundsSent,
   expanded,
+  canChangeTable,
   onToggle,
   onOpenBill,
+  onOpenRounds,
 }: {
   active: ActiveTableSession;
   roundsSent: number;
   expanded: boolean;
+  canChangeTable: boolean;
   onToggle: () => void;
   onOpenBill: () => void;
+  onOpenRounds: () => void;
 }) {
   return (
     <Card>
@@ -200,18 +208,26 @@ function ActiveStrip({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-expanded={expanded}
-            onClick={onToggle}
-            leftIcon={
-              <ChevronDown
-                className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
-              />
-            }
-          >
-            Change table
+          {canChangeTable ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-expanded={expanded}
+              onClick={onToggle}
+              leftIcon={
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                />
+              }
+            >
+              Change table
+            </Button>
+          ) : null}
+          {/* D150 — what is already on the table: every sent round, its kitchen
+              status, and the void. The waiter arriving from the floor's "View
+              order" came to read this, so it is the strip's primary action. */}
+          <Button size="sm" variant="secondary" onClick={onOpenRounds}>
+            Order so far
           </Button>
           {/* D71 — one door to the money: review the bill, split it, close it. */}
           <Button size="sm" variant="outline" onClick={onOpenBill}>
@@ -221,17 +237,6 @@ function ActiveStrip({
       </CardContent>
     </Card>
   );
-}
-
-interface OpenSessionRow {
-  id: string;
-  sessionNumber: string;
-  tableId: string;
-  openedAt: string;
-  guestCount: number | null;
-  /** D104 — this tab's own name; null unless an arrangement is being shared. */
-  tabName: string | null;
-  activeOrderId: string | null;
 }
 
 function Picker({
@@ -275,54 +280,23 @@ function Picker({
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [sessions, areaRows, joinedRows] = await Promise.all([
+      /*
+       * D150 — the furniture and its label map come from the shared resolver,
+       * which the floor plan's deep link reads too. The two used to be one
+       * inline block here, and a deep-linked session would have had to
+       * re-derive it (or settle for a session number on the strip).
+       */
+      const [sessions, furniture] = await Promise.all([
         tableSessions.listOpen(session, branchId).catch(() => [] as OpenSessionRow[]),
-        diningAreas.list(session, branchId, false).catch(() => [] as DiningAreaView[]),
-        /*
-         * D49/D50 — a separate request because a joined table has no area, so
-         * the per-area listing below cannot reach it. Swallowing the error
-         * matches the two calls above: a branch that has never joined tables
-         * must not lose its floor plan to a 403 on a feature it does not use.
-         */
-        openTables.list(session, branchId).catch(() => [] as OpenTableView[]),
+        loadBranchFurniture(session, branchId),
       ]);
-      const sorted = areaRows.slice().sort((a, b) => a.position - b.position);
-      const lists = await Promise.all(
-        sorted.map((a) => restaurantTables.list(session, a.id, false).catch(() => [])),
-      );
-
-      /*
-       * EVERY area is loaded regardless of the filter, and the label map is
-       * built from every table in them. Two reasons, both of which produce a
-       * silent wrong answer otherwise: a session in a filtered-out area would
-       * lose its name entirely — leaving the waiter a chip labelled with a
-       * bare session number and no way to tell which table it is. The filter
-       * narrows what is DISPLAYED, never what is known.
-       *
-       * D91 — and every table is kept, not just the AVAILABLE ones. The
-       * state filter below decides what is shown; discarding the rest here
-       * would make "Open" a chip that can only ever be empty.
-       */
-      const labelMap = new Map<string, string>();
-      const byArea = new Map<string, RestaurantTableView[]>();
-      sorted.forEach((a, i) => {
-        const rows = lists[i] ?? [];
-        for (const t of rows) labelMap.set(t.id, t.label ?? t.code);
-        byArea.set(a.id, rows);
-      });
-      /*
-       * D49/D50 — joined tables go into the SAME label map. A session on one
-       * is returned by `listOpen` like any other, so without this the strip
-       * above falls through to `s.sessionNumber` and the waiter is asked to
-       * recognise their party by "TS-000042".
-       */
-      for (const t of joinedRows) labelMap.set(t.id, t.label ?? t.code);
+      const sorted = furniture.areas;
 
       setOpen(sessions as OpenSessionRow[]);
       setAreas(sorted);
-      setTablesByArea(byArea);
-      setJoined(joinedRows);
-      setLabels(labelMap);
+      setTablesByArea(furniture.tablesByArea);
+      setJoined(furniture.joined);
+      setLabels(furniture.labels);
       /*
        * With no "All" option there must always be a valid selection, so the
        * first area is chosen on load — and re-chosen if a refresh archived
@@ -440,20 +414,7 @@ function Picker({
 
   /** Resume a session the user already has — the strip and the grid share it. */
   const resume = React.useCallback(
-    (s: OpenSessionRow) => {
-      const table = labels.get(s.tableId);
-      onPick({
-        id: s.id,
-        sessionNumber: s.sessionNumber,
-        // D104 — two tabs on one arrangement resolve to the same table name, so
-        // without the tab the POS header, the bill sheet and this chip would
-        // all read identically for two different parties.
-        tableLabel: table ? tabLabel(table, s.tabName) : s.sessionNumber,
-        openedAt: s.openedAt,
-        guestCount: s.guestCount,
-        orderId: s.activeOrderId,
-      });
-    },
+    (s: OpenSessionRow) => onPick(activeSessionFrom(s, labels)),
     [labels, onPick],
   );
 

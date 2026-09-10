@@ -8484,6 +8484,68 @@ wire. Existing rows reopen in the right mode, read from that same shape.
 a threshold is a product question, not a bug — the editor now matches what the
 engine does rather than promising what it does not.
 
+### D150 — a table's order is taken on the POS; "View order" opens it there
+
+**Asked by the PO, 2026-09-10**, looking at the floor plan: *"View order navigates
+to another view — there is no image view there. Remove that and use the POS
+view, without the tables, because we already chose one by tapping View order."*
+
+**What was there.** Two order-composition screens for one job. `/pos?mode=dine-in`
+(D69/D87) and `/tables/session/[id]` (`OrderEntry`) both built a round for a table
+and sent it to the kitchen, and the second one was the older of the two: its menu
+was a grid of name-and-price cards, because every POS improvement since had
+landed on one screen only. Item photos (D86), server-side search over dietary
+tags and subcategories (D45), the sold-out switch (D101), variants in the
+Customise dialog (D46), per-line discounts, the cart promotion line (D138) — all
+of them are POS-side, and the waiters who take most of a restaurant's orders were
+looking at the screen without them.
+
+**Now.** The floor plan's "View order" — on a table card and on every tab of an
+arrangement — opens `/pos?mode=dine-in&sessionId=<id>`: the ordinary POS, bound
+to that session. The table is not asked for, because tapping that card is the
+answer: the picker is absent rather than collapsed, the header names the table
+instead of "Counter 1", and the way back is "Back to floor", which is the
+navigation the old screen had. `/tables/session/[id]` is kept as a redirect (it
+is on the floor's bookmarks) and `OrderEntry` is deleted.
+
+`?sessionId=` was already being WRITTEN before today: the orders queue's "Open in
+POS" composes that exact URL, and the POS page read only `?mode=`. That button is
+still disabled for a second reason (E18 — `UnifiedOrderView` carries no session
+id, so `deriveSessionId` returns `''`), so nobody had reached the hole; the
+reading end is now done, and E18 is all that is left between the queue's row and
+the table's POS.
+
+**The half the POS was missing.** `OrderEntry` answered a question the POS could
+not: *what has this table already got, and where has the kitchen got to with it*.
+The bill sheet (D71) prices the order but says nothing about whether it is
+cooked, and `ORDER_VOID_SENT` had no home outside the retired screen. Both now
+live in "Order so far" on the session strip — rounds newest-first with the
+kitchen's status per round and per line, voided lines struck through rather than
+dropped, and Void behind the same permission it always had. It polls at the
+floor's 8 s while open.
+
+**Two things the strip was getting wrong, fixed with it.** The rounds count was a
+counter starting at 0 on every mount, so a table with four rounds told the next
+waiter "nothing sent yet" — it is now read from the session detail, excluding
+DRAFT rounds. And the table label is resolved in one place
+(`lib/restaurant/active-session.ts`, per D28/D31): no endpoint returns it, so it
+is composed from the area listings plus the open-tables listing (D49/D50 — an
+arrangement belongs to no area and is absent from every per-area read), which the
+picker used to do inline and a deep link had no way to reach.
+
+**Deliberately NOT carried over: the D50 release reminder.** `OrderEntry`'s close
+interrupted close→bill when the session's arrangement still held tables another
+party was using. D105 made a table joinable only while AVAILABLE, so no table can
+be a member of two live arrangements, so `stillReserved` is now always empty —
+the prompt could not fire. It is not re-implemented on the POS close path, which
+never had it.
+
+**Not changed:** the dine-in send, the bill sheet and its split, the permissions
+(`ORDER_SEND_TO_KITCHEN` to send, `BILL_SPLIT` to divide, `TABLE_CLOSE` to
+close), the floor plan itself, and the food-ready badge and its per-device ack
+(D112) — the ack still fires on the same tap, now carrying the waiter into the
+POS.
+
 ## Open decisions
 
 | ID | Question | Needed by |

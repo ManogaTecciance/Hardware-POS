@@ -142,7 +142,11 @@ afterEach(() => {
   tablesFor.mockImplementation((areaId: string) => TABLES[areaId] ?? []);
 });
 
-const panel = (active: ActiveTableSession | null, onPick = vi.fn()) =>
+const panel = (
+  active: ActiveTableSession | null,
+  onPick = vi.fn(),
+  extra: { locked?: boolean; onOpenRounds?: () => void } = {},
+) =>
   render(
     <TableSessionPanel
       session={session}
@@ -150,7 +154,9 @@ const panel = (active: ActiveTableSession | null, onPick = vi.fn()) =>
       active={active}
       onPick={onPick}
       onOpenBill={vi.fn()}
+      onOpenRounds={extra.onOpenRounds ?? vi.fn()}
       roundsSent={0}
+      locked={extra.locked ?? false}
     />,
   );
 
@@ -462,6 +468,7 @@ describe('an active session', () => {
         }}
         onPick={vi.fn()}
         onOpenBill={onOpenBill}
+        onOpenRounds={vi.fn()}
         roundsSent={2}
       />,
     );
@@ -501,6 +508,7 @@ describe('an active session', () => {
         }}
         onPick={onPick}
         onOpenBill={vi.fn()}
+        onOpenRounds={vi.fn()}
         roundsSent={2}
       />,
     );

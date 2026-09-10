@@ -188,7 +188,16 @@ describe('the food-ready badge (D112/D118)', () => {
     await settle();
     await waitFor(() => expect(screen.getByText('Food ready')).toBeTruthy());
 
-    fireEvent.click(screen.getByRole('link', { name: 'View order' }));
+    const viewOrder = screen.getByRole('link', { name: 'View order' });
+    /*
+     * D150 — a table card's View order opens the POS on THIS session. Asserted
+     * here rather than in its own case because this is the test that taps it:
+     * a link whose href had drifted would still clear the badge, so the ack
+     * assertions below would pass while the waiter landed nowhere useful.
+     */
+    expect(viewOrder.getAttribute('href')).toBe('/pos?mode=dine-in&sessionId=ses_1');
+
+    fireEvent.click(viewOrder);
     expect(screen.queryByText('Food ready')).toBeNull();
 
     await tickPoll();
@@ -241,8 +250,15 @@ describe('the badge on an arrangement with several tabs (D104 × D112)', () => {
     expect(screen.getByText('2 tabs')).toBeTruthy();
     const smiths = screen.getByRole('link', { name: /View Smiths/ });
     const jones = screen.getByRole('link', { name: /View Jones/ });
-    expect(smiths.getAttribute('href')).toBe('/tables/session/ses_a');
-    expect(jones.getAttribute('href')).toBe('/tables/session/ses_b');
+    /*
+     * D150 — each tab's link is the POS, bound to THAT tab's session. The
+     * session id in the query is the whole point: one arrangement, two
+     * parties, and the POS has no other way to tell which order it is adding
+     * to. (It used to be `/tables/session/<id>`, the retired order-entry
+     * screen, which redirects here now.)
+     */
+    expect(smiths.getAttribute('href')).toBe('/pos?mode=dine-in&sessionId=ses_a');
+    expect(jones.getAttribute('href')).toBe('/pos?mode=dine-in&sessionId=ses_b');
     expect(screen.getByRole('button', { name: /add a tab/i })).toBeTruthy();
 
     // Opening one tab answers ITS bump only — the other party's food is still up.
