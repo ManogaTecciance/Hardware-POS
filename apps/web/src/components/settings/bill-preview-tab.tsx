@@ -49,7 +49,7 @@ export function BillPreviewTab({
   /** The shop's timezone: a DocumentProfile is the settings plus this (main, 2026-09-01). */
   timezone: string;
   /**
-   * D153 — whose goods fill the sample. From the resolver, never decided
+   * D164 — whose goods fill the sample. From the resolver, never decided
    * here: this is a settings component, and a settings component that named a
    * business type is exactly what the D96 contract test forbids.
    */

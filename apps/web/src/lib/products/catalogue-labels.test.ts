@@ -1,5 +1,5 @@
 /**
- * D158 — the catalogue label resolvers.
+ * D169 — the catalogue label resolvers.
  *
  * ## What makes these assertions non-vacuous (D30)
  *
@@ -7,7 +7,7 @@
  * is NOT `—`. That pairing is the whole point: `—` is what the card shows for a
  * fact that is genuinely absent, so returning it while a catalogue is in flight
  * would not look broken — it would look like a product with no category. That
- * is the D156 bug exactly, and a test that only checked "it says something"
+ * is the D167 bug exactly, and a test that only checked "it says something"
  * would pass straight through it.
  *
  * The three states are asserted against the SAME product, so a resolver that
@@ -62,7 +62,7 @@ const ready = <T,>(rows: T[]): Lookup<T> => ({ state: 'ready', rows });
 const loading = <T,>(): Lookup<T> => ({ state: 'loading', rows: [] });
 const failed = <T,>(): Lookup<T> => ({ state: 'error', rows: [] });
 
-describe('D158 — categoryLabel', () => {
+describe('D169 — categoryLabel', () => {
   const withCategory = { categoryId: 'cat_1', subcategoryId: null };
   const uncategorised = { categoryId: null, subcategoryId: null };
 
@@ -70,7 +70,7 @@ describe('D158 — categoryLabel', () => {
     /*
      * The short-circuit. `categoryId` arrives WITH the product and is
      * authoritative, so a product that has no category must not sit on
-     * "Loading…" while a list it does not need is fetched. D156 fixed the
+     * "Loading…" while a list it does not need is fetched. D167 fixed the
      * opposite error one screen over; this is the guard against overcorrecting
      * into a slow answer where an instant true one exists.
      */
@@ -131,7 +131,7 @@ describe('D158 — categoryLabel', () => {
   });
 });
 
-describe('D158 — brandLabel', () => {
+describe('D169 — brandLabel', () => {
   it('answers instantly for a product with no brand', () => {
     // Both spellings of absent: the field is optional on the type, so a payload
     // that predates the declaration arrives as `undefined`, not `null`.
@@ -151,7 +151,7 @@ describe('D158 — brandLabel', () => {
   });
 });
 
-describe('D158 — humaniseKey', () => {
+describe('D169 — humaniseKey', () => {
   it('reads a stored key as words', () => {
     // An exact map, not a spot check: each input exercises a different
     // separator, and a resolver that handled only one of them would pass a
@@ -162,7 +162,7 @@ describe('D158 — humaniseKey', () => {
   });
 });
 
-describe('D158 — businessDetailRows', () => {
+describe('D169 — businessDetailRows', () => {
   const fields: AttributeField[] = [
     { key: 'material', label: 'Material', type: 'text' },
     { key: 'warrantyMonths', label: 'Warranty (months)', type: 'integer' },
@@ -212,7 +212,7 @@ describe('D158 — businessDetailRows', () => {
 
   it('keeps values whose field the tenant has since removed', () => {
     /*
-     * D150 lets a tenant REPLACE their business-details list. Products created
+     * D161 lets a tenant REPLACE their business-details list. Products created
      * under the old list still carry the old values, and hiding them would
      * silently lose data an operator typed in. They follow the schema fields,
      * humanised, because there is no tenant label left to use.

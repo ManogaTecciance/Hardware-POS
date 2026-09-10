@@ -1,5 +1,5 @@
 /**
- * D150 — the Business details tab appears for retail, and for nobody else.
+ * D161 — the Business details tab appears for retail, and for nobody else.
  *
  * ## Why this is a separate file from `settings-tabs.render.test.tsx`
  *
@@ -182,7 +182,7 @@ const businessDetailsTab = () =>
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
-describe('D150 — who is shown the Business details tab', () => {
+describe('D161 — who is shown the Business details tab', () => {
   it('a retail workspace is offered it', async () => {
     await renderAs('RETAIL');
 

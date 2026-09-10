@@ -7212,9 +7212,9 @@ invisibility check (an ordinary `WHOLE` create in a hardware workspace
 notices nothing) and a second domain (food service is refused too, proving
 the registry is read).
 
-## D135 — a tenant picks its catalogue attribute pack — **SUPERSEDED by D150**
+## D135 — a tenant picks its catalogue attribute pack — **SUPERSEDED by D161**
 
-> **Withdrawn unbuilt, 2026-09-09.** D150 answers the same problem by letting a
+> **Withdrawn unbuilt, 2026-09-09.** D161 answers the same problem by letting a
 > tenant define its OWN field list rather than pick from lists we wrote, which
 > needs no `cataloguePack` column and no migration. The two traps this decision
 > identified were both real and are both answered there. Kept in full below
@@ -8493,7 +8493,7 @@ a threshold is a product question, not a bug — the editor now matches what the
 engine does rather than promising what it does not.
 
 <!--
-  D150-D154 were authored as D138-D142 on `feature/retail-template-v2`
+  D161-D165 were authored as D138-D142 on `feature/retail-template-v2`
   and renumbered on 2026-09-10 when `feature/post-merge-changes-reshin`
   was merged in. D138-D141 there had arrived from
   `merge/restaurant-changes` and D142-D148 were that branch's own,
@@ -8501,7 +8501,7 @@ engine does rather than promising what it does not.
   existing commit message points at a decision that changed meaning.
 -->
 
-## D150 — a tenant defines its own business details, and D135's packs are withdrawn
+### D161 — a tenant defines its own business details, and D135's packs are withdrawn
 
 **Status:** accepted and **built**, 2026-09-09. **Retail only.** No schema change,
 no migration. **Supersedes D135**, which is withdrawn unbuilt.
@@ -8645,7 +8645,7 @@ seed, not a schema.
 
 ---
 
-## D151 — the Inventory tab bar is per workspace: Attributes and Barcodes are not for everyone
+### D162 — the Inventory tab bar is per workspace: Attributes and Barcodes are not for everyone
 
 **Status:** accepted and **built**, 2026-09-09. No schema change, no migration,
 no route removed, no API gate changed.
@@ -8753,7 +8753,7 @@ in the spec.
 
 ---
 
-## D152 — retail's bill prints on a roll; its quotations stay on the letterhead
+### D163 — retail's bill prints on a roll; its quotations stay on the letterhead
 
 **Status:** accepted and **built**, 2026-09-09. Frontend only. No schema change,
 no migration, no route removed, no server behaviour changed.
@@ -8871,7 +8871,7 @@ not what was asked for; it is recorded here rather than fixed in passing.
 
 ---
 
-## D153 — a preview shows the operator's own trade, and their own name
+### D164 — a preview shows the operator's own trade, and their own name
 
 **Status:** accepted and **built**, 2026-09-09. Preview/sample data only. No
 schema change, no migration, no change to any real document.
@@ -8895,7 +8895,7 @@ also reads as a bug, because it is one.
 
 `buildSampleBill` held one hard-coded catalogue, and it was a menu. That was
 correct while food service was the only domain that previewed a thermal bill.
-**D152 gave retail a thermal bill the day before**, and this list stopped being
+**D163 gave retail a thermal bill the day before**, and this list stopped being
 read only by restaurants.
 
 The service charge and the table are the same defect wearing different clothes:
@@ -8953,13 +8953,13 @@ preview at all (D96).
 
 ---
 
-## D154 — a vertical declares the goods its document previews show
+### D165 — a vertical declares the goods its document previews show
 
 **Status:** accepted and **built**, 2026-09-10. Preview/sample data only. No schema
-change, no migration, no change to any real document. **Completes D153**, which
+change, no migration, no change to any real document. **Completes D164**, which
 fixed the thermal bill's sample and deliberately left this one.
 
-### The problem D153 recorded and did not fix
+### The problem D164 recorded and did not fix
 
 `SAMPLE_ITEMS` in `documents.service.ts` was a hardware catalogue — Portland
 Cement, TMT Steel Bar, PVC Pipe — and it was the **only** sample catalogue in the
@@ -8972,9 +8972,9 @@ product opens Preview to see what their quotation will look like; seeing another
 trade's goods is the moment they decide whether the product was built for them.
 That is why it was worth returning to.
 
-### Why D153 stopped, and what changed
+### Why D164 stopped, and what changed
 
-D153 fixed the thermal bill's sample cheaply because that document is rendered
+D164 fixed the thermal bill's sample cheaply because that document is rendered
 **client-side**, where a presentation resolver was already in the call path. The
 A4 document is rendered **server-side**, where none exists — so the server would
 have to choose a catalogue by business type, and `businessType === 'RETAIL'` in a
@@ -8989,7 +8989,7 @@ place anywhere, so there is nothing for D56 to forbid.
 ```ts
 readonly catalogue: {
   readonly attributeSchema: readonly AttributeField[];
-  readonly sampleItems?: readonly SampleCatalogueItem[];   // D154
+  readonly sampleItems?: readonly SampleCatalogueItem[];   // D165
 };
 ```
 
@@ -8998,7 +8998,7 @@ readonly catalogue: {
 | **HARDWARE** | its original eight lines | **unchanged** |
 | **RETAIL** | clothing and groceries | its own trade |
 | **GENERAL** | nothing | neutral filler |
-| **RESTAURANT / CAFE / BAKERY / HOTEL** | nothing | neutral filler — and they never render the A4 preview at all (D96/D152) |
+| **RESTAURANT / CAFE / BAKERY / HOTEL** | nothing | neutral filler — and they never render the A4 preview at all (D96/D163) |
 
 ### Why the field is optional, when its own block says required
 
@@ -9008,7 +9008,7 @@ failure mode is the one this whole module exists to end."*
 
 That rule is right, and this is the exception that proves its reasoning rather
 than an erosion of it. The failure mode it guards against is a vertical silently
-inheriting **another vertical's** answer — precisely the defect D154 fixes.
+inheriting **another vertical's** answer — precisely the defect D165 fixes.
 
 **Omission here falls back to a NEUTRAL list**, not to hardware's. `Standard Item
 1`, `Standard Item 2`, and so on: dull, but it claims no trade. Silence therefore
@@ -9074,7 +9074,7 @@ query and an empty-catalogue fallback, and it would have changed hardware's
 preview — an outcome the isolation rule made unattractive even though the result
 would arguably be better. It stays available as a later refinement.
 
-**The thermal bill keeps its own separate sample** (D153), selected by a
+**The thermal bill keeps its own separate sample** (D164), selected by a
 presentation flag rather than by the descriptor. The two mechanisms now differ,
 which is worth revisiting if a third document surface ever appears; the goods
 themselves were deliberately kept in step, so a retail shop's two documents
@@ -9082,12 +9082,12 @@ illustrate the same shop.
 
 ---
 
-## D155 — a same-product offer says how close it is, and never blocks the sale
+### D166 — a same-product offer says how close it is, and never blocks the sale
 
-> **SUPERSEDED by [D160](#d160) on 2026-09-10, the same day.** The
+> **SUPERSEDED by [D171](#d160) on 2026-09-10, the same day.** The
 > arithmetic below still stands and is still in the code; the POLICY does
 > not. The PO reversed it: every unfinished `BUY_X_GET_Y` now blocks payment,
-> same-product ones included. Read D160 before acting on anything here.
+> same-product ones included. Read D171 before acting on anything here.
 
 **Status:** superseded. Was accepted and built 2026-09-10. Frontend and
 shared only. No schema change, no migration, no server behaviour changed.
@@ -9200,7 +9200,7 @@ screen that had kept it.
 
 ---
 
-## D156 — an empty list is not an answer until somebody has answered
+### D167 — an empty list is not an answer until somebody has answered
 
 **Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
 no migration, no API change.
@@ -9305,7 +9305,7 @@ two cases: the shape claim and the price.
 
 ---
 
-## D157 — two previews, one at a time
+### D168 — two previews, one at a time
 
 **Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
 no migration, no API change. Retail only.
@@ -9315,9 +9315,9 @@ no migration, no API change. Retail only.
 > "cant we use a switch button or something display thermal-preview or
 > A4-preview without adding one below other"
 
-### The problem D152 left behind
+### The problem D163 left behind
 
-D152 gave retail both previews, because retail prints both, and stacked them:
+D163 gave retail both previews, because retail prints both, and stacked them:
 bill on top, quotation underneath. That was the right content in the wrong
 arrangement. A thermal bill is a **metre of paper** rendered at full length, so
 reaching the quotation meant scrolling past an entire receipt, and neither
@@ -9359,7 +9359,7 @@ segmented control with one segment is a dead control, which is what D96 exists
 to remove. Both are asserted directly, each paired with the preview it *does*
 have so "no tabs" cannot pass because the page rendered nothing.
 
-D152's and D153's eleven existing assertions are untouched (D16) and still
+D163's and D164's eleven existing assertions are untouched (D16) and still
 green. They query by title and label, which find hidden nodes, so they state
 what retail previews — not where on the page it sits. That is the right
 division: this decision changed the arrangement, not the content.
@@ -9384,7 +9384,7 @@ visible panel, and fails against the stacked layout for the right reason.
 
 ---
 
-## D158 — the Overview shows what the product IS
+### D169 — the Overview shows what the product IS
 
 **Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
 no migration, **no API change** — every field below already crossed the wire.
@@ -9431,7 +9431,7 @@ with no brand asks for no brands. Variations cost nothing new.
 ### Every answer has three states, not two
 
 The resolvers live in `catalogue-labels.ts` as pure functions because the rule
-they encode is D156's, one card over:
+they encode is D167's, one card over:
 
 > the ID is authoritative and arrives WITH the product;
 > only the NAME needs the catalogue, so only the name waits.
@@ -9443,13 +9443,13 @@ they encode is D156's, one card over:
 | id, catalogue failed | `Could not be loaded` |
 | id not in the catalogue | `No longer in the catalogue` — it HAS one; we cannot name it |
 
-That first row is the guard against overcorrecting D156 into a slow answer
+That first row is the guard against overcorrecting D167 into a slow answer
 where an instant true one exists. The fourth is a real state: brands are
 archived, categories are deleted while a page is open.
 
 ### Consequences that were followed through
 
-**The variations fetch now reports its outcome.** D156 deliberately left this
+**The variations fetch now reports its outcome.** D167 deliberately left this
 one flattened to `[]` on failure and said why: *"neither changes what the
 product IS"* — true while nothing displayed it. A Variations card makes `[]`
 from a failure and `[]` from a product with no dimensions two different facts,
@@ -9463,7 +9463,7 @@ every operator on those verticals reads past forever.
 `GET /products/attribute-schema` answers `{fields: []}` (verified live), so
 those workspaces get no card at all rather than an empty one.
 
-**A removed field still shows its values.** D150 lets a tenant replace their
+**A removed field still shows its values.** D161 lets a tenant replace their
 business-details list; products created under the old one still carry those
 values. Schema fields render first in the tenant's own order, then any leftover
 keys, humanised — hiding them would silently lose data somebody typed in.
@@ -9507,7 +9507,7 @@ Nine mutations, each failing the case that carries its decision:
 
 ---
 
-## D159 — the SKU you can generate, and the opening stock that lands
+### D170 — the SKU you can generate, and the opening stock that lands
 
 **Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
 no migration, no API change. Every business type.
@@ -9605,7 +9605,7 @@ extra digits were being rounded away in silence beforehand either way.
 
 ### 4. "Step 3 of 4" under a five-dot stepper
 
-Four of the five steps hardcoded their position. D150 added Business details as
+Four of the five steps hardcoded their position. D161 added Business details as
 a fifth and gave only the new step a computed label. The step list is
 per-tenant in any case (the attributes step exists only where the domain
 declares fields), so no literal can be right for every workspace. One
@@ -9647,10 +9647,10 @@ Twelve mutations, each failing the case that carries its decision:
 
 ---
 
-## D160 — every buy-X-get-Y offer blocks the sale until it is complete
+### D171 — every buy-X-get-Y offer blocks the sale until it is complete
 
 **Status:** accepted and **built**, 2026-09-10. **Supersedes the non-blocking
-half of [D155](#d155).** Frontend only. No schema change, no migration, no API
+half of [D166](#d155).** Frontend only. No schema change, no migration, no API
 change. Every business type.
 
 ### What was asked
@@ -9660,9 +9660,9 @@ change. Every business type.
 > to block utill add that, every buy x get y promotion needed to handle like
 > that"
 
-### What D155 decided, and why it is reversed
+### What D166 decided, and why it is reversed
 
-D155 asked the same question and answered it the other way, on my
+D166 asked the same question and answered it the other way, on my
 recommendation and with the PO's agreement at the time:
 
 > "You're totally right on the math — blocking a legitimate 5-tie sale would be
@@ -9683,7 +9683,7 @@ the cashier that some offers are optional.
 
 **Every unfinished `BUY_X_GET_Y` blocks payment, and says so identically.**
 
-One list (`incompleteOffers`), one notice, one gate. The muted D155 prompt is
+One list (`incompleteOffers`), one notice, one gate. The muted D166 prompt is
 gone; both shapes now render the same primary-coloured 🎁 card with the same
 sentence and the same "Payment is unavailable until the offer is complete."
 
@@ -9748,7 +9748,7 @@ Seven mutations, each failing the case that carries its decision:
 
 | Mutation | Fails |
 |---|---|
-| the same-product half is dropped from the union (D155's behaviour) | all three "blocks" cases |
+| the same-product half is dropped from the union (D166's behaviour) | all three "blocks" cases |
 | the cross-product half is dropped | the sameness case and the both-short case |
 | the till stops gating on unfinished offers | all three "blocks" cases |
 | the notice is not rendered | all three |
@@ -9758,7 +9758,7 @@ Seven mutations, each failing the case that carries its decision:
 
 ---
 
-## D161 — the dashboard's View Reports button opens Reports
+### D172 — the dashboard's View Reports button opens Reports
 
 **Status:** accepted and **built**, 2026-09-10. Frontend only, one href. No
 schema change, no migration, no API change.

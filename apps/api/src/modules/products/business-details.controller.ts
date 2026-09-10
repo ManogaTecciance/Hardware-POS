@@ -8,7 +8,7 @@ import { BusinessDetailsService } from './business-details.service';
 import { ReplaceBusinessDetailsDto } from './dto/business-details.dto';
 
 /**
- * D150 — `/products/business-details`: the tenant's own catalogue fields.
+ * D161 — `/products/business-details`: the tenant's own catalogue fields.
  *
  * Configuration, not catalogue data, so the write takes `PRODUCT_MANAGE` while
  * the read takes `PRODUCT_READ` — the same split `/attribute-library` uses for

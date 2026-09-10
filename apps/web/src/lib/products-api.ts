@@ -25,7 +25,7 @@ export interface ManagedProduct {
   /**
    * D133 (`8.9`) — the brand this product carries, or null.
    *
-   * D158 — DECLARED, not added: `GET /products/:id` returns the whole
+   * D169 — DECLARED, not added: `GET /products/:id` returns the whole
    * Prisma row and `toManaged` spreads it, so this field has always crossed
    * the wire and always survived the mapper. It was simply not written down
    * here, which is why nothing could read it. Verified against a live

@@ -1,5 +1,5 @@
 /**
- * D158 — turning the IDs on a product into the words an operator reads.
+ * D169 — turning the IDs on a product into the words an operator reads.
  *
  * The product payload carries `categoryId`, `subcategoryId` and `brandId`, and
  * an `attributes` document keyed by opaque strings. None of those are readable.
@@ -7,7 +7,7 @@
  * here has three moments, not two: not asked yet, asked and answered, asked and
  * failed.
  *
- * That distinction is the whole reason this file exists as pure functions. D156
+ * That distinction is the whole reason this file exists as pure functions. D167
  * was a bug of exactly this shape one screen over — an empty array that had not
  * been filled yet was read as fact, and the page confidently described a
  * product it knew nothing about. The rule that came out of it holds here:
@@ -50,7 +50,7 @@ const FAILED = 'Could not be loaded';
  *
  * `id === null` short-circuits BEFORE `state` is consulted: a product with no
  * category is uncategorised whether or not the catalogue ever arrives, and
- * making it wait would be the mirror of the D156 bug — a slow answer in place
+ * making it wait would be the mirror of the D167 bug — a slow answer in place
  * of an instant true one.
  */
 function resolve(id: string | null | undefined, lookup: Lookup<unknown>, name: () => string | null): string {
@@ -147,7 +147,7 @@ function formatValue(value: unknown): string | null {
  * Two rules, both deliberate:
  *
  * 1. **Schema order first, then leftovers.** A tenant may replace their
- *    business-details list (D150), and products created under the old list
+ *    business-details list (D161), and products created under the old list
  *    still carry those values. Rendering only what the schema names would hide
  *    real data the operator entered, so unknown keys follow, humanised.
  *

@@ -246,7 +246,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /products/sellable': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/attribute-schema': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   /*
-   * D150 — the tenant's own business details, beside the schema read it
+   * D161 — the tenant's own business details, beside the schema read it
    * feeds. SHARED CORE and permission-gated, deliberately: whether a workspace
    * may define its own catalogue fields is a CAPABILITY of its business type,
    * which `BusinessDetailsService` reads and refuses on (D56). A module gate

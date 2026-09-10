@@ -1,5 +1,5 @@
 /**
- * D150 — deriving the stored key for a business detail from its label.
+ * D161 — deriving the stored key for a business detail from its label.
  *
  * ## Why the operator never types a key
  *

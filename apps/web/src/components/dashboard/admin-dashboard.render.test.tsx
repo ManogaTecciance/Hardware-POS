@@ -1,5 +1,5 @@
 /**
- * D161 — the dashboard's quick actions go where they say they go.
+ * D172 — the dashboard's quick actions go where they say they go.
  *
  * ## What was reported
  *
@@ -133,7 +133,7 @@ function hrefsFor(label: string): string[] {
 
 afterEach(cleanup);
 
-describe('D161 — dashboard quick actions', () => {
+describe('D172 — dashboard quick actions', () => {
   it('View Reports opens Reports, not the sales list', () => {
     mount();
 
@@ -162,7 +162,7 @@ describe('D161 — dashboard quick actions', () => {
   });
 
   it('is offered only to an operator who may read reports', () => {
-    // The gate, unchanged by D161 and asserted so the fix cannot have widened
+    // The gate, unchanged by D172 and asserted so the fix cannot have widened
     // it: the same REPORT_READ the sidebar's /reports entry requires.
     mount((p) => p !== Permission.REPORT_READ);
 

@@ -53,7 +53,7 @@ import { cn } from '@/lib/utils';
  * D90 — "Hours" likewise: it edits the branch's opening hours, which only a
  * food-service tenant has. Appended for the same reason.
  *
- * D150 — "Business details" is retail-only for now, and appended for the
+ * D161 — "Business details" is retail-only for now, and appended for the
  * third time for the third time's reason: a bookmark on any existing tab
  * still lands where it did.
  */
@@ -90,11 +90,11 @@ function groupedTimeZones(): { region: string; zones: string[] }[] {
 }
 type Tab = (typeof TABS)[number];
 
-/** D157 — the two documents a retail workspace can preview. */
+/** D168 — the two documents a retail workspace can preview. */
 type PreviewSurface = 'bill' | 'a4';
 
 /**
- * D157 — one segment of the preview toggle.
+ * D168 — one segment of the preview toggle.
  *
  * The SEMANTICS come from `Tabs` (roving arrow keys, `role="tab"`,
  * `aria-selected`, a `role="tabpanel"` that hides rather than unmounts).
@@ -122,7 +122,7 @@ function previewSegment(active: boolean): string {
 const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours'];
 
 /**
- * D150 — the tab is shown only where the business type offers the feature.
+ * D161 — the tab is shown only where the business type offers the feature.
  *
  * A SECOND list rather than a member of the one above, because they are
  * different questions with different answers: Charges and Hours ask whether a
@@ -141,7 +141,7 @@ const CONFIGURABLE_CATALOGUE_TABS: readonly Tab[] = ['Business details'];
  * bottom of the viewport, so it sat on top of the Save button that does apply
  * to what they just edited. Two Save buttons, the visible one wrong.
  */
-// D150 — Business details writes `TenantSettings`, not the document profile.
+// D161 — Business details writes `TenantSettings`, not the document profile.
 const SELF_SAVING_TABS: readonly Tab[] = [
   'Charges',
   'Hours',
@@ -188,7 +188,7 @@ export default function SettingsPage() {
   const [taxRate, setTaxRate] = React.useState('');
   const [tab, setTab] = React.useState<Tab>('Business');
   /*
-   * D157 — which document the Preview tab is showing, for the one surface
+   * D168 — which document the Preview tab is showing, for the one surface
    * that prints both (retail). Held here rather than inside the Preview
    * panel so the choice survives a trip to Branding and back, which is the
    * loop an operator actually works in: change the logo, look at the bill,
@@ -497,7 +497,7 @@ export default function SettingsPage() {
         )
       ) : tab === 'Business details' ? (
         /*
-         * D150 — its own save button, for the same reason Charges has one: it
+         * D161 — its own save button, for the same reason Charges has one: it
          * writes `TenantSettings.data.catalogue`, which the sticky document bar
          * below knows nothing about. Unlike Charges it needs no branch — the
          * fields a business tracks are the same in every one of its shops, so
@@ -527,9 +527,9 @@ export default function SettingsPage() {
         />
       ) : view.previewKind === 'THERMAL_BILL_AND_A4' ? (
         /*
-         * D152 — retail prints both, so it previews both.
+         * D163 — retail prints both, so it previews both.
          *
-         * D157 — but ONE AT A TIME. They were stacked, and a thermal bill is
+         * D168 — but ONE AT A TIME. They were stacked, and a thermal bill is
          * a metre of paper: reaching the quotation meant scrolling past a
          * whole receipt, and neither preview could be seen whole.
          *
@@ -1006,7 +1006,7 @@ function LayoutTab({
    * rows appear when they are non-zero, and a continuous roll has no page to
    * lay out.
    *
-   * D152 — and the two are no longer mutually exclusive. This was an early
+   * D163 — and the two are no longer mutually exclusive. This was an early
    * RETURN, because every workspace that printed a bill printed ONLY a bill.
    * Retail broke that: its sale is a slip and its quotation is a letterhead,
    * so it needs the summary AND the page controls, and an early return would
@@ -1101,7 +1101,7 @@ function LayoutTab({
 }
 
 /**
- * D152 — `showA4SaleDocument` decides whether "Invoice / Bill" is offered.
+ * D163 — `showA4SaleDocument` decides whether "Invoice / Bill" is offered.
  *
  * A retail workspace prints its sale on a roll now, so an A4 invoice is a
  * document it cannot produce. Previewing one is the dead control D96 was
@@ -1158,7 +1158,7 @@ function PreviewTab({
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">
-          {/* D152 -- associated with its control. The label was floating, so
+          {/* D163 -- associated with its control. The label was floating, so
               the chooser had no accessible name: a screen reader announced an
               unlabelled combobox, and it could not be found by its label. */}
           <Label htmlFor="preview-document-type">Document type</Label>

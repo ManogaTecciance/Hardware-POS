@@ -31,7 +31,7 @@ const prismaStub = {
   tenantSettings: { findMany: jest.fn(async () => []) },
 } as any;
 const pdfStub = { available: true, htmlToPdf: jest.fn(async () => null) } as any;
-// D154 — only the PREVIEW path reads the profile; a real exchange document is
+// D165 — only the PREVIEW path reads the profile; a real exchange document is
 // built from the exchange itself, so this stub exists to satisfy the
 // constructor and is deliberately never expected to be consulted here.
 const profilesStub = {

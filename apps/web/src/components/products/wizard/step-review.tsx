@@ -20,9 +20,9 @@ interface Props {
   state: WizardState;
   categories: CategoryNode[];
   /**
-   * D159 — "Step 3 of 5", computed by the shell from the step list.
+   * D170 — "Step 3 of 5", computed by the shell from the step list.
    *
-   * A literal reading "of 4" until D150 added a fifth step. The list is
+   * A literal reading "of 4" until D161 added a fifth step. The list is
    * per-tenant, so no literal can be right for every workspace.
    */
   positionLabel: string;

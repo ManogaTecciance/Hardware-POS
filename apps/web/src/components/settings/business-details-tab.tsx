@@ -18,7 +18,7 @@ import {
 import type { AttributeField } from '@hardware-pos/shared';
 
 /**
- * D150 — "Business details": the fields the Add Product wizard collects.
+ * D161 — "Business details": the fields the Add Product wizard collects.
  *
  * ## What this edits
  *

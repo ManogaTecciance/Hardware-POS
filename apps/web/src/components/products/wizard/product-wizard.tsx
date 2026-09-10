@@ -513,9 +513,9 @@ export function ProductWizard(props: Props) {
   }
 
   /*
-   * D159 — ONE step counter, computed from the step list.
+   * D170 — ONE step counter, computed from the step list.
    *
-   * Four of the five steps hardcoded "Step N of 4". D150 added Business
+   * Four of the five steps hardcoded "Step N of 4". D161 added Business
    * details as a fifth and gave only the new step a computed label, so
    * every other panel has been reading "of 4" under a five-dot stepper
    * ever since. The list is per-tenant (the attributes step exists only
@@ -722,7 +722,7 @@ async function runCreate(
   setCreatedId(created.id);
 
   /*
-   * D159 — opening stock for a SINGLE product.
+   * D170 — opening stock for a SINGLE product.
    *
    * It had nowhere to go before this. `ProductCreatePayload` has no
    * `quantityOnHand` field at all, so the number the operator typed was

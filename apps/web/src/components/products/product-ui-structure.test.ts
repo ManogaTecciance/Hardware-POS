@@ -165,7 +165,7 @@ describe('inventory-mode decisions live in the resolver, not in JSX', () => {
     // "components must not compare a mode themselves" rule above continues to
     // enforce the boundary.
     //
-    // D151 added `inventory-tabs.tsx`. It calls the runtime resolver
+    // D162 added `inventory-tabs.tsx`. It calls the runtime resolver
     // (`resolveCatalogueTabs`) rather than only consuming a type, and that is
     // the point: the tab bar asks which catalogue sub-surfaces a workspace has
     // and reads flags back. It is an importer BECAUSE it refuses to decide for

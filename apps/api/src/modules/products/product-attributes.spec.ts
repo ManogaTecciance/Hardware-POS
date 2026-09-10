@@ -106,7 +106,7 @@ describe('coerceAttributeQueryValue', () => {
 
 describe('ProductAttributesService', () => {
   /*
-   * D150 — built with a REAL `BusinessDetailsService`, not a stub of its answer.
+   * D161 — built with a REAL `BusinessDetailsService`, not a stub of its answer.
    *
    * `schemaForTenant` now delegates the “tenant override or domain default”
    * decision, and stubbing that would make these assertions tautological: they

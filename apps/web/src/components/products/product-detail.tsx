@@ -75,7 +75,7 @@ interface Props {
   product: ManagedProduct;
   variants: ProductVariant[];
   /**
-   * D156 — whether `variants` is an ANSWER or just its initial value.
+   * D167 — whether `variants` is an ANSWER or just its initial value.
    *
    * The list arrives after the product does, so an empty array means three
    * different things at three different moments: not asked yet, asked and
@@ -84,20 +84,20 @@ interface Props {
    */
   variantsState: 'loading' | 'ready' | 'error';
   /**
-   * D158 — whether `variations` is an answer, on the same terms.
+   * D169 — whether `variations` is an answer, on the same terms.
    *
-   * D156 flattened this list's failure to `[]` and said why: nothing
+   * D167 flattened this list's failure to `[]` and said why: nothing
    * displayed it. The Variations card does, so it needs the distinction.
    */
   variationsState: 'loading' | 'ready' | 'error';
   /**
-   * D158 — catalogues that name the product's ids. NOT facts about the
+   * D169 — catalogues that name the product's ids. NOT facts about the
    * product: whether it HAS a category is already known from the payload,
    * so a slow or failed catalogue changes the wording and nothing else.
    */
   categories: Lookup<CategoryNode>;
   brands: Lookup<Brand>;
-  /** D158/D64 — the tenant's labels for `product.attributes`. */
+  /** D169/D64 — the tenant's labels for `product.attributes`. */
   attributeFields: AttributeField[];
   variations: ProductVariationDimension[];
   branches: BranchSummary[];
@@ -219,7 +219,7 @@ export function ProductDetail({
   // ── Derived counts + KPIs ────────────────────────────────────────────────
   const activeVariantCount = variants.filter((v) => v.isActive).length;
   /*
-   * D156 — what the product IS, versus what we can say about it yet.
+   * D167 — what the product IS, versus what we can say about it yet.
    *
    * `product.hasVariants` is authoritative and arrives with the product, so
    * the SHAPE is known immediately. Only the count and the price range need
@@ -541,13 +541,13 @@ function OverviewTab({
   variants: ProductVariant[];
   latestCost: number | null;
   hasVariants: boolean;
-  /** D156 — resolved by the parent, like `hasVariants` above it. */
+  /** D167 — resolved by the parent, like `hasVariants` above it. */
   variantsState: 'loading' | 'ready' | 'error';
-  /** D156 — false while a variant product's list is still in flight. */
+  /** D167 — false while a variant product's list is still in flight. */
   variantFactsKnown: boolean;
   /** D101 — resolved by the parent; no kind comparison in here. */
   itemStock: ItemStockPresentation;
-  /** D158 — the dimensions this product varies on, and their options. */
+  /** D169 — the dimensions this product varies on, and their options. */
   variations: ProductVariationDimension[];
   variationsState: 'loading' | 'ready' | 'error';
   categories: Lookup<CategoryNode>;
@@ -565,7 +565,7 @@ function OverviewTab({
   const activePrices = activeVariants.map((v) => Number(v.unitPrice));
 
   /*
-   * D158/D64 — "Behaviour goes in columns. Description goes in
+   * D169/D64 — "Behaviour goes in columns. Description goes in
    * `attributes`." This is the description, finally rendered: the values are
    * the product's own and the labels are the tenant's, resolved together so
    * a key the schema no longer names still shows what somebody typed.
@@ -612,7 +612,7 @@ function OverviewTab({
               }
             />
             {/*
-              * D158 — the ids are on the payload; only the NAMES wait on a
+              * D169 — the ids are on the payload; only the NAMES wait on a
               * catalogue. `categoryLabel` short-circuits on a null id, so an
               * uncategorised product reads "—" at once rather than sitting
               * on "Loading…" for a list it does not need.
@@ -647,7 +647,7 @@ function OverviewTab({
               <Kpi
                 label="Variants"
                 /*
-                 * D156 — three states, not two. A count is only shown once the
+                 * D167 — three states, not two. A count is only shown once the
                  * list is known; a failure says so rather than reporting a
                  * product shape it never learned.
                  */
@@ -693,7 +693,7 @@ function OverviewTab({
               <Kpi
                 label="Selling price"
                 /*
-                 * D156 — a variant product's price is the range across its
+                 * D167 — a variant product's price is the range across its
                  * variants. Until they land there is no honest figure: the
                  * parent's `unitPrice` is a legacy fallback (D44) and reads
                  * Rs 0.00 on every product created since.
@@ -722,7 +722,7 @@ function OverviewTab({
         </Card>
 
         {/*
-          * D158 — the shape of a variant product, which the page fetched
+          * D169 — the shape of a variant product, which the page fetched
           * and then never showed. An operator opening a 25-variant product
           * could see the count but not what it varied ON.
           */}
@@ -758,7 +758,7 @@ function OverviewTab({
         ) : null}
 
         {/*
-          * D158 — rendered only where there is something to say. A tenant
+          * D169 — rendered only where there is something to say. A tenant
           * whose vertical declares no attributes (hardware answers
           * `{fields: []}`) gets no card at all, rather than an empty one.
           */}

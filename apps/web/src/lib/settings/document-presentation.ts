@@ -42,7 +42,7 @@ import type { TenantCapabilities } from '@hardware-pos/shared';
 /**
  * The document surface a tenant prints on.
  *
- * D152 added the third. It is not a midpoint between the other two: a retail
+ * D163 added the third. It is not a midpoint between the other two: a retail
  * workspace prints its BILL on a roll and its QUOTATIONS on a letterhead, so
  * it needs the thermal bill's controls and the A4 document's controls at the
  * same time. Modelling that as "A4 with a thermal option" or "thermal with
@@ -57,7 +57,7 @@ export type DocumentSurfaceKind =
 export type DocumentSurface = DocumentSurfaceKind | 'UNRESOLVED';
 
 /**
- * D153 — whose goods the sample bill is filled with.
+ * D164 — whose goods the sample bill is filled with.
  *
  * Coarse on purpose. It names the kind of thing sold, not the business type:
  * a grocer and a clothing shop both want "a shop's basket" here, and the
@@ -70,7 +70,7 @@ export type BillSampleKind = 'FOOD_SERVICE' | 'RETAIL';
 export type DocumentPreviewKind =
   | 'SERVER_A4'
   | 'THERMAL_BILL'
-  /** D152 — both, stacked: the roll the till prints and the A4 it quotes on. */
+  /** D163 — both, stacked: the roll the till prints and the A4 it quotes on. */
   | 'THERMAL_BILL_AND_A4'
   | 'NONE';
 
@@ -114,7 +114,7 @@ export interface DocumentSettingsPresentation {
    */
   showBillCalibration: boolean;
   /**
-   * D153 — which sample the bill preview fills itself with.
+   * D164 — which sample the bill preview fills itself with.
    *
    * The sample is not decoration. An operator checks the preview to see
    * whether their logo is too wide, whether the note reads right, whether a
@@ -132,7 +132,7 @@ export interface DocumentSettingsPresentation {
 
   // ── Tabs gated on a catalogue capability, not on the print surface ─────
   /**
-   * D150 — "Business details": the tab where a tenant defines the extra
+   * D161 — "Business details": the tab where a tenant defines the extra
    * per-product fields its Add Product wizard collects.
    *
    * NOT a property of the surface, which is why the three constants below all
@@ -214,7 +214,7 @@ const THERMAL_BILL: DocumentSettingsPresentation = {
 };
 
 /**
- * D152 — retail: the bill is a slip, the quotation is a letterhead.
+ * D163 — retail: the bill is a slip, the quotation is a letterhead.
  *
  * Every A4 control stays, because a quotation still carries a logo, an accent,
  * a signature block, a stamp, a page size and a column set — and the operator
@@ -255,7 +255,7 @@ const THERMAL_BILL_AND_A4_DOCUMENTS: DocumentSettingsPresentation = {
   showRestaurantOperationsTabs: false,
   // Overlaid by the resolver -- see the interface.
   showBusinessDetailsTab: false,
-  // D152 — the point of the whole surface: no A4 bill.
+  // D163 — the point of the whole surface: no A4 bill.
   showA4SaleDocument: false,
 };
 
@@ -326,7 +326,7 @@ export function resolveDocumentSettingsPresentation(
   return {
     ...surface,
     /*
-     * D150 -- overlaid rather than table-driven, because it does not vary with
+     * D161 -- overlaid rather than table-driven, because it does not vary with
      * the print surface. `=== true` and not a truthiness check: the capability
      * is OPTIONAL on `catalogue`, so every domain that has not opted in reads
      * `undefined`, and `undefined` must mean "no tab", not "unknown".
@@ -337,9 +337,9 @@ export function resolveDocumentSettingsPresentation(
 }
 
 /**
- * D152 — the surface, from the two facts that decide it.
+ * D163 — the surface, from the two facts that decide it.
  *
- * Until D152 this read `documents.proformaBill`, which means "a pre-payment
+ * Until D163 this read `documents.proformaBill`, which means "a pre-payment
  * bill is issued separately from the receipt" — a food-service fact that
  * happened to correlate with 80mm paper. It could not answer for retail, whose
  * bill is a slip and which issues no proforma at all. Asking the paper question
@@ -350,7 +350,7 @@ export function resolveDocumentSettingsPresentation(
  * "unknown".
  *
  * Neither flag set falls back to `A4_DOCUMENTS`. No domain is in that state
- * today; it is the answer the screen gave before D152 for every domain that
+ * today; it is the answer the screen gave before D163 for every domain that
  * was not food service, so a future descriptor that forgets both lands where
  * it would have landed rather than somewhere new.
  */

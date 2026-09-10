@@ -134,7 +134,7 @@ const PREVIEW_NUMBERS: Record<PreviewDocumentType, string> = {
 };
 
 /**
- * D154 — the sample goods shown when a vertical declares none of its own.
+ * D165 — the sample goods shown when a vertical declares none of its own.
  *
  * This slot used to hold a hardware catalogue — Portland cement, TMT steel bar
  * — and every workspace was previewed with it, so a clothing shop evaluating
@@ -209,7 +209,7 @@ export class DocumentsService {
     private readonly settings: SettingsService,
     private readonly pdf: PdfService,
     /**
-     * D154 — read to resolve which vertical's sample goods to preview.
+     * D165 — read to resolve which vertical's sample goods to preview.
      *
      * D28 forbids `ProductsService`, `SalesService` and `ReturnsService` from
      * injecting this, so that a business rule is never decided by a profile
@@ -299,12 +299,12 @@ export class DocumentsService {
       where: { id: tenantId },
       select: { name: true },
     });
-    // D153 — see `seller`: a missing name is not a reason to claim a trade.
+    // D164 — see `seller`: a missing name is not a reason to claim a trade.
     return tenant?.name ?? 'Your Business';
   }
 
   /**
-   * D154 — the sample goods for this tenant's vertical.
+   * D165 — the sample goods for this tenant's vertical.
    *
    * Read from the DOMAIN REGISTRY, never branched on here. `domainFor` is the
    * one place a business type may be compared (D56), and a `businessType ===`
@@ -732,7 +732,7 @@ export class DocumentsService {
    * lets the Settings UI preview UNSAVED document settings live.
    */
   /**
-   * D153 — async so the letterhead can be the tenant's OWN name.
+   * D164 — async so the letterhead can be the tenant's OWN name.
    *
    * The preview used to fall back to the literal 'Hardware POS' when a
    * workspace had not filled its business name in, which is every workspace
@@ -782,13 +782,13 @@ export class DocumentsService {
     overrides?: Partial<DocumentSettings>,
     lineCount = 6,
     /**
-     * D153 — the name to show when the workspace has set none. Passed in
+     * D164 — the name to show when the workspace has set none. Passed in
      * rather than looked up here, because this builder is synchronous and
      * every one of its other inputs is already resolved by its caller.
      */
     fallbackName = 'Your Business',
     /**
-     * D154 — the goods to illustrate the sample with, resolved by the caller
+     * D165 — the goods to illustrate the sample with, resolved by the caller
      * from the tenant's own vertical. Passed in for the same reason
      * `fallbackName` is: this builder is synchronous and every other input
      * it takes is already resolved.
@@ -892,7 +892,7 @@ export class DocumentsService {
     branchPhone: string | null,
   ): A4Seller {
     return {
-      // D153 — neutral, not a vertical. This is only reached when a
+      // D164 — neutral, not a vertical. This is only reached when a
       // workspace has no business name AND no tenant name, so naming any one
       // trade here puts somebody else's shop on the operator's letterhead.
       name: docs.companyName ?? fallbackName ?? 'Your Business',

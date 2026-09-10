@@ -57,7 +57,7 @@ export default function ProductDetailPage() {
   const [product, setProduct] = React.useState<ManagedProduct | null>(null);
   const [variants, setVariants] = React.useState<ProductVariant[]>([]);
   /*
-   * D156 — whether the variant list is KNOWN, not merely empty.
+   * D167 — whether the variant list is KNOWN, not merely empty.
    *
    * `variants` starts `[]`, and the fetch below deliberately does not gate
    * the page's loading state. Without this flag the overview reads that
@@ -75,9 +75,9 @@ export default function ProductDetailPage() {
   );
   const [variations, setVariations] = React.useState<ProductVariationDimension[]>([]);
   /*
-   * D158 — the same three states as `variantsState`, for the same reason.
+   * D169 — the same three states as `variantsState`, for the same reason.
    *
-   * D156 left this fetch's failure flattened to `[]` and said so explicitly:
+   * D167 left this fetch's failure flattened to `[]` and said so explicitly:
    * nothing rendered the dimensions, so an empty list changed nothing an
    * operator could see. The Variations card changes that, and the moment a
    * list is DISPLAYED, `[]` from a failure and `[]` from a product with no
@@ -87,7 +87,7 @@ export default function ProductDetailPage() {
     'loading',
   );
   /*
-   * D158 — the catalogues that turn the product's IDs into words.
+   * D169 — the catalogues that turn the product's IDs into words.
    *
    * Each is fetched ONLY when the product actually carries the id it would
    * resolve, so a product with no brand issues no `/brands` request and an
@@ -129,13 +129,13 @@ export default function ProductDetailPage() {
   // endpoint must not hide the page, and it changes nothing the page claims);
   // the variant and variation lists report their outcome instead, because
   // both are rendered and an empty one would otherwise read as an answer
-  // (D156, D158).
+  // (D167, D169).
   React.useEffect(() => {
     if (!session || !id) return;
     let cancelled = false;
     setVariantsState('loading');
     /*
-     * D156 — branches and variations still fall back to empty on failure:
+     * D167 — branches and variations still fall back to empty on failure:
      * a slow branches endpoint must not hide the page, and neither changes
      * what the product IS. The variant list does, so its outcome is tracked
      * rather than flattened — `[]` from a failure and `[]` from a product
@@ -165,7 +165,7 @@ export default function ProductDetailPage() {
   }, [session, id, reloadKey]);
 
   /*
-   * D158 — catalogue lookups, keyed on what the product actually needs.
+   * D169 — catalogue lookups, keyed on what the product actually needs.
    *
    * Separate from the effect above because it cannot run until the product
    * has resolved: the ids it fetches names for arrive WITH the product. It

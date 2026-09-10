@@ -1494,7 +1494,7 @@ describe('D134a — measured lines bypass quantity-based promotions', () => {
 });
 
 /**
- * D155 — the near-miss prompt for a same-product offer.
+ * D166 — the near-miss prompt for a same-product offer.
  *
  * ## What makes these assertions non-vacuous
  *
@@ -1504,7 +1504,7 @@ describe('D134a — measured lines bypass quantity-based promotions', () => {
  * satisfy the positive case; one returning nothing would satisfy every
  * negative. So the whole quantity range is walked in one expectation.
  *
- * ## D160 — this now gates payment, and D155 asserted it never would
+ * ## D171 — this now gates payment, and D166 asserted it never would
  *
  * The case below was called "NEVER blocks payment, at any quantity" and
  * required exactly that. The PO reversed the decision: a customer who
@@ -1519,7 +1519,7 @@ describe('D134a — measured lines bypass quantity-based promotions', () => {
  * than the one it replaced: "never blocks" is satisfied by a function that
  * returns nothing, where "blocks at 5 and 11 and nowhere else" is not.
  */
-describe('D155/D160 — rewardUpsells', () => {
+describe('D166/D171 — rewardUpsells', () => {
   const sameProduct = (buyQty: number, getQty: number) =>
     rule({
       id: 'r_tie',
@@ -1539,7 +1539,7 @@ describe('D155/D160 — rewardUpsells', () => {
     return {
       upsells: rewardUpsells({ lines, promotions: [promo] }),
       discount: applyPromotions({ lines, promotions: [promo] }).totalDiscount,
-      // D160 — what the TILL gates on, which is now the union rather than
+      // D171 — what the TILL gates on, which is now the union rather than
       // `outstandingRewards` alone.
       blocks: incompleteOffers({ lines, promotions: [promo] }).length > 0,
     };
@@ -1581,7 +1581,7 @@ describe('D155/D160 — rewardUpsells', () => {
 
   it('blocks payment at exactly the quantities that are one unit short', () => {
     /*
-     * D160, and the reversal of what this case used to require.
+     * D171, and the reversal of what this case used to require.
      *
      * The accepted cost is visible right here in the map: at five and at
      * eleven the sale is held until the free unit is added, so a customer
@@ -1596,7 +1596,7 @@ describe('D155/D160 — rewardUpsells', () => {
       Object.fromEntries([1, 5, 6, 11, 12].map((q) => [q, at(q).blocks])),
     ).toEqual({ 1: false, 5: true, 6: false, 11: true, 12: false });
     // …and the control: a DIFFERENT-product reward blocks too, which is the
-    // whole point of D160 — the two shapes are one behaviour now.
+    // whole point of D171 — the two shapes are one behaviour now.
     const crossOffer = rule({
       id: 'r_cross',
       name: 'Buy 2 Get 1',
@@ -1671,7 +1671,7 @@ describe('D155/D160 — rewardUpsells', () => {
 });
 
 /**
- * D160 — `incompleteOffers`, the one list the till gates on.
+ * D171 — `incompleteOffers`, the one list the till gates on.
  *
  * ## Why this is asserted separately from its two halves
  *
@@ -1685,7 +1685,7 @@ describe('D155/D160 — rewardUpsells', () => {
  * A union that returned only its first argument passes the cross-product case
  * and fails the other two.
  */
-describe('D160 — incompleteOffers', () => {
+describe('D171 — incompleteOffers', () => {
   const sameProductRule = rule({
     id: 'r_tie',
     name: 'Tie',

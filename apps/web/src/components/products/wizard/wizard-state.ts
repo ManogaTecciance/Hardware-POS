@@ -477,7 +477,7 @@ export const COMBINATION_CONFIRM_THRESHOLD = 100;
 export const MAX_SKU_LENGTH = 80;
 
 /**
- * D159 — a SKU suggested from the product's name.
+ * D170 — a SKU suggested from the product's name.
  *
  * `Cement 50kg Bag` + `A7F` -> `CEMENT-50KG-BAG-A7F`.
  *
@@ -732,7 +732,7 @@ export function validateStep(
       }
     } else {
       /*
-       * D159 — SKU is OPTIONAL here, as it always was on the server.
+       * D170 — SKU is OPTIONAL here, as it always was on the server.
        *
        * The column is nullable, `CreateProductDto` marks it `@IsOptional()`,
        * and the create maps `dto.sku ?? null`. This rule was the only thing
@@ -751,7 +751,7 @@ export function validateStep(
         errors['simple-price'] = 'Enter a selling price.';
       }
       /*
-       * D159 — these two ARE capped now, and the old note explaining why
+       * D170 — these two ARE capped now, and the old note explaining why
        * they were not is what made the change necessary to state.
        *
        * It read: "`CreateProductDto` declares them as plain `@IsNumber()
@@ -783,7 +783,7 @@ export function validateStep(
       if (reorder) errors['simple-reorder'] = reorder;
 
       /*
-       * D159 — the same rule the variant branch above applies, for the
+       * D170 — the same rule the variant branch above applies, for the
        * same reason: opening stock is posted as an inventory receipt, and a
        * receipt has to land in a branch. A single product had no branch
        * control at all, which is part of why its opening quantity went
@@ -1049,7 +1049,7 @@ export function buildVariantsBatchInput(
 }
 
 /**
- * D159 — the opening stock of a SINGLE product, as an inventory receipt.
+ * D170 — the opening stock of a SINGLE product, as an inventory receipt.
  *
  * Returns `null` when there is nothing to post, which is the common case:
  * a variant product (its own batch endpoint handles opening stock), a
