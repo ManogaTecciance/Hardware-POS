@@ -24,6 +24,7 @@ import {
   type ManagedProduct,
 } from '@/lib/products-api';
 import { fetchBranches, type BranchSummary } from '@/lib/products/branches-api';
+import { createReceipt } from '@/lib/products/receipts-api';
 import {
   fetchAttributeLibrary,
   type AttributeDefinition as LibraryAttribute,
@@ -73,6 +74,7 @@ import { Stepper } from './stepper';
 import {
   buildComponentsPayload,
   buildCreateInput,
+  buildOpeningReceiptInput,
   buildVariantsBatchInput,
   buildVariationsPayload,
   hydrateFromProduct,
@@ -510,6 +512,18 @@ export function ProductWizard(props: Props) {
     );
   }
 
+  /*
+   * D159 — ONE step counter, computed from the step list.
+   *
+   * Four of the five steps hardcoded "Step N of 4". D150 added Business
+   * details as a fifth and gave only the new step a computed label, so
+   * every other panel has been reading "of 4" under a five-dot stepper
+   * ever since. The list is per-tenant (the attributes step exists only
+   * where the domain declares fields), so a literal cannot be right for
+   * everyone in any case.
+   */
+  const positionLabel = `Step ${stepIndex + 1} of ${wizardSteps.length}`;
+
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,2.6fr)_minmax(280px,1fr)]">
       <div className="space-y-5">
@@ -525,6 +539,7 @@ export function ProductWizard(props: Props) {
             <StepDetails
               state={state}
               errors={errors}
+              positionLabel={positionLabel}
               categories={categories}
               session={session}
               businessKind={businessKind}
@@ -537,7 +552,7 @@ export function ProductWizard(props: Props) {
               state={state}
               errors={errors}
               schema={attributeSchema}
-              positionLabel={`Step ${stepIndex + 1} of ${wizardSteps.length}`}
+              positionLabel={positionLabel}
               onChange={patchState}
             />
           ) : null}
@@ -545,6 +560,7 @@ export function ProductWizard(props: Props) {
             <StepVariations
               state={state}
               errors={errors}
+              positionLabel={positionLabel}
               attributeLibrary={attributeLibrary}
               onChange={patchState}
             />
@@ -553,6 +569,7 @@ export function ProductWizard(props: Props) {
             <StepPricingInventory
               state={state}
               errors={errors}
+              positionLabel={positionLabel}
               branches={branches}
               showOpeningStock={showOpeningStock}
               showMeasuredGoods={showMeasuredGoods}
@@ -566,6 +583,7 @@ export function ProductWizard(props: Props) {
           {currentStep === 'review' ? (
             <StepReview
               state={state}
+              positionLabel={positionLabel}
               categories={categories}
               showOpeningStock={showOpeningStock}
               saveState={saveState}
@@ -702,6 +720,35 @@ async function runCreate(
   // sending them from a UI that pretends they don't exist is misleading.
   const created = await createProduct(session, input);
   setCreatedId(created.id);
+
+  /*
+   * D159 — opening stock for a SINGLE product.
+   *
+   * It had nowhere to go before this. `ProductCreatePayload` has no
+   * `quantityOnHand` field at all, so the number the operator typed was
+   * validated, shown on the Review step as "Opening stock", and then
+   * dropped — `buildCreateInput` was structurally incapable of sending it,
+   * and never had.
+   *
+   * Posted as a receipt rather than added to the create payload for the
+   * reason `buildOpeningReceiptInput` records: it is the path the variant
+   * half already takes and the path every later GRN takes, so branch stock,
+   * the Purchases tab and the weighted-average all follow from it.
+   *
+   * A SECOND call, not part of the create: `POST /products` writes no
+   * inventory, and making it do so would change an endpoint hardware and
+   * restaurant share. The variants path below is already serialised this
+   * way for the same reason.
+   */
+  const opening = buildOpeningReceiptInput(state, created.id);
+  if (opening) {
+    await createReceipt(session, {
+      ...opening,
+      // The server upserts on `(tenantId, idempotencyKey)`, so a retry
+      // after a network wobble cannot receive the same opening stock twice.
+      idempotencyKey: `opening-${created.id}`,
+    });
+  }
 
   if (!state.hasVariations) return;
 

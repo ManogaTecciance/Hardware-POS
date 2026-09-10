@@ -19,6 +19,13 @@ import { variantLabel, type StepKey, type WizardState } from './wizard-state';
 interface Props {
   state: WizardState;
   categories: CategoryNode[];
+  /**
+   * D159 — "Step 3 of 5", computed by the shell from the step list.
+   *
+   * A literal reading "of 4" until D150 added a fifth step. The list is
+   * per-tenant, so no literal can be right for every workspace.
+   */
+  positionLabel: string;
   /** Whether the tenant tracks stock locally — derived by the wizard shell (D31). */
   showOpeningStock: boolean;
   saveState: 'idle' | 'saving' | 'saved';
@@ -29,6 +36,7 @@ interface Props {
 export function StepReview({
   state,
   categories,
+  positionLabel,
   showOpeningStock,
   saveState,
   onEdit,
@@ -43,7 +51,7 @@ export function StepReview({
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Step 4 of 4</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">{positionLabel}</p>
         <h2 className="mt-1 text-lg font-semibold">Review &amp; save</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
           Look over what&apos;s about to be created. Everything is editable later from the product page.

@@ -61,6 +61,7 @@ function Harness({
   const h = useHarness(initial ?? initialState());
   return (
     <StepPricingInventory
+      positionLabel="Step 4 of 5"
       state={h.state}
       errors={validateStep('pricing', h.state, { inventoryMode: 'LOCAL' })}
       branches={branches}
@@ -176,6 +177,7 @@ describe('D134e — only a tenant that sells by measure is offered it', () => {
     // rather than leaking the control into a template that did not ask.
     render(
       <StepPricingInventory
+        positionLabel="Step 4 of 5"
         state={initialState()}
         errors={{}}
         branches={branches}

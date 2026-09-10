@@ -114,6 +114,7 @@ function Harness({
   const h = useHarness(initial ?? beautyState());
   return (
     <StepVariations
+      positionLabel="Step 3 of 5"
       state={h.state}
       errors={{}}
       attributeLibrary={library}
@@ -354,7 +355,7 @@ describe('the category changes after an attribute was chosen', () => {
     const h = useHarness(initial);
     return (
       <>
-        <StepVariations state={h.state} errors={{}} attributeLibrary={LIBRARY} onChange={h.patch} />
+        <StepVariations positionLabel="Step 3 of 5" state={h.state} errors={{}} attributeLibrary={LIBRARY} onChange={h.patch} />
         <pre data-testid="variations">{JSON.stringify(h.state.variations)}</pre>
       </>
     );

@@ -15,7 +15,9 @@ import { useIsTabletUp } from '@/lib/use-viewport';
 import { StepRestaurantAdditions } from './step-restaurant-additions';
 import {
   MAX_SKU_LENGTH,
+  randomSkuSuffix,
   sellingPriceLabel,
+  suggestSku,
   variantLabel,
   type VariantDraft,
   type WizardState,
@@ -33,6 +35,13 @@ import {
 interface Props {
   state: WizardState;
   errors: Record<string, string>;
+  /**
+   * D159 — "Step 3 of 5", computed by the shell from the step list.
+   *
+   * A literal reading "of 4" until D150 added a fifth step. The list is
+   * per-tenant, so no literal can be right for every workspace.
+   */
+  positionLabel: string;
   branches: BranchSummary[];
   /** True when the tenant runs on locally-tracked inventory (LOCAL mode). */
   showOpeningStock: boolean;
@@ -68,6 +77,7 @@ interface Props {
 export function StepPricingInventory({
   state,
   errors,
+  positionLabel,
   branches,
   showOpeningStock,
   showMeasuredGoods,
@@ -83,7 +93,7 @@ export function StepPricingInventory({
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Step 3 of 4</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">{positionLabel}</p>
         <h2 className="mt-1 text-lg font-semibold">
           {isRestaurant ? 'Pricing, modifiers & availability' : 'Pricing & inventory'}
         </h2>
@@ -128,7 +138,13 @@ export function StepPricingInventory({
           onChange={onChange}
         />
       ) : (
-        <SimpleForm state={state} errors={errors} isLocal={isLocal} onChange={onChange} />
+        <SimpleForm
+          state={state}
+          errors={errors}
+          isLocal={isLocal}
+          branches={branches}
+          onChange={onChange}
+        />
       )}
 
       {isRestaurant && session ? (
@@ -151,96 +167,182 @@ function SimpleForm({
   state,
   errors,
   isLocal,
+  branches,
   onChange,
 }: {
   state: WizardState;
   errors: Record<string, string>;
   isLocal: boolean;
+  /** D159 — for the opening-stock branch, which a single product now has too. */
+  branches: BranchSummary[];
   onChange: (patch: Partial<WizardState>) => void;
 }) {
   const set = (patch: Partial<WizardState['simple']>) =>
     onChange({ simple: { ...state.simple, ...patch } });
 
   return (
-    <div className="grid grid-cols-1 gap-4 rounded-2xl border border-border bg-card p-4 md:grid-cols-2">
-      <Field label="SKU" htmlFor="simple-sku" required error={errors['simple-sku']}>
-        <Input
-          id="simple-sku"
-          value={state.simple.sku}
-          onChange={(e) => set({ sku: e.target.value })}
-          placeholder="Enter SKU (or leave blank to generate)"
-          maxLength={80}
-          aria-invalid={!!errors['simple-sku']}
-        />
-      </Field>
-
-      <Field label="Barcode" htmlFor="simple-barcode">
-        <Input
-          id="simple-barcode"
-          value={state.simple.barcode}
-          onChange={(e) => set({ barcode: e.target.value })}
-          placeholder="Optional"
-          maxLength={80}
-        />
-      </Field>
-
-      <Field
-        label={sellingPriceLabel(state)}
-        htmlFor="simple-price"
-        required
-        error={errors['simple-price']}
-      >
-        <MoneyInput
-          id="simple-price"
-          value={state.simple.unitPrice}
-          onChange={(v) => set({ unitPrice: v })}
-          invalid={!!errors['simple-price']}
-        />
-      </Field>
-
-      <Field label="Cost price" htmlFor="simple-cost" error={errors['simple-cost']}>
-        <MoneyInput
-          id="simple-cost"
-          value={state.simple.costPrice}
-          onChange={(v) => set({ costPrice: v })}
-          invalid={!!errors['simple-cost']}
-        />
-      </Field>
-
-      {isLocal && state.trackInventory ? (
-        <Field label="Opening quantity" htmlFor="simple-openq" error={errors['simple-openq']}>
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 rounded-2xl border border-border bg-card p-4 md:grid-cols-2">
+        {/*
+          D159 — NOT `required`, and the button is what makes the placeholder
+          true. This field used to carry a red asterisk AND read "or leave
+          blank to generate": the validator rejected blank, and nothing in the
+          codebase generated a product SKU, so neither half of the promise
+          could be kept. The column is nullable and the API takes null.
+        */}
+        <Field
+          label="SKU"
+          htmlFor="simple-sku"
+          error={errors['simple-sku']}
+          action={
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              leftIcon={<Wand2 className="h-3.5 w-3.5" />}
+              onClick={() => set({ sku: suggestSku(state.name, randomSkuSuffix()) })}
+            >
+              Generate
+            </Button>
+          }
+        >
           <Input
-            id="simple-openq"
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step="0.001"
-            value={state.simple.openingQuantity}
-            onChange={(e) => set({ openingQuantity: e.target.value })}
-            placeholder="0"
-            aria-invalid={!!errors['simple-openq']}
+            id="simple-sku"
+            value={state.simple.sku}
+            onChange={(e) => set({ sku: e.target.value })}
+            placeholder="Enter SKU, press Generate, or leave blank"
+            maxLength={80}
+            aria-invalid={!!errors['simple-sku']}
           />
         </Field>
-      ) : null}
 
-      {/* D101 — a reorder point is a claim about a count; an untracked item
-          has neither. Tracked items (retail Inventory, restaurant packaged
-          goods) keep the field exactly as it was. */}
-      {state.trackInventory ? (
-        <Field label="Reorder point" htmlFor="simple-reorder" error={errors['simple-reorder']}>
+        <Field label="Barcode" htmlFor="simple-barcode">
           <Input
-            id="simple-reorder"
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step="0.001"
-            value={state.simple.reorderLevel}
-            onChange={(e) => set({ reorderLevel: e.target.value })}
+            id="simple-barcode"
+            value={state.simple.barcode}
+            onChange={(e) => set({ barcode: e.target.value })}
             placeholder="Optional"
-            aria-invalid={!!errors['simple-reorder']}
+            maxLength={80}
           />
         </Field>
+
+        <Field
+          label={sellingPriceLabel(state)}
+          htmlFor="simple-price"
+          required
+          error={errors['simple-price']}
+        >
+          <MoneyInput
+            id="simple-price"
+            value={state.simple.unitPrice}
+            onChange={(v) => set({ unitPrice: v })}
+            invalid={!!errors['simple-price']}
+          />
+        </Field>
+
+        <Field label="Cost price" htmlFor="simple-cost" error={errors['simple-cost']}>
+          <MoneyInput
+            id="simple-cost"
+            value={state.simple.costPrice}
+            onChange={(v) => set({ costPrice: v })}
+            invalid={!!errors['simple-cost']}
+          />
+        </Field>
+
+        {isLocal && state.trackInventory ? (
+          <Field label="Opening quantity" htmlFor="simple-openq" error={errors['simple-openq']}>
+            <Input
+              id="simple-openq"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.001"
+              value={state.simple.openingQuantity}
+              onChange={(e) => set({ openingQuantity: e.target.value })}
+              placeholder="0"
+              aria-invalid={!!errors['simple-openq']}
+            />
+          </Field>
+        ) : null}
+
+        {/* D101 — a reorder point is a claim about a count; an untracked item
+            has neither. Tracked items (retail Inventory, restaurant packaged
+            goods) keep the field exactly as it was. */}
+        {state.trackInventory ? (
+          <Field label="Reorder point" htmlFor="simple-reorder" error={errors['simple-reorder']}>
+            <Input
+              id="simple-reorder"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.001"
+              value={state.simple.reorderLevel}
+              onChange={(e) => set({ reorderLevel: e.target.value })}
+              placeholder="Optional"
+              aria-invalid={!!errors['simple-reorder']}
+            />
+          </Field>
+        ) : null}
+      </div>
+
+      {/* D159 — a receipt has to land somewhere, single product or not. */}
+      {isLocal && Number(state.simple.openingQuantity) > 0 ? (
+        <OpeningBranchCard
+          state={state}
+          errors={errors}
+          branches={branches}
+          onChange={onChange}
+        />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * D159 — one opening-stock branch control, shared by both shapes.
+ *
+ * It lived inside the variant matrix, which is part of how a single
+ * product came to have opening stock with nowhere to put it. Extracted
+ * rather than copied: this card states WHERE the receipt lands, and two
+ * copies of that is how two shapes of the same wizard come to disagree.
+ */
+function OpeningBranchCard({
+  state,
+  errors,
+  branches,
+  onChange,
+}: {
+  state: WizardState;
+  errors: Record<string, string>;
+  branches: BranchSummary[];
+  onChange: (patch: Partial<WizardState>) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <Field
+        label="Opening stock branch"
+        htmlFor="opening-branch"
+        required
+        error={errors['openingBranchId']}
+      >
+        <Select
+          id="opening-branch"
+          value={state.openingBranchId}
+          onChange={(e) => onChange({ openingBranchId: e.target.value })}
+          aria-invalid={!!errors['openingBranchId']}
+        >
+          <option value="">Select a branch</option>
+          {branches.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        Opening stock is posted as an inventory receipt against this branch so the
+        weighted-average is seeded on the same path as future GRNs.
+      </p>
     </div>
   );
 }
@@ -597,32 +699,12 @@ function VariantMatrix({
       )}
 
       {isLocal && anyOpening ? (
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <Field
-            label="Opening stock branch"
-            htmlFor="opening-branch"
-            required
-            error={errors['openingBranchId']}
-          >
-            <Select
-              id="opening-branch"
-              value={state.openingBranchId}
-              onChange={(e) => onChange({ openingBranchId: e.target.value })}
-              aria-invalid={!!errors['openingBranchId']}
-            >
-              <option value="">Select a branch</option>
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Opening stock is posted as an inventory receipt against this branch so the
-            weighted-average is seeded on the same path as future GRNs.
-          </p>
-        </div>
+        <OpeningBranchCard
+          state={state}
+          errors={errors}
+          branches={branches}
+          onChange={onChange}
+        />
       ) : null}
     </div>
   );
@@ -710,21 +792,27 @@ function Field({
   htmlFor,
   required,
   error,
+  action,
   children,
 }: {
   label: string;
   htmlFor?: string;
   required?: boolean;
   error?: string;
+  /** D159 — a control that belongs TO the field, e.g. "Generate". */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="flex items-center gap-1 text-sm font-medium" htmlFor={htmlFor}>
-        {label}
-        {required ? <span className="text-danger" aria-hidden="true">*</span> : null}
-        {required ? <span className="sr-only"> (required)</span> : null}
-      </label>
+      <div className="flex min-h-[1.75rem] items-center justify-between gap-2">
+        <label className="flex items-center gap-1 text-sm font-medium" htmlFor={htmlFor}>
+          {label}
+          {required ? <span className="text-danger" aria-hidden="true">*</span> : null}
+          {required ? <span className="sr-only"> (required)</span> : null}
+        </label>
+        {action}
+      </div>
       {children}
       {error ? (
         <p className="text-xs text-danger" role="alert">

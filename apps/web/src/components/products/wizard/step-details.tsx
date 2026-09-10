@@ -37,6 +37,13 @@ import type { RestaurantFoodType, WizardState } from './wizard-state';
 interface Props {
   state: WizardState;
   errors: Record<string, string>;
+  /**
+   * D159 — "Step 3 of 5", computed by the shell from the step list.
+   *
+   * A literal reading "of 4" until D150 added a fifth step. The list is
+   * per-tenant, so no literal can be right for every workspace.
+   */
+  positionLabel: string;
   categories: CategoryNode[];
   session: Session;
   /**
@@ -96,6 +103,7 @@ const RESTAURANT_CATEGORIES: {
 export function StepDetails({
   state,
   errors,
+  positionLabel,
   categories,
   session,
   businessKind,
@@ -110,7 +118,7 @@ export function StepDetails({
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Step 1 of 4</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">{positionLabel}</p>
         <h2 className="mt-1 text-lg font-semibold">Product details</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
           Add the identifying information — name, type, and category.

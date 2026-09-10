@@ -9502,6 +9502,146 @@ Nine mutations, each failing the case that carries its decision:
 
 ---
 
+## D159 — the SKU you can generate, and the opening stock that lands
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
+no migration, no API change. Every business type.
+
+### What was reported
+
+> "sku not generating, sku genarate button now missing, and stock not apply
+> properly"
+
+Three symptoms, three different causes, and only the third was what it sounded
+like. A fourth was visible in the same screenshot.
+
+### 1. The SKU field made two contradictory promises
+
+It carried a red `*` **and** a placeholder reading *"Enter SKU (or leave blank
+to generate)"*. Blank was a hard validation error, so the generate path was
+unreachable — and there was nothing at the other end of it either: the server
+stores `dto.sku ?? null`, and **nothing in the repository generated a product
+SKU at all**.
+
+**Decided.** SKU is **optional**, which is what the server always said: the
+column is nullable, the DTO marks it `@IsOptional()`, and the create maps
+`?? null`. A **Generate** button fills a suggestion from the product's name,
+editable before save. The length cap stays — dropping "required" must not drop
+the rule the server actually enforces.
+
+`Cement 50kg Bag` becomes `CEMENT-50KG-BAG-A7F`. The three-character suffix
+exists because of `@@unique([tenantId, sku])`: two products with the same name
+are ordinary in a shop that restocks under a new supplier code, and a bare slug
+would collide and be refused at save for a reason the operator did not cause.
+It is a **suggestion**, not an assignment — the field stays editable, and a
+genuine clash is still the server's to report. Truncation to 80 characters
+trims the NAME, never the suffix, or every long-named product would receive
+the same SKU.
+
+### 2. The Generate button was not missing — it was never on that screen
+
+`Generate SKUs` lives inside the **variant matrix**. The reported screen is the
+simple path (`hasVariations === false`), which has never had one. The existing
+generator is also a *bulk* tool — prefix plus each option's first three letters
+— so it has nothing to work from on a product with no options. The new button
+is a different thing that happens to share a verb.
+
+### 3. Opening stock was collected, validated, displayed, and dropped
+
+The real defect, and the worst of the three.
+
+`ProductCreatePayload` has **no `quantityOnHand` field**, so `buildCreateInput`
+was structurally incapable of sending one. The operator's number was validated
+by `optionalNumberError`, printed back on the Review step as "Opening stock",
+and then discarded. `git log -S` finds no commit where it was ever sent.
+
+Nothing caught it because the tests asserted the fields the payload **does**
+send. It is the shape D134's spec was written for: every layer that held the
+value did the right thing with it, and no layer handed it on.
+
+**Decided.** The wizard posts an **inventory receipt** after the create, to the
+existing `POST /inventory-receipts`.
+
+Not `quantityOnHand` on the create, though `POST /products` would have taken it
+and D121 says that column *is* what the till reads for a variant-less product —
+so it would have looked fixed. It writes nothing else: no `BranchInventory`
+row, no receipt in the Purchases tab, no weighted-average cost. The product's
+own Inventory tab would still have read empty.
+
+A receipt is the path the **variant** half already takes, and the path every
+later GRN takes. Opening stock arriving by a different route than every
+subsequent receipt is how a product's average cost comes to depend on how it
+was created.
+
+A **second call**, not a change to `POST /products`: that endpoint is shared by
+every business type, and the variants path below it is already serialised the
+same way. `idempotencyKey: opening-<productId>` — the server upserts on
+`(tenantId, idempotencyKey)`, so a retry cannot receive the same stock twice.
+
+A single product also gains the **opening-stock branch** control, and the rule
+that goes with it: a receipt has to land somewhere. That card was inside the
+variant matrix, which is part of how a single product came to have opening
+stock with nowhere to put it; it is now **extracted and shared** rather than
+copied.
+
+### 3a. A precision mismatch, caught before shipping
+
+`CreateReceiptDto`'s line is stricter than `CreateProductDto`: `unitCost` is
+`maxDecimalPlaces: 2` and `quantityReceived` is `3`. The simple form had **no**
+decimal cap, under a note explaining that only the checks the server makes are
+worth blocking a save over — correct while those values only reached
+`POST /products`.
+
+Uncapped, a cost of `4.567` would have passed every check, created the product,
+and then **400ed on the receipt**, leaving the operator with a product that has
+no opening stock and an error naming a field they cannot see. Both are capped
+now, which also matches the columns (`Decimal(12,2)`, `Decimal(12,3)`) — so the
+extra digits were being rounded away in silence beforehand either way.
+
+### 4. "Step 3 of 4" under a five-dot stepper
+
+Four of the five steps hardcoded their position. D150 added Business details as
+a fifth and gave only the new step a computed label. The step list is
+per-tenant in any case (the attributes step exists only where the domain
+declares fields), so no literal can be right for every workspace. One
+`positionLabel`, computed by the shell, passed to all five.
+
+### Two existing assertions were changed, deliberately
+
+D16 forbids editing existing behavioural assertions to accommodate a
+**refactor**. These are intentional behaviour changes with this record behind
+them, and both were **strengthened** rather than relaxed:
+
+- `validateStep returns the right shape per step` asserted that a blank SKU
+  **and** a blank price both error. It now asserts the blank SKU does **not**
+  and the blank price still does — a pair against one state, so "validation
+  stopped running" cannot pass it.
+- `simple mode refuses unusable cost / opening / reorder` had a positive case
+  carrying `openingQuantity: '12'` with no branch. It now supplies the branch,
+  keeping the assertion's original point, and a new line states the refusal
+  when the branch is missing.
+
+### Mutation proof
+
+Twelve mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the opening quantity is dropped (the reported bug, restored) | both `buildOpeningReceiptInput` payload cases |
+| the receipt carries the wrong quantity | the same two |
+| a variant product also posts a receipt | "leaves a variant product alone" |
+| SKU is required again | "is not marked required" |
+| the length cap goes with the required rule | "still refuses a SKU longer than the DTO allows" |
+| `suggestSku` truncates the suffix, not the name | the length case and the separator case |
+| `randomSkuSuffix` returns a constant | "it varies" |
+| opening stock no longer needs a branch | "refuses to continue with stock but no branch" |
+| the Generate button is not rendered | "fills the SKU from the product name" |
+| the branch card is never rendered | "asks where the stock lands" |
+| the cost cap is dropped | "refuses a cost the receipt line would reject" |
+| the quantity cap is dropped | "refuses an opening quantity the receipt line would reject" |
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
