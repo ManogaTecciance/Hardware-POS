@@ -22,6 +22,25 @@ export interface ManagedProduct {
   description: string | null;
   categoryId: string | null;
   subcategoryId: string | null;
+  /**
+   * D133 (`8.9`) — the brand this product carries, or null.
+   *
+   * D158 — DECLARED, not added: `GET /products/:id` returns the whole
+   * Prisma row and `toManaged` spreads it, so this field has always crossed
+   * the wire and always survived the mapper. It was simply not written down
+   * here, which is why nothing could read it. Verified against a live
+   * response before the declaration was added.
+   *
+   * OPTIONAL, unlike `categoryId` above, for one reason only: this type is
+   * built by 28 test fixtures, and a required field would have edited every
+   * one of them — restaurant and hardware fixtures included — to declare
+   * a null they do not care about. Nothing WRITES it (`ProductInput` has no
+   * brand, and the API's update guards on `!== undefined`, so an omitted
+   * brand is preserved rather than cleared), so the argument D134 makes for
+   * `quantityType` being required — that a dropped field is silently saved
+   * back as a wrong value — does not apply here.
+   */
+  brandId?: string | null;
   /** Sales price/rate. */
   unitPrice: number;
   /** QBO income account name (auto-resolved on sync; read-only). */

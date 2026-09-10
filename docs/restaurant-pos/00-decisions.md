@@ -9379,6 +9379,129 @@ visible panel, and fails against the stacked layout for the right reason.
 
 ---
 
+## D158 — the Overview shows what the product IS
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
+no migration, **no API change** — every field below already crossed the wire.
+
+### What was reported
+
+> "another issues with product details view because its not rendering the data
+> and some data are missing from it like category, brand, if have business
+> details it needed to show too, variations etc are missing too"
+
+### Where the data already was
+
+Traced before writing anything, because "missing data" usually means a missing
+endpoint and here it meant nothing of the kind:
+
+| Field | Where it was | What was missing |
+|---|---|---|
+| `categoryId` / `subcategoryId` | on the product payload | only the NAMES |
+| `brandId` | **on the wire already** | the TypeScript declaration |
+| `attributes` (D64) | on the product payload | the labels, and a card |
+| variation dimensions | **already fetched** | anything that rendered them |
+
+`brandId` is the interesting one. `GET /products/:id` runs
+`findFirst({ where })` with no `select`, so the whole Prisma row is returned;
+`toManaged` spreads `...p`, so the field survived the mapper. It was simply
+never written down in `ManagedProduct`, and TypeScript will not let you read a
+field a type does not declare. Confirmed against a live response before the
+declaration was added, rather than inferred from the query. This is the same
+class of gap D125 recorded for `attributeOptionId`: *"The server has always
+returned it; it was simply not typed here."*
+
+The variation dimensions are the other kind of gap: fetched on every page load
+since D44 and passed to exactly one consumer — the variant edit dialog. An
+operator could see that a product had 25 variants and not what it varied ON.
+
+### The decision
+
+**Resolve the names client-side; change no payload.**
+
+Three catalogue requests, each issued **only when the product carries the id it
+would resolve**: an uncategorised product asks for no categories, and a product
+with no brand asks for no brands. Variations cost nothing new.
+
+### Every answer has three states, not two
+
+The resolvers live in `catalogue-labels.ts` as pure functions because the rule
+they encode is D156's, one card over:
+
+> the ID is authoritative and arrives WITH the product;
+> only the NAME needs the catalogue, so only the name waits.
+
+| | Category |
+|---|---|
+| no `categoryId` | `—` **at once** — never waits on a list it does not need |
+| id, catalogue in flight | `Loading…` — **not** `—`, which would claim it has none |
+| id, catalogue failed | `Could not be loaded` |
+| id not in the catalogue | `No longer in the catalogue` — it HAS one; we cannot name it |
+
+That first row is the guard against overcorrecting D156 into a slow answer
+where an instant true one exists. The fourth is a real state: brands are
+archived, categories are deleted while a page is open.
+
+### Consequences that were followed through
+
+**The variations fetch now reports its outcome.** D156 deliberately left this
+one flattened to `[]` on failure and said why: *"neither changes what the
+product IS"* — true while nothing displayed it. A Variations card makes `[]`
+from a failure and `[]` from a product with no dimensions two different facts,
+so `variationsState` now exists alongside `variantsState`.
+
+**Brand renders only where there is one.** D133: *"most hardware and grocery
+products carry no brand worth recording."* A permanent "Brand —" would be a row
+every operator on those verticals reads past forever.
+
+**Business details renders only where there is something to say.** Hardware's
+`GET /products/attribute-schema` answers `{fields: []}` (verified live), so
+those workspaces get no card at all rather than an empty one.
+
+**A removed field still shows its values.** D150 lets a tenant replace their
+business-details list; products created under the old one still carry those
+values. Schema fields render first in the tenant's own order, then any leftover
+keys, humanised — hiding them would silently lose data somebody typed in.
+
+**`false` renders as "No".** It is a fact a customer asks about, and the one
+value that vanishes from JSX and from every truthiness filter.
+
+### `brandId` is optional on the type, and `categoryId` is not
+
+Deliberate, and the one place this record departs from D134's reasoning.
+`ManagedProduct` is built by 28 test fixtures; a required field edits every one
+of them — restaurant and hardware included — to declare a null they do not care
+about. D134 made `quantityType` required because the edit wizard round-trips it
+and a dropped field is silently **saved back** as a wrong value. Nothing writes
+brand: `ProductInput` has no such field, and the API's update guards on
+`!== undefined`, so an omitted brand is preserved rather than cleared.
+
+### Known gap, deliberately not closed here
+
+**No UI assigns a brand to a product.** The API accepts `brandId` on create and
+update; the wizard has never sent it, and the products list offers a brand
+*filter* only. So the Brand row is correct and will stay invisible until brand
+selection exists in the wizard. Displaying a brand and choosing one are
+different pieces of work, and this record is the first.
+
+### Mutation proof
+
+Nine mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| a pending catalogue renders as `—` | the two "waits rather than claiming" cases, both resolvers |
+| a failed catalogue renders as `—` | the two "says a failure was a failure" cases |
+| the no-id short-circuit is dropped | the three "answers instantly" cases |
+| schema order ignored, document order used | "the tenant's own labels, in the tenant's own order" |
+| `false` dropped instead of rendered | "renders false as No", and the render case |
+| Business details card always renders | both "renders no card" cases |
+| Variations card always renders | "renders no card for a single-variant product" |
+| a failed variations fetch reads as empty | "says so when the dimensions could not be loaded" |
+| Brand row always renders | "shows no Brand row at all" |
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

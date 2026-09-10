@@ -12,11 +12,16 @@ import { Permission } from '@/lib/permissions';
 import { useEffectiveProfile } from '@/lib/platform-profile';
 import { resolveProductManagementPresentation } from '@/lib/products/product-presentation';
 import {
+  fetchCategoryTree,
   fetchProduct,
   syncProductToQuickBooks,
+  type CategoryNode,
   type ManagedProduct,
 } from '@/lib/products-api';
 import { fetchBranches, type BranchSummary } from '@/lib/products/branches-api';
+import { fetchBrands, type Brand } from '@/lib/products/brands-api';
+import { fetchProductAttributeSchema, type AttributeField } from '@/lib/products/attributes-api';
+import { PENDING, type Lookup } from '@/lib/products/catalogue-labels';
 import {
   fetchVariants,
   fetchVariations,
@@ -69,6 +74,31 @@ export default function ProductDetailPage() {
     'loading',
   );
   const [variations, setVariations] = React.useState<ProductVariationDimension[]>([]);
+  /*
+   * D158 — the same three states as `variantsState`, for the same reason.
+   *
+   * D156 left this fetch's failure flattened to `[]` and said so explicitly:
+   * nothing rendered the dimensions, so an empty list changed nothing an
+   * operator could see. The Variations card changes that, and the moment a
+   * list is DISPLAYED, `[]` from a failure and `[]` from a product with no
+   * dimensions stop being the same fact.
+   */
+  const [variationsState, setVariationsState] = React.useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
+  /*
+   * D158 — the catalogues that turn the product's IDs into words.
+   *
+   * Each is fetched ONLY when the product actually carries the id it would
+   * resolve, so a product with no brand issues no `/brands` request and an
+   * uncategorised one issues no `/categories`. They resolve NAMES, never
+   * facts: whether the product has a category is already known from the
+   * payload, so nothing here can change what the page claims — only how
+   * readable it is.
+   */
+  const [categories, setCategories] = React.useState<Lookup<CategoryNode>>(PENDING);
+  const [brands, setBrands] = React.useState<Lookup<Brand>>(PENDING);
+  const [attributeFields, setAttributeFields] = React.useState<AttributeField[]>([]);
   const [branches, setBranches] = React.useState<BranchSummary[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -95,8 +125,11 @@ export default function ProductDetailPage() {
 
   // Auxiliary fetches. These do NOT gate loading — the header can render
   // usefully from the product alone, and the inner tabs fetch their own data
-  // lazily. Failures fall back to empty arrays so a slow branches endpoint
-  // does not hide the page.
+  // lazily. Branches still fall back to an empty array (a slow branches
+  // endpoint must not hide the page, and it changes nothing the page claims);
+  // the variant and variation lists report their outcome instead, because
+  // both are rendered and an empty one would otherwise read as an answer
+  // (D156, D158).
   React.useEffect(() => {
     if (!session || !id) return;
     let cancelled = false;
@@ -114,20 +147,74 @@ export default function ProductDetailPage() {
         (rows) => ({ ok: true as const, rows }),
         () => ({ ok: false as const, rows: [] as ProductVariant[] }),
       ),
-      fetchVariations(session, id)
-        .then((r) => r.dimensions)
-        .catch(() => [] as ProductVariationDimension[]),
+      fetchVariations(session, id).then(
+        (r) => ({ ok: true as const, rows: r.dimensions }),
+        () => ({ ok: false as const, rows: [] as ProductVariationDimension[] }),
+      ),
     ]).then(([brs, vars, dims]) => {
       if (cancelled) return;
       setBranches(brs);
       setVariants(vars.rows);
       setVariantsState(vars.ok ? 'ready' : 'error');
-      setVariations(dims);
+      setVariations(dims.rows);
+      setVariationsState(dims.ok ? 'ready' : 'error');
     });
     return () => {
       cancelled = true;
     };
   }, [session, id, reloadKey]);
+
+  /*
+   * D158 — catalogue lookups, keyed on what the product actually needs.
+   *
+   * Separate from the effect above because it cannot run until the product
+   * has resolved: the ids it fetches names for arrive WITH the product. It
+   * therefore re-runs when those ids change, not on every reload.
+   */
+  const productCategoryId = product?.categoryId ?? null;
+  const productBrandId = product?.brandId ?? null;
+  const hasAttributes = product != null && Object.keys(product.attributes ?? {}).length > 0;
+
+  React.useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+
+    if (productCategoryId) {
+      setCategories(PENDING);
+      void fetchCategoryTree(session).then(
+        (rows) => !cancelled && setCategories({ state: 'ready', rows }),
+        () => !cancelled && setCategories({ state: 'error', rows: [] }),
+      );
+    }
+
+    if (productBrandId) {
+      setBrands(PENDING);
+      // `includeArchived` — a product may well carry a brand the tenant has
+      // since archived, and refusing to name it would report a live fact as
+      // a dangling reference.
+      void fetchBrands(session, true).then(
+        (rows) => !cancelled && setBrands({ state: 'ready', rows }),
+        () => !cancelled && setBrands({ state: 'error', rows: [] }),
+      );
+    }
+
+    if (hasAttributes) {
+      /*
+       * Labels only. A failure here is not tracked, and deliberately so:
+       * the VALUES come from the product and are shown either way, and the
+       * resolver falls back to a humanised key. Losing a tenant's wording is
+       * a cosmetic loss; hiding what they recorded would not be.
+       */
+      void fetchProductAttributeSchema(session).then(
+        (r) => !cancelled && setAttributeFields(r.fields),
+        () => undefined,
+      );
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, productCategoryId, productBrandId, hasAttributes]);
 
   // The presentation resolver is the ONE authority for mode-driven UI decisions
   // — the header's Receive Stock button gate and any managed-mode labels in the
@@ -182,6 +269,10 @@ export default function ProductDetailPage() {
       product={product}
       variants={variants}
       variantsState={variantsState}
+      variationsState={variationsState}
+      categories={categories}
+      brands={brands}
+      attributeFields={attributeFields}
       variations={variations}
       branches={branches}
       presentation={presentation}

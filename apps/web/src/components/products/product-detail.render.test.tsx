@@ -18,6 +18,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BranchSummary } from '@/lib/products/branches-api';
+import type { AttributeField } from '@hardware-pos/shared';
 import type { ProductVariant, ProductVariationDimension } from '@/lib/products/variants-api';
 import type { ManagedProduct } from '@/lib/products-api';
 
@@ -100,6 +101,15 @@ const noopSession = {
 const branches: BranchSummary[] = [
   { id: 'br_main', name: 'Main', code: 'MAIN', address: null, phone: null, registers: [] },
 ];
+
+/**
+ * D158 — a catalogue that ANSWERED and is empty, which is not the same as one
+ * that has not answered. The fixtures above carry no `categoryId` and no
+ * `brandId`, so these are never actually consulted; the D158 cases below pass
+ * their own. Naming it here keeps that distinction visible rather than letting
+ * `{state:'ready', rows:[]}` read as "no catalogue" at thirteen call sites.
+ */
+const answeredEmpty = { state: 'ready' as const, rows: [] };
 
 function makeProduct(overrides: Partial<ManagedProduct> = {}): ManagedProduct {
   return {
@@ -241,6 +251,10 @@ describe('ProductDetail — Overview KPIs', () => {
         product={makeProduct({ hasVariants: false })}
         variants={[]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -268,6 +282,10 @@ describe('ProductDetail — Overview KPIs', () => {
         product={product}
         variants={[makeVariant()]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -317,6 +335,10 @@ describe('ProductDetail — Variants tab table', () => {
           }),
         ]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -362,6 +384,10 @@ describe('ProductDetail — delete permanently 409 handling', () => {
         product={makeProduct({ hasVariants: true })}
         variants={[makeVariant()]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -411,6 +437,10 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         product={makeProduct({ hasVariants: false })}
         variants={[]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -433,6 +463,10 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         product={makeProduct({ hasVariants: false })}
         variants={[]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -458,6 +492,10 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         product={makeProduct({ hasVariants: false, quickbooksItemId: 'qb_1', syncStatus: 'SYNCED' })}
         variants={[]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={externalPresentation}
@@ -488,6 +526,10 @@ describe('ProductDetail — Tabs keyboard behaviour', () => {
         product={makeProduct({ hasVariants: true })}
         variants={[makeVariant()]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -535,6 +577,10 @@ describe('ProductDetail — Inventory/Purchases tabs (D101/D103)', () => {
         product={makeProduct({ sellableKind: 'COMPOSED_ITEM', foodType: 'FOOD' })}
         variants={[]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -562,6 +608,10 @@ describe('ProductDetail — Inventory/Purchases tabs (D101/D103)', () => {
         product={makeProduct()}
         variants={[]}
         variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -608,6 +658,10 @@ describe('D156 — the Variants KPI while the list is still loading', () => {
         product={makeProduct({ hasVariants: true })}
         variants={variantsState === 'ready' ? variants : []}
         variantsState={variantsState}
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -648,6 +702,10 @@ describe('D156 — the Variants KPI while the list is still loading', () => {
         product={makeProduct({ hasVariants: true, unitPrice: 0 })}
         variants={[]}
         variantsState="loading"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -698,6 +756,10 @@ describe('D156 — the Variants KPI while the list is still loading', () => {
         product={makeProduct({ hasVariants: false })}
         variants={[]}
         variantsState="loading"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -713,5 +775,258 @@ describe('D156 — the Variants KPI while the list is still loading', () => {
 
     expect(document.body.textContent).toMatch(/single-variant product/i);
     expect(document.body.textContent).not.toMatch(/loading…/i);
+  });
+});
+
+/**
+ * D158 — the Overview shows what the product IS, not only what it costs.
+ *
+ * ## What was reported
+ *
+ * "its not rendering the data and some data are missing from it like category,
+ * brand, if have business details it needed to show too, variations etc are
+ * missing too". All four were on hand: `categoryId`, `brandId` and
+ * `attributes` ride on the product payload, and the variation dimensions were
+ * already being fetched — and then used only to populate an edit dialog.
+ *
+ * ## What makes these assertions non-vacuous (D30)
+ *
+ * Two traps, and a case for each.
+ *
+ * The first is the D156 trap one card over: a name that has not arrived yet
+ * must not render as `—`, because `—` is what a product with NO category
+ * shows. Both are asserted against products that differ only in whether the id
+ * is set, so an implementation that treated "waiting" and "absent" alike fails
+ * one of the pair whichever way it collapsed them.
+ *
+ * The second is the empty card. Business details and Variations are absent for
+ * most products — hardware's vertical declares no attributes at all — so a
+ * test that only checked "the card appears when there is data" would pass an
+ * implementation that rendered an empty card on every single product. Every
+ * absence case therefore also asserts a heading that MUST still be present, so
+ * it cannot pass because the Overview rendered nothing.
+ */
+describe('D158 — Category and Brand', () => {
+  const mount = (
+    product: ManagedProduct,
+    over: {
+      categories?: { state: 'loading' | 'ready' | 'error'; rows: never[] | unknown[] };
+      brands?: { state: 'loading' | 'ready' | 'error'; rows: never[] | unknown[] };
+    } = {},
+  ) =>
+    render(
+      <ProductDetail
+        session={noopSession}
+        product={product}
+        variants={[]}
+        variantsState="ready"
+        variationsState="ready"
+        categories={(over.categories ?? answeredEmpty) as never}
+        brands={(over.brands ?? answeredEmpty) as never}
+        attributeFields={[]}
+        variations={emptyVariations}
+        branches={branches}
+        presentation={localPresentation}
+        hasReceivePermission={true}
+        hasManagePermission={true}
+        canSyncQb={false}
+        syncBusy={false}
+        onSync={() => {}}
+        onReload={() => {}}
+        canSetAvailability={false}
+      />,
+    );
+
+  const category = {
+    id: 'cat_1',
+    name: 'Building Materials',
+    subcategories: [{ id: 'sub_1', categoryId: 'cat_1', name: 'Cement' }],
+  };
+
+  it('names the category and its subcategory', async () => {
+    mount(makeProduct({ categoryId: 'cat_1', subcategoryId: 'sub_1' }), {
+      categories: { state: 'ready', rows: [category] },
+    });
+
+    await waitFor(() => expect(screen.getByText('Category')).toBeTruthy());
+    expect(document.body.textContent).toContain('Building Materials › Cement');
+  });
+
+  it('waits for the name instead of claiming the product has none', async () => {
+    mount(makeProduct({ categoryId: 'cat_1', subcategoryId: null }), {
+      categories: { state: 'loading', rows: [] },
+    });
+
+    await waitFor(() => expect(screen.getByText('Category')).toBeTruthy());
+    const row = screen.getByText('Category').parentElement;
+    expect(row?.textContent).toContain('Loading');
+    // The D156 trap, stated as an assertion: `—` here would be
+    // indistinguishable from the uncategorised product in the next case.
+    expect(row?.textContent).not.toContain('—');
+  });
+
+  it('says "—" at once for a product that has no category', async () => {
+    // The paired half. Same catalogue state as a fresh page load, and the
+    // answer is instant because `categoryId` arrives WITH the product.
+    mount(makeProduct({ categoryId: null }), { categories: { state: 'loading', rows: [] } });
+
+    await waitFor(() => expect(screen.getByText('Category')).toBeTruthy());
+    const row = screen.getByText('Category').parentElement;
+    expect(row?.textContent).toContain('—');
+    expect(row?.textContent).not.toContain('Loading');
+  });
+
+  it('shows no Brand row at all when the product carries no brand', async () => {
+    mount(makeProduct());
+
+    // NEGATIVE — D133 says most hardware and grocery products have no brand
+    // worth recording, so a permanent empty row is one every operator on those
+    // verticals reads past forever.
+    await waitFor(() => expect(screen.getByText('Category')).toBeTruthy());
+    expect(screen.queryByText('Brand')).toBeNull();
+    // POSITIVE — and the card itself is there, so this cannot pass because
+    // the Overview failed to render.
+    expect(screen.getByText('SKU')).toBeTruthy();
+  });
+
+  it('shows the brand when the product has one', async () => {
+    mount(makeProduct({ brandId: 'brd_1' }), {
+      brands: { state: 'ready', rows: [{ id: 'brd_1', name: 'Tokyo Cement', isActive: true, productCount: 2 }] },
+    });
+
+    await waitFor(() => expect(screen.getByText('Brand')).toBeTruthy());
+    expect(screen.getByText('Brand').parentElement?.textContent).toContain('Tokyo Cement');
+  });
+});
+
+describe('D158 — Business details', () => {
+  const mount = (product: ManagedProduct, fields: AttributeField[]) =>
+    render(
+      <ProductDetail
+        session={noopSession}
+        product={product}
+        variants={[]}
+        variantsState="ready"
+        variationsState="ready"
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={fields}
+        variations={emptyVariations}
+        branches={branches}
+        presentation={localPresentation}
+        hasReceivePermission={true}
+        hasManagePermission={true}
+        canSyncQb={false}
+        syncBusy={false}
+        onSync={() => {}}
+        onReload={() => {}}
+        canSetAvailability={false}
+      />,
+    );
+
+  const fields: AttributeField[] = [
+    { key: 'material', label: 'Material', type: 'text' },
+    { key: 'weatherproof', label: 'Weatherproof', type: 'boolean' },
+  ];
+
+  it("renders the tenant's labels against the product's values", async () => {
+    mount(makeProduct({ attributes: { material: 'Galvanised steel', weatherproof: false } }), fields);
+
+    await waitFor(() => expect(screen.getByText('Business details')).toBeTruthy());
+    expect(screen.getByText('Material').parentElement?.textContent).toContain('Galvanised steel');
+    // `false` is a fact a customer asks about, and the one value that vanishes
+    // from JSX and from every truthiness filter.
+    expect(screen.getByText('Weatherproof').parentElement?.textContent).toContain('No');
+  });
+
+  it('renders no card for a product with nothing recorded', async () => {
+    mount(makeProduct({ attributes: {} }), fields);
+
+    await waitFor(() => expect(screen.getByText('At a glance')).toBeTruthy());
+    // NEGATIVE — an empty card on every product would be worse than the
+    // missing section that was reported.
+    expect(screen.queryByText('Business details')).toBeNull();
+  });
+
+  it('renders no card for a vertical that declares no attributes', async () => {
+    // Hardware: `GET /products/attribute-schema` answers `{fields: []}`,
+    // verified live. The card must not appear for them at all.
+    mount(makeProduct({ attributes: {} }), []);
+
+    await waitFor(() => expect(screen.getByText('At a glance')).toBeTruthy());
+    expect(screen.queryByText('Business details')).toBeNull();
+  });
+});
+
+describe('D158 — Variations', () => {
+  const dimensions: ProductVariationDimension[] = [
+    {
+      id: 'dim_1',
+      name: 'Size',
+      position: 0,
+      attributeDefinitionId: null,
+      options: [
+        { id: 'opt_s', name: 'Small', position: 0, attributeOptionId: null },
+        { id: 'opt_m', name: 'Medium', position: 1, attributeOptionId: null },
+      ],
+    },
+  ];
+
+  const mount = (
+    product: ManagedProduct,
+    variations: ProductVariationDimension[],
+    variationsState: 'loading' | 'ready' | 'error' = 'ready',
+  ) =>
+    render(
+      <ProductDetail
+        session={noopSession}
+        product={product}
+        variants={[makeVariant()]}
+        variantsState="ready"
+        variationsState={variationsState}
+        categories={answeredEmpty}
+        brands={answeredEmpty}
+        attributeFields={[]}
+        variations={variations}
+        branches={branches}
+        presentation={localPresentation}
+        hasReceivePermission={true}
+        hasManagePermission={true}
+        canSyncQb={false}
+        syncBusy={false}
+        onSync={() => {}}
+        onReload={() => {}}
+        canSetAvailability={false}
+      />,
+    );
+
+  it('lists each dimension with the options it offers', async () => {
+    mount(makeProduct({ hasVariants: true }), dimensions);
+
+    await waitFor(() => expect(screen.getByText('Variations')).toBeTruthy());
+    const card = screen.getByText('Variations').closest('div')?.parentElement;
+    expect(card?.textContent).toContain('Size');
+    expect(card?.textContent).toContain('Small');
+    expect(card?.textContent).toContain('Medium');
+  });
+
+  it('renders no card for a single-variant product', async () => {
+    mount(makeProduct({ hasVariants: false }), []);
+
+    await waitFor(() => expect(screen.getByText('At a glance')).toBeTruthy());
+    expect(screen.queryByText('Variations')).toBeNull();
+  });
+
+  it('says so when the dimensions could not be loaded', async () => {
+    /*
+     * D156 left this fetch's failure flattened to `[]` and said why: nothing
+     * displayed it. It does now, so an empty list from a failed request would
+     * read as "this product varies on nothing" — for a product whose own
+     * payload says it has variants.
+     */
+    mount(makeProduct({ hasVariants: true }), [], 'error');
+
+    await waitFor(() => expect(screen.getByText('Variations')).toBeTruthy());
+    expect(document.body.textContent).toContain('Could not be loaded');
   });
 });
