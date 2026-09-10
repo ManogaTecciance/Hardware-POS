@@ -19,6 +19,7 @@
 import { api } from '../api';
 import type { Session } from '../session-store';
 import type {
+  AssignableWaiter,
   BillView,
   ChannelBreakdownRow,
   DiningAreaView,
@@ -650,6 +651,25 @@ export const tableSessions = {
   listOpen(session: Session, branchId: string) {
     return api.get<OpenSessionView[]>(
       `/restaurant/branches/${branchId}/open-sessions`,
+      auth(session),
+    );
+  },
+  /**
+   * D153 — who this branch can put on a table (the reassign picker's list).
+   * D153a — with how many tables each already holds, which is what makes a
+   * fifteen-waiter list decidable rather than merely complete.
+   */
+  listAssignableWaiters(session: Session, branchId: string) {
+    return api.get<AssignableWaiter[]>(
+      `/restaurant/branches/${branchId}/assignable-waiters`,
+      auth(session),
+    );
+  },
+  /** D153 — hand an open session to a different waiter. */
+  reassignWaiter(session: Session, branchId: string, sessionId: string, waiterUserId: string) {
+    return api.post<TableSessionView>(
+      `/restaurant/branches/${branchId}/table-sessions/${sessionId}/waiter`,
+      { waiterUserId },
       auth(session),
     );
   },

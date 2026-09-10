@@ -398,6 +398,18 @@ export interface TableSessionView {
  * the waiter-safe "food ready" signal (no KOT_VIEW involved; the route is
  * D70-scoped to the sessions the caller may see).
  */
+/**
+ * D153/D153a — somebody this branch can be handed a table, and how many they
+ * already hold. The count is what makes a long list decidable: the supervisor
+ * wants the colleague who is here and has room, and with no clock-in in this
+ * schema "here" reads as "already serving something".
+ */
+export interface AssignableWaiter {
+  id: string;
+  name: string;
+  openTableCount: number;
+}
+
 export interface OpenSessionView extends TableSessionView {
   activeOrderId: string | null;
   readyTicketIds: string[];

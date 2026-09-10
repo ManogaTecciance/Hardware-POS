@@ -13,10 +13,12 @@ import { Permission } from '../auth/permissions';
 import {
   CloseSessionDto,
   OpenSessionDto,
+  ReassignWaiterDto,
   SubmitRoundDto,
   VoidItemDto,
 } from './dto/table-sessions.dto';
 import {
+  AssignableWaiter,
   OpenSessionSummary,
   OrderView,
   SessionBillPreview,
@@ -91,6 +93,63 @@ export class TableSessionsController {
    * the branch as a small summary + activeOrderId so the frontend can jump
    * straight to the order-entry screen. Read-only, TABLE_VIEW gated.
    */
+  /**
+   * D153 — who this branch can put on a table, for the reassign picker.
+   *
+   * Gated on the reassign permission rather than on a read key: the only
+   * reason to enumerate the floor's staff here is to hand a table to one of
+   * them, and a list of colleagues is not something every waiter needs.
+   */
+  @Get('branches/:branchId/assignable-waiters')
+  @RequirePermissions(Permission.TABLE_SESSION_REASSIGN)
+  @BranchScope(BranchScopeKind.BRANCH_SCOPED)
+  listAssignableWaiters(
+    @TenantId() tenantId: string,
+    @Param('branchId') branchId: string,
+  ): Promise<AssignableWaiter[]> {
+    return this.service.listAssignableWaiters(tenantId, branchId);
+  }
+
+  /**
+   * D153 — the guests have asked for a different waiter.
+   *
+   * Not scoped by D70's `sessionScope`: the point of the permission is that the
+   * holder acts on somebody ELSE's table, so narrowing it to their own would
+   * make the route unusable by the only people who hold it. Audited with both
+   * ids, because "who was on this table at the time" is the question a
+   * disputed bill turns into.
+   */
+  @Post('branches/:branchId/table-sessions/:sessionId/waiter')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.TABLE_SESSION_REASSIGN)
+  @BranchScope(BranchScopeKind.BRANCH_SCOPED)
+  async reassignWaiter(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('branchId') branchId: string,
+    @Param('sessionId') sessionId: string,
+    @Body() dto: ReassignWaiterDto,
+  ): Promise<TableSessionView> {
+    const { session, previousWaiterUserId } = await this.service.reassignWaiter(
+      tenantId,
+      branchId,
+      sessionId,
+      dto.waiterUserId,
+    );
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'TABLE_SESSION_WAITER_REASSIGNED',
+      entityType: 'TableSession',
+      entityId: session.id,
+      metadata: {
+        sessionNumber: session.sessionNumber,
+        fromWaiterUserId: previousWaiterUserId,
+        toWaiterUserId: dto.waiterUserId,
+      },
+    });
+    return session;
+  }
+
   @Get('branches/:branchId/open-sessions')
   @RequirePermissions(Permission.TABLE_VIEW)
   async listOpen(

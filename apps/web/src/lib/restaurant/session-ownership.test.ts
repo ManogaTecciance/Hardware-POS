@@ -18,6 +18,7 @@ import {
   otherWaiterLabel,
   resolveOwnerScope,
   sessionsVisibleTo,
+  supervisesTheFloor,
 } from './session-ownership';
 
 const ME = 'usr_me';
@@ -72,6 +73,28 @@ describe('resolveOwnerScope', () => {
     expect(resolveOwnerScope('all')).toBe('all');
     // And asking for your own sticks even with none — no silent re-widening.
     expect(resolveOwnerScope('mine')).toBe('mine');
+  });
+});
+
+describe('supervisesTheFloor (D152c)', () => {
+  it('separates the office from the floor by ROLE, which is the only thing that can', () => {
+    // An owner watches the room; "my tables" for them is a table they opened
+    // while covering, and D152b would have opened them on that accident.
+    expect(supervisesTheFloor('OWNER')).toBe(true);
+    expect(supervisesTheFloor('ADMIN')).toBe(true);
+    // D108 — the salesperson IS the owner, permission for permission.
+    expect(supervisesTheFloor('SALESPERSON')).toBe(true);
+
+    /*
+     * NEGATIVE, and the reason this is a role test rather than a permission
+     * test: a restaurant Waiter AND the restaurant Cashier both carry the enum
+     * CASHIER (their real authority is a custom role row), and the owner holds
+     * every permission including theirs — so no permission could tell the two
+     * apart. The cashier keeps the control deliberately: their own takeaway
+     * orders are genuinely theirs.
+     */
+    expect(supervisesTheFloor('CASHIER')).toBe(false);
+    expect(supervisesTheFloor('MANAGER')).toBe(false);
   });
 });
 

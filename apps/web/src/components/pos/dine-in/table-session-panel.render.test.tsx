@@ -132,7 +132,12 @@ vi.mock('@/lib/restaurant/labels', () => ({
   },
 }));
 
-const session = { token: 't', user: { id: 'usr_waiter', tenantId: 'tnt' } } as never;
+const session = { token: 't', user: { id: 'usr_waiter', tenantId: 'tnt', role: 'CASHIER' } } as never;
+/** D152c — an owner-level role: the strip opens on the room, with no chips. */
+const ownerSession = {
+  token: 't',
+  user: { id: 'usr_owner', tenantId: 'tnt', role: 'OWNER' },
+} as never;
 
 afterEach(() => {
   cleanup();
@@ -380,6 +385,34 @@ describe('D151 — whose open tables the strip lists', () => {
     expect(stripChips().join(' ')).toMatch(/Sunil/);
     // And mine carries no name: my own tables do not need telling me.
     expect(stripChips().find((t) => t.includes('T2'))).not.toMatch(/Nimal/);
+  });
+
+  it('D152c — an owner-level role opens on the room, with no chips', async () => {
+    /*
+     * "Mine" is a server's question. An owner using the POS is covering, not
+     * carrying a section, so the strip lists every running table and offers no
+     * control to narrow it — asserted as the pair, since "no chips" alone is
+     * also what a strip narrowed to nothing would show.
+     */
+    listOpenSessions.mockResolvedValue([
+      row('theirs', 'tbl_2', 'usr_other', 'Sunil'),
+      row('mine', 'tbl_4', 'usr_waiter', 'Nimal'),
+    ]);
+    render(
+      <TableSessionPanel
+        session={ownerSession}
+        branchId="br_1"
+        active={null}
+        onPick={vi.fn()}
+        onOpenBill={vi.fn()}
+        onOpenRounds={vi.fn()}
+        roundsSent={0}
+      />,
+    );
+
+    await waitFor(() => expect(stripChips()).toHaveLength(2));
+    expect(within(strip()).queryByRole('button', { name: /^Mine/ })).toBeNull();
+    expect(within(strip()).queryByRole('button', { name: /^All/ })).toBeNull();
   });
 
   it('offers no chips when every running table is already mine', async () => {
