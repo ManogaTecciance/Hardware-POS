@@ -109,6 +109,20 @@ export interface OpenSessionSummary extends TableSessionView {
    * and re-enters the list.
    */
   readyTicketIds: string[];
+  /**
+   * D156 — WHOSE table this is, in words the floor uses.
+   *
+   * The floor and the POS picker both open on "my tables" and offer "all", so
+   * every session that is not yours has to be attributable — and the one thing
+   * a waiter can read is a name, not a cuid. It travels on this summary rather
+   * than being looked up client-side because the users endpoint is
+   * `USER_MANAGE`-gated and a waiter holds nothing of the sort.
+   *
+   * Null when the session records no waiter (seeded or pre-D69 rows), never a
+   * placeholder: "nobody opened this" and "somebody we cannot name" read the
+   * same on screen and only one of them is true.
+   */
+  waiterName: string | null;
 }
 
 /**
@@ -509,10 +523,29 @@ export class TableSessionsService {
         readyBySession.set(sid, [...(readyBySession.get(sid) ?? []), t.id]);
       }
     }
+    /*
+     * D156 — whose table each one is, by name.
+     *
+     * One query for the whole page rather than a join: `waiterUserId` is a
+     * loose reference with no FK (the schema's deliberate shape for user
+     * columns), so there is no relation to include. Tenant-scoped, and a name
+     * that cannot be resolved stays null rather than becoming "Unknown" — a
+     * seeded session with no waiter and a deleted user must not read alike.
+     */
+    const waiterIds = [...new Set(rows.map((r) => r.waiterUserId).filter((id): id is string => !!id))];
+    const waiterNames = new Map<string, string>();
+    if (waiterIds.length > 0) {
+      const staff = await this.prisma.user.findMany({
+        where: { tenantId, id: { in: waiterIds } },
+        select: { id: true, name: true },
+      });
+      for (const u of staff) waiterNames.set(u.id, u.name);
+    }
     return rows.map((row) => ({
       ...this.sessionToView(row),
       activeOrderId: row.orders[0]?.id ?? null,
       readyTicketIds: readyBySession.get(row.id) ?? [],
+      waiterName: row.waiterUserId ? waiterNames.get(row.waiterUserId) ?? null : null,
     }));
   }
 

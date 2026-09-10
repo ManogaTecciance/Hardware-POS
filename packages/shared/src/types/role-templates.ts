@@ -191,15 +191,29 @@ export const RESTAURANT_ROLE_TEMPLATES: readonly RoleTemplate[] = [
        * one fact, not catalogue authorship.
        */
       Permission.PRODUCT_AVAILABILITY_SET,
+      /*
+       * D156 — the waiter CAN see the floor, and opens on their own tables.
+       *
+       * This supersedes D70's withholding of the key. D70's objection was the
+       * MIXING ("a floor list that mixes them is how a table gets served twice
+       * or not at all"), and the answer to mixing is a default, not blindness:
+       * every surface opens on My tables and says whose a table is, with All
+       * one tap away. Withholding the read made the routine case of table
+       * service impossible — covering a colleague on a break, a shift change
+       * mid-service, a guest flagging down whoever walks past — because the
+       * other party's order could not even be READ to answer a question about
+       * it.
+       *
+       * It grants no new WRITE: sending a round has never checked ownership
+       * (only ORDER_SEND_TO_KITCHEN), so the floor could always serve a table
+       * it could reach; this lets the waiter reach it honestly instead of
+       * walking to a supervisor's screen.
+       */
+      Permission.TABLE_SESSION_VIEW_ALL,
       // Deliberately absent: ORDER_VOID_SENT and TABLE_TRANSFER/MERGE. Voiding an
       // order the kitchen has already started, and moving a table's bill, are the
       // two places where a waiter's mistake becomes someone else's loss — they
       // belong to whoever is accountable for the shift.
-      //
-      // D70, deliberately absent: TABLE_SESSION_VIEW_ALL. A waiter sees the
-      // sessions THEY opened. Another waiter's party is somebody else's
-      // responsibility, and a floor list that mixes them is how a table gets
-      // served twice or not at all.
       //
       // Also deliberately absent: KOT_VIEW. It is the permission the Kitchen
       // rail entry is gated on, and a waiter has no business on the kitchen

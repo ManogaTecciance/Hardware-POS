@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { PAGE_SIZES, Pagination } from '@/components/ui/pagination';
 import { Select } from '@/components/ui/select';
 import { normalizeSearchTerm } from '@/lib/search-term';
+import { staffLabel } from '@/lib/restaurant/session-ownership';
 import { type Session } from '@/lib/auth';
 import { restaurantOrders } from '@/lib/restaurant/api';
 import { formatElapsed, formatMoney } from '@/lib/restaurant/labels';
@@ -123,6 +124,15 @@ export function OrdersPage({ session, branchId }: Props) {
     ? sizeRaw
     : ORDERS_PAGE_SIZE;
   const openId = params.get('open');
+  /*
+   * D157 — whose orders. Absent means "the server decides" (mine when this
+   * operator has any, else all), which is what a waiter opening the tab gets;
+   * a tap writes it, and from then on it rides in the URL like every other
+   * filter here, so a shared link shows what the sender was looking at.
+   */
+  const scopeRaw = params.get('scope');
+  const scope: 'mine' | 'all' | undefined =
+    scopeRaw === 'mine' || scopeRaw === 'all' ? scopeRaw : undefined;
 
   const [rows, setRows] = React.useState<UnifiedOrderView[]>([]);
   const [total, setTotal] = React.useState(0);
@@ -141,6 +151,31 @@ export function OrdersPage({ session, branchId }: Props) {
    * pager is hidden.
    */
   const [pageSize, setPageSize] = React.useState(ORDERS_PAGE_SIZE);
+  /*
+   * D157 — the chip numbers, and which scope the server applied. Held from the
+   * response rather than derived from `rows`: the list is one page, and the
+   * scope may have been chosen by the server rather than by the URL.
+   */
+  /*
+   * D157a — null until a response lands, so the chips read "My orders" rather
+   * than "My orders · 0" for the length of one fetch. Zero is a real answer at
+   * the till (they own none), and a chip that shows it before anybody has
+   * counted is stating that answer early.
+   */
+  const [mineCount, setMineCount] = React.useState<number | null>(null);
+  const [allCount, setAllCount] = React.useState<number | null>(null);
+  /*
+   * D157a — MINE before the first response, not 'all'.
+   *
+   * The server picks the default and reports it in `resolvedScope`, which does
+   * not exist until the request comes back; seeding this 'all' lit the All chip
+   * for the length of one fetch and then flipped it, which is the flicker the
+   * PO reported. Seeded from the URL when a shared link names a scope, so that
+   * case does not flip either. Someone who owns nothing (a till) still widens
+   * once the answer lands — that is the honest direction, and it cannot be
+   * known any sooner.
+   */
+  const [appliedScope, setAppliedScope] = React.useState<'mine' | 'all'>(scope ?? 'mine');
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = React.useState<Date | null>(null);
@@ -170,6 +205,7 @@ export function OrdersPage({ session, branchId }: Props) {
       // No `page`: a new term must start at page 1, or the reader lands on
       // page 4 of a result set that may only have one page.
       const q = buildQuery({
+        scope,
         channel,
         status,
         partner,
@@ -182,12 +218,16 @@ export function OrdersPage({ session, branchId }: Props) {
       router.replace(`/orders${q}`);
     }, 250);
     return () => clearTimeout(t);
-  }, [localSearch, channel, status, partner, payment, from, to, requestedSize, search, router]);
+    // `scope` is in the list because the rebuilt query carries it (D157a): a
+    // search typed while "All orders" is active must not silently drop back to
+    // the default scope. The early return above keeps the extra runs free.
+  }, [localSearch, scope, channel, status, partner, payment, from, to, requestedSize, search, router]);
 
   const load = React.useCallback(() => {
     setLoading(true);
     restaurantOrders
       .list(session, branchId, {
+        scope,
         channel,
         status,
         paymentStatus: payment,
@@ -210,12 +250,15 @@ export function OrdersPage({ session, branchId }: Props) {
         setTruncated(res.truncated);
         setStatusCounts(res.statusCounts);
         setPageSize(res.pageSize);
+        setMineCount(res.mineCount);
+        setAllCount(res.allCount);
+        setAppliedScope(res.resolvedScope);
         setRefreshedAt(new Date());
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load orders'))
       .finally(() => setLoading(false));
-  }, [session, branchId, channel, status, payment, from, to, search, page, requestedSize]);
+  }, [session, branchId, scope, channel, status, payment, from, to, search, page, requestedSize]);
 
   React.useEffect(() => {
     load();
@@ -269,6 +312,7 @@ export function OrdersPage({ session, branchId }: Props) {
   }, [statusCounts, total]);
 
   const patch = (next: Partial<{
+    scope: 'mine' | 'all';
     channel: UnifiedChannel | 'ALL';
     status: UnifiedOrderStatus | 'ALL';
     partner: string;
@@ -290,6 +334,7 @@ export function OrdersPage({ session, branchId }: Props) {
      * alone.
      */
     const narrows =
+      'scope' in next ||
       'channel' in next ||
       'status' in next ||
       'partner' in next ||
@@ -301,6 +346,7 @@ export function OrdersPage({ session, branchId }: Props) {
     const nextPage = 'page' in next ? next.page : narrows ? 1 : page;
     router.replace(
       `/orders${buildQuery({
+        scope: next.scope ?? scope,
         channel: next.channel ?? channel,
         status: next.status ?? status,
         partner: next.partner ?? partner,
@@ -338,7 +384,14 @@ export function OrdersPage({ session, branchId }: Props) {
 
       {/* Metrics strip */}
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-        <Metric label="Total orders" value={metrics.total} hint={`${branchId ? 'Today · this branch' : ''}`} />
+        {/* D157 — the hint has to say WHOSE, because the number is scoped: a
+            card reading "2 · Today · this branch" over a branch running
+            thirty-six is not a rounding difference, it is the wrong claim. */}
+        <Metric
+          label="Total orders"
+          value={metrics.total}
+          hint={appliedScope === 'mine' ? 'Today · mine' : branchId ? 'Today · this branch' : ''}
+        />
         <Metric label="Pending" value={metrics.pending} tone="warning" hint="Awaiting kitchen" />
         <Metric label="In progress" value={metrics.inProgress} tone="info" hint="Being prepared" />
         <Metric label="Ready" value={metrics.ready} tone="success" hint="For handover" />
@@ -401,6 +454,46 @@ export function OrdersPage({ session, branchId }: Props) {
                 );
               })}
             </ChipRow>
+          </div>
+
+          {/* D157 — whose orders. First, because it frames every count below it:
+              the status tabs and the ready bell describe the SCOPED list, so a
+              reader who has not noticed which view they are in would misread
+              every number on the screen. */}
+          <div className="flex items-center gap-3">
+            <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Orders
+            </span>
+            <div
+              role="group"
+              aria-label="Whose orders to show"
+              className="flex min-w-0 flex-wrap gap-2"
+            >
+              {[
+                {
+                  key: 'mine' as const,
+                  label: mineCount === null ? 'My orders' : `My orders · ${mineCount}`,
+                },
+                {
+                  key: 'all' as const,
+                  label: allCount === null ? 'All orders' : `All orders · ${allCount}`,
+                },
+              ].map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => patch({ scope: c.key })}
+                  data-active={c.key === appliedScope}
+                  className={`inline-flex h-11 shrink-0 items-center rounded-full px-4 text-sm font-medium transition-colors ${
+                    c.key === appliedScope
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-foreground hover:bg-border'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Channel chips — the "Channel" label stays outside the scrollable
@@ -611,7 +704,25 @@ export function OrdersPage({ session, branchId }: Props) {
       ) : filteredByPartner.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            No orders match this filter.
+            {/* D157b — an empty MY ORDERS is a normal state (a shift that has
+                not started, a supervisor who takes none), and it used to be
+                "solved" by silently widening the view. Say what is empty and
+                offer the way over instead: the count is the evidence that
+                there IS somewhere to go, and one tap gets there. */}
+            {appliedScope === 'mine' && (allCount ?? 0) > 0 ? (
+              <>
+                <p>None of this branch&rsquo;s orders are yours right now.</p>
+                <button
+                  type="button"
+                  onClick={() => patch({ scope: 'all' })}
+                  className="mt-3 inline-flex h-11 items-center rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
+                >
+                  Show all {allCount} orders
+                </button>
+              </>
+            ) : (
+              'No orders match this filter.'
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -650,6 +761,10 @@ export function OrdersPage({ session, branchId }: Props) {
               <p className="text-xs text-muted-foreground">
                 {formatElapsed(r.createdAt)}
                 {r.pickupAt ? ` · Pickup ${new Date(r.pickupAt).toLocaleTimeString()}` : ''}
+                {/* D157 — whose order, when it is not yours. Only then: the
+                    operator's own name on every one of their own rows is a word
+                    they already know, repeated down the whole list. */}
+                {staffLabel(r, session.user.id) ? ` · ${staffLabel(r, session.user.id)}` : ''}
               </p>
               {r.itemPreview.length > 0 ? (
                 <p className="line-clamp-2 text-xs text-muted-foreground">
@@ -771,6 +886,8 @@ function Metric({
 }
 
 function buildQuery(f: {
+  /** D157 — omitted (undefined) means "let the server decide whose". */
+  scope?: 'mine' | 'all';
   channel: UnifiedChannel | 'ALL';
   status: UnifiedOrderStatus | 'ALL';
   partner: string;
@@ -783,6 +900,7 @@ function buildQuery(f: {
   open?: string | null;
 }): string {
   const params = new URLSearchParams();
+  if (f.scope) params.set('scope', f.scope);
   if (f.channel !== 'ALL') params.set('channel', f.channel);
   if (f.status !== 'ALL') params.set('status', f.status);
   if (f.partner !== 'ALL') params.set('partner', f.partner);

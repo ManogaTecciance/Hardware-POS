@@ -1,6 +1,17 @@
 'use client';
 
-import { Archive, Building2, ConciergeBell, DoorOpen, Link2, MoreVertical, Pencil, Plus, Users } from 'lucide-react';
+import {
+  Archive,
+  Building2,
+  ConciergeBell,
+  DoorOpen,
+  Link2,
+  MoreVertical,
+  Pencil,
+  Plus,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -25,6 +36,13 @@ import {
   TABLE_STATUS_TONES,
   formatElapsed,
 } from '@/lib/restaurant/labels';
+import {
+  countAll,
+  countMine,
+  resolveOwnerScope,
+  sessionsVisibleTo,
+  type SessionOwnerScope,
+} from '@/lib/restaurant/session-ownership';
 import { seatsFree } from '@/lib/restaurant/types';
 import type {
   DiningAreaView,
@@ -100,13 +118,25 @@ const EMPTY: Snapshot = {
 };
 
 /**
+ * D155 — where "View order" goes: the POS, bound to this session.
+ *
+ * One URL shape, built in one place, because the floor has two cards that link
+ * to it (a physical table, and every tab on an arrangement) and they used to
+ * compose the path independently. The table is chosen by the tap that follows
+ * this link, so the POS opens on the menu rather than on a picker.
+ */
+const posHref = (sessionId: string): string =>
+  `/pos?mode=dine-in&sessionId=${encodeURIComponent(sessionId)}`;
+
+/**
  * Visual floor plan grouped by dining area.
  *
  * Layout: an area filter across the top, then one section per area with a
  * responsive card grid. Cards show table code + capacity + status. When a
  * session is open on the table, the card also shows the elapsed time since
- * open plus a "View order" link to the order-entry screen. Available tables
- * expose an "Open table" action (Phase D) gated on `TABLE_OPEN`.
+ * open plus a "View order" link into the dine-in POS for that session (D155).
+ * Available tables expose an "Open table" action (Phase D) gated on
+ * `TABLE_OPEN`.
  */
 export function TableFloor({ session, branchId, canManage }: Props) {
   const { hasPermission } = useAuth();
@@ -117,6 +147,13 @@ export function TableFloor({ session, branchId, canManage }: Props) {
     error?: string;
   }>({ status: 'loading', snapshot: EMPTY });
   const [selectedArea, setSelectedArea] = React.useState<string | 'ALL'>('ALL');
+  /*
+   * D156 — "my tables" or the whole floor. Null until a chip is tapped, which
+   * is what lets `resolveOwnerScope` default from the data without overriding
+   * an operator who has asked for something: a poll must not pull a waiter
+   * back to their own tables while they are looking at the room.
+   */
+  const [ownerChoice, setOwnerChoice] = React.useState<SessionOwnerScope | null>(null);
   const [showNewArea, setShowNewArea] = React.useState(false);
   const [showNewTable, setShowNewTable] = React.useState<{ areaId: string } | null>(null);
   const [openTarget, setOpenTarget] = React.useState<RestaurantTableView | null>(null);
@@ -292,8 +329,93 @@ export function TableFloor({ session, branchId, canManage }: Props) {
       ? snapshot.areas
       : snapshot.areas.filter((a) => a.id === selectedArea);
 
+  /*
+   * D156 — whose tables are on screen.
+   *
+   * The server now returns the branch's sessions to a waiter too, so the
+   * narrowing that used to happen in the query happens here instead — and
+   * `sessionsVisibleTo` is applied to the MAP rather than at each card, because
+   * the floor reads it in three places (a table card, an arrangement's tabs,
+   * the ready badge) and a scope honoured in two of them is a table that is
+   * hidden and still rings.
+   */
+  const mineCount = countMine(snapshot.sessionsByTableId, currentUserId);
+  const allCount = countAll(snapshot.sessionsByTableId);
+  // D157b — mine unless the operator said otherwise. Nothing about the data
+  // moves it, so there is no paint at which the answer changes under them.
+  const ownerScope = resolveOwnerScope(ownerChoice);
+  /** Whether the first load has landed, so a `0` on a chip is an answer. */
+  const countsKnown = status !== 'loading';
+  /*
+   * D156a — who is serving each table, read from the UNSCOPED snapshot.
+   *
+   * The PO asked for the server's name on the Tables screen, and a floor plan
+   * reads the way every other one does: the room always says who is on a
+   * table, and the Mine/All chips govern what you can WORK on rather than what
+   * you can see. So a colleague's table under "My tables" still carries their
+   * name — it just has no View order — which is also the answer to "who do I
+   * ask about M3".
+   */
+  const servedByTable = React.useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const [tableId, sessions] of snapshot.sessionsByTableId) {
+      const names = sessions
+        .map((session) => session.waiterName?.trim() || null)
+        .filter((name): name is string => name !== null);
+      if (names.length > 0) map.set(tableId, names);
+    }
+    return map;
+  }, [snapshot.sessionsByTableId]);
+  const visibleSessions = React.useMemo(
+    () => sessionsVisibleTo(snapshot.sessionsByTableId, ownerScope, currentUserId),
+    [snapshot.sessionsByTableId, ownerScope, currentUserId],
+  );
+  /*
+   * The chips are offered only to someone the server will actually answer with
+   * other people's tables (D70's key, which the waiter template now carries,
+   * D156). Without it every session returned is already theirs, and a pair of
+   * chips that filter nothing is a control that lies about what it does.
+   */
+  const canSeeWholeFloor = hasPermission(Permission.TABLE_SESSION_VIEW_ALL);
+
   return (
     <div className="space-y-4">
+      {/* D156 — whose tables. Its own row above the area strip, deliberately
+          not folded into it: these are two different questions (whose, and
+          where), and D91/D92 settled that one strip carries ONE selection —
+          mixing them was what made the picker unreadable. Counts on the chips
+          because "My tables 3 · All 7" is the whole answer a waiter wants
+          before they decide which to look at. */}
+      {canSeeWholeFloor ? (
+        <div
+          role="group"
+          aria-label="Whose tables to show"
+          className="flex items-center gap-3"
+        >
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Tables
+          </span>
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {/* D157b — counts appear once the first load has landed, and then
+                include ZERO: "My tables · 0" beside "All tables · 16" is the
+                whole story for a waiter who has not seated anybody, and it is
+                the state that used to be papered over by widening the view.
+                Before that they are absent rather than zero, which would be
+                stating the answer before anybody counted. */}
+            <AreaChip
+              label={countsKnown ? `My tables · ${mineCount}` : 'My tables'}
+              active={ownerScope === 'mine'}
+              onClick={() => setOwnerChoice('mine')}
+            />
+            <AreaChip
+              label={countsKnown ? `All tables · ${allCount}` : 'All tables'}
+              active={ownerScope === 'all'}
+              onClick={() => setOwnerChoice('all')}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {/* Area filter + management actions.
           The chip strip is wrapped in <ChipRow> so branches with 8+ dining
           areas scroll horizontally on tablet portrait instead of wrapping to
@@ -371,12 +493,14 @@ export function TableFloor({ session, branchId, canManage }: Props) {
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                 {snapshot.openTables.map((t) => {
-                  const tabs = snapshot.sessionsByTableId.get(t.id) ?? [];
+                  const tabs = visibleSessions.get(t.id) ?? [];
                   return (
                     <OpenTableCard
                       key={t.id}
                       table={t}
                       sessions={tabs}
+                      // D156a — every tab's server, from the unscoped snapshot.
+                      allTabs={snapshot.sessionsByTableId.get(t.id) ?? []}
                       // D112 — a joined party's food rings too: unanswered bumps across every tab.
                       readyCount={tabs.reduce((n, s) => n + unansweredReady(s, ackedReady), 0)}
                       onViewOrder={ackReady}
@@ -481,12 +605,18 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 tab:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                     {tables.map((t) => {
                       // A physical table still carries at most one tab.
-                      const s = snapshot.sessionsByTableId.get(t.id)?.[0] ?? null;
+                      const s = visibleSessions.get(t.id)?.[0] ?? null;
                       return (
                         <TableCard
                           key={t.id}
                           table={t}
                           session={s}
+                          /*
+                           * D156a — the name comes from the unscoped snapshot,
+                           * so it is there whether or not this session is one
+                           * the current scope lets the operator open.
+                           */
+                          servedBy={servedByTable.get(t.id)?.[0] ?? null}
                           readyCount={s ? unansweredReady(s, ackedReady) : 0}
                           onViewOrder={() => s && ackReady(s)}
                           canOpen={canOpenTable}
@@ -625,6 +755,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
 function TableCard({
   table,
   session,
+  servedBy,
   readyCount,
   onViewOrder,
   canOpen,
@@ -638,6 +769,13 @@ function TableCard({
 }: {
   table: RestaurantTableView;
   session: OpenSessionView | null;
+  /**
+   * D156a — the waiter serving this table, named. Present whenever the branch
+   * has a session on it, including one the current scope is not showing, and
+   * including the operator's own — a floor plan that named everybody except
+   * you would be a strange thing to read over somebody's shoulder.
+   */
+  servedBy: string | null;
   /** D112 — bumped tickets this device has not answered; >0 shows the bell. */
   readyCount: number;
   /** Tapping View order answers the badge for this session on this device. */
@@ -696,6 +834,15 @@ function TableCard({
           <span className="ml-auto">Open {formatElapsed(session.openedAt)}</span>
         ) : null}
       </div>
+      {/* D156a — who is serving it. `UserRound`, not the `Users` above: that
+          one counts covers, this one names a person, and two lines under the
+          same icon read as one fact split in half. */}
+      {servedBy ? (
+        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+          <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{servedBy}</span>
+        </p>
+      ) : null}
       {/* D50 — why this table is Reserved. Naming the holders is what stops an
           operator unreserving something that is reserved for another reason:
           a table with no line here has no unreserve control at all. */}
@@ -722,7 +869,10 @@ function TableCard({
             cards without an action don't jitter the grid row. */}
         {session ? (
           <Button asChild size="md" fullWidth variant="secondary">
-            <Link href={`/tables/session/${session.id}`} onClick={onViewOrder}>
+            {/* D155 — into the POS, bound to this session. The table is already
+                chosen by the tap that got here, so the POS opens on the menu
+                with no picker in front of it. */}
+            <Link href={posHref(session.id)} onClick={onViewOrder}>
               View order
             </Link>
           </Button>
@@ -1457,6 +1607,7 @@ function ArchiveTableDialog({
 function OpenTableCard({
   table,
   sessions,
+  allTabs,
   readyCount,
   onViewOrder,
   canOpen,
@@ -1467,6 +1618,12 @@ function OpenTableCard({
   table: OpenTableView;
   /** D104 — every live tab on this arrangement, not just the first. */
   sessions: OpenSessionView[];
+  /**
+   * D156a — every tab the BRANCH has on this arrangement, scope or no scope,
+   * so the "served by" line names all of them while the buttons above it stay
+   * scoped to what the operator may open.
+   */
+  allTabs: OpenSessionView[];
   /** D112 — see TableCard: unanswered bumped tickets across this arrangement's tabs. */
   readyCount: number;
   /** Tapping a tab's link answers the badge for THAT tab on this device. */
@@ -1539,7 +1696,7 @@ function OpenTableCard({
                screen, rather than letting the label spill past the button. */
             <Button key={s.id} asChild size="md" fullWidth variant="secondary">
               <Link
-                href={`/tables/session/${s.id}`}
+                href={posHref(s.id)}
                 onClick={() => onViewOrder(s)}
                 className="min-w-0 gap-1 px-3"
                 title={`${label} · ${elapsed}`}
@@ -1553,6 +1710,26 @@ function OpenTableCard({
             </Button>
           );
         })}
+        {/* Who is serving each tab, under the buttons they belong to: a name
+            inside a 44px button on a one-cell-wide card pushes the elapsed
+            time — the part that decides whether to walk over — off the chip.
+            D156a: every tab, not only other people's, and read from the
+            unscoped list so the line does not change with the chips. */}
+        {allTabs.some((s) => s.waiterName?.trim()) ? (
+          <p className="flex items-start gap-1 text-xs text-muted-foreground">
+            <UserRound className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0">
+              {allTabs
+                .map((s) => {
+                  const owner = s.waiterName?.trim();
+                  if (!owner) return null;
+                  return s.tabName ? `${s.tabName}: ${owner}` : owner;
+                })
+                .filter((line): line is string => line !== null)
+                .join(' · ')}
+            </span>
+          </p>
+        ) : null}
         {canSeat && canOpen ? (
           <Button
             size="md"

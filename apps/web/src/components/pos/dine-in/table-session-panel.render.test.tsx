@@ -142,7 +142,11 @@ afterEach(() => {
   tablesFor.mockImplementation((areaId: string) => TABLES[areaId] ?? []);
 });
 
-const panel = (active: ActiveTableSession | null, onPick = vi.fn()) =>
+const panel = (
+  active: ActiveTableSession | null,
+  onPick = vi.fn(),
+  extra: { locked?: boolean; onOpenRounds?: () => void } = {},
+) =>
   render(
     <TableSessionPanel
       session={session}
@@ -150,7 +154,9 @@ const panel = (active: ActiveTableSession | null, onPick = vi.fn()) =>
       active={active}
       onPick={onPick}
       onOpenBill={vi.fn()}
+      onOpenRounds={extra.onOpenRounds ?? vi.fn()}
       roundsSent={0}
+      locked={extra.locked ?? false}
     />,
   );
 
@@ -219,6 +225,10 @@ describe('picking a table', () => {
         openedAt: '2026-08-21T09:00:00.000Z',
         guestCount: 2,
         activeOrderId: 'ord_9',
+        // D156/D157b — the caller's own, which is what the pre-D156 scoped read
+        // guaranteed by construction and what the Mine default now shows.
+        waiterUserId: 'usr_waiter',
+        waiterName: 'Nimal',
       },
     ]);
     const onPick = vi.fn();
@@ -282,13 +292,17 @@ describe('picking a table', () => {
         openedAt: '2026-08-21T09:00:00.000Z',
         guestCount: 2,
         activeOrderId: 'ord_9',
+        waiterUserId: 'usr_waiter',
+        waiterName: 'Nimal',
       },
     ]);
     panel(null);
 
     // Scoped to the strip: under D91 the same table is ALSO drawn in the room
     // below while its own area is selected, and an unscoped query matches two.
-    const strip = () => screen.getByRole('group', { name: 'Your open tables' });
+    // D156 — "Open tables", not "Your open tables": the strip can now show the
+    // floor's, and the chips inside it say whose are listed.
+    const strip = () => screen.getByRole('group', { name: 'Open tables' });
     await waitFor(() => expect(within(strip()).getByRole('button', { name: /T2/ })).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: 'Main Hall' }));
@@ -306,19 +320,130 @@ describe('picking a table', () => {
   });
 });
 
+/**
+ * D156 — the picker's strip opens on the caller's own tables.
+ *
+ * The strip is the POS's half of the same rule the floor plan carries: the
+ * server now returns the branch's sessions, so "Mine" is a screen decision, and
+ * both directions are asserted on one fixture because each failure looks like
+ * the other working. A strip stuck on Mine is indistinguishable from a colleague
+ * having no table; a strip that ignores the chip is indistinguishable from a
+ * waiter having two.
+ *
+ * Mutation-proven, run against the component itself (this describe only):
+ *   1. `shownOpen = open` (the chip ignored) — 1 failed, 2 passed: the default
+ *      case, which is the one a waiter meets on every visit;
+ *   2. the chips rendered unconditionally (the `mineOpen.length !== open.length`
+ *      guard dropped) — 1 failed, 2 passed: a pair of chips appears on a floor
+ *      where every running table is already the caller's.
+ */
+describe('D156 — whose open tables the strip lists', () => {
+  const strip = () => screen.getByRole('group', { name: 'Open tables' });
+  /** The session chips inside the strip, by the table name each one carries. */
+  const stripChips = () =>
+    within(strip())
+      .getAllByRole('button')
+      .map((b) => b.textContent ?? '')
+      .filter((t) => !t.startsWith('Mine') && !t.startsWith('All'));
+
+  const row = (id: string, tableId: string, waiterUserId: string, waiterName: string) => ({
+    id,
+    sessionNumber: 'TS-' + id,
+    tableId,
+    tabName: null,
+    openedAt: '2026-09-10T09:00:00.000Z',
+    guestCount: 2,
+    activeOrderId: 'ord_' + id,
+    waiterUserId,
+    waiterName,
+  });
+
+  it('lists mine by default and the floor on demand, naming whose is whose', async () => {
+    listOpenSessions.mockResolvedValue([
+      row('mine', 'tbl_2', 'usr_waiter', 'Nimal'),
+      row('theirs', 'tbl_4', 'usr_other', 'Sunil'),
+    ]);
+    panel(null);
+
+    // POSITIVE — my own table (T2), and NEGATIVE — not the colleague's (M2),
+    // even though the server returned both.
+    await waitFor(() => expect(stripChips()).toHaveLength(1));
+    expect(stripChips()[0]).toMatch(/T2/);
+    expect(within(strip()).queryByRole('button', { name: /M2/ })).toBeNull();
+
+    // The counts say what switching would buy.
+    expect(within(strip()).getByRole('button', { name: 'Mine · 1' })).toBeTruthy();
+    fireEvent.click(within(strip()).getByRole('button', { name: 'All · 2' }));
+
+    await waitFor(() => expect(stripChips()).toHaveLength(2));
+    // Whose, by name — on the chip, beside the elapsed time.
+    expect(stripChips().join(' ')).toMatch(/Sunil/);
+    // And mine carries no name: my own tables do not need telling me.
+    expect(stripChips().find((t) => t.includes('T2'))).not.toMatch(/Nimal/);
+  });
+
+  it('offers no chips when every running table is already mine', async () => {
+    // A control that cannot change anything is a control that lies about what
+    // it does — and this is the commonest state on a small floor.
+    listOpenSessions.mockResolvedValue([row('mine', 'tbl_2', 'usr_waiter', 'Nimal')]);
+    panel(null);
+
+    await waitFor(() => expect(stripChips()).toHaveLength(1));
+    expect(within(strip()).queryByRole('button', { name: /^Mine/ })).toBeNull();
+    expect(within(strip()).queryByRole('button', { name: /^All/ })).toBeNull();
+  });
+
+  it('D157b — stays on Mine with none of its own, and says where the rest are', async () => {
+    /*
+     * This case used to assert the opposite: the strip widened itself when the
+     * caller owned nothing, on the reasoning that an empty strip reads as a
+     * quiet branch. Because the count arrives after the first paint, that
+     * showed as Mine → All a beat later — "it's working backward". It now
+     * holds, and the blank is spoken for.
+     */
+    listOpenSessions.mockResolvedValue([
+      row('theirs', 'tbl_2', 'usr_other', 'Sunil'),
+      row('third', 'tbl_4', 'usr_third', 'Kamal'),
+    ]);
+    panel(null);
+
+    // Held on Mine, with no session chips…
+    await waitFor(() =>
+      expect(within(strip()).getByRole('button', { name: 'Mine · 0' }).getAttribute('data-active')).toBe(
+        'true',
+      ),
+    );
+    expect(stripChips()).toHaveLength(0);
+    // …and a line saying what All holds, so the blank is not a dead end.
+    expect(within(strip()).getByText(/None of the 2 running tables are yours/)).toBeTruthy();
+
+    // One tap over.
+    fireEvent.click(within(strip()).getByRole('button', { name: 'All · 2' }));
+    await waitFor(() => expect(stripChips()).toHaveLength(2));
+  });
+});
+
 describe('D92 — Open is a destination in the strip, not a second filter', () => {
   const room = () => screen.getByRole('group', { name: 'Tables in this area' });
   const roomTables = () =>
     within(room())
       .queryAllByRole('button')
       .map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim());
-  const openSessionRow = (id: string, tableId: string) => ({
+  /*
+   * D156/D157b — the caller's own session unless a test says otherwise. Before
+   * D156 that was guaranteed by the read (the server returned nobody else's);
+   * now the strip DEFAULTS to the caller's own, so a fixture that named no
+   * waiter would be filtered out of the very list these cases are about.
+   */
+  const openSessionRow = (id: string, tableId: string, waiterUserId = 'usr_waiter') => ({
     id,
     sessionNumber: '0000' + id.slice(-1),
     tableId,
     openedAt: '2026-08-21T09:00:00.000Z',
     guestCount: 2,
     activeOrderId: 'ord_' + id.slice(-1),
+    waiterUserId,
+    waiterName: waiterUserId === 'usr_waiter' ? 'Nimal' : 'Sunil',
   });
 
   it('offers Open beside the floors, and nothing else — the All and Free chips are gone', async () => {
@@ -462,6 +587,7 @@ describe('an active session', () => {
         }}
         onPick={vi.fn()}
         onOpenBill={onOpenBill}
+        onOpenRounds={vi.fn()}
         roundsSent={2}
       />,
     );
@@ -501,6 +627,7 @@ describe('an active session', () => {
         }}
         onPick={onPick}
         onOpenBill={vi.fn()}
+        onOpenRounds={vi.fn()}
         roundsSent={2}
       />,
     );
@@ -574,6 +701,12 @@ describe('D49/D50/D104 — arrangements in the POS', () => {
       .map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim());
   const openChip = () => screen.getByRole('button', { name: 'Open' });
 
+  /*
+   * D156 — the tabs are THIS waiter's own, which is what the pre-D156 read
+   * guaranteed by construction (the server returned nobody else's). Said
+   * explicitly now that the read returns the floor: without it these
+   * arrangement cases would be asserting the "All tables" view by accident.
+   */
   const tab = (id: string, tableId: string, tabName: string | null, guests: number) => ({
     id,
     sessionNumber: 'TS-0000' + id.slice(-1),
@@ -582,6 +715,8 @@ describe('D49/D50/D104 — arrangements in the POS', () => {
     openedAt: '2026-08-21T09:00:00.000Z',
     guestCount: guests,
     activeOrderId: 'ord_' + id.slice(-1),
+    waiterUserId: 'usr_waiter',
+    waiterName: 'Nimal',
   });
 
   it('lists an arrangement under Open — with its members and free seats — and on no floor', async () => {
@@ -758,7 +893,7 @@ describe('D49/D50/D104 — arrangements in the POS', () => {
     const onPick = vi.fn();
     panel(null, onPick);
 
-    const strip = await screen.findByRole('group', { name: 'Your open tables' });
+    const strip = await screen.findByRole('group', { name: 'Open tables' });
     const chips = within(strip).getAllByRole('button');
     expect(chips).toHaveLength(2);
     expect(chips.map((c) => c.textContent)).toEqual([

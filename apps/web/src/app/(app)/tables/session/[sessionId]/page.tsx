@@ -1,60 +1,25 @@
-'use client';
-
-import Link from 'next/link';
-import { use } from 'react';
-
-import { PageHeader } from '@/components/page-header';
-import { OrderEntry } from '@/components/restaurant/orders/order-entry';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { useAuth } from '@/lib/auth';
+import { redirect } from 'next/navigation';
 
 interface PageProps {
   params: Promise<{ sessionId: string }>;
 }
 
 /**
- * Order-entry screen for one open table session.
+ * D155 — order entry for a table IS the POS, so this route is a forward.
  *
- * Route: `/tables/session/[sessionId]`. Reached from the tables floor when a
- * waiter taps "View order" on an occupied card. Everything about this screen
- * is scoped to `sessionId`: the guard on the child component keeps the
- * running draft in sync with `GET /table-sessions/:id/detail`.
+ * It used to mount `OrderEntry`: a second order-composition screen with its own
+ * menu grid, which listed items as name-and-price text because it never had the
+ * photo card the POS browser has. Two screens for one job meant every POS
+ * improvement — item photos, server-side search, sold-out marking, variants,
+ * per-line discounts — had to be built twice or (as happened) reached only the
+ * counter, while the waiters who take most of a restaurant's orders looked at
+ * the older one.
+ *
+ * The URL is kept rather than deleted because it is on the floor's bookmarks
+ * and in the odd shared link. A server-side redirect, so there is no flash of a
+ * screen that no longer exists.
  */
-export default function SessionOrderPage({ params }: PageProps) {
-  const { sessionId } = use(params);
-  const { session } = useAuth();
-  if (!session) return null;
-
-  if (!session.branchId) {
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title="Session"
-          description="Building a round for a dining session."
-        />
-        <Card>
-          <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            This user has no active branch. Ask an administrator to grant branch access
-            before opening the floor.
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Order"
-        description={`${session.branchName} — build and send this session's rounds.`}
-        actions={
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/tables">Back to floor</Link>
-          </Button>
-        }
-      />
-      <OrderEntry session={session} sessionId={sessionId} />
-    </div>
-  );
+export default async function SessionOrderPage({ params }: PageProps) {
+  const { sessionId } = await params;
+  redirect(`/pos?mode=dine-in&sessionId=${encodeURIComponent(sessionId)}`);
 }

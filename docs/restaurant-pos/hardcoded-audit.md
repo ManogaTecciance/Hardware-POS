@@ -90,10 +90,10 @@ anywhere in the app, even though the API accepts both.
 | E12 | **Numbering formats** | `TS-`, `RO-`, `RSV-`, `S-`, `KOT-`, `OPEN-` prefixes and 6-digit width hardcoded, while quotations already have configurable `numberFormat` | OPEN |
 | E13 | **Kitchen station categories** | DTO `@IsIn(['KITCHEN','BAR','GRILL','COLD','DESSERT'])` **contradicts the schema comment** saying the column is a string precisely so tenants can add their own | OPEN |
 | E14 | **Dietary tags** | `types.ts:143` freezes 5 tags under a comment claiming runtime extension. Nut-free/dairy-free are legal labelling requirements in several markets. | OPEN |
-| E15 | **Poll intervals** | `kitchen-board.tsx:96` (5s, duplicated as UI copy at `:171`), `orders-page.tsx:110` (8s, duplicated at `:157`), `order-entry.tsx:165` (8s) | OPEN |
+| E15 | **Poll intervals** | `kitchen-board.tsx:96` (5s, duplicated as UI copy at `:171`), `orders-page.tsx:110` (8s, duplicated at `:157`), `session-rounds-sheet.tsx` (8s — was `order-entry.tsx`, retired by D155) | OPEN |
 | E16 | **Defaults**: table capacity `'4'`, party size `2`, prep-time ceiling 360, discount reasons, cash denominations | `table-floor.tsx:824`, `:665`, `wizard-state.ts:143`, `item-discount-dialog.tsx:30`, `payment-popup.tsx:442` | OPEN |
 | E17 | **Per-channel service charge** | `pos-counter-workspace.tsx:205` hardcodes "third-party never carries service charge" as client policy | OPEN |
-| E18 | **`UnifiedOrderView.sessionId`** | `order-detail-drawer.tsx:299` — `deriveSessionId()` returns `''` unconditionally; the dine-in deep link is dead | OPEN |
+| E18 | **`UnifiedOrderView.sessionId`** | `order-detail-drawer.tsx` — `deriveSessionId()` returns `''` unconditionally, so "Open in POS" is permanently disabled. D155 built the READING end (`/pos?mode=dine-in&sessionId=` now binds the session); the view still carries no id | OPEN |
 | E19 | **POS picker categories** | `use-menu-data.ts:123` builds 4 synthetic sections and discards the `category`/`subcategory` the catalogue already returns | OPEN |
 
 ## F. Branding leaking onto customer documents

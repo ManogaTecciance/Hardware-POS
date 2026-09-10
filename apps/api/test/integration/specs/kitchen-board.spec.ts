@@ -37,6 +37,7 @@ import {
   linkUsersToRoles,
 } from '@hardware-pos/database';
 import type { PrismaClient } from '@hardware-pos/database';
+import { Permission } from '@hardware-pos/shared';
 
 import { connectTestPrisma, disconnectTestPrisma } from '../prisma-test-client';
 import { resetDatabase } from '../db-reset';
@@ -850,23 +851,43 @@ describe('D68 — the kitchen role reaches the board and nothing else', () => {
 });
 
 /**
- * D70 — a waiter sees the sessions THEY opened, and no others.
+ * D156 — a waiter sees the whole floor, and the narrowing is permission-driven.
  *
- * ## Why every case is a pair
+ * ## What changed, and why the pairs are the other way up now
  *
- * "Waiter A cannot see Waiter B's table" passes trivially against a build
- * that returns nothing to anybody, so each refusal is asserted alongside the
- * same waiter succeeding on their OWN session, through the same endpoint, in
- * the same test. And each is asserted against a supervisor who still sees
- * both — a scope that hid the floor from the cashier would be a worse bug
- * than the one being fixed, and silent.
+ * D70 withheld `TABLE_SESSION_VIEW_ALL` from the Waiter template, so these
+ * cases used to assert the opposite of what they assert below: waiter A could
+ * not see, read or write waiter B's table. D156 grants the key, because the
+ * mixing D70 was protecting against is a question of DEFAULTS (the floor plan
+ * and the POS picker open on "my tables") and withholding the read made the
+ * routine case of table service impossible — covering a colleague on a break, a
+ * shift change mid-service, answering a guest about an order you did not take.
+ *
+ * ## Why the narrowing is still asserted
+ *
+ * The server-side scope is unchanged and still the authority: it is keyed on a
+ * permission, and a tenant can compose a role without it through RolesApi. No
+ * seeded template lacks it any more, so a spec that exercised only the seeded
+ * roles would leave `sessionScope()` asserted in ONE direction — the shape D30
+ * calls vacuous. `trainee` below is the second direction: a custom role with
+ * TABLE_VIEW and no VIEW_ALL, narrowed exactly as a waiter used to be, through
+ * the same routes in the same test.
+ *
+ * Mutation-proven (run against the template itself): removing
+ * `TABLE_SESSION_VIEW_ALL` from the Waiter template — i.e. reverting to D70 —
+ * fails exactly the three waiter-facing cases (the floor listing with its
+ * names, the per-id reads, the colleague's-table writes) and leaves the
+ * supervisor case and the TRAINEE_WAITER control green: 3 failed, 29 passed.
  */
-describe('D70 — session visibility is scoped to the waiter', () => {
+describe('D156 — session visibility is the floor, narrowed by permission', () => {
   let waiterA: string;
   let waiterB: string;
   let sessionA: string;
   let sessionB: string;
   let cashier: string;
+  /** A custom role WITHOUT TABLE_SESSION_VIEW_ALL — the negative control. */
+  let trainee: string;
+  let sessionTrainee: string;
 
   const tokenFor = (userId: string) =>
     http.tokenFor({
@@ -885,6 +906,35 @@ describe('D70 — session visibility is scoped to the waiter', () => {
       where: { tenantId: restaurant.tenantId, key: 'RESTAURANT_CASHIER' },
       select: { id: true },
     });
+    /*
+     * Composed here rather than taken from a template: every seeded role now
+     * carries the key, and the point of this one is that it does not. The
+     * permissions it connects to are the catalogue rows the seed syncs.
+     */
+    const traineeRole = await prisma.role.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        key: 'TRAINEE_WAITER',
+        name: 'Trainee waiter',
+        description: 'Own tables only — no TABLE_SESSION_VIEW_ALL.',
+        /*
+         * Connected through the enum, not by hand-written strings: the
+         * catalogue keys are the enum's VALUES (`table:view`, not
+         * `TABLE_VIEW`), and a key that does not exist makes `connect` throw
+         * — which would read as a broken fixture rather than as the typo it is.
+         */
+        permissions: {
+          connect: [
+            Permission.TABLE_VIEW,
+            Permission.TABLE_OPEN,
+            Permission.TABLE_CLOSE,
+            Permission.ORDER_CREATE,
+            Permission.ORDER_SEND_TO_KITCHEN,
+          ].map((key) => ({ key })),
+        },
+      },
+      select: { id: true },
+    });
     const mk = async (name: string, email: string, roleId: string) =>
       (
         await prisma.user.create({
@@ -894,6 +944,7 @@ describe('D70 — session visibility is scoped to the waiter', () => {
     waiterA = await mk('Waiter A', 'a@fixture.test', waiterRole.id);
     waiterB = await mk('Waiter B', 'b@fixture.test', waiterRole.id);
     cashier = await mk('Till', 'till@fixture.test', cashierRole.id);
+    trainee = await mk('Trainee', 'trainee@fixture.test', traineeRole.id);
 
     const area = await prisma.diningArea.create({
       data: { tenantId: restaurant.tenantId, branchId, name: 'Bar' },
@@ -912,27 +963,38 @@ describe('D70 — session visibility is scoped to the waiter', () => {
     };
     sessionA = await seat('B1', waiterA);
     sessionB = await seat('B2', waiterB);
+    sessionTrainee = await seat('B3', trainee);
   });
 
-  it('lists only the caller\'s own open sessions', async () => {
-    const forA = await http.request<{ id: string }[]>(
+  it('lists the floor to a waiter, and names whose each table is', async () => {
+    const forA = await http.request<{ id: string; waiterName: string | null }[]>(
       'GET',
       `/restaurant/branches/${branchId}/open-sessions`,
       { token: tokenFor(waiterA) },
     );
-    // POSITIVE — A's own table is there…
-    expect(forA.data.map((s) => s.id)).toContain(sessionA);
-    // …NEGATIVE — and B's is not.
-    expect(forA.data.map((s) => s.id)).not.toContain(sessionB);
+    const ids = forA.data.map((s) => s.id);
+    // POSITIVE — their own table…
+    expect(ids).toContain(sessionA);
+    // …and their colleague's, which D70 withheld.
+    expect(ids).toContain(sessionB);
 
-    // The mirror image, so this is a per-caller scope and not a filter that
-    // happens to favour whoever asked first.
+    /*
+     * D156 — the NAME, because "my tables / all tables" is unusable without
+     * it: the client has only a cuid otherwise, and the users endpoint it
+     * would resolve a name through is USER_MANAGE-gated (a waiter holds
+     * nothing of the sort).
+     */
+    expect(forA.data.find((s) => s.id === sessionB)?.waiterName).toBe('Waiter B');
+    expect(forA.data.find((s) => s.id === sessionA)?.waiterName).toBe('Waiter A');
+
+    // The mirror image, so this is the floor and not a list that happens to
+    // favour whoever asked first.
     const forB = await http.request<{ id: string }[]>(
       'GET',
       `/restaurant/branches/${branchId}/open-sessions`,
       { token: tokenFor(waiterB) },
     );
-    expect(forB.data.map((s) => s.id)).toEqual([sessionB]);
+    expect(forB.data.map((s) => s.id)).toEqual(expect.arrayContaining([sessionA, sessionB]));
   });
 
   it('still shows the whole floor to the cashier and the owner', async () => {
@@ -948,30 +1010,36 @@ describe('D70 — session visibility is scoped to the waiter', () => {
     }
   });
 
-  it('refuses to read another waiter\'s session by id, on every read route', async () => {
+  it('lets a waiter read a colleague session by id, on every read route', async () => {
     for (const path of [
       `/restaurant/table-sessions/${sessionB}`,
       `/restaurant/table-sessions/${sessionB}/detail`,
     ]) {
       const mine = path.replace(sessionB, sessionA);
-      // POSITIVE — the same route, the same token, A's own session: 200.
+      // Their own, and their colleague's, through the same route: both 200.
       expect((await http.request('GET', mine, { token: tokenFor(waiterA) })).status).toBe(200);
-      // NEGATIVE — B's session: refused. 404 rather than 403, so the response
-      // does not confirm that the session exists and belongs to someone else.
-      expect((await http.request('GET', path, { token: tokenFor(waiterA) })).status).toBe(404);
+      expect((await http.request('GET', path, { token: tokenFor(waiterA) })).status).toBe(200);
     }
   });
 
-  it('refuses to WRITE to another waiter\'s session — hiding it is not enough', async () => {
-    // Ordering onto someone else's table, and closing it out from under them,
-    // are the two writes reachable by guessing an id.
+  it('lets a waiter work a colleague table — covering is the point of seeing it', async () => {
+    /*
+     * Deliberate, and it reads both ways: a waiter who can SEE a colleague's
+     * table and then cannot add the round the guests just asked for has been
+     * handed a door onto a 403, which is what D93 says not to build. Sending a
+     * round never checked ownership in the first place (only
+     * ORDER_SEND_TO_KITCHEN), so all that changes here is that the
+     * session-addressed routes stop refusing. Every one of them is audited with
+     * the actor's id, which is where accountability lives — not in pretending
+     * the table is invisible.
+     */
     expect(
       (
         await http.request('POST', `/restaurant/table-sessions/${sessionB}/orders`, {
           token: tokenFor(waiterA),
         })
       ).status,
-    ).toBe(404);
+    ).toBe(201);
     expect(
       (
         await http.request('POST', `/restaurant/table-sessions/${sessionB}/close`, {
@@ -979,25 +1047,48 @@ describe('D70 — session visibility is scoped to the waiter', () => {
           body: { idempotencyKey: 'x1' },
         })
       ).status,
-    ).toBe(404);
+    ).toBe(200);
+  });
 
-    // POSITIVE CONTROL — A can do both on their own table, so the refusals
-    // above are about ownership and not about the routes being broken.
+  it('NEGATIVE CONTROL — a role without the key is still narrowed to its own sessions', async () => {
+    const mine = await http.request<{ id: string }[]>(
+      'GET',
+      `/restaurant/branches/${branchId}/open-sessions`,
+      { token: tokenFor(trainee) },
+    );
+    // Their own table only: the scope the waiter used to live under is still
+    // here, still enforced, for a role composed without the permission.
+    expect(mine.data.map((s) => s.id)).toEqual([sessionTrainee]);
+
+    for (const path of [
+      `/restaurant/table-sessions/${sessionA}`,
+      `/restaurant/table-sessions/${sessionA}/detail`,
+    ]) {
+      const own = path.replace(sessionA, sessionTrainee);
+      // POSITIVE CONTROL — their own session answers 200 on the same route, so
+      // the 404s below are about ownership and not a broken token.
+      expect((await http.request('GET', own, { token: tokenFor(trainee) })).status).toBe(200);
+      // 404 rather than 403: the response must not confirm that the session
+      // exists and belongs to someone else.
+      expect((await http.request('GET', path, { token: tokenFor(trainee) })).status).toBe(404);
+    }
+
+    // And the writes, which hiding alone would not cover.
     expect(
       (
         await http.request('POST', `/restaurant/table-sessions/${sessionA}/orders`, {
-          token: tokenFor(waiterA),
+          token: tokenFor(trainee),
         })
       ).status,
-    ).toBe(201);
+    ).toBe(404);
     expect(
       (
         await http.request('POST', `/restaurant/table-sessions/${sessionA}/close`, {
-          token: tokenFor(waiterA),
+          token: tokenFor(trainee),
           body: { idempotencyKey: 'x2' },
         })
       ).status,
-    ).toBe(200);
+    ).toBe(404);
   });
 });
 

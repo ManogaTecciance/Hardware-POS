@@ -428,10 +428,21 @@ describe('reserved permissions are reserved, not implemented', () => {
     expect(active).toContain(Permission.TABLE_CLOSE);
     expect(active).toContain(Permission.ORDER_CREATE);
     expect(active).toContain(Permission.ORDER_SEND_TO_KITCHEN);
+    /*
+     * D156 — the waiter sees the floor. Asserted here, beside the two keys they
+     * still do not hold, because the three together ARE the split the template
+     * documents: a waiter may READ every table (and work one they can reach,
+     * which was never ownership-checked) and still may not move a table's bill
+     * or void what the kitchen has started.
+     */
+    expect(active).toContain(Permission.TABLE_SESSION_VIEW_ALL);
     // Negative: WAITER's permission list does NOT include TABLE_TRANSFER
     // or TABLE_MERGE — that's the deliberate split from role-templates.ts.
     expect(waiter.permissions).not.toContain(Permission.TABLE_TRANSFER);
     expect(waiter.permissions).not.toContain(Permission.TABLE_MERGE);
+    // …nor ORDER_VOID_SENT: seeing a colleague's table does not make their
+    // mistakes yours to erase.
+    expect(waiter.permissions).not.toContain(Permission.ORDER_VOID_SENT);
   });
 
   it('a waiter cannot reach the kitchen board, sales, reports, or catalogue writes', () => {

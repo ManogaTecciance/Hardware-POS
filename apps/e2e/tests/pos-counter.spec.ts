@@ -585,11 +585,17 @@ test.describe('POS-CTR-5 — Counter Dine-In', () => {
     await expect(completion.getByText(/kot sent to kitchen/i)).toBeVisible();
   });
 
-  test('POS-CTR-502 the Tables floor and its session order-entry are untouched', async ({
+  test('POS-CTR-502 the Tables floor is untouched', async ({
     page,
   }) => {
     await signInAsRestaurantOwner(page);
-    // The floor plan still loads without going through /pos.
+    /*
+     * The floor plan still loads without going through /pos. D155 retired the
+     * separate session order-entry screen this case used to name — "View order"
+     * now opens the POS bound to that session, and `/tables/session/[id]`
+     * redirects there — but the claim here is about the FLOOR, which that
+     * change left alone.
+     */
     await page.goto('/tables');
     // Show chip filter and the "New area" affordance survived (Pilot 1 UX
     // is intact — Pilot 3 did not touch /tables).

@@ -34,8 +34,12 @@ import { useEffectiveProfile } from '@/lib/platform-profile';
  *     they close the table. 2026-08-21 (PO): that flow belongs on the
  *     ordinary POS screen rather than a separate one, so the fork this
  *     comment used to describe (`PosDineInWorkspace` → `OrderEntry`) is
- *     gone. `/tables/session/[id]` still mounts `OrderEntry` — the floor
- *     plan's own route is unchanged.
+ *     gone.
+ *   * `?mode=dine-in&sessionId=…` → the same workspace BOUND to that open
+ *     table session: no picker, the table named in the header, and the
+ *     floor one tap away (D155). This is where the floor plan's "View
+ *     order" now lands; `/tables/session/[id]` redirects here, and
+ *     `OrderEntry` — the photo-less menu grid it used to mount — is gone.
  *   * `?mode=third-party&externalOrderId=…` → still routes to the
  *     `PosThirdPartyWorkspace` platform inspector for accepting inbound
  *     external orders. New Delivery-counter orders (composed here) use
@@ -76,6 +80,13 @@ export default function PosPage() {
 
   const raw = params.get('mode');
   const externalOrderId = params.get('externalOrderId');
+  /*
+   * D155 — the open table session this POS is taking orders onto. Written by
+   * the floor plan's "View order" and the orders queue's "Open in POS"; it was
+   * read by neither end before, so the queue's link had been dropping a cashier
+   * into the table picker since the day it shipped.
+   */
+  const linkedSessionId = params.get('sessionId');
   const mode: PosMode | null =
     raw === 'dine-in'
       ? 'DINE_IN'
@@ -101,11 +112,23 @@ export default function PosPage() {
       session={session}
       branchId={session.branchId}
       initialMode={mode}
+      linkedSessionId={linkedSessionId}
       onModeChange={(m) => {
         // Keep the URL in sync so bookmarks + back-button work. Empty
         // mode drops the ?mode= param — Order Type modal re-opens.
+        /*
+         * D155 — `sessionId` survives only while the mode is still dine-in. A
+         * dine-in-only role arrives with no `?mode=` at all, so this replace
+         * runs on mount for exactly the role the deep link is FOR; dropping
+         * the id here would unbind the table one render after the floor
+         * handed it over. Changing the order type drops it, because a
+         * takeaway order has no table.
+         */
+        const keepSession = m === 'DINE_IN' && linkedSessionId;
         const next = m
-          ? `/pos?mode=${m.toLowerCase().replace('_', '-')}`
+          ? `/pos?mode=${m.toLowerCase().replace('_', '-')}${
+              keepSession ? `&sessionId=${encodeURIComponent(linkedSessionId)}` : ''
+            }`
           : '/pos';
         router.replace(next);
       }}

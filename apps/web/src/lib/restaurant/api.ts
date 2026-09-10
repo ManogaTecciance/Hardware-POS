@@ -1007,6 +1007,13 @@ export const restaurantReports = {
 
 // ── Unified orders (Pilot Change 2 Slice D) ────────────────────────────────
 export interface OrdersQuery {
+  /**
+   * D157 — whose orders. Omitted on a first load so the SERVER picks (mine
+   * when the caller has any, else all) and reports what it chose; set once the
+   * operator taps a chip, from then on riding in the URL like every other
+   * filter on this screen.
+   */
+  scope?: 'mine' | 'all';
   channel?: UnifiedChannel | 'ALL';
   status?: UnifiedOrderStatus | 'ALL';
   paymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | 'ALL';
@@ -1034,11 +1041,21 @@ export interface UnifiedOrdersPage {
    * bell rings whichever tab is open.
    */
   readyHandoverCount: number;
+  /**
+   * D157 — the numbers on the Mine/All chips, counted before the scope
+   * narrowing so both are known whichever view is showing. `resolvedScope` is
+   * what the server actually applied, which is how the screen knows which chip
+   * to light up on a first load that did not ask for one.
+   */
+  mineCount: number;
+  allCount: number;
+  resolvedScope: 'mine' | 'all';
 }
 
 export const restaurantOrders = {
   list(session: Session, branchId: string, q: OrdersQuery = {}) {
     const params = new URLSearchParams();
+    if (q.scope) params.set('scope', q.scope);
     if (q.channel && q.channel !== 'ALL') params.set('channel', q.channel);
     if (q.status && q.status !== 'ALL') params.set('status', q.status);
     if (q.paymentStatus && q.paymentStatus !== 'ALL') params.set('paymentStatus', q.paymentStatus);
