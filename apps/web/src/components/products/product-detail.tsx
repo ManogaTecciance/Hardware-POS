@@ -66,6 +66,15 @@ interface Props {
   session: Session;
   product: ManagedProduct;
   variants: ProductVariant[];
+  /**
+   * D156 — whether `variants` is an ANSWER or just its initial value.
+   *
+   * The list arrives after the product does, so an empty array means three
+   * different things at three different moments: not asked yet, asked and
+   * there are none, asked and it failed. The overview used to read all
+   * three as "this product has no variants".
+   */
+  variantsState: 'loading' | 'ready' | 'error';
   variations: ProductVariationDimension[];
   branches: BranchSummary[];
   presentation: ReturnType<typeof resolveProductManagementPresentation>;
@@ -97,6 +106,7 @@ export function ProductDetail({
   session,
   product,
   variants: initialVariants,
+  variantsState,
   variations,
   branches,
   presentation,
@@ -180,7 +190,24 @@ export function ProductDetail({
 
   // ── Derived counts + KPIs ────────────────────────────────────────────────
   const activeVariantCount = variants.filter((v) => v.isActive).length;
-  const hasVariants = product.hasVariants && variants.length > 0;
+  /*
+   * D156 — what the product IS, versus what we can say about it yet.
+   *
+   * `product.hasVariants` is authoritative and arrives with the product, so
+   * the SHAPE is known immediately. Only the count and the price range need
+   * the variant list, and those are the only things that should wait.
+   *
+   * The previous `product.hasVariants && variants.length > 0` threw away the
+   * authoritative half: while the list was in flight it read a 25-variant
+   * product as single-variant and showed the parent's legacy price and stock
+   * mirror — the fields D44 exists to say are NOT read. The `&&` was there
+   * to survive a product flagged `hasVariants` with no rows, which is a real
+   * state; it is kept below, but only once the list is actually known.
+   */
+  const variantsKnown = variantsState === 'ready';
+  const hasVariants = product.hasVariants && (!variantsKnown || variants.length > 0);
+  /** True only where a NUMBER can honestly be shown for a variant product. */
+  const variantFactsKnown = !product.hasVariants || variantsKnown;
 
   // Latest cost across variants is the max (recency proxied by averageCost
   // freshness); for single-variant products it's the parent's costPrice.
@@ -324,6 +351,8 @@ export function ProductDetail({
             variants={variants}
             latestCost={latestCost}
             hasVariants={hasVariants}
+            variantsState={variantsState}
+            variantFactsKnown={variantFactsKnown}
             itemStock={itemStock}
           />
         </TabsContent>
@@ -466,12 +495,18 @@ function OverviewTab({
   variants,
   latestCost,
   hasVariants,
+  variantsState,
+  variantFactsKnown,
   itemStock,
 }: {
   product: ManagedProduct;
   variants: ProductVariant[];
   latestCost: number | null;
   hasVariants: boolean;
+  /** D156 — resolved by the parent, like `hasVariants` above it. */
+  variantsState: 'loading' | 'ready' | 'error';
+  /** D156 — false while a variant product's list is still in flight. */
+  variantFactsKnown: boolean;
   /** D101 — resolved by the parent; no kind comparison in here. */
   itemStock: ItemStockPresentation;
 }) {
@@ -543,7 +578,25 @@ function OverviewTab({
             <div className="grid gap-3 sm:grid-cols-2">
               <Kpi
                 label="Variants"
-                value={hasVariants ? `${variants.filter((v) => v.isActive).length} active` : 'Single-variant product'}
+                /*
+                 * D156 — three states, not two. A count is only shown once the
+                 * list is known; a failure says so rather than reporting a
+                 * product shape it never learned.
+                 */
+                value={
+                  variantsState === 'error' && product.hasVariants
+                    ? 'Could not be loaded'
+                    : !variantFactsKnown
+                      ? 'Loading…'
+                      : hasVariants
+                        ? `${variants.filter((v) => v.isActive).length} active`
+                        : 'Single-variant product'
+                }
+                hint={
+                  variantsState === 'error' && product.hasVariants
+                    ? 'This product has variants; the list did not load. Reload the page.'
+                    : undefined
+                }
               />
               <Kpi
                 label={itemStock === 'AVAILABILITY' ? 'Availability' : 'Total stock'}
@@ -571,7 +624,13 @@ function OverviewTab({
               />
               <Kpi
                 label="Selling price"
-                value={variantPriceLabel(
+                /*
+                 * D156 — a variant product's price is the range across its
+                 * variants. Until they land there is no honest figure: the
+                 * parent's `unitPrice` is a legacy fallback (D44) and reads
+                 * Rs 0.00 on every product created since.
+                 */
+                value={!variantFactsKnown ? 'Loading…' : variantPriceLabel(
                   {
                     hasVariants: product.hasVariants,
                     unitPrice: product.unitPrice,

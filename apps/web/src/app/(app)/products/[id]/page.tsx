@@ -51,6 +51,23 @@ export default function ProductDetailPage() {
 
   const [product, setProduct] = React.useState<ManagedProduct | null>(null);
   const [variants, setVariants] = React.useState<ProductVariant[]>([]);
+  /*
+   * D156 — whether the variant list is KNOWN, not merely empty.
+   *
+   * `variants` starts `[]`, and the fetch below deliberately does not gate
+   * the page's loading state. Without this flag the overview reads that
+   * empty array as fact and announces "Single-variant product" for a
+   * 25-variant product, alongside the parent's legacy price and stock — the
+   * very fields D44 says are not read once `hasVariants` is true.
+   *
+   * It corrects itself a beat later, so it reads as a flicker on a fast
+   * connection. On a slow one it lingers, and when the request FAILS it
+   * never corrects at all: the catch below turns an error into `[]`, which
+   * is indistinguishable from a genuine answer.
+   */
+  const [variantsState, setVariantsState] = React.useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
   const [variations, setVariations] = React.useState<ProductVariationDimension[]>([]);
   const [branches, setBranches] = React.useState<BranchSummary[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -83,16 +100,28 @@ export default function ProductDetailPage() {
   React.useEffect(() => {
     if (!session || !id) return;
     let cancelled = false;
+    setVariantsState('loading');
+    /*
+     * D156 — branches and variations still fall back to empty on failure:
+     * a slow branches endpoint must not hide the page, and neither changes
+     * what the product IS. The variant list does, so its outcome is tracked
+     * rather than flattened — `[]` from a failure and `[]` from a product
+     * with no variants are different facts and must not render alike.
+     */
     void Promise.all([
       fetchBranches(session).catch(() => [] as BranchSummary[]),
-      fetchVariants(session, id).catch(() => [] as ProductVariant[]),
+      fetchVariants(session, id).then(
+        (rows) => ({ ok: true as const, rows }),
+        () => ({ ok: false as const, rows: [] as ProductVariant[] }),
+      ),
       fetchVariations(session, id)
         .then((r) => r.dimensions)
         .catch(() => [] as ProductVariationDimension[]),
     ]).then(([brs, vars, dims]) => {
       if (cancelled) return;
       setBranches(brs);
-      setVariants(vars);
+      setVariants(vars.rows);
+      setVariantsState(vars.ok ? 'ready' : 'error');
       setVariations(dims);
     });
     return () => {
@@ -152,6 +181,7 @@ export default function ProductDetailPage() {
       session={session}
       product={product}
       variants={variants}
+      variantsState={variantsState}
       variations={variations}
       branches={branches}
       presentation={presentation}

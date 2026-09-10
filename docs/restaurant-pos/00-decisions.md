@@ -9195,6 +9195,111 @@ screen that had kept it.
 
 ---
 
+## D156 — an empty list is not an answer until somebody has answered
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
+no migration, no API change.
+
+### What was reported
+
+The product detail page for a 25-variant product showed:
+
+> Variants: **Single-variant product** · Total stock: **550** · Selling price:
+> **Rs. 0.00** · SKU: **—**
+
+### What was actually wrong
+
+Traced end to end against the live API before changing anything, because the
+symptom looks like a data fault and is not one:
+
+| Layer | Answer |
+|---|---|
+| database | `hasVariants=true`, **25 variants**, 2 dimensions |
+| `GET /products/:id` | `hasVariants: true` ✅ |
+| `GET /products/:id/variants` | **25 rows** ✅ |
+| `api.ts` envelope unwrap | correct ✅ |
+| `toVariant` mapping | defensive, cannot throw ✅ |
+
+Every layer was right. The defect was one expression:
+
+```ts
+const hasVariants = product.hasVariants && variants.length > 0;
+```
+
+`variants` arrives in a **second** fetch that deliberately does not gate the
+page's loading state, so it is `[]` on first paint. That `&&` threw away the
+authoritative half — `product.hasVariants`, which arrives *with* the product —
+and read the not-yet-fetched empty array as fact.
+
+So the page announced a shape it had not been told, alongside the parent's
+`unitPrice` and `quantityOnHand`: precisely the fields **D44** exists to say are
+**not read** once `hasVariants` is true. Rs 0.00 is what every product created
+since D44 carries there.
+
+### Why it was easy to miss, and worse than it looked
+
+It corrects itself when the fetch lands, so on a fast connection it is a
+flicker. Two things make it more than cosmetic:
+
+1. On a slow connection it **lingers**, and the number it shows is wrong rather
+   than absent.
+2. The fetch caught its own error and returned `[]`, so a **failed** request was
+   indistinguishable from a genuine answer and **never corrected**. The operator
+   read a confident, wrong description of their product with nothing on screen
+   suggesting anything had gone wrong.
+
+### The decision
+
+**Distinguish "no variants" from "not asked yet" from "asked and failed."**
+
+```ts
+const variantsKnown     = variantsState === 'ready';
+const hasVariants       = product.hasVariants && (!variantsKnown || variants.length > 0);
+const variantFactsKnown = !product.hasVariants || variantsKnown;
+```
+
+`product.hasVariants` is authoritative for the SHAPE and arrives immediately.
+Only the **count** and the **price range** need the list, and only those wait.
+
+| State | Variants | Selling price |
+|---|---|---|
+| loading | `Loading…` | `Loading…` |
+| ready | `25 active` | range across active variants |
+| error | `Could not be loaded` + how to recover | — |
+| single-variant | `Single-variant product`, **immediately** | the parent's price, correct here |
+
+The last row is the one that keeps the fix honest: a product the payload already
+says is single-variant must not wait on a list it has no reason to care about,
+or the change would have traded a wrong answer for a slow one on every simple
+product in the catalogue.
+
+The `&& variants.length > 0` guard is **kept** for the case it was written for —
+a product flagged `hasVariants` with no rows, which is a real state — but it now
+applies only once the list is genuinely known.
+
+### Failures are reported, not flattened
+
+Branches and variations still fall back to `[]` on failure: a slow branches
+endpoint must not hide the page, and neither changes what the product IS. The
+variant list does, so its outcome is tracked. `[]` from a failure and `[]` from
+a product with no variants are different facts and must not render alike.
+
+### A vacuous test, caught during the work
+
+The first version of "does not show the parent's legacy price while loading"
+asserted `Rs 0.00` was absent — against a fixture whose price is **220**. It
+could not have failed whatever the component did. Rebuilt around the real shape
+(`unitPrice: 0`, what every post-D44 variant product carries), after which the
+mutation fails two tests instead of one. Recorded because it is the exact
+failure mode D30 names, found in new work rather than old.
+
+### Mutation proof
+
+Restoring the old derive reproduces the reported screenshot precisely and fails
+two cases: the shape claim and the price.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

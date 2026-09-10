@@ -240,6 +240,7 @@ describe('ProductDetail — Overview KPIs', () => {
         session={noopSession}
         product={makeProduct({ hasVariants: false })}
         variants={[]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -266,6 +267,7 @@ describe('ProductDetail — Overview KPIs', () => {
         session={noopSession}
         product={product}
         variants={[makeVariant()]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -314,6 +316,7 @@ describe('ProductDetail — Variants tab table', () => {
             ],
           }),
         ]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -358,6 +361,7 @@ describe('ProductDetail — delete permanently 409 handling', () => {
         session={noopSession}
         product={makeProduct({ hasVariants: true })}
         variants={[makeVariant()]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -406,6 +410,7 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         session={noopSession}
         product={makeProduct({ hasVariants: false })}
         variants={[]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -427,6 +432,7 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         session={noopSession}
         product={makeProduct({ hasVariants: false })}
         variants={[]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -451,6 +457,7 @@ describe('ProductDetail — Receive Stock button visibility', () => {
         session={noopSession}
         product={makeProduct({ hasVariants: false, quickbooksItemId: 'qb_1', syncStatus: 'SYNCED' })}
         variants={[]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={externalPresentation}
@@ -480,6 +487,7 @@ describe('ProductDetail — Tabs keyboard behaviour', () => {
         session={noopSession}
         product={makeProduct({ hasVariants: true })}
         variants={[makeVariant()]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -526,6 +534,7 @@ describe('ProductDetail — Inventory/Purchases tabs (D101/D103)', () => {
         session={noopSession}
         product={makeProduct({ sellableKind: 'COMPOSED_ITEM', foodType: 'FOOD' })}
         variants={[]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -552,6 +561,7 @@ describe('ProductDetail — Inventory/Purchases tabs (D101/D103)', () => {
         session={noopSession}
         product={makeProduct()}
         variants={[]}
+        variantsState="ready"
         variations={emptyVariations}
         branches={branches}
         presentation={localPresentation}
@@ -566,5 +576,142 @@ describe('ProductDetail — Inventory/Purchases tabs (D101/D103)', () => {
     );
     expect(screen.getByRole('tab', { name: /^inventory$/i })).toBeDefined();
     expect(screen.getByRole('tab', { name: /^purchases$/i })).toBeDefined();
+  });
+});
+
+/**
+ * D156 — the overview must not assert a shape it has not been told.
+ *
+ * ## The defect
+ *
+ * `variants` arrives in a second fetch that deliberately does not gate the
+ * page's loading state, so it is `[]` on first paint. The overview read that
+ * empty array as fact and announced "Single-variant product" for a 25-variant
+ * product, beside the parent's `unitPrice` — Rs 0.00 on every product created
+ * since D44, because D44 says that field is not read once `hasVariants` is
+ * true. It corrected itself a beat later, so it read as a flicker; on a failed
+ * request it never corrected, because the catch turned the error into `[]`.
+ *
+ * ## What makes these assertions non-vacuous
+ *
+ * The three states are asserted against the SAME product — one with
+ * `hasVariants: true` — so a component that had simply stopped rendering the
+ * KPI would fail all three rather than passing whichever was checked alone.
+ * Each case also pins what must NOT appear: the wrong claim is the defect, and
+ * "loading" quietly replacing every KPI would be its own regression.
+ */
+describe('D156 — the Variants KPI while the list is still loading', () => {
+  const mount = (variantsState: 'loading' | 'ready' | 'error', variants = [makeVariant()]) =>
+    render(
+      <ProductDetail
+        session={noopSession}
+        product={makeProduct({ hasVariants: true })}
+        variants={variantsState === 'ready' ? variants : []}
+        variantsState={variantsState}
+        variations={emptyVariations}
+        branches={branches}
+        presentation={localPresentation}
+        hasReceivePermission={true}
+        hasManagePermission={true}
+        canSyncQb={false}
+        syncBusy={false}
+        onSync={() => {}}
+        onReload={() => {}}
+        canSetAvailability={false}
+      />,
+    );
+
+  it('says it is loading, and does NOT claim the product is single-variant', () => {
+    mount('loading');
+
+    // The defect, stated as an assertion: this product has 25 variants in the
+    // database, and the page must not say otherwise while it is still asking.
+    expect(document.body.textContent).not.toMatch(/single-variant product/i);
+    expect(document.body.textContent).toMatch(/loading/i);
+  });
+
+  it('does not show the parent’s legacy price while the range is unknown', () => {
+    /*
+     * D44 — `product.unitPrice` is a legacy fallback on a variant product, and
+     * every product created since D44 carries 0. Showing it during the wait is
+     * not a placeholder, it is a wrong number.
+     *
+     * The fixture's default price is 220, which would make an
+     * `expect(...).not.toMatch(/Rs 0.00/)` assertion pass no matter what the
+     * component did. So this builds the real shape — a variant product whose
+     * parent price is the legacy 0 — which is what the reported screenshot
+     * showed.
+     */
+    render(
+      <ProductDetail
+        session={noopSession}
+        product={makeProduct({ hasVariants: true, unitPrice: 0 })}
+        variants={[]}
+        variantsState="loading"
+        variations={emptyVariations}
+        branches={branches}
+        presentation={localPresentation}
+        hasReceivePermission={true}
+        hasManagePermission={true}
+        canSyncQb={false}
+        syncBusy={false}
+        onSync={() => {}}
+        onReload={() => {}}
+        canSetAvailability={false}
+      />,
+    );
+    expect(document.body.textContent).not.toMatch(/Rs\.?\s*0\.00/);
+  });
+
+  it('reports the count once the list lands', () => {
+    mount('ready');
+
+    expect(document.body.textContent).toMatch(/1 active/i);
+    expect(document.body.textContent).not.toMatch(/single-variant product/i);
+    // …and the wait wording is gone, so "loading" is not simply always on.
+    expect(document.body.textContent).not.toMatch(/loading…/i);
+  });
+
+  it('says so when the list could not be loaded, instead of inventing a shape', () => {
+    /*
+     * The half that was invisible before: the fetch caught its own error and
+     * returned `[]`, so a failure looked exactly like a single-variant product
+     * and never resolved. Silence here is worse than an error — the operator
+     * reads a confident, wrong answer.
+     */
+    mount('error');
+
+    expect(document.body.textContent).toMatch(/could not be loaded/i);
+    expect(document.body.textContent).not.toMatch(/single-variant product/i);
+  });
+
+  it('a genuinely single-variant product still answers immediately', () => {
+    /*
+     * The control. `product.hasVariants` is authoritative and arrives WITH the
+     * product, so a single-variant product must not wait on a list it has no
+     * reason to care about — otherwise the fix would have traded a wrong answer
+     * for a slow one on every simple product in the catalogue.
+     */
+    render(
+      <ProductDetail
+        session={noopSession}
+        product={makeProduct({ hasVariants: false })}
+        variants={[]}
+        variantsState="loading"
+        variations={emptyVariations}
+        branches={branches}
+        presentation={localPresentation}
+        hasReceivePermission={true}
+        hasManagePermission={true}
+        canSyncQb={false}
+        syncBusy={false}
+        onSync={() => {}}
+        onReload={() => {}}
+        canSetAvailability={false}
+      />,
+    );
+
+    expect(document.body.textContent).toMatch(/single-variant product/i);
+    expect(document.body.textContent).not.toMatch(/loading…/i);
   });
 });
