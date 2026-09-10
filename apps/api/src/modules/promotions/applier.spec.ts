@@ -23,6 +23,7 @@ import {
   distributeByLargestRemainder,
   outstandingRewards,
   rewardEntitlements,
+  rewardUpsells,
   type PromotionCartLine,
   type PromotionRule,
 } from '@hardware-pos/shared';
@@ -1488,5 +1489,165 @@ describe('D134a — measured lines bypass quantity-based promotions', () => {
 
     expect(rewardEntitlements(context)).toHaveLength(1);
     expect(rewardEntitlements(context)[0]!.earned).toBe(2);
+  });
+});
+
+/**
+ * D155 — the near-miss prompt for a same-product offer.
+ *
+ * ## What makes these assertions non-vacuous
+ *
+ * The property that matters is not "a prompt appears at five" — it is that the
+ * prompt appears at exactly the quantities where adding one more is genuinely
+ * free, and NOWHERE else. A function returning a prompt unconditionally would
+ * satisfy the positive case; one returning nothing would satisfy every
+ * negative. So the whole quantity range is walked in one expectation.
+ *
+ * Every case also asserts that payment stays open, in the same render as the
+ * prompt. That is the distinction the feature exists for: `outstandingRewards`
+ * is a debt and gates `canPay`, this is an offer and must not. Asserting them
+ * together is what stops a later change quietly wiring this into the gate.
+ */
+describe('D155 — rewardUpsells', () => {
+  const sameProduct = (buyQty: number, getQty: number) =>
+    rule({
+      id: 'r_tie',
+      name: 'Tie',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: buyQty,
+      getQuantity: getQty,
+      percentageOff: 100,
+      items: [
+        { productId: 'p_tie', role: 'BUY', quantity: 1 },
+        { productId: 'p_tie', role: 'GET', quantity: 1 },
+      ],
+    });
+
+  const at = (qty: number, promo = sameProduct(5, 1)) => {
+    const lines = [item('l_tie', 'p_tie', 500, qty)];
+    return {
+      upsells: rewardUpsells({ lines, promotions: [promo] }),
+      discount: applyPromotions({ lines, promotions: [promo] }).totalDiscount,
+      blocks: outstandingRewards({ lines, promotions: [promo] }).length > 0,
+    };
+  };
+
+  it('prompts only where one more unit is actually free', () => {
+    // The whole range in one expectation: a prompt that fired always, or never,
+    // fails here rather than passing whichever half was asserted alone.
+    const prompted = [1, 2, 4, 5, 6, 7, 10, 11, 12].map((q) => [q, at(q).upsells.length > 0]);
+
+    expect(Object.fromEntries(prompted)).toEqual({
+      // Too far off to nag.
+      1: false,
+      2: false,
+      4: false,
+      // Five paid units: the sixth costs nothing.
+      5: true,
+      // The reward has landed; asking again would ask for a unit that is charged.
+      6: false,
+      7: false,
+      10: false,
+      // …and again for the second free one, on the remainder not the total.
+      11: true,
+      12: false,
+    });
+  });
+
+  it('names the offer, the product and what is free', () => {
+    expect(at(5).upsells).toEqual([
+      {
+        promotionId: 'r_tie',
+        promotionName: 'Tie',
+        productId: 'p_tie',
+        needed: 1,
+        free: 1,
+      },
+    ]);
+  });
+
+  it('NEVER blocks payment, at any quantity — including where it prompts', () => {
+    /*
+     * The reason this is a separate function from `outstandingRewards`. Five
+     * ties at full price is a real sale; refusing it would be worse than saying
+     * nothing at all, which is what the code did before.
+     */
+    // Mapped rather than looped with a message: Jest's `expect` takes no label,
+    // and an exact map names the offending quantity in the failure output.
+    expect(
+      Object.fromEntries([1, 5, 6, 11, 12].map((q) => [q, at(q).blocks])),
+    ).toEqual({ 1: false, 5: false, 6: false, 11: false, 12: false });
+    // …and the positive control: a DIFFERENT-product reward still does block,
+    // so the assertion above cannot pass because blocking broke entirely.
+    const crossOffer = rule({
+      id: 'r_cross',
+      name: 'Buy 2 Get 1',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 2,
+      getQuantity: 1,
+      percentageOff: 100,
+      items: [
+        { productId: 'p_shirt', role: 'BUY', quantity: 1 },
+        { productId: 'p_tie', role: 'GET', quantity: 1 },
+      ],
+    });
+    const shirts = [item('l_shirt', 'p_shirt', 1000, 2)];
+    expect(outstandingRewards({ lines: shirts, promotions: [crossOffer] })).toHaveLength(1);
+  });
+
+  it('says nothing about a different-product reward — that is the other voice', () => {
+    // Those go through `outstandingRewards` the moment they are earned. Two
+    // prompts for one offer would be a second, weaker instruction.
+    const crossOffer = rule({
+      id: 'r_cross',
+      name: 'Buy 2 Get 1',
+      type: 'BUY_X_GET_Y',
+      buyQuantity: 2,
+      getQuantity: 1,
+      percentageOff: 100,
+      items: [
+        { productId: 'p_shirt', role: 'BUY', quantity: 1 },
+        { productId: 'p_tie', role: 'GET', quantity: 1 },
+      ],
+    });
+    for (const q of [1, 2, 3]) {
+      const lines = [item('l_shirt', 'p_shirt', 1000, q)];
+      expect(rewardUpsells({ lines, promotions: [crossOffer] })).toEqual([]);
+    }
+  });
+
+  it('the promise is kept: adding what it asks for produces the discount', () => {
+    /*
+     * The assertion that ties the prompt to the money. A prompt the applier
+     * then declines to honour is worse than none — the cashier has told the
+     * customer something untrue.
+     */
+    const { upsells } = at(5);
+    expect(upsells).toHaveLength(1);
+    const after = at(5 + upsells[0]!.needed);
+    expect(after.discount).toBe(500);
+    expect(after.upsells).toEqual([]);
+  });
+
+  it('handles an offer that gives more than one free', () => {
+    // buy 5 get 2 is a group of seven: at five, two are still to come; at six,
+    // one. Both are honest prompts, and the wording has to carry the number.
+    expect(at(5, sameProduct(5, 2)).upsells[0]).toMatchObject({ needed: 2, free: 2 });
+    expect(at(6, sameProduct(5, 2)).upsells[0]).toMatchObject({ needed: 1, free: 2 });
+    expect(at(7, sameProduct(5, 2)).upsells).toEqual([]);
+  });
+
+  it('a measured line earns no prompt', () => {
+    // D134a — this runs BUY_X_GET_Y counting, and a rule that can never
+    // discount a weighed line must not advertise that it will.
+    const lines = [{ ...item('l_rice', 'p_tie', 500, 5), isMeasured: true }];
+    expect(rewardUpsells({ lines, promotions: [sameProduct(5, 1)] })).toEqual([]);
+  });
+
+  it('a manually discounted line earns no prompt either', () => {
+    // D123 — such a line is invisible to promotions, so promising it a free
+    // unit would be promising something the applier refuses to give.
+    const lines = [{ ...item('l_tie', 'p_tie', 500, 5), manualDiscountAmount: 100 }];
+    expect(rewardUpsells({ lines, promotions: [sameProduct(5, 1)] })).toEqual([]);
   });
 });

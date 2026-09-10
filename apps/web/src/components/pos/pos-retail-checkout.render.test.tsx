@@ -205,3 +205,124 @@ describe('PosRetailCheckout — clearing the cart (D145)', () => {
     expect(clearCart).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * D155 — the near-miss prompt, on the screen it appears on.
+ *
+ * ## What makes these assertions non-vacuous
+ *
+ * `applier.spec.ts` already proves the arithmetic. This proves the two things
+ * arithmetic cannot: that the till RENDERS it, and — the one that matters —
+ * that rendering it leaves **Proceed to Payment enabled**.
+ *
+ * The blocking case is asserted in the same file, against the same component,
+ * so "payment stayed enabled" cannot pass because the gate broke entirely and
+ * now never blocks anything. One offer opens the gate, the other closes it.
+ */
+describe('D155 — the upsell prompt', () => {
+  /** Buy 5 get 1 on ONE product: six for the price of five. */
+  const sameProductOffer = {
+    id: 'r_tie',
+    name: 'Tie Offer',
+    type: 'BUY_X_GET_Y' as const,
+    buyQuantity: 5,
+    getQuantity: 1,
+    percentageOff: 100,
+    stackable: false,
+    items: [
+      { productId: PRODUCT.id, role: 'BUY' as const, quantity: 1 },
+      { productId: PRODUCT.id, role: 'GET' as const, quantity: 1 },
+    ],
+  };
+
+  /** Buy 2 of ours, get 1 of something we are NOT holding — a real debt. */
+  const crossOffer = {
+    id: 'r_cross',
+    name: 'Buy 2 Get 1',
+    type: 'BUY_X_GET_Y' as const,
+    buyQuantity: 2,
+    getQuantity: 1,
+    percentageOff: 100,
+    stackable: false,
+    items: [
+      { productId: PRODUCT.id, role: 'BUY' as const, quantity: 1 },
+      { productId: 'p_other', role: 'GET' as const, quantity: 1 },
+    ],
+  };
+
+  const payButton = () => screen.getByRole('button', { name: /Proceed to Payment/i });
+
+  function withCart(quantity: number, rules: unknown[]) {
+    cart.items = [{ ...ITEM, quantity }];
+    checkout.promotionRules = rules as never;
+  }
+
+  afterEach(() => {
+    cart.items = [ITEM];
+    checkout.promotionRules = [];
+  });
+
+  it('offers the free one when the basket is a unit short, and lets them pay anyway', () => {
+    withCart(5, [sameProductOffer]);
+    renderCheckout();
+
+    /*
+     * POSITIVE — the whole sentence, read off the element that owns it. The
+     * prompt is built from several spans, so a plain string matcher would find
+     * none of it; and a loose /Add/ finds the cart's own "Add order discount".
+     */
+    const prompt = screen
+      .getAllByText((_, el) => /Add\s*1\s*more/.test(el?.textContent ?? ''))
+      .pop();
+    expect(prompt?.textContent).toMatch(
+      /Add\s*1\s*more\s*Floor Tile 60x60\s*and\s*one is free\s*—\s*Tie Offer/,
+    );
+
+    // …and THE POINT: five at full price is a real sale.
+    expect(payButton()).toHaveProperty('disabled', false);
+    // It is an offer, not a requirement, so it must not borrow the debt wording.
+    expect(screen.queryByText(/Payment is unavailable/i)).toBeNull();
+  });
+
+  it('says nothing once the reward has landed', () => {
+    // Six units: the sixth is already free, so asking for a seventh would ask
+    // for one that gets charged.
+    withCart(6, [sameProductOffer]);
+    renderCheckout();
+
+    expect(screen.queryByText(/is free/i)).toBeNull();
+    expect(payButton()).toHaveProperty('disabled', false);
+  });
+
+  it('says nothing when the basket is nowhere near', () => {
+    withCart(2, [sameProductOffer]);
+    renderCheckout();
+
+    expect(screen.queryByText(/is free/i)).toBeNull();
+  });
+
+  it('a DEBT still blocks payment — the control that proves the gate works', () => {
+    /*
+     * Without this, every "payment stayed enabled" assertion above would pass
+     * against a till whose gate had been removed altogether. Here the customer
+     * has earned a product they are not holding, and completing the sale would
+     * pocket it.
+     */
+    withCart(2, [crossOffer]);
+    renderCheckout();
+
+    expect(screen.getByText(/Payment is unavailable/i)).toBeTruthy();
+    expect(payButton()).toHaveProperty('disabled', true);
+  });
+
+  it('a debt outranks an offer: one instruction at a time', () => {
+    // Both rules live. The blocking one wins the space, because a cashier
+    // reading "add one more, it is free" beside "you cannot pay" acts on the
+    // wrong one.
+    withCart(5, [sameProductOffer, crossOffer]);
+    renderCheckout();
+
+    expect(screen.getByText(/Payment is unavailable/i)).toBeTruthy();
+    expect(screen.queryByText(/one is free/i)).toBeNull();
+  });
+});

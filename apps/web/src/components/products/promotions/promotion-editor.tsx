@@ -771,7 +771,7 @@ export function PromotionEditor({
             aria-invalid={!!errors.name}
             value={state.name}
             onChange={(e) => patch({ name: e.target.value })}
-            placeholder="e.g. Lunch Bundle"
+            placeholder="e.g. Weekend Offer"
             maxLength={120}
             autoFocus
           />

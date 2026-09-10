@@ -9082,6 +9082,119 @@ illustrate the same shop.
 
 ---
 
+## D155 — a same-product offer says how close it is, and never blocks the sale
+
+**Status:** accepted and **built**, 2026-09-10. Frontend and shared only. No
+schema change, no migration, no server behaviour changed.
+
+### What was reported
+
+A *"buy 5 ties, get 1 free"* promotion appeared to do nothing: five ties in the
+basket produced no badge, no discount and no notice. The expectation was parity
+with the shirt offer, which names itself and refuses payment until the reward is
+in the basket.
+
+### What was actually happening
+
+Nothing was broken. Checked against the real promotions before changing
+anything:
+
+| Promotion | Buy | Get | Same product? |
+|---|---|---|---|
+| Buy 2 Get 1 Free | Shirt | **Tie** | no |
+| Tie | Tie | **Tie** | **yes** |
+
+A same-product BOGO is **six for the price of five** — the free unit is drawn
+from the same pile that earns it. Verified against the applier directly:
+
+```
+5 ties  -> discount Rs 0
+6 ties  -> discount Rs 500   ✓
+12 ties -> discount Rs 1000  ✓
+```
+
+So the offer worked; it takes six. And `rewardEntitlements` suppresses the
+same-product case on purpose:
+
+> *A same-product BOGO draws its reward from the pool it counts, so the customer
+> is always already holding it. Reporting an entitlement would ask the till to
+> add a unit that earns nothing and gets charged for.*
+
+### Why parity with the shirt offer was rejected
+
+`outstandingRewards` gates `canPay` (4.14), and it is right to. With the shirt
+offer the customer has **earned a tie they are not holding**; completing the sale
+would pocket a promised freebie, so the till must refuse.
+
+With the tie offer at five, **nothing is owed**. Five ties at full price is a
+legitimate sale, and refusing payment would mean a till that will not let a
+customer buy what they asked for because a *larger* purchase would have been a
+better deal. That is hostility dressed as helpfulness, and the PO agreed.
+
+### The real gap, and the decision
+
+At five ties the till said **nothing at all** — the cashier could not see that
+one more tie costs the customer nothing.
+
+**`rewardUpsells` reports how close a same-product offer is. It is an OFFER, not
+a debt, and it must never reach `canPay`.**
+
+```
+qty  prompt                discount  blocks payment
+ 4   —                     Rs 0      no
+ 5   add 1, one is free    Rs 0      no
+ 6   —                     Rs 500    no
+11   add 1, one is free    Rs 500    no
+12   —                     Rs 1000   no
+```
+
+### Why a separate function, not a flag on the existing one
+
+They answer different questions and carry different authority:
+
+- `outstandingRewards` is a **debt** — earned, unheld, and it closes the payment
+  gate.
+- `rewardUpsells` is an **offer** — unearned, declinable, and it must not.
+
+Returning both from one function would invite a caller to feed the lot into
+`canPay` and refuse the five-tie sale — the exact behaviour this was chosen
+over. Two types, so the compiler keeps them apart. A mutation that wires the
+upsell into `canPay` fails the render spec.
+
+### When it fires
+
+Only once the BUY threshold **within the current group** is met, so a basket of
+one tie is not nagged about an offer four units away. It reads the remainder
+rather than the total, which is what makes it right on a repeat: at eleven the
+customer holds one complete group and five spare, so they are one away from a
+*second* free tie.
+
+Measured lines (D134a) and manually discounted lines (D123) earn no prompt —
+both are invisible to the applier, and promising a free unit the applier will
+refuse to give is the badge-and-charge disagreement that 2.12 and 3.10 both
+were.
+
+Different-product rewards are not reported here. Those reach the cashier through
+`outstandingRewards` the moment they are earned, and prompting beforehand would
+be a second, weaker voice on one offer.
+
+### On the screen
+
+Muted, in the surface colour rather than the primary the debt notice uses, and
+worded as what the customer **gets** rather than what the till **requires**. It
+is suppressed entirely while a real debt is outstanding, so the cashier reads
+one instruction at a time and the blocking one wins.
+
+### Also in this change
+
+The promotion editor's name placeholder read **"e.g. Lunch Bundle"** — a
+restaurant example in a shared editor, so a clothing shop naming a promotion was
+prompted with a lunch deal. Now "e.g. Weekend Offer". Same class as the `"e.g.
+Milk 200ml"` placeholder that `2.13` removed from the product wizard, in the one
+screen that had kept it.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

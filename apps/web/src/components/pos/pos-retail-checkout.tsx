@@ -61,7 +61,7 @@ import {
 import { ORDER_DISCOUNT_KEY, requestDiscountApproval } from '@/lib/discounts';
 import { resolveImageUrl } from '@/lib/products-api';
 import { Permission, discountLimitFor, withinDiscountLimit } from '@/lib/permissions';
-import { outstandingRewards } from '@hardware-pos/shared';
+import { outstandingRewards, rewardUpsells } from '@hardware-pos/shared';
 
 import { isMeasured, stockCap, usePosCart } from '@/lib/pos-cart';
 import { MeasureNumpad } from '@/components/pos/measure-numpad';
@@ -446,6 +446,41 @@ export function PosRetailCheckout() {
   );
 
   /*
+   * D155 — an offer the basket is one step short of.
+   *
+   * Deliberately NOT part of `canPay`. `outstanding` is a debt the customer
+   * has earned and the sale must not walk away from; this is an offer they
+   * have not reached and may decline. A same-product "buy 5 get 1" is six
+   * for the price of five, so somebody buying exactly five ties owes nothing
+   * — refusing their payment would be the hostility this replaced.
+   *
+   * Same shape as `outstanding` above, and for the same reason: it reads the
+   * cart the applier prices from, so the free unit it promises is the unit
+   * the applier will discount.
+   */
+  const upsells = React.useMemo(
+    () =>
+      data.promotionRules.length === 0
+        ? []
+        : rewardUpsells({
+            lines: cart.items.map((it) => {
+              const line = computeLine(it);
+              return {
+                id: it.lineKey,
+                productId: it.product.id,
+                unitPrice: linePrice(it),
+                quantity: it.quantity,
+                lineSubtotal: line.lineSubtotal,
+                manualDiscountAmount: line.discountAmount,
+                isMeasured: it.product.quantityType === 'DECIMAL',
+              };
+            }),
+            promotions: data.promotionRules,
+          }),
+    [cart.items, data.promotionRules],
+  );
+
+  /*
    * Open decision 3 (PO-confirmed) — a manual discount that displaced a LARGER
    * promotion. Warns; never blocks and never silently swaps to the better one.
    * The cashier may have every reason to honour the manual price, and a till
@@ -674,6 +709,26 @@ export function PosRetailCheckout() {
           <p className="pt-0.5 text-[11px] font-medium text-primary/80">
             Payment is unavailable until the offer is complete.
           </p>
+        </div>
+      ) : null}
+
+      {/* D155 — how close an offer is, when nothing is owed.
+          Muted, not the primary colour the outstanding notice uses, and it
+          says what the customer GETS rather than what the till requires:
+          this is an offer to decline, not a debt to settle. Suppressed while
+          a reward really is outstanding, so the cashier reads one instruction
+          at a time and the blocking one wins. */}
+      {outstanding.length === 0 && upsells.length > 0 ? (
+        <div className="mx-4 mb-2 space-y-1.5 rounded-xl border border-border bg-surface px-3 py-2.5">
+          {upsells.map((u) => (
+            <p key={u.promotionId} className="text-xs text-muted-foreground">
+              Add <span className="font-semibold text-foreground">{u.needed}</span> more{' '}
+              <span className="font-semibold text-foreground">{outstandingLabel(u.productId)}</span>
+              {u.needed === 1 ? '' : 's'} and{' '}
+              {u.free === 1 ? 'one is' : `${u.free} are`} free —{' '}
+              <span className="font-medium">{u.promotionName}</span>.
+            </p>
+          ))}
         </div>
       ) : null}
 

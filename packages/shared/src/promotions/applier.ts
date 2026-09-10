@@ -839,3 +839,96 @@ export function outstandingRewards(context: PromotionContext): OutstandingReward
     .map((ent) => ({ ...ent, outstanding: Math.max(0, ent.earned - ent.held) }))
     .filter((r) => r.outstanding > 0);
 }
+
+/** D155 — an offer the basket is close to, but has not reached. */
+export interface RewardUpsell {
+  promotionId: string;
+  promotionName: string;
+  /** The product to add more of. It is both trigger and reward. */
+  productId: string;
+  /** Units to add before the next reward unit becomes free. Always > 0. */
+  needed: number;
+  /** How many of those added units are free — the offer's own getQuantity. */
+  free: number;
+}
+
+/**
+ * D155 — offers the basket is one step short of, for a SAME-PRODUCT reward.
+ *
+ * ## The gap this fills
+ *
+ * `outstandingRewards` deliberately reports nothing for a same-product BOGO,
+ * and that is right: a "buy 5 get 1" on one product is six for the price of
+ * five, so a customer holding five has earned nothing and owes nothing. The
+ * till must not block their payment — five ties at full price is a real sale.
+ *
+ * But it said nothing AT ALL, and that is the gap. The cashier could not see
+ * that one more tie costs the customer nothing.
+ *
+ * ## Why this is separate from `outstandingRewards`, not folded into it
+ *
+ * They answer different questions and carry different authority.
+ *
+ *  - `outstandingRewards` is a DEBT: the customer has earned something they
+ *    are not holding, and completing the sale would pocket it. It gates
+ *    payment (4.14).
+ *  - this is an OFFER: nothing is owed, and the customer may decline it.
+ *    It must never gate payment.
+ *
+ * Returning them from one function would invite a caller to feed both into
+ * `canPay` and refuse a legitimate five-tie sale — the exact hostility this
+ * feature was chosen over. Two types, so the compiler keeps them apart.
+ *
+ * ## When it fires
+ *
+ * Only once the BUY threshold within the current group is already met, so a
+ * basket of one tie is not nagged about an offer four units away. With
+ * `buy 5 get 1` (group of six): five ties prompts, six does not (the reward
+ * has landed), eleven prompts again for the second.
+ *
+ * Different-product rewards are not reported here. Those go through
+ * `outstandingRewards` the moment they are earned, and prompting before that
+ * would be a second, weaker voice on the same offer.
+ */
+export function rewardUpsells(context: PromotionContext): RewardUpsell[] {
+  // D134a (`6.4`) — measured lines are excluded for the same reason they are
+  // in `rewardEntitlements`: this runs BUY_X_GET_Y counting, and a rule that
+  // could never discount a weighed line must not advertise that it will.
+  const lines = countableLines(context.lines).filter((l) => l.manualDiscountAmount <= 0);
+  const out: RewardUpsell[] = [];
+
+  for (const rule of context.promotions) {
+    const buyQty = rule.buyQuantity ?? 0;
+    const getQty = rule.getQuantity ?? 0;
+    if (rule.type !== 'BUY_X_GET_Y' || buyQty <= 0 || getQty <= 0) continue;
+
+    const buyIds = new Set(requiredByProduct(rule, 'BUY').keys());
+    const getIds = [...requiredByProduct(rule, 'GET').keys()];
+    // Same pool only — see the header.
+    const productId = getIds.find((id) => buyIds.has(id));
+    if (productId === undefined) continue;
+
+    const groupSize = buyQty + getQty;
+    const held = quantityOf(lines, productId);
+    if (held <= 0) continue;
+
+    /*
+     * What is left over after every complete group has taken its share.
+     * Prompting on the remainder rather than the total is what makes the
+     * message right on a repeat: at eleven the customer has one full group
+     * and five spare, so they are one away from a SECOND free tie.
+     */
+    const remainder = held % groupSize;
+    if (remainder < buyQty) continue;
+
+    out.push({
+      promotionId: rule.id,
+      promotionName: rule.name,
+      productId,
+      needed: groupSize - remainder,
+      free: getQty,
+    });
+  }
+
+  return out;
+}
