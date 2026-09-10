@@ -148,7 +148,16 @@ const ses = (
     readyTicketIds: [],
   }) as OpenSessionView;
 
-const session = { token: 't', user: { id: ME, tenantId: 'tnt_1' } } as never;
+/*
+ * D157c — the enum role a restaurant WAITER actually carries (their authority
+ * comes from the custom role row). Said explicitly because the whole my/all
+ * control now depends on it: an owner-level role sees none of it.
+ */
+const session = { token: 't', user: { id: ME, tenantId: 'tnt_1', role: 'CASHIER' } } as never;
+const ownerSession = {
+  token: 't',
+  user: { id: ME, tenantId: 'tnt_1', role: 'OWNER' },
+} as never;
 
 async function settle() {
   await act(async () => {
@@ -275,6 +284,28 @@ describe('whose tables the floor shows (D156)', () => {
      */
     expect(screen.getByText('Sunil')).toBeTruthy();
     expect(shownSessionIds()).not.toContain('theirs');
+  });
+
+  it('D157c — an OWNER gets the room, and no my/all chips at all', async () => {
+    /*
+     * The PO's report: the owner's Tables tab was showing "My tables · 6" —
+     * six tables that are theirs only because they opened them while covering
+     * or testing. "Mine" is a server's question; an owner watches the floor.
+     *
+     * Asserted as the pair on the same data: no chips AND every session
+     * reachable, because "no chips" alone is also what a broken permission
+     * read would produce — with the floor then silently narrowed to nothing.
+     */
+    render(<TableFloor session={ownerSession} branchId="brn_1" canManage />);
+    await settle();
+
+    await waitFor(() => expect(shownSessionIds().sort()).toEqual(['mine', 'theirs']));
+    expect(screen.queryByRole('button', { name: /^My tables/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^All tables/ })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Whose tables to show' })).toBeNull();
+    // The names stay (D156a) — that is how a supervisor reads the room.
+    expect(screen.getByText('Sunil')).toBeTruthy();
+    expect(screen.getByText('Nimal')).toBeTruthy();
   });
 
   it('D156a — names the server on a table it will not let you open', async () => {

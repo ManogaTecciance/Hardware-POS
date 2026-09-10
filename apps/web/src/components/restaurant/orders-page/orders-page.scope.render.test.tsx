@@ -48,6 +48,7 @@ const { OrdersPage } = await import('./orders-page');
 
 const ME = 'usr_me';
 
+/** D157c — the enum role a restaurant waiter carries; an owner is asserted below. */
 const SESSION = {
   token: 'tok',
   user: {
@@ -234,6 +235,33 @@ describe('whose orders the queue shows (D157)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show all 36 orders' }));
     await waitFor(() => expect(replace).toHaveBeenCalled());
     expect(replace.mock.calls.at(-1)![0] as string).toContain('scope=all');
+  });
+
+  it('D157c — an OWNER asks for the whole queue and gets no chips', async () => {
+    /*
+     * Same report as the floor's: the owner's Orders tab was defaulting to "My
+     * orders". Their own rows exist only because they keyed something while
+     * covering. The client asks for `all` EXPLICITLY (the server's default is
+     * "mine" since D157b) and hides the control, so there is nothing to
+     * misread and nothing to switch back to.
+     */
+    const OWNER = {
+      ...SESSION,
+      user: { ...(SESSION as unknown as { user: Record<string, unknown> }).user, role: 'OWNER' },
+    } as unknown as Session;
+    list.mockResolvedValue(
+      page({ items: [MINE, THEIRS], resolvedScope: 'all', mineCount: 1, allCount: 2 }),
+    );
+
+    render(<OrdersPage session={OWNER} branchId="brn_1" />);
+
+    await waitFor(() => expect(lastQuery()?.scope).toBe('all'));
+    expect(screen.queryByRole('button', { name: /^My orders/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^All orders/ })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Whose orders to show' })).toBeNull();
+    // NEGATIVE — the rows are all there, so this is the control being absent
+    // rather than the queue being filtered to nothing.
+    await waitFor(() => expect(screen.getByText(/Sunil Fernando/)).toBeTruthy());
   });
 
   it('writes the chip into the URL, resetting the page', async () => {

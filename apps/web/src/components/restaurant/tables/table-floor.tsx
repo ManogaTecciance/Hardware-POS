@@ -41,10 +41,13 @@ import {
   countMine,
   resolveOwnerScope,
   sessionsVisibleTo,
+  supervisesTheFloor,
   type SessionOwnerScope,
 } from '@/lib/restaurant/session-ownership';
+import { normalizeSearchTerm } from '@/lib/search-term';
 import { seatsFree } from '@/lib/restaurant/types';
 import type {
+  AssignableWaiter,
   DiningAreaView,
   OpenSessionView,
   OpenTableView,
@@ -170,6 +173,16 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   const canEditOwnArea = hasPermission(Permission.DINING_AREA_EDIT_OWN);
   const canArchiveOwnArea = hasPermission(Permission.DINING_AREA_ARCHIVE_OWN);
   const canEditOwnTable = hasPermission(Permission.TABLE_EDIT_OWN);
+  /*
+   * D159 — "the guests have asked for someone else." Owner-held (the Waiter
+   * template deliberately lacks it), so the control below is invisible to the
+   * floor and the server refuses it besides.
+   */
+  const canReassignWaiter = hasPermission(Permission.TABLE_SESSION_REASSIGN);
+  const [reassignTarget, setReassignTarget] = React.useState<{
+    session: OpenSessionView;
+    tableLabel: string;
+  } | null>(null);
   const canArchiveOwnTable = hasPermission(Permission.TABLE_ARCHIVE_OWN);
   const currentUserId = session.user.id;
   /**
@@ -341,9 +354,14 @@ export function TableFloor({ session, branchId, canManage }: Props) {
    */
   const mineCount = countMine(snapshot.sessionsByTableId, currentUserId);
   const allCount = countAll(snapshot.sessionsByTableId);
-  // D157b — mine unless the operator said otherwise. Nothing about the data
-  // moves it, so there is no paint at which the answer changes under them.
-  const ownerScope = resolveOwnerScope(ownerChoice);
+  /*
+   * D157b — mine unless the operator said otherwise; nothing about the data
+   * moves it, so there is no paint at which the answer changes under them.
+   * D157c — except that a supervisor has no "mine" worth defaulting to: the
+   * floor is their view, and they never see the chips to change it.
+   */
+  const supervises = supervisesTheFloor(session.user.role);
+  const ownerScope = resolveOwnerScope(ownerChoice ?? (supervises ? 'all' : null));
   /** Whether the first load has landed, so a `0` on a chip is an answer. */
   const countsKnown = status !== 'loading';
   /*
@@ -376,7 +394,7 @@ export function TableFloor({ session, branchId, canManage }: Props) {
    * D156). Without it every session returned is already theirs, and a pair of
    * chips that filter nothing is a control that lies about what it does.
    */
-  const canSeeWholeFloor = hasPermission(Permission.TABLE_SESSION_VIEW_ALL);
+  const canSeeWholeFloor = hasPermission(Permission.TABLE_SESSION_VIEW_ALL) && !supervises;
 
   return (
     <div className="space-y-4">
@@ -617,6 +635,26 @@ export function TableFloor({ session, branchId, canManage }: Props) {
                            * the current scope lets the operator open.
                            */
                           servedBy={servedByTable.get(t.id)?.[0] ?? null}
+                          /*
+                           * D159 — reassigning needs the SESSION, and the card
+                           * renders the scoped one; this comes off the branch
+                           * snapshot so a supervisor can change the waiter on a
+                           * table they are not serving, which is every table.
+                           */
+                          onChangeWaiter={
+                            canReassignWaiter
+                              ? (() => {
+                                  const live = snapshot.sessionsByTableId.get(t.id)?.[0];
+                                  return live
+                                    ? () =>
+                                        setReassignTarget({
+                                          session: live,
+                                          tableLabel: t.label ?? t.code,
+                                        })
+                                    : undefined;
+                                })()
+                              : undefined
+                          }
                           readyCount={s ? unansweredReady(s, ackedReady) : 0}
                           onViewOrder={() => s && ackReady(s)}
                           canOpen={canOpenTable}
@@ -689,6 +727,18 @@ export function TableFloor({ session, branchId, canManage }: Props) {
           areaId={showNewTable.areaId}
         />
       ) : null}
+      {reassignTarget ? (
+        <ChangeWaiterDialog
+          session={session}
+          branchId={branchId}
+          target={reassignTarget}
+          onClose={() => setReassignTarget(null)}
+          onChanged={() => {
+            setReassignTarget(null);
+            void refreshSessions();
+          }}
+        />
+      ) : null}
       {openTarget ? (
         <OpenTableDialog
           onClose={() => setOpenTarget(null)}
@@ -756,6 +806,7 @@ function TableCard({
   table,
   session,
   servedBy,
+  onChangeWaiter,
   readyCount,
   onViewOrder,
   canOpen,
@@ -776,6 +827,12 @@ function TableCard({
    * you would be a strange thing to read over somebody's shoulder.
    */
   servedBy: string | null;
+  /**
+   * D159 — opens the reassign picker. Undefined when the reader may not
+   * reassign, or when the table has no live session to hand over: the name
+   * then stays a label, which is what it is for everyone but a supervisor.
+   */
+  onChangeWaiter?: () => void;
   /** D112 — bumped tickets this device has not answered; >0 shows the bell. */
   readyCount: number;
   /** Tapping View order answers the badge for this session on this device. */
@@ -841,6 +898,35 @@ function TableCard({
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{servedBy}</span>
+          {/* D159 — on the name, because that is the thing being changed. A
+              text button rather than a menu item: mid-service, a guest is
+              standing there, and the supervisor should not have to hunt. */}
+          {onChangeWaiter ? (
+            /*
+             * A CHIP, and `brand-100`/`brand-700` rather than `text-primary`.
+             *
+             * Both halves were reported by the PO ("Change text color is not
+             * visible") and both measured: as bare teal text this sat at
+             * 6.28:1 on the light card but 2.49:1 on the dark one — the same
+             * trap the Orders status tabs hit, because `--sem-action-primary`
+             * is Kinetic Teal in BOTH themes while the card behind it goes
+             * dark. `--sem-brand-700` lifts to Flow Aqua under dark, and this
+             * pair is the one already validated at 6.14:1 there.
+             *
+             * The border and fill are the other half: at 12px with no
+             * underline it read as part of the waiter's name rather than as
+             * something to press, which on a tablet at arm's length is the
+             * same as invisible.
+             */
+            <button
+              type="button"
+              onClick={onChangeWaiter}
+              className="inline-flex h-6 shrink-0 items-center rounded-full bg-brand-100 px-2 text-[11px] font-semibold text-brand-700 transition-colors hover:bg-brand-200"
+              aria-label={`Change the waiter serving ${table.label ?? table.code}`}
+            >
+              Change
+            </button>
+          ) : null}
         </p>
       ) : null}
       {/* D50 — why this table is Reserved. Naming the holders is what stops an
@@ -1598,6 +1684,235 @@ function ArchiveTableDialog({
           Historical orders and reports will remain available.
         </p>
       )}
+    </Dialog>
+  );
+}
+
+/**
+ * D159 — hand an open table to a different waiter.
+ *
+ * The list is the SERVER's answer to "who can serve here" (roles carrying
+ * ORDER_SEND_TO_KITCHEN, on this branch), not a client-side guess, so the
+ * picker cannot offer somebody the reassign would then refuse. The waiter
+ * currently on the table is shown and disabled: it is the answer to "who is on
+ * it" and never a thing to pick.
+ *
+ * Every round keeps the waiter who SENT it — this changes who is responsible
+ * from now on, which is what a guest asking for someone else means, and the
+ * table moves between the two waiters' "my tables" (D156) and their "my
+ * orders" (D157) on the next poll.
+ */
+/**
+ * D159 — hand an open table to a different waiter.
+ *
+ * The list is the SERVER's answer to "who can serve here" (roles carrying
+ * ORDER_SEND_TO_KITCHEN, on this branch), not a client-side guess, so the
+ * picker cannot offer somebody the reassign would then refuse. The waiter
+ * currently on the table is shown and disabled: it is the answer to "who is on
+ * it" and never a thing to pick.
+ *
+ * Every round keeps the waiter who SENT it — this changes who is responsible
+ * from now on, which is what a guest asking for someone else means, and the
+ * table moves between the two waiters' "my tables" (D156) and their "my
+ * orders" (D157) on the next poll.
+ *
+ * ## D159a — what a list of fifteen needs that a list of three does not
+ *
+ * A restaurant runs more waiters than fit a dialog, so three things carry the
+ * long case, in the order a supervisor actually decides:
+ *
+ *   1. SERVING NOW first, with their table count. The question mid-service is
+ *      never "who exists" but "who is here and has room", and — with no
+ *      clock-in in this schema — "holding an open session on this branch" is
+ *      the only honest reading of "here". It is also the same fact the floor
+ *      behind the dialog is showing.
+ *   2. A search box once the list passes {@link SEARCH_FROM}. Below that it
+ *      would be a control that costs a tap and saves none — and it is NOT
+ *      auto-focused: on a tablet, focus raises the on-screen keyboard over the
+ *      list, and the commonest action here is tapping a name, not typing one.
+ *   3. A capped, scrolling body. The dialog must not grow past the screen on
+ *      the tablet this is used on.
+ *
+ * Client-side filtering on purpose: this list is the branch's floor staff —
+ * tens of rows, already fetched — so a server round-trip per keystroke would
+ * add latency to a decision being made in front of a guest.
+ */
+/*
+ * Six, not eight (PO asked twice about big floors): at five names every row is
+ * on screen and a keyboard would cover them; by six the list starts to scroll
+ * on a tablet, which is the moment search earns its place.
+ */
+const SEARCH_FROM = 6;
+
+function ChangeWaiterDialog({
+  session,
+  branchId,
+  target,
+  onClose,
+  onChanged,
+}: {
+  session: Session;
+  branchId: string;
+  target: { session: OpenSessionView; tableLabel: string };
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [staff, setStaff] = React.useState<AssignableWaiter[] | null>(null);
+  const [picked, setPicked] = React.useState<string | null>(null);
+  const [query, setQuery] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    tableSessions
+      .listAssignableWaiters(session, branchId)
+      .then((rows) => {
+        if (!cancelled) setStaff(rows);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Could not load the floor staff');
+          setStaff([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, branchId]);
+
+  const submit = async () => {
+    if (!picked || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await tableSessions.reassignWaiter(session, branchId, target.session.id, picked);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change the waiter');
+      setSaving(false);
+    }
+  };
+
+  const current = target.session.waiterUserId;
+  const all = staff ?? [];
+  /*
+   * The current waiter is not a candidate, so they are neither searched nor
+   * grouped — they are shown once, at the top, as context.
+   */
+  const candidates = all.filter((person) => person.id !== current);
+  const needle = normalizeSearchTerm(query).toLowerCase();
+  const matching = needle
+    ? candidates.filter((person) => person.name.toLowerCase().includes(needle))
+    : candidates;
+  /*
+   * The second group is the COMPLEMENT of the first, not `=== 0`: a row whose
+   * count did not arrive (an older server, a payload trimmed by a proxy) would
+   * otherwise belong to neither group and vanish from a picker that is supposed
+   * to list everybody who can take the table.
+   */
+  const serving = matching.filter((person) => person.openTableCount > 0);
+  const free = matching.filter((person) => !(person.openTableCount > 0));
+  const currentPerson = all.find((person) => person.id === current) ?? null;
+
+  const row = (person: AssignableWaiter) => (
+    <button
+      key={person.id}
+      type="button"
+      disabled={saving}
+      onClick={() => setPicked(person.id)}
+      aria-pressed={picked === person.id}
+      className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left text-sm transition-colors disabled:cursor-not-allowed ${
+        picked === person.id ? 'border-primary bg-brand-50' : 'border-border hover:border-primary'
+      }`}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <UserRound className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="truncate font-medium">{person.name}</span>
+      </span>
+      {/* The load, in words: "2 tables" decides a handover in a way a bare
+          name cannot. Absent at zero — that IS the group they are in. */}
+      {person.openTableCount > 0 ? (
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {person.openTableCount} table{person.openTableCount === 1 ? '' : 's'}
+        </span>
+      ) : null}
+    </button>
+  );
+
+  const group = (label: string, people: AssignableWaiter[]) =>
+    people.length === 0 ? null : (
+      <div className="space-y-2" role="group" aria-label={label}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {label} · {people.length}
+        </p>
+        {people.map(row)}
+      </div>
+    );
+
+  return (
+    <Dialog
+      open
+      onClose={saving ? () => undefined : onClose}
+      title={`Change waiter — ${target.tableLabel}`}
+      description="The new waiter takes over from now. Rounds already sent keep the waiter who sent them, and the bill is unaffected."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={() => void submit()} isLoading={saving} disabled={!picked}>
+            Change waiter
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+
+        {/* Who is on it now — once, at the top, and not a choice. */}
+        {currentPerson ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted p-3 text-sm text-muted-foreground">
+            <span className="flex min-w-0 items-center gap-2">
+              <UserRound className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="truncate font-medium">{currentPerson.name}</span>
+            </span>
+            <span className="shrink-0 text-xs uppercase tracking-wide">On this table</span>
+          </div>
+        ) : null}
+
+        {/* D159a — offered only when the list is long enough to need it. */}
+        {candidates.length >= SEARCH_FROM ? (
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search staff by name…"
+            aria-label="Search staff by name"
+          />
+        ) : null}
+
+        {staff === null ? (
+          <p className="py-4 text-sm text-muted-foreground">Loading the floor staff…</p>
+        ) : candidates.length === 0 ? (
+          <p className="py-4 text-sm text-muted-foreground">
+            No other staff on this branch can be given a table. A waiter needs a role that can
+            send orders to the kitchen.
+          </p>
+        ) : matching.length === 0 ? (
+          <p className="py-4 text-sm text-muted-foreground">
+            Nobody matches &ldquo;{query.trim()}&rdquo;.
+          </p>
+        ) : (
+          /*
+           * Capped and scrolling: fifteen rows must not push the footer — and
+           * with it the confirm — off a tablet.
+           */
+          <div className="max-h-[46dvh] space-y-4 overflow-y-auto pr-1">
+            {group('Serving now', serving)}
+            {group('No tables right now', free)}
+          </div>
+        )}
+      </div>
     </Dialog>
   );
 }

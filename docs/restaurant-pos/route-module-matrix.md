@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 318
-- Module-guarded routes: 218
+- Total routes: 320
+- Module-guarded routes: 220
 - Ungated routes: 100
 
 ## How to read the Guard column
@@ -502,6 +502,8 @@ and the per-row detail the drawer fetches.
 | PATCH | `/restaurant/reservations/:reservationId` | RESERVATIONS | ENFORCED | reservation:manage |
 | POST | `/restaurant/reservations/:reservationId/status` | RESERVATIONS | ENFORCED | reservation:manage |
 | POST | `/restaurant/branches/:branchId/table-sessions` | TABLE_MANAGEMENT | ENFORCED | table:open |
+| GET | `/restaurant/branches/:branchId/assignable-waiters` | TABLE_MANAGEMENT | ENFORCED | table-session:reassign |
+| POST | `/restaurant/branches/:branchId/table-sessions/:sessionId/waiter` | TABLE_MANAGEMENT | ENFORCED | table-session:reassign |
 | GET | `/restaurant/branches/:branchId/open-sessions` | TABLE_MANAGEMENT | ENFORCED | table:view |
 | GET | `/restaurant/table-sessions/:sessionId` | TABLE_MANAGEMENT | ENFORCED | table:view |
 | GET | `/restaurant/table-sessions/:sessionId/bill-preview` | TABLE_MANAGEMENT | ENFORCED | bill:view |

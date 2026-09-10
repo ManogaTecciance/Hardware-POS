@@ -131,3 +131,13 @@ export class CloseSessionDto {
    */
   @IsOptional() @IsString() registerId?: string;
 }
+
+// ── D159: reassign the serving waiter ─────────────────────────
+export class ReassignWaiterDto {
+  /**
+   * The user taking the table over. Validated against the branch's assignable
+   * staff in the service — a well-formed id is not the same as a person who
+   * can serve, and only the service can tell the difference.
+   */
+  @IsString() @Length(1, 64) waiterUserId!: string;
+}

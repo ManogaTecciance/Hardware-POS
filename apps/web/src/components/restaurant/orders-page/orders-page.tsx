@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { PAGE_SIZES, Pagination } from '@/components/ui/pagination';
 import { Select } from '@/components/ui/select';
 import { normalizeSearchTerm } from '@/lib/search-term';
-import { staffLabel } from '@/lib/restaurant/session-ownership';
+import { staffLabel, supervisesTheFloor } from '@/lib/restaurant/session-ownership';
 import { type Session } from '@/lib/auth';
 import { restaurantOrders } from '@/lib/restaurant/api';
 import { formatElapsed, formatMoney } from '@/lib/restaurant/labels';
@@ -131,8 +131,15 @@ export function OrdersPage({ session, branchId }: Props) {
    * filter here, so a shared link shows what the sender was looking at.
    */
   const scopeRaw = params.get('scope');
+  /*
+   * D157c — a supervisor asks for the whole queue explicitly rather than
+   * letting the server's "mine" default (D157b) apply: "my orders" is a
+   * server's question, and an owner's own row is an accident of covering.
+   * They see no chips either, so the URL is the only place this can come from.
+   */
+  const supervises = supervisesTheFloor(session.user.role);
   const scope: 'mine' | 'all' | undefined =
-    scopeRaw === 'mine' || scopeRaw === 'all' ? scopeRaw : undefined;
+    scopeRaw === 'mine' || scopeRaw === 'all' ? scopeRaw : supervises ? 'all' : undefined;
 
   const [rows, setRows] = React.useState<UnifiedOrderView[]>([]);
   const [total, setTotal] = React.useState(0);
@@ -176,6 +183,8 @@ export function OrdersPage({ session, branchId }: Props) {
    * known any sooner.
    */
   const [appliedScope, setAppliedScope] = React.useState<'mine' | 'all'>(scope ?? 'mine');
+  /** D157c — the chips are the floor's control; the office does not get them. */
+  const showScopeChips = !supervises;
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = React.useState<Date | null>(null);
@@ -459,7 +468,11 @@ export function OrdersPage({ session, branchId }: Props) {
           {/* D157 — whose orders. First, because it frames every count below it:
               the status tabs and the ready bell describe the SCOPED list, so a
               reader who has not noticed which view they are in would misread
-              every number on the screen. */}
+              every number on the screen. D157c — NOT RENDERED for a supervisor,
+              rather than hidden with a class: a control that is only invisible
+              is still in the tab order and still readable by a screen reader,
+              which makes it a lie about the state rather than an absence. */}
+          {showScopeChips ? (
           <div className="flex items-center gap-3">
             <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Orders
@@ -495,6 +508,7 @@ export function OrdersPage({ session, branchId }: Props) {
               ))}
             </div>
           </div>
+          ) : null}
 
           {/* Channel chips — the "Channel" label stays outside the scrollable
               region so it never disappears when a long strip is scrolled. */}

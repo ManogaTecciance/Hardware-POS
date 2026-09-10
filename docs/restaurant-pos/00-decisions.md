@@ -7685,6 +7685,58 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D160 — merging `fix/restaurant-owner-v2` again: the two commits that followed
+
+D158 merged that branch at `985f3b6`. Two more commits landed on it afterwards
+— a supervisor can reassign the waiter serving an open table, and the control
+that does it became a legible chip — recorded there as D152c and D153–D153b.
+
+**The same collision, one step worse.** Those commits were written on the
+branch's ORIGINAL numbering, so they cite D151, D152 and D152b as their own
+decisions while this log now means five different things by D150–D154. They
+also claim D153, which here is the printed KOT. Renumbered on their side before
+merging, as D158 did: D152c → D157c and D153/a/b → D159/a/b.
+
+The letter suffixes stayed attached to their parent rather than being flattened
+into fresh numbers. D152c is a correction to their D152 and reads as nonsense
+detached from it, so it became D157c; the three D153 records open a new subject
+and took the next free number. D158 was already spent on the previous merge's
+own record, which is why theirs start at D159.
+
+Re-derived from the branch tip rather than rebased onto the earlier renumber,
+so the six records D158 already merged land on identical text and git sees one
+change rather than two competing ones.
+
+**Four conflicts, and three of them were the renumber meeting itself.**
+`table-floor.tsx`, its my-tables spec and `table-session-panel.tsx` conflicted
+because this branch holds their old content renumbered by D158's commit while
+the incoming holds their new content renumbered by this one. Their side was
+taken whole in each case, on a fact rather than a preference: this branch has
+never authored a line in any of the three — every commit touching them is
+theirs or a renumber of theirs — and their new tip is a superset of the old.
+Checked afterwards that none of the three still cites a retired number.
+
+The fourth was the decision log, and it was an artefact of D158 moving their
+records up beside the rest of the recent work: git saw this side delete the
+block from the bottom and their side extend it there. Resolved to one copy, in
+the moved position, carrying all ten of their records — verified by asserting
+no heading appears twice across the whole file.
+
+**Verified rather than assumed**, as in D158: every file only they changed is
+byte-identical to their branch, and every file only this branch changed is
+byte-identical to here. Their new permission `TABLE_SESSION_REASSIGN` and both
+new routes reached the route-module tripwire intact, which is what the api
+suite passing proves. D151's removals still hold — no screen names a counter,
+the header has no search bar.
+
+**Left undone, for the third time:** their ten decisions ship no `testcases.md`
+rows.
+
+Gates on the merged tree: typecheck 7/7, api unit 1480 across 93 suites, web
+unit 1463 across 106 files (2 skipped), integration 1165 across 54 suites, lint
+0 errors (13 warnings, all pre-existing). Playwright not run — it needs a live
+stack.
+
 ### D158 — merging `fix/restaurant-owner-v2`: how each clash was decided
 
 Three commits taken on that branch after it forked from this one at `c3c316f`:
@@ -8087,6 +8139,188 @@ fact split in half.
 chip there is 44px of a scrolling strip carrying a table name, an elapsed time
 and a cover count already; the reader's own name in that space is the noise
 D156 was right about.
+
+### D159 — a supervisor can change the waiter serving a table
+
+**Asked by the PO, 2026-09-10**: *"During serving, someone can complain they need
+to change their waiter. Can you add the owner to that option — he can change the
+waiter?"*
+
+**The capability.** `POST /v1/restaurant/branches/:branchId/table-sessions/
+:sessionId/waiter` moves an OPEN session to another waiter, and
+`GET …/assignable-waiters` is the picker's list. Both gated on a NEW permission,
+`TABLE_SESSION_REASSIGN` (`table-session:reassign`).
+
+**Why a new key rather than `TABLE_TRANSFER`.** That one is reserved for moving a
+table's ORDER to another table — the bill moves with it. Here only the
+responsibility moves, and the two want different answers: a shift supervisor who
+may re-crew the floor is not automatically someone who may move money between
+tables. Keeping them apart also keeps the reserved key's meaning intact for
+whoever implements it.
+
+**Who holds it.** OWNER, by definition — the built-in owner set is
+`ALL_PERMISSIONS` by reference, so a new key reaches it without a decision.
+Deliberately NOT the Waiter template: a waiter may neither hand their table to a
+colleague nor take one, the same accountability line that keeps
+`ORDER_VOID_SENT` and `TABLE_TRANSFER` off it. A tenant that wants a floor
+manager to do this composes a role with the key through RolesApi.
+
+**What moves, and what does not.** Only `TableSession.waiterUserId`. Every round
+keeps the `submittedByUserId` it was sent with, so the history still says who
+fired which course, and the bill is untouched — this is responsibility from here
+on, which is what a guest asking for someone else means. Because the floor plan
+(D156), the POS picker and the Orders queue (D157) all read the session's
+waiter, the table AND its order move to the new waiter's "mine" and leave the
+old one's on the next poll, with no second wiring.
+
+**Who may be given a table** is a permission question, so the list is derived
+from ROLE ROWS carrying `ORDER_SEND_TO_KITCHEN` — the very key the round submit
+is gated on — scoped to the branch by default branch or an explicit
+`BranchAccess` grant. A list built from names or the enum column would
+eventually offer somebody the server then refuses. The reassign re-checks
+against that same list rather than trusting the client, and refuses with 400
+(the user exists; what they lack is a serving role).
+
+**Refusals:** a closed session (nobody to serve, and its bill is raised), a
+session on another branch or tenant (404, never a cross-tenant oracle), and a
+target who cannot serve.
+
+**On screen.** The served-by name D156a put on each table card gains a
+**Change** link for holders of the key; it opens a picker listing the branch's
+servers with the current one shown, disabled, as "On this table" — "changing" to
+the same person is the one action that would look like it worked and do nothing.
+The floor re-reads on success, so the card names the new waiter without a manual
+refresh; a server refusal keeps the dialog up with the reason, because a
+supervisor mid-service needs to pick again rather than start over.
+
+**Audited** as `TABLE_SESSION_WAITER_REASSIGNED` with both ids — "who was on
+this table at the time" is what a disputed bill turns into.
+
+**Dev note.** Adding a permission does not reach an existing workspace: role
+ROWS hold them, so `backfill-tenant-roles.ts <slug> --write` re-applies the
+templates (the catalogue went 62 → 63 keys). Verified live afterwards: the owner
+lists four assignable waiters, a waiter gets 403 on the list, a reassign to a
+kitchen user is refused 400, and a real reassign + restore left two audit rows
+naming both directions.
+
+### D159a — the picker answers "who has room", not just "who exists"
+
+**Asked by the PO, 2026-09-10**, on seeing the reassign dialog: *"Change waiter
+is showing now — but what happens if waiters are more than 10? What is the best
+approach?"*
+
+A flat list of names is fine at three and useless at fifteen: the question a
+supervisor is actually holding, mid-service, in front of a guest, is not "who
+exists" but **"who is here and has room"**. So the list answers that, in the
+order the decision is made:
+
+1. **Grouped by whether they are serving**, with each waiter's table count.
+   There is no clock-in or shift roster in this schema, so "on the floor" is
+   read as "holding an open session on this branch" — the only honest reading
+   available, and the same fact the floor plan behind the dialog is showing.
+   `GET …/assignable-waiters` gained `openTableCount`, tallied in ONE grouped
+   query for the whole list (never one per person). "Serving now · 1 /
+   Nimal Perera · 1 table" beside "No tables right now · 2" is the whole
+   answer; the count is omitted at zero, because that IS the group.
+2. **A search box, but only past six** (`SEARCH_FROM`; eight originally — the
+   PO asked twice about big floors, and six is where a tablet's list starts to
+   scroll). Below that it would cost a tap and save none. It is deliberately
+   NOT auto-focused: on a tablet, focus raises the on-screen keyboard over the
+   very list being read, and the commonest action here is tapping a name rather
+   than typing one — which is also why search is the FALLBACK for a big team
+   rather than the primary control. Filtering is client-side on purpose: this is the
+   branch's floor staff — tens of rows, already fetched — and a round-trip per
+   keystroke would add latency to a decision being made at the table. A query
+   that matches nobody says so, rather than showing an empty panel that reads
+   as "this branch has no staff".
+3. **A capped, scrolling body** (`max-h-[46dvh]`), so fifteen rows cannot push
+   the confirm button off a tablet.
+
+The waiter already on the table moved OUT of the list: shown once at the top as
+context ("On this table") rather than as a disabled row, since a candidate list
+should contain only candidates.
+
+**Not done, deliberately:** server-side search or paging. At restaurant scale
+(tens of staff per branch) it would buy nothing and cost a request per
+keystroke. Section/zone assignment — "show me the waiters covering the Terrace"
+— would be the genuinely better answer, and it needs a section model that does
+not exist; the load count is the useful half of it that today's data supports.
+
+**A real defect this found, mine, caught by its own new test:** grouping the
+second list on `openTableCount === 0` while the first used `> 0` left a row
+whose count was missing (an older server, a trimmed payload) in NEITHER group —
+so it silently vanished from the picker. The second group is now the complement
+of the first, and the case is pinned.
+
+### D157c — "my tables / my orders" is the floor's control, not the office's
+
+**Reported by the PO, 2026-09-10**: *"Now the owner is showing the tab as My
+orders and My tables — how does that happen? My order / my table is for waiters
+only."*
+
+**Correct, and it was a straight miss.** D156 gated the floor's chips on
+`TABLE_SESSION_VIEW_ALL`, which reads as "can see other people's tables" and is
+therefore held by every supervisor — so the control appeared for the owner too,
+and D157b's default then opened them on "My tables · 6": six tables that are
+theirs only because they opened them while covering (or while testing). An owner
+does not carry a section. "Mine" is a question a SERVER asks.
+
+**The rule.** `supervisesTheFloor(role)` — the enum role, via the same
+`isAdminLevelRole` predicate the API uses for "may step past an operational
+guard-rail" (OWNER, ADMIN, SALESPERSON). For such a user the floor plan, the POS
+picker and the Orders queue all open on the whole branch and **do not render the
+chips at all**.
+
+**Why the role and not a permission.** An owner holds EVERY permission,
+including the waiter's, so no permission can separate them — the thing that
+distinguishes a supervisor is what their job is, and the enum role is where this
+codebase records that. Conversely a restaurant Waiter and the restaurant Cashier
+both carry the enum `CASHIER` (their real authority is a custom role row), so
+both keep the control: the cashier's own takeaway orders genuinely are theirs.
+
+**Not hidden — absent.** The queue's chips are not rendered rather than styled
+`hidden`: a control that is merely invisible stays in the tab order and readable
+by a screen reader, which makes it a lie about the state rather than an absence.
+(Caught by its own test, which found the element the CSS was "hiding".)
+
+The Orders queue asks for `scope=all` EXPLICITLY for a supervisor, because the
+server's default is `mine` (D157b) and the client is the only place that knows
+whose screen it is.
+
+**Unchanged:** the served-by names (D156a) stay on every card — that is how a
+supervisor reads the room — and so does everything about what each role may
+*do*. This is a view default, not authorization.
+
+**Verified live:** owner → `/tables` 0 chips / 8 orders reachable, `/orders` 0
+chips / 20 rows; waiter → 2 chips on both, 4 tables and 2 orders in the default
+view. Mutation-proven: stubbing `supervisesTheFloor` to `false` fails all four
+new cases (unit, floor, queue, picker) and nothing else.
+
+### D159b — the Change control is a chip, in the brand pair that survives dark
+
+**Reported by the PO, 2026-09-10**: *"In waiter change button, Change text color
+is not visible."*
+
+Two faults, both measured in the browser rather than eyeballed:
+
+- **Contrast.** As bare `text-primary` the link sat at **6.28:1** on the light
+  card and **2.49:1** on the dark one — a WCAG AA failure, and exactly the trap
+  the Orders status tabs recorded: `--sem-action-primary` is Kinetic Teal in
+  BOTH themes while the surface behind it goes dark. Now `bg-brand-100` /
+  `text-brand-700`, the pair already validated for that reason
+  (`--sem-brand-700` lifts to Flow Aqua under dark): **5.13:1 light, 6.14:1
+  dark**.
+- **Affordance.** At 12px, weight 500, no underline, immediately after the
+  waiter's name in muted grey, it read as part of the NAME rather than as
+  something to press — which on a tablet at arm's length is the same as
+  invisible. It is now a chip: filled, rounded, `font-semibold`, with its own
+  hit area.
+
+The measurement was a one-off (Playwright reading `getComputedStyle` and
+computing the WCAG ratio against the first opaque ancestor background), not a
+new permanent test: a spec asserting class names would pin the implementation
+without proving the contrast, and the honest version of this check needs a
+running stack. Recorded here so the next person can repeat it.
 
 ### D154 — the kitchen board's tick costs one request, and stops when nobody is looking
 

@@ -142,6 +142,20 @@ export class SessionNotOpenError extends BadRequestException {
     super(err(SESSION_ERROR_CODES.SESSION_NOT_OPEN, 'Session is not open'));
   }
 }
+/**
+ * D159 — the chosen person cannot be put on a table.
+ *
+ * 400, not 404: the user may well exist and be perfectly real — what they lack
+ * is a role that can send a round to the kitchen, and saying so is more use to
+ * the caller than pretending they are not there. The message names the reason
+ * because the alternative is a supervisor retrying the same pick.
+ */
+export class WaiterNotAssignableError extends BadRequestException {
+  constructor() {
+    super('That user cannot be assigned a table — their role cannot send orders to the kitchen.');
+  }
+}
+
 export class SessionAlreadyClosedError extends ConflictException {
   constructor() {
     super(

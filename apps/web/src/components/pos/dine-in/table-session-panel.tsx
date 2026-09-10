@@ -22,6 +22,7 @@ import {
   isMySession,
   otherWaiterLabel,
   resolveOwnerScope,
+  supervisesTheFloor,
   type SessionOwnerScope,
 } from '@/lib/restaurant/session-ownership';
 import { TABLE_STATUS_LABELS, formatElapsed } from '@/lib/restaurant/labels';
@@ -382,8 +383,13 @@ function Picker({
     () => open.filter((s) => isMySession(s, session.user.id)),
     [open, session.user.id],
   );
-  // D157b — mine unless the waiter said otherwise; the data never moves it.
-  const ownerScope = resolveOwnerScope(ownerChoice);
+  /*
+   * D157b — mine unless the waiter said otherwise; the data never moves it.
+   * D157c — a supervisor works the whole room: the strip opens on every
+   * running table and carries no chips to narrow it.
+   */
+  const supervises = supervisesTheFloor(session.user.role);
+  const ownerScope = resolveOwnerScope(ownerChoice ?? (supervises ? 'all' : null));
   const shownOpen = ownerScope === 'mine' ? mineOpen : open;
 
   /*
@@ -544,7 +550,7 @@ function Picker({
                   {/* Only when there is something to choose between: on a floor
                       where every running table is the caller's own, two chips
                       that filter nothing would be a control that lies. */}
-                  {mineOpen.length !== open.length ? (
+                  {!supervises && mineOpen.length !== open.length ? (
                     <div className="flex flex-wrap gap-1.5">
                       <button
                         type="button"

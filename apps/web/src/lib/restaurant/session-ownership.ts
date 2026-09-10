@@ -1,3 +1,5 @@
+import { isAdminLevelRole, type UserRole } from '@hardware-pos/shared';
+
 import type { OpenSessionView } from './types';
 
 /**
@@ -18,6 +20,26 @@ import type { OpenSessionView } from './types';
  */
 
 export type SessionOwnerScope = 'mine' | 'all';
+
+/**
+ * D157c — whose screens carry the my/all control at all.
+ *
+ * "My tables" and "My orders" are a SERVER's question: which of the room am I
+ * responsible for. An owner does not serve tables — they watch the floor — so
+ * for them the control was offering a filter over a set that is theirs only by
+ * accident (a table they opened while covering, or while testing), and the
+ * D157b default then opened them on that accident instead of on the room.
+ *
+ * Read off the enum role rather than off permissions, and that is the whole
+ * point: an owner holds EVERY permission, including the waiter's, so no
+ * permission can tell the two apart. `isAdminLevelRole` is the same predicate
+ * the API uses for "may step past an operational guard-rail" (OWNER, ADMIN,
+ * SALESPERSON). A restaurant Waiter and Cashier both carry the enum CASHIER, so
+ * they keep the control — the cashier genuinely has their own takeaway orders.
+ */
+export function supervisesTheFloor(role: UserRole): boolean {
+  return isAdminLevelRole(role);
+}
 
 /**
  * Which scope to show: what the operator chose, or MINE.

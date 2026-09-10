@@ -134,6 +134,20 @@ export const Permission = {
    */
   TABLE_SESSION_VIEW_ALL: 'table-session:view:all',
   TABLE_OPEN: 'table:open',
+  /**
+   * D159 — reassign the waiter serving an OPEN session.
+   *
+   * Its own key rather than `TABLE_TRANSFER`: that one is reserved for moving a
+   * table's order to another TABLE, which is a different act with different
+   * consequences (the bill moves; here only the responsibility does). Keeping
+   * them apart also keeps the grant honest — this is the shift supervisor's
+   * "the guests have asked for someone else", not permission to move money.
+   *
+   * Deliberately NOT in the Waiter template: a waiter must neither hand their
+   * table to a colleague nor take one, for the same reason they cannot void a
+   * sent item. It reaches the OWNER through `ALL_PERMISSIONS`.
+   */
+  TABLE_SESSION_REASSIGN: 'table-session:reassign',
   TABLE_TRANSFER: 'table:transfer',
   TABLE_MERGE: 'table:merge',
   TABLE_CLOSE: 'table:close',

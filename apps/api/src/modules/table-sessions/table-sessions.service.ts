@@ -13,6 +13,7 @@ import {
   OrderChannel,
 } from '@hardware-pos/database';
 
+import { Permission } from '../auth/permissions';
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { LIVE_SESSION_STATUSES } from '../../common/live-sessions';
@@ -45,6 +46,7 @@ import {
   SessionAlreadyClosedError,
   SessionNotFoundError,
   SessionNotOpenError,
+  WaiterNotAssignableError,
   TabNameRequiredError,
   TableAlreadyOpenError,
   TableNotFoundError,
@@ -96,6 +98,18 @@ export interface RoundView {
  * TableSessionView + activeOrderId (the most recent non-cancelled order on
  * the session, if any).
  */
+/**
+ * D159/D159a — somebody this branch can be given a table, and how many they
+ * already hold. The count is what makes a long list decidable: a supervisor
+ * moving a party wants the colleague who is here and has room, and "here" is
+ * knowable only as "already serving something".
+ */
+export interface AssignableWaiter {
+  id: string;
+  name: string;
+  openTableCount: number;
+}
+
 export interface OpenSessionSummary extends TableSessionView {
   activeOrderId: string | null;
   /**
@@ -324,6 +338,117 @@ export class TableSessionsService {
       }
       return this.sessionToView(session);
     });
+  }
+
+  /**
+   * D159 — the people this branch can put on a table.
+   *
+   * "Who can serve" is a permission question, so it is answered from the ROLE
+   * ROWS rather than from a name convention or the enum column: any active user
+   * whose role carries `ORDER_SEND_TO_KITCHEN` can be handed a table, which is
+   * the same key the round submit is gated on. A list built any other way
+   * would eventually offer somebody the server then refuses.
+   *
+   * Scoped to the branch by the user's default branch OR an explicit
+   * `BranchAccess` grant — the two ways a user works a branch anywhere else in
+   * this codebase.
+   */
+  async listAssignableWaiters(
+    tenantId: string,
+    branchId: string,
+  ): Promise<AssignableWaiter[]> {
+    const servingRoles = await this.prisma.role.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        permissions: { some: { key: Permission.ORDER_SEND_TO_KITCHEN } },
+      },
+      select: { id: true },
+    });
+    if (servingRoles.length === 0) return [];
+    const staff = await this.prisma.user.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        roleId: { in: servingRoles.map((r) => r.id) },
+        OR: [{ branchId }, { branchAccess: { some: { branchId } } }],
+      },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    if (staff.length === 0) return [];
+
+    /*
+     * D159a — how many tables each of them is already carrying.
+     *
+     * A list of names is enough to pick from until a branch has fifteen
+     * waiters, at which point the supervisor's real question is not "who
+     * exists" but "who is on the floor and how loaded are they". This is the
+     * only honest answer this schema can give: there is no clock-in or shift
+     * roster, so "serving now" means "holding an open session on this branch",
+     * which is what the floor plan shows anyway.
+     *
+     * One grouped count for the whole list — never one query per person.
+     */
+    const load = await this.prisma.tableSession.groupBy({
+      by: ['waiterUserId'],
+      where: {
+        tenantId,
+        branchId,
+        status: TableSessionStatus.OPEN,
+        waiterUserId: { in: staff.map((u) => u.id) },
+      },
+      _count: { _all: true },
+    });
+    const openByWaiter = new Map(
+      load.map((row) => [row.waiterUserId ?? '', row._count._all] as const),
+    );
+    return staff.map((u) => ({
+      ...u,
+      openTableCount: openByWaiter.get(u.id) ?? 0,
+    }));
+  }
+
+  /**
+   * D159 — put a different waiter on an open session.
+   *
+   * Only the SESSION moves. Every round keeps the `submittedByUserId` it was
+   * sent with, so the history still says who fired which course, and the bill
+   * is untouched: this is a change of responsibility from here on, not a
+   * rewriting of what happened. The floor plan, the POS picker and the Orders
+   * queue all read the session's waiter (D156/D157), so the table and its
+   * order move to the new waiter's "mine" and leave the old one's in the same
+   * beat.
+   *
+   * Refuses a closed session (there is nobody to serve) and a target who
+   * cannot serve a table, rather than writing a state the round submit would
+   * then refuse.
+   */
+  async reassignWaiter(
+    tenantId: string,
+    branchId: string,
+    sessionId: string,
+    waiterUserId: string,
+  ): Promise<{ session: TableSessionView; previousWaiterUserId: string | null }> {
+    const session = await this.prisma.tableSession.findFirst({
+      where: { id: sessionId, tenantId, branchId },
+    });
+    if (!session) throw new SessionNotFoundError();
+    if (session.status !== TableSessionStatus.OPEN) throw new SessionNotOpenError();
+
+    const assignable = await this.listAssignableWaiters(tenantId, branchId);
+    if (!assignable.some((w) => w.id === waiterUserId)) {
+      throw new WaiterNotAssignableError();
+    }
+
+    const updated = await this.prisma.tableSession.update({
+      where: { id: session.id },
+      data: { waiterUserId },
+    });
+    return {
+      session: this.sessionToView(updated),
+      previousWaiterUserId: session.waiterUserId,
+    };
   }
 
   async getSession(
