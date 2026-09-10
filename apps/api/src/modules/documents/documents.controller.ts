@@ -103,12 +103,12 @@ export class DocumentsController {
   @Post('preview/:type')
   @RequireModule(ModuleKey.SETTINGS)
   @RequirePermissions(Permission.SETTINGS_MANAGE)
-  preview(
+  async preview(
     @TenantId() tenantId: string,
     @Param('type') type: string,
     @Body() dto: PreviewDocumentDto,
-  ): { html: string; format: 'A4' } {
-    const html = this.documents.previewHtml(
+  ): Promise<{ html: string; format: 'A4' }> {
+    const html = await this.documents.previewHtml(
       tenantId,
       assertPreviewType(type),
       dto.documents,
@@ -136,6 +136,6 @@ export class DocumentsController {
     }
     // No server-side PDF engine — serve print-ready HTML instead.
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(this.documents.previewHtml(tenantId, previewType));
+    res.end(await this.documents.previewHtml(tenantId, previewType));
   }
 }

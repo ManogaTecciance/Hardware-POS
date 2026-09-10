@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/select';
 import { getActiveCurrency } from '@/lib/tenant-money';
 import { printReceipt } from '@/lib/receipt-print';
 import { buildSampleBill } from '@/lib/settings/sample-bill';
+import type { BillSampleKind } from '@/lib/settings/document-presentation';
 import { detectBrowserLabel, renderBillTestStrip } from '@/lib/settings/bill-test-strip';
 import type { DocumentSettings } from '@/lib/settings-api';
 import { renderThermalBill } from '@/lib/thermal-bill';
@@ -39,6 +40,7 @@ export function BillPreviewTab({
   set,
   showCalibration,
   timezone,
+  sampleKind,
 }: {
   docs: DocumentSettings;
   set: <K extends keyof DocumentSettings>(key: K, value: DocumentSettings[K]) => void;
@@ -46,6 +48,12 @@ export function BillPreviewTab({
   showCalibration: boolean;
   /** The shop's timezone: a DocumentProfile is the settings plus this (main, 2026-09-01). */
   timezone: string;
+  /**
+   * D164 — whose goods fill the sample. From the resolver, never decided
+   * here: this is a settings component, and a settings component that named a
+   * business type is exactly what the D96 contract test forbids.
+   */
+  sampleKind: BillSampleKind;
 }) {
   const [lineCount, setLineCount] = React.useState(6);
 
@@ -55,8 +63,11 @@ export function BillPreviewTab({
     // A DocumentProfile is the document settings plus the shop's timezone (main,
     // 2026-09-01): the same shape `getDocumentProfile` resolves for the till, built
     // here from the tab's UNSAVED values so an edit shows before it is kept.
-    () => renderThermalBill(buildSampleBill({ ...docs, timezone }, getActiveCurrency(), lineCount)),
-    [docs, timezone, lineCount],
+    () =>
+      renderThermalBill(
+        buildSampleBill({ ...docs, timezone }, getActiveCurrency(), lineCount, sampleKind),
+      ),
+    [docs, timezone, lineCount, sampleKind],
   );
 
   /*

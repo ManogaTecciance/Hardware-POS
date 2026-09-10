@@ -93,6 +93,61 @@ export function resolveMeasuredGoods(businessType: BusinessType | null): boolean
 }
 
 /**
+ * D162 — which sub-surfaces the Inventory tab bar offers this workspace.
+ *
+ * `Products → Attributes` and `Products → Barcodes` shipped for everyone, and
+ * they are not for everyone: a kitchen barcodes nothing and keeps no library
+ * of size scales, and a hardware counter types a variation when it needs one.
+ *
+ * ## Why one function returning two flags
+ *
+ * They are one question — "what does this tab bar show?" — asked once, by one
+ * component. Two exported predicates would let a future third tab be gated in
+ * a third place, which is the scattering `product-presentation.ts` exists to
+ * prevent. The tab bar reads the object and filters; it names no capability.
+ *
+ * ## Why not `ProductBusinessKind`
+ *
+ * Same reason `resolveMeasuredGoods` is its own resolver: that kind is a
+ * COARSE split whose `RETAIL` covers hardware and general trade as well as
+ * retail, and these two flags differ WITHIN it — hardware keeps Barcodes and
+ * loses Attributes. The coarse kind cannot express that.
+ *
+ * ## Unresolved hides both
+ *
+ * D31. A tab that appears a beat after the page loads, or worse vanishes
+ * under a click, is worse than one that arrived late. Both default to
+ * `false` while the profile is loading and after a failed request.
+ *
+ * ## Hiding is usability
+ *
+ * Neither route is removed and neither API is gated: `/products/attributes`
+ * and `/products/barcodes` still answer to anyone who types the URL and holds
+ * the permission. D125 made `/attribute-library` shared core on purpose. This
+ * decides what the bar draws, and nothing else.
+ */
+export interface CatalogueTabPresentation {
+  /** `Products → Attributes` — the reusable variation-attribute library. */
+  showAttributes: boolean;
+  /** `Products → Barcodes` — in-store EAN-13 allocation and the audit. */
+  showBarcodes: boolean;
+}
+
+export function resolveCatalogueTabs(
+  businessType: BusinessType | null,
+): CatalogueTabPresentation {
+  if (businessType === null) return { showAttributes: false, showBarcodes: false };
+  const { catalogue } = domainFor(businessType).capabilities;
+  // `=== true` and not a truthiness check: both capabilities are OPTIONAL, so
+  // every domain that has not opted in reads `undefined`, and `undefined` must
+  // mean "no tab" rather than "unknown".
+  return {
+    showAttributes: catalogue.attributeLibrary === true,
+    showBarcodes: catalogue.internalBarcodes === true,
+  };
+}
+
+/**
  * The presentation classes, which are deliberately NOT one-per-`InventoryMode`.
  *
  * `LOCAL` and `DISABLED` share "no external catalogue" but differ on whether stock

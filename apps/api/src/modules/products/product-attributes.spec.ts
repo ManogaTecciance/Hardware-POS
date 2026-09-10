@@ -7,6 +7,9 @@ import {
 } from '@hardware-pos/shared';
 
 import { BusinessProfileService } from '../platform/business-profile.service';
+import { SettingsService } from '../settings/settings.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { BusinessDetailsService } from './business-details.service';
 import { ProductAttributesService } from './product-attributes.service';
 
 /**
@@ -102,11 +105,30 @@ describe('coerceAttributeQueryValue', () => {
 });
 
 describe('ProductAttributesService', () => {
+  /*
+   * D161 — built with a REAL `BusinessDetailsService`, not a stub of its answer.
+   *
+   * `schemaForTenant` now delegates the “tenant override or domain default”
+   * decision, and stubbing that would make these assertions tautological: they
+   * would prove the fake returns what the fake was told to return. A real
+   * collaborator over fake settings keeps them proving what they always proved
+   * — that a domain's declared fields reach the caller — and now covers the
+   * delegation as well. Settings hold no override, which is every tenant until
+   * somebody opens the new tab.
+   */
   const serviceFor = (businessType: string) => {
     const profiles = {
       getEffectiveProfile: jest.fn().mockResolvedValue({ businessType }),
     } as unknown as BusinessProfileService;
-    return new ProductAttributesService(profiles);
+    const settings = {
+      getSettings: () => ({ catalogue: {} }),
+    } as unknown as SettingsService;
+    const businessDetails = new BusinessDetailsService(
+      settings,
+      profiles,
+      {} as unknown as PrismaService,
+    );
+    return new ProductAttributesService(profiles, businessDetails);
   };
 
   it('serves the tenant domain schema — HOTEL declares fields, HARDWARE declares none', async () => {

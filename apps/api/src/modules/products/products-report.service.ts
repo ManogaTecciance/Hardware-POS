@@ -325,16 +325,31 @@ export class ProductsReportService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
+      /*
+       * Widths are POINTS, and they are measured, not guessed. A4 landscape less
+       * 36pt margins leaves 770; these total 738.
+       *
+       * **Price carries a RANGE**, not one number: a variant product prints
+       * `900.00 – 4,000.00` (`variantPriceLabel`). At Helvetica 8pt that is
+       * 64.5pt against the 64pt the old 70pt column left after padding — over by
+       * half a point, so it wrapped onto a second line and, with the row height
+       * fixed at 14, bled into the row beneath. Only the rows with ranges broke,
+       * which is why it read as a rendering glitch rather than a width problem.
+       *
+       * 110 holds `12,000.00 – 145,000.00` (84.5pt) with room to spare. The
+       * points come from the numeric columns, every one of which was far wider
+       * than its content: Cost needs 40, On hand 20, Reorder 18, Stock value 47.
+       */
       const cols: { label: string; width: number; align?: 'right' }[] = [
-        { label: 'Product', width: 190 },
-        { label: 'Type', width: 70 },
+        { label: 'Product', width: 180 },
+        { label: 'Type', width: 55 },
         { label: 'SKU', width: 70 },
         { label: 'Category', width: 95 },
-        { label: 'Price', width: 70, align: 'right' },
-        { label: 'Cost', width: 70, align: 'right' },
-        { label: 'On hand', width: 55, align: 'right' },
-        { label: 'Reorder', width: 50, align: 'right' },
-        { label: 'Stock value', width: 80, align: 'right' },
+        { label: 'Price', width: 110, align: 'right' },
+        { label: 'Cost', width: 60, align: 'right' },
+        { label: 'On hand', width: 48, align: 'right' },
+        { label: 'Reorder', width: 45, align: 'right' },
+        { label: 'Stock value', width: 75, align: 'right' },
       ];
       const startX = doc.page.margins.left;
       const bottomY = doc.page.height - doc.page.margins.bottom;
@@ -381,6 +396,30 @@ export class ProductsReportService {
 
       drawHeaderRow();
 
+      /**
+       * Truncate to what the column can actually draw, measured.
+       *
+       * `lineBreak: false` and `ellipsis: true` are both passed below and were
+       * evidently not enough on pdfkit 0.17.2 — an over-wide Price cell wrapped
+       * anyway. Since every row is drawn at a pinned `y` with a fixed 14pt
+       * height, one wrapped cell overlaps the row beneath and the table stops
+       * lining up.
+       *
+       * So the string is cut to fit BEFORE pdfkit sees it, which does not depend
+       * on how an option is interpreted. With the widths above nothing should
+       * reach this — it is the guard that keeps a freak value (a price range in
+       * the millions, a very long product name) from breaking the whole table
+       * instead of just its own cell.
+       */
+      const fit = (text: string, width: number): string => {
+        if (doc.widthOfString(text) <= width) return text;
+        let cut = text;
+        while (cut.length > 1 && doc.widthOfString(`${cut}\u2026`) > width) {
+          cut = cut.slice(0, -1);
+        }
+        return `${cut}\u2026`;
+      };
+
       const rowHeight = 14;
       for (const r of data.rows) {
         if (doc.y + rowHeight > bottomY) {
@@ -402,7 +441,7 @@ export class ProductsReportService {
         ];
         let x = startX;
         cells.forEach((text, i) => {
-          doc.text(text, x, y, {
+          doc.text(fit(text, cols[i].width - 6), x, y, {
             width: cols[i].width - 6,
             align: cols[i].align ?? 'left',
             lineBreak: false,

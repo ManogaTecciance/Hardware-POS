@@ -30,6 +30,24 @@ import type { AttributeField } from './attributes.js';
 import type { TenantCapabilities } from './capabilities.js';
 import type { NavGroupSpec } from './navigation.js';
 
+/**
+ * D165 — one line of a sample document.
+ *
+ * Deliberately the shape the A4 renderer's line builder already consumed, so
+ * moving the existing hardware list here was a relocation rather than a
+ * rewrite — which is what let hardware's rendered preview stay byte-identical
+ * through the change.
+ */
+export interface SampleCatalogueItem {
+  readonly name: string;
+  readonly sku: string;
+  /** Unit label as printed — BAG, PCS, M, PAIR. */
+  readonly unit: string;
+  readonly unitPrice: number;
+  /** Quantity multiplier, for goods bought by the box rather than singly. */
+  readonly pack?: number;
+}
+
 export interface DomainDescriptor {
   /** The BusinessType values this descriptor serves. */
   readonly businessTypes: readonly BusinessType[];
@@ -81,5 +99,33 @@ export interface DomainDescriptor {
      * refused.
      */
     readonly attributeSchema: readonly AttributeField[];
+    /**
+     * D165 — the goods this vertical's DOCUMENT PREVIEWS are illustrated with.
+     *
+     * Settings → Preview renders a sample quotation so an operator can check
+     * their letterhead, column widths and spacing before printing anything
+     * real. Until D165 that sample was one hard-coded hardware list, so a
+     * clothing shop evaluating the product saw a quotation for Portland
+     * cement and TMT steel bar on its own letterhead.
+     *
+     * ## Why this one is OPTIONAL when the block above says required
+     *
+     * The comment on `catalogue` is right, and this is the exception that
+     * proves its reasoning rather than an erosion of it. That rule exists
+     * because a silent fallback hands a vertical **another vertical's**
+     * answer — which is exactly the defect D165 fixes.
+     *
+     * Omitting this field falls back to a NEUTRAL list (`Standard Item 1`
+     * and so on), not to hardware's. Silence therefore produces honest
+     * filler that claims no trade, and the failure mode the required rule
+     * guards against cannot occur. Making it required would instead force
+     * an edit to the food-service and general descriptors — templates
+     * another team owns — to declare something about a screen food
+     * service never even renders.
+     *
+     * Illustration only. Nothing here is sold, priced, stocked or
+     * provisioned; a workspace's real catalogue comes from its seed pack.
+     */
+    readonly sampleItems?: readonly SampleCatalogueItem[];
   };
 }

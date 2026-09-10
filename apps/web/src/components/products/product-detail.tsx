@@ -42,6 +42,14 @@ import {
   type VariantBranchInventory,
 } from '@/lib/products/variants-api';
 import { setProductAvailability, type CategoryNode, type ManagedProduct } from '@/lib/products-api';
+import type { AttributeField } from '@hardware-pos/shared';
+import type { Brand } from '@/lib/products/brands-api';
+import {
+  brandLabel,
+  businessDetailRows,
+  categoryLabel,
+  type Lookup,
+} from '@/lib/products/catalogue-labels';
 import { fetchSuppliers } from '@/lib/suppliers/suppliers-api';
 import type { Supplier } from '@/lib/suppliers/types';
 import { cn, formatMoney } from '@/lib/utils';
@@ -66,6 +74,31 @@ interface Props {
   session: Session;
   product: ManagedProduct;
   variants: ProductVariant[];
+  /**
+   * D167 — whether `variants` is an ANSWER or just its initial value.
+   *
+   * The list arrives after the product does, so an empty array means three
+   * different things at three different moments: not asked yet, asked and
+   * there are none, asked and it failed. The overview used to read all
+   * three as "this product has no variants".
+   */
+  variantsState: 'loading' | 'ready' | 'error';
+  /**
+   * D169 — whether `variations` is an answer, on the same terms.
+   *
+   * D167 flattened this list's failure to `[]` and said why: nothing
+   * displayed it. The Variations card does, so it needs the distinction.
+   */
+  variationsState: 'loading' | 'ready' | 'error';
+  /**
+   * D169 — catalogues that name the product's ids. NOT facts about the
+   * product: whether it HAS a category is already known from the payload,
+   * so a slow or failed catalogue changes the wording and nothing else.
+   */
+  categories: Lookup<CategoryNode>;
+  brands: Lookup<Brand>;
+  /** D169/D64 — the tenant's labels for `product.attributes`. */
+  attributeFields: AttributeField[];
   variations: ProductVariationDimension[];
   branches: BranchSummary[];
   presentation: ReturnType<typeof resolveProductManagementPresentation>;
@@ -97,6 +130,11 @@ export function ProductDetail({
   session,
   product,
   variants: initialVariants,
+  variantsState,
+  variationsState,
+  categories,
+  brands,
+  attributeFields,
   variations,
   branches,
   presentation,
@@ -180,7 +218,24 @@ export function ProductDetail({
 
   // ── Derived counts + KPIs ────────────────────────────────────────────────
   const activeVariantCount = variants.filter((v) => v.isActive).length;
-  const hasVariants = product.hasVariants && variants.length > 0;
+  /*
+   * D167 — what the product IS, versus what we can say about it yet.
+   *
+   * `product.hasVariants` is authoritative and arrives with the product, so
+   * the SHAPE is known immediately. Only the count and the price range need
+   * the variant list, and those are the only things that should wait.
+   *
+   * The previous `product.hasVariants && variants.length > 0` threw away the
+   * authoritative half: while the list was in flight it read a 25-variant
+   * product as single-variant and showed the parent's legacy price and stock
+   * mirror — the fields D44 exists to say are NOT read. The `&&` was there
+   * to survive a product flagged `hasVariants` with no rows, which is a real
+   * state; it is kept below, but only once the list is actually known.
+   */
+  const variantsKnown = variantsState === 'ready';
+  const hasVariants = product.hasVariants && (!variantsKnown || variants.length > 0);
+  /** True only where a NUMBER can honestly be shown for a variant product. */
+  const variantFactsKnown = !product.hasVariants || variantsKnown;
 
   // Latest cost across variants is the max (recency proxied by averageCost
   // freshness); for single-variant products it's the parent's costPrice.
@@ -324,7 +379,14 @@ export function ProductDetail({
             variants={variants}
             latestCost={latestCost}
             hasVariants={hasVariants}
+            variantsState={variantsState}
+            variantFactsKnown={variantFactsKnown}
             itemStock={itemStock}
+            variations={variations}
+            variationsState={variationsState}
+            categories={categories}
+            brands={brands}
+            attributeFields={attributeFields}
           />
         </TabsContent>
 
@@ -466,14 +528,31 @@ function OverviewTab({
   variants,
   latestCost,
   hasVariants,
+  variantsState,
+  variantFactsKnown,
   itemStock,
+  variations,
+  variationsState,
+  categories,
+  brands,
+  attributeFields,
 }: {
   product: ManagedProduct;
   variants: ProductVariant[];
   latestCost: number | null;
   hasVariants: boolean;
+  /** D167 — resolved by the parent, like `hasVariants` above it. */
+  variantsState: 'loading' | 'ready' | 'error';
+  /** D167 — false while a variant product's list is still in flight. */
+  variantFactsKnown: boolean;
   /** D101 — resolved by the parent; no kind comparison in here. */
   itemStock: ItemStockPresentation;
+  /** D169 — the dimensions this product varies on, and their options. */
+  variations: ProductVariationDimension[];
+  variationsState: 'loading' | 'ready' | 'error';
+  categories: Lookup<CategoryNode>;
+  brands: Lookup<Brand>;
+  attributeFields: AttributeField[];
 }) {
   /*
    * D44 — the parent `unitPrice` is 0.00 on a variant product, so the Selling
@@ -484,6 +563,14 @@ function OverviewTab({
    */
   const activeVariants = variants.filter((v) => v.isActive);
   const activePrices = activeVariants.map((v) => Number(v.unitPrice));
+
+  /*
+   * D169/D64 — "Behaviour goes in columns. Description goes in
+   * `attributes`." This is the description, finally rendered: the values are
+   * the product's own and the labels are the tenant's, resolved together so
+   * a key the schema no longer names still shows what somebody typed.
+   */
+  const detailRows = businessDetailRows(product.attributes ?? {}, attributeFields);
 
   // Low-stock warning aggregates across variants (matrix) or falls back to the
   // parent's own on-hand for single-variant / legacy products. The threshold is
@@ -524,6 +611,22 @@ function OverviewTab({
                 itemStock === 'QUANTITY' && product.type === 'Inventory' ? 'Yes' : 'No'
               }
             />
+            {/*
+              * D169 — the ids are on the payload; only the NAMES wait on a
+              * catalogue. `categoryLabel` short-circuits on a null id, so an
+              * uncategorised product reads "—" at once rather than sitting
+              * on "Loading…" for a list it does not need.
+              */}
+            <Fact label="Category" value={categoryLabel(product, categories)} />
+            {/*
+              * Brand appears only where there IS one. D133 says most hardware
+              * and grocery products carry no brand worth recording, so a
+              * permanent "Brand —" would be a row every operator on those
+              * verticals reads past forever.
+              */}
+            {product.brandId ? (
+              <Fact label="Brand" value={brandLabel(product, brands)} />
+            ) : null}
             {product.description ? (
               <div className="sm:col-span-2">
                 <dt className="text-xs text-muted-foreground">Description</dt>
@@ -543,7 +646,25 @@ function OverviewTab({
             <div className="grid gap-3 sm:grid-cols-2">
               <Kpi
                 label="Variants"
-                value={hasVariants ? `${variants.filter((v) => v.isActive).length} active` : 'Single-variant product'}
+                /*
+                 * D167 — three states, not two. A count is only shown once the
+                 * list is known; a failure says so rather than reporting a
+                 * product shape it never learned.
+                 */
+                value={
+                  variantsState === 'error' && product.hasVariants
+                    ? 'Could not be loaded'
+                    : !variantFactsKnown
+                      ? 'Loading…'
+                      : hasVariants
+                        ? `${variants.filter((v) => v.isActive).length} active`
+                        : 'Single-variant product'
+                }
+                hint={
+                  variantsState === 'error' && product.hasVariants
+                    ? 'This product has variants; the list did not load. Reload the page.'
+                    : undefined
+                }
               />
               <Kpi
                 label={itemStock === 'AVAILABILITY' ? 'Availability' : 'Total stock'}
@@ -571,7 +692,13 @@ function OverviewTab({
               />
               <Kpi
                 label="Selling price"
-                value={variantPriceLabel(
+                /*
+                 * D167 — a variant product's price is the range across its
+                 * variants. Until they land there is no honest figure: the
+                 * parent's `unitPrice` is a legacy fallback (D44) and reads
+                 * Rs 0.00 on every product created since.
+                 */
+                value={!variantFactsKnown ? 'Loading…' : variantPriceLabel(
                   {
                     hasVariants: product.hasVariants,
                     unitPrice: product.unitPrice,
@@ -593,6 +720,62 @@ function OverviewTab({
             </div>
           </CardContent>
         </Card>
+
+        {/*
+          * D169 — the shape of a variant product, which the page fetched
+          * and then never showed. An operator opening a 25-variant product
+          * could see the count but not what it varied ON.
+          */}
+        {product.hasVariants && variationsState === 'error' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Variations</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Could not be loaded. Reload the page to try again.
+            </CardContent>
+          </Card>
+        ) : variations.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Variations</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="space-y-3">
+                {variations.map((dimension) => (
+                  <div key={dimension.id}>
+                    <dt className="text-xs text-muted-foreground">{dimension.name}</dt>
+                    <dd className="mt-1 flex flex-wrap gap-1.5">
+                      {dimension.options.map((option) => (
+                        <Badge key={option.id}>{option.name}</Badge>
+                      ))}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {/*
+          * D169 — rendered only where there is something to say. A tenant
+          * whose vertical declares no attributes (hardware answers
+          * `{fields: []}`) gets no card at all, rather than an empty one.
+          */}
+        {detailRows.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Business details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+                {detailRows.map((row) => (
+                  <Fact key={row.key} label={row.label} value={row.value} />
+                ))}
+              </dl>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {singleLowStock || lowStockVariants.length > 0 ? (
           <div className="rounded-2xl border border-warning-soft bg-warning-soft/40 p-4 text-sm text-warning">

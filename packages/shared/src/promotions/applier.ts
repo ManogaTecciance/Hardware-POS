@@ -839,3 +839,157 @@ export function outstandingRewards(context: PromotionContext): OutstandingReward
     .map((ent) => ({ ...ent, outstanding: Math.max(0, ent.earned - ent.held) }))
     .filter((r) => r.outstanding > 0);
 }
+
+/** D166 — an offer the basket is close to, but has not reached. */
+export interface RewardUpsell {
+  promotionId: string;
+  promotionName: string;
+  /** The product to add more of. It is both trigger and reward. */
+  productId: string;
+  /** Units to add before the next reward unit becomes free. Always > 0. */
+  needed: number;
+  /** How many of those added units are free — the offer's own getQuantity. */
+  free: number;
+}
+
+/**
+ * D166/D171 — a SAME-PRODUCT reward the basket is one step short of.
+ *
+ * ## The gap this fills
+ *
+ * `outstandingRewards` reports nothing for a same-product BOGO, because on
+ * its own terms nothing is owed: a "buy 5 get 1" is six for the price of
+ * five, so a customer holding five has earned nothing yet. The arithmetic
+ * there is unchanged and still correct.
+ *
+ * What changed is what the TILL does about it.
+ *
+ * ## D171 — this now gates payment, and D166 said it never would
+ *
+ * D166 called this an offer to decline and kept it out of `canPay`,
+ * reasoning that refusing a five-tie sale is hostile. The PO reversed that
+ * deliberately: a customer who qualified for a free item must not be let
+ * out of the shop without it, and every BUY_X_GET_Y is to behave the same
+ * way regardless of whether the reward is the same product or another one.
+ *
+ * The consequence is real and was accepted: with `buy 5 get 1`, a basket of
+ * exactly five, eleven, seventeen — each is one short of a group — cannot
+ * be paid for until the free unit is added.
+ *
+ * This function is still SEPARATE from `outstandingRewards` because the two
+ * arithmetics are genuinely different (an entitlement shortfall versus a
+ * remainder within a group). `incompleteOffers` below is the union, and is
+ * what a till should read: one list, one gate, nothing to keep in step.
+ *
+ * ## When it fires
+ *
+ * Only once the BUY threshold within the current group is already met, so a
+ * basket of one tie is not nagged about an offer four units away. With
+ * `buy 5 get 1` (group of six): five ties prompts, six does not (the reward
+ * has landed), eleven prompts again for the second.
+ *
+ * Different-product rewards are not reported here. Those go through
+ * `outstandingRewards` the moment they are earned, and prompting before that
+ * would be a second, weaker voice on the same offer.
+ */
+/**
+ * D171 — every BUY_X_GET_Y this basket has not finished, as one list.
+ *
+ * ## Why this exists rather than two lists at the call site
+ *
+ * The till must now treat both shapes identically: the same notice, the same
+ * emoji, the same refusal to take payment. Two lists merged by the caller is
+ * two places to forget one of them — and the failure would be silent and
+ * one-sided, a cashier able to pay through a same-product offer but not a
+ * cross-product one, or the reverse.
+ *
+ * So the union lives here, next to both halves, and the till reads exactly
+ * one thing.
+ *
+ * ## The two halves are still computed separately, on purpose
+ *
+ *  - `outstandingRewards` — the customer EARNED reward units they are not
+ *    holding. A shortfall against an entitlement.
+ *  - `rewardUpsells` — the customer is inside an incomplete group of a
+ *    same-product offer. A remainder, not an entitlement.
+ *
+ * They are different sums and neither reduces to the other. Merging the
+ * OUTPUT is safe; merging the arithmetic would not be.
+ *
+ * ## What this deliberately does not report
+ *
+ * A basket nowhere near a threshold. One tie against `buy 5 get 1` returns
+ * nothing, and two shirts against `buy 5 get 1 tie` returns nothing: the
+ * customer has not qualified for anything, so there is nothing to complete
+ * and no reason to hold the sale. Blocking there would refuse every small
+ * basket in the shop.
+ */
+export function incompleteOffers(context: PromotionContext): IncompleteOffer[] {
+  return [
+    ...outstandingRewards(context).map((r) => ({
+      promotionId: r.promotionId,
+      promotionName: r.promotionName,
+      productId: r.productId,
+      needed: r.outstanding,
+    })),
+    ...rewardUpsells(context).map((u) => ({
+      promotionId: u.promotionId,
+      promotionName: u.promotionName,
+      productId: u.productId,
+      needed: u.needed,
+    })),
+  ];
+}
+
+/** One unfinished offer, whichever of the two shapes produced it (D171). */
+export interface IncompleteOffer {
+  promotionId: string;
+  promotionName: string;
+  /** The product the cashier must add more of. */
+  productId: string;
+  /** Units still to add before the offer is complete. Always > 0. */
+  needed: number;
+}
+
+export function rewardUpsells(context: PromotionContext): RewardUpsell[] {
+  // D134a (`6.4`) — measured lines are excluded for the same reason they are
+  // in `rewardEntitlements`: this runs BUY_X_GET_Y counting, and a rule that
+  // could never discount a weighed line must not advertise that it will.
+  const lines = countableLines(context.lines).filter((l) => l.manualDiscountAmount <= 0);
+  const out: RewardUpsell[] = [];
+
+  for (const rule of context.promotions) {
+    const buyQty = rule.buyQuantity ?? 0;
+    const getQty = rule.getQuantity ?? 0;
+    if (rule.type !== 'BUY_X_GET_Y' || buyQty <= 0 || getQty <= 0) continue;
+
+    const buyIds = new Set(requiredByProduct(rule, 'BUY').keys());
+    const getIds = [...requiredByProduct(rule, 'GET').keys()];
+    // Same pool only — see the header.
+    const productId = getIds.find((id) => buyIds.has(id));
+    if (productId === undefined) continue;
+
+    const groupSize = buyQty + getQty;
+    const held = quantityOf(lines, productId);
+    if (held <= 0) continue;
+
+    /*
+     * What is left over after every complete group has taken its share.
+     * Prompting on the remainder rather than the total is what makes the
+     * message right on a repeat: at eleven the customer has one full group
+     * and five spare, so they are one away from a SECOND free tie.
+     */
+    const remainder = held % groupSize;
+    if (remainder < buyQty) continue;
+
+    out.push({
+      promotionId: rule.id,
+      promotionName: rule.name,
+      productId,
+      needed: groupSize - remainder,
+      free: getQty,
+    });
+  }
+
+  return out;
+}

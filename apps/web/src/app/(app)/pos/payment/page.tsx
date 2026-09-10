@@ -23,6 +23,8 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getCachedDocumentProfile } from '@/lib/document-template-service';
+import { useEffectiveProfile } from '@/lib/platform-profile';
+import { resolveDocumentSettingsPresentation } from '@/lib/settings/document-presentation';
 import { Select } from '@/components/ui/select';
 import { Sheet } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
@@ -119,6 +121,23 @@ export default function PaymentPage() {
   );
   const [creditUnavailable, setCreditUnavailable] = React.useState(false);
   const [printAfter, setPrintAfter] = React.useState(true);
+  /*
+   * D163 — does this workspace have an A4 bill at all?
+   *
+   * A retail workspace's sale document is the thermal slip now, and this
+   * screen was opening an A4 print window on EVERY completed sale — the
+   * toggle defaults to on. Left alone, removing the button from the sale page
+   * would have hidden the door while the till kept walking through it.
+   *
+   * Read from the resolver, never compared here (D31): the same flag that
+   * decides whether the sale page offers "Print A4 bill" decides whether the
+   * till may open one, so the two cannot disagree.
+   */
+  const { profile } = useEffectiveProfile();
+  const documentView = resolveDocumentSettingsPresentation({
+    capabilities: profile?.capabilities ?? null,
+  });
+  const canPrintA4 = documentView.showA4SaleDocument;
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [completed, setCompleted] = React.useState<CompletedSale | null>(null);
@@ -360,9 +379,17 @@ export default function PaymentPage() {
       setReceiptCtx(ctx);
       setCompleted(sale);
       cart.clearCart();
-      // A4 is the default bill for this client: auto-open the A4 print view
-      // (not the old thermal receipt) when "print after payment" is on.
-      if (printAfter) openA4Bill(sale.id, true);
+      /*
+       * Auto-open the A4 print view (not the old thermal receipt) when "print
+       * after payment" is on — and only where an A4 bill exists.
+       *
+       * `canPrintA4` is checked HERE as well as on the control, deliberately.
+       * The toggle's state survives a profile that resolves late, so a hidden
+       * switch left `true` would still fire. While the profile is unresolved
+       * this is false, which is the safe way round: a missing print is a
+       * button away, an unwanted one is already on paper.
+       */
+      if (printAfter && canPrintA4) openA4Bill(sale.id, true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not complete the sale');
       // The failure may be another register beating us to the stock (or a
@@ -802,15 +829,22 @@ export default function PaymentPage() {
             ) : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm">
-                <Printer className="h-4 w-4 text-muted-foreground" aria-hidden />
-                <span id="print-a4-label">Print A4 bill after payment</span>
-                <Switch
-                  checked={printAfter}
-                  onCheckedChange={setPrintAfter}
-                  aria-labelledby="print-a4-label"
-                />
-              </div>
+              {/* D163 — absent where the workspace prints no A4 bill. Its
+                  receipt still prints; what goes is the second, A4 copy of a
+                  sale that is already on the roll. */}
+              {canPrintA4 ? (
+                <div className="flex items-center gap-2 text-sm">
+                  <Printer className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  <span id="print-a4-label">Print A4 bill after payment</span>
+                  <Switch
+                    checked={printAfter}
+                    onCheckedChange={setPrintAfter}
+                    aria-labelledby="print-a4-label"
+                  />
+                </div>
+              ) : (
+                <span />
+              )}
 
               <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-initial">
                 <Button

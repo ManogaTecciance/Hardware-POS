@@ -7212,11 +7212,19 @@ invisibility check (an ordinary `WHOLE` create in a hardware workspace
 notices nothing) and a second domain (food service is refused too, proving
 the registry is read).
 
-## D135 — a tenant picks its catalogue attribute pack
+## D135 — a tenant picks its catalogue attribute pack — **SUPERSEDED by D161**
 
-**Status:** accepted, 2026-09-07. **Planning only — no code written.** Migration
-required when built (`TenantBusinessProfile.cataloguePack`). Answers `Q6`;
-implements Phase 6 step `6.10`.
+> **Withdrawn unbuilt, 2026-09-09.** D161 answers the same problem by letting a
+> tenant define its OWN field list rather than pick from lists we wrote, which
+> needs no `cataloguePack` column and no migration. The two traps this decision
+> identified were both real and are both answered there. Kept in full below
+> because the reasoning that rejected splitting `RETAIL` and rejected merging
+> the two lists still stands, and because "why not packs" is a question that
+> will be asked again.
+
+**Status:** ~~accepted, 2026-09-07~~ superseded. **Planning only — no code written.**
+Migration would have been required when built (`TenantBusinessProfile.cataloguePack`).
+Answers `Q6`; was to implement Phase 6 step `6.10`.
 
 ### The problem
 
@@ -7684,6 +7692,72 @@ the inventory tabs above the list already carry a Categories tab to the
 same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
+
+### D173 — merging `feature/retail-template-v2`: how each clash was decided
+
+Seventeen commits from the same `c3c316f` fork the restaurant branch came from:
+a tenant defines its own business details (withdrawing D135's attribute packs),
+the Inventory tab bar becomes per-workspace, retail's bill moves to a roll while
+its quotations stay on the letterhead, the document previews learn whose trade
+they are showing, the product Overview says what a product IS, SKU generation
+and opening stock are fixed, and buy-X-get-Y offers stop being able to leave a
+sale half-satisfied. Recorded there as D150–D161.
+
+**Every one of their twelve numbers was taken**, which is the worst of the three
+collisions so far: this branch holds D150–D154 of its own, D155–D157c and
+D159/a/b merged from `fix/restaurant-owner-v2`, and D158/D160 as merge records.
+The whole block shifts by eleven, D150 → D161 … D161 → D172, in one pass —
+sequential replacement would have mapped D150 → D161 and then that same D161 →
+D172.
+
+That branch had already renumbered itself once (its D138–D142 became D150–D154,
+per its own tip commit), so before starting I checked whether the sweep had left
+anything behind. It had not: the only D138–D142 citations in its code are the
+restaurant decisions inherited from the fork.
+
+**Their twelve records also arrived as `## ` headings** where the other 154 use
+`### `. In this file `## ` is a document section — "## Open decisions" is one —
+so as written they sat structurally alongside the dividers of the log rather
+than inside it. Normalised as part of the renumber. Twenty-one older retail
+records (D125–D135) have the same slip and were LEFT ALONE: they predate this
+merge, and a merge commit is the wrong place to reformat somebody else's
+history.
+
+**Two conflicts, and a third that git hid.** The route matrix and the test-case
+catalogue conflicted honestly. The hidden one was worse: both sides had changed
+`Total routes: 318` to `320` — for different reasons, two routes each — so git
+took `320` silently and the merged truth was 322. Caught by running the tripwire
+rather than by reading the diff, which is the entire reason that spec asserts
+against the real controller metadata.
+
+The catalogue's two sides both began at PROD-051. Kept both; their 48 rows keep
+their numbers and this branch's two moved to PROD-094/095, being the smaller
+pair and cited by no spec. The coverage summary was then rebuilt from the rows
+themselves rather than patched: it had drifted to 662 against 713 real rows.
+
+**One real break the merge produced, which no conflict marked.** Their D170 made
+`positionLabel` a required prop on the pricing step; two of this branch's D152
+station tests render that step directly and predate it. Typecheck caught it,
+both renders now pass it, and the pair stayed deliberately identical apart from
+the business kind so the second remains a control rather than a second scenario.
+
+**`packages/shared` had to be rebuilt.** It is consumed from `dist`, their work
+changes the domain capabilities, and the stale build made the api suite fail to
+compile on a type it had never heard of. Nothing to do with the merge itself,
+and invisible until something asked for it.
+
+**Verified rather than assumed**, as in D158 and D160: every file only they
+changed is byte-identical to their branch, every file only this branch changed
+is byte-identical to here, no decision heading appears twice, and D135's
+supersede pointer still resolves to the record that withdrew it.
+
+Unlike the restaurant branch, this one DID bring its own `testcases.md` rows —
+48 of them.
+
+Gates on the merged tree: typecheck 7/7, api unit 1504 across 93 suites, web
+unit 1603 across 114 files (2 skipped), integration 1186 across 55 suites, lint
+0 errors (13 warnings, all pre-existing). Playwright not run — it needs a live
+stack.
 
 ### D160 — merging `fix/restaurant-owner-v2` again: the two commits that followed
 
@@ -9373,6 +9447,1337 @@ wire. Existing rows reopen in the right mode, read from that same shape.
 **Not changed: the engine.** Whether a product-scoped money-off SHOULD honour
 a threshold is a product question, not a bug — the editor now matches what the
 engine does rather than promising what it does not.
+
+<!--
+  D161-D165 were authored as D138-D142 on `feature/retail-template-v2`
+  and renumbered on 2026-09-10 when `feature/post-merge-changes-reshin`
+  was merged in. D138-D141 there had arrived from
+  `merge/restaurant-changes` and D142-D148 were that branch's own,
+  already renumbered once to make room. The unpushed side moved, so no
+  existing commit message points at a decision that changed meaning.
+-->
+
+### D161 — a tenant defines its own business details, and D135's packs are withdrawn
+
+**Status:** accepted and **built**, 2026-09-09. **Retail only.** No schema change,
+no migration. **Supersedes D135**, which is withdrawn unbuilt.
+
+### The problem, restated from D135
+
+`ProductAttributesService.schemaForTenant` resolved **one schema per business
+type**. The `RETAIL` descriptor declares the clothing list — `material`, `fit`,
+`careInstructions`, `gender`, `season` — and clothing and grocery are both
+`RETAIL` because **Q12 resolved: do not split `RETAIL`**. So a grocer was asked
+for **Fit** and **Season**, and `validateAttributes` refused `allergens` as an
+unknown key. Not a missing feature; an actively wrong one.
+
+### Why D135's answer is withdrawn
+
+D135 proposed that a **domain** declare named packs (`attributePacks`) and a
+tenant select one, stored in a new nullable column
+`TenantBusinessProfile.cataloguePack`.
+
+It is withdrawn for three reasons, none of which were visible at planning time:
+
+1. **It does not actually answer the question.** A pack is a list somebody else
+   chose. The grocer whose problem opened D135 does not want *our* grocery pack;
+   they want `expiryDate` because they sell dairy. D135 itself conceded this —
+   "What this does NOT decide: the grocery pack's field list… that draft needs a
+   real grocer before it is committed to". A pack ships the same wrongness with
+   a different list, and then needs a code change and a deploy every time a
+   tenant asks for one more field.
+2. **It costs a migration to store a choice we already have somewhere to put.**
+   `TenantSettings.data.catalogue` is a JSON blob that has held tenant catalogue
+   configuration since 5.8. A tenant's own field list is exactly that shape.
+3. **It is strictly less powerful for strictly more schema.** A tenant-authored
+   list *contains* packs: "the grocery pack" is a list a tenant can type once.
+
+### The decision
+
+**A tenant whose domain allows it defines its own business details.** The list
+lives in `TenantSettings.data.catalogue.businessDetails` and replaces the
+domain's declared `attributeSchema` for that tenant.
+
+```ts
+// capabilities.ts — optional, for the same reason `measuredGoods` is.
+readonly catalogue: {
+  readonly configurableBusinessDetails?: boolean;
+};
+```
+
+`true` on the **retail descriptor** only. It could not live in
+`RETAIL_CAPABILITIES`, because that constant **is** the hardware template
+(D134e's finding, unchanged); it sits on the one line where the two domains
+differ. Optional rather than required, deliberately: required would mean editing
+the hardware, food-service, hotel and general templates to declare that nothing
+about them changes.
+
+**Three states, all distinct:**
+
+| Stored value | Meaning | Wizard |
+|---|---|---|
+| **absent** | the tenant has said nothing | the domain's list — every tenant today |
+| **`[]`** | "we track none" | the step disappears (`visibleSteps`) |
+| **a list** | the tenant's own fields | that list |
+
+Absence is the safety property, and it is the same one D135 wanted from a
+nullable column without needing the column: every existing tenant — clothing,
+hardware, restaurant, every domain — resolves exactly as it does today with no
+backfill. Only a tenant that opens the tab and saves sees anything different.
+
+### One resolver, not two
+
+`BusinessDetailsService.schemaFor` is the single resolver;
+`ProductAttributesService.schemaForTenant` delegates to it. The wizard, `GET
+/products/attribute-schema` and server-side attribute validation therefore
+cannot disagree about what a tenant's fields are — which is the property D64
+bought by declaring one list, and the one a second resolver would have spent.
+
+**A stored list is ignored where the capability is off**, rather than obeyed. A
+workspace that changes business type must not keep enforcing the previous
+type's fields. The list is not deleted — changing back restores it.
+
+### Field types
+
+`text`, `enum` (dropdown) and the new `date` — the three the PO asked for. The
+existing `integer`, `number` and `boolean` remain valid in the schema and are
+still rendered and validated; they are simply not offered in the Settings
+editor, because no tenant asked to author one and every type offered is a type
+that must keep working forever.
+
+`date` is a **calendar date**, validated as one:
+
+```ts
+export function isCalendarDate(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const d = new Date(`${raw}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === raw;
+}
+```
+
+The round-trip comparison is the point: a pattern alone accepts `2026-02-31`,
+and a browser date input on some platforms will hand exactly that over.
+
+### D135's two traps, both answered
+
+**1. Switching strands stored attributes.** D135 required the build to "either
+refuse the switch once products carry attributes, or make it an explicit
+operation with a warning naming the count". **The PO chose refuse.** Removing a
+field, removing a dropdown option, or changing a field's type is refused with
+409 and the count while any product records it:
+
+> `3 product(s) still record "Material". Clear it on those products before removing the field.`
+
+This matches `AttributeLibraryService.remove`, which refuses a definition a
+variant points at. Nothing is cascaded and nothing is silently rewritten. The
+guard fired for real on live data during development — the `Umbalakada` product
+holds `careInstructions: "supiriyak"`.
+
+**2. A field is a commitment.** The `key` is derived from the label once, when
+the field is first saved, and then frozen. The Settings screen offers a rename
+of the **label** and never of the key, because renaming a key orphans every
+value already stored under it. D64 says this of the schema; it is equally true
+of a tenant's own list.
+
+### Why the API is not module-gated
+
+`/products/business-details` is permission-gated (`product:read` / `product:manage`)
+and **not** module-gated. Whether a workspace may define its own catalogue fields
+is a **capability of its business type**, which the service reads and refuses on
+(D56). A module gate would be a second, weaker answer to the same question —
+right today, wrong the moment a second domain opts in. Hiding the Settings tab
+is usability; the server remains the authority and refuses a workspace whose
+domain does not offer it, whatever the browser draws.
+
+### What this does NOT decide
+
+**Whether any other domain gets it.** Retail alone, because retail alone has the
+clothing-vs-grocery problem that opened D135. Hardware, food-service, hotel and
+general are untouched, and a tripwire over the real registry asserts it.
+
+**A grocery preset.** Deliberately not shipped. A tenant types its own fields;
+that is the whole point of withdrawing packs. If a preset is ever wanted it is a
+seed, not a schema.
+
+---
+
+### D162 — the Inventory tab bar is per workspace: Attributes and Barcodes are not for everyone
+
+**Status:** accepted and **built**, 2026-09-09. No schema change, no migration,
+no route removed, no API gate changed.
+
+### The problem
+
+`InventoryTabs` rendered a module-level array unconditionally, so every
+workspace got the same seven tabs:
+
+```
+Products | Categories | Promotions | Attributes | Barcodes | Stock | Purchases
+```
+
+Two of those are not for every business:
+
+- **Attributes** (D125's reusable variation-attribute library) pays for itself
+  in a catalogue with many variants of the same few scales — Size, Colour, Fit.
+  A hardware counter types a variation on the rare product that needs one and
+  keeps no library of them. A kitchen's variants are not scales at all.
+- **Barcodes** (Phase 5's in-store EAN-13 allocation, audit and shelf labels) is
+  a stocked-goods activity. A kitchen does not barcode a portion of rice.
+
+Both were doors to features those workspaces never walk through.
+
+### The decision
+
+| | Attributes | Barcodes |
+|---|---|---|
+| **RETAIL** | ✅ | ✅ |
+| **HARDWARE** | ❌ | ✅ |
+| **RESTAURANT / CAFE / BAKERY / HOTEL** | ❌ | ❌ |
+| **GENERAL** | ✅ | ✅ |
+
+Two optional capabilities, `catalogue.attributeLibrary` and
+`catalogue.internalBarcodes`, resolved once by `resolveCatalogueTabs` in
+`product-presentation.ts`. The tab bar reads flags and filters; it names no
+capability and no business type.
+
+### Why the two flags cannot live in the same place
+
+`RETAIL_CAPABILITIES` **is** the hardware template — hardware reads it verbatim
+and retail spreads it (D134e's finding, unchanged). Hardware and retail need
+DIFFERENT answers for Attributes and the SAME answer for Barcodes, so:
+
+- `internalBarcodes: true` on **`RETAIL_CAPABILITIES`** → hardware and retail
+  both keep it, which is the point.
+- `attributeLibrary: true` on the **retail descriptor's** spread → retail only,
+  the same pattern `measuredGoods` and `configurableBusinessDetails` use.
+
+`FOOD_SERVICE_CAPABILITIES` is **not edited at all**. Absent means false, so
+restaurant, cafe, bakery and hotel lose both without the food-service template
+being touched — which is the desired blast radius on a branch other teams merge
+into.
+
+### Why `GENERAL` keeps both
+
+Nothing asked to change it. It showed both tabs before this decision, and
+hiding two working screens from a template nobody was discussing would be a
+regression smuggled in beside a requested change. Declared explicitly on
+`GENERAL_CAPABILITIES` rather than inherited, because absent means false and
+silence would have removed them.
+
+### Why `HOTEL` loses both
+
+It shares `FOOD_SERVICE_CAPABILITIES`. Giving it a different answer would mean
+forking the hotel descriptor to contradict the capability set it exists to
+reuse. HOTEL is the business type the seven hand-written predicates D56 replaced
+had all independently forgotten; it is named in the tests for that reason.
+
+### Why not `ProductBusinessKind`
+
+The coarse `RESTAURANT` / `RETAIL` split already exists and is the obvious
+shortcut. It cannot express this: its `RETAIL` bucket covers hardware, general
+trade and retail together, and hardware must differ from retail on one flag and
+match it on the other. A capability per surface is the only thing that says it.
+
+### Hiding is usability — the routes and the API are unchanged
+
+`/products/attributes` and `/products/barcodes` still render for anyone who
+types the URL and holds the permission, and `/attribute-library` stays **shared
+core**: D125 gated it on permission rather than business type deliberately, so
+any workspace that does want a library may use one. This decision changes what
+the bar draws and nothing else. CLAUDE.md: *frontend hiding is usability only;
+the server remains the authority.*
+
+That is also why nothing here is a security boundary, and why the change needed
+no server work at all.
+
+### Tests
+
+`product-presentation.test.ts` asserts the exact map over the real registry —
+walked from `BUSINESS_TYPE_VALUES`, so a new business type fails by name — plus
+that the two flags disagree for hardware, which is the case a single shared flag
+could not express.
+
+`inventory-tabs.render.test.tsx` renders the real component and reads the tabs
+off the screen, asserting the WHOLE sequence rather than the absence of one
+label: "restaurant has no Barcodes tab" would hold for a bar that rendered
+nothing, and rendering nothing is a live possibility when both capabilities are
+optional.
+
+Mutation-proven: removing the filter fails 5; swapping which flag gates which
+tab fails 2 — and only the hardware case tells the swap apart, which is stated
+in the spec.
+
+---
+
+### D163 — retail's bill prints on a roll; its quotations stay on the letterhead
+
+**Status:** accepted and **built**, 2026-09-09. Frontend only. No schema change,
+no migration, no route removed, no server behaviour changed.
+
+### What was asked
+
+Retail needs only a thermal bill. The A4 bill goes, and Settings' Layout and
+Preview should be about the bill.
+
+### Why it was not a one-line change
+
+The Settings screen routed on `documents.proformaBill`, which means **"a
+pre-payment bill is issued separately from the receipt"** — the bill a waiter
+brings to a table before anyone has paid. It had been standing in for "prints on
+80mm paper" since D96, and the two happened to coincide because food service was
+the only thermal domain.
+
+Retail breaks the coincidence twice over:
+
+1. **A shop issues no proforma.** Flipping `proformaBill` to `true` for retail
+   would assert something false about it in the domain registry — the proxy
+   abuse D56 exists to prevent — and any future feature reading that capability
+   for what it actually means would then be wrong about retail.
+2. **Retail prints BOTH.** It rings up on a roll and quotes on a letterhead.
+   `proformaBill` is one boolean between two surfaces, so it cannot say that at
+   all: routing retail to the food-service surface strips the signature block,
+   stamp, accent colour, logo placement, page size and column toggles — every
+   one of which belongs to the **quotation** that retail still issues.
+
+The second point is the one that decided the shape. Retail is not "A4 with a
+thermal option" or "thermal with extras"; it genuinely prints two documents.
+
+### The decision
+
+**Two capabilities, replacing the proxy, and a third surface.**
+
+```ts
+readonly documents: {
+  readonly proformaBill: boolean;   // unchanged, and no longer a discriminator
+  readonly splitByItem: boolean;
+  readonly thermalBill?: boolean;   // the BILL prints on an 80mm roll
+  readonly a4Documents?: boolean;   // the tenant issues A4 documents on a letterhead
+};
+```
+
+| | thermalBill | a4Documents | surface |
+|---|---|---|---|
+| **HARDWARE** | — | ✅ | `A4_DOCUMENTS` *(unchanged)* |
+| **GENERAL** | — | ✅ | `A4_DOCUMENTS` *(unchanged)* |
+| **RESTAURANT / CAFE / BAKERY / HOTEL** | ✅ | — | `THERMAL_BILL` *(unchanged)* |
+| **RETAIL** | ✅ | ✅ | `THERMAL_BILL_AND_A4_DOCUMENTS` **(new)** |
+
+`thermalBill` sits on the **retail descriptor's** spread, not in
+`RETAIL_CAPABILITIES` — that constant **is** the hardware template (D134e), and
+hardware still prints an A4 bill. `a4Documents` sits **on** the shared constant,
+because hardware and retail both quote. `FOOD_SERVICE_CAPABILITIES` gains
+`thermalBill: true`, which states directly what `proformaBill` had been standing
+in for and changes no behaviour: food service resolved to the thermal surface
+before this line and resolves to it after.
+
+`proformaBill` is kept. A restaurant really does issue a pre-payment bill, and a
+future feature may act on that. What it must never be again is a stand-in for
+paper — a contract test now asserts it is read by **nothing**.
+
+### What retail gets
+
+| | |
+|---|---|
+| **Sale page** | "Print A4 bill" is gone. "Thermal receipt" stays — that IS the document |
+| **POS payment** | the "Print A4 bill after payment" toggle is gone, and the auto-print is gated |
+| **Branding** | unchanged — logo, accent, signature, stamp, all still the quotation's |
+| **Layout** | the A4 page controls **plus** the read-only summary of what the slip prints |
+| **Preview** | the bill preview and roll calibration **plus** the A4 chooser, minus "Invoice / Bill" |
+
+### The one that would have been missed
+
+The POS payment screen opened the A4 print window on **every completed sale** —
+`printAfter` defaults to `true`. Removing the button from the sale page alone
+would have hidden the door while the till kept walking through it. The auto-open
+is now gated on the same flag the button is, and the flag is checked at the call
+site as well as on the control: the toggle's state survives a profile that
+resolves late, so a hidden switch left `true` would still have fired.
+
+### Two structural changes this forced
+
+**`LayoutTab` stopped being either/or.** It early-returned the bill summary,
+because until now every workspace that printed a bill printed *only* a bill.
+Each half is now guarded by its own flag, so all three surfaces read out of the
+same code: summary only, controls only, or both.
+
+**The Preview chooser drops "Invoice / Bill" where there is no A4 sale
+document.** Previewing a document the operator cannot print is the dead control
+D96 was written to remove. Quotation, return and exchange remain.
+
+### A latent test defect this uncovered
+
+The D96 contract test asserted the resolver "names the capability it routes on"
+against **raw** source, so a capability named only in a doc comment satisfied it
+— the exact vacuity D30 describes. It was live: after the discriminator moved,
+the assertion still passed on a sentence explaining what the code no longer did.
+It now runs on stripped source and pairs the positive with a negative.
+
+### Hiding is usability
+
+`/print/sales/[saleId]` stays ungated and a typed URL still renders an A4 bill,
+exactly as D96 recorded. The server is unchanged; no API gained or lost a gate.
+This decides what the screens offer.
+
+### Scope deliberately not taken
+
+The **A4 note** on the returns screen is offered to every workspace and is gated
+by nothing at all — including food service, which has had no letterhead controls
+since D96. That is a pre-existing inconsistency, older than this decision and
+not what was asked for; it is recorded here rather than fixed in passing.
+
+---
+
+### D164 — a preview shows the operator's own trade, and their own name
+
+**Status:** accepted and **built**, 2026-09-09. Preview/sample data only. No
+schema change, no migration, no change to any real document.
+
+### Two defects, both reported from a screenshot
+
+A retail owner opened `Settings → Preview` and saw:
+
+1. a **thermal bill full of restaurant food** — Chicken Fried Rice, Grilled
+   Seer, Vegetable Kottu, Black Coffee — with a **service charge** row and a
+   **table number**;
+2. an **A4 quotation headed "Hardware POS"**, on a workspace whose business
+   name has never been set.
+
+Neither is cosmetic. The preview is the one place an operator checks whether
+their logo is too wide, whether the note reads right, whether a long product
+name wraps — and a bill full of somebody else's trade answers none of it. It
+also reads as a bug, because it is one.
+
+### Why the bill was full of food
+
+`buildSampleBill` held one hard-coded catalogue, and it was a menu. That was
+correct while food service was the only domain that previewed a thermal bill.
+**D163 gave retail a thermal bill the day before**, and this list stopped being
+read only by restaurants.
+
+The service charge and the table are the same defect wearing different clothes:
+a shop charges no service charge, so previewing that row shows a line its bill
+will never print, and a table number on a counter sale is meaningless.
+
+**The fix.** Two catalogues, selected by a new `billSampleKind` on the
+presentation — `'FOOD_SERVICE' | 'RETAIL' | null`, resolved where every other
+document decision is. The Settings component reads a flag and names no business
+type, which is what the D96 contract test requires of it.
+
+The retail basket is **groceries and clothing together**, because `RETAIL` is
+one business type covering both (Q12 resolved not to split it) and a sample
+showing one would look wrong to half the workspaces that see it. It carries a
+size variant and a fractional weight deliberately: those are the two rows a
+retail bill has that a restaurant's does not.
+
+### Why the quotation said "Hardware POS"
+
+`buildSampleDocument` fell back to the literal `'Hardware POS'` whenever
+`documents.companyName` was unset — which is **every workspace that has not been
+through Settings yet**. Checked against the database before believing it: every
+retail tenant has `companyName: null`, so what the owner saw was the fallback,
+not their data. The Settings field's placeholder was the same literal, which is
+why it looked configured.
+
+**The fix.** The preview now uses the **tenant's own registered name**. Swapping
+one hard-coded vertical for another only moves the problem to whoever is not
+that vertical; the tenant's name is the one answer right for all of them, and it
+is what the operator would have typed anyway. Where even that is missing the
+fallback is `'Your Business'` — neutral, because a missing name is not a reason
+to claim a trade.
+
+`previewHtml` became **async** to do it. That adds exactly one indexed lookup to
+a Settings-screen render, and its spec's stub comment — which said the preview
+path "never touches the database" — was corrected rather than left to mislead
+the next reader.
+
+### What was deliberately NOT changed
+
+**The A4 sample line items are still hardware** — Portland Cement, TMT Steel
+Bar, PVC Pipe. The same defect class as the bill's menu, and visible on a retail
+quotation preview today.
+
+It is left alone because fixing it properly means making `SAMPLE_ITEMS`
+domain-aware, and the only home for a per-vertical catalogue that does not
+re-introduce a business-type if-chain is the domain registry itself (D56) —
+which would put preview illustration into the shared descriptors that every app
+reads. That is a larger decision than a sample list deserves, and it was not
+what was asked for. Recorded here so it is chosen deliberately rather than
+found again.
+
+It affects hardware, general and retail; food service never renders the A4
+preview at all (D96).
+
+---
+
+### D165 — a vertical declares the goods its document previews show
+
+**Status:** accepted and **built**, 2026-09-10. Preview/sample data only. No schema
+change, no migration, no change to any real document. **Completes D164**, which
+fixed the thermal bill's sample and deliberately left this one.
+
+### The problem D164 recorded and did not fix
+
+`SAMPLE_ITEMS` in `documents.service.ts` was a hardware catalogue — Portland
+Cement, TMT Steel Bar, PVC Pipe — and it was the **only** sample catalogue in the
+product. Every workspace's A4 preview used it, so a clothing shop opening
+`Settings → Preview` saw a quotation for building materials on its own
+letterhead.
+
+This is a **sales surface**, not an internal screen. A shop owner evaluating the
+product opens Preview to see what their quotation will look like; seeing another
+trade's goods is the moment they decide whether the product was built for them.
+That is why it was worth returning to.
+
+### Why D164 stopped, and what changed
+
+D164 fixed the thermal bill's sample cheaply because that document is rendered
+**client-side**, where a presentation resolver was already in the call path. The
+A4 document is rendered **server-side**, where none exists — so the server would
+have to choose a catalogue by business type, and `businessType === 'RETAIL'` in a
+service is exactly the if-chain **D56** confines to the domain registry.
+
+The way out is to stop treating it as a branch. **A vertical declares its own
+sample goods, and the server reads the registry.** There is no comparison to
+place anywhere, so there is nothing for D56 to forbid.
+
+### The decision
+
+```ts
+readonly catalogue: {
+  readonly attributeSchema: readonly AttributeField[];
+  readonly sampleItems?: readonly SampleCatalogueItem[];   // D165
+};
+```
+
+| Domain | Declares | Preview shows |
+|---|---|---|
+| **HARDWARE** | its original eight lines | **unchanged** |
+| **RETAIL** | clothing and groceries | its own trade |
+| **GENERAL** | nothing | neutral filler |
+| **RESTAURANT / CAFE / BAKERY / HOTEL** | nothing | neutral filler — and they never render the A4 preview at all (D96/D163) |
+
+### Why the field is optional, when its own block says required
+
+`DomainDescriptor.catalogue` documents itself as required *"so a new descriptor
+must SAY 'no attributes' rather than get it by omission; the silent-fallback
+failure mode is the one this whole module exists to end."*
+
+That rule is right, and this is the exception that proves its reasoning rather
+than an erosion of it. The failure mode it guards against is a vertical silently
+inheriting **another vertical's** answer — precisely the defect D165 fixes.
+
+**Omission here falls back to a NEUTRAL list**, not to hardware's. `Standard Item
+1`, `Standard Item 2`, and so on: dull, but it claims no trade. Silence therefore
+cannot hand anyone somebody else's goods, and the hazard the required rule exists
+for cannot occur.
+
+Making it required would instead have forced an edit to the **food-service and
+general descriptors** — templates another team owns — to declare something about
+a screen food service never even renders. The isolation rule that has governed
+this whole engagement says do not touch them, and a neutral fallback is what lets
+us honour it.
+
+### Hardware is provably unchanged, not promised unchanged
+
+Its eight lines were **lifted out and re-inserted character for character** — the
+patch that moved them read them from the source rather than retyping them, which
+is what makes byte-fidelity a fact rather than an intention.
+
+A test then renders hardware's preview at eight lines with the SKU column on and
+pins **every name, two SKUs and a price**. Names alone would pass for a list that
+kept the labels and lost the rows.
+
+Three mutations were run by hand, and each was caught:
+
+| Mutation | Caught by |
+|---|---|
+| retail declares nothing → falls back to neutral | 4 tests |
+| **hardware declares nothing** → silently regresses to filler | 4 tests |
+| the fallback becomes hardware's list → rebuilds the defect one level down | 3 tests |
+
+The second is the one that matters. Hardware belongs to another team, and a
+relocation that quietly dropped its list would be invisible to anyone reading the
+retail work.
+
+### Where the business type is read
+
+`DocumentsService` injects `BusinessProfileService` and calls `domainFor(...)`.
+**D28** forbids `ProductsService`, `SalesService` and `ReturnsService` from
+injecting it, so that a business rule is never decided by a profile branch inside
+a service. This service decides nothing about a transaction — it chooses which
+illustrative goods a preview draws — and it reads the registry rather than
+branching on the type. `DocumentsModule` imports `PlatformModule` explicitly even
+though that module is `@Global()`, following the precedent set in
+`providers.module.ts`: global only means "no re-import once it is in the graph",
+and something still has to put it there for a smaller graph to compile.
+
+### One deliberate behaviour change beyond retail
+
+**GENERAL's A4 preview moves from hardware goods to neutral filler.** It is the
+only workspace besides hardware and retail that renders this preview, and it
+declares no sample items.
+
+This is the intended consequence of choosing a neutral fallback over a hardware
+one, and it is an improvement — general trade is not a hardware store — but it is
+a change to a template we did not otherwise touch, and it is recorded here rather
+than left to be discovered.
+
+### What this does NOT decide
+
+**Whether a preview should show the tenant's own real products** instead of any
+declared list. That was the alternative considered and set aside: it needs a
+query and an empty-catalogue fallback, and it would have changed hardware's
+preview — an outcome the isolation rule made unattractive even though the result
+would arguably be better. It stays available as a later refinement.
+
+**The thermal bill keeps its own separate sample** (D164), selected by a
+presentation flag rather than by the descriptor. The two mechanisms now differ,
+which is worth revisiting if a third document surface ever appears; the goods
+themselves were deliberately kept in step, so a retail shop's two documents
+illustrate the same shop.
+
+---
+
+### D166 — a same-product offer says how close it is, and never blocks the sale
+
+> **SUPERSEDED by [D171](#d160) on 2026-09-10, the same day.** The
+> arithmetic below still stands and is still in the code; the POLICY does
+> not. The PO reversed it: every unfinished `BUY_X_GET_Y` now blocks payment,
+> same-product ones included. Read D171 before acting on anything here.
+
+**Status:** superseded. Was accepted and built 2026-09-10. Frontend and
+shared only. No schema change, no migration, no server behaviour changed.
+
+### What was reported
+
+A *"buy 5 ties, get 1 free"* promotion appeared to do nothing: five ties in the
+basket produced no badge, no discount and no notice. The expectation was parity
+with the shirt offer, which names itself and refuses payment until the reward is
+in the basket.
+
+### What was actually happening
+
+Nothing was broken. Checked against the real promotions before changing
+anything:
+
+| Promotion | Buy | Get | Same product? |
+|---|---|---|---|
+| Buy 2 Get 1 Free | Shirt | **Tie** | no |
+| Tie | Tie | **Tie** | **yes** |
+
+A same-product BOGO is **six for the price of five** — the free unit is drawn
+from the same pile that earns it. Verified against the applier directly:
+
+```
+5 ties  -> discount Rs 0
+6 ties  -> discount Rs 500   ✓
+12 ties -> discount Rs 1000  ✓
+```
+
+So the offer worked; it takes six. And `rewardEntitlements` suppresses the
+same-product case on purpose:
+
+> *A same-product BOGO draws its reward from the pool it counts, so the customer
+> is always already holding it. Reporting an entitlement would ask the till to
+> add a unit that earns nothing and gets charged for.*
+
+### Why parity with the shirt offer was rejected
+
+`outstandingRewards` gates `canPay` (4.14), and it is right to. With the shirt
+offer the customer has **earned a tie they are not holding**; completing the sale
+would pocket a promised freebie, so the till must refuse.
+
+With the tie offer at five, **nothing is owed**. Five ties at full price is a
+legitimate sale, and refusing payment would mean a till that will not let a
+customer buy what they asked for because a *larger* purchase would have been a
+better deal. That is hostility dressed as helpfulness, and the PO agreed.
+
+### The real gap, and the decision
+
+At five ties the till said **nothing at all** — the cashier could not see that
+one more tie costs the customer nothing.
+
+**`rewardUpsells` reports how close a same-product offer is. It is an OFFER, not
+a debt, and it must never reach `canPay`.**
+
+```
+qty  prompt                discount  blocks payment
+ 4   —                     Rs 0      no
+ 5   add 1, one is free    Rs 0      no
+ 6   —                     Rs 500    no
+11   add 1, one is free    Rs 500    no
+12   —                     Rs 1000   no
+```
+
+### Why a separate function, not a flag on the existing one
+
+They answer different questions and carry different authority:
+
+- `outstandingRewards` is a **debt** — earned, unheld, and it closes the payment
+  gate.
+- `rewardUpsells` is an **offer** — unearned, declinable, and it must not.
+
+Returning both from one function would invite a caller to feed the lot into
+`canPay` and refuse the five-tie sale — the exact behaviour this was chosen
+over. Two types, so the compiler keeps them apart. A mutation that wires the
+upsell into `canPay` fails the render spec.
+
+### When it fires
+
+Only once the BUY threshold **within the current group** is met, so a basket of
+one tie is not nagged about an offer four units away. It reads the remainder
+rather than the total, which is what makes it right on a repeat: at eleven the
+customer holds one complete group and five spare, so they are one away from a
+*second* free tie.
+
+Measured lines (D134a) and manually discounted lines (D123) earn no prompt —
+both are invisible to the applier, and promising a free unit the applier will
+refuse to give is the badge-and-charge disagreement that 2.12 and 3.10 both
+were.
+
+Different-product rewards are not reported here. Those reach the cashier through
+`outstandingRewards` the moment they are earned, and prompting beforehand would
+be a second, weaker voice on one offer.
+
+### On the screen
+
+Muted, in the surface colour rather than the primary the debt notice uses, and
+worded as what the customer **gets** rather than what the till **requires**. It
+is suppressed entirely while a real debt is outstanding, so the cashier reads
+one instruction at a time and the blocking one wins.
+
+### Also in this change
+
+The promotion editor's name placeholder read **"e.g. Lunch Bundle"** — a
+restaurant example in a shared editor, so a clothing shop naming a promotion was
+prompted with a lunch deal. Now "e.g. Weekend Offer". Same class as the `"e.g.
+Milk 200ml"` placeholder that `2.13` removed from the product wizard, in the one
+screen that had kept it.
+
+---
+
+### D167 — an empty list is not an answer until somebody has answered
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
+no migration, no API change.
+
+### What was reported
+
+The product detail page for a 25-variant product showed:
+
+> Variants: **Single-variant product** · Total stock: **550** · Selling price:
+> **Rs. 0.00** · SKU: **—**
+
+### What was actually wrong
+
+Traced end to end against the live API before changing anything, because the
+symptom looks like a data fault and is not one:
+
+| Layer | Answer |
+|---|---|
+| database | `hasVariants=true`, **25 variants**, 2 dimensions |
+| `GET /products/:id` | `hasVariants: true` ✅ |
+| `GET /products/:id/variants` | **25 rows** ✅ |
+| `api.ts` envelope unwrap | correct ✅ |
+| `toVariant` mapping | defensive, cannot throw ✅ |
+
+Every layer was right. The defect was one expression:
+
+```ts
+const hasVariants = product.hasVariants && variants.length > 0;
+```
+
+`variants` arrives in a **second** fetch that deliberately does not gate the
+page's loading state, so it is `[]` on first paint. That `&&` threw away the
+authoritative half — `product.hasVariants`, which arrives *with* the product —
+and read the not-yet-fetched empty array as fact.
+
+So the page announced a shape it had not been told, alongside the parent's
+`unitPrice` and `quantityOnHand`: precisely the fields **D44** exists to say are
+**not read** once `hasVariants` is true. Rs 0.00 is what every product created
+since D44 carries there.
+
+### Why it was easy to miss, and worse than it looked
+
+It corrects itself when the fetch lands, so on a fast connection it is a
+flicker. Two things make it more than cosmetic:
+
+1. On a slow connection it **lingers**, and the number it shows is wrong rather
+   than absent.
+2. The fetch caught its own error and returned `[]`, so a **failed** request was
+   indistinguishable from a genuine answer and **never corrected**. The operator
+   read a confident, wrong description of their product with nothing on screen
+   suggesting anything had gone wrong.
+
+### The decision
+
+**Distinguish "no variants" from "not asked yet" from "asked and failed."**
+
+```ts
+const variantsKnown     = variantsState === 'ready';
+const hasVariants       = product.hasVariants && (!variantsKnown || variants.length > 0);
+const variantFactsKnown = !product.hasVariants || variantsKnown;
+```
+
+`product.hasVariants` is authoritative for the SHAPE and arrives immediately.
+Only the **count** and the **price range** need the list, and only those wait.
+
+| State | Variants | Selling price |
+|---|---|---|
+| loading | `Loading…` | `Loading…` |
+| ready | `25 active` | range across active variants |
+| error | `Could not be loaded` + how to recover | — |
+| single-variant | `Single-variant product`, **immediately** | the parent's price, correct here |
+
+The last row is the one that keeps the fix honest: a product the payload already
+says is single-variant must not wait on a list it has no reason to care about,
+or the change would have traded a wrong answer for a slow one on every simple
+product in the catalogue.
+
+The `&& variants.length > 0` guard is **kept** for the case it was written for —
+a product flagged `hasVariants` with no rows, which is a real state — but it now
+applies only once the list is genuinely known.
+
+### Failures are reported, not flattened
+
+Branches and variations still fall back to `[]` on failure: a slow branches
+endpoint must not hide the page, and neither changes what the product IS. The
+variant list does, so its outcome is tracked. `[]` from a failure and `[]` from
+a product with no variants are different facts and must not render alike.
+
+### A vacuous test, caught during the work
+
+The first version of "does not show the parent's legacy price while loading"
+asserted `Rs 0.00` was absent — against a fixture whose price is **220**. It
+could not have failed whatever the component did. Rebuilt around the real shape
+(`unitPrice: 0`, what every post-D44 variant product carries), after which the
+mutation fails two tests instead of one. Recorded because it is the exact
+failure mode D30 names, found in new work rather than old.
+
+### Mutation proof
+
+Restoring the old derive reproduces the reported screenshot precisely and fails
+two cases: the shape claim and the price.
+
+---
+
+### D168 — two previews, one at a time
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
+no migration, no API change. Retail only.
+
+### What was reported
+
+> "cant we use a switch button or something display thermal-preview or
+> A4-preview without adding one below other"
+
+### The problem D163 left behind
+
+D163 gave retail both previews, because retail prints both, and stacked them:
+bill on top, quotation underneath. That was the right content in the wrong
+arrangement. A thermal bill is a **metre of paper** rendered at full length, so
+reaching the quotation meant scrolling past an entire receipt, and neither
+document could be seen whole. The taller the workspace's bill — more line
+items, a longer footer — the worse it got.
+
+### The decision
+
+**One preview on screen at a time, chosen by a segmented control.** The bill is
+the default: it goes to a customer on every single sale, where a quotation is
+occasional.
+
+Three sub-decisions, each of which a mutation proof pins to one test:
+
+**1. A tablist, not a switch or a pair of buttons.**
+A switch means on/off. This is a choice between two named documents, and
+flipping it swaps a panel of content — which is what `role="tablist"` means.
+Built on the existing `Tabs` primitive (D44), so it inherits roving arrow-key
+focus, `aria-selected`, and the tabpanel wiring rather than reimplementing
+them. The LOOK is borrowed class for class from `ThemeToggle`, the segmented
+control this app already uses, so a second visual idiom was not invented.
+
+**2. The hidden panel keeps its DOM.**
+`TabsContent` hides rather than unmounts. `PreviewTab` holds the chosen
+document type in its own state, so a `{cond ? <A/> : <B/>}` implementation
+would reset an operator comparing a return slip against the bill to
+"Quotation" on every flip.
+
+**3. The choice lives on the page, not inside the Preview panel.**
+The loop an operator actually works in is: change the logo, look at the bill,
+change it again. The main tab bar is a ternary and discards whatever the panel
+held, so state kept there would land them back on the bill every time they came
+back from Branding.
+
+### What did not change
+
+Hardware and restaurant preview one document each and get **no** toggle: a
+segmented control with one segment is a dead control, which is what D96 exists
+to remove. Both are asserted directly, each paired with the preview it *does*
+have so "no tabs" cannot pass because the page rendered nothing.
+
+D163's and D164's eleven existing assertions are untouched (D16) and still
+green. They query by title and label, which find hidden nodes, so they state
+what retail previews — not where on the page it sits. That is the right
+division: this decision changed the arrangement, not the content.
+
+### Mutation proof
+
+Three mutations, each failing exactly — and only — the case that carries
+its decision:
+
+| Mutation | Fails |
+|---|---|
+| both panels visible at once (the stacked layout) | the 3 visibility cases |
+| the hidden panel is unmounted rather than hidden | *only* "keeps its document across a flip" |
+| the main tab bar resets the choice | *only* "survives a trip to another tab and back" |
+
+"Not stacked" is a claim about what is **visible**, and the hidden panel is
+still in the DOM on purpose. `getByText`/`getByTitle` cannot state it — they
+find hidden nodes and would pass just as happily against the old layout. The
+assertions read through `screen.getByRole('tabpanel')`, which omits `hidden`
+subtrees and throws on more than one match: it therefore asserts EXACTLY ONE
+visible panel, and fails against the stacked layout for the right reason.
+
+---
+
+### D169 — the Overview shows what the product IS
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
+no migration, **no API change** — every field below already crossed the wire.
+
+### What was reported
+
+> "another issues with product details view because its not rendering the data
+> and some data are missing from it like category, brand, if have business
+> details it needed to show too, variations etc are missing too"
+
+### Where the data already was
+
+Traced before writing anything, because "missing data" usually means a missing
+endpoint and here it meant nothing of the kind:
+
+| Field | Where it was | What was missing |
+|---|---|---|
+| `categoryId` / `subcategoryId` | on the product payload | only the NAMES |
+| `brandId` | **on the wire already** | the TypeScript declaration |
+| `attributes` (D64) | on the product payload | the labels, and a card |
+| variation dimensions | **already fetched** | anything that rendered them |
+
+`brandId` is the interesting one. `GET /products/:id` runs
+`findFirst({ where })` with no `select`, so the whole Prisma row is returned;
+`toManaged` spreads `...p`, so the field survived the mapper. It was simply
+never written down in `ManagedProduct`, and TypeScript will not let you read a
+field a type does not declare. Confirmed against a live response before the
+declaration was added, rather than inferred from the query. This is the same
+class of gap D125 recorded for `attributeOptionId`: *"The server has always
+returned it; it was simply not typed here."*
+
+The variation dimensions are the other kind of gap: fetched on every page load
+since D44 and passed to exactly one consumer — the variant edit dialog. An
+operator could see that a product had 25 variants and not what it varied ON.
+
+### The decision
+
+**Resolve the names client-side; change no payload.**
+
+Three catalogue requests, each issued **only when the product carries the id it
+would resolve**: an uncategorised product asks for no categories, and a product
+with no brand asks for no brands. Variations cost nothing new.
+
+### Every answer has three states, not two
+
+The resolvers live in `catalogue-labels.ts` as pure functions because the rule
+they encode is D167's, one card over:
+
+> the ID is authoritative and arrives WITH the product;
+> only the NAME needs the catalogue, so only the name waits.
+
+| | Category |
+|---|---|
+| no `categoryId` | `—` **at once** — never waits on a list it does not need |
+| id, catalogue in flight | `Loading…` — **not** `—`, which would claim it has none |
+| id, catalogue failed | `Could not be loaded` |
+| id not in the catalogue | `No longer in the catalogue` — it HAS one; we cannot name it |
+
+That first row is the guard against overcorrecting D167 into a slow answer
+where an instant true one exists. The fourth is a real state: brands are
+archived, categories are deleted while a page is open.
+
+### Consequences that were followed through
+
+**The variations fetch now reports its outcome.** D167 deliberately left this
+one flattened to `[]` on failure and said why: *"neither changes what the
+product IS"* — true while nothing displayed it. A Variations card makes `[]`
+from a failure and `[]` from a product with no dimensions two different facts,
+so `variationsState` now exists alongside `variantsState`.
+
+**Brand renders only where there is one.** D133: *"most hardware and grocery
+products carry no brand worth recording."* A permanent "Brand —" would be a row
+every operator on those verticals reads past forever.
+
+**Business details renders only where there is something to say.** Hardware's
+`GET /products/attribute-schema` answers `{fields: []}` (verified live), so
+those workspaces get no card at all rather than an empty one.
+
+**A removed field still shows its values.** D161 lets a tenant replace their
+business-details list; products created under the old one still carry those
+values. Schema fields render first in the tenant's own order, then any leftover
+keys, humanised — hiding them would silently lose data somebody typed in.
+
+**`false` renders as "No".** It is a fact a customer asks about, and the one
+value that vanishes from JSX and from every truthiness filter.
+
+### `brandId` is optional on the type, and `categoryId` is not
+
+Deliberate, and the one place this record departs from D134's reasoning.
+`ManagedProduct` is built by 28 test fixtures; a required field edits every one
+of them — restaurant and hardware included — to declare a null they do not care
+about. D134 made `quantityType` required because the edit wizard round-trips it
+and a dropped field is silently **saved back** as a wrong value. Nothing writes
+brand: `ProductInput` has no such field, and the API's update guards on
+`!== undefined`, so an omitted brand is preserved rather than cleared.
+
+### Known gap, deliberately not closed here
+
+**No UI assigns a brand to a product.** The API accepts `brandId` on create and
+update; the wizard has never sent it, and the products list offers a brand
+*filter* only. So the Brand row is correct and will stay invisible until brand
+selection exists in the wizard. Displaying a brand and choosing one are
+different pieces of work, and this record is the first.
+
+### Mutation proof
+
+Nine mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| a pending catalogue renders as `—` | the two "waits rather than claiming" cases, both resolvers |
+| a failed catalogue renders as `—` | the two "says a failure was a failure" cases |
+| the no-id short-circuit is dropped | the three "answers instantly" cases |
+| schema order ignored, document order used | "the tenant's own labels, in the tenant's own order" |
+| `false` dropped instead of rendered | "renders false as No", and the render case |
+| Business details card always renders | both "renders no card" cases |
+| Variations card always renders | "renders no card for a single-variant product" |
+| a failed variations fetch reads as empty | "says so when the dimensions could not be loaded" |
+| Brand row always renders | "shows no Brand row at all" |
+
+---
+
+### D170 — the SKU you can generate, and the opening stock that lands
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only. No schema change,
+no migration, no API change. Every business type.
+
+### What was reported
+
+> "sku not generating, sku genarate button now missing, and stock not apply
+> properly"
+
+Three symptoms, three different causes, and only the third was what it sounded
+like. A fourth was visible in the same screenshot.
+
+### 1. The SKU field made two contradictory promises
+
+It carried a red `*` **and** a placeholder reading *"Enter SKU (or leave blank
+to generate)"*. Blank was a hard validation error, so the generate path was
+unreachable — and there was nothing at the other end of it either: the server
+stores `dto.sku ?? null`, and **nothing in the repository generated a product
+SKU at all**.
+
+**Decided.** SKU is **optional**, which is what the server always said: the
+column is nullable, the DTO marks it `@IsOptional()`, and the create maps
+`?? null`. A **Generate** button fills a suggestion from the product's name,
+editable before save. The length cap stays — dropping "required" must not drop
+the rule the server actually enforces.
+
+`Cement 50kg Bag` becomes `CEMENT-50KG-BAG-A7F`. The three-character suffix
+exists because of `@@unique([tenantId, sku])`: two products with the same name
+are ordinary in a shop that restocks under a new supplier code, and a bare slug
+would collide and be refused at save for a reason the operator did not cause.
+It is a **suggestion**, not an assignment — the field stays editable, and a
+genuine clash is still the server's to report. Truncation to 80 characters
+trims the NAME, never the suffix, or every long-named product would receive
+the same SKU.
+
+### 2. The Generate button was not missing — it was never on that screen
+
+`Generate SKUs` lives inside the **variant matrix**. The reported screen is the
+simple path (`hasVariations === false`), which has never had one. The existing
+generator is also a *bulk* tool — prefix plus each option's first three letters
+— so it has nothing to work from on a product with no options. The new button
+is a different thing that happens to share a verb.
+
+### 3. Opening stock was collected, validated, displayed, and dropped
+
+The real defect, and the worst of the three.
+
+`ProductCreatePayload` has **no `quantityOnHand` field**, so `buildCreateInput`
+was structurally incapable of sending one. The operator's number was validated
+by `optionalNumberError`, printed back on the Review step as "Opening stock",
+and then discarded. `git log -S` finds no commit where it was ever sent.
+
+Nothing caught it because the tests asserted the fields the payload **does**
+send. It is the shape D134's spec was written for: every layer that held the
+value did the right thing with it, and no layer handed it on.
+
+**Decided.** The wizard posts an **inventory receipt** after the create, to the
+existing `POST /inventory-receipts`.
+
+Not `quantityOnHand` on the create, though `POST /products` would have taken it
+and D121 says that column *is* what the till reads for a variant-less product —
+so it would have looked fixed. It writes nothing else: no `BranchInventory`
+row, no receipt in the Purchases tab, no weighted-average cost. The product's
+own Inventory tab would still have read empty.
+
+A receipt is the path the **variant** half already takes, and the path every
+later GRN takes. Opening stock arriving by a different route than every
+subsequent receipt is how a product's average cost comes to depend on how it
+was created.
+
+A **second call**, not a change to `POST /products`: that endpoint is shared by
+every business type, and the variants path below it is already serialised the
+same way. `idempotencyKey: opening-<productId>` — the server upserts on
+`(tenantId, idempotencyKey)`, so a retry cannot receive the same stock twice.
+
+A single product also gains the **opening-stock branch** control, and the rule
+that goes with it: a receipt has to land somewhere. That card was inside the
+variant matrix, which is part of how a single product came to have opening
+stock with nowhere to put it; it is now **extracted and shared** rather than
+copied.
+
+### 3a. A precision mismatch, caught before shipping
+
+`CreateReceiptDto`'s line is stricter than `CreateProductDto`: `unitCost` is
+`maxDecimalPlaces: 2` and `quantityReceived` is `3`. The simple form had **no**
+decimal cap, under a note explaining that only the checks the server makes are
+worth blocking a save over — correct while those values only reached
+`POST /products`.
+
+Uncapped, a cost of `4.567` would have passed every check, created the product,
+and then **400ed on the receipt**, leaving the operator with a product that has
+no opening stock and an error naming a field they cannot see. Both are capped
+now, which also matches the columns (`Decimal(12,2)`, `Decimal(12,3)`) — so the
+extra digits were being rounded away in silence beforehand either way.
+
+### 4. "Step 3 of 4" under a five-dot stepper
+
+Four of the five steps hardcoded their position. D161 added Business details as
+a fifth and gave only the new step a computed label. The step list is
+per-tenant in any case (the attributes step exists only where the domain
+declares fields), so no literal can be right for every workspace. One
+`positionLabel`, computed by the shell, passed to all five.
+
+### Two existing assertions were changed, deliberately
+
+D16 forbids editing existing behavioural assertions to accommodate a
+**refactor**. These are intentional behaviour changes with this record behind
+them, and both were **strengthened** rather than relaxed:
+
+- `validateStep returns the right shape per step` asserted that a blank SKU
+  **and** a blank price both error. It now asserts the blank SKU does **not**
+  and the blank price still does — a pair against one state, so "validation
+  stopped running" cannot pass it.
+- `simple mode refuses unusable cost / opening / reorder` had a positive case
+  carrying `openingQuantity: '12'` with no branch. It now supplies the branch,
+  keeping the assertion's original point, and a new line states the refusal
+  when the branch is missing.
+
+### Mutation proof
+
+Twelve mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the opening quantity is dropped (the reported bug, restored) | both `buildOpeningReceiptInput` payload cases |
+| the receipt carries the wrong quantity | the same two |
+| a variant product also posts a receipt | "leaves a variant product alone" |
+| SKU is required again | "is not marked required" |
+| the length cap goes with the required rule | "still refuses a SKU longer than the DTO allows" |
+| `suggestSku` truncates the suffix, not the name | the length case and the separator case |
+| `randomSkuSuffix` returns a constant | "it varies" |
+| opening stock no longer needs a branch | "refuses to continue with stock but no branch" |
+| the Generate button is not rendered | "fills the SKU from the product name" |
+| the branch card is never rendered | "asks where the stock lands" |
+| the cost cap is dropped | "refuses a cost the receipt line would reject" |
+| the quantity cap is dropped | "refuses an opening quantity the receipt line would reject" |
+
+---
+
+### D171 — every buy-X-get-Y offer blocks the sale until it is complete
+
+**Status:** accepted and **built**, 2026-09-10. **Supersedes the non-blocking
+half of [D166](#d155).** Frontend only. No schema change, no migration, no API
+change. Every business type.
+
+### What was asked
+
+> "that tie problem we fix earlier i want it to handle like we handle with like
+> 2 shirts 1 tie, same kind of lable with emoji, and proceed to payment needed
+> to block utill add that, every buy x get y promotion needed to handle like
+> that"
+
+### What D166 decided, and why it is reversed
+
+D166 asked the same question and answered it the other way, on my
+recommendation and with the PO's agreement at the time:
+
+> "You're totally right on the math — blocking a legitimate 5-tie sale would be
+> terrible UX. The upsell notice is a much more elegant and modern approach."
+
+The arithmetic behind that has not changed and is still in the code: a
+"buy 5 get 1" on ONE product is six for the price of five, so a customer
+holding five has earned nothing and owes nothing. `outstandingRewards` reports
+nothing for them, correctly.
+
+The PO has reversed the **policy** built on top of it. The reasoning is a
+merchandising one, and it is theirs to make: a customer who has reached the
+threshold of a free item must not be allowed to leave without it, and a till
+that treats a same-product offer more softly than a cross-product one teaches
+the cashier that some offers are optional.
+
+### The decision
+
+**Every unfinished `BUY_X_GET_Y` blocks payment, and says so identically.**
+
+One list (`incompleteOffers`), one notice, one gate. The muted D166 prompt is
+gone; both shapes now render the same primary-coloured 🎁 card with the same
+sentence and the same "Payment is unavailable until the offer is complete."
+
+### The cost, accepted with the decision
+
+With `buy 5 get 1`, the gate closes at **5, 11, 17 —** every basket one unit
+short of a complete group. A customer who wants exactly five ties cannot be
+served until a sixth is added. That is not a side effect; it is the decision.
+It is recorded here, in the code, and in the spec's assertion map, so nobody
+rediscovers it at a counter and files it as a bug.
+
+**Not blocked:** a basket nowhere near a threshold. One tie against a buy-five
+offer reports nothing, and so does one shirt against a buy-two. The customer
+has qualified for nothing, so there is nothing to complete — blocking there
+would refuse every small basket in the shop.
+
+### `incompleteOffers` is a union of outputs, not of arithmetic
+
+The two halves stay separate functions because they compute genuinely
+different things:
+
+- `outstandingRewards` — a shortfall against an **entitlement**. The customer
+  earned reward units they are not holding.
+- `rewardUpsells` — a **remainder** inside an incomplete group of a
+  same-product offer. Nothing is earned yet.
+
+Neither reduces to the other. Merging their OUTPUT is safe; merging the sums
+would not be. The union lives in `applier.ts` beside both halves rather than at
+the call site, because two lists merged by a caller is two places to forget
+one — and that failure would be silent and one-sided: a till that blocks one
+shape and not the other.
+
+### Assertions that were reversed, deliberately
+
+D16 forbids editing behavioural assertions to accommodate a **refactor**. This
+is an intentional policy reversal with this record behind it, and both
+assertions were made **stronger**, not relaxed:
+
+- `applier.spec.ts` had a case named *"NEVER blocks payment, at any quantity"*
+  asserting `{1,5,6,11,12} → all false`. It now pins where the gate **closes**:
+  `{1: false, 5: true, 6: false, 11: true, 12: false}`. "Never blocks" is
+  satisfied by a function that returns nothing; "blocks at 5 and 11 and nowhere
+  else" is not.
+- The till spec required **Proceed to Payment enabled** with the prompt on
+  screen, and required the prompt to be suppressed while a debt was live. Both
+  now assert the opposite, and a new case asserts both offers are **named
+  together** rather than one hidden — hiding one would leave a cashier
+  completing an offer and finding the button still disabled with no reason
+  given.
+
+### A vacuous test of my own, caught by mutation
+
+Every case I first wrote happened to need exactly **one** more unit, so a till
+that hard-coded `1` in the notice passed all of them. Found by mutating the
+count and watching nothing fail. A "buy 2 get 2" case with two in the basket
+now pins the number and the plural. Recorded because it is the exact D30
+failure mode, found in new work.
+
+### Mutation proof
+
+Seven mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the same-product half is dropped from the union (D166's behaviour) | all three "blocks" cases |
+| the cross-product half is dropped | the sameness case and the both-short case |
+| the till stops gating on unfinished offers | all three "blocks" cases |
+| the notice is not rendered | all three |
+| the notice always says "one" | *only* "counts how many are still needed" |
+| the 🎁 is dropped | the sameness case and the both-short case |
+| an offer nowhere near completion also blocks | both "says nothing" controls |
+
+---
+
+### D172 — the dashboard's View Reports button opens Reports
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only, one href. No
+schema change, no migration, no API change.
+
+### What was reported
+
+> "in dashbord in retail when click on 'view reports' btn its goes to sales its
+> needed to go to reports"
+
+### What was wrong
+
+`admin-dashboard.tsx` built its secondary action as:
+
+```ts
+...(canReport ? [{ key: 'reports', label: 'View Reports', href: '/sales', ... }] : []),
+```
+
+Everything about that entry said Reports except the one field that decides
+where the browser goes: the key is `reports`, the label is "View Reports", the
+icon is `BarChart3`, and the gate is `REPORT_READ` — the same permission the
+sidebar's `/reports` entry requires. `/reports` exists and always has.
+
+Present since `99826df` ("add futuristic responsive role dashboards"), so it
+has never worked.
+
+### Why `/sales` is not simply a typo to be swept up elsewhere
+
+Several KPI cards on the same screen point at `/sales` **correctly**, and that
+is a deliberate pattern: a metric tile drills into the record list its number
+came from, so Revenue and Gross Profit both land on the sales list. Those were
+checked and left alone.
+
+The difference is that this is a named ACTION, not a metric. Its only job is to
+open Reports. So the fix is one href, and the test says "this action does not
+link to `/sales`" rather than anything about the page as a whole — `/sales` is
+a correct destination elsewhere on it.
+
+### Why nothing caught it
+
+Nothing rendered this dashboard. There was no `admin-dashboard` spec at all.
+
+A wrong `href` is invisible to TypeScript (it is a `string`), invisible to
+lint, and invisible to every other spec in the suite. The only thing that
+catches it is an assertion about the destination, and there was none. That is
+the real gap, and the reason this fix ships with a spec rather than a one-word
+diff: the next wrong link would be just as silent.
+
+### Mutation proof
+
+Four mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the original bug restored (`/reports` → `/sales`) | "View Reports opens Reports, not the sales list" |
+| the action is dropped entirely | the same case |
+| the `REPORT_READ` gate is removed | "is offered only to an operator who may read reports" |
+| a sibling action's href is rewritten to `/reports` | "the actions it sits beside still point where they did" |
+
+The last one is the control that matters: without it, "View Reports goes to
+`/reports`" would pass for a dashboard whose every action had been rewritten to
+the same string.
+
+---
 
 ## Open decisions
 

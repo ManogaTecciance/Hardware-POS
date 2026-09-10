@@ -33,6 +33,7 @@ import { AttributeLibraryController } from '../../modules/products/attribute-lib
 import { ExchangesController } from '../../modules/exchanges/exchanges.controller';
 import { BarcodesController } from '../../modules/products/identifiers/barcodes.controller';
 import { LabelsController } from '../../modules/products/identifiers/labels.controller';
+import { BusinessDetailsController } from '../../modules/products/business-details.controller';
 import { ProductAttributeSchemaController } from '../../modules/products/product-attribute-schema.controller';
 import { ProductComponentsController } from '../../modules/products/product-components.controller';
 import { ProductsController } from '../../modules/products/products.controller';
@@ -157,6 +158,11 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   SellableController,
   // D64 — Phase 7 attribute schema read.
   ProductAttributeSchemaController,
+  // D161 — the tenant's own business details. Permission-gated, not
+  // module-gated: whether a workspace may define its own catalogue fields is
+  // a CAPABILITY of its business type, which the service reads (D56). A module
+  // gate would be a second, weaker answer to the same question.
+  BusinessDetailsController,
   // D125 / D125a — Phase 5 option library. SHARED CORE: any business selling
   // variants benefits from saying "Size" once, and gating it on a business type
   // would be the D56 mistake. Permission-gated, not module-gated.
@@ -205,6 +211,8 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'products',
   // D64 — Phase 7.
   'product-attribute-schema',
+  // D161 — Phase 5.12.
+  'business-details',
   // D65 — Phase 8.
   'product-components',
   'public-quotations',

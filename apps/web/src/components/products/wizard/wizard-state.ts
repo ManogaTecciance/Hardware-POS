@@ -499,6 +499,44 @@ export const COMBINATION_CONFIRM_THRESHOLD = 100;
 /** `@MaxLength(80)` on CreateProductDto.sku and CreateVariantInputDto.sku/barcode. */
 export const MAX_SKU_LENGTH = 80;
 
+/**
+ * D170 — a SKU suggested from the product's name.
+ *
+ * `Cement 50kg Bag` + `A7F` -> `CEMENT-50KG-BAG-A7F`.
+ *
+ * The suffix is a PARAMETER rather than generated in here, so this stays a
+ * pure function that a test can pin exactly. `randomSkuSuffix` beside it is
+ * the one impure line, called at the click.
+ *
+ * Why a suffix at all: `@@unique([tenantId, sku])`. Two products called
+ * "Cement 50kg Bag" are ordinary in a shop that restocks under a new
+ * supplier code, and a bare slug would collide and be refused at save with
+ * an error the operator did not cause. It is a SUGGESTION, not an
+ * assignment: the field stays editable, and a clash is still the server's
+ * to report.
+ */
+export function suggestSku(name: string, suffix: string): string {
+  const slug = name
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const tail = suffix ? `-${suffix}` : '';
+  /*
+   * A product with no usable letters ("???", or a name in a script this
+   * strips entirely) still gets a usable SKU rather than a bare `-A7F`.
+   */
+  if (!slug) return suffix ? `SKU-${suffix}` : '';
+  // Truncated from the NAME end, never the suffix: the suffix is the part
+  // carrying uniqueness, so trimming it would defeat the point.
+  const room = MAX_SKU_LENGTH - tail.length;
+  return `${slug.slice(0, Math.max(room, 0)).replace(/-+$/, '')}${tail}`;
+}
+
+/** Three base-36 characters. The only impure half of `suggestSku`. */
+export function randomSkuSuffix(): string {
+  return Math.random().toString(36).slice(2, 5).toUpperCase().padEnd(3, '0');
+}
+
 /** `@MaxLength(200)` on CreateProductDto.name. */
 export const MAX_NAME_LENGTH = 200;
 
@@ -742,28 +780,69 @@ export function validateStep(
         }
       }
     } else {
+      /*
+       * D170 — SKU is OPTIONAL here, as it always was on the server.
+       *
+       * The column is nullable, `CreateProductDto` marks it `@IsOptional()`,
+       * and the create maps `dto.sku ?? null`. This rule was the only thing
+       * making it mandatory, and it sat directly under a placeholder reading
+       * "or leave blank to generate" — a promise no layer could keep,
+       * because nothing in the codebase generated a product SKU at all. The
+       * Generate button now fills one in; leaving it blank is also a real
+       * answer, and reaches the server as null.
+       */
       const sku = state.simple.sku.trim();
-      if (!sku) errors['simple-sku'] = 'SKU is required.';
-      else if (sku.length > MAX_SKU_LENGTH) {
+      if (sku.length > MAX_SKU_LENGTH) {
         errors['simple-sku'] = `SKU is limited to ${MAX_SKU_LENGTH} characters.`;
       }
       const price = Number(state.simple.unitPrice);
       if (state.simple.unitPrice === '' || !Number.isFinite(price) || price < 0) {
         errors['simple-price'] = 'Enter a selling price.';
       }
-      // No decimal cap on these three: `CreateProductDto` declares them as
-      // plain `@IsNumber() @Min(0)`, unlike the variant DTO. Only the checks
-      // the server actually makes are worth blocking a save over.
-      const cost = optionalNumberError(state.simple.costPrice, 'Cost price');
+      /*
+       * D170 — these two ARE capped now, and the old note explaining why
+       * they were not is what made the change necessary to state.
+       *
+       * It read: "`CreateProductDto` declares them as plain `@IsNumber()
+       * @Min(0)`, unlike the variant DTO. Only the checks the server
+       * actually makes are worth blocking a save over." That was correct
+       * while these values only ever reached `POST /products`.
+       *
+       * They now also reach `POST /inventory-receipts`, whose line DTO is
+       * the stricter one: `quantityReceived` is `maxDecimalPlaces: 3` and
+       * `unitCost` is `2`. Uncapped, a cost of `4.567` would pass every
+       * check here, create the product, and then 400 on the receipt — the
+       * operator would have a product with no opening stock and an error
+       * naming a field they cannot see.
+       *
+       * The caps match the COLUMNS too (`Decimal(12,2)` for cost,
+       * `Decimal(12,3)` for quantity), so the extra digits were being
+       * rounded away in silence even before the receipt existed. Saying so
+       * up front is the honest version of what already happened.
+       */
+      const cost = optionalNumberError(state.simple.costPrice, 'Cost price', 2);
       if (cost) errors['simple-cost'] = cost;
       const openq = showsOpening
-        ? optionalNumberError(state.simple.openingQuantity, 'Opening quantity')
+        ? optionalNumberError(state.simple.openingQuantity, 'Opening quantity', 3)
         : null;
       if (openq) errors['simple-openq'] = openq;
       const reorder = showsReorder
         ? optionalNumberError(state.simple.reorderLevel, 'Reorder point')
         : null;
       if (reorder) errors['simple-reorder'] = reorder;
+
+      /*
+       * D170 — the same rule the variant branch above applies, for the
+       * same reason: opening stock is posted as an inventory receipt, and a
+       * receipt has to land in a branch. A single product had no branch
+       * control at all, which is part of why its opening quantity went
+       * nowhere.
+       */
+      if (ctx.inventoryMode === 'LOCAL' && Number(state.simple.openingQuantity) > 0) {
+        if (!state.openingBranchId) {
+          errors['openingBranchId'] = 'Pick where the opening stock lands.';
+        }
+      }
     }
 
     // D65 — recipe rows (card D). Every listed component needs a usable
@@ -1015,6 +1094,50 @@ export function buildVariantsBatchInput(
         optionValues,
       };
     }),
+  };
+}
+
+/**
+ * D170 — the opening stock of a SINGLE product, as an inventory receipt.
+ *
+ * Returns `null` when there is nothing to post, which is the common case:
+ * a variant product (its own batch endpoint handles opening stock), a
+ * blank or zero quantity, or no branch chosen.
+ *
+ * ## Why a receipt rather than a `quantityOnHand` on the create
+ *
+ * `POST /products` would accept the number and store it, and D121 says that
+ * column IS what the till reads for a variant-less product — so it would
+ * have looked fixed. But it writes nothing else: no `BranchInventory` row,
+ * no receipt in the Purchases tab, no weighted-average cost. The product's
+ * own Inventory tab would still have read empty.
+ *
+ * A receipt is the path the VARIANT half already takes (`openingQuantity`
+ * on the variants batch creates an `InventoryReceipt` and calls
+ * `receiveStock`), and it is the path every later GRN takes. Opening stock
+ * arriving by a different route than every subsequent receipt is how the
+ * average cost of a product comes to depend on how it was created.
+ *
+ * `unitCost` falls back to 0 exactly as the variant path does: a zero-cost
+ * opening receipt is a legitimate initial condition, correctable later.
+ */
+export function buildOpeningReceiptInput(
+  state: WizardState,
+  productId: string,
+): { branchId: string; lines: Array<{ productId: string; quantityReceived: number; unitCost: number }> } | null {
+  if (state.hasVariations) return null;
+  const quantity = Number(state.simple.openingQuantity);
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+  if (!state.openingBranchId) return null;
+  return {
+    branchId: state.openingBranchId,
+    lines: [
+      {
+        productId,
+        quantityReceived: quantity,
+        unitCost: Number(state.simple.costPrice) || 0,
+      },
+    ],
   };
 }
 

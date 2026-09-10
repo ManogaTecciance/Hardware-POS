@@ -38,6 +38,13 @@ interface Props {
   state: WizardState;
   errors: Record<string, string>;
   /**
+   * D170 — "Step 3 of 5", computed by the shell from the step list.
+   *
+   * A literal reading "of 4" until D161 added a fifth step. The list is
+   * per-tenant, so no literal can be right for every workspace.
+   */
+  positionLabel: string;
+  /**
    * D125 — the tenant's attribute library, fetched by the shell.
    *
    * Defaults to empty, and empty means the free-text fields this step has
@@ -51,6 +58,7 @@ interface Props {
 export function StepVariations({
   state,
   errors,
+  positionLabel,
   attributeLibrary = [],
   onChange,
 }: Props) {
@@ -290,7 +298,7 @@ export function StepVariations({
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Step 2 of 4</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">{positionLabel}</p>
         <h2 className="mt-1 text-lg font-semibold">Variations</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
           Sizes, colours, or any dimension a single product can be sold in.

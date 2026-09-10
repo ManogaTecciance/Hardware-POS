@@ -308,6 +308,7 @@ describe('StepDetails', () => {
     const errors = validateStep('details', h.state, { inventoryMode: 'LOCAL' });
     return (
       <StepDetails
+        positionLabel="Step 1 of 5"
         state={h.state}
         errors={errors}
         categories={categories}
@@ -325,6 +326,7 @@ describe('StepDetails', () => {
     const s = initialState();
     render(
       <StepDetails
+        positionLabel="Step 1 of 5"
         state={s}
         errors={validateStep('details', s, { inventoryMode: 'LOCAL' })}
         categories={categoryTree}
@@ -452,7 +454,7 @@ describe('StepVariations', () => {
 
   function Harness({ state }: { state: WizardState }) {
     const h = useHarness(state);
-    return <StepVariations state={h.state} errors={{}} onChange={h.patch} />;
+    return <StepVariations positionLabel="Step 3 of 5" state={h.state} errors={{}} onChange={h.patch} />;
   }
 
   it('default state advertises the "no variations" mode with the switch on', () => {
@@ -460,7 +462,7 @@ describe('StepVariations', () => {
     // Positive precondition.
     expect(s.hasVariations).toBe(false);
 
-    render(<StepVariations state={s} errors={{}} onChange={() => {}} />);
+    render(<StepVariations positionLabel="Step 3 of 5" state={s} errors={{}} onChange={() => {}} />);
     const noVarSwitch = screen.getByRole('switch', {
       name: /this product has no variations/i,
     });
@@ -584,6 +586,7 @@ describe('StepPricingInventory', () => {
       const h = useHarness(initialState());
       return (
         <StepPricingInventory
+          positionLabel="Step 4 of 5"
           state={h.state}
           errors={{}}
           branches={branches}
@@ -658,6 +661,7 @@ describe('StepPricingInventory', () => {
     ];
     renderWithConfirm(
       <StepPricingInventory
+        positionLabel="Step 4 of 5"
         state={s}
         errors={{}}
         branches={branches}
@@ -710,6 +714,7 @@ describe('StepPricingInventory', () => {
       const h = useHarness(s);
       return (
         <StepPricingInventory
+          positionLabel="Step 4 of 5"
           state={h.state}
           errors={{}}
           branches={branches}
@@ -811,6 +816,7 @@ describe('StepPricingInventory', () => {
       latest = h.state;
       return (
         <StepPricingInventory
+          positionLabel="Step 4 of 5"
           state={h.state}
           errors={{}}
           branches={branches}
@@ -882,6 +888,7 @@ describe('StepPricingInventory', () => {
       const h = useHarness(s);
       return (
         <StepPricingInventory
+          positionLabel="Step 4 of 5"
           state={h.state}
           errors={{}}
           branches={branches}
@@ -939,6 +946,7 @@ describe('StepPricingInventory', () => {
 
     const { rerender } = renderWithConfirm(
       <StepPricingInventory
+        positionLabel="Step 4 of 5"
         state={s}
         errors={{}}
         branches={branches}
@@ -953,6 +961,7 @@ describe('StepPricingInventory', () => {
     rerender(
       <ConfirmProvider>
         <StepPricingInventory
+          positionLabel="Step 4 of 5"
           state={s}
           errors={{}}
           branches={branches}
@@ -987,6 +996,7 @@ describe('StepReview', () => {
     const onEdit = vi.fn();
     render(
       <StepReview
+        positionLabel="Step 5 of 5"
         state={s}
         categories={categoryTree}
         showOpeningStock={true}
@@ -1125,6 +1135,107 @@ describe('StepAttributes', () => {
   });
 });
 
+/**
+ * D161 — the calendar-date field a tenant can now define for itself.
+ *
+ * ## What makes these assertions non-vacuous
+ *
+ * "The launch date renders a date input" would pass for a step that rendered
+ * `type="date"` on everything, so every case below asserts the OTHER fields in
+ * the same schema at the same time: a text field that is not a date input, and
+ * an enum that is still a select. One schema, three types, one render.
+ *
+ * The validation cases pair a date that exists with one that does not, because
+ * a validator that accepted every `YYYY-MM-DD` string would pass the first
+ * alone — and 2026-02-31 is exactly the string a browser date input on some
+ * platforms will hand over.
+ */
+const TENANT_SCHEMA: readonly AttributeField[] = [
+  { key: 'material', label: 'Material', type: 'text' },
+  { key: 'fit', label: 'Fit', type: 'enum', options: ['Slim', 'Regular'] },
+  { key: 'launchDate', label: 'Launch date', type: 'date' },
+];
+
+describe('D161 — a tenant-defined calendar date', () => {
+  function Harness({ state }: { state: WizardState }) {
+    const h = useHarness(state);
+    const errors = validateStep('attributes', h.state, {
+      inventoryMode: 'LOCAL',
+      attributeSchema: TENANT_SCHEMA,
+    });
+    return (
+      <StepAttributes
+        state={h.state}
+        errors={errors}
+        schema={TENANT_SCHEMA}
+        positionLabel="Step 2 of 5"
+        onChange={h.patch}
+      />
+    );
+  }
+
+  it('renders a date input for the date field and for nothing else', () => {
+    render(<Harness state={initialState()} />);
+
+    // POSITIVE — the new branch is reached.
+    const launch = screen.getByLabelText('Launch date') as HTMLInputElement;
+    expect(launch.getAttribute('type')).toBe('date');
+
+    // NEGATIVE — and did not swallow the other two types in the same schema.
+    const material = screen.getByLabelText('Material') as HTMLInputElement;
+    expect(material.getAttribute('type')).not.toBe('date');
+    const fit = screen.getByLabelText('Fit');
+    expect(fit.tagName).toBe('SELECT');
+    // …which also proves the enum branch still precedes it, rather than the
+    // date branch being unreachable behind an earlier match.
+    expect(Array.from((fit as HTMLSelectElement).options).map((o) => o.textContent)).toEqual([
+      'Not set',
+      'Slim',
+      'Regular',
+    ]);
+  });
+
+  it('a picked date reaches wizard state under the field key', () => {
+    render(<Harness state={initialState()} />);
+    const launch = screen.getByLabelText('Launch date') as HTMLInputElement;
+
+    fireEvent.change(launch, { target: { value: '2026-09-09' } });
+
+    expect((screen.getByLabelText('Launch date') as HTMLInputElement).value).toBe('2026-09-09');
+    // NEGATIVE — typing into one field does not write into its neighbours.
+    expect((screen.getByLabelText('Material') as HTMLInputElement).value).toBe('');
+  });
+
+  it('a date rides on the payload as a string, and a blank one is dropped', () => {
+    const s = initialState();
+    s.attributes = { launchDate: '2026-09-09', material: '' };
+    // NOT coerced: a date is a scalar string in `attributes` (D64), and turning
+    // it into a number or a Date here is how a document stops matching what the
+    // shared validator will accept.
+    expect(buildAttributesDocument(s, TENANT_SCHEMA)).toEqual({ launchDate: '2026-09-09' });
+  });
+
+  it('refuses a date that does not exist, and accepts one that does', () => {
+    const s = initialState();
+    const errorsFor = (value: string) => {
+      s.attributes = { launchDate: value };
+      return validateStep('attributes', s, {
+        inventoryMode: 'LOCAL',
+        attributeSchema: TENANT_SCHEMA,
+      });
+    };
+
+    // NEGATIVE — the calendar, not the pattern: 31 February matches the shape.
+    expect(errorsFor('2026-02-31')['attr-launchDate']).toBeDefined();
+    // …and neither does a different notation for a real day.
+    expect(errorsFor('09/09/2026')['attr-launchDate']).toBeDefined();
+    // POSITIVE — a real date passes, so the refusals above are not "refuse all".
+    expect(errorsFor('2026-09-09')).toEqual({});
+    // Blank is not a refusal either; a field is optional unless declared.
+    expect(errorsFor('')).toEqual({});
+  });
+});
+
 describe('D65 — recipe drafts', () => {
   const draft = (over: Partial<import('./wizard-state').ComponentDraft> = {}) => ({
     componentProductId: 'p-bun',
@@ -1185,8 +1296,23 @@ describe('validateStep — DTO-mirroring field rules', () => {
 
     // Positive — real values pass, and so does the untouched (empty) state.
     // Without this half the checks above would read as "these are required".
-    expect(pricing(priced({ costPrice: '4.5', openingQuantity: '12', reorderLevel: '3' })))
-      .toEqual({});
+    //
+    // D170 — the branch is part of the positive case now: an opening
+    // quantity is posted as an inventory receipt, and a receipt has to land
+    // somewhere. The assertion still says what it always said (these three
+    // values are acceptable); it just supplies the branch that makes an
+    // opening quantity a complete answer.
+    expect(
+      pricing({
+        ...priced({ costPrice: '4.5', openingQuantity: '12', reorderLevel: '3' }),
+        openingBranchId: 'br_main',
+      }),
+    ).toEqual({});
+    // — and without it, the wizard says so rather than dropping the stock
+    // on the floor, which is exactly what it used to do.
+    expect(
+      pricing(priced({ openingQuantity: '12' }))['openingBranchId'],
+    ).toMatch(/where the opening stock lands/i);
     expect(pricing(priced())).toEqual({});
   });
 
@@ -1206,6 +1332,7 @@ describe('validateStep — DTO-mirroring field rules', () => {
       cleanup();
       render(
         <StepDetails
+          positionLabel="Step 1 of 5"
           state={{ ...initialState(), name }}
           errors={{}}
           categories={categoryTree}
@@ -1312,7 +1439,7 @@ describe('validateStep — DTO-mirroring field rules', () => {
       const errs = variations(s);
       expect(errs['variation-option-0-1']).toMatch(/option needs a name/i);
 
-      render(<StepVariations state={s} errors={errs} onChange={() => {}} />);
+      render(<StepVariations positionLabel="Step 3 of 5" state={s} errors={errs} onChange={() => {}} />);
       const shown = screen.getAllByRole('alert').map((n) => n.textContent ?? '');
       expect(shown.some((t) => /option needs a name/i.test(t))).toBe(true);
       // Negative control: the filled option is not flagged.
@@ -1400,6 +1527,7 @@ describe('validateStep — DTO-mirroring field rules', () => {
       const s = withVariant({ barcode: 'B'.repeat(81), openingQuantity: '-1', reorderLevel: '1.2345' });
       renderWithConfirm(
         <StepPricingInventory
+          positionLabel="Step 4 of 5"
           state={s}
           errors={pricing(s)}
           branches={branches}
@@ -1562,9 +1690,16 @@ describe('wizard-state helpers', () => {
     const vErr = validateStep('variations', varState, { inventoryMode: 'LOCAL' });
     expect(vErr['variations-empty']).toBeDefined();
 
-    // Step 'pricing' — simple mode with no SKU and no price fires both.
+    // Step 'pricing' — a missing price is an error; a missing SKU is not.
+    //
+    // D170 — this pair used to assert that BOTH fired. SKU is optional on
+    // the server (nullable column, `@IsOptional()`, `dto.sku ?? null`), and
+    // the wizard's own placeholder offered to generate one, so requiring it
+    // here was the single thing making that offer impossible to accept.
+    // Asserted as a PAIR against one state so "validation stopped running"
+    // cannot pass: the price must still fire in the same call.
     const pErr = validateStep('pricing', empty, { inventoryMode: 'LOCAL' });
-    expect(pErr['simple-sku']).toBeDefined();
+    expect(pErr['simple-sku']).toBeUndefined();
     expect(pErr['simple-price']).toBeDefined();
 
     // Filling in a good product yields an empty error map on details.
@@ -1646,6 +1781,7 @@ describe('D101 — restaurant Track stock', () => {
       const h = useHarness(restaurantState());
       return (
         <StepDetails
+          positionLabel="Step 1 of 5"
           state={h.state}
           errors={{}}
           categories={categoryTree}
@@ -1677,6 +1813,7 @@ describe('D101 — restaurant Track stock', () => {
   it('retail Step 1 keeps its own switch and never shows the restaurant wording', () => {
     render(
       <StepDetails
+        positionLabel="Step 1 of 5"
         state={initialState()}
         errors={{}}
         categories={categoryTree}
@@ -1694,6 +1831,7 @@ describe('D101 — restaurant Track stock', () => {
   it('an untracked dish gets neither opening quantity nor a reorder point on Step 3', () => {
     render(
       <StepPricingInventory
+        positionLabel="Step 4 of 5"
         state={restaurantState()}
         errors={{}}
         branches={branches}
@@ -1712,6 +1850,7 @@ describe('D101 — restaurant Track stock', () => {
   it('a tracked packaged good keeps both — the fields follow the answer, not the tenant', () => {
     render(
       <StepPricingInventory
+        positionLabel="Step 4 of 5"
         state={restaurantState({ trackInventory: true })}
         errors={{}}
         branches={branches}
@@ -2026,6 +2165,8 @@ describe('D152 — card C: Main is the default, and it is chosen once', () => {
         branches={branches}
         showOpeningStock={true}
         businessKind="RETAIL"
+        // D170 made this required on the step; these two renders predate it.
+        positionLabel="Step 3 of 4"
         session={branchSession}
         branchId="br_main"
         onChange={() => {}}
@@ -2047,6 +2188,10 @@ describe('D152 — card C: Main is the default, and it is chosen once', () => {
         branches={branches}
         showOpeningStock={true}
         businessKind="RESTAURANT"
+        // Same required prop as the RETAIL half above; the two renders are
+        // deliberately identical apart from the business kind, which is what
+        // makes this a control rather than a second scenario.
+        positionLabel="Step 3 of 4"
         session={branchSession}
         branchId="br_main"
         onChange={() => {}}

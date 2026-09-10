@@ -245,6 +245,16 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // surface and keep its MENU_MANAGEMENT gate.
   'GET /products/sellable': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/attribute-schema': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  /*
+   * D161 — the tenant's own business details, beside the schema read it
+   * feeds. SHARED CORE and permission-gated, deliberately: whether a workspace
+   * may define its own catalogue fields is a CAPABILITY of its business type,
+   * which `BusinessDetailsService` reads and refuses on (D56). A module gate
+   * here would be a second answer to that question, and the weaker one — it
+   * would still be right today and wrong the moment a second domain opts in.
+   */
+  'GET /products/business-details': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
+  'PUT /products/business-details': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'POST /products/modifier-groups': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },
   'GET /products/modifier-groups/:groupId': { module: 'SHARED_CORE', guard: 'shared-core', scope: T },

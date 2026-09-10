@@ -31,9 +31,15 @@ const prismaStub = {
   tenantSettings: { findMany: jest.fn(async () => []) },
 } as any;
 const pdfStub = { available: true, htmlToPdf: jest.fn(async () => null) } as any;
+// D165 — only the PREVIEW path reads the profile; a real exchange document is
+// built from the exchange itself, so this stub exists to satisfy the
+// constructor and is deliberately never expected to be consulted here.
+const profilesStub = {
+  getEffectiveProfile: jest.fn(async () => ({ businessType: 'HARDWARE' })),
+} as any;
 
 function service(): DocumentsService {
-  return new DocumentsService(prismaStub, new SettingsService(prismaStub), pdfStub);
+  return new DocumentsService(prismaStub, new SettingsService(prismaStub), pdfStub, profilesStub);
 }
 
 /**
@@ -47,7 +53,7 @@ function serviceWithDocs(overrides: Partial<DocumentSettings>): DocumentsService
   const settings = {
     getSettings: () => ({ ...base, documents: { ...base.documents, ...overrides } }),
   } as unknown as SettingsService;
-  return new DocumentsService(prismaStub, settings, pdfStub);
+  return new DocumentsService(prismaStub, settings, pdfStub, profilesStub);
 }
 
 /** Column LABELS. `doc.columns` holds objects, so comparing it to strings

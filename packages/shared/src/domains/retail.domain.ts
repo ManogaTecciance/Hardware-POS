@@ -42,9 +42,32 @@
  */
 import { GENERAL_ROLE_TEMPLATES } from '../types/role-templates.js';
 import { RETAIL_CAPABILITIES } from './capabilities.js';
-import type { DomainDescriptor } from './domain.types.js';
+import type { DomainDescriptor, SampleCatalogueItem } from './domain.types.js';
 import { RETAIL_MODULES, SHARED_CORE_MODULES } from './modules.js';
 import { RETAIL_NAVIGATION } from './navigation.js';
+
+/**
+ * D165 — the goods a retail workspace's document previews show.
+ *
+ * Clothing AND groceries in one list, because RETAIL is a single business
+ * type covering both (Q12 resolved not to split it) and a sample showing only
+ * one would look wrong to half the workspaces that see it. The same reasoning,
+ * and deliberately the same goods, as the thermal bill's sample (D164), so a
+ * shop's two documents illustrate the same shop.
+ *
+ * One line carries a `pack`, so the preview still exercises the multiplied-
+ * quantity path that hardware's wire-by-the-metre line was the only case of.
+ */
+const RETAIL_SAMPLE_ITEMS: readonly SampleCatalogueItem[] = [
+  { name: 'Cotton Shirt — Blue, Medium', sku: 'SHRT-CTN-M', unit: 'PCS', unitPrice: 3450 },
+  { name: 'Ladies Denim Jeans — 32', sku: 'JEAN-LD-32', unit: 'PCS', unitPrice: 6900 },
+  { name: 'Kids T-Shirt — 5-6 yrs', sku: 'TSHT-KD-56', unit: 'PCS', unitPrice: 1650 },
+  { name: 'Basmati Rice (per kg)', sku: 'RICE-BAS', unit: 'KG', unitPrice: 720 },
+  { name: 'Coconut Oil 1L', sku: 'OIL-CN-1L', unit: 'BTL', unitPrice: 1180 },
+  { name: 'Red Lentils (per kg)', sku: 'LENT-RED', unit: 'KG', unitPrice: 640 },
+  { name: 'Bath Towel — Large', sku: 'TOWL-LG', unit: 'PCS', unitPrice: 2250 },
+  { name: 'Milk Powder 400g', sku: 'MILK-400', unit: 'PKT', unitPrice: 1490, pack: 6 },
+];
 
 export const RETAIL_DOMAIN: DomainDescriptor = {
   businessTypes: ['RETAIL'],
@@ -112,7 +135,29 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
    */
   capabilities: {
     ...RETAIL_CAPABILITIES,
-    catalogue: { ...RETAIL_CAPABILITIES.catalogue, measuredGoods: true },
+    catalogue: {
+      ...RETAIL_CAPABILITIES.catalogue,
+      measuredGoods: true,
+      // D161 — a clothing shop and a grocer track different things about a
+      // product, and the five fields declared below are the CLOTHING answer.
+      // Retail is the domain that has to serve both, so it is the domain that
+      // gets to redefine them. Spread for the same reason `measuredGoods` is:
+      // `RETAIL_CAPABILITIES` is the hardware template too.
+      configurableBusinessDetails: true,
+      // D162 — the attribute library is retail's, not hardware's. Both read
+      // `RETAIL_CAPABILITIES`, so declaring it there would hand the tab to a
+      // hardware counter that types a variation when it needs one and keeps no
+      // library of them. Same reason `measuredGoods` sits here. `internalBarcodes`
+      // is NOT repeated: it is on the shared constant precisely because hardware
+      // keeps it too, and restating it here would invite the two to drift.
+      attributeLibrary: true,
+    },
+    // D163 — retail's bill prints on a roll. Spread onto the descriptor, not
+    // into `RETAIL_CAPABILITIES`, because that constant IS the hardware
+    // template and hardware still prints an A4 bill. `a4Documents` stays true
+    // through the spread: a shop quotes on a letterhead even though its bill
+    // is a slip, and those are two facts rather than one switch.
+    documents: { ...RETAIL_CAPABILITIES.documents, thermalBill: true },
   },
   /**
    * D64 (2.4) — the clothing catalogue fields.
@@ -162,6 +207,8 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
    * a commitment, not a sketch.
    */
   catalogue: {
+    // D165 — a clothing shop previewing a quotation sees clothing.
+    sampleItems: RETAIL_SAMPLE_ITEMS,
     attributeSchema: [
       // "60% cotton, 40% polyester" — free text because the combinations are
       // endless and nothing groups on the exact string.

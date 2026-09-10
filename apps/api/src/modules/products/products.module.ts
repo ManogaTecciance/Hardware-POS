@@ -12,6 +12,8 @@ import { SkuGeneratorService } from './identifiers/sku-generator.service';
 import { ProductAttributeSchemaController } from './product-attribute-schema.controller';
 import { ProductComponentsController } from './product-components.controller';
 import { ProductComponentsService } from './product-components.service';
+import { BusinessDetailsController } from './business-details.controller';
+import { BusinessDetailsService } from './business-details.service';
 import { ProductAttributesService } from './product-attributes.service';
 import { ProductModifierGroupsController } from './product-modifier-groups.controller';
 import { PlatformModule } from '../platform/platform.module';
@@ -73,6 +75,9 @@ import { ProductVariantsService } from './variants/product-variants.service';
     // ('sellable', 'attribute-schema').
     SellableController,
     ProductAttributeSchemaController,
+    // D161 — the tenant's own business-detail field list. Static, so it must
+    // register above `GET /products/:id` like its neighbours.
+    BusinessDetailsController,
     // D125 — the tenant option library. Its own root path, so it does not
     // compete with ProductsController's GET /products/:id.
     AttributeLibraryController,
@@ -102,6 +107,7 @@ import { ProductVariantsService } from './variants/product-variants.service';
     ProductModifiersService,
     ProductStationsService,
     ProductAttributesService,
+    BusinessDetailsService,
     AttributeLibraryService,
     AttributeLibraryRepository,
     SkuGeneratorService,

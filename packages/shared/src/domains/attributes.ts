@@ -36,7 +36,40 @@ export type AttributeField =
       readonly max?: number;
     })
   | (AttributeFieldBase & { readonly type: 'boolean' })
+  /**
+   * A calendar date, stored as the `YYYY-MM-DD` string.
+   *
+   * A STRING, not a `Date`: values here are scalars (see the header), the
+   * column is JSON, and `YYYY-MM-DD` sorts and compares lexicographically
+   * exactly as it does chronologically. A timestamp would also carry a time
+   * and a zone that nothing here means — “the season starts on the 1st” is a
+   * date, not an instant, and D79's timezone handling belongs to documents.
+   */
+  | (AttributeFieldBase & { readonly type: 'date' })
   | (AttributeFieldBase & { readonly type: 'enum'; readonly options: readonly string[] });
+
+/** Every type a field may declare. One list, so a form and a validator agree. */
+export const ATTRIBUTE_FIELD_TYPES = [
+  'text',
+  'integer',
+  'number',
+  'boolean',
+  'date',
+  'enum',
+] as const;
+export type AttributeFieldType = (typeof ATTRIBUTE_FIELD_TYPES)[number];
+
+/**
+ * `YYYY-MM-DD`, and a date that actually exists.
+ *
+ * The regex alone admits 2026-02-31. Round-tripping through `Date` rejects
+ * it, because JS normalises the overflow to March and the string changes.
+ */
+export function isCalendarDate(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const d = new Date(`${raw}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === raw;
+}
 
 export interface AttributeValidationIssue {
   /** The offending key, or '' when the payload itself is malformed. */
@@ -115,6 +148,10 @@ function validateValue(field: AttributeField, raw: unknown): string | null {
     }
     case 'boolean':
       return typeof raw === 'boolean' ? null : `${field.label} must be true or false.`;
+    case 'date':
+      return typeof raw === 'string' && isCalendarDate(raw)
+        ? null
+        : `${field.label} must be a date, as YYYY-MM-DD.`;
     case 'enum':
       return typeof raw === 'string' && field.options.includes(raw)
         ? null
@@ -143,6 +180,10 @@ export function coerceAttributeQueryValue(
       if (raw === 'true') return { ok: true, value: true };
       if (raw === 'false') return { ok: true, value: false };
       return { ok: false, message: `${field.label} filter must be true or false.` };
+    case 'date':
+      return isCalendarDate(raw)
+        ? { ok: true, value: raw }
+        : { ok: false, message: `${field.label} filter must be a date, as YYYY-MM-DD.` };
     case 'integer':
     case 'number': {
       const n = Number(raw);

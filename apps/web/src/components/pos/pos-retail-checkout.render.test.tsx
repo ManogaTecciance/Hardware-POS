@@ -205,3 +205,184 @@ describe('PosRetailCheckout — clearing the cart (D145)', () => {
     expect(clearCart).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * D171 — every unfinished BUY_X_GET_Y blocks, and says so the same way.
+ *
+ * ## What changed, and why these assertions were rewritten
+ *
+ * D166 shipped a same-product prompt that deliberately did NOT block payment,
+ * reasoning that five ties at full price is a real sale. Two assertions here
+ * pinned that: one required Proceed to Payment to stay ENABLED, and one
+ * required the muted prompt to be suppressed while a debt was live.
+ *
+ * The PO reversed the decision: a customer who qualified for a free item must
+ * not leave without it, and every reward offer behaves identically whether the
+ * free item is the same product or a different one. So both assertions now
+ * state the opposite, deliberately (D16 forbids editing assertions to
+ * accommodate a REFACTOR; this is an intentional behaviour change with a
+ * decision record behind it).
+ *
+ * ## What makes these assertions non-vacuous (D30)
+ *
+ * "Both shapes behave the same" is the claim, so it is asserted as a PAIR
+ * against the same component: a same-product offer and a cross-product one,
+ * each one unit short, must produce the same wording and the same disabled
+ * button. A test that only checked the same-product case would pass a till
+ * that had started blocking EVERYTHING, which is a worse defect.
+ *
+ * The two "says nothing" cases are what stop that: a basket that is nowhere
+ * near an offer, and one where the reward has already landed, must both pay
+ * freely. Without them, "blocks payment" would pass for a till whose button
+ * is simply always disabled.
+ */
+describe('D171 — unfinished offers block, whichever shape they are', () => {
+  /** Buy 5 get 1 on ONE product: six for the price of five. */
+  const sameProductOffer = {
+    id: 'r_tie',
+    name: 'Tie Offer',
+    type: 'BUY_X_GET_Y' as const,
+    buyQuantity: 5,
+    getQuantity: 1,
+    percentageOff: 100,
+    stackable: false,
+    items: [
+      { productId: PRODUCT.id, role: 'BUY' as const, quantity: 1 },
+      { productId: PRODUCT.id, role: 'GET' as const, quantity: 1 },
+    ],
+  };
+
+  /** Buy 2 of ours, get 1 of something we are NOT holding. */
+  const crossOffer = {
+    id: 'r_cross',
+    name: 'Buy 2 Get 1',
+    type: 'BUY_X_GET_Y' as const,
+    buyQuantity: 2,
+    getQuantity: 1,
+    percentageOff: 100,
+    stackable: false,
+    items: [
+      { productId: PRODUCT.id, role: 'BUY' as const, quantity: 1 },
+      { productId: 'p_other', role: 'GET' as const, quantity: 1 },
+    ],
+  };
+
+  const payButton = () => screen.getByRole('button', { name: /Proceed to Payment/i });
+
+  /** The whole notice, read off the element that owns it. */
+  const notice = () =>
+    screen
+      .getAllByText((_, el) => /to complete this offer/.test(el?.textContent ?? ''))
+      .pop()?.textContent ?? '';
+
+  function withCart(quantity: number, rules: unknown[]) {
+    cart.items = [{ ...ITEM, quantity }];
+    checkout.promotionRules = rules as never;
+  }
+
+  afterEach(() => {
+    cart.items = [ITEM];
+    checkout.promotionRules = [];
+  });
+
+  it('a same-product offer one unit short blocks payment', () => {
+    /*
+     * The reversal, stated as an assertion. D166 required the opposite here.
+     * The accepted cost: a customer who wants exactly five ties cannot be
+     * served until the sixth — which is free — is added.
+     */
+    withCart(5, [sameProductOffer]);
+    renderCheckout();
+
+    expect(notice()).toMatch(/Add\s*1\s*Floor Tile 60x60\s*to complete this offer/);
+    expect(screen.getByText(/Payment is unavailable/i)).toBeTruthy();
+    expect(payButton()).toHaveProperty('disabled', true);
+  });
+
+  it('and it is the SAME notice a cross-product offer gets', () => {
+    /*
+     * The point of the change, and the half that makes the case above mean
+     * something: "handle it like the shirt/tie offer" is a claim about
+     * sameness, so the two are read off the same component and compared.
+     */
+    withCart(5, [sameProductOffer]);
+    renderCheckout();
+    const sameProduct = notice();
+    const sameProductGift = screen.getByText(/🎁/).textContent;
+
+    cleanup();
+    withCart(2, [crossOffer]);
+    renderCheckout();
+
+    // Same sentence shape, same gift, same refusal wording.
+    expect(notice()).toMatch(/Add\s*1\s*.+\s*to complete this offer/);
+    expect(sameProduct).toMatch(/Add\s*1\s*.+\s*to complete this offer/);
+    expect(sameProductGift).toMatch(/🎁/);
+    expect(screen.getByText(/🎁/).textContent).toMatch(/🎁/);
+    expect(payButton()).toHaveProperty('disabled', true);
+  });
+
+  it('counts how many are still needed, not just "one"', () => {
+    /*
+     * Every other case here happens to need exactly one, so a till that
+     * hard-coded "1" would pass all of them — found by mutating the count and
+     * watching nothing fail. "Buy 2 get 2" with two in the basket needs two
+     * more, and exercises the plural at the same time.
+     */
+    const buyTwoGetTwo = {
+      ...sameProductOffer,
+      id: 'r_two',
+      name: 'Two For Two',
+      buyQuantity: 2,
+      getQuantity: 2,
+    };
+    withCart(2, [buyTwoGetTwo]);
+    renderCheckout();
+
+    expect(notice()).toMatch(/Add\s*2\s*Floor Tile 60x60s\s*to complete this offer/);
+    expect(payButton()).toHaveProperty('disabled', true);
+  });
+
+  it('names both offers when both are short, rather than hiding one', () => {
+    /*
+     * D166 suppressed the same-product prompt while a debt was live, so the
+     * cashier read one instruction at a time and the blocking one won. Both
+     * block now, so both are named: hiding one would leave the cashier
+     * completing an offer and finding the button still disabled with no
+     * explanation for the second.
+     */
+    withCart(5, [sameProductOffer, crossOffer]);
+    renderCheckout();
+
+    const names = screen.getAllByText(/🎁/).map((el) => el.textContent);
+    expect(names).toHaveLength(2);
+    expect(names.join(' ')).toMatch(/Tie Offer/);
+    expect(names.join(' ')).toMatch(/Buy 2 Get 1/);
+    expect(payButton()).toHaveProperty('disabled', true);
+  });
+
+  it('says nothing once the reward has landed, and payment opens', () => {
+    // Six units: the sixth is already free. This is the control that stops
+    // "blocks payment" passing for a till whose button is always disabled.
+    withCart(6, [sameProductOffer]);
+    renderCheckout();
+
+    expect(screen.queryByText(/to complete this offer/i)).toBeNull();
+    expect(screen.queryByText(/Payment is unavailable/i)).toBeNull();
+    expect(payButton()).toHaveProperty('disabled', false);
+  });
+
+  it('says nothing when the basket is nowhere near an offer', () => {
+    /*
+     * The other control, and the one that keeps the change proportionate.
+     * Two units against a buy-five offer has qualified for nothing, so there
+     * is nothing to complete — blocking here would refuse every small basket
+     * in the shop.
+     */
+    withCart(2, [sameProductOffer]);
+    renderCheckout();
+
+    expect(screen.queryByText(/to complete this offer/i)).toBeNull();
+    expect(payButton()).toHaveProperty('disabled', false);
+  });
+});

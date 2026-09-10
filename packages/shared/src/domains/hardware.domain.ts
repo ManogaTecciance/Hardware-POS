@@ -13,9 +13,32 @@
  */
 import { HARDWARE_ROLE_TEMPLATES } from '../types/role-templates.js';
 import { RETAIL_CAPABILITIES } from './capabilities.js';
-import type { DomainDescriptor } from './domain.types.js';
+import type { DomainDescriptor, SampleCatalogueItem } from './domain.types.js';
 import { RETAIL_MODULES, SHARED_CORE_MODULES } from './modules.js';
 import { RETAIL_NAVIGATION } from './navigation.js';
+
+/**
+ * D165 — the goods hardware's document previews are illustrated with.
+ *
+ * These eight lines were the ONLY sample catalogue in the product, living in
+ * `documents.service.ts` and shown to every workspace regardless of trade — so
+ * a clothing shop previewing its own quotation saw Portland cement on its
+ * letterhead. They are moved here unchanged, character for character, so that
+ * hardware's rendered preview is byte-identical before and after the move.
+ * A test asserts exactly that.
+ *
+ * Illustration only: nothing here is provisioned, priced or sold.
+ */
+const HARDWARE_SAMPLE_ITEMS: readonly SampleCatalogueItem[] = [
+  { name: 'Portland Cement 50kg', sku: 'CEM-50', unit: 'BAG', unitPrice: 2650 },
+  { name: 'TMT Steel Bar 12mm (per length)', sku: 'STL-12', unit: 'PCS', unitPrice: 1980 },
+  { name: 'PVC Pipe 2 inch — 6m', sku: 'PVC-2IN', unit: 'LENGTH', unitPrice: 1450 },
+  { name: 'Weathershield Emulsion Paint 4L', sku: 'PNT-WS4', unit: 'CAN', unitPrice: 5400 },
+  { name: 'Door Lock Set — Stainless', sku: 'LOCK-STD', unit: 'SET', unitPrice: 4850 },
+  { name: 'Electrical Wire 1mm (per metre)', sku: 'WIRE-1MM', unit: 'M', unitPrice: 95, pack: 10 },
+  { name: 'Angle Grinder 4 inch 720W', sku: 'GRND-4', unit: 'PCS', unitPrice: 9200 },
+  { name: 'Safety Gloves — Nitrile', sku: 'GLOV-STD', unit: 'PAIR', unitPrice: 640 },
+];
 
 export const HARDWARE_DOMAIN: DomainDescriptor = {
   businessTypes: ['HARDWARE'],
@@ -49,5 +72,11 @@ export const HARDWARE_DOMAIN: DomainDescriptor = {
   // No domain attributes (D64): everything the hardware vertical stores about
   // a product is behaviour, and behaviour lives in typed columns. An empty
   // schema means every `attributes` key is refused — declared, not defaulted.
-  catalogue: { attributeSchema: [] },
+  catalogue: {
+    attributeSchema: [],
+    // D165 — declared, not inherited. The fallback for a descriptor that
+    // says nothing is a NEUTRAL list, so hardware has to name its own goods
+    // to keep the preview it has always had.
+    sampleItems: HARDWARE_SAMPLE_ITEMS,
+  },
 };

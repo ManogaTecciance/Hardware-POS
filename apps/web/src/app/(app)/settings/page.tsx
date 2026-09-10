@@ -14,10 +14,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth';
 import { BillPreviewTab } from '@/components/settings/bill-preview-tab';
+import { BusinessDetailsTab } from '@/components/settings/business-details-tab';
 import { BillStructureCard } from '@/components/settings/bill-structure-card';
 import { ChargesTab } from '@/components/settings/charges-tab';
 import { HoursTab } from '@/components/settings/hours-tab';
@@ -41,6 +43,7 @@ import {
   type DocumentSettings,
   type PreviewDocumentType,
 } from '@/lib/settings-api';
+import { cn } from '@/lib/utils';
 
 /*
  * D84 — "Charges" is restaurant-only: it edits RestaurantBranchConfig, which
@@ -49,8 +52,21 @@ import {
  *
  * D90 — "Hours" likewise: it edits the branch's opening hours, which only a
  * food-service tenant has. Appended for the same reason.
+ *
+ * D161 — "Business details" is retail-only for now, and appended for the
+ * third time for the third time's reason: a bookmark on any existing tab
+ * still lands where it did.
  */
-const TABS = ['Business', 'Branding', 'Layout', 'Preview', 'Charges', 'Hours', 'Workspace'] as const;
+const TABS = [
+  'Business',
+  'Branding',
+  'Layout',
+  'Preview',
+  'Charges',
+  'Hours',
+  'Workspace',
+  'Business details',
+] as const;
 
 /**
  * Every zone the runtime knows, grouped by region for a navigable `<select>`.
@@ -74,6 +90,29 @@ function groupedTimeZones(): { region: string; zones: string[] }[] {
 }
 type Tab = (typeof TABS)[number];
 
+/** D168 — the two documents a retail workspace can preview. */
+type PreviewSurface = 'bill' | 'a4';
+
+/**
+ * D168 — one segment of the preview toggle.
+ *
+ * The SEMANTICS come from `Tabs` (roving arrow keys, `role="tab"`,
+ * `aria-selected`, a `role="tabpanel"` that hides rather than unmounts).
+ * The LOOK is the segmented control this app already uses for theme
+ * preference, borrowed class for class rather than invented: a pill shell
+ * with the chosen segment raised onto `bg-surface`.
+ *
+ * `border-b-0` and `rounded-lg` are the two overrides that undo the
+ * primitive's underlined-tab default; `cn` is tailwind-merge, so the last
+ * class wins and the defaults drop out rather than fighting.
+ */
+function previewSegment(active: boolean): string {
+  return cn(
+    'h-9 rounded-lg border-b-0 px-4 transition-colors',
+    active ? 'bg-surface text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground',
+  );
+}
+
 /**
  * D96 — Charges and Hours edit `RestaurantBranchConfig`, a row a retail tenant
  * has none of. They were appended unconditionally by D84/D90, so a Tile Shop
@@ -81,6 +120,17 @@ type Tab = (typeof TABS)[number];
  * live. The resolver decides now.
  */
 const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours'];
+
+/**
+ * D161 — the tab is shown only where the business type offers the feature.
+ *
+ * A SECOND list rather than a member of the one above, because they are
+ * different questions with different answers: Charges and Hours ask whether a
+ * branch config row exists, this asks whether the catalogue may be redefined.
+ * Folding them together would make the next tab that needs a gate inherit the
+ * wrong answer, which is the drift D96 was written to correct.
+ */
+const CONFIGURABLE_CATALOGUE_TABS: readonly Tab[] = ['Business details'];
 
 /*
  * D90 — tabs that write their OWN record and carry their own Save button, plus
@@ -91,7 +141,13 @@ const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours'];
  * bottom of the viewport, so it sat on top of the Save button that does apply
  * to what they just edited. Two Save buttons, the visible one wrong.
  */
-const SELF_SAVING_TABS: readonly Tab[] = ['Charges', 'Hours', 'Workspace'];
+// D161 — Business details writes `TenantSettings`, not the document profile.
+const SELF_SAVING_TABS: readonly Tab[] = [
+  'Charges',
+  'Hours',
+  'Workspace',
+  'Business details',
+];
 
 const PREVIEW_TYPES: { value: PreviewDocumentType; label: string }[] = [
   { value: 'quotation', label: 'Quotation' },
@@ -132,6 +188,14 @@ export default function SettingsPage() {
   const [taxRate, setTaxRate] = React.useState('');
   const [tab, setTab] = React.useState<Tab>('Business');
   /*
+   * D168 — which document the Preview tab is showing, for the one surface
+   * that prints both (retail). Held here rather than inside the Preview
+   * panel so the choice survives a trip to Branding and back, which is the
+   * loop an operator actually works in: change the logo, look at the bill,
+   * change it again.
+   */
+  const [previewSurface, setPreviewSurface] = React.useState<PreviewSurface>('bill');
+  /*
    * D96 — the restaurant-only tabs appear only where their record exists.
    * While the profile is unresolved they are hidden, which is the safe way
    * round: a tab that vanishes a moment after appearing is worse than one that
@@ -139,8 +203,12 @@ export default function SettingsPage() {
    */
   const visibleTabs = React.useMemo(
     () =>
-      TABS.filter((t) => !FOOD_SERVICE_ONLY_TABS.includes(t) || view.showRestaurantOperationsTabs),
-    [view.showRestaurantOperationsTabs],
+      TABS.filter(
+        (t) =>
+          (!FOOD_SERVICE_ONLY_TABS.includes(t) || view.showRestaurantOperationsTabs) &&
+          (!CONFIGURABLE_CATALOGUE_TABS.includes(t) || view.showBusinessDetailsTab),
+      ),
+    [view.showRestaurantOperationsTabs, view.showBusinessDetailsTab],
   );
   /*
    * …and a tab that disappears under the operator must not leave the screen
@@ -427,6 +495,24 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         )
+      ) : tab === 'Business details' ? (
+        /*
+         * D161 — its own save button, for the same reason Charges has one: it
+         * writes `TenantSettings.data.catalogue`, which the sticky document bar
+         * below knows nothing about. Unlike Charges it needs no branch — the
+         * fields a business tracks are the same in every one of its shops, so
+         * the only thing guarded here is the session itself, which this page
+         * carries as nullable throughout.
+         */
+        session ? (
+          <BusinessDetailsTab session={session} />
+        ) : (
+          <Card className="max-w-3xl">
+            <CardContent className="py-16 text-center text-sm text-muted-foreground">
+              Sign in to change the fields your products record.
+            </CardContent>
+          </Card>
+        )
       ) : tab === 'Workspace' ? (
         // D95 — read-only, and therefore outside the document save bar.
         <WorkspaceTab />
@@ -437,9 +523,54 @@ export default function SettingsPage() {
           set={set}
           showCalibration={view.showBillCalibration}
           timezone={timezone ?? DEFAULT_TIME_ZONE}
+          sampleKind={view.billSampleKind ?? 'FOOD_SERVICE'}
         />
+      ) : view.previewKind === 'THERMAL_BILL_AND_A4' ? (
+        /*
+         * D163 — retail prints both, so it previews both.
+         *
+         * D168 — but ONE AT A TIME. They were stacked, and a thermal bill is
+         * a metre of paper: reaching the quotation meant scrolling past a
+         * whole receipt, and neither preview could be seen whole.
+         *
+         * The bill is the default because it goes to a customer on every
+         * single sale, where a quotation is occasional.
+         *
+         * Built on the same `Tabs` primitive the page's own tab bar uses
+         * rather than a pair of buttons, so it inherits the roving-focus
+         * keyboard behaviour and the tablist semantics for free — and so
+         * the inactive panel keeps its DOM, which is what stops the A4
+         * chooser losing its selected document type on every flip.
+         */
+        <div className="space-y-4">
+          <Tabs value={previewSurface} onValueChange={(v) => setPreviewSurface(v as PreviewSurface)}>
+            <TabsList
+              aria-label="Which document to preview"
+              className="inline-flex gap-0.5 rounded-xl border border-border bg-canvas p-0.5"
+            >
+              <TabsTrigger value="bill" className={previewSegment(previewSurface === 'bill')}>
+                Printed bill
+              </TabsTrigger>
+              <TabsTrigger value="a4" className={previewSegment(previewSurface === 'a4')}>
+                A4 documents
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="bill" className="mt-4">
+              <BillPreviewTab
+                docs={docs}
+                set={set}
+                showCalibration={view.showBillCalibration}
+                timezone={timezone ?? DEFAULT_TIME_ZONE}
+                sampleKind={view.billSampleKind ?? 'FOOD_SERVICE'}
+              />
+            </TabsContent>
+            <TabsContent value="a4" className="mt-4">
+              <PreviewTab docs={docs} showA4SaleDocument={view.showA4SaleDocument} />
+            </TabsContent>
+          </Tabs>
+        </div>
       ) : view.previewKind === 'SERVER_A4' ? (
-        <PreviewTab docs={docs} />
+        <PreviewTab docs={docs} showA4SaleDocument={view.showA4SaleDocument} />
       ) : (
         /*
          * Unresolved. Neither preview is right yet, and guessing means flashing
@@ -869,16 +1000,30 @@ function LayoutTab({
   view: DocumentSettingsPresentation;
 }) {
   /*
-   * D96 — a workspace that prints bills gets a read-only summary instead of
-   * these controls. Not because the controls are unwanted, but because not one
-   * of them can reach a thermal bill: its columns are fixed, its totals rows
-   * appear when they are non-zero, and a continuous roll has no page to lay
-   * out. Offering them would be offering settings that change nothing.
+   * D96 — a workspace that prints bills gets a read-only summary of what the
+   * slip contains. Not because the A4 controls are unwanted, but because not
+   * one of them can reach a thermal bill: its columns are fixed, its totals
+   * rows appear when they are non-zero, and a continuous roll has no page to
+   * lay out.
+   *
+   * D163 — and the two are no longer mutually exclusive. This was an early
+   * RETURN, because every workspace that printed a bill printed ONLY a bill.
+   * Retail broke that: its sale is a slip and its quotation is a letterhead,
+   * so it needs the summary AND the page controls, and an early return would
+   * have silently taken the quotation's page size away from it.
+   *
+   * Each half is now guarded by its own flag, so the three surfaces read out
+   * of the same code: summary only (food service), controls only (hardware,
+   * general), both (retail).
    */
-  if (view.showBillLayoutSummary) return <BillStructureCard note={view.layoutNote} />;
+  const summary = view.showBillLayoutSummary ? (
+    <BillStructureCard note={view.layoutNote} />
+  ) : null;
+  if (!view.showPageSetup) return summary;
 
   return (
     <div className="max-w-3xl space-y-4">
+      {summary}
       <Card>
         <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
           <Field label="Margins">
@@ -955,8 +1100,28 @@ function LayoutTab({
   );
 }
 
-function PreviewTab({ docs }: { docs: DocumentSettings }) {
+/**
+ * D163 — `showA4SaleDocument` decides whether "Invoice / Bill" is offered.
+ *
+ * A retail workspace prints its sale on a roll now, so an A4 invoice is a
+ * document it cannot produce. Previewing one is the dead control D96 was
+ * written to remove — it answers a question the operator will then be unable
+ * to act on. Its quotations, returns and exchanges are still A4 and stay.
+ */
+function PreviewTab({
+  docs,
+  showA4SaleDocument,
+}: {
+  docs: DocumentSettings;
+  showA4SaleDocument: boolean;
+}) {
   const { session } = useAuth();
+  const types = React.useMemo(
+    () => PREVIEW_TYPES.filter((t) => t.value !== 'invoice' || showA4SaleDocument),
+    [showA4SaleDocument],
+  );
+  // 'quotation' for everyone: it is the one A4 document every surface that
+  // reaches this component still issues, so the default is never filtered out.
   const [type, setType] = React.useState<PreviewDocumentType>('quotation');
   const [lineCount, setLineCount] = React.useState(6);
   const [html, setHtml] = React.useState<string>('');
@@ -993,13 +1158,17 @@ function PreviewTab({ docs }: { docs: DocumentSettings }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">
-          <Label>Document type</Label>
+          {/* D163 -- associated with its control. The label was floating, so
+              the chooser had no accessible name: a screen reader announced an
+              unlabelled combobox, and it could not be found by its label. */}
+          <Label htmlFor="preview-document-type">Document type</Label>
           <Select
+            id="preview-document-type"
             value={type}
             onChange={(e) => setType(e.target.value as PreviewDocumentType)}
             className="w-56"
           >
-            {PREVIEW_TYPES.map((t) => (
+            {types.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
               </option>
