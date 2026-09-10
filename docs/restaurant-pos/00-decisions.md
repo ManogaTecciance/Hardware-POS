@@ -9758,6 +9758,71 @@ Seven mutations, each failing the case that carries its decision:
 
 ---
 
+## D161 — the dashboard's View Reports button opens Reports
+
+**Status:** accepted and **built**, 2026-09-10. Frontend only, one href. No
+schema change, no migration, no API change.
+
+### What was reported
+
+> "in dashbord in retail when click on 'view reports' btn its goes to sales its
+> needed to go to reports"
+
+### What was wrong
+
+`admin-dashboard.tsx` built its secondary action as:
+
+```ts
+...(canReport ? [{ key: 'reports', label: 'View Reports', href: '/sales', ... }] : []),
+```
+
+Everything about that entry said Reports except the one field that decides
+where the browser goes: the key is `reports`, the label is "View Reports", the
+icon is `BarChart3`, and the gate is `REPORT_READ` — the same permission the
+sidebar's `/reports` entry requires. `/reports` exists and always has.
+
+Present since `99826df` ("add futuristic responsive role dashboards"), so it
+has never worked.
+
+### Why `/sales` is not simply a typo to be swept up elsewhere
+
+Several KPI cards on the same screen point at `/sales` **correctly**, and that
+is a deliberate pattern: a metric tile drills into the record list its number
+came from, so Revenue and Gross Profit both land on the sales list. Those were
+checked and left alone.
+
+The difference is that this is a named ACTION, not a metric. Its only job is to
+open Reports. So the fix is one href, and the test says "this action does not
+link to `/sales`" rather than anything about the page as a whole — `/sales` is
+a correct destination elsewhere on it.
+
+### Why nothing caught it
+
+Nothing rendered this dashboard. There was no `admin-dashboard` spec at all.
+
+A wrong `href` is invisible to TypeScript (it is a `string`), invisible to
+lint, and invisible to every other spec in the suite. The only thing that
+catches it is an assertion about the destination, and there was none. That is
+the real gap, and the reason this fix ships with a spec rather than a one-word
+diff: the next wrong link would be just as silent.
+
+### Mutation proof
+
+Four mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the original bug restored (`/reports` → `/sales`) | "View Reports opens Reports, not the sales list" |
+| the action is dropped entirely | the same case |
+| the `REPORT_READ` gate is removed | "is offered only to an operator who may read reports" |
+| a sibling action's href is rewritten to `/reports` | "the actions it sits beside still point where they did" |
+
+The last one is the control that matters: without it, "View Reports goes to
+`/reports`" would pass for a dashboard whose every action had been rewritten to
+the same string.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

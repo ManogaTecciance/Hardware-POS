@@ -192,7 +192,19 @@ export function AdminDashboard({
     ...(canManageProducts
       ? [{ key: 'product', label: 'Add Product', href: '/products/new', icon: PackagePlus }]
       : []),
-    ...(canReport ? [{ key: 'reports', label: 'View Reports', href: '/sales', icon: BarChart3 }] : []),
+    /*
+     * D161 — `/reports`, not `/sales`.
+     *
+     * The KPI cards above deliberately drill into the record list a metric
+     * came from, and several of them land on `/sales` for that reason. This
+     * is not one of those: it is a named action whose only job is to open
+     * Reports, it carries the Reports label and icon, and it is gated on
+     * REPORT_READ — the same permission the sidebar's `/reports` entry uses.
+     * Every signal about it said Reports except the href.
+     */
+    ...(canReport
+      ? [{ key: 'reports', label: 'View Reports', href: '/reports', icon: BarChart3 }]
+      : []),
   ];
 
   const alerts = buildAdminAlerts(data);
