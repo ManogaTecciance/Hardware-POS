@@ -10386,6 +10386,106 @@ eye.
 
 ---
 
+## D169 — a workspace the team can sign in to is a seeded workspace
+
+**Status:** accepted and **built**, 2026-09-11. No schema change, no migration.
+
+### What was reported
+
+> "other users cant see my retail account when i give them my credential
+> created they cant visit it , they say needed to add it to … seed.ts"
+
+### What was actually wrong
+
+Nothing was wrong with the credentials. `seed.ts` seeded **three** tenants
+— `tnt_dev` (HARDWARE), `tnt_resto` (RESTAURANT) and `tnt_platform` — and
+**no RETAIL tenant at all**. The retail workspace everyone had been demoing in
+was created by hand on one machine through `provision-tenant` / the platform
+console, so it lives in one developer's database and nowhere else.
+
+A password is an answer to "who are you", not to "does this row exist". Handing
+it to a teammate whose database has no such tenant fails at the lookup, before
+authentication is ever reached. **Sharing a credential cannot share a row.**
+
+### The decision
+
+**Every workspace the team is expected to sign in to is seeded. A workspace
+created by hand is a workspace that exists on one machine.**
+
+So `seedRetail()` joins `seedRestaurant()` and `seedPlatformConsole()`:
+`retail-demo`, profile `RETAIL` · `LOCAL` inventory · `NONE` accounting, an
+Owner and a Cashier, and the clothing pack.
+
+The hand-made tenant is **not** migrated or renamed. It keeps its data and its
+owner keeps working in it; the seeded one is simply the workspace the team
+shares. Renaming someone's tenant to claim the slug would take their work
+hostage to a convention.
+
+### Clothing, and with samples
+
+`seedClothingPack` is **the same function `provision-tenant` calls** for a real
+RETAIL workspace (D120), not a second catalogue written for the demo. Shared
+deliberately: the workspace a developer reviews in and the workspace a shop is
+given must not be able to drift apart.
+
+Clothing rather than groceries because Q12 kept RETAIL as one business type, and
+clothing is what exercises the parts retail actually added — variants across
+Size and Colour (D44), the per-variant stock the till reads (D121), and business
+details the tenant owns (D150).
+
+`withSamples: true` here, where `provision-tenant` defaults it **off**. D120's
+reasoning is about a real shop: seeded products are frozen in that shop's
+database and someone then has to clear them out. This tenant exists to be looked
+at, and a demo workspace with no products shows nothing. Verified: 5 categories,
+2 products, **16 variants**, each with a barcode, and 16 branch-inventory rows
+totalling 144 units.
+
+### No role wiring, and that is the point
+
+The restaurant needs three explicit `role.findFirst` + `user.update` blocks,
+because `WAITER`, `KITCHEN_STAFF` and `RESTAURANT_CASHIER` have no matching
+`UserRole` enum value and `linkUsersToRoles` links only where the key matches.
+
+RETAIL uses `GENERAL_ROLE_TEMPLATES` — `Owner` and `Cashier` — whose keys
+**are** enum values, so the generic linker handles both. Adding the explicit
+blocks anyway would have been dead code that looked load-bearing. Proven rather
+than assumed: after seeding, both users resolve a role **row**, and the cashier's
+login returns `roleName: "Cashier"` with 17 permissions.
+
+### What is deliberately not written
+
+- **No business details.** D150 makes them a tenant *override*; `schemaFor`
+  falls back to RETAIL's shipped fields when there is none. Restating Material /
+  Fit / Care instructions / Gender / Season in the seed would freeze today's
+  list into this tenant and silently stop tracking the domain.
+- **No `TenantModule` rows**, for `provision-tenant`'s own reason: with a profile
+  and no per-module opinion the API resolves the defaults for the business type,
+  and writing them would freeze today's defaults.
+- **The timezone IS written**, matching `provision-tenant`. It equals
+  `DEFAULT_TIME_ZONE`, so nothing renders differently today; what the row buys is
+  that the setting is *stated* rather than inherited, so a later change to the
+  default cannot silently re-date this tenant.
+
+### Verification
+
+Idempotent by construction — every write is an upsert, the settings row is
+guarded by a lookup because `(tenantId, branchId)` carries no unique index, and
+the pack matches categories by name. The seed was run against a database that
+already held the hand-made tenant: `tnt_retail` appeared, and `kandy-apparel`
+came through unchanged at 20 products and 2 users.
+
+End to end, against the running API: `POST /v1/auth/login` with
+`workspace: retail-demo` returns **200** for both users, resolving `tnt_retail`,
+branch `Main Store` and register `Counter 1`.
+
+### The seed console does not print the password
+
+Same rule the restaurant follows: it points at the README's table instead.
+Echoing a credential to a terminal is how it reaches scrollback, CI logs and
+screenshots.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

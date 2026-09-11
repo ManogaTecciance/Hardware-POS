@@ -57,12 +57,21 @@ pnpm dev
 - Web → http://localhost:3000
 - API → http://localhost:4000/v1
 
-Seeded logins — two workspaces with different business profiles:
+Seeded logins — three workspaces, one per business profile:
 
 | Workspace | Sign in with | Profile |
 | --------- | ------------ | ------- |
 | `demo` | `owner@hardwarepos.test` / `password123` (Owner), `salesperson@hardwarepos.test` / `password123` (Salesperson), Cashier PIN `1111`, approver PIN `2222` | Tile Shop, QuickBooks inventory and accounting |
 | `restaurant-demo` | `restaurant.owner@axlopos.test` / `Restaurant123!`, Cashier PIN `3333` | Restaurant, local inventory, no accounting |
+| `retail-demo` | `retail.owner@axlopos.test` / `Retail123!` (approver PIN `6666`), `retail.cashier@axlopos.test` / `Retail123!` (approver PIN `7777`) | Retail clothing shop, local inventory, no accounting |
+
+`retail-demo` is where the retail work is reviewed (D169). It seeds the clothing
+pack: five categories and two sample products carrying sixteen variants across
+Size and Colour, each with its own barcode and branch stock — enough for the
+till, the variant picker and stock movements to have something real to act on.
+**A workspace you created by hand is on your machine only.** Sharing its
+password cannot share the row; anything the team needs to sign in to has to be
+seeded here.
 
 The workspace field is optional while an email is unique across tenants. **PIN
 sign-in requires the device to be commissioned first** — sign in once with an email

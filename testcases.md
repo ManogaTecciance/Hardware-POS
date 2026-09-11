@@ -229,16 +229,16 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PIMP-006 | Invalid date flagged | Bad "Quantity as of date" | Row error; excluded | N | Not Run |
 | PIMP-007 | Duplicate SKU inside sheet flagged | Two rows share a SKU | Second row errored with row reference | N | Not Run |
 | PIMP-008 | Image attach per row in review | Add photo to a row, commit | Product created and image uploaded to that product | P | Not Run |
-| PIMP-009 | The template carries the tenant's business details (D168) | On a RETAIL workspace that has business details configured: Products → Import → **Template** | The .xlsx has the 14 QuickBooks columns **plus one per configured field**, under the tenant's own labels (e.g. Material, Fit, Care instructions, Gender, Season). Before D168 it had only the 14, so a sheet could not set them at all | P | Not Run |
-| PIMP-010 | A workspace with none gets the sheet it always had (D168) | Download the template on a HARDWARE workspace | Exactly the 14 QuickBooks columns, unchanged. The extra columns are per tenant because the fields are | N | Not Run |
-| PIMP-011 | Business details import from the sheet (D168) | Import `Docs/product-import-example-clothing.xlsx` on a retail workspace, then open one of the products | The Business details card shows Material, Fit, Care instructions, Gender and Season as given in the sheet | P | Not Run |
-| PIMP-012 | A bad value is caught at preview (D168) | Set a Fit cell to something not in the list (e.g. "Slimm") and upload | The preview row shows an error naming the field and the allowed options — the same wording the API uses. The row is excluded from the commit count | N | Not Run |
-| PIMP-013 | A blank column does NOT erase stored details (D168) | On a product that already has business details, import a sheet matching it by SKU with the detail columns **left blank** | The product keeps its existing business details. Blank means "this sheet says nothing", not "clear them" — sending an empty document would wipe them under D64's replace semantics | N | Not Run |
 | PIMP-009 | Commit summary accurate | Commit mixed create/update sheet | created/updated/failed counts match rows | P | Not Run |
 | PIMP-010 | Empty/wrong-header sheet rejected | Upload sheet without the name column | 400 "Header row not found…" in dialog | N | Not Run |
 | PIMP-011 | Non-spreadsheet file rejected | Upload a .pdf | Friendly parse error | N | Not Run |
 | PIMP-012 | >10MB upload rejected | Upload oversized file | 413/400 "File is too large" | N | Not Run |
 | PIMP-013 | Cancel mid-review creates nothing | Preview then close dialog | No products created | P | Not Run |
+| PIMP-014 | The template carries the tenant's business details (D168) | On a RETAIL workspace that has business details configured: Products → Import → **Template** | The .xlsx has the 14 QuickBooks columns **plus one per configured field**, under the tenant's own labels (e.g. Material, Fit, Care instructions, Gender, Season). Before D168 it had only the 14, so a sheet could not set them at all | P | Not Run |
+| PIMP-015 | A workspace with none gets the sheet it always had (D168) | Download the template on a HARDWARE workspace | Exactly the 14 QuickBooks columns, unchanged. The extra columns are per tenant because the fields are | N | Not Run |
+| PIMP-016 | Business details import from the sheet (D168) | Import `Docs/product-import-example-clothing.xlsx` on a retail workspace, then open one of the products | The Business details card shows Material, Fit, Care instructions, Gender and Season as given in the sheet | P | Not Run |
+| PIMP-017 | A bad value is caught at preview (D168) | Set a Fit cell to something not in the list (e.g. "Slimm") and upload | The preview row shows an error naming the field and the allowed options — the same wording the API uses. The row is excluded from the commit count | N | Not Run |
+| PIMP-018 | A blank column does NOT erase stored details (D168) | On a product that already has business details, import a sheet matching it by SKU with the detail columns **left blank** | The product keeps its existing business details. Blank means "this sheet says nothing", not "clear them" — sending an empty document would wipe them under D64's replace semantics | N | Not Run |
 
 ## POS — Point of Sale
 
@@ -869,6 +869,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | ADM-013 | Invalid role on user create rejected | POST /users with role "SUPERADMIN" | 400 | N | Not Run |
 | ADM-014 | Audit log records sensitive actions | Approve a discount / change settings; GET /audit-logs | Entries with actor, action, timestamp | P | Not Run |
 | ADM-015 | Salesperson is a hardware-template role (D108) | Provision `--business-type RESTAURANT` with a `SALESPERSON` user; then a HARDWARE (or no-profile) tenant with one | Restaurant provisioning aborts naming OWNER, WAITER, RESTAURANT_CASHIER, KITCHEN_STAFF and creates nothing; the hardware user is created linked to the `SALESPERSON` row with enum SALESPERSON | N | Not Run |
+| ADM-016 | A fresh database has a RETAIL workspace (D169) | On a database that has never been seeded: `pnpm db:seed`, then sign in at `retail-demo` with `retail.owner@axlopos.test` / `Retail123!` | Signs in. Before D169 the seed created only `demo`, `restaurant-demo` and `platform`, so a teammate given these credentials had no tenant to sign in to — the reported fault | P | Not Run |
+| ADM-017 | The seeded retail cashier resolves a role ROW, not the enum (D169) | Sign in as `retail.cashier@axlopos.test` / `Retail123!`; inspect the login response (or Settings → Users) | `roleName` is **Cashier** and permissions come from the role row. RETAIL's templates are Owner and Cashier, whose keys match the enum, so no explicit linking is needed — unlike the restaurant's Waiter and Kitchen | P | Not Run |
+| ADM-018 | The retail demo has a real catalogue to work with (D169) | In `retail-demo`, open Products, then add one to the cart in POS | 5 categories; Cotton T-Shirt (12 variants across Size and Colour) and Denim Jeans (4 waist sizes); each variant has its own barcode and branch stock, so the variant picker and stock movements have something to act on | P | Not Run |
+| ADM-019 | Re-seeding converges rather than stacking (D169) | Run `pnpm db:seed` twice on the same database and re-count `retail-demo` | Identical both times: 5 categories, 2 products, 16 variants, 16 branch-inventory rows, 2 users, 2 roles and **exactly 1** settings row. `(tenantId, branchId)` has no unique index, so the settings row is guarded by a lookup | N | Not Run |
+| ADM-020 | Seeding leaves a hand-made tenant alone (D169) | On a machine that already has a hand-provisioned retail tenant, run `pnpm db:seed` and re-open it | Its products, users and slug are unchanged. The seeded `retail-demo` is added alongside; D169 does not migrate or rename anyone's workspace to claim the slug | N | Not Run |
+| ADM-021 | The seed does not echo the retail password (D169) | Read the `pnpm db:seed` console output | It prints the emails and PINs and points at README.md for the password. A credential echoed to a terminal reaches scrollback, CI logs and screenshots | N | Not Run |
 
 ## UI — Theme, Layout & Responsiveness
 
@@ -933,21 +939,21 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 |---|---|---|---|
 | AUTH | 15 | CUST | 36 |
 | PERM | 17 | CIMP | 10 |
-| DASH | 28 | SUP | 15 |
-| PROD | 50 | SIMP | 8 |
-| PIMP | 13 | QB | 31 |
-| POS | 62 | SET | 31 |
-| PAY | 41 | DOC | 22 |
+| DASH | 31 | SUP | 15 |
+| PROD | 93 | SIMP | 8 |
+| PIMP | 18 | QB | 31 |
+| POS | 62 | SET | 36 |
+| PAY | 41 | DOC | 37 |
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
 | RET | 18 | KIT | 22 |
-| EXC-T | 12 | ADM | 15 |
+| EXC-T | 12 | ADM | 21 |
 | EXC-D | 4 | UI | 33 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 647 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 724 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 
