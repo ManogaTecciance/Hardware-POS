@@ -15,12 +15,26 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Session } from '@/lib/auth';
-import type { KitchenTicketView } from '@/lib/restaurant/types';
+import type {
+  DiningAreaView,
+  KitchenStationView,
+  KitchenTicketView,
+  RestaurantTableView,
+} from '@/lib/restaurant/types';
 
 // ── boundaries ───────────────────────────────────────────────────────────────
 
 const history = vi.fn();
 const orderFn = vi.fn();
+/*
+ * D175 — the three lists the filter panel is built from. Separate spies so a
+ * test can fail ONE of them and show the others still stand: the claim that a
+ * failed station fetch does not blank the table group is only a claim if the
+ * table fetch is a different call.
+ */
+const stationsFn = vi.fn();
+const areasFn = vi.fn();
+const tablesFn = vi.fn();
 vi.mock('@/lib/restaurant/api', () => ({
   kitchen: {
     history: (...args: unknown[]) => history(...args),
@@ -28,6 +42,9 @@ vi.mock('@/lib/restaurant/api', () => ({
     // dialog the board uses.
     order: (...args: unknown[]) => orderFn(...args),
   },
+  kitchenStations: { list: (...args: unknown[]) => stationsFn(...args) },
+  diningAreas: { list: (...args: unknown[]) => areasFn(...args) },
+  restaurantTables: { list: (...args: unknown[]) => tablesFn(...args) },
 }));
 
 const { KitchenHistory, formatFinishedStamp, summariseItems } = await import('./kitchen-history');
@@ -145,12 +162,22 @@ function expectNoFinish(row: HTMLElement) {
   expect(within(row).queryByText(/on the pass/)).toBeNull();
 }
 
+/** The shape of one history read, as the screen hands it to the client. */
+interface HistoryQuery {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  /** D175 — the structured filters. Absent, not `[]`, when nothing is set. */
+  stationIds?: string[];
+  tableIds?: string[];
+}
+
 /** The query object of the last request the screen made. */
-function lastQuery(): { page?: number; pageSize?: number; search?: string } {
+function lastQuery(): HistoryQuery {
   const call = history.mock.calls.at(-1);
   if (!call)
     throw new Error('the screen issued no request — every assertion below would be vacuous');
-  return call[2] as { page?: number; pageSize?: number; search?: string };
+  return call[2] as HistoryQuery;
 }
 
 const searchBox = () => screen.getByLabelText('Search ticket history');
@@ -168,8 +195,17 @@ function deferred<T>() {
 beforeEach(() => {
   history.mockReset();
   orderFn.mockReset();
+  stationsFn.mockReset();
+  areasFn.mockReset();
+  tablesFn.mockReset();
   orderFn.mockImplementation(() => new Promise(() => undefined));
   history.mockResolvedValue(page([]));
+  // Empty lists, not rejections: the suites above this one are about the
+  // table, and a panel that failed to load would be noise in every one of them.
+  // The D175 block hands the panel its own fixtures.
+  stationsFn.mockResolvedValue([]);
+  areasFn.mockResolvedValue([]);
+  tablesFn.mockResolvedValue([]);
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
@@ -722,26 +758,31 @@ describe('the columns (D152)', () => {
     expect(headerNames()).toHaveLength(7);
   });
 
-  it('searches by ticket, order, table, station and dish — the station leg is back', async () => {
+  it('searches by ticket, order and dish — the station and the table are filters now', async () => {
     history.mockResolvedValue(page([ticket()]));
     render(<KitchenHistory session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
 
     /*
-     * D152 rewrote this claim. The hint read "Search ticket, order, table, or
-     * dish…" while the term had no station leg; the leg is back on the server,
-     * so a hint that still listed four things would send a cook who remembers
-     * only "the grill" away from a search that would have answered them.
+     * D175 rewrote this claim, which D152 had rewritten before it. It used to
+     * pin "Search ticket, order, table, station, or dish…" — five legs, the
+     * station rejoined. The station and the table have now LEFT the term for
+     * the filter panel, so a hint that still promised them would send a cook
+     * typing "Grill" into a search that answers with the grilled prawns. The
+     * old assertion is not weakened but replaced with the new truth (D16), and
+     * the wording it pinned becomes the negative below.
      *
-     * The equality is what makes this a claim: `toContain('station')` would pass
-     * on a hint that merely mentioned the word. The server's own legs are pinned
-     * in the API's suite; what this screen owns is the promise it makes.
+     * The equality is what makes this a claim: `toContain('dish')` would pass
+     * on a hint that merely mentioned the word. The server's own legs are
+     * pinned in the API's suite; what this screen owns is the promise it makes.
      */
     const box = searchBox() as HTMLInputElement;
-    expect(box.placeholder).toBe('Search ticket, order, table, station, or dish…');
-    // NEGATIVE — the D147 wording, four legs and no station, is not what the
-    // box says any more.
+    expect(box.placeholder).toBe('Search ticket, order, or dish…');
+    // NEGATIVE — neither D152's five-leg wording nor D147's four-leg one, both
+    // of which promised a table leg the term no longer has.
+    expect(box.placeholder).not.toBe('Search ticket, order, table, station, or dish…');
     expect(box.placeholder).not.toBe('Search ticket, order, table, or dish…');
+    expect(box.placeholder).not.toMatch(/table|station/i);
   });
 });
 
@@ -826,6 +867,416 @@ describe('the station on the row (D152)', () => {
   });
 });
 
+/*
+ * D175 — the station and the table are structured FILTERS, not legs of the
+ * search term.
+ *
+ * Everything here is asserted against the CALL, for the reason at the top of
+ * this file: the server does the filtering, so the rows on screen are the same
+ * fixture whatever the panel sends, and a test that watched the table would be
+ * green with the chips wired to nothing. The fixtures are built so that each
+ * claim has something to break it: an INACTIVE station beside two active ones,
+ * so "active only" is a filter and not the whole list; two areas that EACH hold
+ * a "Table 1", so the grouping under the area name is what tells them apart;
+ * and a station fixture that can fail on its own while the table fetch
+ * succeeds. Proven by mutation at the foot of this file.
+ */
+describe('the filter panel (D175)', () => {
+  const NOW = '2026-09-08T10:00:00.000Z';
+
+  function station(over: Partial<KitchenStationView>): KitchenStationView {
+    return {
+      id: 'stn_hot',
+      branchId: 'brn_1',
+      code: 'HOT',
+      name: 'Hot line',
+      category: 'HOT',
+      isActive: true,
+      createdAt: NOW,
+      updatedAt: NOW,
+      ...over,
+    };
+  }
+
+  function area(over: Partial<DiningAreaView>): DiningAreaView {
+    return {
+      id: 'area_g',
+      branchId: 'brn_1',
+      name: 'Garden',
+      description: null,
+      position: 1,
+      isActive: true,
+      createdByUserId: null,
+      ...over,
+    };
+  }
+
+  function table(over: Partial<RestaurantTableView>): RestaurantTableView {
+    return {
+      id: 'tbl_g1',
+      areaId: 'area_g',
+      branchId: 'brn_1',
+      kind: 'PHYSICAL',
+      code: '1',
+      label: null,
+      capacity: 4,
+      positionX: null,
+      positionY: null,
+      status: 'AVAILABLE',
+      isActive: true,
+      createdByUserId: null,
+      ...over,
+    };
+  }
+
+  /** Two live stations and one archived one, which must NOT become a chip. */
+  const STATIONS = [
+    station({}),
+    station({ id: 'stn_grill', code: 'GRL', name: 'Grill' }),
+    station({ id: 'stn_old', code: 'OLD', name: 'Old fryer', isActive: false }),
+  ];
+  /** Listed out of floor order on purpose: the panel sorts by position. */
+  const AREAS = [
+    area({ id: 'area_t', name: 'Terrace', position: 2 }),
+    area({}),
+    // An area with no tables at all — a heading over an empty row would read
+    // as a fetch that failed, so it must not appear.
+    area({ id: 'area_bar', name: 'Bar', position: 3 }),
+  ];
+  /** "Table 1" exists in BOTH areas — the case the grouping exists for. */
+  const TABLES: Record<string, RestaurantTableView[]> = {
+    area_g: [table({ id: 'tbl_g3', code: '3', label: 'T3' }), table({})],
+    area_t: [table({ id: 'tbl_t1', areaId: 'area_t' })],
+    area_bar: [],
+  };
+
+  function givePanelItsLists() {
+    stationsFn.mockResolvedValue(STATIONS);
+    areasFn.mockResolvedValue(AREAS);
+    tablesFn.mockImplementation((_s: unknown, areaId: string) =>
+      Promise.resolve(TABLES[areaId] ?? []),
+    );
+  }
+
+  const filtersButton = () => screen.getByRole('button', { name: /^Filters/ });
+  const stationGroup = () => screen.getByRole('group', { name: 'Filter by station' });
+  const areaGroup = (name: string) =>
+    within(screen.getByRole('group', { name: 'Filter by table' })).getByRole('group', { name });
+  const chip = (scope: HTMLElement, name: string) => within(scope).getByRole('button', { name });
+  const pressed = (el: HTMLElement) => el.getAttribute('aria-pressed');
+
+  /** Mount, wait for the first read, and open the panel with its lists in. */
+  async function renderOpen(over: Record<string, unknown> = {}) {
+    givePanelItsLists();
+    history.mockResolvedValue(page([ticket()], over));
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
+    fireEvent.click(filtersButton());
+    await waitFor(() => expect(chip(stationGroup(), 'Grill')).toBeTruthy());
+    await waitFor(() => expect(chip(areaGroup('Garden'), 'T3')).toBeTruthy());
+  }
+
+  it('never offers the synthetic takeaway and delivery areas as table chips', async () => {
+    /*
+     * The server parks takeaway and delivery sessions on areas it creates
+     * lazily — "Walk In" at position 999, the delivery hub at 998 — so that
+     * every session hangs off a table row. `diningAreas.list` returns them
+     * like any other area, and a chip for one would ADMIT takeaway tickets
+     * to a filter whose whole meaning is "this table". D175's rule is that a
+     * takeaway matches only when no table is chosen.
+     *
+     * The fixture holds both synthetic areas WITH tables, so the negative is
+     * about a real choice: those tables are fetched-and-dropped, not absent.
+     */
+    givePanelItsLists();
+    areasFn.mockResolvedValue([
+      ...AREAS,
+      area({ id: 'area_walkin', name: 'Walk In', position: 999 }),
+      area({ id: 'area_delivery', name: 'Delivery hub', position: 998 }),
+    ]);
+    tablesFn.mockImplementation((_s: unknown, areaId: string) =>
+      Promise.resolve(
+        areaId === 'area_walkin'
+          ? [table({ id: 'tbl_walkin', areaId: 'area_walkin', code: 'WALK-IN', label: null })]
+          : areaId === 'area_delivery'
+            ? [table({ id: 'tbl_hub', areaId: 'area_delivery', code: 'HUB', label: null })]
+            : (TABLES[areaId] ?? []),
+      ),
+    );
+    history.mockResolvedValue(page([ticket()]));
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
+    fireEvent.click(filtersButton());
+    await waitFor(() => expect(chip(areaGroup('Garden'), 'T3')).toBeTruthy());
+
+    // NEGATIVE — neither synthetic area is a group, and neither table a chip.
+    const tables = screen.getByRole('group', { name: 'Filter by table' });
+    expect(within(tables).queryByRole('group', { name: 'Walk In' })).toBeNull();
+    expect(within(tables).queryByRole('group', { name: 'Delivery hub' })).toBeNull();
+    expect(within(tables).queryByRole('button', { name: /walk-in/i })).toBeNull();
+    expect(within(tables).queryByRole('button', { name: /hub/i })).toBeNull();
+    // POSITIVE CONTROL — the real areas beside them are all there, so the
+    // absence above is the position rule and not an empty panel.
+    expect(chip(areaGroup('Garden'), 'T3')).toBeTruthy();
+    expect(chip(areaGroup('Terrace'), 'Table 1')).toBeTruthy();
+    // …and the synthetic areas were never even asked for their tables.
+    expect(tablesFn).not.toHaveBeenCalledWith(SESSION, 'area_walkin');
+    expect(tablesFn).not.toHaveBeenCalledWith(SESSION, 'area_delivery');
+  });
+
+  it('is closed until the button is pressed, and then shows both groups built from the endpoints', async () => {
+    givePanelItsLists();
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(history).toHaveBeenCalled());
+
+    /*
+     * The lists are fetched on MOUNT, not on opening: a chip that appeared a
+     * beat after the button was pressed would be pressed again. All three
+     * endpoints, for this branch and each of its areas — asserted before the
+     * button is touched so the timing is the claim.
+     */
+    await waitFor(() => expect(tablesFn).toHaveBeenCalledTimes(3));
+    expect(stationsFn).toHaveBeenCalledWith(SESSION, 'brn_1');
+    expect(areasFn).toHaveBeenCalledWith(SESSION, 'brn_1');
+    for (const id of ['area_g', 'area_t', 'area_bar']) {
+      expect(tablesFn).toHaveBeenCalledWith(SESSION, id);
+    }
+    // NEGATIVE — nothing of the panel is on screen yet.
+    expect(filtersButton().getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('group', { name: 'Filter by station' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Filter by table' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Grill' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull();
+
+    fireEvent.click(filtersButton());
+
+    expect(filtersButton().getAttribute('aria-expanded')).toBe('true');
+    // Station: the two ACTIVE stations, as unpressed toggles.
+    const stations = stationGroup();
+    expect(pressed(chip(stations, 'Hot line'))).toBe('false');
+    expect(pressed(chip(stations, 'Grill'))).toBe('false');
+    // NEGATIVE — an archived station cooks nothing now; no chip for it.
+    expect(within(stations).queryByRole('button', { name: 'Old fryer' })).toBeNull();
+    expect(within(stations).getAllByRole('button')).toHaveLength(2);
+    /*
+     * Table: grouped under the area, labelled `label ?? Table <code>`, in floor
+     * order. "Table 1" is in BOTH groups and is the same string in each, so
+     * only the grouping keeps the Garden's apart from the Terrace's.
+     */
+    expect(pressed(chip(areaGroup('Garden'), 'Table 1'))).toBe('false');
+    expect(pressed(chip(areaGroup('Garden'), 'T3'))).toBe('false');
+    expect(pressed(chip(areaGroup('Terrace'), 'Table 1'))).toBe('false');
+    expect(within(areaGroup('Garden')).getAllByRole('button')).toHaveLength(2);
+    expect(within(areaGroup('Terrace')).getAllByRole('button')).toHaveLength(1);
+    const areaNames = within(screen.getByRole('group', { name: 'Filter by table' }))
+      .getAllByRole('group')
+      .map((g) => g.getAttribute('aria-labelledby'))
+      .map((id) => document.getElementById(id!)?.textContent);
+    expect(areaNames).toEqual(['Garden', 'Terrace']);
+    // NEGATIVE — the empty Bar is not a heading over nothing, and the code is
+    // not printed bare where a label exists.
+    expect(screen.queryByRole('group', { name: 'Bar' })).toBeNull();
+    expect(within(areaGroup('Garden')).queryByRole('button', { name: 'Table 3' })).toBeNull();
+
+    // …and the same button closes it again.
+    fireEvent.click(filtersButton());
+    expect(screen.queryByRole('group', { name: 'Filter by station' })).toBeNull();
+    expect(filtersButton().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('sends a pressed station to the read, at once and back on page 1', async () => {
+    await renderOpen({ total: 200 });
+    fireEvent.click(screen.getByRole('button', { name: 'Page 3' }));
+    await waitFor(() => expect(lastQuery().page).toBe(3));
+    // NEGATIVE first — nothing is filtered until a chip is pressed.
+    expect(lastQuery().stationIds).toBeUndefined();
+    expect(lastQuery().tableIds).toBeUndefined();
+
+    fireEvent.click(chip(stationGroup(), 'Grill'));
+
+    /*
+     * No `waitFor` and no timer advance: a chip is one deliberate tap, so the
+     * request goes out in the same act as the click, where the search box
+     * needs its 250 ms (see `type`). The page is 1 again for the reason the
+     * search resets it — page 3 of a set that now has one page is an empty
+     * table reading "no matches".
+     */
+    expect(lastQuery()).toEqual({ page: 1, pageSize: 20, stationIds: ['stn_grill'] });
+    // Not `[]` and not the other axis: an empty set travels as no parameter.
+    expect(lastQuery().tableIds).toBeUndefined();
+    expect(pressed(chip(stationGroup(), 'Grill'))).toBe('true');
+    expect(pressed(chip(stationGroup(), 'Hot line'))).toBe('false');
+  });
+
+  it('is a multi-select on each axis — a second station joins the set, and pressing it again removes it', async () => {
+    await renderOpen();
+
+    fireEvent.click(chip(stationGroup(), 'Grill'));
+    fireEvent.click(chip(stationGroup(), 'Hot line'));
+    expect(lastQuery().stationIds).toEqual(['stn_grill', 'stn_hot']);
+    expect(pressed(chip(stationGroup(), 'Grill'))).toBe('true');
+    expect(pressed(chip(stationGroup(), 'Hot line'))).toBe('true');
+
+    fireEvent.click(chip(stationGroup(), 'Grill'));
+    expect(lastQuery().stationIds).toEqual(['stn_hot']);
+    expect(pressed(chip(stationGroup(), 'Grill'))).toBe('false');
+
+    fireEvent.click(chip(stationGroup(), 'Hot line'));
+    // Back to no filter at all — absent, not an empty array.
+    expect(lastQuery().stationIds).toBeUndefined();
+    expect(pressed(chip(stationGroup(), 'Hot line'))).toBe('false');
+  });
+
+  it('sends the Garden’s Table 1 and not the Terrace’s — the id, not the label', async () => {
+    await renderOpen();
+
+    fireEvent.click(chip(areaGroup('Garden'), 'Table 1'));
+
+    expect(lastQuery().tableIds).toEqual(['tbl_g1']);
+    // NEGATIVE — the chip with the same text in the other area is untouched.
+    expect(lastQuery().tableIds).not.toContain('tbl_t1');
+    expect(pressed(chip(areaGroup('Terrace'), 'Table 1'))).toBe('false');
+    expect(lastQuery().stationIds).toBeUndefined();
+
+    fireEvent.click(chip(areaGroup('Terrace'), 'Table 1'));
+    expect(lastQuery().tableIds).toEqual(['tbl_g1', 'tbl_t1']);
+
+    /*
+     * …and pressing the Garden's again removes ONLY the Garden's. Asserted on
+     * this axis as well as the station one: the two toggles are separate
+     * functions, and a table toggle that only ever added survived every test
+     * above until this was written (M18 in the record at the foot of the file).
+     */
+    fireEvent.click(chip(areaGroup('Garden'), 'Table 1'));
+    expect(lastQuery().tableIds).toEqual(['tbl_t1']);
+    expect(pressed(chip(areaGroup('Garden'), 'Table 1'))).toBe('false');
+    expect(pressed(chip(areaGroup('Terrace'), 'Table 1'))).toBe('true');
+  });
+
+  it('sends both axes together, with the term, and returns to page 1 for a table as for a station', async () => {
+    await renderOpen({ total: 200 });
+    await type('kottu');
+    await waitFor(() => expect(lastQuery().search).toBe('kottu'));
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    await waitFor(() => expect(lastQuery().page).toBe(2));
+
+    fireEvent.click(chip(areaGroup('Garden'), 'T3'));
+    expect(lastQuery()).toEqual({ page: 1, pageSize: 20, search: 'kottu', tableIds: ['tbl_g3'] });
+
+    fireEvent.click(chip(stationGroup(), 'Hot line'));
+    expect(lastQuery()).toEqual({
+      page: 1,
+      pageSize: 20,
+      search: 'kottu',
+      stationIds: ['stn_hot'],
+      tableIds: ['tbl_g3'],
+    });
+  });
+
+  it('counts the set filters on the button, across both axes, and Clear empties both', async () => {
+    await renderOpen();
+    // NEGATIVE first — no number while nothing is set, and nothing to clear.
+    expect(filtersButton().textContent?.trim()).toBe('Filters');
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull();
+
+    fireEvent.click(chip(stationGroup(), 'Grill'));
+    expect(filtersButton().textContent?.trim()).toBe('Filters · 1');
+    fireEvent.click(chip(areaGroup('Terrace'), 'Table 1'));
+    // One from each axis: the count is of chips, not of axes with something in.
+    expect(filtersButton().textContent?.trim()).toBe('Filters · 2');
+    expect(lastQuery().stationIds).toEqual(['stn_grill']);
+    expect(lastQuery().tableIds).toEqual(['tbl_t1']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+
+    expect(lastQuery().stationIds).toBeUndefined();
+    expect(lastQuery().tableIds).toBeUndefined();
+    expect(lastQuery().page).toBe(1);
+    expect(filtersButton().textContent?.trim()).toBe('Filters');
+    expect(pressed(chip(stationGroup(), 'Grill'))).toBe('false');
+    expect(pressed(chip(areaGroup('Terrace'), 'Table 1'))).toBe('false');
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull();
+    // The panel itself stays open — clearing is not closing.
+    expect(stationGroup()).toBeTruthy();
+  });
+
+  it('keeps the count on a CLOSED panel, so a narrowed list still says why', async () => {
+    await renderOpen();
+    fireEvent.click(chip(stationGroup(), 'Grill'));
+
+    fireEvent.click(filtersButton());
+
+    expect(screen.queryByRole('group', { name: 'Filter by station' })).toBeNull();
+    expect(filtersButton().textContent?.trim()).toBe('Filters · 1');
+    expect(lastQuery().stationIds).toEqual(['stn_grill']);
+  });
+
+  it('says the stations are unavailable when their fetch fails — and still offers the tables', async () => {
+    givePanelItsLists();
+    stationsFn.mockRejectedValue(new Error('offline'));
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(history).toHaveBeenCalled());
+    fireEvent.click(filtersButton());
+
+    await waitFor(() => expect(screen.getByText('Stations unavailable.')).toBeTruthy());
+    /*
+     * NEGATIVE — not the empty-list wording, and not an empty row. A station
+     * group with no chips is exactly what a failed fetch looks like, and "no
+     * active stations" is false on every branch (D152 gives each one a Main).
+     */
+    expect(screen.queryByText('No active stations.')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Filter by station' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Grill' })).toBeNull();
+    // …and the OTHER axis, whose own request succeeded, is intact.
+    await waitFor(() => expect(chip(areaGroup('Garden'), 'T3')).toBeTruthy());
+    expect(chip(areaGroup('Terrace'), 'Table 1')).toBeTruthy();
+    expect(screen.queryByText('Tables unavailable.')).toBeNull();
+  });
+
+  it('says the tables are unavailable when any part of their fetch fails — and still offers the stations', async () => {
+    givePanelItsLists();
+    // The areas arrive; ONE area's tables do not. A silently missing area is a
+    // table nobody can select and no sign that it exists, so the whole group
+    // says so rather than showing the rest as if it were everything.
+    tablesFn.mockImplementation((_s: unknown, areaId: string) =>
+      areaId === 'area_t'
+        ? Promise.reject(new Error('offline'))
+        : Promise.resolve(TABLES[areaId] ?? []),
+    );
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(history).toHaveBeenCalled());
+    fireEvent.click(filtersButton());
+
+    await waitFor(() => expect(screen.getByText('Tables unavailable.')).toBeTruthy());
+    expect(screen.queryByRole('group', { name: 'Filter by table' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'T3' })).toBeNull();
+    expect(screen.queryByText('No tables.')).toBeNull();
+    // The station axis stands.
+    expect(chip(stationGroup(), 'Grill')).toBeTruthy();
+    expect(screen.queryByText('Stations unavailable.')).toBeNull();
+  });
+
+  it('says "no tickets match these filters", not "nothing has reached this kitchen", over an empty filtered page', async () => {
+    await renderOpen();
+    history.mockResolvedValue(page([]));
+
+    fireEvent.click(chip(stationGroup(), 'Grill'));
+
+    await waitFor(() => expect(screen.getByText('No tickets match these filters.')).toBeTruthy());
+    // NEGATIVE — the empty-kitchen wording would tell a branch with a full
+    // history that it had none.
+    expect(screen.queryByText(/have reached this kitchen yet/)).toBeNull();
+
+    // With a term as well, the message names both — a cook who cleared only
+    // the term would otherwise wonder why "nothing matches" nothing.
+    await type('lamprais');
+    await waitFor(() =>
+      expect(screen.getByText('No tickets match “lamprais” under these filters.')).toBeTruthy(),
+    );
+    expect(screen.queryByText('No tickets match these filters.')).toBeNull();
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mutation proofs (D30)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -859,7 +1310,9 @@ describe('the station on the row (D152)', () => {
  *  5. The column moved to the END, after By, so the set is present but the
  *     position is wrong — KILLED.
  *  6. The search hint left at D147's "Search ticket, order, table, or dish…" —
- *     KILLED.
+ *     KILLED. (D175 has since moved the station and the table out of the term;
+ *     the hint's claim, and the mutant that proves it, are in the D175 record
+ *     below.)
  *  7. The cell hard-coded to "Hot line" rather than reading the row — KILLED.
  *  8. The header renamed "Kitchen" with the cell left in place — KILLED.
  *  9. The <td> removed but the <th> left, so every cell after Items shifts one
@@ -1064,3 +1517,58 @@ describe('the D150 dashes can actually fail', () => {
     expect(() => cellUnder(row, 'Station')).toThrow(/would inspect nothing/);
   });
 });
+
+/*
+ * D175's filter claims are about what the screen SENDS, and the ways they go
+ * vacuous are all quiet ones: a chip that renders and is wired to nothing, a
+ * set that never empties, a count that reads one axis, a failed fetch that
+ * looks like an empty list. Two things are shown inline in the block itself —
+ * every request assertion goes through `lastQuery`, which throws rather than
+ * returning `{}` when no request was made, and the fixtures carry an inactive
+ * station, a duplicate "Table 1" and an empty area so that "active only",
+ * "grouped by area" and "no empty heading" each have something to break them.
+ *
+ * Beyond these, the real component was mutated in a scratch copy outside the
+ * repo and this spec re-run against each mutant:
+ *
+ *  1. `stationIds`/`tableIds` dropped from the page-reset effect's deps —
+ *     KILLED (2 tests: both page-1 claims).
+ *  2. `stationIds` never sent to the read — KILLED (5).
+ *  3. The two axes SWAPPED on the wire (tables under `stationIds`) — KILLED (6).
+ *  4. The station toggle only ever adding, never removing — KILLED.
+ *  5. Clear emptying the stations only — KILLED.
+ *  6. The badge counting stations only — KILLED (one from each axis reads 1).
+ *  7. Archived stations offered as chips — KILLED ("Old fryer" appeared).
+ *  8. A failed station fetch stored as `{ ready, rows: [] }`, the silent-empty
+ *     shape — KILLED ("Stations unavailable." missing, empty group present).
+ *  9. The panel open by default — KILLED (10; the "closed until pressed"
+ *     negative and every `renderOpen`, whose click then CLOSED it).
+ * 10. Tables flattened into one row with no area group — KILLED (9).
+ * 11. The search hint left at D152's five-leg wording — KILLED.
+ * 12. The empty state ignoring the filters, "nothing has reached this kitchen"
+ *     over a set Grill chip — KILLED.
+ * 13. The lists fetched on opening the panel rather than on mount — KILLED
+ *     (the endpoints are asserted BEFORE the button is pressed).
+ * 14. An empty set sent as `[]` rather than left off — KILLED (6, including
+ *     D142's own "returns to page 1 when the term narrows", whose exact-shape
+ *     `toEqual` is what makes "absent, not empty" a claim across the file).
+ * 15. The table chip printing the bare code (`t.code`) instead of
+ *     `label ?? Table <code>` — KILLED (9).
+ * 16. One area's failed table fetch swallowed as `[]`, the floor's habit —
+ *     KILLED.
+ * 17. An area with no tables still given a heading — KILLED ("Bar" appeared).
+ * 18. The TABLE toggle only ever adding — SURVIVED on the first run: no test
+ *     pressed a table chip twice, so a second toggle function had no witness.
+ *     The Garden/Terrace test now un-presses the Garden's Table 1 and asserts
+ *     the Terrace's stays — re-run: KILLED.
+ * 19. Table chips wired to the STATION set — KILLED (3).
+ * 20. Areas rendered in list order rather than by floor position — KILLED
+ *     (the fixture lists Terrace before Garden on purpose).
+ *
+ * Not mutated: "no debounce on a chip" has no natural one-line mutant, and is
+ * pinned instead by the shape of the assertion — `lastQuery()` read in the
+ * same act as the click, with no timer advance, where `type` needs 300 ms.
+ *
+ * The repo was restored from the untouched copy after every run, verified by
+ * hash.
+ */

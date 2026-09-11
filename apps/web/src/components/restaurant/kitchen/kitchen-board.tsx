@@ -117,8 +117,9 @@ const URGENCY_TIMER_CLASS: Record<Urgency, string> = {
  * neither is the money. Start/done ripple to the round and any takeaway
  * profile server-side, which is what moves the Orders queue.
  *
- * Polls every 5 s, in ONE request (D154): shorter cadences read as jitter on a
- * wall-mounted screen; longer ones leave a dish sitting unseen while a table
+ * Polls every 5 s, in ONE request (D154; a station cut adds the station's
+ * lane counts beside it — D174, see `load`): shorter cadences read as jitter on
+ * a wall-mounted screen; longer ones leave a dish sitting unseen while a table
  * waits. The poll doubles as the age-escalation tick: every refresh re-renders
  * the cards, which is where the timers and colours advance — and as the
  * chime's watch: a poll that brings an unseen ticket onto "To make" rings the
@@ -150,8 +151,19 @@ export function KitchenBoard({ session, branchId }: Props) {
    *
    * D154 — they ride in the ticket read's envelope now, off the same snapshot,
    * rather than arriving from a second request behind it.
+   *
+   * D174 — under a station cut they are that STATION's numbers, read from the
+   * counts route beside the list (see `load`). The tag records which station a
+   * set answers, on the lesson D154 learned for the rows: state that answers
+   * a question the screen has stopped asking must not be relabelled as the
+   * answer to the new one. `laneCount` reads a set only while its tag is the
+   * station on screen.
    */
-  const [counts, setCounts] = React.useState<KitchenLaneCounts | null>(null);
+  const [counts, setCounts] = React.useState<{
+    /** The station the numbers were read for; `null` is the whole branch. */
+    stationId: string | null;
+    lanes: KitchenLaneCounts;
+  } | null>(null);
 
   /*
    * D152 — the station filter. `null` is every station.
@@ -270,16 +282,37 @@ export function KitchenBoard({ session, branchId }: Props) {
     const chimeKey = `${fetchFilter}|${stationId ?? 'ALL'}`;
     try {
       /*
-       * D154 — ONE request per tick. The lane counts come back with the
-       * tickets, so the board no longer chases `kitchen.laneCounts` after
-       * every list read (the client keeps that call for anything wanting the
-       * numbers alone). Beyond the halved traffic it is one server snapshot,
-       * so the cards and the chips can no longer disagree about a ticket
-       * bumped between two reads.
+       * D154 — ONE request per tick on an unfiltered board. The lane counts
+       * come back with the tickets, so the board does not chase
+       * `kitchen.laneCounts` after every list read. Beyond the halved traffic
+       * it is one server snapshot, so the cards and the chips can no longer
+       * disagree about a ticket bumped between two reads.
+       *
+       * D174 — under a station cut, one more: the station's three lane counts
+       * from the counts route, in parallel. The list itself stays UNSCOPED,
+       * because the station strip below the lanes counts EVERY station's share
+       * of the current lane (D152's "where is the work?") and could not do so
+       * from a list the server had already cut to one. The envelope's own
+       * counts would then be the branch's, which is the number D152 withheld
+       * under a cut and the PO has now asked to see corrected rather than
+       * hidden — so the cut asks the counts route, which takes the same
+       * `stationId` as the list read and is pinned to it server-side, for the
+       * three integers alone. Reading the cut list a second time to get those
+       * integers would fetch every card twice; this fetches them once.
+       *
+       * What that costs: the other lane's number is a second snapshot. The
+       * cards, the active lanes' chips and the strip all still derive from the
+       * one list, so nothing ON SCREEN can disagree with a card the way D154
+       * describes; only a lane with no cards showing reads from the second
+       * read. One failure fails the tick: a banner over five-second-old
+       * numbers, exactly as D154 handles a failed list read.
        */
-      const next = await kitchen.listTickets(session, branchId, fetchFilter);
+      const [next, stationLanes] = await Promise.all([
+        kitchen.listTickets(session, branchId, fetchFilter),
+        stationId ? kitchen.laneCounts(session, branchId, stationId) : null,
+      ]);
       setTickets(next.items);
-      setCounts(next.counts);
+      setCounts({ stationId, lanes: stationLanes ?? next.counts });
       setStatus('ready');
       loadedFetch.current = fetchFilter;
       // The banner is about the LAST poll, not about the mount. Without this a
@@ -471,17 +504,24 @@ export function KitchenBoard({ session, branchId }: Props) {
    * before, and why "Done" showed nothing from To make, and To make and
    * Preparing showed nothing from Done.
    *
-   * D152 — with one exception, and it is the same rule the station cut is
-   * built on. The server's count is BRANCH-wide; it knows nothing of the
-   * station this screen was mounted at. Under a station cut it would promise
-   * a lane the cook cannot reach — "Done 7" on a board that will show two —
-   * so the chip goes bare rather than lying. Every unfiltered board, which is
-   * every single-station branch and every board on "All stations", keeps all
-   * three numbers exactly as D142b left them.
+   * D174 — and that holds under a station cut too. D152 left the other lane's
+   * chip bare under a cut, because the only number the board had was the
+   * BRANCH's and "Done 7" over a lane that would show two is a lie; the PO
+   * has ruled that a bare chip is the worse answer. The lie is now fixed at
+   * its source instead: `load` reads the station's own three numbers, so the
+   * chip carries the count the cook will actually find on that lane. A ticket
+   * from the D147 window belongs to no station and is in no station's number,
+   * exactly as it is on no station's board; it is still in "All stations".
+   *
+   * The one moment a chip is bare is while the numbers in hand answer a
+   * DIFFERENT station from the one selected — the round trip after a station
+   * tap, or a poll that failed on the way. Those are not this station's
+   * numbers, and D154's rule for the rows applies to them: never relabel the
+   * old answer as the new one. The chip fills as soon as the poll lands.
    */
   const laneCount = (key: Filter): number | null => {
     if (FETCH_FOR[key] === FETCH_FOR[filter]) return inLane(scoped, key).length;
-    return stationId ? null : (counts?.[COUNT_KEY[key]] ?? null);
+    return counts?.stationId === stationId ? counts.lanes[COUNT_KEY[key]] : null;
   };
 
   /*
@@ -489,6 +529,11 @@ export function KitchenBoard({ session, branchId }: Props) {
    * they answer "where is the work?" while the lane strip answers "what state
    * is it in?". Deliberately not scoped by `stationId`: a chip that only ever
    * counted its own selection would read zero on every station but one.
+   *
+   * D174 — which is why `load` keeps the list read unscoped and asks the
+   * counts route for the station's lane numbers, rather than cutting the list
+   * on the server: a list the server had cut to Grill holds nothing for these
+   * chips to count for Main.
    */
   const inLaneAllStations = inLane(tickets, filter);
   const stationCount = (id: string): number =>

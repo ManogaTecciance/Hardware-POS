@@ -7693,6 +7693,87 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D175 — the history filters by station and table, and stops searching them
+
+PO, 2026-09-11: "instead of having station and table in search, add a filter
+button that will expand to show multi-filter options for both of them."
+
+**Two search legs become two structured filters.** The history's free-text
+search had five OR legs: ticket number, order number, table/tab/area, station
+name and dish. The station and table legs are gone from it, and the box says
+what remains — ticket, order, dish. In their place a Filters button beside the
+search opens a panel with a Station group and a Table group, each a row of
+multi-select chips, a badge counting active filters, and a Clear action.
+Changing a filter resets to page one exactly as the search does.
+
+On the wire they are repeatable query params, each an array of ids; a ticket
+matches when its station is IN the set AND its table is IN the set, and an
+empty set applies no filter on that axis. Two details of that shape matter.
+An empty set adds no clause at all rather than `in: []`, which is a legal
+clause that matches nothing. And a single value arrives from Express as a
+string, not a one-element array, so the DTO wraps it before validating —
+asserted through a real ValidationPipe with the real options, because a DTO
+that typed the field as an array and received a string is the classic NestJS
+trap and it would have 400'd every one-station filter.
+
+**A takeaway matches only when no table is chosen.** It has no table a person
+would pick, but on the wire it hangs off a synthetic "Walk In" area the server
+creates lazily at position 999 (delivery at 998), because every session needs
+a table row. The area list returns those like any other, and left in they put
+a "Walk In" chip in the panel whose selection would ADMIT takeaway tickets —
+the opposite of what "filter by table" means. The panel hides areas at or above
+position 998; the floor plan does not, because it wants to show them. Found by
+a verifier, not by the author.
+
+The Station column and the em dash for a stationless ticket are exactly as
+D152 left them.
+
+### D174 — every lane chip carries its number under a station cut too
+
+PO, 2026-09-11: "the Done tab is only showing the counter next to it while in
+the All stations sub tab."
+
+**This was a choice, and it was the wrong one.** D152 restored the station
+filter and, on the lane the board is not fetching, withheld the chip's number
+whenever a station was selected — the count came from the server and the
+server counted the branch, so "Done 7" over a lane that would show two cards
+was judged worse than no number. The PO has ruled that D142b's rule stands
+without exception: every chip carries its number, whichever lane is open, and
+under a cut it is the STATION's number.
+
+**Solved at the source, not by withholding.** The list read and the standalone
+counts route both take an optional `stationId`. It is one more clause on the
+SAME shared count queries, not a second definition, so the two exposures stay
+pinned to each other: an integration test asserts the envelope's counts equal
+the counts route's for the same station, across every lane. Omitted, both
+routes emit byte-for-byte what they did. A stationless ticket from the D147
+window belongs to no station, so it is in the "All stations" numbers and in
+no station's — equality never matches null.
+
+**The board keeps its list UNSCOPED, and that is the interesting decision.** The
+contract as first written had the board pass the station on the list read. A
+verifier showed why it cannot: the station strip under the lanes counts EVERY
+station's share of the current lane — D152's "where is the work?" — and from a
+list the server had already cut to one station every other chip would read
+zero, the exact failure D152's own comment forbids. So the board reads the
+whole lane, cuts it client-side for the cards and the active chips, and under
+a cut asks the counts route for the one lane it is not showing. An unfiltered
+board is still one request per tick (D154); a cut is two. The alternatives —
+reading the cut list a second time, or per-station counts in every envelope —
+cost more for the same three integers.
+
+What that costs: under a cut the off-lane chip is a second snapshot, so a bump
+landing between the two concurrent reads can leave a card on To make while
+Done counts it, for one tick. Narrowed to milliseconds and self-healing; the
+PO prefers a number to a blank.
+
+**REPEATABLE READ is now asserted, on both reads.** D154 pinned the list read
+at that level and said so; D174 gives the counts route the same, since it now
+feeds a chip. A verifier dropped the option from both and every test stayed
+green — the stub's one-argument signature had made the isolation level
+invisible to the spec for a decision and a half. Both are pinned now, and both
+mutants die.
+
 ### D173 — merging `feature/retail-template-v2`: how each clash was decided
 
 Seventeen commits from the same `c3c316f` fork the restaurant branch came from:

@@ -30,6 +30,16 @@
  *     unlinked dish reaching a ticket proves nothing at a one-station branch
  *     — D67's retired sole-station sweep did that much — and a build
  *     resolving Main by display name would send it to the demo hot line.
+ *   • D174's station cut is asserted with every number DISTINCT — per lane,
+ *     per station, and against the branch — so a chip counting the other
+ *     station, the branch, or the open lane each land on a different wrong
+ *     integer; and with a D147-window ticket on no station that is in the
+ *     branch's numbers and in neither station's.
+ *   • D175's filters are asserted as SETS of ticket ids over real rows, never
+ *     as totals alone, and every negative — a leg gone from the search, a
+ *     takeaway absent under a table set, a stationless ticket outside every
+ *     station's set — is paired with the read that still finds the same
+ *     ticket the way the contract now says it is found.
  */
 import {
   seedTenantRoles,
@@ -145,12 +155,15 @@ const board = (query = '') =>
  * D154 moved the board off this route and deliberately left it standing: it
  * is the cheap read for a caller that wants the chips without the lane. Which
  * is precisely why the two exposures now have to be pinned to each other —
- * see the last test in this file.
+ * see the D154 and D174 describes at the end of this file.
+ *
+ * D174 — it takes the same `?stationId=` the list does, for the same reason:
+ * pinned to a station, the two exposures still have to agree.
  */
-const laneCounts = () =>
+const laneCounts = (query = '') =>
   http.request<LaneCounts>(
     'GET',
-    `/restaurant/branches/${branchId}/kitchen-tickets/counts`,
+    `/restaurant/branches/${branchId}/kitchen-tickets/counts${query}`,
     { token: kitchenToken() },
   );
 
@@ -1537,7 +1550,7 @@ describe('D142 — today on the board, everything in the history', () => {
     expect([...ids].sort()).toEqual([...ticketIds].sort());
   });
 
-  it('searches the ticket number and the dish, and narrows rather than empties', async () => {
+  it('searches the ticket number and the dish; the station and the table are filters now', async () => {
     await sendRound();
     const ticketId = (await board('?status=OUTSTANDING')).data.items[0]!.id;
     const bumped = await bump(ticketId);
@@ -1551,21 +1564,55 @@ describe('D142 — today on the board, everything in the history', () => {
     expect((await history(`?search=${encodeURIComponent(fragment)}`)).data.total).toBe(1);
     expect((await history()).data.total).toBe(1);
     /*
-     * D152 — and a fourth way in: the STATION that cooked it. This leg left
-     * the search with the split and comes back with it, and it is the one that
-     * answers "what did the grill have on last Friday". 'pass' matches no KOT
-     * number, no RO number, no dish name and no part of "T7 · Terrace", so a
-     * hit here can only have come through the station join.
+     * D175 — the STATION is no longer a way in through the search box.
+     *
+     * D152 had put a station-name leg on the search, and this test asserted
+     * that `?search=pass` found the ticket. That is genuinely false now, so
+     * it is rewritten to the new truth rather than deleted (D16): 'pass'
+     * matches no KOT number, no RO number and no dish, and the leg that used
+     * to carry it to the station join is gone — "what did the grill have on
+     * last Friday" is asked of the station FILTER instead.
+     *
+     * The claim is made over the exact set of station names the branch has —
+     * Pass, which cooked this ticket, and Main, which the submit created and
+     * did not — rather than over one name typed into the spec. 'pass' is the
+     * line that discriminates: 1 before D175, 0 now. 'main' was 0 both before
+     * and after (the retired leg matched the ticket's OWN station, and that
+     * pair used to prove it), and is here so the set is the whole set.
      */
-    expect((await history('?search=pass')).data.total).toBe(1);
+    const stationNames = (
+      await prisma.kitchenStation.findMany({ where: { branchId }, select: { name: true } })
+    ).map((s) => s.name);
+    expect([...stationNames].sort()).toEqual(['Main', 'Pass']);
+    for (const name of stationNames) {
+      const total = (await history(`?search=${encodeURIComponent(name.toLowerCase())}`)).data.total;
+      expect({ name, total }).toEqual({ name, total: 0 });
+    }
     /*
-     * NEGATIVE, paired — 'main' is a station this branch really HAS (the
-     * submit created it) and it did not cook this ticket. Without this the
-     * positive above would also hold for a leg that matched any station in the
-     * branch rather than the ticket's own.
+     * POSITIVE CONTROLS for those zeroes (D30). The ticket really IS Pass's —
+     * the name is on the row this same read returns — and the station is
+     * still a way in, through the structured filter that replaced the leg.
+     * Without both, the zeroes would also hold for a fixture that never
+     * linked the dish to Pass, and for a build that had lost the station.
      */
-    expect(await prisma.kitchenStation.count({ where: { branchId, code: 'MAIN' } })).toBe(1);
-    expect((await history('?search=main')).data.total).toBe(0);
+    const row = (await history()).data.items[0]!;
+    expect(row.stationName).toBe('Pass');
+    expect((await history(`?stationId=${stationId}`)).data.items.map((t) => t.id)).toEqual([
+      ticketId,
+    ]);
+    /*
+     * D175 — the TABLE/tab/area leg went with it. 'T7' and 'terrace' are both
+     * on this row's own place label and neither finds anything now; the
+     * table is `?tableId=`, and that read is the positive paired with them.
+     */
+    expect(row.placeLabel).toBe('T7 · Terrace');
+    expect((await history('?search=T7')).data.total).toBe(0);
+    expect((await history('?search=terrace')).data.total).toBe(0);
+    const t7 = await prisma.restaurantTable.findFirstOrThrow({
+      where: { branchId, code: 'T7' },
+      select: { id: true },
+    });
+    expect((await history(`?tableId=${t7.id}`)).data.items.map((t) => t.id)).toEqual([ticketId]);
     // NEGATIVE — a term that matches nothing returns nothing, so the positives
     // above are not simply an unfiltered list.
     expect((await history('?search=zzzznotathing')).data.total).toBe(0);
@@ -1980,6 +2027,733 @@ describe('D154 — the list envelope carries the counts route’s own numbers', 
     );
     expect([...(await board('?status=OUTSTANDING')).data.items.map((t) => t.id)].sort()).toEqual(
       [...queue.slice(2)].sort(),
+    );
+  });
+});
+
+/*
+ * D174 — a station scopes the list AND the counts, together, over real rows.
+ *
+ * The PO's report: on the kitchen page the Done tab carried a number only
+ * while "All stations" was selected. That was D152's own doing — on the lane
+ * the board was not fetching, `laneCount` answered null under a station cut,
+ * because the counts came from the server and the server counted the BRANCH,
+ * and "Done 7" over a lane about to draw the grill's two cards was judged
+ * worse than no number. The PO ruled otherwise: D142b's rule that EVERY chip
+ * carries its number holds under a station cut too, and the number is that
+ * station's own. So `?stationId=` narrows the list and all three counts in
+ * the one snapshot D154 made, and the standalone counts route takes the same
+ * param so the two exposures stay pinned to each other.
+ *
+ * The unit specs pin the SHAPE — one station key on all four queries, in one
+ * transaction. What only real rows can prove is that Postgres, given that
+ * shape, hands back the station's tickets AND the station's numbers, and that
+ * the counts route — its own DTO, its own guard — says the same three
+ * integers. The fixture is therefore built the way D154's was, with every
+ * number DISTINCT per lane, per station, and against the branch, so a chip
+ * counting the other station, the branch, or the open lane each land on a
+ * different wrong integer:
+ *
+ *   Pass    { 4, 2, 1 }
+ *   Grill   { 2, 1, 3 }   plus one bumped three days ago: completed, NOT today
+ *   (none)  { 1, 0, 0 }   a D147-window ticket, its stationId nulled by hand
+ *   branch  { 7, 3, 4 }   = Pass + Grill + (none), lane by lane
+ *
+ * The stationless row is load-bearing. D174 says a ticket cut during the D147
+ * window belongs to NO station and is therefore in no station's count, while
+ * it is still in the "All stations" numbers. Without it the branch total would
+ * simply be the two stations' sum, and a build that folded a null-station row
+ * into whichever station was asked for would pass every assertion here.
+ */
+describe('D174 — a station scopes the list and the counts together', () => {
+  let grillStationId: string;
+  let grillProductId: string;
+  interface Lanes {
+    queued: string[];
+    preparing: string[];
+    doneToday: string[];
+  }
+  let pass: Lanes;
+  /** Grill also holds a ticket bumped OUTSIDE the day: completed, not Done. */
+  let grill: Lanes & { doneBefore: string };
+  /** The D147-window shape: a real, queued ticket on no station at all. */
+  let stationless: string;
+
+  const PASS_COUNTS: LaneCounts = { toMake: 4, preparing: 2, doneToday: 1 };
+  const GRILL_COUNTS: LaneCounts = { toMake: 2, preparing: 1, doneToday: 3 };
+  const BRANCH_COUNTS: LaneCounts = { toMake: 7, preparing: 3, doneToday: 4 };
+  const NOTHING: LaneCounts = { toMake: 0, preparing: 0, doneToday: 0 };
+
+  const start = (ticketId: string) =>
+    http.request('POST', `/restaurant/branches/${branchId}/kitchen-tickets/${ticketId}/start`, {
+      token: kitchenToken(),
+    });
+
+  /** The ids on a page, order-free: the lanes sort by different keys. */
+  const ids = (res: { data: { items: TicketView[] } }) =>
+    [...res.data.items.map((t) => t.id)].sort();
+
+  /** One round holding a dish for EACH station: two tickets, keyed by station. */
+  const sendPair = async (key: string) => {
+    const sent = await http.request<{ id: string }>(
+      'POST',
+      `/restaurant/orders/${orderId}/rounds`,
+      {
+        token: ownerToken(),
+        body: {
+          idempotencyKey: key,
+          items: [
+            { sourceKind: 'PRODUCT', productId, quantity: '1' }, // Beef Steak → Pass
+            { sourceKind: 'PRODUCT', productId: grillProductId, quantity: '1' }, // → Grill
+          ],
+        },
+      },
+    );
+    expect(sent.status).toBe(201);
+    const rows = await prisma.kitchenTicket.findMany({
+      where: { roundId: sent.data.id },
+      select: { id: true, stationId: true },
+    });
+    // D152's split, relied on rather than re-proven here: exactly one ticket
+    // per station. A fixture that lost one must fail HERE, not three
+    // assertions later as an off-by-one in a chip.
+    expect([...rows.map((r) => r.stationId)].sort()).toEqual([stationId, grillStationId].sort());
+    return {
+      pass: rows.find((r) => r.stationId === stationId)!.id,
+      grill: rows.find((r) => r.stationId === grillStationId)!.id,
+    };
+  };
+
+  beforeEach(async () => {
+    const station = await prisma.kitchenStation.create({
+      data: { tenantId: restaurant.tenantId, branchId, code: 'GRILL', name: 'Grill' },
+    });
+    grillStationId = station.id;
+    const product = await prisma.product.create({
+      data: {
+        tenantId: restaurant.tenantId,
+        name: 'Grilled Seer Fish',
+        type: 'Inventory',
+        sku: 'RST-SEER',
+        unitPrice: '900.00',
+        // D65 — a round DEPLETES stock at submit; seven of them need it.
+        quantityOnHand: '100.000',
+        isActive: true,
+      },
+    });
+    grillProductId = product.id;
+    await prisma.productStationLink.create({
+      data: { productId: product.id, stationId: grillStationId },
+    });
+
+    const pairs: { pass: string; grill: string }[] = [];
+    for (let i = 0; i < 7; i += 1) pairs.push(await sendPair(`d174-pair-${i}`));
+    const p = pairs.map((x) => x.pass);
+    const g = pairs.map((x) => x.grill);
+
+    // Pass: two started, one bumped, four left queued → { 4, 2, 1 }.
+    await start(p[0]!);
+    await start(p[1]!);
+    await bump(p[2]!);
+    pass = { queued: p.slice(3), preparing: [p[0]!, p[1]!], doneToday: [p[2]!] };
+
+    // Grill: one started, three bumped today, one bumped and moved out of the
+    // day, two left queued → { 2, 1, 3 } with a fourth COMPLETED row the Done
+    // chip must not see.
+    await start(g[0]!);
+    for (const id of [g[1]!, g[2]!, g[3]!, g[4]!]) await bump(id);
+    await backdate(g[4]!, 3);
+    grill = {
+      queued: g.slice(5),
+      preparing: [g[0]!],
+      doneToday: [g[1]!, g[2]!, g[3]!],
+      doneBefore: g[4]!,
+    };
+
+    /*
+     * The D147-window row: cut on Pass by the ordinary path, then its station
+     * removed by hand, exactly as `backdate` makes yesterday — there is no
+     * verb for it and there must not be. Asserting it WAS Pass's first is
+     * what makes its absence from Pass's numbers below the null's doing, and
+     * not a fixture that never routed it.
+     */
+    const lone = await sendRound();
+    expect(lone.status).toBe(201);
+    const loneRow = await prisma.kitchenTicket.findFirstOrThrow({
+      where: { roundId: lone.data.id },
+      select: { id: true, stationId: true },
+    });
+    expect(loneRow.stationId).toBe(stationId);
+    await prisma.kitchenTicket.update({ where: { id: loneRow.id }, data: { stationId: null } });
+    stationless = loneRow.id;
+  });
+
+  it('?stationId=A returns A’s tickets and A’s three numbers, and the counts route agrees exactly', async () => {
+    const stations: { name: string; id: string; lanes: Lanes; expected: LaneCounts }[] = [
+      { name: 'Pass', id: stationId, lanes: pass, expected: PASS_COUNTS },
+      { name: 'Grill', id: grillStationId, lanes: grill, expected: GRILL_COUNTS },
+    ];
+    for (const { name, id, lanes, expected } of stations) {
+      // The station travels INSIDE every compared value, for the same reason
+      // D154 carries the lane: a bare mismatch on the second pass would not
+      // say which station produced it.
+      const outstanding = await board(`?status=OUTSTANDING&stationId=${id}`);
+      expect({ name, status: outstanding.status }).toEqual({ name, status: 200 });
+      // POSITIVE — the LIST is that station's slice of the lane: exactly its
+      // queued and started tickets, each card naming the station asked for.
+      expect({ name, ids: ids(outstanding) }).toEqual({
+        name,
+        ids: [...lanes.queued, ...lanes.preparing].sort(),
+      });
+      expect(outstanding.data.items.every((t) => t.stationId === id)).toBe(true);
+      // …and the COUNTS are that station's, NAMED — not the branch's, not the
+      // other station's, and not a count of the rows just listed (which would
+      // put 6 on a chip that must say 4).
+      expect({ name, counts: outstanding.data.counts }).toEqual({ name, counts: expected });
+
+      const done = await board(`?status=COMPLETED_TODAY&stationId=${id}`);
+      expect({ name, ids: ids(done) }).toEqual({ name, ids: [...lanes.doneToday].sort() });
+      expect({ name, counts: done.data.counts }).toEqual({ name, counts: expected });
+
+      // The standalone route, same param: the two exposures pinned to each
+      // other under a station cut, as D154 pinned them without one.
+      const standalone = await laneCounts(`?stationId=${id}`);
+      expect({ name, status: standalone.status }).toEqual({ name, status: 200 });
+      expect({ name, counts: standalone.data }).toEqual({ name, counts: expected });
+    }
+
+    /*
+     * …and the chips partition the lane the way the lists do (D142b, per
+     * station): Pass's outstanding cards number 4 + 2, Grill's 2 + 1, and the
+     * two slices share no ticket. A chip is a promise about a list; this is
+     * the line that reads the promise and the list against each other.
+     */
+    const passIds = ids(await board(`?status=OUTSTANDING&stationId=${stationId}`));
+    const grillIds = ids(await board(`?status=OUTSTANDING&stationId=${grillStationId}`));
+    expect(passIds).toHaveLength(PASS_COUNTS.toMake + PASS_COUNTS.preparing);
+    expect(grillIds).toHaveLength(GRILL_COUNTS.toMake + GRILL_COUNTS.preparing);
+    expect(passIds.filter((id) => grillIds.includes(id))).toEqual([]);
+  });
+
+  it('D142’s day bound holds under the station cut, on the lane and on the chip', async () => {
+    // POSITIVE — Grill has FOUR completed tickets when the day is not cut…
+    const everCompleted = await board(`?status=COMPLETED&stationId=${grillStationId}`);
+    expect(ids(everCompleted)).toEqual([...grill.doneToday, grill.doneBefore].sort());
+    // …and three on Done, because one finished three days ago.
+    const today = await board(`?status=COMPLETED_TODAY&stationId=${grillStationId}`);
+    expect(ids(today)).toEqual([...grill.doneToday].sort());
+    expect(ids(today)).not.toContain(grill.doneBefore);
+    // NEGATIVE — the chip says three, not four, on both exposures: a station-
+    // scoped count that had lost the day bound would say 4 here.
+    expect(today.data.counts.doneToday).toBe(3);
+    expect((await laneCounts(`?stationId=${grillStationId}`)).data.doneToday).toBe(3);
+    // …and the branch's Done chip is 4, not 5, for the same reason — the
+    // backdated bump is out of the day on every scope.
+    expect((await laneCounts()).data.doneToday).toBe(4);
+  });
+
+  it('every chip carries its number whichever lane is open — the PO’s Done tab, under a station cut', async () => {
+    /*
+     * THE REPORT: on Done with a station selected, only the Done chip had a
+     * number. The envelope now carries all three, and they must not move with
+     * `?status=` — the loop D154 runs for the branch, run for one station. The
+     * Cancelled lane is again the sharpest: zero cards, and the chips still
+     * say 2/1/3.
+     */
+    const standalone = (await laneCounts(`?stationId=${grillStationId}`)).data;
+    expect(standalone).toEqual(GRILL_COUNTS);
+
+    const lanes = [
+      '',
+      '?status=OUTSTANDING',
+      '?status=COMPLETED_TODAY',
+      '?status=COMPLETED',
+      '?status=CANCELLED',
+    ];
+    for (const filter of lanes) {
+      const tick = await board(`${filter}${filter ? '&' : '?'}stationId=${grillStationId}`);
+      expect({ filter, status: tick.status }).toEqual({ filter, status: 200 });
+      expect({ filter, counts: tick.data.counts }).toEqual({ filter, counts: standalone });
+    }
+
+    // …and those were different reads: the lane moved with `?status=` even
+    // though the chips did not.
+    expect((await board(`?status=CANCELLED&stationId=${grillStationId}`)).data.items).toHaveLength(
+      0,
+    );
+    expect(ids(await board(`?status=OUTSTANDING&stationId=${grillStationId}`))).toEqual(
+      [...grill.queued, ...grill.preparing].sort(),
+    );
+    expect(ids(await board(`?status=COMPLETED_TODAY&stationId=${grillStationId}`))).toEqual(
+      [...grill.doneToday].sort(),
+    );
+    // Standing on Done, pinned to Grill: the To make and Preparing chips —
+    // the ones D152 blanked — carry Grill's 2 and 1, not null and not the
+    // branch's 7 and 3.
+    const onDone = (await board(`?status=COMPLETED_TODAY&stationId=${grillStationId}`)).data.counts;
+    expect(onDone.toMake).toBe(2);
+    expect(onDone.preparing).toBe(1);
+    expect(onDone).not.toEqual(BRANCH_COUNTS);
+  });
+
+  it('omitted, both exposures answer the branch: each station’s numbers plus the ticket on no station', async () => {
+    /*
+     * The pre-D174 read, byte-for-byte: the existing D142b and D154 tests
+     * pin its numbers for their own fixtures and keep passing unchanged. What
+     * is added here is the ARITHMETIC — the branch's three numbers are the
+     * two stations' three numbers plus the one ticket that belongs to
+     * neither, lane by lane, read from the server rather than typed in.
+     */
+    const branch = (await laneCounts()).data;
+    expect(branch).toEqual(BRANCH_COUNTS);
+    expect((await board()).data.counts).toEqual(BRANCH_COUNTS);
+    // An empty `?stationId=` is omitted, the way a blank search is: a client
+    // that sent the key with nothing in it asked for the branch, not for a
+    // station named '' — which would otherwise answer three zeroes.
+    expect((await board('?stationId=')).data.counts).toEqual(BRANCH_COUNTS);
+    expect((await laneCounts('?stationId=')).data).toEqual(BRANCH_COUNTS);
+
+    const passRead = (await laneCounts(`?stationId=${stationId}`)).data;
+    const grillRead = (await laneCounts(`?stationId=${grillStationId}`)).data;
+    expect(branch).toEqual({
+      toMake: passRead.toMake + grillRead.toMake + 1, // + the ticket on no station
+      preparing: passRead.preparing + grillRead.preparing,
+      doneToday: passRead.doneToday + grillRead.doneToday,
+    });
+
+    /*
+     * The D147-window ticket: on the branch's lane, on NEITHER station's.
+     * A ticket cut during that window carries a null `stationId`; equality
+     * matches nothing null, so it is in no station's list or count and only
+     * in the "All stations" numbers. That is the truth about the row, not a
+     * gap: inventing a station for it is the backfill D152 declined to write.
+     */
+    const branchLane = await board('?status=OUTSTANDING');
+    expect(ids(branchLane)).toContain(stationless);
+    expect(ids(branchLane)).toHaveLength(10); // 4 + 2 Pass, 2 + 1 Grill, and it
+    expect(ids(await board(`?status=OUTSTANDING&stationId=${stationId}`))).not.toContain(
+      stationless,
+    );
+    expect(ids(await board(`?status=OUTSTANDING&stationId=${grillStationId}`))).not.toContain(
+      stationless,
+    );
+    // POSITIVE CONTROL — the row really carries no station and is really
+    // queued, on the wire and in the column: the exclusions above are the
+    // null's doing and not a lane's. (That it WAS Pass's is asserted in the
+    // fixture, before the null is written.)
+    const card = branchLane.data.items.find((t) => t.id === stationless)!;
+    expect({
+      stationId: card.stationId,
+      stationName: card.stationName,
+      status: card.status,
+    }).toEqual({ stationId: null, stationName: null, status: 'QUEUED' });
+    const row = await prisma.kitchenTicket.findUniqueOrThrow({
+      where: { id: stationless },
+      select: { stationId: true, status: true },
+    });
+    expect(row).toEqual({ stationId: null, status: 'QUEUED' });
+  });
+
+  it('a station the branch does not have answers empty and zero on both routes — not 400', async () => {
+    /*
+     * A board whose selected station was archived mid-shift keeps polling
+     * with its id. Empty lists and three zeroes are the truth about that
+     * station here; a 400 would be an error the board cannot recover from
+     * without a reload, which is why the DTO bounds the string and checks it
+     * against nothing.
+     */
+    const tick = await board('?status=OUTSTANDING&stationId=no-such-station');
+    expect(tick.status).toBe(200);
+    expect(tick.data.items).toEqual([]);
+    expect(tick.data.counts).toEqual(NOTHING);
+    const standalone = await laneCounts('?stationId=no-such-station');
+    expect(standalone.status).toBe(200);
+    expect(standalone.data).toEqual(NOTHING);
+    // POSITIVE CONTROL — the same lane, unpinned, has ten cards and the
+    // branch's numbers: the empties above are the station's, not the branch's.
+    const unpinned = await board('?status=OUTSTANDING');
+    expect(unpinned.data.items).toHaveLength(10);
+    expect(unpinned.data.counts).toEqual(BRANCH_COUNTS);
+  });
+});
+
+/*
+ * D175 — station and table are STRUCTURED filters on the history, and the
+ * search keeps the three things a person would type.
+ *
+ * Until now the search box had five OR legs on the server — ticket number,
+ * order number, table/tab/area, station name, item name — and "grill" typed
+ * into it found the grill's tickets AND every Grilled Seer Fish the pass had
+ * ever cooked. The PO asked for a Filters button instead: a multi-select for
+ * the station and one for the table, each a SET of ids. A ticket is on the
+ * page when its station is IN the station set AND its session's table is IN
+ * the table set; an empty set is no filter on that axis. A takeaway ticket
+ * has no table and matches only while the table axis is unfiltered.
+ *
+ * The unit spec pins the emitted `where`. What only rows can prove is that the
+ * two axes really are AND-ed across and OR-ed within, that the table clause
+ * really reaches through the SESSION (a ticket carries no table of its own),
+ * and that the two retired legs are gone from the wire — so this fixture is
+ * arranged for every query below to answer a DIFFERENT set of ids:
+ *
+ *   A  Pass    T7   round 1        D  Pastry  T8   round 2
+ *   B  Grill   T7   round 1        E  Pass    takeaway
+ *   C  Pass    T8   round 2        F  (none)  T7   round 3, stationId nulled
+ *
+ * F is the D147-window shape again: on a table, on no station, so the two
+ * axes can be told apart — the table set finds it, and the union of EVERY
+ * station in the branch does not. And every set assertion is on ids, never on
+ * a total alone: a total of 3 is satisfied by three wrong tickets.
+ */
+describe('D175 — the history’s structured filters', () => {
+  let grillStationId: string;
+  let pastryStationId: string;
+  let grillProductId: string;
+  let pastryProductId: string;
+  let t7: string;
+  let t8: string;
+  /** T8's open order — called off in the table test to prove D115 holds under a table set. */
+  let order2Id: string;
+  let A: string;
+  let B: string;
+  let C: string;
+  let D: string;
+  let E: string;
+  let F: string;
+
+  /** One page of the history, with the query inside the status assertion. */
+  const page = async (query: string) => {
+    const res = await history(query);
+    expect({ query, status: res.status }).toEqual({ query, status: 200 });
+    return res.data;
+  };
+  /** The ids on a page, order-free: the D150 ordering is pinned elsewhere. */
+  const idsOf = async (query: string) => [...(await page(query)).items.map((t) => t.id)].sort();
+  const set = (...ticketIds: string[]) => [...ticketIds].sort();
+
+  beforeEach(async () => {
+    const mkStation = async (code: string, name: string) =>
+      (
+        await prisma.kitchenStation.create({
+          data: { tenantId: restaurant.tenantId, branchId, code, name },
+        })
+      ).id;
+    const mkProduct = async (name: string, sku: string, station: string) => {
+      const product = await prisma.product.create({
+        data: {
+          tenantId: restaurant.tenantId,
+          name,
+          type: 'Inventory',
+          sku,
+          unitPrice: '900.00',
+          quantityOnHand: '100.000',
+          isActive: true,
+        },
+      });
+      await prisma.productStationLink.create({
+        data: { productId: product.id, stationId: station },
+      });
+      return product.id;
+    };
+    grillStationId = await mkStation('GRILL', 'Grill');
+    pastryStationId = await mkStation('PASTRY', 'Pastry');
+    grillProductId = await mkProduct('Grilled Seer Fish', 'RST-SEER', grillStationId);
+    pastryProductId = await mkProduct('Watalappan', 'RST-WATA', pastryStationId);
+
+    /*
+     * T7 is the outer fixture's table and `orderId` its open order. T8 sits
+     * in the SAME area, so 'terrace' would have matched every dine-in ticket
+     * here through the retired leg — the sharpest zero available for it.
+     */
+    const terrace = await prisma.diningArea.findFirstOrThrow({
+      where: { branchId, name: 'Terrace' },
+      select: { id: true },
+    });
+    t7 = (
+      await prisma.restaurantTable.findFirstOrThrow({
+        where: { branchId, code: 'T7' },
+        select: { id: true },
+      })
+    ).id;
+    t8 = (
+      await prisma.restaurantTable.create({
+        data: {
+          tenantId: restaurant.tenantId,
+          branchId,
+          areaId: terrace.id,
+          code: 'T8',
+          capacity: 2,
+        },
+      })
+    ).id;
+    const session2 = await http.request<{ id: string }>(
+      'POST',
+      `/restaurant/branches/${branchId}/table-sessions`,
+      { token: ownerToken(), body: { tableId: t8 } },
+    );
+    expect(session2.status).toBe(201);
+    const order2 = await http.request<{ id: string }>(
+      'POST',
+      `/restaurant/table-sessions/${session2.data.id}/orders`,
+      { token: ownerToken() },
+    );
+    expect(order2.status).toBe(201);
+    order2Id = order2.data.id;
+
+    /** Send a round and hand back its tickets keyed by the station that cut them. */
+    const send = async (
+      order: string,
+      key: string,
+      items: { productId: string; quantity: string }[],
+    ) => {
+      const sent = await http.request<{ id: string }>(
+        'POST',
+        `/restaurant/orders/${order}/rounds`,
+        {
+          token: ownerToken(),
+          body: { idempotencyKey: key, items: items.map((i) => ({ sourceKind: 'PRODUCT', ...i })) },
+        },
+      );
+      expect(sent.status).toBe(201);
+      const rows = await prisma.kitchenTicket.findMany({
+        where: { roundId: sent.data.id },
+        select: { id: true, stationId: true },
+      });
+      // One dish per station per round, so D152's split is one ticket per
+      // line — checked here so a fixture that lost one fails as a fixture.
+      expect(rows).toHaveLength(items.length);
+      return new Map(rows.map((r) => [r.stationId, r.id]));
+    };
+    const round1 = await send(orderId, 'd175-r1', [
+      { productId, quantity: '1' }, // Beef Steak → Pass
+      { productId: grillProductId, quantity: '1' }, // → Grill
+    ]);
+    A = round1.get(stationId)!;
+    B = round1.get(grillStationId)!;
+    const round2 = await send(order2.data.id, 'd175-r2', [
+      { productId, quantity: '1' }, // Beef Steak → Pass
+      { productId: pastryProductId, quantity: '1' }, // → Pastry
+    ]);
+    C = round2.get(stationId)!;
+    D = round2.get(pastryStationId)!;
+
+    // E — a takeaway, through the real route, so its session hangs off
+    // whatever the takeaway path gives it and not off a table this spec chose.
+    const takeaway = await http.request<{ id: string; orderId: string }>(
+      'POST',
+      `/restaurant/takeaway`,
+      {
+        token: ownerToken(),
+        body: {
+          branchId,
+          idempotencyKey: 'd175-takeaway',
+          items: [{ sourceKind: 'PRODUCT', productId, quantity: 1 }],
+        },
+      },
+    );
+    expect(takeaway.status).toBe(201);
+    E = (
+      await prisma.kitchenTicket.findFirstOrThrow({
+        where: { round: { orderId: takeaway.data.orderId } },
+        select: { id: true },
+      })
+    ).id;
+
+    // F — cut on Pass, at T7, then its station removed by hand: the D147
+    // window's shape, made the way `backdate` makes yesterday.
+    const round3 = await send(orderId, 'd175-r3', [{ productId, quantity: '1' }]);
+    F = round3.get(stationId)!;
+    await prisma.kitchenTicket.update({ where: { id: F }, data: { stationId: null } });
+  });
+
+  it('with no filter set, reads all six — the set the assertions below carve up', async () => {
+    const all = await page('');
+    expect(set(...all.items.map((t) => t.id))).toEqual(set(A, B, C, D, E, F));
+    expect(all.total).toBe(6);
+    /*
+     * The facts every filter below turns on, read off the WIRE rather than
+     * assumed from the fixture: which station each was cut on, which table
+     * each sits at, that E is the takeaway, and that F is on no station.
+     */
+    const byId = new Map(all.items.map((t) => [t.id, t]));
+    const shape = (id: string) => {
+      const t = byId.get(id)!;
+      return { station: t.stationName, place: t.placeLabel };
+    };
+    expect(shape(A)).toEqual({ station: 'Pass', place: 'T7 · Terrace' });
+    expect(shape(B)).toEqual({ station: 'Grill', place: 'T7 · Terrace' });
+    expect(shape(C)).toEqual({ station: 'Pass', place: 'T8 · Terrace' });
+    expect(shape(D)).toEqual({ station: 'Pastry', place: 'T8 · Terrace' });
+    expect(shape(E)).toEqual({ station: 'Pass', place: 'Takeaway' });
+    expect(shape(F)).toEqual({ station: null, place: 'T7 · Terrace' });
+    expect(byId.get(F)!.stationId).toBeNull();
+  });
+
+  it('?stationId=a&stationId=b is the union on the station axis, and no station’s set holds a D147-window ticket', async () => {
+    // POSITIVE — one station, then another, then both: the sets, not the totals.
+    expect(await idsOf(`?stationId=${stationId}`)).toEqual(set(A, C, E));
+    expect(await idsOf(`?stationId=${grillStationId}`)).toEqual(set(B));
+    expect(await idsOf(`?stationId=${stationId}&stationId=${grillStationId}`)).toEqual(
+      set(A, B, C, E),
+    );
+    // …and the total is of the filtered set, so the pager cannot promise a
+    // page of the branch's tickets over a page of the station's.
+    expect((await page(`?stationId=${stationId}`)).total).toBe(3);
+
+    /*
+     * NEGATIVE — the union of EVERY station the branch has is still not the
+     * whole list: F belongs to none of them. `IN` never matches null, so a
+     * ticket cut during the D147 window is in no station's set and only on
+     * the unfiltered page — the same truth D174 states for the lane counts.
+     * "Every station" is checked rather than assumed: the four ids below are
+     * the branch's whole station table, Main (created by the submits) included.
+     */
+    const main = await prisma.kitchenStation.findFirstOrThrow({
+      where: { branchId, code: 'MAIN' },
+      select: { id: true },
+    });
+    expect(
+      (await prisma.kitchenStation.findMany({ where: { branchId }, select: { id: true } }))
+        .map((s) => s.id)
+        .sort(),
+    ).toEqual(set(stationId, grillStationId, pastryStationId, main.id));
+    const everyStation = [stationId, grillStationId, pastryStationId, main.id]
+      .map((id) => `stationId=${id}`)
+      .join('&');
+    expect(await idsOf(`?${everyStation}`)).toEqual(set(A, B, C, D, E));
+    // POSITIVE CONTROL — F is on the unfiltered page, so the line above is an
+    // exclusion and not a lost row; and it was cut on the Pass dish, so its
+    // absence from Pass's set is the null's doing.
+    expect(await idsOf('')).toContain(F);
+    const f = await prisma.kitchenTicket.findUniqueOrThrow({
+      where: { id: F },
+      select: { stationId: true, items: { select: { menuItemName: true } } },
+    });
+    expect(f).toEqual({ stationId: null, items: [{ menuItemName: 'Beef Steak' }] });
+  });
+
+  it('?tableId=x narrows to the session’s table, and a takeaway ticket is on no table', async () => {
+    // POSITIVE — one table, the other, then both: F is on T7 despite having
+    // no station, which is what makes the two axes independent — a build
+    // that keyed the table off the station join would lose it here.
+    expect(await idsOf(`?tableId=${t7}`)).toEqual(set(A, B, F));
+    expect(await idsOf(`?tableId=${t8}`)).toEqual(set(C, D));
+    expect(await idsOf(`?tableId=${t7}&tableId=${t8}`)).toEqual(set(A, B, C, D, F));
+    expect((await page(`?tableId=${t7}`)).total).toBe(3);
+
+    /*
+     * NEGATIVE — E, the takeaway, is in neither table's set nor in the set
+     * holding both of the floor's tables. D175: a takeaway ticket has no
+     * table and matches only while the table axis is unfiltered. Paired with
+     * the unfiltered read that has it AND names it as the takeaway, so this
+     * is an exclusion of a real ticket and not a fixture that never made one.
+     *
+     * Honest about the rows: a takeaway's session hangs off the branch's
+     * synthetic WALK-IN table (D92), so what "no table" means on the wire is
+     * that no table a person would PICK admits it. The sets here hold the
+     * floor's real tables; whether the walk-in row is ever offered as a chip
+     * is the picker's decision, and this spec pins neither answer to it.
+     */
+    const all = await page('');
+    expect(all.items.map((t) => t.id)).toContain(E);
+    expect(all.items.find((t) => t.id === E)!.placeLabel).toBe('Takeaway');
+    expect(all.total).toBe(6);
+
+    /*
+     * D115 UNDER the table filter. The clause reaches the session through the
+     * SAME `round.order` object the cancellation clauses live in; written as a
+     * second `round:` key it would have silently replaced them, and a called-
+     * off order's tickets would come back the moment a table was picked. So
+     * T8's order is called off here — by hand, as the D142 tests do it — and
+     * T8's set is asserted EMPTY, with the {C, D} read above as the positive
+     * control that the filter found them a moment ago.
+     */
+    await prisma.restaurantOrder.update({
+      where: { id: order2Id },
+      data: { status: 'CANCELLED' },
+    });
+    expect(await idsOf(`?tableId=${t8}`)).toEqual([]);
+    expect(await idsOf(`?tableId=${t7}&tableId=${t8}`)).toEqual(set(A, B, F));
+    // …and out of the unfiltered page too, so this is D115 holding rather
+    // than a table filter that lost T8.
+    expect(await idsOf('')).toEqual(set(A, B, E, F));
+  });
+
+  it('both sets together intersect: AND across the axes, OR within one', async () => {
+    // POSITIVE — Pass ∩ T7: A alone (C and E are Pass's elsewhere; B and F
+    // are T7's on other stations).
+    expect(await idsOf(`?stationId=${stationId}&tableId=${t7}`)).toEqual(set(A));
+    // NEGATIVE — Grill ∩ T8 is EMPTY. An OR across the axes would answer
+    // {B, C, D} here; this is the assertion that tells AND from OR.
+    const none = await page(`?stationId=${grillStationId}&tableId=${t8}`);
+    expect(none.items).toEqual([]);
+    expect(none.total).toBe(0);
+    // POSITIVE CONTROLS for that empty page — each axis alone is non-empty,
+    // so the empty is the intersection's and not a broken filter's.
+    expect(await idsOf(`?stationId=${grillStationId}`)).toEqual(set(B));
+    expect(await idsOf(`?tableId=${t8}`)).toEqual(set(C, D));
+    // OR within an axis, AND across: {Pass, Grill} ∩ T7 = {A, B}; Pass ∩
+    // {T7, T8} = {A, C} — E (Pass, no table) and F (T7, no station) both
+    // drop, each on the axis it has no value for.
+    expect(
+      await idsOf(`?stationId=${stationId}&stationId=${grillStationId}&tableId=${t7}`),
+    ).toEqual(set(A, B));
+    expect(await idsOf(`?stationId=${stationId}&tableId=${t7}&tableId=${t8}`)).toEqual(set(A, C));
+  });
+
+  it('the search lost its station and table legs, and kept the KOT, the RO and the dish', async () => {
+    const all = await page('');
+    const d = all.items.find((t) => t.id === D)!;
+    const a = all.items.find((t) => t.id === A)!;
+
+    // POSITIVE — the three legs that stay, each reaching D through a
+    // different field. The RO number is the ORDER's, so it finds both
+    // tickets of round 2 — the order is what a person types it to find.
+    expect(await idsOf('?search=watalappan')).toEqual(set(D));
+    expect(await idsOf(`?search=${encodeURIComponent(d.ticketNumber)}`)).toEqual(set(D));
+    expect(await idsOf(`?search=${encodeURIComponent(d.orderNumber!)}`)).toEqual(set(C, D));
+
+    /*
+     * NEGATIVE — the STATION leg. 'pastry' is D's own station name, on the
+     * row the unfiltered read returns, and it matches no KOT number, no RO
+     * number and no dish; through the D152 leg this found D. Now the station
+     * is a filter, which is the positive paired with the zero.
+     */
+    expect(d.stationName).toBe('Pastry');
+    expect((await page('?search=pastry')).total).toBe(0);
+    expect(await idsOf(`?stationId=${pastryStationId}`)).toEqual(set(D));
+
+    /*
+     * NEGATIVE — the TABLE/tab/area leg. 'T7' and 'terrace' are on the place
+     * label of five tickets here and neither finds anything now; `?tableId=`
+     * is the way in, and it finds the three at T7.
+     */
+    expect(a.placeLabel).toBe('T7 · Terrace');
+    expect((await page('?search=T7')).total).toBe(0);
+    expect((await page('?search=terrace')).total).toBe(0);
+    expect(await idsOf(`?tableId=${t7}`)).toEqual(set(A, B, F));
+
+    // NEGATIVE — and nothing else grew a leg: a term on no field is nothing.
+    expect((await page('?search=zzzznotathing')).total).toBe(0);
+  });
+
+  it('composes with the search, and pages the filtered set with its own total', async () => {
+    // Search alone finds every Beef Steak; the filters narrow it to the one
+    // at T8 — the search did not do the narrowing, and the filters did not
+    // do the finding.
+    expect(await idsOf('?search=beef')).toEqual(set(A, C, E, F));
+    expect(await idsOf(`?search=beef&stationId=${stationId}&tableId=${t8}`)).toEqual(set(C));
+
+    // Paging over a filtered set: the total is the SET's, the pages neither
+    // overlap nor drop a row, and page 1 is what the client resets to on a
+    // filter change — a count over the branch would promise a third page.
+    const first = await page(`?tableId=${t7}&page=1&pageSize=2`);
+    expect(first.items).toHaveLength(2);
+    expect(first.total).toBe(3);
+    const second = await page(`?tableId=${t7}&page=2&pageSize=2`);
+    expect(second.items).toHaveLength(1);
+    expect(set(...first.items.map((t) => t.id), ...second.items.map((t) => t.id))).toEqual(
+      set(A, B, F),
     );
   });
 });

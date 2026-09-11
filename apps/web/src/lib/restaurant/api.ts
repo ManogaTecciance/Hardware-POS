@@ -738,9 +738,10 @@ export const tableSessions = {
  * chip still counts it, or the reverse. One envelope is one snapshot, so the
  * cards and the numbers agree by construction.
  *
- * `counts` is always the BRANCH's three lanes and never varies with `status`:
- * D142b's rule is that every lane chip carries its number whichever lane is
- * open, so these cannot be the filtered read's own tally.
+ * `counts` never varies with `status`: D142b's rule is that every lane chip
+ * carries its number whichever lane is open, so these cannot be the filtered
+ * read's own tally. They are the BRANCH's three lanes — or, with `stationId`
+ * (D174), that station's three, scoped by the same clause as `items`.
  */
 export interface KitchenTicketListResult {
   items: KitchenTicketView[];
@@ -757,10 +758,20 @@ export const kitchen = {
      * which is the server's reckoning and not the browser's.
      */
     status?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY' | 'ALL',
+    /**
+     * D174 — scopes BOTH `items` and `counts` to one station. Omitted, the
+     * read is the whole branch, exactly as before D174. A D147-window ticket
+     * belongs to no station, so it is in no station's read and only in the
+     * unscoped one.
+     */
+    stationId?: string,
   ) {
-    const query = status && status !== 'ALL' ? `?status=${status}` : '';
+    const params = new URLSearchParams();
+    if (status && status !== 'ALL') params.set('status', status);
+    if (stationId) params.set('stationId', stationId);
+    const qs = params.toString();
     return api.get<KitchenTicketListResult>(
-      `/restaurant/branches/${branchId}/kitchen-tickets${query}`,
+      `/restaurant/branches/${branchId}/kitchen-tickets${qs ? `?${qs}` : ''}`,
       auth(session),
     );
   },
@@ -772,10 +783,18 @@ export const kitchen = {
    * they are the cheap read for anything that wants the numbers WITHOUT the
    * tickets, and making a caller fetch a whole lane to learn three integers
    * would be the same waste D154 just removed, pointed the other way.
+   *
+   * D174 — and the board is that caller again, under a station cut: it needs
+   * the station's three numbers beside a list it must read UNSCOPED (the
+   * station strip counts every station), which is three integers exactly.
+   * `stationId` scopes the numbers the same way it scopes `listTickets`, so
+   * the two routes answer the same question with the same clause (D174 pins
+   * them to each other server-side).
    */
-  laneCounts(session: Session, branchId: string) {
+  laneCounts(session: Session, branchId: string, stationId?: string) {
+    const query = stationId ? `?stationId=${encodeURIComponent(stationId)}` : '';
     return api.get<KitchenLaneCounts>(
-      `/restaurant/branches/${branchId}/kitchen-tickets/counts`,
+      `/restaurant/branches/${branchId}/kitchen-tickets/counts${query}`,
       auth(session),
     );
   },
@@ -792,7 +811,20 @@ export const kitchen = {
   history(
     session: Session,
     branchId: string,
-    query: { page?: number; pageSize?: number; search?: string } = {},
+    query: {
+      page?: number;
+      pageSize?: number;
+      /** D175 — ticket number, order number and item name; nothing else. */
+      search?: string;
+      /**
+       * D175 — structured filters, each a set of ids. A ticket matches when its
+       * station is IN `stationIds` AND its table is IN `tableIds`; an empty (or
+       * absent) set is no filter on that axis. A takeaway ticket has no table,
+       * so it matches only while `tableIds` is empty.
+       */
+      stationIds?: string[];
+      tableIds?: string[];
+    } = {},
   ) {
     const params = new URLSearchParams();
     if (query.page !== undefined) params.set('page', String(query.page));
@@ -800,6 +832,10 @@ export const kitchen = {
     // An empty term is no term: sending `search=` would have the server treat
     // the blank as a filter that matches nothing rather than as no filter.
     if (query.search) params.set('search', query.search);
+    // Repeated keys (`stationId=a&stationId=b`), which is what the server's
+    // array param reads; a joined `a,b` would arrive as one id nothing matches.
+    for (const id of query.stationIds ?? []) params.append('stationId', id);
+    for (const id of query.tableIds ?? []) params.append('tableId', id);
     const qs = params.toString();
     return api.get<KitchenHistoryPage>(
       `/restaurant/branches/${branchId}/kitchen-tickets/history${qs ? `?${qs}` : ''}`,

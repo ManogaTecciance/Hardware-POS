@@ -79,6 +79,13 @@ export interface KitchenLaneCounts {
  * `counts` is the BRANCH's, not the filter's: D142b's rule is that every lane
  * chip carries its number whichever lane is open, so these must not move when
  * `?status=` does.
+ *
+ * D174 — and the STATION's, when the read is pinned to one. The counts still
+ * do not move with `?status=`; they move with `?stationId=`, together with the
+ * list, so a chip over a lane showing one station's cards counts that station
+ * and not the branch. D152 had blanked the off-lane chips under a station cut
+ * rather than show the branch's number there; the PO ruled that every chip
+ * carries its number under a station cut too, and that it be the right one.
  */
 export interface KitchenTicketListView {
   items: KitchenTicketView[];
@@ -416,12 +423,39 @@ export class KitchenService {
    * D142b — extracted from the list so the lane COUNTS are counted over
    * exactly the rows the lane lists. Two copies of "what is outstanding" is
    * how a chip comes to promise three tickets the list does not have.
+   *
+   * D174 — `stationId` narrows every branch of the ladder to one station's
+   * slice, and it is threaded through HERE, on the one `where` both the list
+   * and the counts are built from, rather than added to either caller: a
+   * station clause on the list alone is precisely the disagreement D174 was
+   * raised to end — a chip reading the branch's seven over a lane showing the
+   * grill's two.
    */
   private whereForFilter(
     tenantId: string,
     branchId: string,
     filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY',
+    stationId?: string,
   ): Prisma.KitchenTicketWhereInput {
+    /*
+     * D174 — the scope every branch below opens with. The station key is
+     * spread in only when one was asked for: an explicit `stationId:
+     * undefined` is the same query to Prisma but not the same object to the
+     * specs that pin the shape, and "omitted is byte-for-byte what it was" is
+     * the contract. An empty string counts as omitted for the same reason a
+     * blank search does — a client that sent `?stationId=` asked for nothing.
+     *
+     * A ticket cut during the D147 window carries a null `stationId`.
+     * Equality matches nothing null, so such a ticket belongs to NO station's
+     * count or list — only to the "All stations" numbers, where the scope is
+     * absent. That is the truth about the row, not an oversight: inventing a
+     * station for it is the backfill D152 declined to write.
+     */
+    const scope: Prisma.KitchenTicketWhereInput = {
+      tenantId,
+      branchId,
+      ...(stationId ? { stationId } : {}),
+    };
     /*
      * "This ticket's work was called off", spelled from the ticket's point
      * of view. Only the takeaway path writes a cancellation today; the
@@ -451,24 +485,22 @@ export class KitchenService {
     const where: Prisma.KitchenTicketWhereInput =
       filter === 'OUTSTANDING'
         ? {
-            tenantId,
-            branchId,
+            ...scope,
             status: { not: KitchenTicketStatus.COMPLETED },
             ...notCancelled,
           }
         : filter === 'CANCELLED'
-          ? { tenantId, branchId, ...cancelledWork }
+          ? { ...scope, ...cancelledWork }
           : filter === 'COMPLETED_TODAY'
             ? {
-                tenantId,
-                branchId,
+                ...scope,
                 status: KitchenTicketStatus.COMPLETED,
                 completedAt: this.todayWindow(tenantId),
                 ...notCancelled,
               }
             : filter === KitchenTicketStatus.COMPLETED
-              ? { tenantId, branchId, status: filter, ...notCancelled }
-              : { tenantId, branchId, ...(filter ? { status: filter } : {}) };
+              ? { ...scope, status: filter, ...notCancelled }
+              : { ...scope, ...(filter ? { status: filter } : {}) };
     return where;
   }
 
@@ -487,12 +519,19 @@ export class KitchenService {
    * Returns the queries UNAWAITED, as a fixed-length tuple, because both
    * callers hand them straight to `$transaction` — a caller that awaited one
    * here would be taking its own snapshot, which is the thing D154 removed.
+   *
+   * D174 — `stationId` is one more `where` clause on these SAME three
+   * queries, not a second set of station-scoped ones beside them. It reaches
+   * them through `whereForFilter`, the way the list's own scope does, so the
+   * station chips and the station lists are one definition narrowed the same
+   * way — which is the only reason a chip can be trusted over a pinned lane.
    */
   private laneCountQueries(
     tenantId: string,
     branchId: string,
+    stationId?: string,
   ): [Prisma.PrismaPromise<number>, Prisma.PrismaPromise<number>, Prisma.PrismaPromise<number>] {
-    const outstanding = this.whereForFilter(tenantId, branchId, 'OUTSTANDING');
+    const outstanding = this.whereForFilter(tenantId, branchId, 'OUTSTANDING', stationId);
     return [
       this.prisma.kitchenTicket.count({
         where: {
@@ -508,7 +547,7 @@ export class KitchenService {
         where: { ...outstanding, status: KitchenTicketStatus.IN_PROGRESS },
       }),
       this.prisma.kitchenTicket.count({
-        where: this.whereForFilter(tenantId, branchId, 'COMPLETED_TODAY'),
+        where: this.whereForFilter(tenantId, branchId, 'COMPLETED_TODAY', stationId),
       }),
     ];
   }
@@ -529,13 +568,21 @@ export class KitchenService {
    * board shows all three chips whichever lane is open. `waiterNames` still
    * runs afterwards — it needs the rows before it knows which users to read,
    * and user names are not what a ticket snapshot is protecting.
+   *
+   * D174 — `stationId` scopes the LIST and the COUNTS together, in the same
+   * snapshot. The board passes its selected station on every poll, so the
+   * three chips read that station's lanes while the cards show that station's
+   * slice of the open one; omitted, this read is exactly what it was. The
+   * station chips under the lanes are a different question (D152's "where is
+   * the work?") and are counted by the client over the whole lane, unchanged.
    */
   async listTicketsForBranch(
     tenantId: string,
     branchId: string,
     filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY',
+    stationId?: string,
   ): Promise<KitchenTicketListView> {
-    const where = this.whereForFilter(tenantId, branchId, filter);
+    const where = this.whereForFilter(tenantId, branchId, filter, stationId);
 
     const [rows, toMake, preparing, doneToday] = await this.prisma.$transaction([
       this.prisma.kitchenTicket.findMany({
@@ -563,7 +610,7 @@ export class KitchenService {
               },
         include: TICKET_INCLUDE,
       }),
-      ...this.laneCountQueries(tenantId, branchId),
+      ...this.laneCountQueries(tenantId, branchId, stationId),
       ],
       /*
        * D154 — REPEATABLE READ, or the promise above is not one.
@@ -598,10 +645,27 @@ export class KitchenService {
    * definition — and one transaction, so the three numbers are consistent
    * with each other as well as with the lists. A ticket bumped between two
    * separate queries would otherwise be counted twice or not at all.
+   *
+   * D174 — the same optional `stationId` the list read takes, so the two
+   * exposures of "the counts" stay pinned to each other under a station cut
+   * as well as without one.
    */
-  async laneCountsForBranch(tenantId: string, branchId: string): Promise<KitchenLaneCounts> {
+  async laneCountsForBranch(
+    tenantId: string,
+    branchId: string,
+    stationId?: string,
+  ): Promise<KitchenLaneCounts> {
     const [toMake, preparing, doneToday] = await this.prisma.$transaction(
-      this.laneCountQueries(tenantId, branchId),
+      this.laneCountQueries(tenantId, branchId, stationId),
+      /*
+       * D174 — the same REPEATABLE READ the list read takes (D154). Under a
+       * station cut this route now feeds a chip on the board, so its three
+       * numbers have to agree among themselves: at READ COMMITTED each count
+       * takes its own snapshot and a bump landing between two of them leaves
+       * "To make" and "Done" both claiming the ticket for a tick. Three
+       * read-only statements against one branch take no locks, so it is free.
+       */
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
     return { toMake, preparing, doneToday };
   }
@@ -633,16 +697,43 @@ export class KitchenService {
    * kitchen COOKED should not be padded with what it was told to stop cooking.
    * D150 widened the STATUS filter and nothing else — the round, order and
    * takeaway cancellation clauses below are exactly as they were.
+   *
+   * D175 — station and table are STRUCTURED filters now, not legs of the
+   * search. Each is a set of ids; a ticket matches when its station is in the
+   * station set AND its session's table is in the table set, and an empty set
+   * is no filter on that axis. Typing "grill" into a box that also matched a
+   * dish called "Grilled prawns" was the wrong tool for "what did the grill
+   * have on", and a table code is something a person picks off a list, not
+   * something they remember the spelling of.
    */
   async listHistoryForBranch(
     tenantId: string,
     branchId: string,
-    query: { page: number; pageSize: number; skip: number; take: number; search?: string },
+    query: {
+      page: number;
+      pageSize: number;
+      skip: number;
+      take: number;
+      search?: string;
+      stationIds?: string[];
+      tableIds?: string[];
+    },
   ): Promise<Paginated<KitchenTicketView>> {
     const search = query.search?.trim() || undefined;
+    const stationIds = query.stationIds ?? [];
+    const tableIds = query.tableIds ?? [];
     const where: Prisma.KitchenTicketWhereInput = {
       tenantId,
       branchId,
+      /*
+       * D175 — `in` the set, and only when the set has members. An empty `in`
+       * is a legal clause that matches NOTHING, so spreading it in
+       * unconditionally would turn "no station filter" into "no rows"; the key
+       * is absent instead, and the specs pin that absence. A D147-window ticket
+       * has a null `stationId` and `IN` never matches null, so it is in no
+       * station's filter — the same truth D174 states for the lane counts.
+       */
+      ...(stationIds.length > 0 ? { stationId: { in: stationIds } } : {}),
       /*
        * D150 — no `status` narrowing, deliberately. Queued, in progress and
        * completed are one list here; the lanes are the BOARD's split of the
@@ -656,39 +747,44 @@ export class KitchenService {
             { takeawayProfile: null },
             { takeawayProfile: { status: { not: TakeawayOrderStatus.CANCELLED } } },
           ],
+          /*
+           * D175 — the table filter reaches through the SESSION, which is
+           * where a dine-in ticket's table lives; a ticket carries no table of
+           * its own. Nested beside the cancellation clauses rather than joined
+           * with a second `round:` key, because an object literal keeps only
+           * the last of two equal keys and Prisma would never see the first.
+           *
+           * D175 says a takeaway ticket "has no table" and matches only while
+           * the table axis is unfiltered. In the rows it is subtler: a
+           * takeaway session sits on the branch's synthetic WALK-IN table, so
+           * a non-empty set admits it only if that one table's id is in the
+           * set. The clause is deliberately no cleverer than `IN` — a second
+           * "is this takeaway?" test here would be a second definition of
+           * takeaway beside the cancellation pair above, and whether the
+           * walk-in row is ever offered as a chip is the picker's decision.
+           */
+          ...(tableIds.length > 0 ? { session: { tableId: { in: tableIds } } } : {}),
         },
       },
       /*
-       * The five things a person actually remembers about a ticket: its own
-       * number, the order it belonged to, where it was going, what was on it,
-       * and — with D152's split back — which station cooked it. Searching the
-       * dish name matters most: "which table had the lamprais that came back"
-       * is the question this screen gets asked, and no ticket number is
-       * remembered alongside it. The station leg is the one that answers "what
-       * did the grill have on last Friday", which a station-split board makes
-       * askable again; it simply matches nothing on the D147-window tickets,
-       * which carry no station.
+       * The three things a person remembers about a ticket and would TYPE:
+       * its own number, the order it belonged to, and what was on it.
+       * Searching the dish name matters most: "which table had the lamprais
+       * that came back" is the question this screen gets asked, and no ticket
+       * number is remembered alongside it.
+       *
+       * D175 — the station-name leg (D152) and the tab/table/area leg are gone
+       * from here: both became the structured filters above. Left in, a
+       * search for "T4" would have kept matching table T4 beside the picker
+       * that now selects it, and the two would have disagreed about what "T4"
+       * means the moment a dish name contained it.
        */
       ...(search
         ? {
             OR: [
               { ticketNumber: { contains: search, mode: 'insensitive' } },
               { round: { order: { orderNumber: { contains: search, mode: 'insensitive' } } } },
-              {
-                round: {
-                  order: {
-                    session: {
-                      OR: [
-                        { tabName: { contains: search, mode: 'insensitive' } },
-                        { table: { code: { contains: search, mode: 'insensitive' } } },
-                        { table: { area: { name: { contains: search, mode: 'insensitive' } } } },
-                      ],
-                    },
-                  },
-                },
-              },
               { items: { some: { menuItemName: { contains: search, mode: 'insensitive' } } } },
-              { station: { name: { contains: search, mode: 'insensitive' } } },
             ],
           }
         : {}),

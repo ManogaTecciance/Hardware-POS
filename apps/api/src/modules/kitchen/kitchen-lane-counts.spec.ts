@@ -22,6 +22,17 @@ import type { SettingsService } from '../settings/settings.service';
  * - **`GET …/counts` still answers exactly as it did.** It is the cheap read
  *   for a caller that wants three integers rather than every ticket and its
  *   items, and D154 removes callers from it, not the route.
+ * - **D174 — a station scopes the list AND the counts, together.** D152 had
+ *   the off-lane chips go blank under a station cut, because the counts were
+ *   the branch's and a "Done 7" over a lane showing two cards was worse than
+ *   no number. The PO ruled that every chip carries its number under a
+ *   station cut too, and that it be the STATION's. So `stationId` is one more
+ *   clause on the same four queries: the list's `where` and all three counts
+ *   carry it, in the one transaction, and omitted they are byte-for-byte what
+ *   they were. The stub knows one station's numbers, distinct from the
+ *   branch's, and throws on any other — so a count that dropped the station
+ *   clause lands on the branch's numbers and fails, and one that scoped to a
+ *   station nobody asked for fails louder.
  *
  * HOW THE STUB EARNS ITS ASSERTIONS (D30). Prisma's query builders return
  * *unawaited* `PrismaPromise`s here, so the stub returns descriptors that
@@ -47,6 +58,17 @@ const SHOP_TZ = 'Asia/Colombo';
 const TO_MAKE = 7;
 const PREPARING = 3;
 const DONE_TODAY = 11;
+
+/**
+ * D174 — the one station the stub knows, and ITS three lane counts: distinct
+ * from each other for the same reason as the branch's, and distinct from the
+ * branch's so a count that lost its station clause cannot land on the right
+ * number by accident.
+ */
+const STATION = 'stn_grill';
+const STATION_TO_MAKE = 2;
+const STATION_PREPARING = 1;
+const STATION_DONE_TODAY = 5;
 
 type Args = { where?: Record<string, unknown> } & Record<string, unknown>;
 
@@ -84,11 +106,37 @@ function issue(kind: Issued['kind'], args: Args, value: unknown): Issued {
  * handing back a plausible number and letting the suite stay green.
  */
 function countValueFor(args: Args): number {
-  const where = (args.where ?? {}) as { status?: unknown; completedAt?: unknown };
+  const where = (args.where ?? {}) as {
+    status?: unknown;
+    completedAt?: unknown;
+    stationId?: unknown;
+  };
+  /*
+   * D174 — which SCOPE, before which lane. `stationId` absent is the branch;
+   * the one station the stub knows is that station; anything else is a query
+   * this spec never meant to answer, so it throws rather than handing back a
+   * branch number that a station-scoped assertion would then read as "the
+   * station clause is missing" — the wrong diagnosis for the right failure.
+   */
+  const scoped =
+    where.stationId === undefined
+      ? { toMake: TO_MAKE, preparing: PREPARING, doneToday: DONE_TODAY }
+      : where.stationId === STATION
+        ? {
+            toMake: STATION_TO_MAKE,
+            preparing: STATION_PREPARING,
+            doneToday: STATION_DONE_TODAY,
+          }
+        : null;
+  if (!scoped) {
+    throw new Error(
+      `count scoped to a station this spec does not know: ${JSON.stringify(args.where)}`,
+    );
+  }
   const status = where.status as { notIn?: unknown[] } | string | undefined;
-  if (status && typeof status === 'object' && Array.isArray(status.notIn)) return TO_MAKE;
-  if (status === 'IN_PROGRESS') return PREPARING;
-  if (status === 'COMPLETED' && where.completedAt) return DONE_TODAY;
+  if (status && typeof status === 'object' && Array.isArray(status.notIn)) return scoped.toMake;
+  if (status === 'IN_PROGRESS') return scoped.preparing;
+  if (status === 'COMPLETED' && where.completedAt) return scoped.doneToday;
   throw new Error(
     `unrecognised lane count — this spec would be asserting nothing: ${JSON.stringify(args.where)}`,
   );
@@ -130,7 +178,13 @@ function ticketRow() {
 function makeService(rows = [ticketRow()]) {
   /** Every query the service BUILT, in build order. */
   const issued: Issued[] = [];
-  const $transaction = jest.fn((ops: Issued[]) => Promise.resolve(ops.map((op) => op.value)));
+  // The second argument is Prisma's transaction options. Declared so the stub
+  // records it — a one-argument signature made the isolation level invisible
+  // to the spec, which is exactly how it went unasserted for a decision and a
+  // half.
+  const $transaction = jest.fn((ops: Issued[], _options?: { isolationLevel?: string }) =>
+    Promise.resolve(ops.map((op) => op.value)),
+  );
   const userFindMany = jest.fn().mockResolvedValue([{ id: 'usr_1', name: 'Nimal' }]);
 
   const prisma = {
@@ -223,6 +277,33 @@ describe('D154 — a board tick is one request and one snapshot', () => {
     for (const op of issued) expect(ops).toContain(op);
     // NEGATIVE — no second snapshot anywhere: nothing was issued outside it.
     expect(issued.filter((q) => !ops.includes(q))).toEqual([]);
+  });
+
+  it('takes that snapshot at REPEATABLE READ, on both the list read and the counts route', async () => {
+    /*
+     * The half of "one snapshot" that the transaction alone does not give.
+     * Prisma's batch `$transaction` runs at the connection default, which is
+     * Postgres READ COMMITTED, where every statement takes its OWN snapshot —
+     * so four statements in one transaction can still disagree about a ticket
+     * bumped between two of them. D154 pinned the list read at REPEATABLE
+     * READ for that reason and D174 does the same to the counts route, which
+     * now feeds a chip under a station cut. Neither was asserted anywhere
+     * before this: a verifier dropped the option from both and every test
+     * stayed green.
+     */
+    const list = makeService();
+    await list.service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING');
+    const listOptions = list.$transaction.mock.calls[0]?.[1] as
+      | { isolationLevel?: string }
+      | undefined;
+    expect(listOptions?.isolationLevel).toBe('RepeatableRead');
+
+    const counts = makeService();
+    await counts.service.laneCountsForBranch(TENANT, BRANCH);
+    const countOptions = counts.$transaction.mock.calls[0]?.[1] as
+      | { isolationLevel?: string }
+      | undefined;
+    expect(countOptions?.isolationLevel).toBe('RepeatableRead');
   });
 
   it('MUTATION PROOF — counts read outside the snapshot would be caught, both ways', async () => {
@@ -446,5 +527,203 @@ describe('D154 — the standalone counts route is untouched', () => {
     // NEGATIVE — and they are three DIFFERENT queries, so the equality above
     // cannot be one query compared with itself three times.
     expect(new Set(fromRoute.map((a) => JSON.stringify(a))).size).toBe(3);
+  });
+});
+
+describe('D174 — a station scopes the list AND the counts, together', () => {
+  /** Every lane the board can be standing on, plus "no filter at all". */
+  const FILTERS = [
+    undefined,
+    'OUTSTANDING',
+    'COMPLETED_TODAY',
+    'CANCELLED',
+    'COMPLETED',
+    'IN_PROGRESS',
+  ] as const;
+
+  it('pinned to a station, all four queries carry it and the chips read that station’s numbers', async () => {
+    const { service, $transaction } = makeService();
+
+    const res = await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING', STATION);
+
+    // POSITIVE — still one transaction of the same four queries (D154)…
+    expect($transaction).toHaveBeenCalledTimes(1);
+    const ops = opsOf($transaction);
+    expect(ops.map((op) => op.kind)).toEqual(['findMany', 'count', 'count', 'count']);
+    // …and EVERY one of them is scoped to the station. The set, not "at least
+    // one": a station clause on the list alone is the disagreement D174 was
+    // raised to end.
+    expect(ops.map((op) => op.args.where!.stationId)).toEqual([STATION, STATION, STATION, STATION]);
+    /*
+     * The envelope carries the STATION's three numbers, which the stub only
+     * hands out for a count whose `where` names that station. A count that
+     * had lost the clause would have come back with the branch's 7/3/11, and
+     * the two sets are disjoint on purpose.
+     */
+    expect(res.counts).toEqual({
+      toMake: STATION_TO_MAKE,
+      preparing: STATION_PREPARING,
+      doneToday: STATION_DONE_TODAY,
+    });
+    expect(res.counts).not.toEqual({
+      toMake: TO_MAKE,
+      preparing: PREPARING,
+      doneToday: DONE_TODAY,
+    });
+  });
+
+  it('omitted, no query carries a station key — byte-for-byte what it was', async () => {
+    const { service, $transaction } = makeService();
+
+    for (const filter of FILTERS) {
+      await service.listTicketsForBranch(TENANT, BRANCH, filter);
+    }
+    // The positive half in the SAME test: the identical calls WITH a station
+    // put the key on all four queries, so the absence below is the service
+    // declining to add it and not the service never having heard of it.
+    await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING', STATION);
+
+    const pinned = opsOf($transaction, FILTERS.length);
+    expect(pinned.map((op) => 'stationId' in op.args.where!)).toEqual([true, true, true, true]);
+
+    for (let i = 0; i < FILTERS.length; i += 1) {
+      for (const op of opsOf($transaction, i)) {
+        // Both spellings: `in` catches a key present-and-undefined, which
+        // Prisma would treat as no filter but which is not "byte-for-byte".
+        expect('stationId' in op.args.where!).toBe(false);
+        expect(op.args.where!.stationId).toBeUndefined();
+      }
+    }
+    // And the branch's numbers, not the station's, come back for the
+    // unscoped reads — the stub only hands those out for a station-free `where`.
+    const unscoped = await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING');
+    expect(unscoped.counts).toEqual({
+      toMake: TO_MAKE,
+      preparing: PREPARING,
+      doneToday: DONE_TODAY,
+    });
+  });
+
+  it('an empty station string is omitted, the way a blank search is', async () => {
+    // A client that sent `?stationId=` asked for nothing; scoping to the
+    // empty string would answer with no cards and three zeros.
+    const { service, $transaction } = makeService();
+
+    await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING', '');
+
+    for (const op of opsOf($transaction)) expect('stationId' in op.args.where!).toBe(false);
+  });
+
+  it('under a station cut the counts STILL do not move with ?status= (D142b holds)', async () => {
+    const { service, $transaction } = makeService();
+
+    for (const filter of FILTERS) {
+      await service.listTicketsForBranch(TENANT, BRANCH, filter, STATION);
+    }
+
+    const listWheres: unknown[] = [];
+    const countWheres: unknown[][] = [];
+    for (let i = 0; i < FILTERS.length; i += 1) {
+      const ops = opsOf($transaction, i);
+      listWheres.push(ops[0]!.args.where);
+      countWheres.push(ops.slice(1).map((op) => op.args.where));
+    }
+    // POSITIVE — the three station-scoped count queries are identical across
+    // every lane, and each names the station.
+    for (const wheres of countWheres) {
+      expect(wheres).toEqual(countWheres[0]);
+      expect(wheres.map((w) => (w as { stationId: unknown }).stationId)).toEqual([
+        STATION,
+        STATION,
+        STATION,
+      ]);
+    }
+    // NEGATIVE — the LIST's `where` genuinely changed for every lane, so the
+    // equality above is not six copies of one query agreeing with themselves.
+    expect(new Set(listWheres.map((w) => JSON.stringify(w))).size).toBe(FILTERS.length);
+  });
+
+  it('the station is the ONLY difference a pinned read makes to each query', async () => {
+    /*
+     * Pinned and unpinned, lane by lane: strip the station key from the
+     * pinned queries and they must be the unpinned ones exactly. This is what
+     * "one more `where` clause on the SAME queries, not a second definition"
+     * means as an assertion — a station-scoped count that had, say, dropped
+     * the day window or the cancellation clauses would differ here in more
+     * than the key.
+     */
+    const { service, $transaction } = makeService();
+
+    for (const filter of FILTERS) {
+      await service.listTicketsForBranch(TENANT, BRANCH, filter);
+      await service.listTicketsForBranch(TENANT, BRANCH, filter, STATION);
+    }
+
+    for (let i = 0; i < FILTERS.length; i += 1) {
+      const unpinned = opsOf($transaction, 2 * i).map((op) => op.args);
+      const pinned = opsOf($transaction, 2 * i + 1).map((op) => op.args);
+      expect(pinned).toHaveLength(unpinned.length);
+      pinned.forEach((args, n) => {
+        const { stationId, ...rest } = args.where as { stationId: unknown };
+        expect(stationId).toBe(STATION);
+        expect({ ...args, where: rest }).toEqual(unpinned[n]);
+      });
+    }
+  });
+
+  it('the standalone counts route takes the station and issues the list’s exact three counts', async () => {
+    const { service, $transaction } = makeService();
+
+    await service.listTicketsForBranch(TENANT, BRANCH, 'COMPLETED_TODAY', STATION);
+    const counts = await service.laneCountsForBranch(TENANT, BRANCH, STATION);
+
+    const fromList = opsOf($transaction, 0).slice(1).map((op) => op.args);
+    const fromRoute = opsOf($transaction, 1).map((op) => op.args);
+    // POSITIVE — byte-identical, station and all: the two exposures of "the
+    // counts" cannot drift apart under a station cut.
+    expect(fromRoute).toEqual(fromList);
+    expect(fromRoute.map((a) => a.where!.stationId)).toEqual([STATION, STATION, STATION]);
+    expect(counts).toEqual({
+      toMake: STATION_TO_MAKE,
+      preparing: STATION_PREPARING,
+      doneToday: STATION_DONE_TODAY,
+    });
+    // NEGATIVE — and the route WITHOUT a station issues different queries, so
+    // the equality above is not two unscoped reads agreeing.
+    await service.laneCountsForBranch(TENANT, BRANCH);
+    const unscoped = opsOf($transaction, 2).map((op) => op.args);
+    expect(unscoped).not.toEqual(fromRoute);
+    expect(unscoped.map((a) => 'stationId' in a.where!)).toEqual([false, false, false]);
+  });
+
+  it('MUTATION PROOF — a list scoped without the counts, and the reverse, are both caught', async () => {
+    /*
+     * The two mutants D174 names: the station threaded into the list's
+     * `where` but not into `laneCountQueries` (the counts stay the branch's —
+     * D152's exact defect, with a number on it instead of a blank), and the
+     * reverse (the counts narrow while the cards stay the branch's). Both are
+     * built from the ops the SHIPPED service just emitted, so this proves the
+     * assertion the first test rests on is about the code that runs. Both
+     * were also proven against the real source: dropping `stationId` from
+     * either call site in `listTicketsForBranch` turns that test red.
+     */
+    const { service, $transaction } = makeService();
+    await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING', STATION);
+    const shipped = opsOf($transaction).map((op) => op.args.where!);
+    const strip = ({ stationId: _, ...rest }: Record<string, unknown>) => rest;
+
+    const listOnly = [shipped[0]!, ...shipped.slice(1).map(strip)];
+    const countsOnly = [strip(shipped[0]!), ...shipped.slice(1)];
+
+    for (const mutant of [listOnly, countsOnly]) {
+      // Each mutation lands — a genuinely different set of four queries…
+      expect(mutant).not.toEqual(shipped);
+      // …and the all-four assertion rejects it.
+      expect(() =>
+        expect(mutant.map((w) => w.stationId)).toEqual([STATION, STATION, STATION, STATION]),
+      ).toThrow();
+    }
+    // …while what actually shipped satisfies it.
+    expect(shipped.map((w) => w.stationId)).toEqual([STATION, STATION, STATION, STATION]);
   });
 });

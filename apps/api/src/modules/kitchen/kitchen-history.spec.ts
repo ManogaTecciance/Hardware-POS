@@ -25,10 +25,14 @@ import type { SettingsService } from '../settings/settings.service';
  *   at all; the negative, in the same test, is that no `completedAt` clause
  *   crept in with the widening. Asserting only the absence of `status` would
  *   pass just as well against a `where` that had collapsed to nothing.
- * - D152 — the split is back, so the search has a FIFTH leg again: the station
- *   name. Asserted positively (the leg is there, insensitive like the rest)
- *   AND with the other four re-asserted beside it, because "it mentions a
- *   station" is equally true of an OR that had lost everything else.
+ * - D175 — station and table are STRUCTURED filters, and the search is down to
+ *   the THREE things a person would type: ticket number, order number, dish.
+ *   Under D152 the station name was the search's fifth leg and this file
+ *   pinned it; that assertion is now false by decision and is rewritten here
+ *   rather than loosened (D16). The station filter is `stationId: { in }`, the
+ *   table filter reaches through `round.order.session.tableId`, and an EMPTY
+ *   set is the ABSENCE of the key — an `in: []` is a legal clause that matches
+ *   nothing, which is the mutant the empty-set tests exist to catch.
  *
  * Prisma is a stub and the assertions are about the QUERY the service issues —
  * the ladder, the window and the paging arithmetic — not about the database.
@@ -382,12 +386,14 @@ describe('the ticket history (D142)', () => {
     ]);
   });
 
-  it('searches the five things a person remembers, case-insensitively', async () => {
+  it('searches the three things a person would TYPE, case-insensitively (D175)', async () => {
     /*
-     * D152 — "four" until the split came back. The count and the leg list are
-     * rewritten to the new truth rather than loosened (D16): a `toBeGreaterThan`
-     * here would stop noticing a leg that went missing, which is the only
-     * failure this test exists to catch.
+     * "Five" under D152, "four" under D147 before that, and now THREE by
+     * decision: the station-name leg and the tab/table/area leg left the
+     * search and became the structured filters pinned below. The count and
+     * the leg list are rewritten to the new truth rather than loosened (D16):
+     * a `toBeGreaterThan` here would stop noticing a leg that went missing,
+     * which is the only failure this test exists to catch.
      */
     const { service, captured } = makeService();
 
@@ -395,80 +401,106 @@ describe('the ticket history (D142)', () => {
 
     const or = lastWhere(captured).OR as Record<string, unknown>[];
     const serialised = JSON.stringify(or);
-    expect(or).toHaveLength(5);
-    // The ticket's own number, the order it belonged to, where it was going,
-    // what was on it, and which station cooked it.
+    expect(or).toHaveLength(3);
+    // The ticket's own number, the order it belonged to, and what was on it.
     expect(serialised).toContain('ticketNumber');
     expect(serialised).toContain('orderNumber');
-    expect(serialised).toContain('tabName');
     expect(serialised).toContain('menuItemName');
-    expect(serialised).toContain('station');
     // Every leg insensitive — a search for "lamprais" must find "Lamprais".
-    // Two more than there are legs because the place leg is itself an OR of
-    // three: tab name, table code, area name.
-    expect(serialised.match(/insensitive/g)).toHaveLength(or.length + 2);
+    // Exactly as many as there are legs now: the place leg that was itself an
+    // OR of three is gone, so there is no longer a "+2" to explain.
+    expect(serialised.match(/insensitive/g)).toHaveLength(or.length);
   });
 
-  it('D152 — searches by station name again, and the other four legs are untouched', async () => {
+  it('D175 — the station and table legs are OUT of the search, and the three that remain are exact', async () => {
     /*
-     * This test asserted the OPPOSITE under D147 — that no leg reached a
-     * station — which was right while a ticket belonged to none. The split is
-     * back, so "what did the grill have on last Friday" is a question the
-     * history can answer again, and the assertion is rewritten to the new
-     * truth rather than deleted (D16).
+     * This test asserted the OPPOSITE under D152 — that the station name was
+     * a leg of the search — which was right until the PO asked for station
+     * and table to be picked from a list rather than typed. Rewritten to the
+     * new truth rather than deleted (D16).
      *
-     * Asserted as the EXACT leg rather than "the word station appears
-     * somewhere": a `{ station: { isNot: null } }` or a leg on `stationId`
-     * would both contain the string and neither would match a name a cook
-     * typed. And the other four are re-asserted beside it, so this cannot pass
-     * by the OR having collapsed to the station leg alone (D30).
+     * The search term is 'Grill', a station name a cook would type, so the
+     * negative below is not vacuous: under D152 this exact call produced a
+     * station leg, and the structured filter that replaced it is asserted in
+     * the SAME test, so "no station leg" cannot pass for a service that had
+     * simply lost the station altogether (D30).
      */
     const { service, captured } = makeService();
 
-    await service.listHistoryForBranch(TENANT, BRANCH, { ...query, search: 'Grill' });
+    await service.listHistoryForBranch(TENANT, BRANCH, {
+      ...query,
+      search: 'Grill',
+      stationIds: ['stn_grill'],
+    });
 
-    const or = lastWhere(captured).OR as Record<string, unknown>[];
-    // POSITIVE — the station leg, spelled out, and insensitive like the rest.
-    expect(or).toContainEqual({ station: { name: { contains: 'Grill', mode: 'insensitive' } } });
-    // POSITIVE — and every other leg still there, in its place.
-    expect(or).toHaveLength(5);
-    expect(or[0]).toEqual({ ticketNumber: { contains: 'Grill', mode: 'insensitive' } });
-    expect(JSON.stringify(or)).toContain('menuItemName');
-    // NEGATIVE — exactly ONE leg reaches a station. Two would double-count a
-    // ticket in the SQL and make the pager promise rows the page cannot hold.
-    expect(or.filter((leg) => 'station' in leg)).toHaveLength(1);
+    const where = lastWhere(captured);
+    const or = where.OR as Record<string, unknown>[];
+    // POSITIVE — the three legs, spelled out and in order, insensitive.
+    expect(or).toEqual([
+      { ticketNumber: { contains: 'Grill', mode: 'insensitive' } },
+      { round: { order: { orderNumber: { contains: 'Grill', mode: 'insensitive' } } } },
+      { items: { some: { menuItemName: { contains: 'Grill', mode: 'insensitive' } } } },
+    ]);
+    // NEGATIVE — no leg reaches the station relation, by name or by id…
+    expect(or.filter((leg) => 'station' in leg || 'stationId' in leg)).toEqual([]);
+    // …and no leg reaches the session (tab name, table code, area name).
+    expect(JSON.stringify(or)).not.toContain('session');
+    expect(JSON.stringify(or)).not.toContain('tabName');
+    // POSITIVE — where the station went instead: a structured `in` on the id,
+    // OUTSIDE the OR, so it narrows the search rather than widening it.
+    expect(where.stationId).toEqual({ in: ['stn_grill'] });
   });
 
-  it('MUTATION PROOF — a station leg that matched the ID rather than the NAME would be caught', async () => {
+  it('MUTATION PROOF — either retired leg creeping back into the search would be caught', async () => {
     /*
-     * The mutant a careless restore produces: `{ stationId: { contains: … } }`,
-     * which is a real Prisma clause, serialises with the word "station" in it,
-     * and matches nothing a human ever types. It is built from the `where` the
-     * SHIPPED service just emitted — not from a local stand-in — so this proves
-     * the assertion above is about the code that runs.
+     * Two mutants, both built from the OR the SHIPPED service just emitted
+     * rather than from a local stand-in, so this proves the assertions above
+     * are about the code that runs. Both were also proven against the real
+     * source: restoring either leg in the service turns the two tests above
+     * red on the exact-legs assertion.
+     *
+     * Mutant 1: the D152 station-name leg put back. Mutant 2: the tab/table/
+     * area leg put back. A `toHaveLength(3)` alone would catch both; the
+     * exact-array assertion catches them AND a leg swapped for a different one.
      */
     const { service, captured } = makeService();
     await service.listHistoryForBranch(TENANT, BRANCH, { ...query, search: 'Grill' });
     const shipped = lastWhere(captured).OR as Record<string, unknown>[];
-    const mutant = [
-      ...shipped.filter((leg) => !('station' in leg)),
-      { stationId: { contains: 'Grill', mode: 'insensitive' } },
+
+    const withStation = [
+      ...shipped,
+      { station: { name: { contains: 'Grill', mode: 'insensitive' } } },
+    ];
+    const withPlace = [
+      ...shipped,
+      {
+        round: {
+          order: {
+            session: {
+              OR: [
+                { tabName: { contains: 'Grill', mode: 'insensitive' } },
+                { table: { code: { contains: 'Grill', mode: 'insensitive' } } },
+                { table: { area: { name: { contains: 'Grill', mode: 'insensitive' } } } },
+              ],
+            },
+          },
+        },
+      },
     ];
 
-    // The mutation lands — the two ORs are genuinely different…
-    expect(mutant).not.toEqual(shipped);
-    // …a loose "does it mention a station" check would accept it…
-    expect(JSON.stringify(mutant)).toContain('station');
-    // …and the exact-leg assertion the test above rests on rejects it…
-    expect(() =>
-      expect(mutant).toContainEqual({
-        station: { name: { contains: 'Grill', mode: 'insensitive' } },
-      }),
-    ).toThrow();
-    // …while accepting what actually shipped.
-    expect(shipped).toContainEqual({
-      station: { name: { contains: 'Grill', mode: 'insensitive' } },
-    });
+    for (const mutant of [withStation, withPlace]) {
+      // The mutation lands — the ORs are genuinely different…
+      expect(mutant).not.toEqual(shipped);
+      // …and the leg-count assertion the tests above rest on rejects both.
+      expect(() => expect(mutant).toHaveLength(3)).toThrow();
+    }
+    // Each mutant is also caught by the negative aimed at ITS leg…
+    expect(() => expect(withStation.filter((leg) => 'station' in leg)).toEqual([])).toThrow();
+    expect(() => expect(JSON.stringify(withPlace)).not.toContain('session')).toThrow();
+    // …while what actually shipped satisfies all three.
+    expect(shipped).toHaveLength(3);
+    expect(shipped.filter((leg) => 'station' in leg)).toEqual([]);
+    expect(JSON.stringify(shipped)).not.toContain('session');
   });
 
   it('NEGATIVE — no search term means no OR clause, not an OR that matches nothing', async () => {
@@ -495,5 +527,198 @@ describe('the ticket history (D142)', () => {
     const paged = (captured.findMany.mock.calls.at(-1)![0] as { where: unknown }).where;
     const counted = (captured.count.mock.calls.at(-1)![0] as { where: unknown }).where;
     expect(counted).toEqual(paged);
+  });
+});
+
+/**
+ * The cancellation clauses exactly as D115/D150 left them on the history's
+ * `round`, restated here because the table filter is nested INSIDE this
+ * object and the tests below must prove it landed beside these rather than
+ * in place of them.
+ */
+const NOT_CANCELLED_ROUND = {
+  status: { not: 'CANCELLED' },
+  order: {
+    status: { not: 'CANCELLED' },
+    OR: [{ takeawayProfile: null }, { takeawayProfile: { status: { not: 'CANCELLED' } } }],
+  },
+};
+
+describe('the ticket history’s structured filters (D175)', () => {
+  const query = { page: 1, pageSize: 25, skip: 0, take: 25 };
+
+  it('a station set is `stationId: { in }` on the ticket itself', async () => {
+    const { service, captured } = makeService();
+
+    await service.listHistoryForBranch(TENANT, BRANCH, {
+      ...query,
+      stationIds: ['stn_grill', 'stn_pastry'],
+    });
+
+    const where = lastWhere(captured);
+    // POSITIVE — the set, verbatim, as an `in` on the column the ticket
+    // carries. A D147-window ticket has null there and `IN` never matches
+    // null, which is how "in no station's filter" falls out of the clause.
+    expect(where.stationId).toEqual({ in: ['stn_grill', 'stn_pastry'] });
+    // NEGATIVE — it is a filter, not a search: no OR was built for it…
+    expect(where.OR).toBeUndefined();
+    // …and the cancellation clauses stand untouched beside it.
+    expect(where.round).toEqual(NOT_CANCELLED_ROUND);
+    expect(where.tenantId).toBe(TENANT);
+    expect(where.branchId).toBe(BRANCH);
+  });
+
+  it('a table set reaches through round.order.session.tableId, BESIDE the cancellation clauses', async () => {
+    const { service, captured } = makeService();
+
+    await service.listHistoryForBranch(TENANT, BRANCH, {
+      ...query,
+      tableIds: ['tbl_4', 'tbl_7'],
+    });
+
+    const where = lastWhere(captured);
+    /*
+     * The whole `round` object, not a `.session.tableId` reach: a filter that
+     * had been written as a second `round:` key would have REPLACED the
+     * cancellation clauses (an object literal keeps the last of two equal
+     * keys), and a test that only looked for the table clause would have
+     * called that a pass while cancelled work came back onto the screen.
+     */
+    expect(where.round).toEqual({
+      ...NOT_CANCELLED_ROUND,
+      order: {
+        ...NOT_CANCELLED_ROUND.order,
+        session: { tableId: { in: ['tbl_4', 'tbl_7'] } },
+      },
+    });
+    // NEGATIVE — the table axis did not touch the station axis or the search.
+    expect('stationId' in where).toBe(false);
+    expect(where.OR).toBeUndefined();
+  });
+
+  it('both sets at once are AND-ed: the two clauses are both present, each with its own ids', async () => {
+    const { service, captured } = makeService();
+
+    await service.listHistoryForBranch(TENANT, BRANCH, {
+      ...query,
+      stationIds: ['stn_grill'],
+      tableIds: ['tbl_4'],
+    });
+
+    const where = lastWhere(captured);
+    // Distinct ids on each axis, so a filter that wired one set to the other's
+    // clause would land here with them crossed.
+    expect(where.stationId).toEqual({ in: ['stn_grill'] });
+    expect(
+      (where.round as { order: { session: { tableId: unknown } } }).order.session.tableId,
+    ).toEqual({ in: ['tbl_4'] });
+    // Top-level siblings on the same `where` — which is an AND in Prisma — and
+    // not two entries of an OR, which would widen the page instead of
+    // narrowing it.
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toBeUndefined();
+  });
+
+  it('an empty set is NO filter on that axis — the key is absent, not `in: []`', async () => {
+    /*
+     * The difference the screen would notice: `stationId: { in: [] }` is a
+     * legal Prisma clause and it matches NOTHING, so a service that spread the
+     * clause in unconditionally would answer "Clear filters" with an empty
+     * page. Both spellings of absence are asserted, because `toBeUndefined`
+     * also passes for a key present and explicitly undefined.
+     */
+    const { service, captured } = makeService();
+
+    await service.listHistoryForBranch(TENANT, BRANCH, {
+      ...query,
+      stationIds: [],
+      tableIds: [],
+    });
+
+    const where = lastWhere(captured);
+    expect('stationId' in where).toBe(false);
+    expect(where.stationId).toBeUndefined();
+    expect(where.round).toEqual(NOT_CANCELLED_ROUND);
+    expect('session' in (where.round as { order: object }).order).toBe(false);
+    // POSITIVE — and the read is otherwise intact, so this cannot pass for a
+    // `where` that collapsed to nothing.
+    expect(where.tenantId).toBe(TENANT);
+    expect(where.branchId).toBe(BRANCH);
+  });
+
+  it('a set left out entirely is the same query as an empty one — byte-for-byte', async () => {
+    const { service, captured } = makeService();
+
+    await service.listHistoryForBranch(TENANT, BRANCH, query);
+    const omitted = lastWhere(captured);
+    await service.listHistoryForBranch(TENANT, BRANCH, { ...query, stationIds: [], tableIds: [] });
+    const empty = lastWhere(captured);
+
+    // The client sends nothing for an unfiltered axis and the controller hands
+    // the service `undefined`; the page's "Clear filters" may well hand it
+    // `[]`. Neither may differ from the read the history made before D175.
+    expect(JSON.stringify(empty)).toBe(JSON.stringify(omitted));
+    expect(omitted).toEqual({ tenantId: TENANT, branchId: BRANCH, round: NOT_CANCELLED_ROUND });
+  });
+
+  it('MUTATION PROOF — an empty set spread in as `in: []` would be caught', async () => {
+    /*
+     * The mutant: the conditional spread replaced by an unconditional one, so
+     * "no filter" arrives at Postgres as `stationId IN ()`. Built on the
+     * `where` the SHIPPED service just emitted for an empty set — not on a
+     * local stand-in — so this proves the assertion above is about the code
+     * that runs. Proven against the real source too: dropping the
+     * `length > 0` guard in the service turns the two tests above red.
+     */
+    const { service, captured } = makeService();
+    await service.listHistoryForBranch(TENANT, BRANCH, { ...query, stationIds: [] });
+    const shipped = lastWhere(captured);
+    const mutant = { ...shipped, stationId: { in: [] } };
+
+    // The mutation lands — genuinely different queries…
+    expect(mutant).not.toEqual(shipped);
+    // …a loose "is it undefined-ish" check would NOT catch it (a real clause
+    // is present), which is why the test above asserts the key's absence…
+    expect(() => expect('stationId' in mutant).toBe(false)).toThrow();
+    // …while accepting what actually shipped.
+    expect('stationId' in shipped).toBe(false);
+  });
+
+  it('filters and the search compose: three legs of OR, narrowed by both sets', async () => {
+    const { service, captured } = makeService();
+
+    await service.listHistoryForBranch(TENANT, BRANCH, {
+      ...query,
+      search: 'kottu',
+      stationIds: ['stn_grill'],
+      tableIds: ['tbl_4'],
+    });
+
+    const where = lastWhere(captured);
+    expect(where.OR).toHaveLength(3);
+    expect(where.stationId).toEqual({ in: ['stn_grill'] });
+    expect(
+      (where.round as { order: { session: { tableId: unknown } } }).order.session.tableId,
+    ).toEqual({ in: ['tbl_4'] });
+  });
+
+  it('counts the SAME filtered set it pages', async () => {
+    // The D142 sibling above proves this for a search; the filters are new
+    // clauses on the same `where` and the pager's promise must hold for them
+    // too — a count that forgot the table set would report a total the page
+    // could never reach.
+    const { service, captured } = makeService();
+
+    await service.listHistoryForBranch(TENANT, BRANCH, {
+      ...query,
+      stationIds: ['stn_grill'],
+      tableIds: ['tbl_4'],
+    });
+
+    const paged = (captured.findMany.mock.calls.at(-1)![0] as { where: unknown }).where;
+    const counted = (captured.count.mock.calls.at(-1)![0] as { where: unknown }).where;
+    expect(counted).toEqual(paged);
+    // …and it is the FILTERED set both agree on, not an unfiltered one.
+    expect((counted as { stationId: unknown }).stationId).toEqual({ in: ['stn_grill'] });
   });
 });

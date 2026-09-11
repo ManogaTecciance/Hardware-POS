@@ -5,6 +5,7 @@ import { RequireModule } from '../../common/decorators/require-module.decorator'
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
+import { QueryKitchenTicketsDto } from './dto/kitchen.dto';
 import { KitchenService, type KitchenTicketListView } from './kitchen.service';
 
 /**
@@ -23,13 +24,14 @@ export class KdsController {
   async board(
     @TenantId() tenantId: string,
     @Param('branchId') branchId: string,
-    @Query('status') status?: string,
+    @Query() query: QueryKitchenTicketsDto,
   ): Promise<KitchenTicketListView> {
     /*
      * D68 — default to OUTSTANDING, not QUEUED. A ticket left on one of the
      * retired print statuses by a pre-D68 round is still food nobody has
      * cooked; filtering on QUEUED alone would hide it from the pass.
      */
+    const { status } = query;
     const filter =
       status && status in KitchenTicketStatus ? (status as KitchenTicketStatus) : 'OUTSTANDING';
     /*
@@ -45,7 +47,11 @@ export class KdsController {
      *
      * One read, one shape. A KDS that wants only the cards reads `items` and
      * ignores the rest, exactly as the board did before it had chips.
+     *
+     * D174 — and the same optional `?stationId=`, for the same reason: this
+     * route IS the list read, and a station screen driven off it would want
+     * its own slice and its own numbers rather than the branch's.
      */
-    return this.kitchen.listTicketsForBranch(tenantId, branchId, filter);
+    return this.kitchen.listTicketsForBranch(tenantId, branchId, filter, query.stationId);
   }
 }

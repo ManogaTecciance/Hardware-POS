@@ -29,6 +29,12 @@
  *   "one request per tick" is invisible on screen by definition. Both halves
  *   again: hidden must stop the interval, and coming back must refetch at once
  *   rather than waiting out the remainder of one.
+ * - D174's station-scoped lane counts are pinned by a fixture in which the
+ *   branch's number, each station's number and the poison the abandoned path
+ *   answers ALL DIFFER, so "the chip carries a number" cannot pass on the wrong
+ *   one; and the list read is asserted to stay UNSCOPED, because the station
+ *   strip is counted from it and a server-cut list would read zero on every
+ *   station but the one selected.
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
@@ -82,14 +88,19 @@ vi.mock('@/lib/restaurant/api', () => ({
     reopen: (...args: unknown[]) => reopenFn(...args),
     order: (...args: unknown[]) => orderFn(...args),
     /*
-     * D154 — the board stopped calling this, and the standalone endpoint
-     * STAYED (other callers want the numbers without the tickets). It is kept
-     * on the mock deliberately: a suite that simply dropped it would make
-     * "the board never calls laneCounts" untestable — the board would throw
-     * on the missing function and fail for the wrong reason — so the spy is
-     * present, answers a value nothing on screen could be mistaken for, and
-     * is asserted silent. Its ability to record is proven at the foot of this
-     * file.
+     * D154 — the board stopped calling this on an unfiltered board, and the
+     * standalone endpoint STAYED (other callers want the numbers without the
+     * tickets). It is kept on the mock deliberately: a suite that simply
+     * dropped it would make "an unfiltered board never calls laneCounts"
+     * untestable — the board would throw on the missing function and fail for
+     * the wrong reason — so the spy is present, answers a value nothing on
+     * screen could be mistaken for, and is asserted silent there. Its ability
+     * to record is proven at the foot of this file.
+     *
+     * D174 — under a station cut the board IS a caller again, with the
+     * station: the list stays unscoped for the strip's sake, so the station's
+     * three numbers come from here. The spy then answers the per-station
+     * fixture below, and the poison only when asked without a station.
      */
     laneCounts: (...args: unknown[]) => laneCountsFn(...args),
   },
@@ -210,6 +221,29 @@ let doneRows: KitchenTicketView[] = [];
  * would be asserted against a constant.
  */
 let serverCounts: KitchenLaneCounts = { toMake: 0, preparing: 0, doneToday: 0 };
+/*
+ * D174 — the same three numbers per STATION, which both routes answer when
+ * asked with `stationId`. Keyed by station id so a test can make the branch's
+ * number and each station's differ — the only way an assertion can tell "the
+ * station's count" from "the branch's" or from the poison.
+ */
+let stationCounts: Record<string, KitchenLaneCounts> = {};
+
+/**
+ * D174 — what the server does with `stationId`: scopes the rows AND the three
+ * numbers by the same clause. A D147-window ticket (`stationId: null`) is in no
+ * station's read. Shared by both route mocks so the fixture cannot pin them to
+ * different definitions.
+ */
+function scopeToStation(rows: KitchenTicketView[], stationId: unknown) {
+  return {
+    items: stationId ? rows.filter((t) => t.stationId === stationId) : rows,
+    counts:
+      stationId && typeof stationId === 'string'
+        ? (stationCounts[stationId] ?? { toMake: 911, preparing: 911, doneToday: 911 })
+        : serverCounts,
+  };
+}
 
 /**
  * jsdom pins `visibilityState` to 'visible'; D154's poll gate needs it
@@ -227,15 +261,24 @@ beforeEach(() => {
   outstandingRows = [];
   doneRows = [];
   serverCounts = { toMake: 0, preparing: 0, doneToday: 0 };
+  stationCounts = {};
   visibility = 'visible';
   listFn.mockReset();
   laneCountsFn.mockReset();
   /*
-   * D154 — the board must not read this. It answers numbers no chip could
-   * legitimately show, so a board that quietly went back to the second request
-   * would not merely be "still green": the counts on screen would change.
+   * D154 — an UNFILTERED board must not read this. Asked without a station it
+   * answers numbers no chip could legitimately show, so a board that quietly
+   * went back to the second request would not merely be "still green": the
+   * counts on screen would change.
+   *
+   * D174 — asked WITH a station it answers that station's fixture, the same
+   * numbers the list route would carry for that station; a station the test
+   * never described gets the poison too, so a cut read against a forgotten
+   * fixture fails loudly rather than on a zero that looks like a count.
    */
-  laneCountsFn.mockResolvedValue({ toMake: 911, preparing: 911, doneToday: 911 });
+  laneCountsFn.mockImplementation((_s: unknown, _b: unknown, stationId?: unknown) =>
+    Promise.resolve(scopeToStation([], stationId).counts),
+  );
   startFn.mockReset();
   completeFn.mockReset();
   reopenFn.mockReset();
@@ -262,11 +305,17 @@ beforeEach(() => {
    * with `filter` here, because they do not vary with it on the server either
    * (D142b — every chip carries its number whichever lane is open).
    */
-  listFn.mockImplementation((_s: unknown, _b: unknown, filter: unknown) =>
-    Promise.resolve({
-      items: filter === 'COMPLETED_TODAY' ? doneRows : outstandingRows,
-      counts: serverCounts,
-    }),
+  /*
+   * D174 — and `stationId` scopes both halves of the envelope. The BOARD never
+   * sends it (the strip needs the whole lane), and that is asserted; the mock
+   * honours it anyway so a board that started scoping its list would lose the
+   * strip's other stations HERE, in the fixture, the way it would in production
+   * — not merely trip a call-shape assertion.
+   */
+  listFn.mockImplementation((_s: unknown, _b: unknown, filter: unknown, stationId?: unknown) =>
+    Promise.resolve(
+      scopeToStation(filter === 'COMPLETED_TODAY' ? doneRows : outstandingRows, stationId),
+    ),
   );
   completeFn.mockImplementation((_s: unknown, _b: unknown, id: unknown) => {
     outstandingRows = outstandingRows.filter((t) => t.id !== id);
@@ -861,7 +910,9 @@ describe('one tick, one request (D154)', () => {
     await tickPoll();
     await settle(3);
 
-    // NEGATIVE — the standalone counts endpoint is no part of a tick…
+    // NEGATIVE — the standalone counts endpoint is no part of an UNFILTERED
+    // tick (D174 adds it under a station cut, which this single-station board
+    // can never be under)…
     expect(laneCountsFn).not.toHaveBeenCalled();
     // …and neither is anything else. The stations read fires ONCE, at mount,
     // which is what makes this a claim about the tick's whole cost rather
@@ -878,6 +929,8 @@ describe('one tick, one request (D154)', () => {
   });
 
   it('takes the other lane’s number from the ticket read, not from a second call', async () => {
+    // Unfiltered (one station, so no strip and no cut): the envelope is the
+    // only source. The cut's own source is pinned under "the station filter".
     outstandingRows = [ticket({ id: 'tk_1' })];
     serverCounts = { toMake: 1, preparing: 0, doneToday: 7 };
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
@@ -1647,6 +1700,9 @@ describe('the station filter (D152)', () => {
       ticket({ id: 'tk_g2', placeLabel: 'T2', stationId: 'stn_1', stationName: 'Grill' }),
       ticket({ id: 'tk_m1', placeLabel: 'T3', stationId: 'stn_2', stationName: 'Main Kitchen' }),
     ];
+    // D174 — the cut reads Main Kitchen's lane numbers; described so the Done
+    // chip carries a real one below rather than the poison going unasserted.
+    stationCounts = { stn_2: { toMake: 1, preparing: 0, doneToday: 4 } };
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
     await waitFor(() => expect(screen.getByRole('button', { name: /All stations/ })).toBeTruthy());
@@ -1673,16 +1729,32 @@ describe('the station filter (D152)', () => {
     expect(screen.getByRole('button', { name: /^Grill 2/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /All stations 3/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Main Kitchen 1/ })).toBeTruthy();
+    /*
+     * D174 — and those three are only possible because the LIST the board
+     * reads is still the whole lane: the server now cuts the list when asked
+     * with a station, and a board that asked would have nothing to count for
+     * Grill. The fixture honours a station argument exactly as the server
+     * does, so the "Grill 2" above is the proof; this is the call shape that
+     * makes it so.
+     */
+    for (const call of listFn.mock.calls) expect(call).toHaveLength(3);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 4' })).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /911/ })).toBeNull();
   });
 
-  it('withholds the branch-wide lane count the cut makes untrue, and keeps the ones it can', async () => {
+  it('carries every lane’s number under a cut, and the number is the station’s (D174)', async () => {
     /*
-     * D142b's other-lane numbers come from the server, which counts the BRANCH
-     * — it knows nothing of the station this screen was mounted at. Under a cut
-     * it would promise a lane the cook cannot reach, so the chip goes bare
-     * rather than lying, on exactly the reasoning the lane counts follow the
-     * cut at all. Both halves: the countable lanes must still carry numbers, or
-     * this would pass on a board that had simply lost its chips.
+     * D16 — this test used to be "withholds the branch-wide lane count the cut
+     * makes untrue": D152 left the other lane's chip bare under a station cut,
+     * because the only number the board had was the BRANCH's and "Done 7" over
+     * a lane that would show two was a lie. D174 reverses the remedy, not the
+     * diagnosis: every chip carries a number whichever lane is open (D142b),
+     * under a cut too, and the number is the STATION's. The assertion below is
+     * the opposite of the old one because the truth is.
+     *
+     * The fixture makes the branch's Done (7), Grill's (5), Main Kitchen's (2)
+     * and the abandoned path's poison (911) all differ, or "the chip carries a
+     * number" could not tell which one it carried.
      */
     stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
     outstandingRows = [
@@ -1690,22 +1762,152 @@ describe('the station filter (D152)', () => {
       ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
     ];
     serverCounts = { toMake: 2, preparing: 0, doneToday: 7 };
+    stationCounts = {
+      stn_1: { toMake: 1, preparing: 0, doneToday: 5 },
+      stn_2: { toMake: 1, preparing: 0, doneToday: 2 },
+    };
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
-    // Unfiltered, D142b is untouched: Done carries the server's number.
+    // Unfiltered, D142b is untouched: Done carries the BRANCH's number.
     // Matched on the ACCESSIBLE NAME, which is the whole chip — label and
     // count — so "Done 7" cannot be satisfied by a chip that lost its number.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 7' })).toBeTruthy());
+    // …and an unfiltered board never asks the counts route (D154).
+    expect(laneCountsFn).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+
+    // POSITIVE — the lanes this board fetches count, cut to the station…
+    await waitFor(() => expect(screen.getByRole('button', { name: 'To make 1' })).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Preparing 0' })).toBeTruthy();
+    // …and the lane it is NOT fetching carries Main Kitchen's own number.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 2' })).toBeTruthy());
+    // NEGATIVE — not the branch's, not bare, and not the unscoped poison.
+    expect(screen.queryByRole('button', { name: 'Done 7' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /911/ })).toBeNull();
+    // The number came from the counts route, asked for THIS station…
+    expect(laneCountsFn).toHaveBeenCalledWith(SESSION, 'brn_1', 'stn_2');
+    // …and the list read stayed unscoped: no fourth argument on any call. The
+    // strip is counted from that list, and would read zero for Grill if the
+    // server had cut it.
+    expect(listFn.mock.calls.length).toBeGreaterThan(0);
+    for (const call of listFn.mock.calls) expect(call).toHaveLength(3);
+    expect(screen.getByRole('button', { name: /^Grill 1/ })).toBeTruthy();
+
+    // A different station reads a different number — the count follows the
+    // selection, not merely "some station".
+    fireEvent.click(screen.getByRole('button', { name: /^Grill/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 5' })).toBeTruthy());
+    expect(laneCountsFn).toHaveBeenLastCalledWith(SESSION, 'brn_1', 'stn_1');
+
+    // And back on "All stations" the branch's number returns from the
+    // envelope, with no further call to the counts route.
+    const callsUnderCut = laneCountsFn.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: /All stations/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 7' })).toBeTruthy());
+    expect(laneCountsFn).toHaveBeenCalledTimes(callsUnderCut);
+  });
+
+  it('carries the station’s number on the Done lane too, for the two lanes it is not fetching', async () => {
+    // D142b's "same bug facing the other way", under a cut: standing on Done,
+    // To make and Preparing are the other lanes, and both must be the station's.
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [ticket({ id: 'tk_g', stationId: 'stn_1', stationName: 'Grill' })];
+    doneRows = [
+      ticket({ id: 'd_g', placeLabel: 'T-G', status: 'COMPLETED', stationId: 'stn_1' }),
+      ticket({ id: 'd_m', placeLabel: 'T-M', status: 'COMPLETED', stationId: 'stn_2' }),
+    ];
+    serverCounts = { toMake: 6, preparing: 4, doneToday: 2 };
+    stationCounts = { stn_2: { toMake: 3, preparing: 1, doneToday: 1 } };
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Main Kitchen/ })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done/ }));
+
+    // POSITIVE — the lane in hand is cut client-side, and the other two carry
+    // Main Kitchen's numbers.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 1' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'To make 3' })).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Preparing 1' })).toBeTruthy();
+    expect(screen.getByText('T-M')).toBeTruthy();
+    // NEGATIVE — the branch's numbers are nowhere on the strip.
+    expect(screen.queryByRole('button', { name: 'To make 6' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Preparing 4' })).toBeNull();
+    expect(screen.queryByText('T-G')).toBeNull();
+    expect(laneCountsFn).toHaveBeenCalledWith(SESSION, 'brn_1', 'stn_2');
+  });
+
+  it('shows no number rather than the wrong station’s while the station’s is on its way', async () => {
+    /*
+     * D174's tag. The round trip after a station tap is the one moment the
+     * board holds numbers for a station other than the one on screen. D154's
+     * rule for the rows — never relabel the old answer as the new question's —
+     * applies: the chip is bare for that round trip and fills when the poll
+     * lands. Asserted with the counts read held open, because with it resolved
+     * the stale number and the right one are one render apart and a test
+     * cannot see between them.
+     */
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    serverCounts = { toMake: 2, preparing: 0, doneToday: 7 };
+    let release: (c: KitchenLaneCounts) => void = () => undefined;
+    laneCountsFn.mockImplementation(
+      () =>
+        new Promise<KitchenLaneCounts>((resolve) => {
+          release = resolve;
+        }),
+    );
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Done 7' })).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
 
-    // POSITIVE — the lanes this board fetches still count, cut to the station.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'To make 1' })).toBeTruthy());
-    expect(screen.getByRole('button', { name: 'Preparing 0' })).toBeTruthy();
-    // NEGATIVE — and the branch-wide number is withheld rather than promising
-    // seven cards on a lane that will show at most this station's share.
+    // The cards and the lanes in hand follow the tap at once (client cut)…
+    await waitFor(() => expect(screen.queryByText('T-GRILL')).toBeNull());
+    expect(screen.getByRole('button', { name: 'To make 1' })).toBeTruthy();
+    // …and the other lane, whose number is still the BRANCH's, goes bare
+    // rather than reading "Done 7" over Main Kitchen.
+    await waitFor(() => expect(laneCountsFn).toHaveBeenCalledWith(SESSION, 'brn_1', 'stn_2'));
     expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^Done \d/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Done 7' })).toBeNull();
+
+    // Positive control: the moment the station's number lands, the chip fills.
+    release({ toMake: 1, preparing: 0, doneToday: 2 });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 2' })).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+  });
+
+  it('does not relabel the branch’s number as the station’s when the cut’s first poll fails', async () => {
+    // The failed-poll half of the tag. D154 keeps the last good numbers under a
+    // banner — for the SAME question. After a station tap they answer a
+    // different one, so the chip goes bare under the banner, and the cards
+    // (still the unscoped list, cut client-side) stay.
+    stationsFn.mockImplementation(() => Promise.resolve(twoStations()));
+    outstandingRows = [
+      ticket({ id: 'tk_g', placeLabel: 'T-GRILL', stationId: 'stn_1', stationName: 'Grill' }),
+      ticket({ id: 'tk_m', placeLabel: 'T-MAIN', stationId: 'stn_2', stationName: 'Main Kitchen' }),
+    ];
+    serverCounts = { toMake: 2, preparing: 0, doneToday: 7 };
+    laneCountsFn.mockImplementation(() => Promise.reject(new Error('counts 503')));
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done 7' })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Main Kitchen/ }));
+
+    // The tick failed and says so…
+    await waitFor(() => expect(screen.getByText('counts 503')).toBeTruthy());
+    // …the board is kept, cut to the station (positive control)…
+    expect(screen.getByText('T-MAIN')).toBeTruthy();
+    expect(screen.queryByText('T-GRILL')).toBeNull();
+    expect(screen.getByRole('button', { name: 'To make 1' })).toBeTruthy();
+    // …and the branch's Done is not passed off as Main Kitchen's.
+    expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Done 7' })).toBeNull();
   });
 
   it('says which station is empty rather than looking like an empty kitchen', async () => {
@@ -1949,9 +2151,9 @@ describe('the chime under a station filter (D152)', () => {
  *   station just because the list failed to arrive".
  * - The archived cleanup removed entirely — "drops a remembered station that no
  *   longer exists".
- * - `laneCount` reading the server count under a cut — "withholds the
- *   branch-wide lane count the cut makes untrue"; the server counts dropped
- *   altogether — all four D142b chip tests.
+ * - The server counts dropped altogether — all four D142b chip tests. (The
+ *   D152-era mutant beside it, `laneCount` reading the server count under a
+ *   cut, is what D174 SHIPS; its inverse is proven in the D174 block below.)
  * - `COMPLETED` in place of `COMPLETED_TODAY` — "asks the server for the
  *   day-scoped lane" and the other tests that reach the Done lane, since the
  *   fixture answers that token with the OUTSTANDING rows rather than pretending
@@ -1970,10 +2172,11 @@ describe('the chime under a station filter (D152)', () => {
  *   "refetches the moment the board is looked at again" and "comes back on
  *   window focus too". That pair is the whole difference between a poll that
  *   pauses and one that has stalled.
- * - The second request put back (`kitchen.laneCounts` after the list) — "spends
- *   ONE request per tick", "takes the other lane's number from the ticket
- *   read", the failed-poll test, both D142b chip tests and D152's withheld
- *   count: the 911 the abandoned spy answers reaches the strip.
+ * - The second request put back (`kitchen.laneCounts` after the list, on an
+ *   UNFILTERED board) — "spends ONE request per tick", "takes the other lane's
+ *   number from the ticket read", the failed-poll test and both D142b chip
+ *   tests: the 911 the spy answers without a station reaches the strip. (D174
+ *   re-runs this as M4 below, against the fixture that answers per station.)
  * - `setCounts(next.counts)` dropped — the same five bar the request-count one.
  *   The chips go bare rather than wrong, which is why the two are separate
  *   mutants and not one.
@@ -1993,6 +2196,41 @@ describe('the chime under a station filter (D152)', () => {
  *   failure but a tsc one, in BOTH callers (`.items`/`.counts` on an array).
  *   That is what makes the envelope's type load-bearing rather than decorative,
  *   since every test in this file mocks the client and would never see it.
+ *
+ * D174's mutants — station-scoped lane counts — run the same way (pristine
+ * copy outside the repo, suite re-run per mutant, restored byte-for-byte and
+ * compared). All nine were killed:
+ *
+ * - M1 the tag ignored (`laneCount` reads whatever station the counts answer)
+ *   — "shows no number rather than the wrong station's while the station's is
+ *   on its way" and "does not relabel the branch's number … when the cut's
+ *   first poll fails". These two are the tag's whole justification; nothing
+ *   else notices, which is why they hold the counts read open.
+ * - M2 D152's withholding put back (`stationId ? null : …`) — "carries every
+ *   lane's number under a cut", "carries the station's number on the Done lane
+ *   too", "counts the lane per station" (its Done 4) and the on-its-way test's
+ *   positive control.
+ * - M3 the LIST read scoped on the server (`stationId` passed to
+ *   `listTickets`) — "counts the lane per station" reads "Grill 0" from the
+ *   cut list, and the call-shape pins in it and in "carries every lane's
+ *   number" trip. This is the one the strip depends on, and the fixture
+ *   honouring a station argument is what lets it fail on the NUMBER and not
+ *   only on the call shape.
+ * - M4 the counts route asked on an unfiltered board too — the two D154
+ *   request-count tests and the three cut tests: the 911 the spy answers
+ *   without a station reaches the strip.
+ * - M5 the counts route never asked (envelope counts under a cut) — the five
+ *   cut tests: "Done 7" stands over Main Kitchen.
+ * - M6 the tag always `null` — four cut tests: the chip never fills.
+ * - M7 a failing counts read swallowed (`.catch(() => null)`, envelope counts
+ *   in its place) — "does not relabel … when the cut's first poll fails",
+ *   which is the pin for "one failure fails the tick".
+ * - M8 the strip counted from the SCOPED list (`inLane(scoped, filter)`) —
+ *   "counts the lane per station" and the Grill 1 in "carries every lane's
+ *   number": D152's "zero on every station but one".
+ * - M9 in api.ts, `laneCounts` losing its `stationId` parameter — a tsc
+ *   failure at the board's call (`Expected 2 arguments, but got 3`), not a
+ *   test one, for the same reason as the envelope mutant above.
  */
 describe('the D152 dialog negative can actually fail', () => {
   it('catches the pre-D147 "no station" warning, in either casing', () => {

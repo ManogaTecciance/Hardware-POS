@@ -800,6 +800,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | KIT-031 | The board stops polling when nobody is looking (D154) | Open the kitchen board, switch to another tab for a minute, then come back. Watch the network panel | No requests while the tab is hidden, and one immediately on return rather than a wait for the next tick. Switching windows away and back does the same | P | Not Run |
 | KIT-032 | A tick costs one request (D154) | Watch the network panel with the board open and visible | One request per five seconds, not two. The lane chips still carry their numbers on every lane, and the numbers agree with the cards | P | Not Run |
 | KIT-033 | A failed poll keeps the pass working (D154) | With the board loaded, take the API offline for one tick, then restore it | The cards and the chips stay on screen under an error banner, not a blank board. The banner clears on the next good poll. Switching lanes while offline shows the error card instead, never the previous lane's cards relabelled | P | Not Run |
+| KIT-034 | Every lane chip carries its number under a station cut (D174) | On a multi-station branch, pick a station chip and read all three lane chips from each lane in turn | To make, Preparing and Done each show a number on every lane, and the number is THAT station's — bumping a ticket at another station does not move it. Switch back to All stations and the branch-wide numbers return | P | Not Run |
+| KIT-035 | The station strip still counts every station under a cut (D174) | With work at two stations, pick one station chip and read the strip | The other station's chip still shows its own count rather than zero; the cards show only the chosen station's work | P | Not Run |
+| KIT-036 | The ticket history filters by station and table (D175) | Open Ticket history, press Filters, tick a station, then also tick a table; then press Clear | The panel shows a Station group and a Table group of chips; the button badge counts the active filters; the list narrows to tickets matching BOTH; the page returns to one on every change; Clear empties both | P | Not Run |
+| KIT-037 | Searching a station or table name no longer matches (D175) | Type a station name, then a table name, then a dish name into the history search | The first two match nothing; the dish still matches. The search box says it searches ticket, order and dish | P | Not Run |
+| KIT-038 | Takeaway is never a table chip (D175) | On a branch that has taken a takeaway order, open the history Filters panel | No "Walk In" or delivery group appears among the tables; takeaway tickets are listed only while no table filter is set | P | Not Run |
 | KIT-008 | Yesterday's tickets are in the history, and so are today's (D142) | Open Ticket history from the rail, and from the "Older tickets" link on the Done lane | Both reach /kitchen/history; the list holds the ticket bumped yesterday AND the one bumped minutes ago, newest first, with where it went, its items, its station, when it was finished and by whom | P | Not Run |
 | KIT-009 | Ticket history pages and searches on the server (D142) | With more than one page of finished tickets: change the rows-per-page, go to page 2, then search a dish name, a ticket number and a table code | Each request carries page/pageSize/search to GET …/kitchen-tickets/history; searching returns to page 1; a term with a double space still matches; a term that matches nothing reads "No tickets match “…”" rather than the empty-branch wording | P | Not Run |
 | KIT-010 | Cancelled work is in neither the lane nor the history (D115/D142) | Cancel an order whose ticket was already bumped; check the Done lane and Ticket history | The ticket appears in neither; it remains visible on the board's Cancelled lane | N | Not Run |
@@ -936,13 +941,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
-| RET | 18 | KIT | 33 |
+| RET | 18 | KIT | 38 |
 | EXC-T | 12 | ADM | 15 |
 | EXC-D | 4 | UI | 35 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 713 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 718 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

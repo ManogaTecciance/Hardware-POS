@@ -10,7 +10,11 @@ import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Permission } from '../auth/permissions';
-import { QueryKitchenHistoryDto } from './dto/kitchen.dto';
+import {
+  QueryKitchenHistoryDto,
+  QueryKitchenLaneCountsDto,
+  QueryKitchenTicketsDto,
+} from './dto/kitchen.dto';
 import {
   KitchenLaneCounts,
   KitchenOrderView,
@@ -44,15 +48,27 @@ export class KitchenTicketsController {
    * snapshot as the cards, so a ticket bumped mid-tick can no longer be on a
    * chip and off the pass at once. `counts` is the branch's whatever
    * `?status=` says (D142b).
+   *
+   * D174 — `?stationId=` scopes BOTH the list and the counts to one station,
+   * so a board pinned to the grill reads the grill's three numbers over the
+   * grill's cards. Omitted, the read is exactly what it was. The board sends
+   * it on every poll rather than only when the lane changes, because the
+   * counts ride along with every tick and must be the same station's each
+   * time.
    */
   @Get()
   @RequirePermissions(Permission.KOT_VIEW)
   list(
     @TenantId() tenantId: string,
     @Param('branchId') branchId: string,
-    @Query('status') status?: string,
+    @Query() query: QueryKitchenTicketsDto,
   ): Promise<KitchenTicketListView> {
-    return this.service.listTicketsForBranch(tenantId, branchId, parseFilter(status));
+    return this.service.listTicketsForBranch(
+      tenantId,
+      branchId,
+      parseFilter(query.status),
+      query.stationId,
+    );
   }
 
   // (D115: `?status=CANCELLED` is a pseudo-filter like OUTSTANDING — see
@@ -71,14 +87,19 @@ export class KitchenTicketsController {
    * is a legitimate and much cheaper question than "give me the lane", and
    * nothing is served by making a caller who wants three integers read every
    * ticket and its items to get them.
+   *
+   * D174 — takes the same optional `?stationId=` as the list, and answers the
+   * same three numbers the list's envelope would carry for that station, so
+   * the two exposures of "the counts" cannot drift apart under a station cut.
    */
   @Get('counts')
   @RequirePermissions(Permission.KOT_VIEW)
   counts(
     @TenantId() tenantId: string,
     @Param('branchId') branchId: string,
+    @Query() query: QueryKitchenLaneCountsDto,
   ): Promise<KitchenLaneCounts> {
-    return this.service.laneCountsForBranch(tenantId, branchId);
+    return this.service.laneCountsForBranch(tenantId, branchId, query.stationId);
   }
 
   /**
@@ -93,6 +114,12 @@ export class KitchenTicketsController {
    * Declared ABOVE the `:ticketId` routes because `history` would otherwise be
    * a candidate ticket id, and KOT_VIEW like the board: this is the same
    * information the kitchen already received, read back later.
+   *
+   * D175 — `?stationId=` and `?tableId=`, each repeatable, are the structured
+   * filters that replaced the search's station and table legs: a ticket is
+   * on the page when its station is IN the one set AND its table is IN the
+   * other, and an absent set is no filter on that axis. `?search=` keeps the
+   * ticket number, the order number and the dish.
    */
   @Get('history')
   @RequirePermissions(Permission.KOT_VIEW)
@@ -107,6 +134,8 @@ export class KitchenTicketsController {
       skip: query.skip,
       take: query.take,
       search: query.search,
+      stationIds: query.stationId,
+      tableIds: query.tableId,
     });
   }
 
