@@ -6,6 +6,14 @@
  * behind it, which is the point — so the assertions are about the ROW being
  * complete and reachable, and about who is allowed to touch it.
  *
+ * D174 brought unattended printing back as a COPY of the board, and this
+ * spec's fixture configures no printer on purpose: the board must be whole
+ * with nothing to print to. The "no print work" negatives below therefore
+ * still hold, now as the proof that a branch without a printer enqueues
+ * nothing and loses nothing. The positive side — a configured printer gets
+ * its attempt and the board is untouched by it — lives in
+ * `auto-printing.spec.ts`.
+ *
  * D30 compliance:
  *
  *   • Every "printing is gone" negative is paired with a positive that the
@@ -273,7 +281,7 @@ beforeEach(async () => {
 });
 
 describe('D68 — a sent round lands on the kitchen board', () => {
-  it('creates a ticket carrying where the food is going, and queues no print work', async () => {
+  it('creates a ticket carrying where the food is going, and — with no printer configured — queues no print work', async () => {
     const sent = await sendRound('no pepper');
     expect(sent.status).toBe(201);
 
@@ -300,8 +308,10 @@ describe('D68 — a sent round lands on the kitchen board', () => {
     expect(ticket.items[0]!.menuItemName).toBe('Beef Steak');
     expect(ticket.items[0]!.specialInstructions).toBe('no pepper');
 
-    // NEGATIVE — nothing was queued for a printer. Paired with the positives
-    // above: this cannot pass by virtue of no ticket having been generated.
+    // NEGATIVE — nothing was queued for a printer, because this branch has
+    // none (D174: no printer means no attempt, and the ticket is still whole).
+    // Paired with the positives above: this cannot pass by virtue of no
+    // ticket having been generated.
     const attempts = await prisma.kitchenPrintAttempt.count({
       where: { tenantId: restaurant.tenantId },
     });

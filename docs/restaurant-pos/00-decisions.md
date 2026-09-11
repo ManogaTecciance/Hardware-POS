@@ -10777,6 +10777,287 @@ The last one is the control that matters: without it, "View Reports goes to
 `/reports`" would pass for a dashboard whose every action had been rewritten to
 the same string.
 
+### D174 — the kitchen prints again, and the board is what makes that safe
+
+**Status:** ACCEPTED, 2026-09-11, and being built. Supersedes exactly one clause
+of D68. Recorded before implementation began, so that reversing a PO decision is
+itself a decision rather than a drift someone notices six weeks later in a diff.
+
+### What is being asked
+
+When a cashier, a waiter or an owner sends an order to the kitchen, the
+kitchen's own printer should produce the ticket, with nobody pressing anything.
+
+One vocabulary correction is carried into the record because the request used
+the other word: the kitchen receives a **KOT**, not a bill. The bill is the
+customer's money document and prints at the till. This decision is about the
+KOT; it leaves the bill where D68 put it.
+
+### What D68 decided, and which part of it is actually being reversed
+
+D68 has four parts. Only the first is touched:
+
+| D68 clause | Under this record |
+|---|---|
+| Kitchen tickets are not printed at all | **reversed** |
+| Kitchen staff are a role, holding three permissions | stands |
+| A ticket carries where the food is going | stands — D152 strengthened it |
+| The waiter completes the order; the cashier prints the bill | stands |
+
+**D68's reasoning was not wrong and is not being called wrong.** It observed
+that a row written inside the round's transaction cannot fail to arrive, while a
+printer can, and concluded that the screen was the more reliable delivery. That
+observation is still true and is the reason this record can be written safely at
+all. What has changed is only the premise that the screen must therefore be the
+*sole* delivery. A kitchen can read paper and a screen; it cannot cook what
+never reached it.
+
+### The condition that makes the reversal safe, and it is structural
+
+**The board stays the authority. The paper is a copy, and the copy is allowed to
+fail.**
+
+- `KitchenTicket` is still written INSIDE the submit transaction, exactly as
+  D152 leaves it. Ticket generation does not move, change shape, or acquire a
+  printer dependency.
+- The print QUEUE ROW is written inside the same transaction. A queue row is a
+  database insert, exactly as reliable as the ticket beside it, and writing the
+  two atomically is what stops a committed order from having no queued ticket.
+  (An earlier draft of this record said the enqueue happens after the commit.
+  That was wrong and is corrected here: it would open a window in which a crash
+  loses the print silently, which is the failure this whole record exists to
+  avoid.)
+- **No network I/O to a printer ever happens inside a transaction.** The
+  dispatcher drains the queue out of band, after the commit. A printer that is
+  jammed, out of paper, unplugged or behind a dead switch cannot roll back a
+  customer's order and cannot keep the ticket off the board; it leaves a FAILED
+  attempt row and nothing else.
+- A failed print surfaces against the order, not only in a log on a machine in
+  the restaurant's back office.
+
+This is the whole safety argument, so it gets a test rather than a promise: a
+spec asserts that a printer which fails every attempt still leaves the ticket
+QUEUED and legible on the board. Without that assertion, a later change that
+moves the enqueue inside the transaction would undo this decision in fact while
+the record still reads as accepted.
+
+### Why an on-site agent is forced rather than preferred
+
+`apps/api` runs on EC2 and the kitchen printer answers on a private address
+inside the restaurant. There is no route between them, and a browser cannot
+speak raw ESC/POS at all — which is why D153's Print button, useful as it is,
+prints on whatever machine the board happens to be open on rather than in the
+kitchen. A program running inside the restaurant, dialling outward, is the only
+arrangement that reaches the printer without exposing port 9100 to the internet
+or requiring a static address at every site.
+
+The one alternative that avoids an agent — printers that poll the cloud
+themselves, such as Epson's Server Direct Print — is rejected because it makes
+every future hardware purchase at every site a compatibility question.
+
+### What comes back, and from where
+
+Restored from `63ee8e9^` rather than reinvented, on D152's precedent. The D67
+work was deleted, not disproved; it already knows about tenants, branches,
+permissions and this schema, which is the expensive part of such a system and
+the part a generic reference implementation does not have.
+
+Returning: the `printing` module (ESC/POS encoder, drivers, dispatcher, worker,
+the agent controller/guard/service, the KOT and bill templates), the
+`apps/print-agent` application, and the Settings → Printing screen.
+
+D68's migration `20260903000000_kitchen_ticket_completion` is the precise
+inventory of what an additive migration must put back: the `PrintAgent` and
+`UserPrinterPreference` tables, the `PrinterRole` type, the lease columns on
+`KitchenPrintAttempt` and `PrintJob`, `PrintJob.branchId`/`orderId`/`printerId`,
+`KitchenPrinter.columns`/`role`, the `ORDER_BILL` value on `PrintJobType`, and
+`RestaurantBranchConfig.autoPrintKot` / `autoPrintBill` / `billCopies` /
+`defaultKitchenPrinterId` / `defaultReceiptPrinterId`.
+
+That last group matters: the per-branch switch this request needs was already
+designed and is simply absent. Restoring it is additive under D15, and nothing
+in it is destructive — D68's migration deleted `ORDER_BILL` rows on the way out,
+so there is no data to reconcile.
+
+### Three things this design keeps that the supplied reference implementation does not
+
+A reference implementation was supplied alongside the request (a Socket.IO
+gateway plus a Node agent). Its architecture is correct and agrees with D67's on
+every point that matters. Three differences are decided here rather than left to
+whoever writes the code:
+
+1. **The server renders; the agent only pushes bytes.** The reference renders
+   the KOT and the bill on the agent. Because the agent is installed per site,
+   that makes every layout change a visit to every restaurant — and this bill's
+   layout has already moved three times by decision (D72, D99, D102). D67's
+   README already stated the rule and it is adopted: *"it never renders
+   documents, so changing a receipt layout needs no agent update."*
+2. **Printer configuration lives in `KitchenPrinter`, not in a file on the shop
+   PC.** The table and its admin CRUD already exist. A JSON file on a till is a
+   second source of truth that no one in the office can see, and changing a
+   kitchen printer's IP becomes a site visit.
+3. **An agent is a database row, not an environment variable.** The reference
+   registers devices through `PRINT_AGENT_DEVICES_JSON`, making every new
+   restaurant an API redeploy. D67's `PrintAgent` row with a hashed token and a
+   pair-once screen is restored instead.
+
+### Routing is D152's, and is not rebuilt
+
+The reference carries its own `kitchen-routing.service`. It is not adopted.
+D152's routing already decides the station, already falls back to `MAIN`, and is
+structurally incapable of dropping an unlinked dish — a property bought with an
+adversarial review and a superseded decision, which a second router would not
+inherit.
+
+### Idempotency is the ticket id
+
+A KOT job is keyed on `KitchenTicket.id` and on nothing else. The reference keys
+on order, printer and station, which collides on the **second round at the same
+table**: the key is identical, the job is discarded as a duplicate, and the
+kitchen is never told it missed anything. Rounds are how this product composes an
+order, so that is not an edge case here. `KitchenTicket.primaryPrinterId` —
+present since D152 and written by nothing — becomes the recorded destination.
+
+### The bill does not change by default
+
+The browser path stays the default for the till's own printer: a human presses
+the button, the destination is that machine's printer, the dialog is expected,
+and it works today. The agent path is offered per branch and is worth taking for
+exactly one reason — **a browser cannot kick a cash drawer.** A branch that
+wants the drawer takes the agent path; a branch that does not, changes nothing.
+An ESC/POS bill template reproducing what `thermal-bill.ts` renders is the one
+piece of genuinely new work in this record.
+
+### What was rejected
+
+**Socket.IO now.** D67's outbound HTTPS poll with a lease TTL needs no sticky
+sessions and no Redis adapter, and O2 is still open. A kitchen tolerates a
+second or two. The socket is a later optimisation, not a starting requirement.
+
+**A second print-jobs table.** `PrintJob` already carries the lifecycle and the
+retry behaviour, for the reasons D127 gave when it widened the table rather than
+splitting it.
+
+**Printing without the board.** Not proposed by anyone, recorded so that nobody
+reads this as a return to D67. D67's failure was never the machinery; it was
+that paper was the only delivery.
+
+### Open question this raises
+
+No ESC/POS code page encodes Sinhala or Tamil, so a menu carrying non-Latin item
+names needs bitmap rendering rather than a configuration change. Raised as O13
+because it decides a rendering pipeline, and is cheaper to answer before the
+templates are written than after.
+
+### As built — where the code departed from the draft above, and why
+
+Written after implementation, 2026-09-11, so the record describes what runs.
+
+**The queue rows are written inside the round transaction** (corrected above).
+`KitchenService.generateTicketsForRound` resolves the station's printers and
+writes one PENDING `KitchenPrintAttempt` per device beside the ticket;
+`PrintingService.enqueueBillForSale` writes the bill job inside the close.
+Callers `kick()` the dispatcher after commit. No socket is opened inside a
+transaction anywhere.
+
+**Print state never writes the ticket.** D67's dispatcher and agent-ack path
+set `KitchenTicket.status` to PRINTED / FAILED; both writes are gone. A reprint
+is detected from the attempt history (a prior SUCCEEDED row), not from the
+status. `auto-printing.spec.ts` asserts on every path — direct success, three
+failures, agent ack — that the ticket is still QUEUED and still on the
+outstanding board, and that a cook's IN_PROGRESS survives a reprint.
+
+**`UserPrinterPreference` was not restored**, and D67's per-user routing layer
+went with it (`resolveCashierPrinterId`, `resolveKitchenPrinterIdForUser`,
+`GET|PUT /printing/my-printers`). The chain is now station links (primary
+first) → the branch's `defaultKitchenPrinterId`; the bill goes to
+`defaultReceiptPrinterId` and nowhere else. Only ACTIVE printers of the tenant
+are returned, so a link to a retired device yields no attempt rather than
+three failed ones — and a station whose only link is retired does NOT fall
+through to the branch default, because a link naming a dead device is a
+configuration to fix, not to paper over.
+
+**The test page rides the queue.** `PrintJobType` gained `PRINTER_TEST`
+alongside the restored `ORDER_BILL`. On a branch with a live agent the
+operator's Test print creates a job (`queued: true`, `jobId`) that the agent
+leases like any other and the screen polls through `GET /printing/jobs/:id`;
+with no agent the server prints it synchronously, which on an on-prem install
+is the shop LAN. The draft's synchronous-only test was useless for the
+deployment that actually exists.
+
+**The agent's persistent local queue was NOT adopted**, contrary to the
+"fold in" list above. The POS itself is in the cloud: when the uplink is down
+no order can be placed, so there is nothing new to spool; and a crash between
+print and ack is already covered by the server's 60 s lease TTL. Local state
+would only add a second place for a row to be. D67's "the agent holds no state
+worth backing up" stands.
+
+**The 2-second `servedByAgent` cache is gone.** A just-paired agent could watch
+the server print its first ticket, and a just-revoked one could strand a row;
+the drain now asks once per pass (`liveAgentBranches`, one query), and callers
+outside a drain ask fresh.
+
+**The takeaway bill prints at SETTLE, not at placement.** D67 printed a
+pre-settlement bill against the order because the counter did not settle
+until handover; D117 moved settlement to payment time, so the settled Sale is
+the source — same document, same calculator, paid amount included — and a
+handover after settle prints nothing twice. `enqueueOrderBill` remains for a
+branch that later wants the placement-time document, unused.
+
+**Printing is a Settings TAB** (`PrintingTab`, restaurant-only, self-saving),
+not D67's `/settings/printing` route with its own nav entry: every per-branch
+setting has lived on the Settings tabs since D84, and the switches read the
+same versioned config row Charges does.
+
+**The agent's Windows USB transport is the reference implementation's winspool
+helper**, resolved from `__dirname` rather than the working directory (a
+service manager starts the agent from wherever it likes). Address = the
+printer's Windows name. Installed as a service, not a startup shortcut.
+
+**Route matrix**: 12 ENFORCED routes under KITCHEN and 3 `public-no-tenant`
+agent routes; 337 total.
+
+**The test print says when the device is not a receipt printer.** Found on
+the first live try: the kitchen printer was pointed at a Canon inkjet, which
+accepts raw bytes on port 9100 like any office printer, and the screen read
+"Test page printed" while nothing came out — "delivered" was true and useless.
+After a delivered network test the server now sends DLE EOT 1 (ESC/POS
+real-time status); a receipt printer answers with a byte, an office printer
+stays silent, and silence becomes a WARNING beside the success ("check that
+192.168.0.75 is the thermal printer; if a page came out, ignore this") rather
+than a failure, because some genuine printers ship with status replies off.
+Server path only — the agent's ack carries no channel for it yet.
+
+**An office printer can print the ticket as plain text (kind `A4_NETWORK`).**
+The same first live try had one thermal printer, in use at a till, and one
+Canon inkjet on the LAN for testing. Rather than leave "no ESC/POS device, no
+test", the builder gained a plain-text mode: the SAME templates, no control
+sequences, centring by spaces, a form feed for the cut, ASCII-only
+transliteration. `renderOptions(printer)` picks it by kind, so neither the
+templates nor the agent decide anything; the agent hands the bytes to the
+Windows spooler with data type TEXT instead of RAW, and the printer's own
+driver lays them out. Address = the printer's Windows name on the agent PC.
+The server's direct path refuses the kind with a message that says to run the
+agent, since only the agent has a spooler. The test print's DLE EOT probe does
+not apply to this kind. Verified live: a round placed through the API came out
+of the Canon as a text page within one poll, Windows job "Complete, 1 page".
+
+**The thermal KOT follows the mainstream kitchen-ticket layout** (owner,
+2026-09-11: "industry standard"), replacing D67's: order type (DINE IN /
+TAKEAWAY / DELIVERY) and the table — or the order number, with the customer's
+name — as the only double-size text; ticket number and stamp; order, round,
+server and station on their own lines; quantity first and the item in double
+HEIGHT (D67's double width halved the columns without telling the wrapper, so
+long names broke mid-word at the printer's 24th column); variant in capitals,
+modifiers with `+`, instructions with `>>` in bold capitals; a blank line
+between items; an item count at the foot; reprint marker; feed and cut. Found
+on the way: the builder's word-wrap had eaten leading spaces since D67, so
+nothing under a dish had ever printed indented — fixed, with the indent kept on
+every wrapped line. The on-screen KOT (D153's Print button) is unchanged and
+now differs from the paper one; aligning it touches a PO-supplied format and is
+left for the PO. Live on the Xprinter XP-Q80B: two-station order, two tickets,
+both via the agent.
+
 ---
 
 ## Open decisions
@@ -10795,3 +11076,4 @@ the same string.
 | O10 | Should the clothing Retail template (D120) offer the Salesperson, the hardware-only owner-equivalent of D108? It seeds Owner + Cashier today (D136). | before the first Retail workspace |
 | O11 | Their 5.10 (D136a) takes the SKU line off every 80mm SALES receipt (the return receipt still prints it) and turns the A4 SKU column's default off; both reach the Tile Shop, and a workspace that never saved its documents settings loses the column. Keep, or exempt the QuickBooks pilot (D16)? | before the next production deploy |
 | O12 | `startOfDayInTimeZone` resolves a local midnight that DST SKIPS backwards, so in a zone whose transition is at 00:00 (Cuba, Chile) a business day computed from it is an hour short at the end — the Done lane (D142), the dashboard's "today" and every `lastNDaysInTimeZone` report. Found by review, pre-existing, no tenant is in such a zone today. Fix the helper, or leave it? | before a tenant in Cuba/Chile |
+| O13 | No ESC/POS code page encodes Sinhala or Tamil, so a menu with non-Latin item names needs the KOT and bill rendered as bitmaps rather than text. Latin-only, or bitmap rendering? Raised by D174. | before the printing templates are written |

@@ -69,6 +69,8 @@ import { BillingController } from '../../modules/billing/billing.controller';
 import { RestaurantReportsController } from '../../modules/restaurant-reports/restaurant-reports.controller';
 import { DeliveryWebhookController } from '../../modules/delivery-hub/delivery-webhook.controller';
 import { KdsController } from '../../modules/kitchen/kds.controller';
+import { PrintingController } from '../../modules/printing/printing.controller';
+import { PrintAgentController } from '../../modules/printing/print-agent.controller';
 import { RestaurantOrdersController } from '../../modules/restaurant-orders/restaurant-orders.controller';
 // D44 — Product variants + purchase receipts.
 import { ProductImagesController } from '../../modules/products/product-images.controller';
@@ -143,6 +145,9 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   DeliveryWebhookController,
   KdsController,
   RestaurantOrdersController,
+  // D174 — the print queue's operator surface and the on-site agent's API.
+  PrintingController,
+  PrintAgentController,
   // D44 — Product variants + purchase receipts.
   ProductImagesController,
   ProductVariantsController,
@@ -251,6 +256,9 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'delivery-webhook',
   'kds',
   'restaurant-orders',
+  // D174.
+  'printing',
+  'print-agent',
   // D44 — Product variants + purchase receipts.
   'inventory-receipts',
   // D132 (`8.7`) — stock takes / cycle counts.

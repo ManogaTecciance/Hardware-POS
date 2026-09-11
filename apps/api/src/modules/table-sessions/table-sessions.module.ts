@@ -5,6 +5,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
 import { AuthModule } from '../auth/auth.module';
 import { DiningModule } from '../dining/dining.module';
 import { KitchenModule } from '../kitchen/kitchen.module';
+import { PrintingModule } from '../printing/printing.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TableSessionsController } from './table-sessions.controller';
@@ -22,6 +23,8 @@ import { TableSessionsService } from './table-sessions.service';
     ProvidersModule,
     // Promotions on the bill (see RestaurantPromotionPricingService).
     PromotionsModule,
+    // D174 — bill on close, dispatcher nudge after each commit.
+    PrintingModule,
   ],
   controllers: [TableSessionsController],
   providers: [TableSessionsService],

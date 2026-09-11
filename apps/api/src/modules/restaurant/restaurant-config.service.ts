@@ -20,6 +20,12 @@ export interface RestaurantBranchConfigView {
   serviceChargeTaxable: boolean;
   /** D52 — flat per-order packaging charge for TAKEAWAY / ONLINE. */
   packagingChargeAmount: string;
+  /** D174 — auto-printing, per branch. */
+  autoPrintKot: boolean;
+  autoPrintBill: boolean;
+  billCopies: number;
+  defaultReceiptPrinterId: string | null;
+  defaultKitchenPrinterId: string | null;
   version: number;
   updatedAt: string;
 }
@@ -38,6 +44,11 @@ const CODE_DEFAULTS = {
   serviceChargeChannels: ['DINE_IN'],
   serviceChargeTaxable: true,
   packagingChargeAmount: '0.00',
+  autoPrintKot: true,
+  autoPrintBill: true,
+  billCopies: 1,
+  defaultReceiptPrinterId: null,
+  defaultKitchenPrinterId: null,
   version: 0,
 };
 
@@ -99,6 +110,14 @@ export class RestaurantConfigService {
               dto.packagingChargeAmount !== undefined
                 ? new Prisma.Decimal(dto.packagingChargeAmount)
                 : undefined,
+            // D174 — auto-printing switches + the branch's default printers.
+            autoPrintKot: dto.autoPrintKot ?? undefined,
+            autoPrintBill: dto.autoPrintBill ?? undefined,
+            billCopies: dto.billCopies ?? undefined,
+            defaultReceiptPrinterId:
+              dto.defaultReceiptPrinterId !== undefined ? dto.defaultReceiptPrinterId : undefined,
+            defaultKitchenPrinterId:
+              dto.defaultKitchenPrinterId !== undefined ? dto.defaultKitchenPrinterId : undefined,
             version: { increment: 1 },
           },
         });
@@ -135,6 +154,15 @@ export class RestaurantConfigService {
           ...(dto.packagingChargeAmount !== undefined
             ? { packagingChargeAmount: dto.packagingChargeAmount }
             : {}),
+          ...(dto.autoPrintKot !== undefined ? { autoPrintKot: dto.autoPrintKot } : {}),
+          ...(dto.autoPrintBill !== undefined ? { autoPrintBill: dto.autoPrintBill } : {}),
+          ...(dto.billCopies !== undefined ? { billCopies: dto.billCopies } : {}),
+          ...(dto.defaultReceiptPrinterId !== undefined
+            ? { defaultReceiptPrinterId: dto.defaultReceiptPrinterId }
+            : {}),
+          ...(dto.defaultKitchenPrinterId !== undefined
+            ? { defaultKitchenPrinterId: dto.defaultKitchenPrinterId }
+            : {}),
         },
       });
       return this.toView(created);
@@ -164,6 +192,11 @@ export class RestaurantConfigService {
       serviceChargeChannels: row.serviceChargeChannels,
       serviceChargeTaxable: row.serviceChargeTaxable,
       packagingChargeAmount: row.packagingChargeAmount.toFixed(2),
+      autoPrintKot: row.autoPrintKot,
+      autoPrintBill: row.autoPrintBill,
+      billCopies: row.billCopies,
+      defaultReceiptPrinterId: row.defaultReceiptPrinterId,
+      defaultKitchenPrinterId: row.defaultKitchenPrinterId,
       version: row.version,
       updatedAt: row.updatedAt.toISOString(),
     };

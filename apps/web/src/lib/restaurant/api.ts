@@ -28,6 +28,11 @@ import type {
   KitchenLaneCounts,
   KitchenPrinterKind,
   KitchenPrinterView,
+  PrintAgentView,
+  PrintJobStatusView,
+  PrintQueueStatus,
+  PrinterRole,
+  TestPrintResult,
   KitchenTicketStatus,
   KitchenTicketView,
   MenuItemView,
@@ -85,6 +90,12 @@ export const restaurantConfig = {
       takeawayEnabled?: boolean;
       dineInEnabled?: boolean;
       defaultTicketTargetMinutes?: number;
+      /** D174 — auto-printing switches and the branch's default printers. */
+      autoPrintKot?: boolean;
+      autoPrintBill?: boolean;
+      billCopies?: number;
+      defaultReceiptPrinterId?: string | null;
+      defaultKitchenPrinterId?: string | null;
       expectedVersion?: number;
     },
   ) {
@@ -858,7 +869,14 @@ export const kitchenPrinters = {
   create(
     session: Session,
     branchId: string,
-    body: { code: string; name: string; kind: KitchenPrinterKind; address: string },
+    body: {
+      code: string;
+      name: string;
+      kind: KitchenPrinterKind;
+      address: string;
+      role?: PrinterRole;
+      columns?: number;
+    },
   ) {
     return api.post<KitchenPrinterView>(
       `/restaurant/branches/${branchId}/kitchen-printers`,
@@ -870,13 +888,71 @@ export const kitchenPrinters = {
     session: Session,
     branchId: string,
     printerId: string,
-    body: Partial<{ name: string; kind: KitchenPrinterKind; address: string; isActive: boolean }>,
+    body: Partial<{
+      name: string;
+      kind: KitchenPrinterKind;
+      address: string;
+      isActive: boolean;
+      role: PrinterRole;
+      columns: number;
+    }>,
   ) {
     return api.patch<KitchenPrinterView>(
       `/restaurant/branches/${branchId}/kitchen-printers/${printerId}`,
       body,
       auth(session),
     );
+  },
+  /** D174 — which stations this printer serves. Replace-all. */
+  setStations(session: Session, branchId: string, printerId: string, stationIds: string[]) {
+    return api.put<KitchenPrinterView>(
+      `/restaurant/branches/${branchId}/kitchen-printers/${printerId}/stations`,
+      { stationIds },
+      auth(session),
+    );
+  },
+  /** D174 — a self-test page: printed now, or queued for the branch's agent. */
+  testPrint(session: Session, branchId: string, printerId: string) {
+    return api.post<TestPrintResult>(
+      `/restaurant/branches/${branchId}/kitchen-printers/${printerId}/test-print`,
+      {},
+      auth(session),
+    );
+  },
+};
+
+// ── Printing (D174) ─────────────────────────────────────────────────────────
+export const printing = {
+  /** The queue's depth and its recent failures, for the settings screen. */
+  queue(session: Session, branchId: string) {
+    return api.get<PrintQueueStatus>(
+      `/printing/queue?branchId=${encodeURIComponent(branchId)}`,
+      auth(session),
+    );
+  },
+  /** One job's outcome — a queued test page, a stuck bill. */
+  job(session: Session, jobId: string) {
+    return api.get<PrintJobStatusView>(`/printing/jobs/${jobId}`, auth(session));
+  },
+  retryJob(session: Session, jobId: string) {
+    return api.post<{ ok: true }>(`/printing/jobs/${jobId}/retry`, {}, auth(session));
+  },
+  agents(session: Session, branchId: string) {
+    return api.get<PrintAgentView[]>(
+      `/printing/agents?branchId=${encodeURIComponent(branchId)}`,
+      auth(session),
+    );
+  },
+  /** Pair an on-site agent. The token comes back ONCE. */
+  pairAgent(session: Session, branchId: string, name: string) {
+    return api.post<{ id: string; name: string; token: string }>(
+      '/printing/agents',
+      { branchId, name },
+      auth(session),
+    );
+  },
+  revokeAgent(session: Session, agentId: string) {
+    return api.post<{ ok: true }>(`/printing/agents/${agentId}/revoke`, {}, auth(session));
   },
 };
 

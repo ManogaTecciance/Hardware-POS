@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 322
-- Module-guarded routes: 220
-- Ungated routes: 102
+- Total routes: 337
+- Module-guarded routes: 232
+- Ungated routes: 105
 
 ## How to read the Guard column
 
@@ -480,6 +480,42 @@ and the per-row detail the drawer fetches.
 | POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/complete` | KITCHEN | ENFORCED | kitchen:status:update |
 | POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/start` | KITCHEN | ENFORCED | kitchen:status:update |
 | POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen` | KITCHEN | ENFORCED | kitchen:status:update |
+
+### PrintingController / KitchenPrintersController (D174 auto-printing)
+
+D174, restoring D67: printers are added once per branch by the owner
+(discovery-assisted), given a role (KITCHEN / CASHIER) and linked to stations;
+the branch's auto-print switches and default printers live on the restaurant
+branch config (`PUT /restaurant/branches/:branchId/config`). D67's per-user
+printer choice is not restored — D152's station decides the device.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| PUT | `/restaurant/branches/:branchId/kitchen-printers/:printerId/stations` | KITCHEN | ENFORCED | kitchen:station:manage |
+| POST | `/restaurant/branches/:branchId/kitchen-printers/:printerId/test-print` | KITCHEN | ENFORCED | kitchen:station:manage |
+| GET | `/printing/branch` | KITCHEN | ENFORCED | kitchen:station:manage |
+| GET | `/printing/queue` | KITCHEN | ENFORCED | kot:view |
+| GET | `/printing/jobs/:jobId` | KITCHEN | ENFORCED | kot:view |
+| POST | `/printing/jobs/:jobId/retry` | KITCHEN | ENFORCED | kot:print |
+| POST | `/printing/drain` | KITCHEN | ENFORCED | kot:print |
+| GET | `/printing/discover` | KITCHEN | ENFORCED | kitchen:station:manage |
+| POST | `/printing/probe` | KITCHEN | ENFORCED | kitchen:station:manage |
+| POST | `/printing/agents` | KITCHEN | ENFORCED | kitchen:station:manage |
+| GET | `/printing/agents` | KITCHEN | ENFORCED | kitchen:station:manage |
+| POST | `/printing/agents/:agentId/revoke` | KITCHEN | ENFORCED | kitchen:station:manage |
+
+### PrintAgentController (D174 — the on-site agent's own API)
+
+Not workspace-user routes: `@Public()` switches off the user stack and
+`PrintAgentGuard` authenticates a branch-scoped **device** token, supplying
+tenant and branch from the token's own row. Nothing about scope is read from
+the request, so a stolen token can only drain its own branch's print queue.
+
+| Method | Path | Module | Guard | Permission |
+|---|---|---|---|---|
+| POST | `/print-agent/heartbeat` | SHARED_CORE | public-no-tenant | _agent token_ |
+| POST | `/print-agent/lease` | SHARED_CORE | public-no-tenant | _agent token_ |
+| POST | `/print-agent/ack` | SHARED_CORE | public-no-tenant | _agent token_ |
 
 ### TableSessionsController
 

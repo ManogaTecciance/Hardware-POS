@@ -23,6 +23,7 @@ import { BusinessDetailsTab } from '@/components/settings/business-details-tab';
 import { BillStructureCard } from '@/components/settings/bill-structure-card';
 import { ChargesTab } from '@/components/settings/charges-tab';
 import { HoursTab } from '@/components/settings/hours-tab';
+import { PrintingTab } from '@/components/settings/printing-tab';
 import { WorkspaceTab } from '@/components/settings/workspace-tab';
 import { Permission } from '@/lib/permissions';
 import { useEffectiveProfile } from '@/lib/platform-profile';
@@ -64,6 +65,7 @@ const TABS = [
   'Preview',
   'Charges',
   'Hours',
+  'Printing',
   'Workspace',
   'Business details',
 ] as const;
@@ -119,7 +121,9 @@ function previewSegment(active: boolean): string {
  * owner has been shown two tabs that answer "Feature not available" — verified
  * live. The resolver decides now.
  */
-const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours'];
+// D174 — Printing joins them: kitchen tickets and cashier bills are the
+// restaurant's, and the tab reads the same per-branch config row Charges does.
+const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours', 'Printing'];
 
 /**
  * D161 — the tab is shown only where the business type offers the feature.
@@ -145,6 +149,7 @@ const CONFIGURABLE_CATALOGUE_TABS: readonly Tab[] = ['Business details'];
 const SELF_SAVING_TABS: readonly Tab[] = [
   'Charges',
   'Hours',
+  'Printing',
   'Workspace',
   'Business details',
 ];
@@ -492,6 +497,21 @@ export default function SettingsPage() {
           <Card className="max-w-3xl">
             <CardContent className="py-16 text-center text-sm text-muted-foreground">
               Opening hours are set per branch. Ask an administrator for branch access.
+            </CardContent>
+          </Card>
+        )
+      ) : tab === 'Printing' ? (
+        /*
+         * D174 — its own save button, for the reason Charges has one: the
+         * auto-print switches live on the versioned branch config row, and
+         * the printers and agents are records of their own.
+         */
+        session?.branchId ? (
+          <PrintingTab session={session} branchId={session.branchId} />
+        ) : (
+          <Card className="max-w-3xl">
+            <CardContent className="py-16 text-center text-sm text-muted-foreground">
+              Printing is set per branch. Ask an administrator for branch access.
             </CardContent>
           </Card>
         )

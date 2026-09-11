@@ -60,6 +60,25 @@ const STATIONS = {
 /** What `resolveMainStation`'s upsert hands back — a fifth, separate station. */
 const MAIN_STATION_ID = 'stn_main_fallback';
 
+/*
+ * D174 — printers. The grill has its own device plus a RETIRED backup; the
+ * bar has none linked and inherits the branch default; the hotline's only
+ * link is to the retired device, so it must produce no attempt rather than
+ * one that fails three times. Pastry and Main link nothing, and the branch
+ * default is what they get.
+ */
+const PRINTERS = {
+  grill: 'prn_grill',
+  retired: 'prn_retired',
+  branchDefault: 'prn_default',
+} as const;
+const STATION_PRINTER_LINKS = [
+  { stationId: STATIONS.grill, printerId: PRINTERS.grill, isPrimary: true },
+  { stationId: STATIONS.grill, printerId: PRINTERS.retired, isPrimary: false },
+  { stationId: STATIONS.hotline, printerId: PRINTERS.retired, isPrimary: true },
+];
+const ACTIVE_PRINTERS = new Set<string>([PRINTERS.grill, PRINTERS.branchDefault]);
+
 /**
  * Product links. 'prd_pudding' has NONE — that is the whole point of it.
  */
@@ -146,7 +165,13 @@ const EXPECTED_SPLIT: Record<string, string[]> = {
   [STATIONS.bar]: ['Plain Tea'],
 };
 
-type CreatedTicket = { id: string; stationId: string | null; ticketNumber: string };
+type CreatedTicket = {
+  id: string;
+  stationId: string | null;
+  /** D174 — the device the ticket recorded, null when nothing was routable. */
+  primaryPrinterId: string | null;
+  ticketNumber: string;
+};
 type WrittenItem = {
   ticketId: string;
   menuItemName: string;
@@ -165,14 +190,24 @@ type Harness = {
     productStationLink: { findMany: jest.Mock };
     kitchenStation: { upsert: jest.Mock; findMany: jest.Mock };
     $queryRaw: jest.Mock;
+    kitchenStationPrinter: { findMany: jest.Mock };
+    restaurantBranchConfig: { findUnique: jest.Mock };
+    kitchenPrinter: { findMany: jest.Mock };
+    kitchenPrintAttempt: { create: jest.Mock };
   };
   created: CreatedTicket[];
   written: WrittenItem[];
+  /** D174 — every PENDING attempt the round queued, in creation order. */
+  attempts: { ticketId: string; printerId: string }[];
 };
 
-function makeHarness(items: RoundItem[] = ROUND_ITEMS): Harness {
+function makeHarness(
+  items: RoundItem[] = ROUND_ITEMS,
+  printing: { branchDefaultPrinterId: string | null } = { branchDefaultPrinterId: PRINTERS.branchDefault },
+): Harness {
   const created: CreatedTicket[] = [];
   const written: WrittenItem[] = [];
+  const attempts: { ticketId: string; printerId: string }[] = [];
   let seq = 27;
 
   const raw = {
@@ -206,6 +241,45 @@ function makeHarness(items: RoundItem[] = ROUND_ITEMS): Harness {
     },
     // `nextDocumentNumber` is a raw INSERT … RETURNING; one call, one number.
     $queryRaw: jest.fn().mockImplementation(() => Promise.resolve([{ value: seq++ }])),
+    /*
+     * D174 — the printer chain, each stub honouring its `where` for the same
+     * reason the junction stubs do: a resolver that ignored the station would
+     * still get "the right printer" from a stub that returned everything.
+     */
+    kitchenStationPrinter: {
+      findMany: jest.fn().mockImplementation((args: { where: { stationId: string } }) =>
+        Promise.resolve(
+          STATION_PRINTER_LINKS.filter((l) => l.stationId === args.where.stationId)
+            .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+            .map((l) => ({ printerId: l.printerId })),
+        ),
+      ),
+    },
+    restaurantBranchConfig: {
+      findUnique: jest.fn().mockImplementation((args: { where: { branchId: string } }) =>
+        Promise.resolve(
+          args.where.branchId === BRANCH
+            ? { defaultKitchenPrinterId: printing.branchDefaultPrinterId }
+            : null,
+        ),
+      ),
+    },
+    kitchenPrinter: {
+      findMany: jest.fn().mockImplementation(
+        (args: { where: { id: { in: string[] }; tenantId: string; isActive: boolean } }) =>
+          Promise.resolve(
+            args.where.tenantId === TENANT && args.where.isActive === true
+              ? args.where.id.in.filter((id) => ACTIVE_PRINTERS.has(id)).map((id) => ({ id }))
+              : [],
+          ),
+      ),
+    },
+    kitchenPrintAttempt: {
+      create: jest.fn().mockImplementation((args: { data: { ticketId: string; printerId: string } }) => {
+        attempts.push({ ticketId: args.data.ticketId, printerId: args.data.printerId });
+        return Promise.resolve(undefined);
+      }),
+    },
   };
 
   const tx = {
@@ -215,6 +289,7 @@ function makeHarness(items: RoundItem[] = ROUND_ITEMS): Harness {
         const row: CreatedTicket = {
           id: `tkt_${created.length + 1}`,
           stationId: (args.data.stationId as string | null) ?? null,
+          primaryPrinterId: (args.data.primaryPrinterId as string | null) ?? null,
           ticketNumber: args.data.ticketNumber as string,
         };
         created.push(row);
@@ -240,6 +315,7 @@ function makeHarness(items: RoundItem[] = ROUND_ITEMS): Harness {
     raw,
     created,
     written,
+    attempts,
   };
 }
 
@@ -638,6 +714,93 @@ describe('KitchenService.generateTicketsForRound — the split (D152)', () => {
     expect(() =>
       assertSplitAndNothingDropped(guessed.created, guessed.written, EXPECTED_SPLIT, ALL_NAMES),
     ).toThrow();
+  });
+});
+
+/**
+ * D174 — the printer is decided per station INSIDE the round transaction, and
+ * a station without one still gets its ticket. These sit beside the split
+ * because the split is what they ride on: the station chooses the device.
+ */
+describe('KitchenService.generateTicketsForRound — the printer (D174)', () => {
+  const byStation = (h: Harness) =>
+    Object.fromEntries(h.created.map((t) => [t.stationId, t]));
+  const attemptsFor = (h: Harness, stationId: string) =>
+    h.attempts.filter((a) => a.ticketId === byStation(h)[stationId]!.id).map((a) => a.printerId);
+
+  it('a station with a linked printer gets one PENDING attempt on it, and the ticket records it', async () => {
+    const h = makeHarness();
+    await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+    expect(attemptsFor(h, STATIONS.grill)).toEqual([PRINTERS.grill]);
+    expect(byStation(h)[STATIONS.grill]!.primaryPrinterId).toBe(PRINTERS.grill);
+  });
+
+  it('a retired printer produces NO attempt — not one that fails three times', async () => {
+    const h = makeHarness();
+    await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+    // The grill's backup link and the hotline's only link both point at it.
+    expect(h.attempts.map((a) => a.printerId)).not.toContain(PRINTERS.retired);
+    // The hotline had a link, so the branch default must NOT step in: a link
+    // that names a dead device is a configuration to fix, not to paper over.
+    expect(attemptsFor(h, STATIONS.hotline)).toEqual([]);
+    expect(byStation(h)[STATIONS.hotline]!.primaryPrinterId).toBeNull();
+  });
+
+  it('a station linked to nothing inherits the branch default kitchen printer', async () => {
+    const h = makeHarness();
+    await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+    for (const stationId of [STATIONS.bar, MAIN_STATION_ID]) {
+      expect(attemptsFor(h, stationId)).toEqual([PRINTERS.branchDefault]);
+      expect(byStation(h)[stationId]!.primaryPrinterId).toBe(PRINTERS.branchDefault);
+    }
+  });
+
+  it('with no printer anywhere the tickets are still written — the board never waits on paper', async () => {
+    const h = makeHarness(ROUND_ITEMS, { branchDefaultPrinterId: null });
+    const ids = await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+    // Every station still has its ticket and every line still reached one.
+    expect(ids).toHaveLength(4);
+    expect(h.written).toHaveLength(ROUND_ITEMS.length);
+    // Only the grill (its own live device) queued anything.
+    expect(h.attempts.map((a) => a.printerId)).toEqual([PRINTERS.grill]);
+    expect(byStation(h)[STATIONS.bar]!.primaryPrinterId).toBeNull();
+  });
+
+  it('asks for ACTIVE printers of THIS tenant only', async () => {
+    const h = makeHarness();
+    await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+    const calls = h.raw.kitchenPrinter.findMany.mock.calls as [{ where: Record<string, unknown> }][];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call[0].where).toMatchObject({ tenantId: TENANT, isActive: true });
+    }
+  });
+
+  it('MUTATION PROOF — a resolver that ignored the station, or skipped the active check, turns these red', async () => {
+    // Mutant 1: every station gets the branch default regardless of links.
+    {
+      const h = makeHarness();
+      h.raw.kitchenStationPrinter.findMany.mockResolvedValue([]);
+      await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+      expect(() => {
+        expect(attemptsFor(h, STATIONS.grill)).toEqual([PRINTERS.grill]);
+      }).toThrow();
+      expect(() => {
+        expect(attemptsFor(h, STATIONS.hotline)).toEqual([]);
+      }).toThrow();
+    }
+    // Mutant 2: the active check is skipped, so the retired backup gets an
+    // attempt too.
+    {
+      const h = makeHarness();
+      h.raw.kitchenPrinter.findMany.mockImplementation((args: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(args.where.id.in.map((id) => ({ id }))),
+      );
+      await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+      expect(() => {
+        expect(h.attempts.map((a) => a.printerId)).not.toContain(PRINTERS.retired);
+      }).toThrow();
+    }
   });
 });
 

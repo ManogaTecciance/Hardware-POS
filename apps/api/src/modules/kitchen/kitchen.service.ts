@@ -13,6 +13,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { paginate } from '../../common/pagination';
 import { withTabName } from '../../common/place-label';
+import { resolveStationPrinterIds } from '../printing/printing.service';
 import { SettingsService } from '../settings/settings.service';
 
 /*
@@ -317,6 +318,16 @@ export class KitchenService {
 
     const ticketIds: string[] = [];
     for (const [stationId, stationItems] of perStation) {
+      /*
+       * D174 — which device this station's paper comes out of. Resolved
+       * INSIDE the transaction so the ticket and its queue rows commit
+       * together; the actual printing happens out of band in the dispatcher,
+       * so a dead printer can only ever leave a FAILED attempt, never a
+       * missing ticket. Empty is a legitimate answer (no printer configured):
+       * the ticket still reaches the board and D153 prints it by hand.
+       */
+      const printerIds = await resolveStationPrinterIds(tx, { tenantId, branchId, stationId });
+
       // One document number PER TICKET: two stations cooking one round are two
       // cards on the pass, and two cards sharing a KOT number cannot be told
       // apart by the people calling them out.
@@ -328,6 +339,7 @@ export class KitchenService {
           branchId,
           roundId,
           stationId,
+          primaryPrinterId: printerIds[0] ?? null,
           ticketNumber,
           status: KitchenTicketStatus.QUEUED,
         },
@@ -348,6 +360,14 @@ export class KitchenService {
             modifierNames: item.modifiers.map((m) => m.optionName),
             specialInstructions: item.specialInstructions,
           },
+        });
+      }
+      // One PENDING attempt per configured printer. A station linked to a
+      // primary and a backup gets the same ticket on both — that is the
+      // redundancy the second link is for, not a duplicate.
+      for (const printerId of printerIds) {
+        await tx.kitchenPrintAttempt.create({
+          data: { tenantId, ticketId: ticket.id, printerId },
         });
       }
       ticketIds.push(ticket.id);

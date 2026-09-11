@@ -408,6 +408,32 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // D100 — recall: a wrong bump reopens on the board; same permission as
   // completing.
   'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  // D174 — auto-printing returns: station links, the self-test page, the
+  // queue, the network scan, agent pairing, and the branch's printing config.
+  'PUT /restaurant/branches/:branchId/kitchen-printers/:printerId/stations': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'POST /restaurant/branches/:branchId/kitchen-printers/:printerId/test-print': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'GET /printing/branch': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'GET /printing/queue': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'GET /printing/jobs/:jobId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'POST /printing/jobs/:jobId/retry': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'POST /printing/drain': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'GET /printing/discover': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'POST /printing/probe': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'POST /printing/agents': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'GET /printing/agents': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'POST /printing/agents/:agentId/revoke': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  /*
+   * D174 — the on-site print agent's own API. `public-no-tenant` in this
+   * table's vocabulary means "not a workspace-user route": these carry
+   * @Public() to switch OFF the user stack and are guarded by
+   * PrintAgentGuard instead, which resolves a branch-scoped device token.
+   * They cannot carry a module guard for the same reason the QuickBooks
+   * OAuth callback cannot — there is no authenticated tenant on the request
+   * until the guard puts one there.
+   */
+  'POST /print-agent/heartbeat': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
+  'POST /print-agent/lease': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
+  'POST /print-agent/ack': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
   'GET /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'POST /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   // D117 — money without handover: close the session into a Sale, status untouched.

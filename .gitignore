@@ -54,3 +54,9 @@ playwright-report/
 apps/api/uploads/
 uploads/
 .~lock.*#
+
+# D174 — MOCK printers spool to disk (integration tests, dev machines); the
+# on-site agent keeps its pairing token in agent.json and its MOCK output beside it.
+.print-spool/
+apps/print-agent/agent.json
+apps/print-agent/agent-spool.bin

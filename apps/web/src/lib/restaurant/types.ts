@@ -144,6 +144,12 @@ export interface RestaurantBranchConfigView {
   takeawayEnabled: boolean;
   dineInEnabled: boolean;
   defaultTicketTargetMinutes: number | null;
+  /** D174 — auto-printing, per branch. */
+  autoPrintKot: boolean;
+  autoPrintBill: boolean;
+  billCopies: number;
+  defaultReceiptPrinterId: string | null;
+  defaultKitchenPrinterId: string | null;
   version: number;
   updatedAt: string;
 }
@@ -592,6 +598,9 @@ export interface KitchenHistoryPage {
   pageSize: number;
 }
 
+/** D174 — KITCHEN devices are station-routed; CASHIER devices print bills. */
+export type PrinterRole = 'KITCHEN' | 'CASHIER';
+
 export interface KitchenPrinterView {
   id: string;
   branchId: string;
@@ -600,6 +609,56 @@ export interface KitchenPrinterView {
   kind: KitchenPrinterKind;
   address: string;
   isActive: boolean;
+  role: PrinterRole;
+  /** Characters per line: 48 = 80 mm paper, 32 = 58 mm. */
+  columns: number;
+  /** Stations this printer serves. Empty on a CASHIER printer. */
+  stationIds: string[];
+}
+
+// ── Printing (D174) ─────────────────────────────────────────────────────────
+export interface PrintAgentView {
+  id: string;
+  name: string;
+  isActive: boolean;
+  lastSeenAt: string | null;
+  version: string | null;
+  createdAt: string;
+  /** Checked in within the freshness window — the branch prints through it. */
+  online: boolean;
+}
+
+export interface PrintQueueStatus {
+  pendingKitchenAttempts: number;
+  failedKitchenTickets: number;
+  pendingBillJobs: number;
+  failedBillJobs: {
+    id: string;
+    saleId: string | null;
+    error: string | null;
+    attempts: number;
+    at: string;
+  }[];
+}
+
+export interface PrintJobStatusView {
+  id: string;
+  type: string;
+  status: 'PENDING' | 'PRINTED' | 'FAILED';
+  attempts: number;
+  error: string | null;
+  printedAt: string | null;
+  updatedAt: string;
+}
+
+export interface TestPrintResult {
+  ok: boolean;
+  error?: string;
+  /** Delivered, but the device did not answer as an ESC/POS printer. */
+  warning?: string;
+  /** Present when the branch is agent-served: poll `printing.job(jobId)`. */
+  queued?: boolean;
+  jobId?: string;
 }
 
 // ── Takeaway ────────────────────────────────────────────────────────────────

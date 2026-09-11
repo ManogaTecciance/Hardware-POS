@@ -12,6 +12,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { KitchenService } from '../kitchen/kitchen.service';
+import { PrintingService } from '../printing/printing.service';
 import { RestaurantPromotionPricingService } from '../promotions/restaurant-promotion-pricing.service';
 import { computeRestaurantTotals } from '../restaurant/restaurant-totals';
 import {
@@ -72,6 +73,8 @@ export class TakeawayService {
     // D65 — takeaway rounds deplete exactly as dine-in rounds do.
     private readonly roundDepletion: RoundDepletionService,
     private readonly promotionPricing: RestaurantPromotionPricingService,
+    // D174 — same auto-printing as dine-in: KOTs at create, bill at settle.
+    private readonly printing: PrintingService,
   ) {}
 
   async create(
@@ -87,7 +90,7 @@ export class TakeawayService {
       throw new BadRequestException('Takeaway is disabled on this branch');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const branch = await tx.branch.findFirst({
         where: { id: dto.branchId, tenantId, isActive: true },
         select: { id: true },
@@ -182,6 +185,10 @@ export class TakeawayService {
       // or, failing that, on handover.
       return this.toView(profile, order.orderNumber, null);
     });
+    // D174 — print the KOTs the round just queued, without making the
+    // response wait for a printer.
+    this.printing.kick();
+    return created;
   }
 
   async list(tenantId: string, branchId: string): Promise<TakeawayView[]> {
@@ -237,6 +244,10 @@ export class TakeawayService {
         );
       }
       return this.toView(updated, updated.order.orderNumber, finalSaleId);
+    }).then((view) => {
+      // D174 — a handover that settled queued a bill; print it now.
+      this.printing.kick();
+      return view;
     });
   }
 
@@ -265,10 +276,13 @@ export class TakeawayService {
       throw new BadRequestException('This order has no session to settle');
     }
     const sessionId = existing.order.sessionId;
-    return this.prisma.$transaction(async (tx) => {
+    const view = await this.prisma.$transaction(async (tx) => {
       const finalSaleId = await this.settleSessionIntoSale(tx, tenantId, sessionId, actorUserId);
       return this.toView(existing, existing.order.orderNumber, finalSaleId);
     });
+    // D174 — the bill queued at settle goes out now, not on the next tick.
+    this.printing.kick();
+    return view;
   }
 
   /**
@@ -413,6 +427,21 @@ export class TakeawayService {
       await tx.tableSession.update({
         where: { id: session.id },
         data: { status: 'CLOSED', closedAt: new Date(), finalSaleId: sale.id },
+      });
+      /*
+       * D174 — the counter's bill prints when the takeaway SETTLES (D117: at
+       * payment), which is the moment a Sale exists to print from. D67 printed
+       * it at placement instead, against the unsettled order; D117 moved
+       * settlement to placement-time in practice, so the settled Sale is the
+       * simpler and more honest source — same document as dine-in, same
+       * calculator, paid amount included. Idempotent through the CLOSED
+       * guard above: a handover after settle never reaches this line.
+       */
+      await this.printing.enqueueBillForSale(tx, {
+        tenantId,
+        branchId: session.branchId,
+        saleId: sale.id,
+        createdByUserId: actorUserId,
       });
       // D61: release via the provider (a takeaway session sits on the
       // synthetic walk-in table; the provider frees whatever kind it is).
