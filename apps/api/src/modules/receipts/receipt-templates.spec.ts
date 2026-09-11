@@ -80,20 +80,30 @@ function text(html: string): string {
 }
 
 describe('D162 — cash received and change on the customer receipt', () => {
-  it('prints both, with the amounts that were actually handed over', () => {
+  it('prints four rows, and none of them twice', () => {
+    /*
+     * D164 — the reported clutter, stated as an assertion. This used to
+     * print seven rows with the total repeated three times (Total, Paid and
+     * a trailing Cash payment row), burying the two figures the customer
+     * came for.
+     */
     const out = text(renderCustomerReceipt(makeReceipt({ amountTendered: 5000 })));
 
-    // The reported defect, stated as an assertion: the tender and the change
-    // are on the paper, with their real values.
-    expect(out).toContain('Cash received Rs. 5,000.00');
-    expect(out).toContain('Change Rs. 2,522.00');
-
-    // …and the money the sale settled for is untouched in the same render.
-    // Writing the tender into either of these is the failure mode the whole
-    // decision exists to avoid.
-    expect(out).toContain('Paid Rs. 2,478.00');
-    expect(out).toContain('Balance Rs. 0.00');
+    // POSITIVE — what the customer reads: what it cost, what they gave,
+    // what comes back, and that it is settled.
     expect(out).toContain('Total Rs. 2,478.00');
+    expect(out).toContain('Cash Rs. 5,000.00');
+    expect(out).toContain('Balance Rs. 2,522.00');
+    expect(out).toContain('Status PAID');
+
+    // NEGATIVE — the three rows that said nothing are gone. `Paid` equals
+    // the total on any settled sale, and the payment breakdown was the
+    // total a third time.
+    expect(out).not.toContain('Paid');
+    expect(out).not.toContain('Balance Rs. 0.00');
+    // The total appears ONCE. A count, because 'not.toContain' cannot say
+    // "only once" and repetition is the whole defect.
+    expect(out.match(/Rs\. 2,478\.00/g) ?? []).toHaveLength(1);
   });
 
   it('prints neither when the customer paid the exact amount', () => {
@@ -101,10 +111,14 @@ describe('D162 — cash received and change on the customer receipt', () => {
     // reader has to check and discard every single time.
     const out = text(renderCustomerReceipt(makeReceipt({ amountTendered: 2478 })));
 
-    expect(out).not.toContain('Cash received');
-    expect(out).not.toContain('Change');
-    // …and the receipt still prints, so this cannot pass on an empty render.
+    /*
+     * The discriminator is the `Paid` row, not the word "Cash": a settled
+     * cash sale legitimately prints `Cash` in its payment breakdown. Only
+     * the change layout DROPS `Paid`, so its presence is what says this
+     * receipt took the ordinary path.
+     */
     expect(out).toContain('Paid Rs. 2,478.00');
+    expect(out).toContain('Balance Rs. 0.00');
   });
 
   it('prints neither on an under-tender — that is a balance, not change', () => {
@@ -118,8 +132,9 @@ describe('D162 — cash received and change on the customer receipt', () => {
       ),
     );
 
-    expect(out).not.toContain('Cash received');
-    expect(out).not.toContain('Change');
+    // The tender never becomes a `Cash` row of its own…
+    expect(out).not.toContain('Cash Rs. 2,000.00');
+    // …and Paid / Balance carry the real figures, as they always did.
     expect(out).toContain('Paid Rs. 2,000.00');
     expect(out).toContain('Balance Rs. 478.00');
   });
@@ -132,10 +147,17 @@ describe('D162 — cash received and change on the customer receipt', () => {
      */
     const out = text(renderCustomerReceipt(makeReceipt()));
 
-    expect(out).not.toContain('Cash received');
-    expect(out).not.toContain('Change');
+    /*
+     * The discriminator is the `Paid` row, not the word "Cash": a settled
+     * cash sale legitimately prints `Cash` in its payment breakdown. Only
+     * the change layout DROPS `Paid`, so its presence is what says this
+     * receipt took the ordinary path.
+     */
     expect(out).toContain('Paid Rs. 2,478.00');
     expect(out).toContain('Balance Rs. 0.00');
+    // The breakdown survives untouched — this is the reprint/card/restaurant
+    // shape, and it must print exactly what it printed before D162.
+    expect(out).toContain('Cash Rs. 2,478.00');
   });
 
   it('derives the change rather than trusting a number it was handed', () => {
@@ -148,7 +170,7 @@ describe('D162 — cash received and change on the customer receipt', () => {
     const out = text(renderCustomerReceipt(makeReceipt({ amountTendered: 3000 })));
 
     // 3000 − 2478, computed here, not supplied.
-    expect(out).toContain('Change Rs. 522.00');
+    expect(out).toContain('Balance Rs. 522.00');
     expect(out).not.toContain('Rs. 2,522.00');
   });
 
@@ -157,6 +179,64 @@ describe('D162 — cash received and change on the customer receipt', () => {
     // sense a customer cares about. `Rs. 0.00` would be worse than silence.
     const out = text(renderCustomerReceipt(makeReceipt({ amountTendered: 2478.001 })));
 
-    expect(out).not.toContain('Change');
+    // The ordinary layout, not the change one.
+    expect(out).toContain('Paid Rs. 2,478.00');
+    expect(out).not.toContain('Cash Rs. 2,478.00 Balance');
+  });
+});
+
+describe('D164 — the settlement block keeps what a split tender needs', () => {
+  it('suppresses the payment row that merely repeats the total', () => {
+    // One cash payment for the whole total is the row that said 2,478 a third
+    // time. With change on the paper it carries nothing the Cash row does not.
+    const out = text(renderCustomerReceipt(makeReceipt({ amountTendered: 5000 })));
+
+    expect(out.match(/Cash Rs\./g) ?? []).toHaveLength(1);
+  });
+
+  it('KEEPS the full layout when the sale was split across methods', () => {
+    /*
+     * The half that stops the tidy-up going too far.
+     *
+     * On a split the change is NOT `tendered — total` — the cash covers only
+     * its own share — so the short layout cannot be right here, and the
+     * breakdown is the only record of how the sale was settled. The till
+     * never sends a tender for a split; this pins that the template is
+     * correct even if some other caller does.
+     */
+    const out = text(
+      renderCustomerReceipt(
+        makeReceipt({
+          amountTendered: 3000,
+          payments: [
+            { method: 'CARD', amount: 1000 },
+            { method: 'CASH', amount: 1478 },
+          ],
+        }),
+      ),
+    );
+
+    // Both methods survive…
+    expect(out).toContain('Card Rs. 1,000.00');
+    expect(out).toContain('Cash Rs. 1,478.00');
+    // …and the ordinary rows are kept, not the four-row change layout.
+    expect(out).toContain('Paid Rs. 2,478.00');
+    // The tender is NOT printed as a Cash row of its own, and no change
+    // figure is invented from a subtraction that does not apply.
+    expect(out).not.toContain('Cash Rs. 3,000.00');
+    expect(out).not.toContain('Balance Rs. 522.00');
+  });
+
+  it('an ordinary settled sale is untouched', () => {
+    /*
+     * The isolation case. A card sale, a restaurant bill and every reprint
+     * arrive with no tender and must print exactly what they printed before
+     * D162 — Paid, Balance and the full breakdown.
+     */
+    const out = text(renderCustomerReceipt(makeReceipt()));
+
+    expect(out).toContain('Paid Rs. 2,478.00');
+    expect(out).toContain('Balance Rs. 0.00');
+    expect(out).toContain('Cash Rs. 2,478.00');
   });
 });

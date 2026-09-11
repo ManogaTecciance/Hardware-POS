@@ -91,42 +91,92 @@ export interface CustomerReceiptData {
 }
 
 /**
- * D162 — "Cash received" and "Change", for a sale that was over-tendered.
+ * D162/D164 — the change owed back, or null when there is none to print.
  *
- * ## Why the rows are computed here rather than sent
+ * The caller passes only what it observed — the amount handed over — so the
+ * change is derived here and cannot contradict the amounts printed beside it.
  *
- * The caller passes only what it observed — the amount handed over. The change
- * is derived from it and the total, so the receipt cannot be made to print a
- * change figure that does not follow from the two numbers beside it.
- *
- * ## Why nothing prints unless there is real change
- *
- * Exact money is the common case, and "Change Rs. 0.00" on every cash receipt
- * is a row the reader has to check and discard every time. Under-tender is not
- * change either — that is a partial payment, and `Paid` / `Balance` above
- * already say so correctly.
- *
- * A restaurant bill, a card sale and every REPRINT pass nothing, so they render
- * byte-for-byte as they did before D162.
+ * One guard covers all three cases that must print nothing: exact money
+ * (change 0), an under-tender (negative — that is a balance owed, not change)
+ * and a tender a fraction of a cent over, where "Rs. 0.00" is worse than
+ * silence. A card sale, a credit sale, a restaurant bill and every REPRINT
+ * arrive with no tender at all and take the same path.
  */
-function changeRows(d: CustomerReceiptData): string {
+function changeFor(d: CustomerReceiptData): number | null {
   const tendered = d.amountTendered;
-  if (tendered == null || !Number.isFinite(tendered)) return '';
+  if (tendered == null || !Number.isFinite(tendered)) return null;
   const change = round2(tendered - d.total);
-  /*
-   * ONE guard, covering all three cases that must print nothing: exact
-   * money (change 0), an under-tender (change negative — that is a balance,
-   * and `Paid` / `Balance` above already say it), and a tender a fraction
-   * of a cent over, where "Rs. 0.00" would be worse than silence.
-   *
-   * A separate `tendered <= d.total` check stood here and was removed: it
-   * is fully subsumed by this one, so no mutation could kill it — which is
-   * the definition of a branch that is not doing any work.
-   */
-  if (change <= 0) return '';
+  return change > 0 ? change : null;
+}
+
+function row(label: string, amount: number, currency: string): string {
+  return `<div class="row"><span>${esc(label)}</span><span>${money(amount, currency)}</span></div>`;
+}
+
+/**
+ * D164 — what the customer actually needs to read, and nothing twice.
+ *
+ * ## The report
+ *
+ * After D162/D163 a cash sale with change printed SEVEN rows, three of which
+ * carried the same number:
+ *
+ *     Total 3,200 | Paid 3,200 | Balance 0.00
+ *     Cash received 3,500 | Change 300 | PAID | Cash 3,200
+ *
+ * `Paid` equals the total on any settled sale, `Balance` is 0.00 by definition
+ * when it is, and the trailing `Cash` row is the payment breakdown repeating
+ * the total a third time. The two figures the customer came for — what they
+ * handed over and what they get back — were buried among five that told them
+ * nothing.
+ *
+ * ## What is printed instead
+ *
+ * On an over-tendered cash sale, four rows:
+ *
+ *     Total | Cash | Balance | Status
+ *
+ * `Cash` is what was handed over; `Balance` is what comes back. On this
+ * receipt there is nothing owed, so `Balance` is unambiguous — and it is the
+ * word the PO asked for.
+ *
+ * ## What is NOT changed
+ *
+ * Every other receipt keeps `Paid` / `Balance` and its full payment breakdown,
+ * because there `Balance` means money still OWED and the breakdown is the only
+ * record of how a split or credit sale was settled. A restaurant bill, a card
+ * sale, a credit sale and every reprint are byte-for-byte as before.
+ *
+ * ## Only a single-payment sale takes the short layout
+ *
+ * On a SPLIT tender the change is not `tendered — total`: the cash covers
+ * only its own share, so that subtraction is meaningless and would print a
+ * negative. The till never sends a tender for a split (it is sent only in
+ * single-method CASH mode), so the condition states what is already true
+ * rather than guarding a case the caller can reach.
+ *
+ * A split therefore keeps `Paid` / `Balance` and its full breakdown, which
+ * is the only record of how it was settled.
+ */
+function settlementRows(d: CustomerReceiptData, paymentRows: string): string {
+  const status = `<div class="row"><span>Status</span><span>${esc(d.paymentStatus)}</span></div>`;
+  const change = changeFor(d);
+
+  if (change === null || d.payments.length !== 1) {
+    return (
+      row('Paid', d.paidAmount, d.currency) +
+      row('Balance', d.balanceAmount, d.currency) +
+      status +
+      paymentRows
+    );
+  }
+
+  // Exactly one payment, and it is the row that repeats the total, so it is
+  // dropped: `Cash` above already says what was handed over.
   return (
-    `<div class="row"><span>Cash received</span><span>${money(tendered, d.currency)}</span></div>` +
-    `<div class="row"><span>Change</span><span>${money(change, d.currency)}</span></div>`
+    row('Cash', d.amountTendered as number, d.currency) +
+    row('Balance', change, d.currency) +
+    status
   );
 }
 
@@ -253,11 +303,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
         .join('')}
       <div class="row"><span>Tax</span><span>${money(d.taxAmount, d.currency)}</span></div>
       <div class="row grand"><span>Total</span><span>${money(d.total, d.currency)}</span></div>
-      <div class="row"><span>Paid</span><span>${money(d.paidAmount, d.currency)}</span></div>
-      <div class="row"><span>Balance</span><span>${money(d.balanceAmount, d.currency)}</span></div>
-      ${changeRows(d)}
-      <div class="row"><span>Status</span><span>${esc(d.paymentStatus)}</span></div>
-      ${payments}
+      ${settlementRows(d, payments)}
     </div>
     <div class="foot">${esc(d.footer)}</div>
   </div>

@@ -10000,6 +10000,83 @@ it — **DOC-050** — was written with D162 and had not been run yet.
 
 ---
 
+## D164 — the receipt says four things, and none of them twice
+
+**Status:** accepted and **built**, 2026-09-11. Frontend/API display only. No
+schema change, no migration.
+
+### What was reported
+
+D162/D163 worked, and the result was worse to read:
+
+```
+Total          Rs. 3,200.00
+Paid           Rs. 3,200.00     <- the total again
+Balance        Rs.     0.00     <- nothing
+Cash received  Rs. 3,500.00
+Change         Rs.   300.00
+Status         PAID
+Cash           Rs. 3,200.00     <- the total a third time
+```
+
+> "i think it display same data 3, like total, paid, cash — i want is display
+> total, customer given amount, customer recive balance and status"
+
+Correct. `Paid` equals the total on any settled sale, `Balance` is 0.00 by
+definition when it is, and the trailing `Cash` row is the payment breakdown
+repeating the total once more. The two figures the customer actually came for
+were buried among five that told them nothing.
+
+### The decision
+
+**On an over-tendered cash sale, four rows:**
+
+```
+Total     Rs. 3,200.00
+Cash      Rs. 3,500.00
+Balance   Rs.   300.00
+Status    PAID
+```
+
+`Cash` is what was handed over; `Balance` is what comes back. The PO chose
+those words, and on this receipt they are unambiguous: nothing is owed, so
+`Balance` can only mean the money going back across the counter.
+
+### What is deliberately unchanged
+
+Every other receipt keeps `Paid` / `Balance` and its full payment breakdown.
+There `Balance` means money still **owed**, and the breakdown is the only
+record of how a credit or split sale was settled. A card sale, a credit sale,
+a restaurant bill and every reprint are byte-for-byte as before.
+
+### The split-tender correction
+
+The first version suppressed the payment rows whenever there was change, and
+kept them only when there were several. Writing the test found the flaw: on a
+**split** tender the change is not `tendered — total` at all — the cash covers
+only its own share, so the subtraction is meaningless and would print a
+negative.
+
+The till never sends a tender for a split (it is sent only in single-method
+CASH mode), so the short layout is now gated on **exactly one payment**, which
+states what was already true instead of guarding a case the caller can reach.
+A split keeps the full layout, and a test pins it.
+
+### Mutation proof
+
+Six mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the short layout is never used (**the reported clutter, restored**) | the four-row case and the derivation case |
+| the change guard is dropped | all three "prints neither" cases |
+| `Cash` prints the total rather than the tender | the four-row case |
+| the change is computed the wrong way round | three cases |
+| a split tender takes the short layout | "KEEPS the full layout when split" |
+| the duplicated payment row is printed again | the four-row case and the suppression case |
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
