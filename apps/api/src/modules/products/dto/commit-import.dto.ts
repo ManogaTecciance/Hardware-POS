@@ -7,6 +7,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -25,6 +26,20 @@ import { PRODUCT_TYPES, type ProductType } from './create-product.dto';
 export class ImportProductRowDto {
   @IsInt()
   rowNumber!: number;
+
+  /**
+   * D168 — the tenant's business details (D150) read from the sheet.
+   *
+   * Round-tripped from the preview rather than re-read, so the rows the
+   * operator reviewed are the rows that are written.
+   *
+   * OPTIONAL and never defaulted to `{}`: D64 gives the document replace
+   * semantics, so an empty object on an update erases what the product
+   * holds. Absent means the sheet said nothing about these fields.
+   */
+  @IsObject()
+  @IsOptional()
+  attributes?: Record<string, unknown>;
 
   @IsString()
   @IsNotEmpty()

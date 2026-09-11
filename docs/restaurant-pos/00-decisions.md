@@ -10299,6 +10299,93 @@ them.
 
 ---
 
+## D168 — the import template is the tenant's, not a fixed fourteen columns
+
+**Status:** accepted and **built**, 2026-09-11. No schema change, no migration.
+
+### What was reported
+
+> "in product there is a import button to download the template and upload it,
+> but template was little bit wrong now after the changes … because we add
+> business details from settings"
+
+### What was wrong
+
+`TEMPLATE_HEADERS` was a fixed list of the fourteen QuickBooks *Products &
+Services* columns, written long before D150. D150 made the catalogue's
+descriptive fields **the tenant's own**, so a clothing shop that configured
+Material, Fit, Care instructions, Gender and Season could set them one product
+at a time in the wizard — and **not at all** in a sheet of four hundred.
+
+`buildTemplate()` did not even take a `tenantId`. It could not have known.
+
+### The decision
+
+**The template is generated per tenant: the fourteen QuickBooks columns, then
+one column per configured business detail, under the tenant's own label.**
+
+- A **hardware** workspace configures none, so its sheet is byte-for-byte the
+  one it has always downloaded. Asserted directly, because that is the file
+  another team's operators use.
+- The example rows gain a plausible value per field type, so the expected shape
+  is visible rather than described.
+- The parser reads those columns back into `attributes`, **keyed by the field's
+  `key`, not its label**: the label is what a human types in a spreadsheet, the
+  key is what the product stores.
+
+### Validation is the API's own, not a second copy
+
+Each row's details are checked with `validateAttributes` — the same function
+`assertValidDocument` refuses with. So "Fit must be one of Regular, Slim,
+Relaxed, Oversized" is written once, and a sheet's error cannot drift from the
+endpoint's.
+
+It runs where the value will actually be applied:
+
+| Row | Behaviour |
+|---|---|
+| **create** | always validated — a missing required field is an error the operator sees while reviewing, not at row 12 of the commit |
+| **update**, columns filled | validated, and written |
+| **update**, columns blank | **nothing is sent** |
+
+That last row is the one that matters. D64 gives the attributes document
+**replace** semantics: `{}` means "this product has no business details", so an
+import that sent an empty object for a row whose columns were blank would
+**erase** what the product holds. `undefined` and `{}` look alike in a debugger
+and are opposite instructions; a sheet that ignores those columns must leave
+them alone.
+
+### Still not carried by the import
+
+`brandId` (D133), `quantityType` / `unitOfMeasure` (D134) and barcodes have no
+column either. They were out of scope here and are listed so the gap is
+recorded rather than rediscovered: this decision closes the one the PO reported.
+
+### Mutation proof
+
+Five mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the template ignores the tenant's fields (**the reported bug**) | "appends one column per configured field" |
+| columns keyed by LABEL instead of key | "keyed by field key not label" |
+| a blank update sends `{}` | "an UPDATE whose columns are blank sends NOTHING" |
+| commit drops the attributes again | "carries the attributes through commit" |
+| the per-row validation is skipped | the bad-value case and the required-field case |
+
+The template is asserted by **reading the workbook back**, not by inspecting the
+array handed to ExcelJS: a column that exists in a variable and never reaches
+the file is exactly the defect class here.
+
+### A worked example ships with it
+
+`Docs/product-import-example-clothing.xlsx` — ten products for a clothing shop,
+covering all three item types and every business-detail field. It was verified
+by running it through the **real** `preview` parser (10 rows, no errors), not by
+eye.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

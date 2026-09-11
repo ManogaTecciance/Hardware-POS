@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { UserRole } from '@hardware-pos/database';
+import { validateAttributes, type AttributeField } from '@hardware-pos/shared';
 import * as ExcelJS from 'exceljs';
 import { Readable } from 'node:stream';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { ProductsService } from './products.service';
+import { ProductAttributesService } from './product-attributes.service';
 import { CreateProductDto, type ProductType } from './dto/create-product.dto';
 import { ImportProductRowDto } from './dto/commit-import.dto';
 
@@ -27,6 +29,15 @@ export interface ParsedProductRow {
   incomeAccount: string | null;
   expenseAccount: string | null;
   inventoryAssetAccount: string | null;
+  /**
+   * D168 — the tenant's business details (D150), keyed by field `key`.
+   *
+   * `undefined` means the sheet said nothing about them, which is NOT the
+   * same as `{}`: D64 gives the attributes document replace semantics, so an
+   * empty object on an update would ERASE what the product already holds.
+   * A sheet that ignores these columns must leave them alone.
+   */
+  attributes?: Record<string, unknown>;
   /** Whether this row would create a new product or update an existing match. */
   matchStatus: 'create' | 'update';
   /** Validation problems; a row is committable only when this is empty. */
@@ -138,6 +149,52 @@ function asItemType(v: string | number | Date): ProductType {
   return 'Inventory';
 }
 
+/**
+ * D168 — one business-detail cell, as the type its field declares.
+ *
+ * A value that cannot be read as its type is returned AS TEXT rather than
+ * dropped or coerced to zero: `validateAttributes` then produces the real
+ * message ("Warranty months must be a number"), so the sheet's errors and
+ * the API's errors are written by the same code and cannot drift.
+ *
+ * Returns `undefined` for a blank cell, which is how a row says nothing
+ * about a field at all.
+ */
+function attributeCell(field: AttributeField, raw: string | number | Date): unknown {
+  if (raw instanceof Date) return raw.toISOString().slice(0, 10);
+  const s = asText(raw);
+  if (s === '') return undefined;
+  if (field.type === 'integer' || field.type === 'number') {
+    const n = Number(s.replace(/,/g, ''));
+    return Number.isFinite(n) ? n : s;
+  }
+  if (field.type === 'boolean') {
+    const k = s.toLowerCase();
+    if (['true', 'yes', 'y', '1'].includes(k)) return true;
+    if (['false', 'no', 'n', '0'].includes(k)) return false;
+    return s;
+  }
+  return s;
+}
+
+/** A plausible value per field type, for the template's example rows. */
+function attributeSample(field: AttributeField): string | number {
+  switch (field.type) {
+    case 'integer':
+      return 12;
+    case 'number':
+      return 1.5;
+    case 'boolean':
+      return 'Yes';
+    case 'date':
+      return '2026-01-31';
+    case 'enum':
+      return field.options[0] ?? '';
+    default:
+      return 'e.g. ' + field.label.toLowerCase();
+  }
+}
+
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -160,20 +217,35 @@ export class ProductsImportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly productsService: ProductsService,
+    private readonly attributes: ProductAttributesService,
   ) {}
 
-  /** A ready-to-fill .xlsx template with the QuickBooks headers + example rows. */
-  async buildTemplate(): Promise<Buffer> {
+  /**
+   * A ready-to-fill .xlsx template: the QuickBooks headers, plus this
+   * TENANT's business details, plus example rows.
+   *
+   * D168 — the extra columns are per tenant because D150 made the fields
+   * per tenant. A clothing shop that configured Material, Fit and Season
+   * downloads a sheet with those three columns under their own labels; a
+   * hardware workspace that configured none downloads exactly the sheet it
+   * always did.
+   */
+  async buildTemplate(tenantId: string): Promise<Buffer> {
+    const schema = await this.attributes.schemaForTenant(tenantId);
+    const headers = [...TEMPLATE_HEADERS, ...schema.map((f) => f.label)];
+
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Products');
-    const header = ws.addRow(TEMPLATE_HEADERS);
+    const header = ws.addRow(headers);
     header.font = { bold: true };
     header.eachCell((cell) => {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } };
       cell.border = { bottom: { style: 'thin' } };
     });
-    for (const sample of TEMPLATE_SAMPLES) ws.addRow(sample);
-    TEMPLATE_HEADERS.forEach((h, i) => {
+    for (const sample of TEMPLATE_SAMPLES) {
+      ws.addRow([...sample, ...schema.map(attributeSample)]);
+    }
+    headers.forEach((h, i) => {
       ws.getColumn(i + 1).width = Math.max(14, Math.min(34, h.length + 6));
     });
     return Buffer.from(await wb.xlsx.writeBuffer());
@@ -185,6 +257,7 @@ export class ProductsImportService {
     file: { buffer: Buffer; originalname?: string },
   ): Promise<ParsedProductRow[]> {
     const rawRows = await this.parse(file);
+    const schema = await this.attributes.schemaForTenant(tenantId);
     const rows: ParsedProductRow[] = [];
     const skuSeen = new Map<string, number>(); // lower(sku) → first rowNumber
 
@@ -221,6 +294,34 @@ export class ProductsImportService {
         select: { id: true },
       });
 
+      /*
+       * D168 — the business details this row states, if any.
+       *
+       * Validated with the SAME function the API uses, so the preview's
+       * message and the eventual refusal are one piece of code.
+       *
+       * Validated only where it will actually be applied: a CREATE always
+       * sends a document (so a missing required field is an error the
+       * operator should see now, not at commit), while an UPDATE that
+       * mentions none of these columns sends nothing and leaves the stored
+       * document alone.
+       */
+      let attributes: Record<string, unknown> | undefined;
+      if (schema.length > 0) {
+        const stated: Record<string, unknown> = {};
+        for (const field of schema) {
+          const value = attributeCell(field, get(field.label));
+          if (value !== undefined) stated[field.key] = value;
+        }
+        const saysSomething = Object.keys(stated).length > 0;
+        if (saysSomething || !existing) {
+          attributes = stated;
+          for (const issue of validateAttributes(schema, stated)) {
+            errors.push(issue.message);
+          }
+        }
+      }
+
       const isInventory = type === 'Inventory';
       rows.push({
         rowNumber,
@@ -238,6 +339,7 @@ export class ProductsImportService {
         incomeAccount: asText(get(H.incomeAccount)) || null,
         expenseAccount: asText(get(H.expenseAccount)) || null,
         inventoryAssetAccount: asText(get(H.inventoryAssetAccount)) || null,
+        attributes,
         matchStatus: existing ? 'update' : 'create',
         errors,
       });
@@ -303,6 +405,9 @@ export class ProductsImportService {
       quantityOnHand: isInventory ? (row.quantityOnHand ?? 0) : 0,
       quantityAsOfDate: isInventory ? (row.quantityAsOfDate ?? undefined) : undefined,
       reorderLevel: isInventory ? (row.reorderLevel ?? undefined) : undefined,
+      // D168 — omitted, not `{}`, when the sheet said nothing: D64's replace
+      // semantics would otherwise erase a product's stored details on update.
+      ...(row.attributes !== undefined ? { attributes: row.attributes } : {}),
     };
 
     const existing = await this.prisma.product.findFirst({
