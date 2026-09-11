@@ -125,11 +125,12 @@ describe('D165 — a reprint keeps the tender', () => {
     await s.service.generateCustomer('t1', 'sale_1', 'usr_1');
 
     const out = text(s.html());
-    expect(out).toContain('Cash Rs. 4,000.00');
-    expect(out).toContain('Balance Rs. 224.00');
-    // …and the row it replaces is gone, so this is genuinely the short layout
-    // and not both printed at once.
-    expect(out).not.toContain('Paid Rs.');
+    expect(out).toContain('Paid Amount Rs. 4,000.00');
+    expect(out).toContain('Bal. Amount Rs. 224.00');
+    // …and the figure the ordinary layout would have printed in that same
+    // row is absent, so this is genuinely the short layout. Since D167 the
+    // two layouts share labels, so the VALUE is what tells them apart.
+    expect(out).not.toContain('Paid Amount Rs. 3,776.00');
   });
 
   it('writes it back, so a second reprint still has it', async () => {
@@ -156,8 +157,8 @@ describe('D165 — a reprint keeps the tender', () => {
 
     await s.service.generateCustomer('t1', 'sale_1', 'usr_1', 5000);
 
-    expect(text(s.html())).toContain('Cash Rs. 5,000.00');
-    expect(text(s.html())).toContain('Balance Rs. 1,224.00');
+    expect(text(s.html())).toContain('Paid Amount Rs. 5,000.00');
+    expect(text(s.html())).toContain('Bal. Amount Rs. 1,224.00');
   });
 
   it('renders as before when nothing is stored and nothing is supplied', async () => {
@@ -171,9 +172,9 @@ describe('D165 — a reprint keeps the tender', () => {
     await s.service.generateCustomer('t1', 'sale_1', 'usr_1');
 
     const out = text(s.html());
-    expect(out).toContain('Paid Rs. 3,776.00');
-    expect(out).toContain('Balance Rs. 0.00');
-    expect(out).not.toContain('Cash Rs. 4,000.00');
+    expect(out).toContain('Paid Amount Rs. 3,776.00');
+    expect(out).toContain('Bal. Amount Rs. 0.00');
+    expect(out).not.toContain('Paid Amount Rs. 4,000.00');
   });
 
   it('ignores a stored value that is not a usable number', async () => {
@@ -185,7 +186,7 @@ describe('D165 — a reprint keeps the tender', () => {
       await s.service.generateCustomer('t1', 'sale_1', 'usr_1');
 
       // It renders the ordinary layout…
-      expect(text(s.html())).toContain('Paid Rs. 3,776.00');
+      expect(text(s.html())).toContain('Paid Amount Rs. 3,776.00');
 
       /*
        * …and, the half that makes the check worth having: the junk is NOT

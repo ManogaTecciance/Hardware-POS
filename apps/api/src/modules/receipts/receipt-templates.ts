@@ -158,14 +158,31 @@ function row(label: string, amount: number, currency: string): string {
  * A split therefore keeps `Paid` / `Balance` and its full breakdown, which
  * is the only record of how it was settled.
  */
+/*
+ * D167 — the wording is the restaurant bill's, because it is the trade's.
+ *
+ * `thermal-bill.ts` has printed `Bill Amount` / `Paid Amount` / `Bal. Amount`
+ * on every food-service slip since it was written, and a Sri Lankan customer
+ * reads those three lines on any till roll they are handed. The retail
+ * receipt said `Total` / `Paid` / `Balance` — correct English, and not what
+ * the paper in this market says.
+ *
+ * Both layouts now use the same three labels, which is the other gain: the
+ * short over-tender layout and the ordinary one read identically, so a
+ * cashier is not learning two receipts.
+ *
+ * The restaurant renderer appends ` :` to each label. That is NOT copied:
+ * this receipt puts a colon on none of its other rows (Subtotal, Tax,
+ * Status), and three colons among seven rows is worse than none.
+ */
 function settlementRows(d: CustomerReceiptData, paymentRows: string): string {
   const status = `<div class="row"><span>Status</span><span>${esc(d.paymentStatus)}</span></div>`;
   const change = changeFor(d);
 
   if (change === null || d.payments.length !== 1) {
     return (
-      row('Paid', d.paidAmount, d.currency) +
-      row('Balance', d.balanceAmount, d.currency) +
+      row('Paid Amount', d.paidAmount, d.currency) +
+      row('Bal. Amount', d.balanceAmount, d.currency) +
       status +
       paymentRows
     );
@@ -174,8 +191,8 @@ function settlementRows(d: CustomerReceiptData, paymentRows: string): string {
   // Exactly one payment, and it is the row that repeats the total, so it is
   // dropped: `Cash` above already says what was handed over.
   return (
-    row('Cash', d.amountTendered as number, d.currency) +
-    row('Balance', change, d.currency) +
+    row('Paid Amount', d.amountTendered as number, d.currency) +
+    row('Bal. Amount', change, d.currency) +
     status
   );
 }
@@ -302,7 +319,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
         )
         .join('')}
       <div class="row"><span>Tax</span><span>${money(d.taxAmount, d.currency)}</span></div>
-      <div class="row grand"><span>Total</span><span>${money(d.total, d.currency)}</span></div>
+      <div class="row grand"><span>Bill Amount</span><span>${money(d.total, d.currency)}</span></div>
       ${settlementRows(d, payments)}
     </div>
     <div class="foot">${esc(d.footer)}</div>

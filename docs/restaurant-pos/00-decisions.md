@@ -10228,6 +10228,77 @@ with `underline`, which is what "primary, not a link" actually means.
 
 ---
 
+## D167 — the receipt uses the trade's words, not correct English
+
+**Status:** accepted and **built**, 2026-09-11. Display only. No schema change,
+no migration, no behaviour change.
+
+### What was asked
+
+> "for the thermal bills need a little change in raw names in bill
+> Total → Bill Amount, Cash → Paid Amount, Balance → Bal. Amount
+> because it is the standed way, in restaurant bill also use this way"
+
+### Checked before changing
+
+`thermal-bill.ts` — the food-service renderer, written long before this branch —
+prints exactly:
+
+```
+Bill Amount : …
+Paid Amount : …
+Bal. Amount : …
+```
+
+So the PO is describing what half the product already does. The retail receipt
+said `Total` / `Paid` / `Balance`: correct English, and not what a till roll
+says in this market. A customer handed a slip should not have to work out that
+two shops mean the same thing by different words.
+
+### The decision
+
+The retail customer receipt adopts the restaurant renderer's three labels.
+
+| Was | Now |
+|---|---|
+| `Total` | **`Bill Amount`** |
+| `Paid` (ordinary) / `Cash` (over-tender) | **`Paid Amount`** |
+| `Balance` | **`Bal. Amount`** |
+
+**The payment BREAKDOWN keeps its method names.** `Cash`, `Card`, `Credit`
+there name how the sale was settled, not an amount, and renaming those would
+turn a method into a total.
+
+**One gain beyond consistency:** both layouts now read identically. D164's
+four-row over-tender layout and the ordinary one carry the same three labels,
+so a cashier is not learning two receipts.
+
+**The ` :` suffix is NOT copied.** The restaurant renderer appends a colon to
+each label; this receipt puts one on none of its other rows (Subtotal, Tax,
+Status), and three colons among seven rows reads worse than none.
+
+### Consequence for the tests, worth recording
+
+Both layouts now share labels, so several assertions that told them apart by
+WORD no longer can. Those were rewritten to discriminate by what actually
+differs:
+
+- the figure's **count** (the over-tender layout prints the total once; the old
+  one printed it three times);
+- the **payment breakdown**, which the ordinary layout keeps and the short one
+  drops;
+- the **value** in a shared row (`Paid Amount` is the tender in one layout and
+  the settled amount in the other).
+
+One case lost its teeth in the rename and was caught by re-running the
+mutations: "prints neither when the customer paid the exact amount" passed
+against a receipt that had wrongly taken the short path, because after the
+rename both layouts print `Paid Amount 2,478` and `Bal. Amount 0.00`. It now
+asserts the breakdown is present, which is the only thing that still separates
+them.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
