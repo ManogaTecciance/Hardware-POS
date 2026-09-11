@@ -230,7 +230,7 @@ describe('what the screen shows', () => {
     await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
     const row = screen.getByText('K-000123').closest('tr')! as HTMLElement;
     expect(within(row).getByText('T3 · Garden')).toBeTruthy();
-    expect(within(row).getByText(/O-000045 · Round 2/)).toBeTruthy();
+    expect(within(row).getByText(/O-000045 · 2nd send/)).toBeTruthy();
     expect(within(row).getByText('2 × Chicken Kottu')).toBeTruthy();
     expect(within(row).getByText('Chef Perera')).toBeTruthy();
     /*
@@ -527,8 +527,8 @@ describe('opening a record', () => {
     expect(within(dialog).getByText(/1× Watalappan/)).toBeTruthy();
     expect(within(dialog).getByText('Extra spicy')).toBeTruthy();
     expect(within(dialog).getByText('No egg')).toBeTruthy();
-    expect(within(dialog).getByText('Round 1')).toBeTruthy();
-    expect(within(dialog).getByText('Round 2')).toBeTruthy();
+    expect(within(dialog).getByText('1st send')).toBeTruthy();
+    expect(within(dialog).getByText('2nd send')).toBeTruthy();
     /*
      * D152 rewrote what this test used to end with. The last assertion here was
      * `expectNoStationAnywhere(dialog)` — D147's claim that the per-item station

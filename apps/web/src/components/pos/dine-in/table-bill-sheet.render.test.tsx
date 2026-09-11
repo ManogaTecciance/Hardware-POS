@@ -38,8 +38,13 @@ vi.mock('@/lib/restaurant/api', () => ({
   billing: { splitByItems: (...args: unknown[]) => splitByItems(...args) },
 }));
 
-vi.mock('@/lib/restaurant/labels', () => ({
+vi.mock('@/lib/restaurant/labels', async () => ({
   formatMoney: (v: string | number) => `LKR ${Number(v).toFixed(2)}`,
+  // D177 — the REAL helper, not a stub: this spec asserts "1st send" and
+  // "2nd send" below, and a stub spelling them here would make those
+  // assertions about the mock rather than about the word the bill prints.
+  sendLabel: (await vi.importActual<typeof import('@/lib/restaurant/labels')>('@/lib/restaurant/labels'))
+    .sendLabel,
 }));
 
 const { TableBillSheet } = await import('./table-bill-sheet');
@@ -131,10 +136,10 @@ describe('reviewing the bill', () => {
     sheet();
 
     expect(await screen.findByText(/Beef Steak/)).toBeTruthy();
-    expect(screen.getByText('Round 1')).toBeTruthy();
+    expect(screen.getByText('1st send')).toBeTruthy();
     // Previous rounds are the point: a waiter answering "what have we had"
     // must see round 2 as well as round 1.
-    expect(screen.getByText('Round 2')).toBeTruthy();
+    expect(screen.getByText('2nd send')).toBeTruthy();
     expect(screen.getByText(/Garlic Bread/)).toBeTruthy();
     // Variant, because it is what the guest is being charged for.
     expect(screen.getByText('Medium')).toBeTruthy();

@@ -807,6 +807,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | KIT-038 | Takeaway is never a table chip (D175) | On a branch that has taken a takeaway order, open the history Filters panel | No "Walk In" or delivery group appears among the tables; takeaway tickets are listed only while no table filter is set | P | Not Run |
 | KIT-039 | Orders and tickets number independently (D176) | Note the last RO- and KOT- numbers, send a round spanning two stations, then place a new order | The two tickets are consecutive KOT numbers; the order counter has not moved for them; the new order is the next RO number after the last order, not after the last ticket | P | Not Run |
 | KIT-040 | The first ticket after the upgrade does not collide (D176) | On a tenant that already holds tickets minted from the old shared stream, send a round | The round succeeds and its ticket takes the number after the highest existing KOT, never KOT-000001 again | P | Not Run |
+| KIT-041 | A round is called a send on every screen (D177) | Send three rounds for one table; read the board card, its Details dialog, the ticket history, the bill sheet, the session sheet and a printed KOT | Each says "1st send", "2nd send", "3rd send" and none says "Round". On a table with eleven or more sends the labels read 11th, 12th, 13th | P | Not Run |
+| KIT-042 | The KOT number is always fully visible (D177) | Open the kitchen board at 1024, 1280 and 1920 px wide with cards holding short and long content | The full KOT number shows on every card at every width. Below 1024 the Print and Details buttons show icons only and remain usable; the board never shows more than three columns | P | Not Run |
 | KIT-008 | Yesterday's tickets are in the history, and so are today's (D142) | Open Ticket history from the rail, and from the "Older tickets" link on the Done lane | Both reach /kitchen/history; the list holds the ticket bumped yesterday AND the one bumped minutes ago, newest first, with where it went, its items, its station, when it was finished and by whom | P | Not Run |
 | KIT-009 | Ticket history pages and searches on the server (D142) | With more than one page of finished tickets: change the rows-per-page, go to page 2, then search a dish name, a ticket number and a table code | Each request carries page/pageSize/search to GET …/kitchen-tickets/history; searching returns to page 1; a term with a double space still matches; a term that matches nothing reads "No tickets match “…”" rather than the empty-branch wording | P | Not Run |
 | KIT-010 | Cancelled work is in neither the lane nor the history (D115/D142) | Cancel an order whose ticket was already bumped; check the Done lane and Ticket history | The ticket appears in neither; it remains visible on the board's Cancelled lane | N | Not Run |
@@ -943,13 +945,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
-| RET | 18 | KIT | 40 |
+| RET | 18 | KIT | 42 |
 | EXC-T | 12 | ADM | 15 |
 | EXC-D | 4 | UI | 35 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 720 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 722 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

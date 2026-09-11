@@ -1,5 +1,6 @@
 'use client';
 
+import { sendLabel } from '@/lib/restaurant/labels';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -109,7 +110,7 @@ export function TicketOrderDialog({
             {byRound.map(([round, items]) => (
               <div key={round ?? 'x'}>
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {round ? `Round ${round}` : 'Items'}
+                  {round ? sendLabel(round) : 'Items'}
                 </p>
                 <ul className="space-y-1.5">
                   {items.map((item) => (

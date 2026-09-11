@@ -148,8 +148,8 @@ describe('the order so far (D155)', () => {
     await settle();
 
     // POSITIVE — the round, its kitchen status, and the per-item status.
-    expect(await screen.findByText('Round #2')).toBeTruthy();
-    expect(screen.getByText('Round #1')).toBeTruthy();
+    expect(await screen.findByText('2nd send')).toBeTruthy();
+    expect(screen.getByText('1st send')).toBeTruthy();
     /*
      * TWICE each, and that is the point: the round carries the kitchen's
      * verdict on the whole ticket and every line carries its own, which is what
@@ -160,8 +160,8 @@ describe('the order so far (D155)', () => {
     // Newest first: the question is nearly always about the last round.
     expect(
       screen
-        .getByText('Round #2')
-        .compareDocumentPosition(screen.getByText('Round #1')) &
+        .getByText('2nd send')
+        .compareDocumentPosition(screen.getByText('1st send')) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
@@ -172,7 +172,7 @@ describe('the order so far (D155)', () => {
     expect(screen.getByText('Voided')).toBeTruthy();
 
     // NEGATIVE — the DRAFT round is not something the table has.
-    expect(screen.queryByText('Round #3')).toBeNull();
+    expect(screen.queryByText('3rd send')).toBeNull();
     expect(screen.queryByText(/Ice Cream/)).toBeNull();
   });
 
@@ -187,7 +187,7 @@ describe('the order so far (D155)', () => {
   it('offers Void on a live line, and never on one already voided', async () => {
     mount(true);
     await settle();
-    await screen.findByText('Round #2');
+    await screen.findByText('2nd send');
 
     // Two live lines (Rice and Curry, Kottu); the voided one carries no verb.
     expect(screen.getAllByRole('button', { name: 'Void' })).toHaveLength(2);
@@ -198,7 +198,7 @@ describe('the order so far (D155)', () => {
     await settle();
 
     // The list is the same list: this is a gate on the verb, not on the read.
-    expect(await screen.findByText('Round #2')).toBeTruthy();
+    expect(await screen.findByText('2nd send')).toBeTruthy();
     expect(screen.getByText(/Rice and Curry/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Void' })).toBeNull();
   });
@@ -206,7 +206,7 @@ describe('the order so far (D155)', () => {
   it('posts the reason the void was given, and refuses to post without one', async () => {
     mount(true);
     await settle();
-    await screen.findByText('Round #2');
+    await screen.findByText('2nd send');
 
     /*
      * Addressed through the LINE, not by position: the list is newest-first, so
@@ -239,7 +239,7 @@ describe('the order so far (D155)', () => {
   it('keeps the last good list when a refresh fails, and says so', async () => {
     mount(true);
     await settle();
-    await screen.findByText('Round #2');
+    await screen.findByText('2nd send');
 
     getDetail.mockRejectedValueOnce(new Error('Network unreachable'));
     // The poll cadence is the floor's 8 s; driven here rather than waited out.
@@ -251,6 +251,6 @@ describe('the order so far (D155)', () => {
     expect(await screen.findByText(/Network unreachable/)).toBeTruthy();
     // NEGATIVE — blanking a waiter's order because one refresh timed out is the
     // worse of the two failures.
-    expect(screen.getByText('Round #2')).toBeTruthy();
+    expect(screen.getByText('2nd send')).toBeTruthy();
   });
 });

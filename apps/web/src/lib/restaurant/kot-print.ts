@@ -33,6 +33,7 @@
  */
 
 import { getCachedDocumentProfile } from '../document-template-service';
+import { sendLabel } from './labels';
 import { printReceipt } from '../receipt-print';
 import {
   billBodyGeometryCss,
@@ -197,7 +198,7 @@ export function renderKitchenTicket(input: KotPrintInput, geometry?: BillGeometr
    */
   const sub = [
     input.orderNumber ? esc(input.orderNumber) : '',
-    input.roundNumber != null ? `Round ${input.roundNumber}` : '',
+    input.roundNumber != null ? sendLabel(input.roundNumber) : '',
     input.stationName ? esc(input.stationName) : '',
   ]
     .filter(Boolean)

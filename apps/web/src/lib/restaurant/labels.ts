@@ -231,3 +231,25 @@ export function formatTime(iso: string): string {
     hour12: true,
   });
 }
+
+/**
+ * D177 — how a round is NAMED on screen: "1st send", "2nd send", "3rd send".
+ *
+ * "Round" is the data model's word and it stays there. On a ticket it read
+ * as bar service — one order of drinks for the table — and on a food ticket
+ * it told the cook nothing about what the thing was. What a waiter actually
+ * does is SEND, and what the kitchen receives is the second thing that table
+ * sent tonight. The PO chose this over dropping the word entirely and over
+ * "course", which would be wrong whenever a second send is more mains.
+ *
+ * ONE spelling, from one place: the board ribbon, the ticket dialog, the bill
+ * sheet and the printed KOT all call this, so the word cannot drift into
+ * "Round" on one of them and "send" on another.
+ */
+export function sendLabel(roundNumber: number): string {
+  const n = Math.trunc(roundNumber);
+  // 11th, 12th, 13th — the teens are the exception to the last-digit rule.
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `${n}${suffix} send`;
+}

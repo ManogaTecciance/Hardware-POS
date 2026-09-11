@@ -17,6 +17,7 @@ import {
   KITCHEN_TICKET_STATUS_TONES,
   formatElapsed,
   formatTime,
+  sendLabel,
 } from '@/lib/restaurant/labels';
 import type {
   DiningAreaView,
@@ -536,7 +537,7 @@ export function KitchenHistory({ session, branchId }: Props) {
                       <div>{t.placeLabel ?? '—'}</div>
                       <div className="text-xs text-muted-foreground">
                         {t.orderNumber ?? '—'}
-                        {t.roundNumber !== null ? ` · Round ${t.roundNumber}` : ''}
+                        {t.roundNumber !== null ? ` · ${sendLabel(t.roundNumber)}` : ''}
                       </div>
                     </td>
                     <td className="px-4 py-3">{summariseItems(t)}</td>

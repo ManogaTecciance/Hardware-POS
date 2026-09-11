@@ -83,7 +83,7 @@ describe('what the ticket prints', () => {
     // the rename would pass on a `toContain` of the name inside the old label.
     expect(text).toContain('Table 1');
     expect(text).not.toMatch(/table no/i);
-    expect(text).toContain('RO-000026 · Round 2 · Grill');
+    expect(text).toContain('RO-000026 · 2nd send · Grill');
   });
 
   it('lists every dish with its number and quantity', () => {
@@ -189,9 +189,9 @@ describe('the shapes a real kitchen sends', () => {
   it('omits the station for a ticket that has none, without printing null', () => {
     const text = asText(renderKitchenTicket({ ...TICKET, stationName: null }));
 
-    expect(text).toContain('RO-000026 · Round 2');
+    expect(text).toContain('RO-000026 · 2nd send');
     expect(text).not.toContain('null');
-    expect(text).not.toContain('Round 2 ·');
+    expect(text).not.toContain('2nd send ·');
   });
 
   it('escapes a dish name that contains markup', () => {

@@ -1,5 +1,6 @@
 'use client';
 
+import { sendLabel } from '@/lib/restaurant/labels';
 import { Loader2 } from 'lucide-react';
 import * as React from 'react';
 
@@ -176,7 +177,7 @@ function RoundBlock({
     <div className="rounded-lg border border-border p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="min-w-0 text-sm">
-          <span className="font-semibold">Round #{round.roundNumber}</span>
+          <span className="font-semibold">{sendLabel(round.roundNumber)}</span>
           <span className="ml-2 text-xs text-muted-foreground">Order {order.orderNumber}</span>
         </div>
         <StatusBadge

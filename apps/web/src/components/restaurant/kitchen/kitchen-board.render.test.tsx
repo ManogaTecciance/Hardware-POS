@@ -541,7 +541,7 @@ describe('the Details dialog', () => {
       ],
     });
 
-    await waitFor(() => expect(screen.getByText('Round 1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('1st send')).toBeTruthy());
     // The skeleton is gone, the floor is not.
     expect(dialog.querySelectorAll('.animate-pulse')).toHaveLength(0);
     expect(dialog.querySelector('.min-h-44')).toBeTruthy();
@@ -758,6 +758,42 @@ describe('card layout', () => {
       title.compareDocumentPosition(provenance) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(provenance.className).toContain('truncate');
+  });
+
+  it('never truncates the KOT number, and gives up the button labels first (D177)', async () => {
+    /*
+     * The PO's report: "the KOT number is not fully visible". The footer row
+     * carries the number plus Print and Details, and the number was the part
+     * marked `truncate` — right for a long completed-by NAME (the test below),
+     * wrong for the one string on the card the pass calls out. jsdom lays
+     * nothing out, so the contract is asserted as the mechanism: the number
+     * is pinned, the labels are the things that collapse at a narrow width,
+     * and the board never asks for a fourth column.
+     */
+    outstandingRows = [ticket({ id: 'tk_1', placeLabel: 'T1', ticketNumber: 'KOT-000031' })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    const number = screen.getByText('KOT-000031');
+    // POSITIVE — pinned: it does not shrink and does not wrap.
+    expect(number.className).toContain('shrink-0');
+    expect(number.className).toContain('whitespace-nowrap');
+    // NEGATIVE — and it is not the thing that truncates any more.
+    expect(number.className).not.toContain('truncate');
+
+    // The labels are what give: hidden below `lg`, present above it, while
+    // each button keeps a full accessible name so nothing is lost.
+    const print = screen.getByRole('button', { name: 'Print KOT-000031' });
+    const details = screen.getByRole('button', { name: 'Details for KOT-000031' });
+    for (const label of [within(print).getByText('Print'), within(details).getByText('Details')]) {
+      expect(label.className).toContain('hidden');
+      expect(label.className).toContain('lg:inline');
+    }
+
+    // And the grid stops at three: a fourth column is what squeezed the row.
+    const grid = screen.getByText('T1').closest('.grid')!;
+    expect(grid.className).toContain('lg:grid-cols-3');
+    expect(grid.className).not.toMatch(/grid-cols-4/);
   });
 
   it('keeps the ticket number and Details on one line', async () => {
@@ -1302,7 +1338,7 @@ describe('station ribbon (D152)', () => {
 
     // Positive: both ends of the ONE ribbon, station first.
     const station = screen.getByText('Grill');
-    const round = screen.getByText('Round 2');
+    const round = screen.getByText('2nd send');
     expect(station.parentElement).toBe(round.parentElement);
     expect(station.compareDocumentPosition(round) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The station is the half that gives; a round number never needs to.
@@ -1342,11 +1378,11 @@ describe('station ribbon (D152)', () => {
     await waitFor(() => expect(screen.getByText('T-OLD')).toBeTruthy());
 
     // Positive: the band is there and it is the round's.
-    const round = screen.getByText('Round 3');
+    const round = screen.getByText('3rd send');
     const ribbon = round.parentElement as HTMLElement;
     expect(ribbon.className).toContain('bg-brand-50');
     // Negative: nothing else is on it — no name, and no rendered `null`.
-    expect(ribbon.textContent).toBe('Round 3');
+    expect(ribbon.textContent).toBe('3rd send');
     expect(container.textContent ?? '').not.toContain('null');
 
     // Positive control, same board: a D152 ticket beside it DOES name its
@@ -1489,8 +1525,8 @@ describe('station ribbon (D152)', () => {
 
     const dialog = await screen.findByRole('dialog');
     // POSITIVE — the rounds, their dishes, and the station on the line.
-    await waitFor(() => expect(within(dialog).getByText('Round 1')).toBeTruthy());
-    expect(within(dialog).getByText('Round 2')).toBeTruthy();
+    await waitFor(() => expect(within(dialog).getByText('1st send')).toBeTruthy());
+    expect(within(dialog).getByText('2nd send')).toBeTruthy();
     expect(within(dialog).getByText(/1× Kottu/)).toBeTruthy();
     expect(within(dialog).getByText(/1× Watalappan/)).toBeTruthy();
     expect(within(dialog).getByText('Main Kitchen')).toBeTruthy();

@@ -7693,6 +7693,39 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D177 — a round is a "send" on screen, and a card is wide enough for its number
+
+PO, 2026-09-11, two things in one breath.
+
+**"Round" was the wrong word, and the PO asked for a better one.** It is the
+data model's word and it stays there. On a ticket it read as bar service —
+one order of drinks for a table — and on a food ticket it told a cook nothing
+about what the thing was. Three options were put to the PO: drop the word
+from the screens entirely (the ticket number already says it), "send", or
+"course". They chose "send". Course would have been wrong whenever a second
+send is more mains, which in table service it usually is; dropping it loses a
+distinction a kitchen reading two tickets for one table an hour apart does
+use.
+
+So a round is now "1st send", "2nd send", "3rd send" wherever a person reads
+it: the board ribbon, the ticket dialog, the history table, the bill sheet,
+the session sheet and the printed KOT. ONE function spells it — `sendLabel`
+in the restaurant labels — so the word cannot drift into "Round" on one
+surface and "send" on another. Its one trap is pinned: 11th, 12th and 13th,
+not 11st, 12nd, 13rd.
+
+**"The KOT number is not fully visible."** The cause was not the grid width
+alone, and widening the grid alone would have masked it. The card's footer row
+carries the ticket number plus the Print and Details buttons D153 added, and
+the number was the element marked `truncate` — correct for a long
+completed-by name on a Done card, which must not drag the buttons out of the
+row, and wrong for the one string on the card the pass calls out. Three
+changes, each pinned: the number no longer shrinks or wraps; the two button
+LABELS are what give instead, hidden below `lg` while every button keeps its
+full accessible name; and the grid stops at three columns rather than four,
+because a card that cannot show its own number is not a card the pass can
+call out.
+
 ### D176 — a kitchen ticket numbers from its own counter
 
 PO, 2026-09-11, on being told what an RO- number was: "I'd rather the two ran

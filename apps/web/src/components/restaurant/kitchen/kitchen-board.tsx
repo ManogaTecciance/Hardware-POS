@@ -19,6 +19,7 @@ import {
   KITCHEN_TICKET_STATUS_TONES,
   formatElapsed,
   formatTime,
+  sendLabel,
 } from '@/lib/restaurant/labels';
 import type {
   KitchenLaneCounts,
@@ -689,7 +690,14 @@ export function KitchenBoard({ session, branchId }: Props) {
         // Three across from `lg` (1024) rather than `xl` (1280): the kitchen
         // board is usually a wall-mounted landscape tablet, where two columns
         // of narrow cards wastes half the screen the pass is reading from.
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        //
+        // D177 — and never FOUR. The footer row carries the KOT number, a
+        // Print button and a Details button (D153 added the middle one), and
+        // at four columns on a wide screen the number was the thing that gave
+        // — "KOT-0000…" is what the pass got. A card that cannot show its own
+        // number is not a card the pass can call out, so the fourth column is
+        // gone and the number no longer truncates (see the footer).
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
           {visible.map((t) => (
             <TicketCard
               key={t.id}
@@ -800,7 +808,9 @@ function TicketCard({
           <span className="truncate">{ticket.stationName}</span>
           {/* Absent on a legacy ticket that predates rounds, and the ribbon must
               not then render a bare "Round". */}
-          {ticket.roundNumber ? <span className="shrink-0">Round {ticket.roundNumber}</span> : null}
+          {ticket.roundNumber ? (
+            <span className="shrink-0">{sendLabel(ticket.roundNumber)}</span>
+          ) : null}
         </div>
       ) : null}
       <CardContent className="flex flex-1 flex-col space-y-3 p-4">
@@ -897,7 +907,11 @@ function TicketCard({
               ) : (
                 <>
                   <Clock className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{ticket.ticketNumber}</span>
+                  {/* D177 — NOT truncated, unlike the completed-by name above
+                      it: a ticket number the pass cannot read in full is the
+                      one thing this row exists to show. The buttons beside it
+                      shed their labels first (see below). */}
+                  <span className="shrink-0 whitespace-nowrap">{ticket.ticketNumber}</span>
                 </>
               )}
             </span>
@@ -910,6 +924,10 @@ function TicketCard({
               bump verb below — the write action is still the whole bottom of
               the card (D100).
             */}
+            {/* D177 — the labels hide below `lg` so the row has three things
+                that shrink (two labels) and one that does not (the number).
+                The icons stay, and each button keeps its accessible name, so
+                nothing is lost to a screen reader or a wide screen. */}
             <Button
               size="sm"
               variant="ghost"
@@ -918,16 +936,17 @@ function TicketCard({
               leftIcon={<Printer className="h-4 w-4" />}
               onClick={() => printKitchenTicket(ticket)}
             >
-              Print
+              <span className="hidden lg:inline">Print</span>
             </Button>
             <Button
               size="sm"
               variant="ghost"
+              aria-label={`Details for ${ticket.ticketNumber}`}
               className="shrink-0"
               leftIcon={<ListTree className="h-4 w-4" />}
               onClick={onDetails}
             >
-              Details
+              <span className="hidden lg:inline">Details</span>
             </Button>
           </div>
           {/*

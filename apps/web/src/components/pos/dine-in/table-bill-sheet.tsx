@@ -1,5 +1,6 @@
 'use client';
 
+import { sendLabel } from '@/lib/restaurant/labels';
 import { Loader2, Receipt, SplitSquareHorizontal } from 'lucide-react';
 import * as React from 'react';
 
@@ -228,7 +229,7 @@ export function TableBillSheet({
           {groupByRound(preview.items).map(([round, items]) => (
             <div key={round ?? 'x'}>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {round ? `Round ${round}` : 'Items'}
+                {round ? sendLabel(round) : 'Items'}
               </p>
               <ul className="space-y-1">
                 {items.map((it) => (
