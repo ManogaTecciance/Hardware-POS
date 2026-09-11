@@ -11,6 +11,12 @@ export type DocumentType =
   // loud, and order numbers don't collide with sale numbers.
   | 'TABLE_SESSION'
   | 'RESTAURANT_ORDER'
+  // D176 — kitchen tickets get their own counter. Until now a KOT drew from
+  // RESTAURANT_ORDER, so orders and tickets interleaved on one stream: 13
+  // orders and 17 tickets reached RO-000029 and KOT-000030, neither series
+  // contiguous, and adjacent digits across the two meant nothing. Its own
+  // sequence lets the pass read "KOT-31, 32, 33" as three consecutive tickets.
+  | 'KITCHEN_TICKET'
   // D44 — Purchase Receipts (Receive Stock / GRN). Kept as its own tenant
   // sequence so the "RCV-000042" identifiers do not collide with sales,
   // returns or quotations, and so gaps caused by aborted transactions are

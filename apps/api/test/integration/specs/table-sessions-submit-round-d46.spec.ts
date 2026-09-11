@@ -1021,3 +1021,94 @@ describe('D46/D152 — one KOT per station, carrying its dishes and their varian
     expect(await prisma.kitchenStation.count({ where: { branchId, isActive: true } })).toBe(3);
   });
 });
+
+describe('D176 — orders and tickets number independently', () => {
+  const seq = (docType: string) =>
+    prisma.documentSequence.findUnique({
+      where: { tenantId_docType: { tenantId: restaurant.tenantId, docType } },
+      select: { value: true },
+    });
+  const num = (s: string) => Number(s.slice(s.indexOf('-') + 1));
+
+  it('a round\'s tickets consume the KITCHEN_TICKET counter and leave the order stream alone', async () => {
+    const orderBefore = (await seq('RESTAURANT_ORDER'))?.value ?? 0;
+    const order = await prisma.restaurantOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { orderNumber: true },
+    });
+
+    // Two stations, one round: two tickets, two allocations on the kitchen's
+    // counter and NONE on the order's.
+    const res = await submitRound({
+      idempotencyKey: 'd176-a',
+      items: [
+        { sourceKind: 'PRODUCT', productId: variantProductId, productVariantId: variantMediumId, quantity: 1 },
+        { sourceKind: 'PRODUCT', productId: simpleProductId, quantity: 1 },
+      ],
+    });
+    expect(res.status).toBe(201);
+
+    const tickets = await prisma.kitchenTicket.findMany({
+      where: { roundId: res.data.id },
+      select: { ticketNumber: true },
+      orderBy: { ticketNumber: 'asc' },
+    });
+    expect(tickets).toHaveLength(2);
+    const nums = tickets.map((t) => num(t.ticketNumber));
+    // POSITIVE — consecutive, which a shared counter interleaved with the
+    // order stream could not promise.
+    expect(nums[1]).toBe(nums[0]! + 1);
+    // …and the kitchen counter moved by exactly two.
+    expect((await seq('KITCHEN_TICKET'))?.value).toBe(nums[1]);
+    // NEGATIVE — the order stream did not move at all for two tickets.
+    expect((await seq('RESTAURANT_ORDER'))?.value ?? 0).toBe(orderBefore);
+    expect(order.orderNumber.startsWith('RO-')).toBe(true);
+  });
+
+  it('seeds the new counter above tickets minted from the old shared stream, so nothing collides', async () => {
+    /*
+     * The migration path, against the real unique constraint. A tenant that
+     * cooked before D176 holds tickets numbered from the ORDER stream. Wipe
+     * the kitchen counter to simulate first use after the upgrade, plant a
+     * high pre-D176 ticket, and send a round: the counter must start ABOVE
+     * it. A counter starting at 1 would violate (tenantId, ticketNumber) the
+     * first time it reached a number the old stream had used, and the
+     * round-submit transaction would roll back — food not reaching the
+     * kitchen because of a numbering change.
+     */
+    await prisma.documentSequence.deleteMany({
+      where: { tenantId: restaurant.tenantId, docType: 'KITCHEN_TICKET' },
+    });
+    const first = await submitRound({
+      idempotencyKey: 'd176-seed-1',
+      items: [{ sourceKind: 'PRODUCT', productId: simpleProductId, quantity: 1 }],
+    });
+    expect(first.status).toBe(201);
+    const planted = await prisma.kitchenTicket.findFirstOrThrow({
+      where: { roundId: first.data.id },
+      select: { id: true },
+    });
+    // Renumber that ticket the way the shared stream would have, far above.
+    await prisma.kitchenTicket.update({
+      where: { id: planted.id },
+      data: { ticketNumber: 'KOT-000500' },
+    });
+    await prisma.documentSequence.deleteMany({
+      where: { tenantId: restaurant.tenantId, docType: 'KITCHEN_TICKET' },
+    });
+
+    const second = await submitRound({
+      idempotencyKey: 'd176-seed-2',
+      items: [{ sourceKind: 'PRODUCT', productId: simpleProductId, quantity: 1 }],
+    });
+    // POSITIVE — the round went through (no unique violation)…
+    expect(second.status).toBe(201);
+    const minted = await prisma.kitchenTicket.findFirstOrThrow({
+      where: { roundId: second.data.id },
+      select: { ticketNumber: true },
+    });
+    // …and took the number after the highest existing one.
+    expect(minted.ticketNumber).toBe('KOT-000501');
+    expect((await seq('KITCHEN_TICKET'))?.value).toBe(501);
+  });
+});

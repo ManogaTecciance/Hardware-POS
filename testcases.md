@@ -805,6 +805,8 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | KIT-036 | The ticket history filters by station and table (D175) | Open Ticket history, press Filters, tick a station, then also tick a table; then press Clear | The panel shows a Station group and a Table group of chips; the button badge counts the active filters; the list narrows to tickets matching BOTH; the page returns to one on every change; Clear empties both | P | Not Run |
 | KIT-037 | Searching a station or table name no longer matches (D175) | Type a station name, then a table name, then a dish name into the history search | The first two match nothing; the dish still matches. The search box says it searches ticket, order and dish | P | Not Run |
 | KIT-038 | Takeaway is never a table chip (D175) | On a branch that has taken a takeaway order, open the history Filters panel | No "Walk In" or delivery group appears among the tables; takeaway tickets are listed only while no table filter is set | P | Not Run |
+| KIT-039 | Orders and tickets number independently (D176) | Note the last RO- and KOT- numbers, send a round spanning two stations, then place a new order | The two tickets are consecutive KOT numbers; the order counter has not moved for them; the new order is the next RO number after the last order, not after the last ticket | P | Not Run |
+| KIT-040 | The first ticket after the upgrade does not collide (D176) | On a tenant that already holds tickets minted from the old shared stream, send a round | The round succeeds and its ticket takes the number after the highest existing KOT, never KOT-000001 again | P | Not Run |
 | KIT-008 | Yesterday's tickets are in the history, and so are today's (D142) | Open Ticket history from the rail, and from the "Older tickets" link on the Done lane | Both reach /kitchen/history; the list holds the ticket bumped yesterday AND the one bumped minutes ago, newest first, with where it went, its items, its station, when it was finished and by whom | P | Not Run |
 | KIT-009 | Ticket history pages and searches on the server (D142) | With more than one page of finished tickets: change the rows-per-page, go to page 2, then search a dish name, a ticket number and a table code | Each request carries page/pageSize/search to GET …/kitchen-tickets/history; searching returns to page 1; a term with a double space still matches; a term that matches nothing reads "No tickets match “…”" rather than the empty-branch wording | P | Not Run |
 | KIT-010 | Cancelled work is in neither the lane nor the history (D115/D142) | Cancel an order whose ticket was already bumped; check the Done lane and Ticket history | The ticket appears in neither; it remains visible on the board's Cancelled lane | N | Not Run |
@@ -941,13 +943,13 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
-| RET | 18 | KIT | 38 |
+| RET | 18 | KIT | 40 |
 | EXC-T | 12 | ADM | 15 |
 | EXC-D | 4 | UI | 35 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 718 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 720 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

@@ -7693,6 +7693,42 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D176 — a kitchen ticket numbers from its own counter
+
+PO, 2026-09-11, on being told what an RO- number was: "I'd rather the two ran
+independently."
+
+**They shared a stream.** An order number and a ticket number were both drawn
+from the `RESTAURANT_ORDER` sequence, so they interleaved: 13 orders and 17
+tickets had reached RO-000029 and KOT-000030, neither series contiguous, and
+adjacent digits across the two meant nothing. A ticket number is a thing the
+pass calls out in sequence, and "31, 32, 33" only reads as one when nothing
+else consumed 32. Tickets now draw from `KITCHEN_TICKET`. No migration:
+`DocumentSequence.docType` is a plain string.
+
+**The migration path is the whole difficulty.** `KitchenTicket` has a
+per-tenant unique on the number, and every tenant that has cooked before holds
+KOT-000001 onward from the old stream. A fresh counter starting at 1 would mint
+KOT-000001 again on its first use, hit the unique, and roll back the
+round-submit transaction — the guests' food would not reach the kitchen
+because of a numbering change. So the first allocation on a tenant reads the
+highest ticket number it already holds and seeds the counter AT it, inside the
+round's own transaction so two rounds racing to be first cannot both seed. A
+tenant that has never cut a ticket seeds nothing and starts at one. After that
+first allocation the counter is the authority and the tickets table is never
+consulted again: a seed is a one-time migration, not a reconciliation, and a
+counter that could move backwards would not be a counter.
+
+Pinned four ways by mutation and once against a real database: the shared
+stream restored, the seed dropped, the seed set one above the floor, and the
+seed re-run on every round each turn a unit test red; and an integration test
+wipes the counter, plants KOT-000500 from the old stream, sends a round, and
+asserts KOT-000501 with no unique violation.
+
+**Orders are untouched.** They keep `RESTAURANT_ORDER`, so a live tenant's next
+order continues its existing series with no gap and no renumbering. Tickets
+already minted keep the digits they have.
+
 ### D175 — the history filters by station and table, and stops searching them
 
 PO, 2026-09-11: "instead of having station and table in search, add a filter

@@ -164,13 +164,23 @@ type Harness = {
     menuItemStationLink: { findMany: jest.Mock };
     productStationLink: { findMany: jest.Mock };
     kitchenStation: { upsert: jest.Mock; findMany: jest.Mock };
+    documentSequence: { findUnique: jest.Mock; create: jest.Mock };
+    kitchenTicket: { findFirst: jest.Mock };
     $queryRaw: jest.Mock;
   };
   created: CreatedTicket[];
   written: WrittenItem[];
 };
 
-function makeHarness(items: RoundItem[] = ROUND_ITEMS): Harness {
+function makeHarness(
+  items: RoundItem[] = ROUND_ITEMS,
+  /**
+   * D176 — the state of the kitchen's own counter and of the tickets already
+   * minted. Default: a counter that exists, so the seeding path is not taken
+   * and every test above this describe is about the split alone.
+   */
+  numbering: { counter: number | null; lastTicket: string | null } = { counter: 26, lastTicket: null },
+): Harness {
   const created: CreatedTicket[] = [];
   const written: WrittenItem[] = [];
   let seq = 27;
@@ -205,12 +215,29 @@ function makeHarness(items: RoundItem[] = ROUND_ITEMS): Harness {
       findMany: jest.fn().mockResolvedValue([]),
     },
     // `nextDocumentNumber` is a raw INSERT … RETURNING; one call, one number.
+    // It honours a seed: a counter created at N hands out N + 1 next.
     $queryRaw: jest.fn().mockImplementation(() => Promise.resolve([{ value: seq++ }])),
+    documentSequence: {
+      findUnique: jest.fn().mockImplementation(() =>
+        Promise.resolve(numbering.counter === null ? null : { value: numbering.counter }),
+      ),
+      create: jest.fn().mockImplementation((args: { data: { value: number } }) => {
+        // Seeding AT the floor means the next allocation is floor + 1.
+        seq = args.data.value + 1;
+        return Promise.resolve(args.data);
+      }),
+    },
+    kitchenTicket: {
+      findFirst: jest.fn().mockImplementation(() =>
+        Promise.resolve(numbering.lastTicket ? { ticketNumber: numbering.lastTicket } : null),
+      ),
+    },
   };
 
   const tx = {
     ...raw,
     kitchenTicket: {
+      ...raw.kitchenTicket,
       create: jest.fn().mockImplementation((args: { data: Record<string, unknown> }) => {
         const row: CreatedTicket = {
           id: `tkt_${created.length + 1}`,
@@ -727,3 +754,87 @@ async function routingMutant(h: Harness, mode: 'drop' | 'first-station'): Promis
     }
   }
 }
+
+describe('D176 — a KOT number comes from the kitchen\'s own counter', () => {
+  /*
+   * Until D176 a ticket drew from RESTAURANT_ORDER, the same stream an order
+   * number comes from, so the two interleaved and neither series was
+   * contiguous. Its own counter is a one-key change — except for the tickets
+   * already minted from the shared stream, which the new counter must not
+   * collide with: `KitchenTicket` has a per-tenant unique on the number.
+   */
+  const ROUND = 'rnd_1';
+
+  it('draws every ticket from KITCHEN_TICKET, and never from the order stream', async () => {
+    const h = makeHarness([ROUND_ITEMS[0]!, ROUND_ITEMS[1]!, ROUND_ITEMS[2]!]);
+
+    await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+
+    // POSITIVE — one allocation per ticket, each against the kitchen's key.
+    const sql = h.raw.$queryRaw.mock.calls.map((c: unknown[]) => JSON.stringify(c[0]));
+    expect(sql).toHaveLength(h.created.length);
+    for (const call of sql) expect(call).toContain('KITCHEN_TICKET');
+    // NEGATIVE — the order stream is not consumed by a ticket any more, so an
+    // order raised next takes the number after the last ORDER, not after the
+    // last ticket.
+    for (const call of sql) expect(call).not.toContain('RESTAURANT_ORDER');
+  });
+
+  it('seeds a brand-new counter ABOVE the tickets the shared stream already minted', async () => {
+    /*
+     * The migration path. A tenant that has cooked before holds KOT-000001 …
+     * KOT-000030 from the shared stream. A counter starting at 1 would mint
+     * KOT-000001 again, hit the unique, and fail the round-submit transaction
+     * — the guests\' food would not reach the kitchen because of a numbering
+     * change. So the first allocation seeds the counter at the highest existing
+     * number and continues from there.
+     */
+    const h = makeHarness([ROUND_ITEMS[0]!], { counter: null, lastTicket: 'KOT-000030' });
+
+    await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+
+    // POSITIVE — the counter was created at the floor…
+    expect(h.raw.documentSequence.create).toHaveBeenCalledWith({
+      data: { tenantId: TENANT, docType: 'KITCHEN_TICKET', value: 30 },
+    });
+    // …and the ticket took the number after it, not KOT-000001.
+    expect(h.created.map((t) => t.ticketNumber)).toEqual(['KOT-000031']);
+    // The floor came from the tickets table, read inside the transaction.
+    expect(h.raw.kitchenTicket.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: TENANT, ticketNumber: { startsWith: 'KOT-' } },
+        orderBy: { ticketNumber: 'desc' },
+      }),
+    );
+  });
+
+  it('starts at one on a tenant that has never cut a ticket', async () => {
+    const h = makeHarness([ROUND_ITEMS[0]!], { counter: null, lastTicket: null });
+
+    await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+
+    // NEGATIVE — no seed row for a tenant with nothing to seed above: the
+    // ordinary INSERT … ON CONFLICT path creates the counter at 1 by itself.
+    expect(h.raw.documentSequence.create).not.toHaveBeenCalled();
+    expect(h.created.map((t) => t.ticketNumber)).toEqual(['KOT-000027']);
+  });
+
+  it('does NOT re-seed once the counter exists, whatever the tickets table says', async () => {
+    /*
+     * The seed is a one-time migration, not a reconciliation. After it exists
+     * the counter is the authority; re-reading the tickets table on every
+     * round would cost a query per round for ever, and a counter reset to the
+     * highest ticket could hand out a number that a rolled-back round had
+     * burned — which is fine for gaps, and wrong for a counter that only ever
+     * moves forward.
+     */
+    const h = makeHarness([ROUND_ITEMS[0]!], { counter: 40, lastTicket: 'KOT-000030' });
+
+    await h.service.generateTicketsForRound(h.tx, TENANT, BRANCH, ROUND);
+
+    expect(h.raw.kitchenTicket.findFirst).not.toHaveBeenCalled();
+    expect(h.raw.documentSequence.create).not.toHaveBeenCalled();
+    // The number came from the counter\'s own allocation, untouched.
+    expect(h.created.map((t) => t.ticketNumber)).toEqual(['KOT-000027']);
+  });
+});

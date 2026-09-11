@@ -327,7 +327,12 @@ export class KitchenService {
       // One document number PER TICKET: two stations cooking one round are two
       // cards on the pass, and two cards sharing a KOT number cannot be told
       // apart by the people calling them out.
-      const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
+      //
+      // D176 — from KITCHEN_TICKET, not RESTAURANT_ORDER. The two used to share
+      // a counter and interleave; a ticket number is a thing the pass calls out
+      // in sequence, and "31, 32, 33" only reads as a sequence when nothing
+      // else consumed 32.
+      const seq = await this.nextTicketSequence(tx, tenantId);
       const ticketNumber = `KOT-${padSequence(seq)}`;
       const ticket = await tx.kitchenTicket.create({
         data: {
@@ -360,6 +365,49 @@ export class KitchenService {
       ticketIds.push(ticket.id);
     }
     return ticketIds;
+  }
+
+  /**
+   * D176 — the next ticket number, from the kitchen's own counter.
+   *
+   * The counter is NEW, and `KitchenTicket` has a per-tenant unique on the
+   * number. Every ticket cut before D176 took its digits from the shared
+   * RESTAURANT_ORDER stream, so a tenant that has cooked anything already holds
+   * KOT-000001 … KOT-0000nn. A fresh counter starting at 1 would collide with
+   * the first of those on its first use and fail the round-submit
+   * transaction — the guest's food would not reach the kitchen because of a
+   * numbering change.
+   *
+   * So the first allocation on a tenant seeds the counter at the highest
+   * ticket number it already holds, and the sequence continues from there.
+   * Read inside the round's transaction, so two rounds racing to be the first
+   * cannot both seed: the second sees the row the first inserted and takes
+   * the ordinary `+1` path. After the first allocation this is exactly
+   * `nextDocumentNumber` and costs one query, the same as before.
+   */
+  private async nextTicketSequence(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ): Promise<number> {
+    const existing = await tx.documentSequence.findUnique({
+      where: { tenantId_docType: { tenantId, docType: 'KITCHEN_TICKET' } },
+      select: { value: true },
+    });
+    if (!existing) {
+      const last = await tx.kitchenTicket.findFirst({
+        where: { tenantId, ticketNumber: { startsWith: 'KOT-' } },
+        orderBy: { ticketNumber: 'desc' },
+        select: { ticketNumber: true },
+      });
+      const floor = last ? Number(last.ticketNumber.slice('KOT-'.length)) : 0;
+      if (Number.isFinite(floor) && floor > 0) {
+        // Seed AT the floor; the allocation below then hands out floor + 1.
+        await tx.documentSequence.create({
+          data: { tenantId, docType: 'KITCHEN_TICKET', value: floor },
+        });
+      }
+    }
+    return nextDocumentNumber(tx, tenantId, 'KITCHEN_TICKET');
   }
 
   /**
