@@ -9941,6 +9941,65 @@ row it prints was unasserted and this went unnoticed.
 
 ---
 
+## D163 — the tender is captured when it is true, not when it is printed
+
+**Status:** accepted and **built**, 2026-09-11. Frontend only, one file. No
+schema change, no migration.
+
+### What was reported
+
+D162 shipped and the receipt still printed no change. A Rs 3,776 sale paid with
+Rs 4,000 printed `Paid 3,776 / Balance 0.00` — exactly as before the fix.
+
+### Why D162 did not work
+
+Not the server. Verified against the RUNNING API before touching anything: the
+live build renders the rows correctly when the field arrives.
+
+```
+Total  2,750.00 | Paid  2,750.00 | Balance  0.00
+Cash received  9,999.00 | Change  7,249.00 | PAID
+```
+
+The client never sent it. `payment/page.tsx` carries:
+
+```ts
+React.useEffect(() => {
+  setTendered(total ? total.toFixed(2) : '');
+}, [total]);
+```
+
+Completing a sale calls `cart.clearCart()`. That changes `total`, which fires
+this effect, which **overwrites `tendered`** — and all of it happens before the
+operator reaches the Thermal receipt button. D162 read `tendered` at print time
+and always found the reset value, so its own guard correctly decided there was
+no change to report.
+
+### The decision
+
+**Snapshot the tender at completion, beside the sale itself.**
+
+`completedTender` is set in the same block as `setCompleted(sale)` and
+deliberately BEFORE `clearCart()`. `printReceipt` reads the snapshot, never the
+live field.
+
+The guard moves with it: only a cash over-tender is kept, so every other shape
+stores `null` and prints nothing, exactly as D162 intended.
+
+### Why the tests did not catch it
+
+D162's spec covers `renderCustomerReceipt` thoroughly — six cases, five
+mutations, all killed — and every one of them still passes. They test the
+TEMPLATE. Nothing tested the seam between the till and the template, and the
+defect lived entirely in that seam: correct renderer, correct endpoint, correct
+DTO, and a caller reading its own state one beat too late.
+
+This is the shape D134's spec was written for and the shape `6.1b` shipped in:
+every layer green, the chain broken at the join. The manual case that catches
+it — **DOC-050** — was written with D162 and had not been run yet.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

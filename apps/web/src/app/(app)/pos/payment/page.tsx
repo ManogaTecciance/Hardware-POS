@@ -141,6 +141,16 @@ export default function PaymentPage() {
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [completed, setCompleted] = React.useState<CompletedSale | null>(null);
+  /*
+   * D163 — the tender, SNAPSHOT at completion.
+   *
+   * D162 read `tendered` again at print time and always found it empty.
+   * Completing the sale clears the cart, `total` changes, and the effect
+   * that seeds this field with the exact amount fires and overwrites what
+   * the operator typed — before they ever reach the Thermal receipt
+   * button. The number has to be captured while it is still true.
+   */
+  const [completedTender, setCompletedTender] = React.useState<number | null>(null);
   const [receiptCtx, setReceiptCtx] = React.useState<ReceiptContext | null>(null);
   const [printing, setPrinting] = React.useState(false);
   const [summaryOpen, setSummaryOpen] = React.useState(false);
@@ -378,6 +388,10 @@ export default function PaymentPage() {
       };
       setReceiptCtx(ctx);
       setCompleted(sale);
+      // D163 — BEFORE `clearCart`, which resets `tendered` through the
+      // `total` effect. Only a cash over-tender is worth keeping; every
+      // other shape prints nothing anyway.
+      setCompletedTender(mode === 'CASH' && tenderedNum > total ? tenderedNum : null);
       cart.clearCart();
       /*
        * Auto-open the A4 print view (not the old thermal receipt) when "print
@@ -418,7 +432,7 @@ export default function PaymentPage() {
   const printReceipt = async () => {
     if (!completed || !receiptCtx) return;
     /*
-     * D162 — the tender travels to the receipt, and nowhere else.
+     * D162/D163 — the tender travels to the receipt, and nowhere else.
      *
      * The screen has shown "Change" since D74 and the paper never did,
      * because `tendered` was local state used for that display and then
@@ -429,8 +443,7 @@ export default function PaymentPage() {
      * Sent only for CASH with real change. A card sale, an exact-money
      * sale and an under-tender all send nothing and print as before.
      */
-    const tenderToPrint =
-      mode === 'CASH' && change > 0 ? tenderedNum : undefined;
+    const tenderToPrint = completedTender ?? undefined;
     setPrinting(true);
     try {
       await printCustomerReceipt(session!, completed, receiptCtx, tenderToPrint);
