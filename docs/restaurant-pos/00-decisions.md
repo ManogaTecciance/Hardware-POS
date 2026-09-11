@@ -10151,6 +10151,83 @@ what makes the branch killable.
 
 ---
 
+## D166 — a till that prints one bill offers one bill
+
+**Status:** accepted and **built**, 2026-09-11. Frontend only. No schema change,
+no migration.
+
+### What was reported
+
+> "when cacheir giving bill its needed to show only thermal bill, only in
+> quotations we use A4 bill. after click complete payment its go to thermal bill
+> print like in restaurant-pos"
+
+On a RETAIL till, completing a sale opened a dialog whose **primary** action was
+**Print A4 Bill**, beside **Preview A4 Bill** — for a document D152 removed from
+retail — with the receipt demoted to a text link between them. And with the A4
+gone, `printAfter` had nothing to print, so a retail sale completed and printed
+**nothing at all**.
+
+### What D152 missed
+
+D152 gated the Settings screen, the sale page and the *"print A4 bill after
+payment"* toggle on `showA4SaleDocument`. Three doors, closed.
+
+The fourth was the payment-complete dialog, and it is the one the cashier
+actually stands in front of. The page **already computed** `canPrintA4` and used
+it twice; it simply never passed it to the dialog.
+
+### The decision
+
+**One capability, three consequences.**
+
+1. **The dialog offers the bill this workspace issues.** Where there is no A4,
+   the receipt is the single, primary action — not a link between two buttons
+   for a document that cannot be printed.
+2. **`printAfter` chooses instead of refusing.** It read
+   `printAfter && canPrintA4`, so retail printed nothing. It now prints the A4
+   where there is one and the receipt where there is not.
+3. **The toggle comes back, renamed.** D152 hid it because there was no A4 to
+   print. There is still a receipt, and now that it prints automatically the
+   operator needs the switch that turns it off. It reads *"Print A4 bill after
+   payment"* or *"Print receipt after payment"*.
+
+Hardware and every other A4 workspace are unchanged: same two buttons, same
+toggle wording, same auto-print.
+
+### Two implementation notes
+
+**The auto-print is safe after an `await`.** D78 prints receipts from a hidden
+iframe rather than a popup, so there is no transient-activation window to miss —
+unlike the A4 path, which D74 had to open in the click's own turn.
+
+**It uses the local `sale`, `ctx` and `tender`, not the state just set.** React
+has not re-rendered at that point, and reading state a beat too early is exactly
+the D163 defect.
+
+### `SuccessView` moved out of `page.tsx`
+
+Next's App Router forbids extra named exports from a route file, so the dialog
+could not be rendered by a test while it lived there. It is now
+`components/pos/payment-success-dialog.tsx`. That is why this defect survived
+D152: **nothing had ever rendered this page**, so no test could see which
+buttons it drew.
+
+### Mutation proof
+
+| Mutation | Fails |
+|---|---|
+| the dialog ignores the flag (**the reported bug**) | the retail case and the primary-action case |
+| the A4 pair is dropped for everyone | the hardware case |
+| the receipt is demoted back to a text link | the primary-action case |
+
+The third survived its first run against a weaker assertion (`tagName` is a
+button, class contains `h-`) — true of almost any control. It now asserts the
+receipt carries the same `h-14` the New sale button does and is **not** styled
+with `underline`, which is what "primary, not a link" actually means.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

@@ -44,6 +44,7 @@ import { fetchCustomerCredit, type CustomerCredit } from '@/lib/customers-api';
 import { isValidYmd } from '@/lib/dates';
 import { usePosCart } from '@/lib/pos-cart';
 import { printCustomerReceipt, type ReceiptContext } from '@/lib/receipt-print';
+import { SuccessView } from '@/components/pos/payment-success-dialog';
 import {
   completeSale,
   saleLocation,
@@ -391,7 +392,8 @@ export default function PaymentPage() {
       // D163 — BEFORE `clearCart`, which resets `tendered` through the
       // `total` effect. Only a cash over-tender is worth keeping; every
       // other shape prints nothing anyway.
-      setCompletedTender(mode === 'CASH' && tenderedNum > total ? tenderedNum : null);
+      const tender = mode === 'CASH' && tenderedNum > total ? tenderedNum : null;
+      setCompletedTender(tender);
       cart.clearCart();
       /*
        * Auto-open the A4 print view (not the old thermal receipt) when "print
@@ -403,7 +405,24 @@ export default function PaymentPage() {
        * this is false, which is the safe way round: a missing print is a
        * button away, an unwanted one is already on paper.
        */
-      if (printAfter && canPrintA4) openA4Bill(sale.id, true);
+      if (printAfter) {
+        /*
+         * D166 — print the bill this workspace actually issues.
+         *
+         * D152 took the A4 away from retail and this line kept its `&&
+         * canPrintA4` guard, so a retail till completed a sale and printed
+         * NOTHING — the cashier had to find a text link. The guard now
+         * chooses instead of refusing.
+         *
+         * Safe after the await: D78 prints receipts from a hidden iframe,
+         * not a popup, so there is no transient-activation window to miss.
+         * Local `sale`, `ctx` and `tender` are used rather than the state
+         * just set — React has not re-rendered yet, and D163 is the bug
+         * that comes from reading state a beat too early.
+         */
+        if (canPrintA4) openA4Bill(sale.id, true);
+        else void printCustomerReceipt(session!, sale, ctx, tender ?? undefined);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not complete the sale');
       // The failure may be another register beating us to the stock (or a
@@ -462,6 +481,7 @@ export default function PaymentPage() {
         onPreviewA4={() => openA4Bill(completed.id)}
         onPrintA4={() => openA4Bill(completed.id, true)}
         onPrintThermal={printReceipt}
+        canPrintA4={canPrintA4}
         onViewSale={() => router.push(`/sales/${completed.id}`)}
         onNewSale={() => router.push('/pos')}
       />
@@ -856,22 +876,23 @@ export default function PaymentPage() {
             ) : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
-              {/* D152 — absent where the workspace prints no A4 bill. Its
-                  receipt still prints; what goes is the second, A4 copy of a
-                  sale that is already on the roll. */}
-              {canPrintA4 ? (
-                <div className="flex items-center gap-2 text-sm">
-                  <Printer className="h-4 w-4 text-muted-foreground" aria-hidden />
-                  <span id="print-a4-label">Print A4 bill after payment</span>
-                  <Switch
-                    checked={printAfter}
-                    onCheckedChange={setPrintAfter}
-                    aria-labelledby="print-a4-label"
-                  />
-                </div>
-              ) : (
-                <span />
-              )}
+              {/* D152 — the A4 went away for retail.
+                  D166 — the TOGGLE comes back, naming whichever bill this
+                  workspace prints. D152 hid it because there was no A4 to
+                  print; there is still a receipt, and now that it prints
+                  automatically the operator needs the switch that turns it
+                  off. */}
+              <div className="flex items-center gap-2 text-sm">
+                <Printer className="h-4 w-4 text-muted-foreground" aria-hidden />
+                <span id="print-after-label">
+                  {canPrintA4 ? 'Print A4 bill after payment' : 'Print receipt after payment'}
+                </span>
+                <Switch
+                  checked={printAfter}
+                  onCheckedChange={setPrintAfter}
+                  aria-labelledby="print-after-label"
+                />
+              </div>
 
               <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-initial">
                 <Button
@@ -1117,95 +1138,10 @@ function Row({
   );
 }
 
-function SuccessView({
-  sale,
-  currency,
-  printing,
-  onPreviewA4,
-  onPrintA4,
-  onPrintThermal,
-  onViewSale,
-  onNewSale,
-}: {
-  sale: CompletedSale;
-  currency: string;
-  printing: boolean;
-  onPreviewA4: () => void;
-  onPrintA4: () => void;
-  onPrintThermal: () => void;
-  onViewSale?: () => void;
-  onNewSale: () => void;
-}) {
-  return (
-    <Dialog open onClose={onNewSale} className="max-w-sm">
-      <div className="flex flex-col items-center text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-success">
-          <CheckCircle2 className="h-8 w-8" />
-        </span>
-        <h2 className="mt-3 text-lg font-semibold">Payment complete</h2>
-        <p className="text-sm text-muted-foreground">Sale {sale.saleNumber}</p>
-
-        <div className="mt-5 w-full space-y-2 rounded-xl border border-border p-4 text-sm">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Amount paid</span>
-            <span className="font-medium">{formatMoney(sale.paidAmount, currency)}</span>
-          </div>
-          {sale.balanceAmount > 0 ? (
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Balance due</span>
-              <span className="font-semibold text-danger">
-                {formatMoney(sale.balanceAmount, currency)}
-              </span>
-            </div>
-          ) : null}
-          <div className="flex items-center justify-between pt-1">
-            <span className="text-muted-foreground">Sync status</span>
-            <Badge variant="warning">
-              <Clock className="h-3.5 w-3.5" />
-              Waiting to Sync
-            </Badge>
-          </div>
-        </div>
-
-        <div className="mt-5 grid w-full gap-2">
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="outline"
-              size="lg"
-              onClick={onPreviewA4}
-              leftIcon={<ReceiptText className="h-4 w-4" />}
-            >
-              Preview A4 Bill
-            </Button>
-            <Button size="lg" onClick={onPrintA4} leftIcon={<Printer className="h-4 w-4" />}>
-              Print A4 Bill
-            </Button>
-          </div>
-          <div className="flex items-center justify-center gap-3 text-xs text-muted-foreground">
-            {onViewSale ? (
-              <button onClick={onViewSale} className="font-medium text-primary hover:underline">
-                View sale
-              </button>
-            ) : null}
-            <span aria-hidden>·</span>
-            <button
-              onClick={onPrintThermal}
-              disabled={printing}
-              className="font-medium hover:underline disabled:opacity-50"
-            >
-              {printing ? 'Preparing…' : 'Thermal receipt'}
-            </button>
-          </div>
-          <Button
-            size="lg"
-            onClick={onNewSale}
-            leftIcon={<Plus className="h-4 w-4" />}
-            className="mt-1"
-          >
-            New sale
-          </Button>
-        </div>
-      </div>
-    </Dialog>
-  );
-}
+/**
+ * The payment-complete dialog.
+ *
+ * Exported for its spec (D166): which bill this offers is a per-workspace
+ * decision, and the defect it fixes was invisible to every other test
+ * because nothing rendered this page.
+ */
