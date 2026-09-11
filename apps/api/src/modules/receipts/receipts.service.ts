@@ -56,12 +56,31 @@ export class ReceiptsService {
     const sale = await this.loadCompletedSale(tenantId, saleId);
     const settings = this.settingsService.getSettings(tenantId);
 
+    /*
+     * D165 — a reprint keeps the tender the first print recorded.
+     *
+     * The till sends `amountTendered` once, at the counter. `Receipt.content`
+     * is a JSON column and the receipt data is spread into it, so that first
+     * print DID store the number — and then the first reprint destroyed it,
+     * because `upsertReceipt` overwrites `content` and a reprint has no
+     * tender of its own to put back.
+     *
+     * So the stored value is carried forward when the caller supplies none.
+     * A reprint from Sales now shows what the customer actually handed over,
+     * with no schema change: the number was already on disk, and the bug was
+     * that we were erasing it.
+     *
+     * A supplied tender always WINS, so the till stays the authority for the
+     * sale it just took.
+     */
+    const tender = amountTendered ?? (await this.storedTender(tenantId, saleId));
+
     const receiptData = this.toCustomerReceiptData(
       sale,
       settings.currency,
       settings.receiptFooter,
       safeTimeZone(settings.timezone),
-      amountTendered,
+      tender,
     );
     const receipt = await this.receiptsRepository.upsertReceipt(
       sale.id,
@@ -151,6 +170,20 @@ export class ReceiptsService {
       );
     }
     return sale;
+  }
+
+  /**
+   * D165 — the tender a previous print recorded, or undefined.
+   *
+   * Read defensively: `content` is JSON written by this service, but it is
+   * still a column anything could have put a shape into, and a receipt that
+   * cannot be re-rendered is worse than one missing a row.
+   */
+  private async storedTender(tenantId: string, saleId: string): Promise<number | undefined> {
+    const existing = await this.receiptsRepository.findReceiptBySale(tenantId, saleId);
+    const content = existing?.content as { amountTendered?: unknown } | null;
+    const stored = content?.amountTendered;
+    return typeof stored === 'number' && Number.isFinite(stored) ? stored : undefined;
   }
 
   private toCustomerReceiptData(

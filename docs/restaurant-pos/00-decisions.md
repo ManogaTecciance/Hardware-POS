@@ -10077,6 +10077,80 @@ Six mutations, each failing the case that carries its decision:
 
 ---
 
+## D165 — a reprint keeps the tender the first print recorded
+
+**Status:** accepted and **built**, 2026-09-11. **No schema change, no
+migration** — the number was already on disk.
+
+### What was reported
+
+> "in we view the bill in sales its display balance as 0 still why is that"
+
+D162—D164 fixed the receipt printed at the counter. Viewing the same bill from
+Sales still showed `Balance 0.00`.
+
+### The cause — and why the migration turned out to be unnecessary
+
+D162 recorded a known limit: the tender is not stored, so a reprint cannot show
+it, and persisting it needs columns on `Sale`.
+
+**That was wrong, and the D162 record overstated the problem.** `Receipt.content`
+is a JSON column, and `toReceiptContent` spreads the whole receipt payload into
+it. The FIRST print therefore stored `amountTendered` already — incidentally,
+not by design.
+
+What went wrong is the other half: `upsertReceipt` **overwrites** `content` on
+every print, and a reprint arrives with no tender of its own. So the first
+reprint erased the stored number and then rendered without it. The data was
+being deleted, not missing.
+
+### The decision
+
+**Carry the stored tender forward when the caller supplies none.**
+
+```ts
+const tender = amountTendered ?? (await this.storedTender(tenantId, saleId));
+```
+
+- **A supplied tender always wins.** The till is the authority for the sale it
+  just took; a stale stored value must never override what was just counted.
+- **It is written back**, so the second reprint still has it — otherwise the
+  bug would return one print later.
+- **The stored value is read defensively.** `content` is JSON written by this
+  service, but it is still a column anything could have put a shape into, and a
+  receipt that cannot be re-rendered is worse than one missing a row. Junk is
+  ignored AND not written back, so a bad value cannot outlive whatever put it
+  there.
+
+### What this does and does not reach
+
+| | |
+|---|---|
+| the receipt printed at the till | ✅ D162/D163 |
+| **a reprint from Sales** | ✅ **this decision** |
+| the sale DETAIL page (`/sales/:id`) | ❌ still reads `paidAmount` / `balanceAmount` |
+| the A4 invoice | ❌ same |
+
+Receipts printed **before** D162 have nothing stored and render exactly as they
+always did, which is what the PO asked for: *"dont needed to fix old bill"*.
+
+### Mutation proof
+
+Three mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the stored tender is not carried forward (**the reported bug**) | the render case and the write-back case |
+| the stored value overrides a supplied one | "a supplied tender wins" |
+| the defensive type check is dropped | "ignores a stored value that is not a usable number" |
+
+The third survived its first run: `changeFor` already rejects junk when
+rendering, so the check looked redundant. It is not — without it the junk is
+**written back** into `content` and persists. The test now pins that, which is
+what makes the branch killable.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
