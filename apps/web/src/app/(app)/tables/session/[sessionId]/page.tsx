@@ -5,7 +5,7 @@ interface PageProps {
 }
 
 /**
- * D150 — order entry for a table IS the POS, so this route is a forward.
+ * D155 — order entry for a table IS the POS, so this route is a forward.
  *
  * It used to mount `OrderEntry`: a second order-composition screen with its own
  * menu grid, which listed items as name-and-price text because it never had the

@@ -402,7 +402,7 @@ export interface OpenSessionView extends TableSessionView {
   activeOrderId: string | null;
   readyTicketIds: string[];
   /**
-   * D151 — whose table this is, in words. The floor and the POS picker open on
+   * D156 — whose table this is, in words. The floor and the POS picker open on
    * "my tables" and offer "all", so a session that is not yours has to be
    * attributable, and the users endpoint a name would come from is
    * `USER_MANAGE`-gated. Null when the session records no waiter, or when the
@@ -656,7 +656,7 @@ export type UnifiedOrderStatus =
   | 'CONFIRMED'
   | 'IN_PROGRESS'
   | 'READY'
-  /** D153 — a dine-in bill at the till, not yet paid. */
+  /** D178 — a dine-in bill at the till, not yet paid. */
   | 'AWAITING_PAYMENT'
   | 'HANDED_OVER'
   | 'COMPLETED'
@@ -690,20 +690,20 @@ export interface UnifiedOrderView {
   /** D83 — the settled Sale, for viewing and reprinting the bill in place. */
   saleId: string | null;
   /**
-   * D153 — the table session behind a dine-in row, null otherwise. What
+   * D178 — the table session behind a dine-in row, null otherwise. What
    * "Open in POS" and "Proceed to pay" address from the queue.
    */
   sessionId: string | null;
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
   /**
-   * D153a — each round and where the kitchen has it. The card lists these
+   * D178a — each round and where the kitchen has it. The card lists these
    * so a two-round table reads "Round 1 · Ready / Round 2 · Preparing"
    * rather than a bare "Preparing". Empty for a third-party row.
    */
   rounds: { roundNumber: number; status: OrderRoundStatus; items: { name: string; qty: number }[] }[];
   /**
-   * D152 — whose order this is: the table's waiter for dine-in, the person who
+   * D157 — whose order this is: the table's waiter for dine-in, the person who
    * keyed it for takeaway, null for a third-party row (nobody on the floor
    * took it). What the queue's Mine/All filter is built on, and what names a
    * row that is not yours.

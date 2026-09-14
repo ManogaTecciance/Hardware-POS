@@ -6,7 +6,7 @@ import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 
 @Module({
-  // D153 — TableSessionsModule: the payment that clears a bill is what frees
+  // D178 — TableSessionsModule: the payment that clears a bill is what frees
   // the table now, and the table lifecycle stays in the service that owns it.
   imports: [AuditLogModule, TableSessionsModule],
   controllers: [BillingController],

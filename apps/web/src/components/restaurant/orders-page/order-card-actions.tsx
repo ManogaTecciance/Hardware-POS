@@ -22,7 +22,7 @@ interface Props {
 }
 
 /**
- * D153 — the dine-in settlement verbs, on the queue.
+ * D178 — the dine-in settlement verbs, on the queue.
  *
  * Two roles, two moments, one component so the card footer and the detail
  * drawer cannot offer different buttons for the same row:

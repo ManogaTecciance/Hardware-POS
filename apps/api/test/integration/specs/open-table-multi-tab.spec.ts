@@ -30,7 +30,7 @@
  * last close would see itself as a survivor and never dissolve — which is
  * exactly what the third test would catch.
  *
- * D153 re-timed "close". A tab is done when its bill is PAID, not when the
+ * D178 re-timed "close". A tab is done when its bill is PAID, not when the
  * waiter sends it to the till, so `settleTab` below does both — send, then
  * pay in full — and the release facts the old `/close` response used to carry
  * (`openTableRelease`) are read back from the tables themselves, which is
@@ -133,7 +133,7 @@ async function sendRound(sessionId: string, key: string) {
   expect(round.status).toBe(201);
 }
 
-/** D153 — the waiter's half alone: the bill goes to the till, the table is held. */
+/** D178 — the waiter's half alone: the bill goes to the till, the table is held. */
 async function sendTab(sessionId: string) {
   return http.request<{ session: { status: string }; saleId: string }>(
     'POST',
@@ -143,7 +143,7 @@ async function sendTab(sessionId: string) {
 }
 
 /**
- * D153 — what "close" means now: send the bill, then pay it in full. Returns
+ * D178 — what "close" means now: send the bill, then pay it in full. Returns
  * the shape the old `/close` response carried, with the release summary
  * derived from the tables and the arrangement's live tabs after settlement.
  */
@@ -308,7 +308,7 @@ describe('D104 — several tabs on one joined table', () => {
     expect(still.status).toBe('OPEN');
   });
 
-  it('D153 — sending a bill to the till frees nothing; paying it does', async () => {
+  it('D178 — sending a bill to the till frees nothing; paying it does', async () => {
     const arrangement = await createArrangement(6);
     const tab = await openTab(arrangement.id, { guestCount: 4 });
     await sendRound(tab.data.id, 'k1');

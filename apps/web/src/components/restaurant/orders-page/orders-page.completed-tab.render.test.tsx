@@ -1,5 +1,5 @@
 /**
- * D154 — a Completed tab, and All Orders is the live queue.
+ * D179 — a Completed tab, and All Orders is the live queue.
  *
  * Three things the SCREEN owns:
  *   - the strip: Completed is present, Handed over is gone (both halves —
@@ -95,7 +95,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('the Completed tab (D154)', () => {
+describe('the Completed tab (D179)', () => {
   it('is on the strip, and Handed over is not', async () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
     await screen.findByRole('button', { name: /^Completed\s/ });

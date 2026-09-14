@@ -4807,7 +4807,7 @@ Cancelled at once → the board no longer shows it.
 
 ### D117 — payment settles; handover is a hand
 
-> **Superseded 2026-09-11 on its tab strip by [D154](#d154--a-completed-tab-and-all-orders-is-the-live-queue):** a Completed tab exists and the Handed over tab is folded into it. The settle/handover split this record made is unchanged.
+> **Superseded 2026-09-11 on its tab strip by [D179](#d154--a-completed-tab-and-all-orders-is-the-live-queue):** a Completed tab exists and the Handed over tab is folded into it. The settle/handover split this record made is unchanged.
 
 PO, 2026-09-07: "i found the bug, when takeaway place it shows handed
 over. but it need to show like other pending, preparing, handed over,
@@ -8486,7 +8486,7 @@ wire. Existing rows reopen in the right mode, read from that same shape.
 a threshold is a product question, not a bug — the editor now matches what the
 engine does rather than promising what it does not.
 
-### D150 — a table's order is taken on the POS; "View order" opens it there
+### D155 — a table's order is taken on the POS; "View order" opens it there
 
 **Asked by the PO, 2026-09-10**, looking at the floor plan: *"View order navigates
 to another view — there is no image view there. Remove that and use the POS
@@ -8548,7 +8548,7 @@ close), the floor plan itself, and the food-ready badge and its per-device ack
 (D112) — the ack still fires on the same tap, now carrying the waiter into the
 POS.
 
-### D151 — a waiter opens on their own tables and can see the floor
+### D156 — a waiter opens on their own tables and can see the floor
 
 **Asked by the PO, 2026-09-10**: *"In waiter view he needs to see his orders by
 default in his view, and can also see other orders. Follow the best approach the
@@ -8577,7 +8577,7 @@ waiter-facing surfaces default to "mine":
   strip (its own row: whose and where are two questions, and D91/D92 settled
   that one strip carries one selection). Under "mine" a colleague's table is
   drawn exactly as it was before — status badge, no View order — so the
-  pre-D151 screen is literally the default state.
+  pre-D156 screen is literally the default state.
 - The POS dine-in picker — the same two chips over its open-tables strip, and
   the room grid honours them, so an occupied table that is someone else's stays
   greyed until All is chosen.
@@ -8626,19 +8626,19 @@ to a tenant that already exists. Also added `prisma/add-staff.ts`
 (`POST /v1/users` still throws `NotImplementedException`), which is how a
 restaurant with one waiter account stays a restaurant with one waiter account.
 
-### D152 — the Orders queue answers "which of these are mine"
+### D157 — the Orders queue answers "which of these are mine"
 
-**Asked by the PO, 2026-09-10**, correcting D151's reading: *"I told you to check
+**Asked by the PO, 2026-09-10**, correcting D156's reading: *"I told you to check
 ORDERS. A waiter handling orders needs to easily check what are HIS orders.
 You added it for table management. Check what the industry does for both — is
 that even necessary? — and it is needed on the Orders tab."*
 
-**The misread, and what was actually wrong.** D151 put "my tables" on the floor
+**The misread, and what was actually wrong.** D156 put "my tables" on the floor
 plan and the POS picker, which is a real control (see below) but not the one
 that was asked for. The Orders tab — the live queue a waiter watches to see what
 is cooking, ready or unpaid — has always listed the WHOLE branch with no
 attribution of any kind: forty rows across three channels, no way to find the
-four that are yours, and no column saying whose any of them are. D151's own
+four that are yours, and no column saying whose any of them are. D156's own
 record named that gap and left it; this closes it.
 
 **Industry, both surfaces.** Mainstream POS carries the split on both screens
@@ -8695,7 +8695,7 @@ attributed to whoever keyed it; there is no second staff column to say who took
 the money. Fine for the queue's question ("which are mine to chase"), and worth
 revisiting only if a shift-report needs the other one.
 
-### D152a — the default must not flicker: "mine" is the state a screen OPENS in
+### D157a — the default must not flicker: "mine" is the state a screen OPENS in
 
 **Reported by the PO, 2026-09-10**, on both surfaces at once: *"Set my orders and
 my tables by default. Now when a waiter navigates to Tables and Orders, for a
@@ -8744,15 +8744,15 @@ MINE (My orders · 2 / All orders · 36). No sample reads ALL on the way in. Eac
 of the three fixes was reverted in turn to confirm the new render cases fail
 without it (1 failed, 5 passed, three times).
 
-### D152b — "mine" is the default, and nothing widens it on the operator's behalf
+### D157b — "mine" is the default, and nothing widens it on the operator's behalf
 
-**Reported by the PO, 2026-09-10**, immediately after D152a: *"Now it's working
+**Reported by the PO, 2026-09-10**, immediately after D157a: *"Now it's working
 backward — firstly it navigates to my tables and then automatically to all
 tables."*
 
 **Why there were two flickers, not one.** The default was data-driven —
 `mineCount > 0 ? 'mine' : 'all'` on the client, and the same test on the server
-for the queue — and the count only exists after the first response. D152a fixed
+for the queue — and the count only exists after the first response. D157a fixed
 one direction (opening on ALL and snapping to mine, by teaching the resolver
 that "not counted yet" is not "empty"). What was left was the other direction,
 which fires for anyone who genuinely owns nothing at that moment: a waiter
@@ -8784,7 +8784,7 @@ only label the choice now — they no longer make it.
   to be papered over.
 
 Counts stay absent (rather than showing `· 0`) until that first response, for
-the D152a reason: stating an answer before anybody counted is the same class of
+the D157a reason: stating an answer before anybody counted is the same class of
 lie in miniature.
 
 **Measured on the running stack**, sampling the chips every 50 ms from the first
@@ -8802,11 +8802,11 @@ the till re-choosing All every shift, but it would also make the opening view
 depend on who used the tablet last — the opposite of "my orders and my tables by
 default".
 
-### D151a — the floor names the waiter serving every table
+### D156a — the floor names the waiter serving every table
 
 **Asked by the PO, 2026-09-10**: *"In tables, can you add serve waiter name?"*
 
-**What was there.** D151 put a name on a table card only when the session was
+**What was there.** D156 put a name on a table card only when the session was
 NOT the reader's own, reasoning that your own name on your own cards is a word
 you already know repeated down the screen. True as far as it goes, and wrong
 about what a floor plan is for: it is the shared picture of the room, read over
@@ -8823,7 +8823,7 @@ about where the name comes from:
   can see: a named table with no View order beside it is exactly the answer to
   "who do I ask about M3", and it was the old behaviour that made a colleague's
   table go anonymous the moment a waiter narrowed to their own;
-- it is null-safe by the same rule as everywhere else (D151): a session with no
+- it is null-safe by the same rule as everywhere else (D156): a session with no
   waiter recorded, or one whose user no longer resolves, shows no line rather
   than "Unknown".
 
@@ -8834,9 +8834,9 @@ fact split in half.
 **Unchanged:** the POS picker still names only the tables that are not yours. A
 chip there is 44px of a scrolling strip carrying a table name, an elapsed time
 and a cover count already; the reader's own name in that space is the noise
-D151 was right about.
+D156 was right about.
 
-### D153 — the waiter sends the bill, the till settles it, and the table frees when it is paid
+### D178 — the waiter sends the bill, the till settles it, and the table frees when it is paid
 
 **Asked by the PO, 2026-09-11**: *"after ready then the waiter after give to the
 customer then give a button … proceed to pay … the cashier can print the bill
@@ -8916,7 +8916,7 @@ it — `collectPayment` refuses an amount of zero — so a table held "until pai
 would be held forever. `sendToCashier` settles a zero-total bill on the spot,
 through the same `settleBilledSession` the paying cashier goes through: CLOSED,
 COMPLETED, released. Found on the running stack, not on paper; pinned in the
-D153 spec. (The Sale stays UNPAID with a zero balance, exactly as the old close
+D178 spec. (The Sale stays UNPAID with a zero balance, exactly as the old close
 left it — a pre-existing oddity D52 owns, not this record.)
 
 **Idempotent.** A second "Proceed to pay" on a table already at the till
@@ -8924,7 +8924,7 @@ answers with the same Sale, 200, and raises no second one. `finalSaleId
 @unique` stays the structural guard underneath. The old `/close` route stays
 mounted and does the same thing.
 
-**The queue row carries `sessionId` now.** It was E18 (D150): the view had a
+**The queue row carries `sessionId` now.** It was E18 (D155): the view had a
 sale id for the bill but never the session id for the table, so the drawer's
 *Open in POS* sat disabled behind a stub returning `''`. The card's button
 needed the id anyway; the stub is gone and *Open in POS* works.
@@ -8971,7 +8971,7 @@ stacking cannot be proven in jsdom.
 - A waiter-side Print. D87.
 - Server-side `PrintJob` rows for restaurant bills. Printing stays
   browser-side, as D68/D69 left it.
-- Carrying `openTableRelease` on the payment response. D150 dropped the D50
+- Carrying `openTableRelease` on the payment response. D155 dropped the D50
   release reminder it fed; nothing reads it.
 
 **Migration: none.** Every value this record starts writing already exists —
@@ -8981,12 +8981,12 @@ stacking cannot be proven in jsdom.
 TypeScript union on both sides of the wire, not a database enum. One route is
 added and classified in `route-module-matrix.spec.ts` (319 routes, 219 guarded).
 
-### D151b — the arrangement's server line names people, not tabs
+### D156b — the arrangement's server line names people, not tabs
 
 **Asked by the PO, 2026-09-11**: *"in the waiter section in the tables tab
 shows the surandi: Restaurant Waiter like one i think its not the best."*
 
-**What was there.** D151a put a name on every table. On a joined table it
+**What was there.** D156a put a name on every table. On a joined table it
 rendered one entry per tab as `<tab>: <waiter>`, so an arrangement with a tab
 called "surandi" read **surandi: Restaurant Waiter** — directly under a button
 that already says **View surandi**. The tab name was on the card twice, and a
@@ -8994,13 +8994,13 @@ waiter running two tabs was named twice.
 
 **Now.** The line is the **distinct waiter names**, joined ` · `, nothing
 else. The tab name lives on its View button, which is where somebody looking
-for a tab is already looking. A physical table's line (D151a) is unchanged.
+for a tab is already looking. A physical table's line (D156a) is unchanged.
 
 **Paired per D30** (`table-floor.server-line.render.test.tsx`): one waiter on
 two tabs is named once and the `tab:` form is asserted absent; two waiters
 are both named; the physical card is the control.
 
-### D153a — the queue card shows each round's kitchen state
+### D178a — the queue card shows each round's kitchen state
 
 **Asked by the PO, 2026-09-11**: *"im order fried rice then after go to the
 kitchen … in the second time im order a milkshake … the kitchen the fried rice
@@ -9010,7 +9010,7 @@ then show its proceed to pay."*
 
 **What was there.** The card carried the order's unified status and a flat
 item preview. The status is derived correctly — an order is READY only when
-*every* round is (D113), and that is what gates **Proceed to pay** (D153) —
+*every* round is (D113), and that is what gates **Proceed to pay** (D178) —
 but a two-round table with the rice up and the shake still on the pass read a
 bare **Preparing**, with nothing saying which was which.
 
@@ -9025,7 +9025,7 @@ preview.
 **Also fixed here.** The controller's status allow-list never learned
 `AWAITING_PAYMENT`, so the To pay tab's filter fell back to ALL on the server
 and the tab showed every order. Caught by the live walkthrough for this
-record; pinned in the D153 spec.
+record; pinned in the D178 spec.
 
 **Paired per D30** (`orders-page.rounds.render.test.tsx`,
 `round-preview.spec.ts`): the half-ready row shows Round 1 · Ready and Round
@@ -9036,7 +9036,7 @@ on the per-line status (every line restating round 1's — 1 failed / 3
 passed); honest that keying the list on the item preview instead of the
 rounds is unprovable, since on every real row the two are empty together.
 
-### D154 — a Completed tab, and All Orders is the live queue
+### D179 — a Completed tab, and All Orders is the live queue
 
 **Asked by the PO, 2026-09-11**: *"add a section in the order section add a
 completed tab then move all the completed orders to it."*
@@ -9044,7 +9044,7 @@ completed tab then move all the completed orders to it."*
 **Supersedes D117 on its tab strip.** D117's *"no need completed tab hide it"*
 was said of a counter whose orders never reached COMPLETED — the dine-in
 shell had no writer for it, so a Completed tab would have been a tab for
-nothing. D153 gave it a writer: a paid table is COMPLETED. The PO now wants
+nothing. D178 gave it a writer: a paid table is COMPLETED. The PO now wants
 them somewhere, and out of the way.
 
 **Now.**

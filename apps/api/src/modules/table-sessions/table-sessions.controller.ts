@@ -203,7 +203,7 @@ export class TableSessionsController {
   }
 
   /**
-   * D153 — "Proceed to pay". The waiter raises the bill and sends it to the
+   * D178 — "Proceed to pay". The waiter raises the bill and sends it to the
    * till; the table is held (BILLING) until the cashier records the payment
    * that clears it. TABLE_CLOSE, because this is what closing a table has
    * always meant on the floor — the Waiter template holds it and the Cashier
@@ -237,8 +237,8 @@ export class TableSessionsController {
   }
 
   /**
-   * Pre-D153 route, kept mounted for older callers. Same handler as
-   * `send-to-cashier`; a "close" has held the table until payment since D153.
+   * Pre-D178 route, kept mounted for older callers. Same handler as
+   * `send-to-cashier`; a "close" has held the table until payment since D178.
    */
   @Post('table-sessions/:sessionId/close')
   @HttpCode(HttpStatus.OK)

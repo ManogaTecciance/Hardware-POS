@@ -225,7 +225,7 @@ describe('picking a table', () => {
         openedAt: '2026-08-21T09:00:00.000Z',
         guestCount: 2,
         activeOrderId: 'ord_9',
-        // D151/D152b — the caller's own, which is what the pre-D151 scoped read
+        // D156/D157b — the caller's own, which is what the pre-D156 scoped read
         // guaranteed by construction and what the Mine default now shows.
         waiterUserId: 'usr_waiter',
         waiterName: 'Nimal',
@@ -300,7 +300,7 @@ describe('picking a table', () => {
 
     // Scoped to the strip: under D91 the same table is ALSO drawn in the room
     // below while its own area is selected, and an unscoped query matches two.
-    // D151 — "Open tables", not "Your open tables": the strip can now show the
+    // D156 — "Open tables", not "Your open tables": the strip can now show the
     // floor's, and the chips inside it say whose are listed.
     const strip = () => screen.getByRole('group', { name: 'Open tables' });
     await waitFor(() => expect(within(strip()).getByRole('button', { name: /T2/ })).toBeTruthy());
@@ -321,7 +321,7 @@ describe('picking a table', () => {
 });
 
 /**
- * D151 — the picker's strip opens on the caller's own tables.
+ * D156 — the picker's strip opens on the caller's own tables.
  *
  * The strip is the POS's half of the same rule the floor plan carries: the
  * server now returns the branch's sessions, so "Mine" is a screen decision, and
@@ -337,7 +337,7 @@ describe('picking a table', () => {
  *      guard dropped) — 1 failed, 2 passed: a pair of chips appears on a floor
  *      where every running table is already the caller's.
  */
-describe('D151 — whose open tables the strip lists', () => {
+describe('D156 — whose open tables the strip lists', () => {
   const strip = () => screen.getByRole('group', { name: 'Open tables' });
   /** The session chips inside the strip, by the table name each one carries. */
   const stripChips = () =>
@@ -393,7 +393,7 @@ describe('D151 — whose open tables the strip lists', () => {
     expect(within(strip()).queryByRole('button', { name: /^All/ })).toBeNull();
   });
 
-  it('D152b — stays on Mine with none of its own, and says where the rest are', async () => {
+  it('D157b — stays on Mine with none of its own, and says where the rest are', async () => {
     /*
      * This case used to assert the opposite: the strip widened itself when the
      * caller owned nothing, on the reasoning that an empty strip reads as a
@@ -430,8 +430,8 @@ describe('D92 — Open is a destination in the strip, not a second filter', () =
       .queryAllByRole('button')
       .map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim());
   /*
-   * D151/D152b — the caller's own session unless a test says otherwise. Before
-   * D151 that was guaranteed by the read (the server returned nobody else's);
+   * D156/D157b — the caller's own session unless a test says otherwise. Before
+   * D156 that was guaranteed by the read (the server returned nobody else's);
    * now the strip DEFAULTS to the caller's own, so a fixture that named no
    * waiter would be filtered out of the very list these cases are about.
    */
@@ -702,7 +702,7 @@ describe('D49/D50/D104 — arrangements in the POS', () => {
   const openChip = () => screen.getByRole('button', { name: 'Open' });
 
   /*
-   * D151 — the tabs are THIS waiter's own, which is what the pre-D151 read
+   * D156 — the tabs are THIS waiter's own, which is what the pre-D156 read
    * guaranteed by construction (the server returned nobody else's). Said
    * explicitly now that the read returns the floor: without it these
    * arrangement cases would be asserting the "All tables" view by accident.

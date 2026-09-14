@@ -72,14 +72,14 @@ describe('unifiedStatusForRestaurantOrder (D113 — rounds drive the queue)', ()
 });
 
 /**
- * D153 — the session outranks the rounds once the bill is at the till.
+ * D178 — the session outranks the rounds once the bill is at the till.
  *
  * Paired: BILLING yields AWAITING_PAYMENT whatever the rounds say (positive),
  * and the SAME rounds under OPEN, CLOSED or an absent session yield exactly
- * what they did before D153 (negative) — a derivation that read "any session
+ * what they did before D178 (negative) — a derivation that read "any session
  * status set" as "at the till" would fail the second half.
  */
-describe('unifiedStatusForRestaurantOrder (D153 — the session drives To pay)', () => {
+describe('unifiedStatusForRestaurantOrder (D178 — the session drives To pay)', () => {
   const withSession = (
     sessionStatus: 'OPEN' | 'BILLING' | 'CLOSED' | null | undefined,
     roundStatuses: string[] = ['DELIVERED'],
@@ -98,7 +98,7 @@ describe('unifiedStatusForRestaurantOrder (D153 — the session drives To pay)',
   it('serving alone does not — DELIVERED rounds under an OPEN session still read Ready', () => {
     expect(withSession('OPEN', ['DELIVERED'])).toBe('READY');
     expect(withSession('OPEN', ['DELIVERED', 'SUBMITTED'])).toBe('IN_PROGRESS');
-    // Callers from before D153 pass no session at all and derive as they did.
+    // Callers from before D178 pass no session at all and derive as they did.
     expect(withSession(undefined, ['DELIVERED'])).toBe('READY');
     expect(withSession(null, ['READY'])).toBe('READY');
   });

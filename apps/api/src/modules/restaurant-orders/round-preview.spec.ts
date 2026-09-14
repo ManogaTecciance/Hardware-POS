@@ -1,7 +1,7 @@
 import { RestaurantOrdersService, roundPreviews } from './restaurant-orders.service';
 
 /**
- * D153a — each round's kitchen state on the queue row; D154 — the two status
+ * D178a — each round's kitchen state on the queue row; D179 — the two status
  * buckets the tabs ask for.
  *
  * Paired per D30 throughout:
@@ -91,7 +91,7 @@ const TWO_ROUNDS = order('ord_2r', {
   ],
 });
 
-describe('roundPreviews (D153a)', () => {
+describe('roundPreviews (D178a)', () => {
   it('groups each item onto its round and lists rounds by number', () => {
     expect(roundPreviews(TWO_ROUNDS.rounds, TWO_ROUNDS.items)).toEqual([
       {
@@ -125,7 +125,7 @@ describe('roundPreviews (D153a)', () => {
   });
 });
 
-describe('the OUTSTANDING and DONE buckets (D154)', () => {
+describe('the OUTSTANDING and DONE buckets (D179)', () => {
   const rows = [
     order('ord_pending'),
     order('ord_ready', { rounds: [{ id: 'r', roundNumber: 1, status: 'READY' }] }),

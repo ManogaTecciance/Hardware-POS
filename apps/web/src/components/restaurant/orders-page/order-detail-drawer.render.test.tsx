@@ -61,13 +61,13 @@ const { OrderDetailDrawer } = await import('./order-detail-drawer');
 
 /** The row the user's screenshot showed: takeaway, taken over the phone. */
 const ROW: UnifiedOrderView = {
-  // D152 — the counter user who keyed it. Not this spec's subject, but the row
+  // D157 — the counter user who keyed it. Not this spec's subject, but the row
   // shape carries it now and a fixture missing it would not be a real row.
   staffUserId: 'usr_till',
   staffName: 'Restaurant Cashier',
-  // D153 — takeaway has no table to address; the row shape carries it now.
+  // D178 — takeaway has no table to address; the row shape carries it now.
   sessionId: null,
-  // D153a — not this spec's subject either; a real row carries it.
+  // D178a — not this spec's subject either; a real row carries it.
   rounds: [],
   id: 'ord_1',
   channel: 'TAKEAWAY',

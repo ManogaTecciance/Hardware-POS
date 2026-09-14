@@ -1,18 +1,18 @@
 /**
- * D153 — the waiter sends the bill; the till settles it; the table frees on
+ * D178 — the waiter sends the bill; the till settles it; the table frees on
  * payment.
  *
  *   kitchen bumps → waiter "Proceed to pay" → session BILLING, table BILLING,
  *   served rounds DELIVERED, one Sale UNPAID → cashier records payment →
  *   on PAID: order COMPLETED, session CLOSED, table AVAILABLE.
  *
- * Before D153 the close did the release itself, in the same transaction that
+ * Before D178 the close did the release itself, in the same transaction that
  * raised the Sale, so a table showed free before a rupee moved. Every claim
  * below is paired per D30: the send is asserted to have raised the bill
  * (positive) AND to have moved nothing on the floor (negative); the partial
  * payment is asserted to have been recorded AND to have freed nothing; and
  * the hook is proven inert for the three shapes of sale that must not
- * trigger it — a pre-D153 close, a sale with no session, and a payment that
+ * trigger it — a pre-D178 close, a sale with no session, and a payment that
  * does not clear the balance.
  *
  * Permissions are asserted both ways on the same routes: the waiter can send
@@ -204,7 +204,7 @@ async function queueRow(orderId: string, as = cashierId, status?: string) {
   if (!row) throw new Error(`order ${orderId} not on the queue`);
   return { row, counts: page.data.statusCounts };
 }
-/** Whether the queue lists the order at all under a status filter (D154 buckets). */
+/** Whether the queue lists the order at all under a status filter (D179 buckets). */
 async function queued(orderId: string, status: string, as = cashierId) {
   const page = await http.request<{ items: Array<{ id: string }> }>(
     'GET',
@@ -217,13 +217,13 @@ async function queued(orderId: string, status: string, as = cashierId) {
 
 // ── the flow ────────────────────────────────────────────────────────────────
 
-describe('D153 — proceed to pay, then settle', () => {
+describe('D178 — proceed to pay, then settle', () => {
   it('holds the table from "Proceed to pay" until the bill is paid, then frees it', async () => {
     const { sessionId, orderId, roundId } = await seatAndOrder();
     expect(await tableStatus()).toBe('OCCUPIED');
     expect((await bump((await ticketFor(roundId)).id)).status).toBe(201);
     expect(await roundStatus(roundId)).toBe('READY');
-    // D153a — the row carries the round and where the kitchen has it.
+    // D178a — the row carries the round and where the kitchen has it.
     const ready = await queueRow(orderId);
     expect(ready.row.rounds).toEqual([
       { roundNumber: 1, status: 'READY', items: [{ name: 'Kottu', qty: 2 }] },
@@ -237,7 +237,7 @@ describe('D153 — proceed to pay, then settle', () => {
     // POSITIVE — the bill exists, unpaid, and the served round is recorded.
     const sale = await prisma.sale.findUniqueOrThrow({ where: { id: sent.data.saleId } });
     expect(sale.paymentStatus).toBe('UNPAID');
-    expect(sale.status).toBe('COMPLETED'); // D52 — unchanged by D153
+    expect(sale.status).toBe('COMPLETED'); // D52 — unchanged by D178
     expect(sale.total.toFixed(2)).toBe('25.00');
     expect(await roundStatus(roundId)).toBe('DELIVERED');
     expect(
@@ -257,7 +257,7 @@ describe('D153 — proceed to pay, then settle', () => {
     expect(atTill.row.saleId).toBe(sale.id);
     expect(atTill.counts.AWAITING_PAYMENT).toBe(1);
     expect(atTill.row.rounds[0]!.status).toBe('DELIVERED');
-    // D153 — the To pay filter is honoured server-side (it fell back to ALL
+    // D178 — the To pay filter is honoured server-side (it fell back to ALL
     // until the controller's allow-list learned the value).
     expect(await queued(orderId, 'AWAITING_PAYMENT')).toBe(true);
     expect(await queued(orderId, 'READY')).toBe(false);
@@ -288,7 +288,7 @@ describe('D153 — proceed to pay, then settle', () => {
     expect(history.map((h) => h.toStatus)).toEqual(['SUBMITTED', 'COMPLETED']);
     expect(history[1]!.changedByUserId).toBe(cashierId);
     expect((await queueRow(orderId)).row.unifiedStatus).toBe('COMPLETED');
-    // D154 — finished, so it leaves the live queue and joins Completed; a
+    // D179 — finished, so it leaves the live queue and joins Completed; a
     // bare list (no status) still carries it, as the row above just proved.
     expect(await queued(orderId, 'OUTSTANDING')).toBe(false);
     expect(await queued(orderId, 'DONE')).toBe(true);
@@ -389,11 +389,11 @@ describe('D153 — proceed to pay, then settle', () => {
   });
 });
 
-describe('D153 — the payment hook is inert where it must be', () => {
-  it('takes a payment on a pre-D153 bill (session already CLOSED) without touching the table', async () => {
+describe('D178 — the payment hook is inert where it must be', () => {
+  it('takes a payment on a pre-D178 bill (session already CLOSED) without touching the table', async () => {
     const { sessionId, orderId } = await seatAndOrder();
     const sent = await sendToCashier(sessionId);
-    // Rewind to the shape every sale closed before D153 has: session CLOSED,
+    // Rewind to the shape every sale closed before D178 has: session CLOSED,
     // table already AVAILABLE, order never COMPLETED.
     await prisma.tableSession.update({
       where: { id: sessionId },
@@ -443,7 +443,7 @@ describe('D153 — the payment hook is inert where it must be', () => {
   });
 });
 
-describe('D153 — who may do which half', () => {
+describe('D178 — who may do which half', () => {
   it('the waiter sends and cannot collect; the cashier collects and cannot send', async () => {
     const { sessionId } = await seatAndOrder();
 

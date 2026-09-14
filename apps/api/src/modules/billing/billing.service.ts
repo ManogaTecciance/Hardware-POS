@@ -76,7 +76,7 @@ export interface BillView {
 export class BillingService {
   constructor(
     private readonly prisma: PrismaService,
-    // D153 — the payment that clears a dine-in bill is what frees the table.
+    // D178 — the payment that clears a dine-in bill is what frees the table.
     private readonly tableSessions: TableSessionsService,
   ) {}
 
@@ -239,7 +239,7 @@ export class BillingService {
         });
       }
       /*
-       * D153 — the bill is paid, so the table is done. Same transaction,
+       * D178 — the bill is paid, so the table is done. Same transaction,
        * AFTER the version check: a cashier who lost the race rolls the
        * release back with their payment rather than freeing a table whose
        * money never landed. A no-op for anything that is not a dine-in

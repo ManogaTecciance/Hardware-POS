@@ -1,5 +1,5 @@
 /**
- * D153a — the queue card shows each round's kitchen state.
+ * D178a — the queue card shows each round's kitchen state.
  *
  * A two-round table (fried rice up, milkshake still on the pass) used to read
  * a bare "Preparing". The order-level badge is right — the order is not READY
@@ -160,7 +160,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('round lines on the card (D153a)', () => {
+describe('round lines on the card (D178a)', () => {
   it('shows which round is up and which is not, and holds Proceed to pay back', async () => {
     render(<OrdersPage session={WAITER} branchId="brn_1" />);
     await screen.findByRole('button', { name: '#ORD_HALF' });

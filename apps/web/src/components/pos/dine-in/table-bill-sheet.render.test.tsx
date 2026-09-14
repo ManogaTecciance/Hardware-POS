@@ -19,10 +19,10 @@
  * re-adding the lines: 3 × 1000 is 3000, but the total shown is 3300 with
  * service charge, and only the server knows that.
  *
- * D153 — the primary action is "Proceed to pay" and calls `sendToCashier`,
+ * D178 — the primary action is "Proceed to pay" and calls `sendToCashier`,
  * which raises the Sale exactly as `close` did and holds the table. Every
  * claim below is unchanged; only the verb's name and the wording of the
- * unsent-items question moved with it (recorded in D153).
+ * unsent-items question moved with it (recorded in D178).
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
@@ -232,7 +232,7 @@ describe('closing', () => {
     expect(onClosed).toHaveBeenCalledWith({ saleId: 'sale_1', splitCount: 1 });
   });
 
-  // D153 — was "reports the table CLOSED": the bill is at the till and the
+  // D178 — was "reports the table CLOSED": the bill is at the till and the
   // table is HELD, so the message says that instead. The claim is the same —
   // a half-success is reported as the success it is, naming who finishes it.
   it('reports the bill AT THE TILL when the split fails afterwards', async () => {

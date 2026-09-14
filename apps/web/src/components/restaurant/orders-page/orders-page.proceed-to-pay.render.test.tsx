@@ -1,5 +1,5 @@
 /**
- * D153 — "Proceed to pay" on the queue, and the till's half beside it.
+ * D178 — "Proceed to pay" on the queue, and the till's half beside it.
  *
  * Three things the SCREEN owns, each paired per D30 because every failure
  * looks like the other half working:

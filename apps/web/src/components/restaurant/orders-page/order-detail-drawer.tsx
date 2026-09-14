@@ -463,13 +463,13 @@ function OrderDetailActions({
   };
   return (
     <>
-      {/* D153 — Proceed to pay / Print bill / Collect payment, the same
+      {/* D178 — Proceed to pay / Print bill / Collect payment, the same
           component the queue card renders, so the two cannot disagree. */}
       {session ? (
         <OrderCardActions session={session} order={order} onMutated={onMutated} />
       ) : null}
       {/*
-        * D153 — the row carries the session id now (it was E18: the view had
+        * D178 — the row carries the session id now (it was E18: the view had
         * a sale id for the bill but never the session id for the table, so
         * this sat disabled with a title explaining itself). Absent rather
         * than disabled for the one dine-in row that has none — the synthetic

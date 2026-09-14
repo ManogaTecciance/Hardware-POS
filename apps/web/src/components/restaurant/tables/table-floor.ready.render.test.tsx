@@ -105,7 +105,7 @@ function openSession(readyTicketIds: string[]): OpenSessionView {
     activeOrderId: 'ord_1',
     tabName: null,
     readyTicketIds,
-    // D151 — the session's own waiter. `usr_1` IS the signed-in user in this
+    // D156 — the session's own waiter. `usr_1` IS the signed-in user in this
     // spec, so every session here is "mine" and the ownership filter is a
     // no-op: these cases stay about the badge, as they were written.
     waiterName: 'Restaurant Waiter',
@@ -194,7 +194,7 @@ describe('the food-ready badge (D112/D118)', () => {
 
     const viewOrder = screen.getByRole('link', { name: 'View order' });
     /*
-     * D150 — a table card's View order opens the POS on THIS session. Asserted
+     * D155 — a table card's View order opens the POS on THIS session. Asserted
      * here rather than in its own case because this is the test that taps it:
      * a link whose href had drifted would still clear the badge, so the ack
      * assertions below would pass while the waiter landed nowhere useful.
@@ -255,7 +255,7 @@ describe('the badge on an arrangement with several tabs (D104 × D112)', () => {
     const smiths = screen.getByRole('link', { name: /View Smiths/ });
     const jones = screen.getByRole('link', { name: /View Jones/ });
     /*
-     * D150 — each tab's link is the POS, bound to THAT tab's session. The
+     * D155 — each tab's link is the POS, bound to THAT tab's session. The
      * session id in the query is the whole point: one arrangement, two
      * parties, and the POS has no other way to tell which order it is adding
      * to. (It used to be `/tables/session/<id>`, the retired order-entry

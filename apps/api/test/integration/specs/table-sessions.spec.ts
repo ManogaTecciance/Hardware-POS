@@ -138,7 +138,7 @@ describe('Phase 5 — table session lifecycle', () => {
       { token: ownerToken(restaurant), body: {} },
     );
     expect(close.status).toBe(200);
-    // D153 — was CLOSED. The close raises the bill and HOLDS the table; the
+    // D178 — was CLOSED. The close raises the bill and HOLDS the table; the
     // session is CLOSED by the payment that clears the bill, not by this call.
     expect(close.data.session.status).toBe('BILLING');
     expect(close.data.saleId).toBeTruthy();
@@ -151,7 +151,7 @@ describe('Phase 5 — table session lifecycle', () => {
     expect(sale.tenantId).toBe(restaurant.tenantId);
     expect(sale.branchId).toBe(branchId);
 
-    // MUTATION PROOF: closing again raises no second Sale. D153 — was a 409;
+    // MUTATION PROOF: closing again raises no second Sale. D178 — was a 409;
     // a repeat on a table already at the till now answers with the SAME bill
     // (idempotent), and the proof is that exactly one Sale exists for it.
     const secondClose = await http.request<{ saleId: string }>(

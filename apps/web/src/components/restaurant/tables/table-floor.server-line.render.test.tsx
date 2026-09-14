@@ -1,5 +1,5 @@
 /**
- * D151b — the arrangement's server line names people, not tabs.
+ * D156b — the arrangement's server line names people, not tabs.
  *
  * "surandi: Restaurant Waiter" under a button that already says "View
  * surandi" repeated the tab, and one waiter running two tabs was named twice.
@@ -139,7 +139,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe('the server line on a joined table (D151b)', () => {
+describe('the server line on a joined table (D156b)', () => {
   it('names one waiter once across two tabs, with no tab prefix', async () => {
     listOpen.mockResolvedValue([
       tab('ses_a', 'surandi', 'Restaurant Waiter'),
@@ -169,7 +169,7 @@ describe('the server line on a joined table (D151b)', () => {
     await waitFor(() => expect(screen.getByText('Restaurant Waiter · Nimal Perera')).toBeTruthy());
   });
 
-  it('CONTROL — a physical table still carries its waiter as before (D151a)', async () => {
+  it('CONTROL — a physical table still carries its waiter as before (D156a)', async () => {
     listOpenTables.mockResolvedValue([]);
     listOpen.mockResolvedValue([tab('ses_p', null, 'Restaurant Waiter', 'tbl_1')]);
     render(<TableFloor session={session} branchId="brn_1" canManage />);

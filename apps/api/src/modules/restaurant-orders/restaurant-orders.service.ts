@@ -26,7 +26,7 @@ export type UnifiedOrderStatus =
   | 'IN_PROGRESS'
   | 'READY'
   /**
-   * D153 — a dine-in table whose bill has gone to the till and is not yet
+   * D178 — a dine-in table whose bill has gone to the till and is not yet
    * paid. Derived from the SESSION (BILLING), not from rounds: serving the
    * food does not move the bucket, asking for the bill does.
    */
@@ -72,17 +72,17 @@ export interface OrderView {
    */
   saleId: string | null;
   /**
-   * D153 — the table session behind a dine-in row; null for takeaway (its
+   * D178 — the table session behind a dine-in row; null for takeaway (its
    * session is the synthetic walk-in table, which nobody deep-links to) and
    * for third party. This is what "Open in POS" and "Proceed to pay" on the
    * queue address — the row carried a sale id for the bill but never the
-   * session id for the table, so the deep link sat disabled (D150, E18).
+   * session id for the table, so the deep link sat disabled (D155, E18).
    */
   sessionId: string | null;
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
   /**
-   * D153a — each round and where the kitchen has it, for the card. The
+   * D178a — each round and where the kitchen has it, for the card. The
    * order-level `unifiedStatus` is not READY until EVERY round is, which is
    * right, but it left a two-round table reading "Preparing" with no way to
    * see that round 1 is up and round 2 is not. Empty for a third-party row,
@@ -90,7 +90,7 @@ export interface OrderView {
    */
   rounds: RoundPreview[];
   /**
-   * D152 — whose order this is, on the floor or at the counter.
+   * D157 — whose order this is, on the floor or at the counter.
    *
    * Dine-in: the table's waiter (`TableSession.waiterUserId`), falling back to
    * whoever sent the first round for a session opened without one. Takeaway:
@@ -163,7 +163,7 @@ export interface OrderDetailView extends OrderView {
   takeawayProfileId: string | null;
 }
 
-/** D153a — one round on a queue card: its number, its kitchen state, what was in it. */
+/** D178a — one round on a queue card: its number, its kitchen state, what was in it. */
 export interface RoundPreview {
   roundNumber: number;
   status: OrderRoundStatus;
@@ -171,18 +171,18 @@ export interface RoundPreview {
 }
 
 /**
- * D154 — what the queue may ask for. The unified statuses and `ALL` as
+ * D179 — what the queue may ask for. The unified statuses and `ALL` as
  * before, plus two BUCKETS the tabs use: `OUTSTANDING` is everything that is
  * not finished (the "All Orders" tab), `DONE` is COMPLETED or HANDED_OVER
  * (the "Completed" tab). `ALL` and an omitted status still mean everything —
  * the specs that read a row back through a bare list depend on that, and so
- * does any bookmark from before D154.
+ * does any bookmark from before D179.
  */
 export type OrdersStatusFilter = UnifiedOrderStatus | 'ALL' | 'OUTSTANDING' | 'DONE';
 
 export interface OrdersQuery {
   /**
-   * D152 — whose orders. `'mine'` narrows to the caller's own attribution
+   * D157 — whose orders. `'mine'` narrows to the caller's own attribution
    * (see {@link OrderView.staffUserId}); `'all'` is the whole branch.
    *
    * Absent means "decide for me", which is what the Orders screen sends on a
@@ -238,7 +238,7 @@ export interface OrdersPage {
    */
   readyHandoverCount: number;
   /**
-   * D152 — how many rows are the caller's own, and how many exist at all,
+   * D157 — how many rows are the caller's own, and how many exist at all,
    * counted BEFORE the scope narrowing (and after channel/date/payment/search,
    * like `statusCounts`). They are the numbers on the Mine/All chips, so both
    * are needed whichever scope is active — a chip that could not name the size
@@ -289,7 +289,7 @@ export class RestaurantOrdersService {
     branchId: string,
     query: OrdersQuery = {},
     /**
-     * D152 — who is asking, for the `mine` scope. Optional so every existing
+     * D157 — who is asking, for the `mine` scope. Optional so every existing
      * caller (and every spec written before the scope existed) keeps working:
      * without an actor there is nobody to be "mine", so the scope resolves to
      * `all` and the counts say zero rather than guessing.
@@ -334,11 +334,11 @@ export class RestaurantOrdersService {
             select: { menuItemName: true, quantity: true, roundId: true },
           },
           rounds: {
-            // D152 — `submittedByUserId` is the counter's attribution: a
+            // D157 — `submittedByUserId` is the counter's attribution: a
             // takeaway order has no session, so the person who sent its first
             // round is the person whose order it is. Ordered so "first" is the
             // round the operator sent first and not whichever row came back.
-            // D153a — id and number, so the items can be grouped back onto
+            // D178a — id and number, so the items can be grouped back onto
             // the round the kitchen is cooking.
             select: { id: true, roundNumber: true, status: true, submittedByUserId: true },
             orderBy: { roundNumber: 'asc' },
@@ -408,7 +408,7 @@ export class RestaurantOrdersService {
     }
 
     /*
-     * D152 — the names behind the attributions. One query for the page's
+     * D157 — the names behind the attributions. One query for the page's
      * distinct staff ids, the same shape `kitchen.service.waiterNames` uses and
      * for the same reason: `TableSession.waiterUserId` and
      * `OrderRound.submittedByUserId` are loose columns with no relation, so
@@ -428,7 +428,7 @@ export class RestaurantOrdersService {
     }
 
     /*
-     * D152 — whose orders, resolved before anything is counted.
+     * D157 — whose orders, resolved before anything is counted.
      *
      * `mineCount`/`allCount` are tallied on the unscoped base so both chips can
      * carry a number; everything after this point — the status tabs, the ready
@@ -440,7 +440,7 @@ export class RestaurantOrdersService {
       : 0;
     const allCount = base.length;
     /*
-     * D152b — MINE unless the caller asked for the floor.
+     * D157b — MINE unless the caller asked for the floor.
      *
      * This used to widen itself when the caller had no rows of their own, on
      * the reasoning that an empty queue reads as a broken one. The count only
@@ -646,7 +646,7 @@ function restaurantOrderBaseView(
     orderNumber: string;
     status: RestaurantOrderStatus;
     createdAt: Date;
-    // D153a — `id`/`roundNumber` optional so the paging and scope specs'
+    // D178a — `id`/`roundNumber` optional so the paging and scope specs'
     // stubs, which carry only a status, keep compiling; a row without them
     // simply previews no rounds.
     rounds: {
@@ -659,10 +659,10 @@ function restaurantOrderBaseView(
     // one arrangement are two distinguishable rows in this list.
     session: {
       id?: string;
-      // D153 — BILLING is what puts a dine-in row in the To-pay bucket.
+      // D178 — BILLING is what puts a dine-in row in the To-pay bucket.
       status?: TableSessionStatus;
       tabName: string | null;
-      // D152 — the table's waiter: whose dine-in order this is.
+      // D157 — the table's waiter: whose dine-in order this is.
       waiterUserId?: string | null;
       table: { code: string; label: string | null } | null;
     } | null;
@@ -726,7 +726,7 @@ function restaurantOrderBaseView(
     })),
     rounds: roundPreviews(o.rounds, o.items),
     /*
-     * D152 — the table's waiter first, the first round's submitter second.
+     * D157 — the table's waiter first, the first round's submitter second.
      *
      * The order matters: a dine-in order belongs to whoever is SERVING the
      * table, not to whichever colleague keyed the last round while covering
@@ -807,7 +807,7 @@ function externalOrderBaseView(e: {
     itemCount: 0,
     itemPreview: [],
     /*
-     * D152 — nobody's, on purpose. A platform order arrives without a person
+     * D157 — nobody's, on purpose. A platform order arrives without a person
      * behind it, and attributing it to whoever is looking would put rows in
      * "my orders" that the operator never took.
      */
@@ -862,11 +862,11 @@ function splitDeliveryNotes(notes: string | null): {
 }
 
 /** Every status at zero, so a status absent from the page still has a count. */
-/** D154 — the two unified statuses that mean "nothing left to do here". */
+/** D179 — the two unified statuses that mean "nothing left to do here". */
 const DONE_STATUSES: ReadonlySet<UnifiedOrderStatus> = new Set(['COMPLETED', 'HANDED_OVER']);
 
 /**
- * D153a — the rounds a queue card lists, oldest first, each with the items the
+ * D178a — the rounds a queue card lists, oldest first, each with the items the
  * kitchen received on it. Items are already the non-voided set (the callers'
  * `where`), so a voided line does not reappear here. A round the caller did
  * not identify (no `id`) previews nothing rather than swallowing every item.
@@ -912,7 +912,7 @@ export function unifiedStatusForRestaurantOrder(input: {
   roundStatuses: readonly string[];
   takeawayStatus: TakeawayOrderStatus | null;
   /**
-   * D153 — optional so every caller and spec written before the To-pay
+   * D178 — optional so every caller and spec written before the To-pay
    * bucket existed keeps deriving exactly what it did. Only BILLING is
    * read; OPEN and CLOSED fall through to the order/round derivation.
    */
@@ -935,7 +935,7 @@ export function unifiedStatusForRestaurantOrder(input: {
   if (input.orderStatus === 'CANCELLED') return 'CANCELLED';
   if (input.orderStatus === 'COMPLETED') return 'COMPLETED';
   if (input.orderStatus === 'DRAFT') return 'DRAFT';
-  // D153 — the bill is at the till. Checked before the rounds because the
+  // D178 — the bill is at the till. Checked before the rounds because the
   // rounds still say READY/DELIVERED, and "Ready" is the wrong answer to
   // "where is this order" once the guest has asked to pay.
   if (input.sessionStatus === TableSessionStatus.BILLING) return 'AWAITING_PAYMENT';

@@ -556,7 +556,7 @@ test.describe('POS-CTR-5 — Counter Dine-In', () => {
   }) => {
     await signInAsRestaurantOwner(page);
     /*
-     * The floor plan still loads without going through /pos. D150 retired the
+     * The floor plan still loads without going through /pos. D155 retired the
      * separate session order-entry screen this case used to name — "View order"
      * now opens the POS bound to that session, and `/tables/session/[id]`
      * redirects there — but the claim here is about the FLOOR, which that

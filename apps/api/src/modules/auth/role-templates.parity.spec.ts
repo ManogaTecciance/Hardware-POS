@@ -429,7 +429,7 @@ describe('reserved permissions are reserved, not implemented', () => {
     expect(active).toContain(Permission.ORDER_CREATE);
     expect(active).toContain(Permission.ORDER_SEND_TO_KITCHEN);
     /*
-     * D151 — the waiter sees the floor. Asserted here, beside the two keys they
+     * D156 — the waiter sees the floor. Asserted here, beside the two keys they
      * still do not hold, because the three together ARE the split the template
      * documents: a waiter may READ every table (and work one they can reach,
      * which was never ownership-checked) and still may not move a table's bill

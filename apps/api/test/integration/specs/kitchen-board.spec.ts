@@ -591,13 +591,13 @@ describe('D68 — the kitchen role reaches the board and nothing else', () => {
 });
 
 /**
- * D151 — a waiter sees the whole floor, and the narrowing is permission-driven.
+ * D156 — a waiter sees the whole floor, and the narrowing is permission-driven.
  *
  * ## What changed, and why the pairs are the other way up now
  *
  * D70 withheld `TABLE_SESSION_VIEW_ALL` from the Waiter template, so these
  * cases used to assert the opposite of what they assert below: waiter A could
- * not see, read or write waiter B's table. D151 grants the key, because the
+ * not see, read or write waiter B's table. D156 grants the key, because the
  * mixing D70 was protecting against is a question of DEFAULTS (the floor plan
  * and the POS picker open on "my tables") and withholding the read made the
  * routine case of table service impossible — covering a colleague on a break, a
@@ -619,7 +619,7 @@ describe('D68 — the kitchen role reaches the board and nothing else', () => {
  * names, the per-id reads, the colleague's-table writes) and leaves the
  * supervisor case and the TRAINEE_WAITER control green: 3 failed, 29 passed.
  */
-describe('D151 — session visibility is the floor, narrowed by permission', () => {
+describe('D156 — session visibility is the floor, narrowed by permission', () => {
   let waiterA: string;
   let waiterB: string;
   let sessionA: string;
@@ -719,7 +719,7 @@ describe('D151 — session visibility is the floor, narrowed by permission', () 
     expect(ids).toContain(sessionB);
 
     /*
-     * D151 — the NAME, because "my tables / all tables" is unusable without
+     * D156 — the NAME, because "my tables / all tables" is unusable without
      * it: the client has only a cuid otherwise, and the users endpoint it
      * would resolve a name through is USER_MANAGE-gated (a waiter holds
      * nothing of the sort).

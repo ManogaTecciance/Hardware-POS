@@ -49,7 +49,7 @@ export class RestaurantOrdersController {
     @Query('pageSize') pageSize?: string,
   ): Promise<OrdersPage> {
     const q: OrdersQuery = {
-      // D152 — anything that is not one of the two words is "decide for me",
+      // D157 — anything that is not one of the two words is "decide for me",
       // the same treatment every other filter here gives a mangled value.
       scope: scope === 'mine' || scope === 'all' ? scope : undefined,
       channel: parseChannel(channel),
@@ -100,14 +100,14 @@ const STATUSES: UnifiedOrderStatus[] = [
   'CONFIRMED',
   'IN_PROGRESS',
   'READY',
-  // D153 — was missing from this list, so the To pay tab's filter fell back
+  // D178 — was missing from this list, so the To pay tab's filter fell back
   // to ALL on the server and the tab showed everything.
   'AWAITING_PAYMENT',
   'HANDED_OVER',
   'COMPLETED',
   'CANCELLED',
 ];
-/** D154 — the two buckets the queue's tabs ask for; see `OrdersQuery.status`. */
+/** D179 — the two buckets the queue's tabs ask for; see `OrdersQuery.status`. */
 const BUCKETS: OrdersStatusFilter[] = ['OUTSTANDING', 'DONE'];
 function parseStatus(v: string | undefined): OrdersStatusFilter {
   if (!v) return 'ALL';

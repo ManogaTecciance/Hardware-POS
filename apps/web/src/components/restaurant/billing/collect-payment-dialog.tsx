@@ -21,7 +21,7 @@ export const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
 ];
 
 /**
- * The till's tender dialog. Lived inside the bill screen until D153 put a
+ * The till's tender dialog. Lived inside the bill screen until D178 put a
  * "Collect payment" button on the Orders queue too; moved here verbatim so
  * both surfaces record money through the one form.
  */

@@ -110,7 +110,7 @@ export interface OpenSessionSummary extends TableSessionView {
    */
   readyTicketIds: string[];
   /**
-   * D151 — WHOSE table this is, in words the floor uses.
+   * D156 — WHOSE table this is, in words the floor uses.
    *
    * The floor and the POS picker both open on "my tables" and offer "all", so
    * every session that is not yours has to be attributable — and the one thing
@@ -492,7 +492,7 @@ export class TableSessionsService {
       where: {
         tenantId,
         branchId,
-        // D153 — a table waiting for its bill is still a table with guests at
+        // D178 — a table waiting for its bill is still a table with guests at
         // it. Filtering on OPEN alone made every session vanish from the floor
         // the moment the waiter pressed "Proceed to pay".
         status: { in: [...LIVE_SESSION_STATUSES] },
@@ -527,7 +527,7 @@ export class TableSessionsService {
       }
     }
     /*
-     * D151 — whose table each one is, by name.
+     * D156 — whose table each one is, by name.
      *
      * One query for the whole page rather than a join: `waiterUserId` is a
      * loose reference with no FK (the schema's deliberate shape for user
@@ -807,11 +807,11 @@ export class TableSessionsService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Proceed to pay → Sale (D1 junction point, re-timed by D153)
+  // Proceed to pay → Sale (D1 junction point, re-timed by D178)
   // ─────────────────────────────────────────────────────────────
 
   /**
-   * D153 — the waiter sends the table to the cashier.
+   * D178 — the waiter sends the table to the cashier.
    *
    * This is what "Close & send one bill" always did — raise the Sale from
    * every non-voided item on the session — with ONE thing removed: the table
@@ -921,7 +921,7 @@ export class TableSessionsService {
   }
 
   /**
-   * D153 — the bill is paid; the table is done.
+   * D178 — the bill is paid; the table is done.
    *
    * Called by `BillingService.collectPayment` INSIDE its transaction, once the
    * payment that clears the balance has landed and the optimistic-concurrency
@@ -930,7 +930,7 @@ export class TableSessionsService {
    *
    * Inert unless the sale is a table session's AND that session is BILLING.
    * That one check makes it a no-op for a partial payment (the caller only
-   * asks on PAID), for a sale raised before D153 (session already CLOSED,
+   * asks on PAID), for a sale raised before D178 (session already CLOSED,
    * table long free), for a counter or takeaway sale (no session, or one
    * that never went to BILLING), and for a split bill whose siblings are
    * still outstanding (the sale is one document; it is PAID once).
@@ -992,8 +992,8 @@ export class TableSessionsService {
   }
 
   /**
-   * Pre-D153 name for `sendToCashier`, kept so the mounted `/close` route and
-   * any older caller keep working. Nothing behind it is different: since D153
+   * Pre-D178 name for `sendToCashier`, kept so the mounted `/close` route and
+   * any older caller keep working. Nothing behind it is different: since D178
    * a "close" holds the table until the bill is paid.
    */
   async closeSession(
@@ -1143,7 +1143,7 @@ export class TableSessionsService {
         paidAmount: new Prisma.Decimal(0),
         balanceAmount: totals.total,
         // D52 — COMPLETED before payment, deliberately; UNPAID is the
-        // financial state. D153 changes when the TABLE frees, not this.
+        // financial state. D178 changes when the TABLE frees, not this.
         paymentStatus: 'UNPAID',
         status: 'COMPLETED',
         completedAt: new Date(),

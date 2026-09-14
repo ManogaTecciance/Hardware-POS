@@ -692,7 +692,7 @@ export const tableSessions = {
     );
   },
   /**
-   * D153 — "Proceed to pay". Raises the bill and holds the table (BILLING)
+   * D178 — "Proceed to pay". Raises the bill and holds the table (BILLING)
    * until the cashier records the payment that clears it. Idempotent: a
    * second call on a table already at the till returns the same sale.
    */
@@ -704,7 +704,7 @@ export const tableSessions = {
     );
   },
   /**
-   * Pre-D153 route, same behaviour as `sendToCashier` since D153. Kept so an
+   * Pre-D178 route, same behaviour as `sendToCashier` since D178. Kept so an
    * older client keeps working; new code calls `sendToCashier`.
    */
   close(session: Session, sessionId: string, body: { idempotencyKey?: string } = {}) {
@@ -988,7 +988,7 @@ export const restaurantReports = {
 // ── Unified orders (Pilot Change 2 Slice D) ────────────────────────────────
 export interface OrdersQuery {
   /**
-   * D152 — whose orders. Omitted on a first load so the SERVER picks (mine
+   * D157 — whose orders. Omitted on a first load so the SERVER picks (mine
    * when the caller has any, else all) and reports what it chose; set once the
    * operator taps a chip, from then on riding in the URL like every other
    * filter on this screen.
@@ -996,7 +996,7 @@ export interface OrdersQuery {
   scope?: 'mine' | 'all';
   channel?: UnifiedChannel | 'ALL';
   /**
-   * D154 — a unified status, or one of two buckets the tabs use:
+   * D179 — a unified status, or one of two buckets the tabs use:
    * `OUTSTANDING` (everything not finished — the "All Orders" tab) and
    * `DONE` (COMPLETED or HANDED_OVER — the "Completed" tab). `ALL` is still
    * literally everything.
@@ -1028,7 +1028,7 @@ export interface UnifiedOrdersPage {
    */
   readyHandoverCount: number;
   /**
-   * D152 — the numbers on the Mine/All chips, counted before the scope
+   * D157 — the numbers on the Mine/All chips, counted before the scope
    * narrowing so both are known whichever view is showing. `resolvedScope` is
    * what the server actually applied, which is how the screen knows which chip
    * to light up on a first load that did not ask for one.

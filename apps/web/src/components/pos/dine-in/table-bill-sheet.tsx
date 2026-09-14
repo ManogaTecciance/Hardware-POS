@@ -109,7 +109,7 @@ export function TableBillSheet({
     }));
 
   /*
-   * D153 — "Proceed to pay". The Sale is raised exactly as the close always
+   * D178 — "Proceed to pay". The Sale is raised exactly as the close always
    * raised it; what changed is that the table is HELD (BILLING) until the
    * cashier records the payment, rather than freed on the spot.
    */
