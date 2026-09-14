@@ -18,6 +18,22 @@ same way.
 
 ## Install
 
+**Customer site (Windows) — the short way.** Build the release once:
+
+```bash
+pnpm --filter @hardware-pos/print-agent package   # → release/axlo-print-agent-<version>.zip
+```
+
+On the shop PC: unzip, pair the agent in the app, right-click `install.ps1` →
+*Run with PowerShell*, paste the token. The script installs Node.js if it is
+missing, registers the agent as a Windows service (NSSM, auto-start, restart
+on failure, log in `agent.log`), stops the PC sleeping on mains power and waits
+for the first check-in. `README-CUSTOMER.md` inside the zip is the owner-facing
+version of this page. Re-running the script over a new zip is how an agent is
+updated; `.\install.ps1 -Uninstall` removes the service.
+
+**By hand (any platform):**
+
 1. In the app: **Settings → Printing → Agents → Pair agent**. Copy the token
    (it is shown once).
 2. On the shop machine (Node 20+):
@@ -55,8 +71,10 @@ this agent online the page is queued for it, and the screen shows the outcome.
 
 A USB thermal printer on Windows belongs to the spooler; there is no device
 path to write to. Add it as kind **ESC_POS_USB** with the printer's **Windows
-name** as the address (exactly as it appears in *Printers & scanners*, e.g.
-`POS-80`). The agent hands the spooler a RAW document through `winspool.drv`
+name** as the address. Since 0.2.0 the agent reports the printers installed on
+its PC with every heartbeat (D183), so the app offers them in a list — pick
+the one you mean; typing the name exactly as *Printers & scanners* shows it
+(e.g. `POS-80`) is the fallback for an older agent. The agent hands the spooler a RAW document through `winspool.drv`
 (`scripts/windows-raw-printer.ps1`, run with `-ExecutionPolicy Bypass` so no
 machine policy needs changing), which passes ESC/POS through untouched. The
 vendor driver or *Generic / Text Only* both accept RAW.
