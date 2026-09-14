@@ -83,6 +83,7 @@ export class ReceiptsService {
       tender,
     );
     const receipt = await this.receiptsRepository.upsertReceipt(
+      tenantId,
       sale.id,
       `RCP-${sale.saleNumber}`,
       this.toReceiptContent(receiptData),

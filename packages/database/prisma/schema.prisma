@@ -348,6 +348,7 @@ model Tenant {
   productComponents            ProductComponent[]
   auditLogs                    AuditLog[]
   printJobs                    PrintJob[]
+  receipts                     Receipt[]
   returns                      Return[]
   refundPayments               RefundPayment[]
   subcategories                ProductSubcategory[]
@@ -1320,17 +1321,29 @@ model Discount {
 }
 
 model Receipt {
-  id            String    @id @default(cuid())
+  id String @id @default(cuid())
+
+  /// D171 — denormalised from `sale.tenantId`, and the reason the unique below
+  /// can exist. Mirrors `InventoryReceipt`, which has carried the same pair
+  /// since it was introduced.
+  tenantId      String
   saleId        String    @unique
-  receiptNumber String    @unique
+  /// `RCP-<saleNumber>`. NOT globally unique: `Sale.saleNumber` restarts at
+  /// S-000001 for every tenant, so a global constraint here means the first
+  /// tenant to print its sale N permanently blocks every other tenant's sale N.
+  receiptNumber String
   content       Json?
   printCount    Int       @default(0)
   printedAt     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   sale      Sale       @relation(fields: [saleId], references: [id], onDelete: Cascade)
   printJobs PrintJob[]
+
+  @@unique([tenantId, receiptNumber])
+  @@index([tenantId])
 }
 
 model PrintJob {

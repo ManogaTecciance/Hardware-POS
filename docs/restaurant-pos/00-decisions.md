@@ -10704,6 +10704,140 @@ the moment anyone rang up a sale.
 
 ---
 
+## D171 — a receipt number is unique per tenant, not per installation
+
+**Status:** accepted and **built**, 2026-09-14. **Schema change and migration**
+`20260917000000_scope_receipt_number_per_tenant`.
+
+### The defect
+
+`Receipt.receiptNumber` was `String @unique` — globally, across every tenant in
+the installation. The value is built in one place:
+
+```ts
+`RCP-${sale.saleNumber}`
+```
+
+and `Sale` is `@@unique([tenantId, saleNumber])`. **Every tenant's numbering
+restarts at S-000001.**
+
+So the first tenant to print claimed `RCP-S-000001` for the whole installation,
+and every other tenant printing its own first sale hit a `P2002` that surfaced
+as a **hard 500 at the till** — on a path with no workaround, since a receipt is
+the record of money that has already changed hands.
+
+Not theoretical. On the development database when this was found:
+
+| `saleNumber` | tenants holding it | receipts printed |
+|---|---|---|
+| `S-000001` | **4** | **1** |
+| `S-000002` | **4** | **1** |
+| `S-000003` | **4** | **1** |
+
+Three tenants out of four could not print a receipt for their own first sale,
+today, on the machine this was written on. D170 made it likelier rather than
+less likely: four seeded workspaces instead of two.
+
+### The decision
+
+**`@@unique([tenantId, receiptNumber])`, with a `tenantId` column to hang it
+on.**
+
+`InventoryReceipt` — the sibling model, same field name, same purpose for
+purchases — has carried exactly that pair since it was introduced. This brings
+`Receipt` into line rather than inventing a shape.
+
+### Why not simply drop the constraint
+
+It was tempting. `receiptNumber` is **never a lookup key**: every query in
+`ReceiptsRepository` reaches a receipt by `saleId` or `id`, scoped with
+`sale: { tenantId }`. And uniqueness per tenant is already implied by
+construction — `Receipt.saleId` is `@unique`, `Sale` is unique per
+`(tenantId, saleNumber)`, and the number is derived from the sale number.
+
+Dropping it would have been a one-line migration with no new column.
+
+It was rejected because **implied is not enforced**. The number a customer is
+handed is an identifier; the moment anything else derives a receipt number — a
+reprint path, an import, a correction — the implication stops holding and
+nothing catches it. The guarantee is cheap to state and the mutation proof below
+shows what its absence costs: with no constraint at all, four of the five tests
+still pass.
+
+### Why `tenantId` is denormalised onto `Receipt`
+
+A composite unique needs both columns on the table; `sale.tenantId` cannot be
+reached from an index. The column is written **on create and never on update**,
+deliberately: a receipt belongs to the tenant of its sale and a sale never
+changes hands, so putting `tenantId` in the `upsert`'s `update` branch would let
+a *reprint* move a receipt between tenants — a worse bug than the one being
+fixed. A test asserts the column agrees with the sale it hangs off.
+
+### Migration safety
+
+Additive then narrowing, in the only order safe on a populated table:
+
+1. `ADD COLUMN "tenantId" TEXT` — nullable, so existing rows stay legal;
+2. backfill each receipt from **its own sale**;
+3. `SET NOT NULL`;
+4. drop the global unique, create the composite, add the index and the FK.
+
+No row moves between tenants: each receipt takes the tenant it was already
+reachable through. `Receipt.saleId` is NOT NULL and `@unique`, so the backfill
+covers every row and cannot produce two answers for one receipt.
+
+The narrowing cannot fail on existing data, because **the old constraint was
+strictly stronger than the new one**: anything globally unique is unique within
+a tenant. A migration that loosens a constraint has no data to reject.
+
+### Blast radius on hardware and restaurant: zero
+
+Asserted, not assumed:
+
+- **The receipt number format is unchanged.** `RCP-${sale.saleNumber}` is
+  untouched, so every existing receipt keeps the string it was printed with and
+  a reprint renders byte-for-byte what it rendered before.
+- **No rendering code changed.** `receipt-templates.ts` is not in the diff. Its
+  55 assertions pass unmodified.
+- **No existing assertion was weakened.** One line moved in
+  `receipts.service.spec.ts` — `mock.calls[0][2]` became `[3]`, because
+  `tenantId` is now the first argument. The assertions either side of it are
+  identical, and the index was *supposed* to shift: had it not, the spec would
+  have silently begun reading the receipt number instead of the content.
+- **Both domains verified against real PostgreSQL**, not by inspection: the full
+  integration suite, which exercises hardware QuickBooks receipts and restaurant
+  bills end to end.
+
+The only behaviour that changes is the one that was broken: a second tenant
+printing its own sale N now succeeds instead of returning 500.
+
+### Mutation proof
+
+`receipt-number-tenant-scope.spec.ts` runs against real PostgreSQL, because the
+defect lives in an **index**, not a branch — a mocked Prisma raises whatever the
+mock is told to raise and would have passed against the broken schema and the
+fixed one alike.
+
+Two mutations were applied to the live test database and the suite re-run:
+
+| Mutation | Result |
+|---|---|
+| restore the global `@unique` on `receiptNumber` | **2 failed** — "both tenants print their own S-000001" and "a receipt belongs to the tenant of its sale", with the original `Unique constraint failed on the fields: (receiptNumber)` |
+| drop the composite unique and add nothing | **1 failed** — "a duplicate within one tenant is still refused" |
+
+The second is the one that matters for test design. Four of five tests pass with
+**no constraint at all**, so the positive case alone would have green-lit
+removing the guarantee entirely. That is why the negative case is written.
+
+### The tripwire had to be told
+
+`provider-contract.spec.ts` pins the migration directories as an **exact set**,
+so a new migration fails it until someone names it and says why. That is the
+test working, not the test being in the way, and it is the reason the reasoning
+above now sits beside the directory name in the spec. The count moved 85 → 86.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

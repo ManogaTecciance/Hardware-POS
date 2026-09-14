@@ -144,7 +144,9 @@ describe('D165 — a reprint keeps the tender', () => {
 
     await s.service.generateCustomer('t1', 'sale_1', 'usr_1');
 
-    const written = (s.repo.upsertReceipt as jest.Mock).mock.calls[0]?.[2] as {
+    // D171 put `tenantId` first, so `content` is argument 3. The assertion
+    // below is unchanged — this index reaches the same value it always did.
+    const written = (s.repo.upsertReceipt as jest.Mock).mock.calls[0]?.[3] as {
       amountTendered?: number;
     };
     expect(written.amountTendered).toBe(4000);
@@ -194,7 +196,7 @@ describe('D165 — a reprint keeps the tender', () => {
        * that merely fails to render would otherwise be persisted forever,
        * outliving whatever put it there.
        */
-      const written = (s.repo.upsertReceipt as jest.Mock).mock.calls[0]?.[2] as Record<
+      const written = (s.repo.upsertReceipt as jest.Mock).mock.calls[0]?.[3] as Record<
         string,
         unknown
       >;

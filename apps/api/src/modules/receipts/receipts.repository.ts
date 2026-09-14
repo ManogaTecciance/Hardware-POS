@@ -36,7 +36,16 @@ export class ReceiptsRepository {
     return this.prisma.receipt.findFirst({ where: { id, sale: { tenantId } } });
   }
 
+  /**
+   * D171 — `tenantId` is written on create, and deliberately NOT on update.
+   *
+   * A receipt belongs to the tenant of its sale and a sale never changes hands,
+   * so the only honest moment to set it is creation. Putting it in `update`
+   * would make a reprint capable of moving a receipt between tenants, which is
+   * a worse bug than the one this column exists to fix.
+   */
   upsertReceipt(
+    tenantId: string,
     saleId: string,
     receiptNumber: string,
     content: Prisma.InputJsonValue,
@@ -44,7 +53,7 @@ export class ReceiptsRepository {
     return this.prisma.receipt.upsert({
       where: { saleId },
       update: { content, printCount: { increment: 1 }, printedAt: new Date() },
-      create: { saleId, receiptNumber, content, printCount: 1, printedAt: new Date() },
+      create: { tenantId, saleId, receiptNumber, content, printCount: 1, printedAt: new Date() },
     });
   }
 

@@ -881,6 +881,10 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | ADM-025 | A product keeps its zero or one default variant (D170) | Re-seed, then inspect any multi-variant product | At most ONE variant is default, and a product whose source had none still has none. `ProductVariant_productId_default_key` is a partial unique index Prisma cannot express, so a second default fails as a P2002 naming `productId` — which reads like a duplicate product | N | Not Run |
 | ADM-026 | The seed stands aside when a slug is taken (D170) | On a machine with a hand-made workspace already using `grocery-demo`, run `pnpm db:seed` | The seed prints `! 'grocery-demo' is already used by ...` and seeds nothing for it. The existing workspace keeps every row — the seed neither renames it nor writes into it. `clothing-demo` still seeds normally | N | Not Run |
 | ADM-027 | Refreshing a pack after changing the shop (D170) | Change a price in the app, re-run `db:export-catalogue` for that slug, re-seed a fresh database | The new price appears. The packs are generated, never hand-edited, so the catalogue cannot drift from the workspace it documents | P | Not Run |
+| ADM-028 | Two workspaces can each print their own first sale (D171) | In `clothing-demo` complete a sale and print the bill; do the same in `grocery-demo` | Both print. Both receipts read `RCP-S-000001`, because sale numbering restarts per workspace. Before D171 the second one returned a **500** — `Receipt.receiptNumber` was globally unique, so the first workspace to print claimed the string for the whole installation | P | Not Run |
+| ADM-029 | A receipt number still cannot repeat inside one workspace (D171) | In one workspace, complete two sales and print both | `RCP-S-000001` and `RCP-S-000002` — never the same number twice. D171 scoped the constraint per tenant; it did not remove it | N | Not Run |
+| ADM-030 | Existing hardware and restaurant receipts are unaffected (D171) | Reprint a bill in `demo` and in `restaurant-demo` that was printed before the migration | Identical to what it printed before, same number and same layout. The number FORMAT did not change and no rendering code was touched | N | Not Run |
+| ADM-031 | A reprint does not consume a second number (D171) | Print the same sale's bill twice | Same `receiptNumber` both times, one `Receipt` row, print count 2 | N | Not Run |
 
 ## UI — Theme, Layout & Responsiveness
 
@@ -954,12 +958,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
 | RET | 18 | KIT | 22 |
-| EXC-T | 12 | ADM | 27 |
+| EXC-T | 12 | ADM | 31 |
 | EXC-D | 4 | UI | 33 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 730 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 734 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 
