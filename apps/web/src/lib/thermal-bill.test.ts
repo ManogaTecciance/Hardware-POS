@@ -135,7 +135,10 @@ describe('the header, as the reference bill lays it out', () => {
     expect(html).toContain('Served By: cashier');
     expect(html).toContain('15-Jul-2026');
     expect(html).toMatch(/01:40\s*PM/i);
-    expect(html).toContain('Bill # S-000057');
+    // D197a — "Bill S-000057", not "Bill # S-000057": the `#` is the call
+    // tag's, and the sale number carries its own prefix.
+    expect(html).toContain('Bill S-000057');
+    expect(html).not.toContain('Bill # ');
     expect(html).toContain('M1/10');
   });
 

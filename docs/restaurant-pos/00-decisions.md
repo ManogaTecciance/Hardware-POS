@@ -7695,6 +7695,28 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D197a — the browser bill says "Bill S-000035", not "Bill # S-000035"
+
+PO, 2026-09-14, reading the first D197 bill off the till's browser print:
+
+> "Bill # S-000035 Takeaway / Order #RO-000131 why there is space # S-"
+
+**The `#` was the template's, not the number's.** `thermal-bill.ts` printed
+`Bill # ${documentNumber}` — laid out, per its own comment, for a bare "57".
+Every sale number has carried the `S-` prefix since the document sequences
+were introduced, so the line has always read `Bill # S-…`; D197 made it
+visible by putting `Order #47` directly under it, where two different kinds
+of `#` on one paper are a question rather than a style. The server-printed
+ESC/POS bill (D197) already reads `Bill S-000087`; the browser bill now
+matches it. One string, one test changed with it — the assertion moved from
+`Bill # S-000057` to `Bill S-000057` under this record, with a negative
+that the old form is gone.
+
+**`Order #RO-000131` is not a defect.** That order was minted before the API
+was restarted onto D197, so it has no call number and reads by its `RO-`
+number, as D197 says a legacy order must. The first order opened after the
+restart is `#1` for that branch's day.
+
 ### D197 — an order has a call number, and the bill names both numbers
 
 **Status:** accepted and **built**, 2026-09-14. **Schema change and migration**

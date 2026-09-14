@@ -38,7 +38,13 @@ export interface ThermalBillInput {
   /** Falls back to the branch name when the profile carries no company name. */
   fallbackName?: string;
   currency?: string;
-  /** "Bill # 57" — the sale or order number. */
+  /**
+   * "Bill S-000057" — the sale number. D197a: the template used to print
+   * `Bill # ${n}`, laid out for a bare "57"; against a prefixed `S-000057`
+   * that read as a stray `#` and a space, and the same paper's `Order #47`
+   * line then had two different kinds of `#` on it. The `#` belongs to the
+   * call tag only.
+   */
   documentNumber: string;
   /**
    * D197 — "Order #47 · RO-000120", printed under the bill number so the
@@ -359,7 +365,7 @@ ${header}
 ${input.servedBy ? `<div>Served By: ${esc(input.servedBy)}</div>` : ''}
 ${input.cashierName ? `<div>Cashier: ${esc(input.cashierName)}</div>` : ''}
 <div class="row"><span>${esc(date)}</span><span>${esc(time)}</span></div>
-<div class="row"><span>Bill # ${esc(input.documentNumber)}</span><span>${esc(
+<div class="row"><span>Bill ${esc(input.documentNumber)}</span><span>${esc(
     input.placeLabel ?? '',
   )}</span></div>
 ${input.orderRef ? `<div>Order ${esc(input.orderRef)}</div>` : ''}
