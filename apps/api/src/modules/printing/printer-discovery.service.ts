@@ -36,6 +36,23 @@ export interface DiscoveredPrinter {
   port: number;
   /** Round-trip of the TCP handshake — useful for spotting a slow link. */
   latencyMs: number;
+  /**
+   * D183 — whether it answered a DLE EOT status query like a receipt printer.
+   * Reported by the agent; an office printer also listens on 9100 and must
+   * not be offered as one. Absent when the check did not run.
+   */
+  escpos?: boolean;
+}
+
+/**
+ * D183 — a printer installed on the agent's machine, as its spooler names
+ * it. Only an agent can report these; the server never has a spooler that
+ * matters.
+ */
+export interface LocalPrinter {
+  name: string;
+  driver: string | null;
+  port: string | null;
 }
 
 export interface DiscoveryResult {

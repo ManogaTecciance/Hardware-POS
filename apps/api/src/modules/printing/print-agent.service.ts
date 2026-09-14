@@ -8,7 +8,7 @@ import {
   PrintDispatcherService,
   PRINT_MAX_ATTEMPTS,
 } from './print-dispatcher.service';
-import type { DiscoveredPrinter } from './printer-discovery.service';
+import type { DiscoveredPrinter, LocalPrinter } from './printer-discovery.service';
 import { hashAgentToken } from './print-agent.guard';
 
 /**
@@ -61,7 +61,7 @@ export class PrintAgentService {
    */
   private readonly discovered = new Map<
     string,
-    { at: Date; agentName: string; printers: DiscoveredPrinter[] }
+    { at: Date; agentName: string; printers: DiscoveredPrinter[]; localPrinters: LocalPrinter[] }
   >();
 
   constructor(
@@ -158,9 +158,25 @@ export class PrintAgentService {
     return { ok: true };
   }
 
-  /** Devices the agent found on the shop LAN, for the settings screen. */
-  reportDiscovery(branchId: string, agentName: string, printers: DiscoveredPrinter[]): void {
-    this.discovered.set(branchId, { at: new Date(), agentName, printers });
+  /**
+   * Devices the agent found on the shop LAN, and (D183) the printers its own
+   * machine has installed, for the settings screen. `localPrinters` omitted
+   * means "this agent cannot say" and the previous list survives; `[]` means
+   * it looked and found none.
+   */
+  reportDiscovery(
+    branchId: string,
+    agentName: string,
+    printers: DiscoveredPrinter[],
+    localPrinters?: LocalPrinter[],
+  ): void {
+    const previous = this.discovered.get(branchId);
+    this.discovered.set(branchId, {
+      at: new Date(),
+      agentName,
+      printers,
+      localPrinters: localPrinters ?? previous?.localPrinters ?? [],
+    });
   }
 
   /** The freshest agent-reported device list for a branch, if any. */
@@ -171,6 +187,7 @@ export class PrintAgentService {
       at: entry.at.toISOString(),
       agentName: entry.agentName,
       printers: entry.printers,
+      localPrinters: entry.localPrinters,
     };
   }
 

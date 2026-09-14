@@ -7,13 +7,16 @@ import {
 } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -36,13 +39,33 @@ class DiscoveredPrinterDto {
   @IsString() host!: string;
   @Type(() => Number) @IsInt() @Min(1) @Max(65535) port!: number;
   @IsOptional() @Type(() => Number) @IsInt() latencyMs?: number;
+  /** D183 — answered DLE EOT like a receipt printer; absent when not checked. */
+  @IsOptional() @IsBoolean() escpos?: boolean;
 }
 
-class HeartbeatDto {
+/**
+ * D183 — a printer the agent's own Windows spooler knows. Its `name` is the
+ * exact string a USB or office printer needs as its address, which is why
+ * the agent reports it: the owner picks it instead of copying it by hand.
+ */
+export class LocalPrinterDto {
+  @IsString() @MinLength(1) @MaxLength(200) name!: string;
+  @IsOptional() @IsString() @MaxLength(200) driver?: string | null;
+  @IsOptional() @IsString() @MaxLength(200) port?: string | null;
+}
+
+export class HeartbeatDto {
   @IsOptional() @IsString() version?: string;
   /** Devices the agent found on the shop LAN, if it just scanned. */
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DiscoveredPrinterDto)
   discovered?: DiscoveredPrinterDto[];
+  /** Printers installed on the agent's machine (D183). Absent from 0.1.0 agents. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => LocalPrinterDto)
+  localPrinters?: LocalPrinterDto[];
 }
 
 class LeaseDto {
@@ -73,7 +96,15 @@ export class PrintAgentController {
       this.agents.reportDiscovery(
         agent.branchId,
         agent.name,
-        dto.discovered.map((d) => ({ host: d.host, port: d.port, latencyMs: d.latencyMs ?? 0 })),
+        dto.discovered.map((d) => ({
+          host: d.host,
+          port: d.port,
+          latencyMs: d.latencyMs ?? 0,
+          escpos: d.escpos,
+        })),
+        // undefined, not []: an agent that cannot enumerate (0.1.0, Linux)
+        // must not erase what a newer one on the same branch reported.
+        dto.localPrinters?.map((p) => ({ name: p.name, driver: p.driver ?? null, port: p.port ?? null })),
       );
     }
     await this.agents.heartbeat(agent.agentId, dto.version);

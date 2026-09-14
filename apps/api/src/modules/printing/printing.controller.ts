@@ -9,7 +9,11 @@ import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
 import { PrintAgentService } from './print-agent.service';
 import { PrintDispatcherService } from './print-dispatcher.service';
-import { PrinterDiscoveryService, DEFAULT_PRINTER_PORT } from './printer-discovery.service';
+import {
+  PrinterDiscoveryService,
+  DEFAULT_PRINTER_PORT,
+  type LocalPrinter,
+} from './printer-discovery.service';
 import { PrintingService } from './printing.service';
 
 export class ProbePrinterDto {
@@ -96,11 +100,18 @@ export class PrintingController {
         at: reported.at,
         port: wanted,
         printers: reported.printers,
+        localPrinters: reported.localPrinters,
         subnets: [],
         hostsScanned: reported.printers.length,
       };
     }
-    return { source: 'SERVER' as const, ...(await this.discovery.scan(wanted)) };
+    // The server has no spooler worth offering: a USB or office printer is
+    // always on the agent's machine, so without an agent the list is empty.
+    return {
+      source: 'SERVER' as const,
+      localPrinters: [] as LocalPrinter[],
+      ...(await this.discovery.scan(wanted)),
+    };
   }
 
   /** Check ONE address — the manual-entry counterpart to the scan. */
