@@ -10,8 +10,8 @@ usually the counter PC with the bill printer plugged into it.
 2. In AxloPOS, as the owner: **Settings → Printing → Print agent → Pair a
    new agent**. Give it a name like *Counter PC* and press **Pair agent**.
    Copy the token it shows — it starts with `pat_` and is shown **once**.
-3. Right-click **`install.ps1`** → **Run with PowerShell**. Say **Yes** when
-   Windows asks for permission. Paste the token when asked.
+3. Double-click **`install.cmd`**. Say **Yes** when Windows asks for permission.
+   Paste the token when asked, and press Enter when it says *Done*.
 4. When it says *Done*, open **Settings → Printing** in AxloPOS: the agent
    shows **Online**.
 
