@@ -60,3 +60,6 @@ uploads/
 .print-spool/
 apps/print-agent/agent.json
 apps/print-agent/agent-spool.bin
+
+# SSH keys
+*.pem

@@ -31,3 +31,6 @@ apps/api/uploads
 temp
 docs
 *.log
+
+# SSH keys must never enter a build context
+*.pem

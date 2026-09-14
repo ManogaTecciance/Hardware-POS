@@ -62,7 +62,19 @@ ENV RUN_MIGRATIONS_ON_BOOT=false
 EXPOSE 4000
 
 # cwd stays /app; the API reads UPLOAD_DIR for local uploads (mount a volume
-# there — see docker-compose.prod.yml).
-RUN chmod +x apps/api/docker-entrypoint.sh
+# there - see docker-compose.prod.yml). Pre-create it owned by `node` so the
+# named volume inherits that ownership on first creation.
+RUN chmod +x apps/api/docker-entrypoint.sh \
+    && mkdir -p /data/uploads \
+    && chown -R node:node /data
+
+# Run unprivileged. Chromium is launched with --no-sandbox (pdf.service.ts), so
+# it works the same as a non-root user; Prisma's engine is generated at build
+# time and needs no runtime writes.
+USER node
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:4000/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 ENTRYPOINT ["/app/apps/api/docker-entrypoint.sh"]
 CMD ["serve"]

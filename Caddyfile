@@ -1,13 +1,38 @@
-# Caddy terminates TLS for the backend. On first boot it obtains a free
-# Let's Encrypt certificate for api.axlopos.com over the ACME HTTP-01 challenge
-# (needs ports 80 + 443 open in the EC2 security group) and auto-renews it.
+# Caddy terminates TLS for the whole stack. On first boot it obtains free
+# Let's Encrypt certificates for every site below over the ACME HTTP-01
+# challenge (needs ports 80 + 443 open on the host firewall and DNS already
+# pointing here) and auto-renews them.
 #
-# All paths — the /v1 API, /uploads static images, and the QuickBooks OAuth
-# callback — are the same origin (api.axlopos.com), so one reverse_proxy covers
-# everything.
+# Sites:
+#   axlopos.com, www.axlopos.com -> web:3000  (Next.js front-end)
+#   api.axlopos.com              -> api:4000  (the /v1 API, /uploads static
+#                                              images, and the QuickBooks OAuth
+#                                              callback share this one origin)
+
+(security_headers) {
+	header {
+		# Browsers refuse plain HTTP for a year once they have seen this.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		# Don't advertise the proxy software.
+		-Server
+	}
+}
+
+axlopos.com, www.axlopos.com {
+	encode zstd gzip
+	import security_headers
+
+	reverse_proxy web:3000
+
+	log
+}
 
 api.axlopos.com {
 	encode zstd gzip
+	import security_headers
 
 	# Product-image uploads can be a few MB; lift the default request cap.
 	request_body {
@@ -16,6 +41,6 @@ api.axlopos.com {
 
 	reverse_proxy api:4000
 
-	# Optional: send access logs to stdout (view with `docker compose logs caddy`).
+	# Access logs to stdout (view with `docker compose logs caddy`).
 	log
 }
