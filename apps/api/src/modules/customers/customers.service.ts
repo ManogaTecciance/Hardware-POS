@@ -4,6 +4,10 @@ import type { Paginated } from '@hardware-pos/shared';
 
 import { round2 } from '../../common/money';
 import { paginate } from '../../common/pagination';
+import {
+  StoreCreditService,
+  type StoreCreditEntryView,
+} from '../store-credit/store-credit.service';
 import { CreditService, type CustomerCredit } from '../credit/credit.service';
 import { QuickBooksCustomersService } from '../quickbooks/quickbooks-customers.service';
 import { CustomersRepository } from './customers.repository';
@@ -17,6 +21,17 @@ export interface CustomerListItem extends Customer {
   outstandingCredit: number;
   /** `creditLimit - outstandingCredit`; null when no limit is configured. */
   availableCredit: number | null;
+  /**
+   * D175 — what the SHOP owes the customer, from returns refunded as store
+   * credit.
+   *
+   * The opposite direction of money from the two fields above, and named so
+   * that it cannot be mistaken for them: `availableCredit` is how much this
+   * customer may still buy ON ACCOUNT. They were confused for each other in the
+   * field — "when i return cloth and get store credit but customer available
+   * store credit not updated in customer tab" — which is what prompted this.
+   */
+  storeCreditBalance: number;
 }
 
 @Injectable()
@@ -25,6 +40,8 @@ export class CustomersService {
     private readonly customersRepository: CustomersRepository,
     private readonly quickbooksCustomers: QuickBooksCustomersService,
     private readonly credit: CreditService,
+    /** D175 — what the shop owes, as opposed to what it is owed. */
+    private readonly storeCredit: StoreCreditService,
   ) {}
 
   async list(tenantId: string, query: QueryCustomersDto): Promise<Paginated<CustomerListItem>> {
@@ -41,10 +58,13 @@ export class CustomersService {
     );
 
     // One grouped query for the whole page rather than an aggregate per row.
-    const outstandingByCustomer = await this.credit.outstandingByCustomer(
-      tenantId,
-      items.map((c) => c.id),
-    );
+    const ids = items.map((c) => c.id);
+    // Both in one round trip each, not one aggregate per row: a customer list
+    // that queries per row is a list that starts timing out at a few hundred.
+    const [outstandingByCustomer, storeCreditByCustomer] = await Promise.all([
+      this.credit.outstandingByCustomer(tenantId, ids),
+      this.storeCredit.balancesFor(tenantId, ids),
+    ]);
     const withCredit = items.map((customer) => {
       const outstanding = outstandingByCustomer.get(customer.id) ?? 0;
       const creditLimit = customer.creditLimit != null ? Number(customer.creditLimit) : null;
@@ -54,10 +74,38 @@ export class CustomersService {
         // Null, not zero: "no limit set" and "no credit left" are different
         // answers and the table must not conflate them.
         availableCredit: creditLimit != null ? round2(creditLimit - outstanding) : null,
+        // Zero, not null: every customer HAS a store-credit balance, and a
+        // customer who has never been given any holds nothing. That is a real
+        // answer, unlike "no credit limit configured" above.
+        storeCreditBalance: storeCreditByCustomer.get(customer.id) ?? 0,
       };
     });
 
     return paginate(withCredit, total, query.page, query.pageSize);
+  }
+
+  /**
+   * D175 — what the shop owes this customer, and where each part came from.
+   *
+   * Its OWN read, not a field on `CustomerCredit`. That shape answers "what may
+   * this customer still buy on account"; this one answers "what do we owe
+   * them". Folding the second into the first is how they were confused in the
+   * first place, and an API that repeats the confusion teaches it to every
+   * screen that reads it.
+   *
+   * `getById` first so an unknown or other-tenant id is a 404 rather than an
+   * empty ledger, which would read as "this customer has no store credit".
+   */
+  async storeCreditFor(
+    tenantId: string,
+    id: string,
+  ): Promise<{ balance: number; entries: StoreCreditEntryView[] }> {
+    await this.getById(tenantId, id);
+    const [balance, entries] = await Promise.all([
+      this.storeCredit.balanceFor(tenantId, id),
+      this.storeCredit.historyFor(tenantId, id),
+    ]);
+    return { balance, entries };
   }
 
   /** Live credit position for one customer; 404 when the customer is not theirs. */

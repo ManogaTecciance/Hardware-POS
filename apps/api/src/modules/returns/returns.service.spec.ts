@@ -94,6 +94,11 @@ const CASHIER: AuthenticatedUser = {
   activeBranchId: null,
 };
 
+/** D175 — captures what the return asked the ledger to do. */
+const storeCredit = { issueForReturn: jest.fn(async () => undefined) };
+
+beforeEach(() => storeCredit.issueForReturn.mockClear());
+
 function makeService(repo: Partial<ReturnsRepository>) {
   const settings = { getSettings: () => SETTINGS } as unknown as SettingsService;
   const auth = {
@@ -130,6 +135,11 @@ function makeService(repo: Partial<ReturnsRepository>) {
     syncQueue,
     accounting,
     inventory,
+    // D175 — the ledger, recorded rather than written. These specs assert the
+    // return's own decisions; whether the entry lands is asserted against a
+    // real database in `store-credit.spec`, because the guarantee being made is
+    // that it lands in the SAME TRANSACTION, which a stub cannot demonstrate.
+    storeCredit as never,
     // D174 — resolves nothing, matching SETTINGS above. `inline-image.spec`
     // covers the resolving behaviour itself.
     { resolve: jest.fn(async () => null) } as never,

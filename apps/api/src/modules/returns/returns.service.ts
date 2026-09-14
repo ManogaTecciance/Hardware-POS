@@ -27,6 +27,7 @@ import { StockLine } from '../providers/provider.types';
 import { formatReceiptDateTime } from '../receipts/receipt-templates';
 import { SettingsService } from '../settings/settings.service';
 import { inlineImage } from '../../common/storage/inline-image';
+import { StoreCreditService } from '../store-credit/store-credit.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
 import {
@@ -35,6 +36,7 @@ import {
 } from './customer-return-document';
 import { computeReturnLine, sumReturnTotals, type ComputedReturnLine } from './returns.calc';
 import {
+  IssueStoreCredit,
   PostReturnAccounting,
   RestoreStock,
   ReturnListRow,
@@ -89,6 +91,8 @@ export class ReturnsService {
     private readonly syncQueue: SyncQueueService,
     private readonly accountingProviders: AccountingProviderFactory,
     private readonly inventoryProviders: InventoryProviderFactory,
+    /** D175 — credits the customer when a return is refunded as store credit. */
+    private readonly storeCredit: StoreCreditService,
     /**
      * D174 — reads the logo's bytes so the refund slip carries them.
      *
@@ -376,6 +380,30 @@ export class ReturnsService {
         createdByUserId: actor.id,
       });
 
+    /*
+     * D175 — a store-credit refund credits the customer's ledger.
+     *
+     * Guarded on the refund method AND on a saved customer, even though
+     * `validateRefundMethod` has already refused a walk-in above. The guard is
+     * cheap and the alternative is a crash inside a money transaction if that
+     * rule is ever relaxed; a ledger entry with no customer is not a thing the
+     * schema can hold.
+     *
+     * Note this runs for EVERY tenant, including QuickBooks ones whose return
+     * also becomes a Credit Memo. The ledger is what the till can read at the
+     * counter; QuickBooks is where it is reconciled.
+     */
+    const issueStoreCredit: IssueStoreCredit = async (tx, returnId) => {
+      if (dto.refundMethod !== 'STORE_CREDIT' || !sale.customerId) return;
+      await this.storeCredit.issueForReturn(tx, {
+        tenantId,
+        customerId: sale.customerId,
+        returnId,
+        amount: refundTotal,
+        createdByUserId: actor.id,
+      });
+    };
+
     let created: ReturnWithRelations;
     try {
       created = await this.repo.createCompleted(
@@ -411,6 +439,7 @@ export class ReturnsService {
         },
         postAccounting,
         restoreStock,
+        issueStoreCredit,
       );
     } catch (err) {
       // Unique-key race on idempotency: return the winner instead of failing.

@@ -40,6 +40,17 @@ enum PaymentMethod {
   OTHER
 }
 
+/// D175 — why a store-credit entry exists. The ledger is append-only, so this
+/// is the entry's whole story: nothing is ever edited, only offset.
+enum StoreCreditReason {
+  /// A return refunded as store credit. Positive.
+  RETURN_REFUND
+  /// Tendered against a sale. Negative.
+  SALE_REDEMPTION
+  /// A manual correction by someone with the permission. Either sign.
+  ADJUSTMENT
+}
+
 enum PaymentStatus {
   UNPAID
   PARTIAL
@@ -404,6 +415,7 @@ model Tenant {
   externalOrders               ExternalOrder[]
   externalOrderEvents          ExternalOrderEvent[]
   webhookDeliveryLogs          WebhookDeliveryLog[]
+  storeCreditEntries           StoreCreditEntry[]
 }
 
 /**
@@ -617,7 +629,8 @@ model User {
   countedStockTakes        StockTake[]         @relation("StockTakeCounter")
 
   /// D68 — kitchen tickets this user marked done on the board.
-  completedKitchenTickets KitchenTicket[] @relation("KitchenTicketCompletedBy")
+  completedKitchenTickets KitchenTicket[]    @relation("KitchenTicketCompletedBy")
+  storeCreditEntries      StoreCreditEntry[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -977,12 +990,13 @@ model Customer {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  sales             Sale[]
-  returns           Return[]
-  quotations        Quotation[]
-  payments          Payment[]
-  tableReservations TableReservation[]
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sales              Sale[]
+  returns            Return[]
+  quotations         Quotation[]
+  storeCreditEntries StoreCreditEntry[]
+  payments           Payment[]
+  tableReservations  TableReservation[]
 
   @@unique([tenantId, quickbooksCustomerId])
   @@index([tenantId])
@@ -1085,23 +1099,24 @@ model Sale {
   createdAt                    DateTime                @default(now())
   updatedAt                    DateTime                @updatedAt
 
-  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch           Branch      @relation(fields: [branchId], references: [id])
-  register         Register?   @relation(fields: [registerId], references: [id])
-  cashier          User        @relation(fields: [cashierId], references: [id])
-  markedPaidBy     User?       @relation("SaleMarkedPaidBy", fields: [markedPaidByUserId], references: [id])
-  customer         Customer?   @relation(fields: [customerId], references: [id])
-  items            SaleItem[]
-  payments         Payment[]
-  receipt          Receipt?
-  printJobs        PrintJob[]
-  returns          Return[]
-  quotation        Quotation?  @relation("QuotationConvertedSale")
-  billSplits       BillSplit[]
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch             Branch             @relation(fields: [branchId], references: [id])
+  register           Register?          @relation(fields: [registerId], references: [id])
+  cashier            User               @relation(fields: [cashierId], references: [id])
+  markedPaidBy       User?              @relation("SaleMarkedPaidBy", fields: [markedPaidByUserId], references: [id])
+  customer           Customer?          @relation(fields: [customerId], references: [id])
+  items              SaleItem[]
+  payments           Payment[]
+  receipt            Receipt?
+  printJobs          PrintJob[]
+  returns            Return[]
+  quotation          Quotation?         @relation("QuotationConvertedSale")
+  billSplits         BillSplit[]
   /// D128 — exchanges taken against this sale, and exchanges that issued it.
   /// Two relations to the same model, so both are named.
-  exchangesAgainst Exchange[]  @relation("ExchangeOriginalSale")
-  exchangesIssuing Exchange[]  @relation("ExchangeReplacementSale")
+  exchangesAgainst   Exchange[]         @relation("ExchangeOriginalSale")
+  exchangesIssuing   Exchange[]         @relation("ExchangeReplacementSale")
+  storeCreditEntries StoreCreditEntry[]
 
   @@unique([tenantId, saleNumber])
   @@index([tenantId])
@@ -1318,6 +1333,74 @@ model Discount {
 
   @@unique([tenantId, name])
   @@index([tenantId])
+}
+
+/// D175 — what a customer's store credit actually is.
+///
+/// ## Why a ledger and not a balance column
+///
+/// A `Customer.storeCreditBalance` column is one `UPDATE` away from being wrong
+/// forever, and nothing in the row says how it got there. Two concurrent
+/// redemptions read the same figure and both write; a refund that half-failed
+/// leaves a number nobody can explain; and the question every shopkeeper
+/// actually asks — "where did this come from?" — has no answer.
+///
+/// Entries are append-only and SIGNED: positive issues credit, negative
+/// redeems it. The balance is `SUM(amount)`, which cannot drift from its own
+/// history because it IS its own history. Correcting a mistake means writing an
+/// offsetting `ADJUSTMENT`, so the trail survives the correction.
+///
+/// ## Why this is not `Customer.creditLimit`
+///
+/// That is the opposite direction of money. `creditLimit` / `availableCredit`
+/// is how much the customer may buy ON ACCOUNT — what they are allowed to owe
+/// the shop. Store credit is what the SHOP owes the customer. They were
+/// confused for each other in the field, which is what prompted this decision:
+/// "when i return cloth and get store credit but customer available store
+/// credit not updated in customer tab".
+///
+/// ## Why it applies to every tenant
+///
+/// A QuickBooks tenant's STORE_CREDIT return also becomes a Credit Memo, and
+/// QuickBooks tracks a balance of its own. This ledger is still written, and is
+/// still the authority the till reads: the POS cannot settle a sale against a
+/// figure it would have to fetch from an external system that may be
+/// unreachable at the counter. The two are reconciled by the Credit Memo, which
+/// is the same document either way.
+model StoreCreditEntry {
+  id         String @id @default(cuid())
+  tenantId   String
+  customerId String
+
+  /// Signed, in the tenant's currency. Positive issues, negative redeems.
+  /// Never zero — an entry that moves nothing is a row that explains nothing.
+  amount Decimal           @db.Decimal(12, 2)
+  reason StoreCreditReason
+
+  /// The return that issued it, or the sale that spent it. Exactly one is set
+  /// for RETURN_REFUND and SALE_REDEMPTION; an ADJUSTMENT may carry neither.
+  returnId String?
+  saleId   String?
+
+  note            String?
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  return    Return?  @relation(fields: [returnId], references: [id], onDelete: SetNull)
+  sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  createdBy User?    @relation(fields: [createdByUserId], references: [id])
+
+  /// One issuing entry per return. A replayed or retried return must not credit
+  /// the customer twice, and the database is the only place that guarantee
+  /// holds under concurrency. NULLs are distinct in Postgres, so redemptions
+  /// and adjustments are unaffected.
+  @@unique([returnId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, createdAt])
+  @@index([saleId])
 }
 
 model Receipt {
@@ -1586,7 +1669,8 @@ model Return {
   printJobs      PrintJob[]
 
   /// D128 — the exchange this return is the returning leg of, if any.
-  exchange Exchange?
+  exchange         Exchange?
+  storeCreditEntry StoreCreditEntry?
 
   @@unique([tenantId, returnNumber])
   @@unique([tenantId, idempotencyKey])

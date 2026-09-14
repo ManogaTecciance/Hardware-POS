@@ -6,9 +6,10 @@ import { CustomersController } from './customers.controller';
 import { CustomersImportService } from './customers-import.service';
 import { CustomersRepository } from './customers.repository';
 import { CustomersService } from './customers.service';
+import { StoreCreditModule } from '../store-credit/store-credit.module';
 
 @Module({
-  imports: [QuickBooksModule, CreditModule],
+  imports: [StoreCreditModule, QuickBooksModule, CreditModule],
   controllers: [CustomersController],
   providers: [CustomersService, CustomersRepository, CustomersImportService],
   exports: [CustomersService],

@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 320
-- Module-guarded routes: 218
+- Total routes: 321
+- Module-guarded routes: 219
 - Ungated routes: 102
 
 ## How to read the Guard column
@@ -111,6 +111,7 @@ reach production unclassified.
 | POST | `/customers` | CUSTOMERS | ENFORCED | customer:manage |
 | GET | `/customers/:id` | CUSTOMERS | ENFORCED | customer:read |
 | GET | `/customers/:id/credit` | CUSTOMERS | ENFORCED | customer:read |
+| GET | `/customers/:id/store-credit` | CUSTOMERS | ENFORCED | customer:read |
 | PATCH | `/customers/:id` | CUSTOMERS | ENFORCED | customer:manage |
 | POST | `/customers/:id/sync-to-quickbooks` | QUICKBOOKS | ENFORCED | quickbooks:manage |
 | POST | `/customers/import/commit` | CUSTOMERS | ENFORCED | customer:manage |

@@ -26,6 +26,14 @@ export interface ManagedCustomer {
   outstandingCredit?: number;
   /** List responses only: credit limit less what is owed. Null when no limit is set. */
   availableCredit?: number | null;
+  /**
+   * D175 — list responses only: what the SHOP owes this customer, from returns
+   * refunded as store credit.
+   *
+   * The opposite direction of money from the two fields above. `availableCredit`
+   * is what they may still SPEND on account; this is what they are OWED.
+   */
+  storeCreditBalance?: number;
   company: string | null;
   /** QuickBooks' free-text customer type taxonomy (e.g. "Wholesale Trade"). */
   qbCustomerType: string | null;
@@ -95,12 +103,13 @@ export interface CustomerInput {
 /** Raw JSON — Prisma Decimals may arrive as strings. */
 type ApiCustomer = Omit<
   ManagedCustomer,
-  'creditLimit' | 'openingBalance' | 'outstandingCredit' | 'availableCredit'
+  'creditLimit' | 'openingBalance' | 'outstandingCredit' | 'availableCredit' | 'storeCreditBalance'
 > & {
   creditLimit: string | number | null;
   openingBalance: string | number | null;
   outstandingCredit?: string | number | null;
   availableCredit?: string | number | null;
+  storeCreditBalance?: string | number | null;
 };
 
 function auth(session: Session): { token: string; tenantId: string } {
@@ -142,6 +151,8 @@ function toManaged(c: ApiCustomer): ManagedCustomer {
     // not send this field at all".
     availableCredit:
       c.availableCredit === undefined ? undefined : c.availableCredit === null ? null : Number(c.availableCredit),
+    storeCreditBalance:
+      c.storeCreditBalance == null ? undefined : Number(c.storeCreditBalance),
   };
 }
 
@@ -204,6 +215,40 @@ export async function fetchCustomerCredit(
     creditLimit: c.creditLimit == null ? null : Number(c.creditLimit),
     outstanding: Number(c.outstanding),
     available: c.available == null ? null : Number(c.available),
+  };
+}
+
+/** D175 — one movement of a customer's store credit. */
+export interface StoreCreditEntry {
+  id: string;
+  /** Signed: positive was issued to them, negative was spent. */
+  amount: number;
+  reason: 'RETURN_REFUND' | 'SALE_REDEMPTION' | 'ADJUSTMENT';
+  returnId: string | null;
+  saleId: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+/**
+ * What the shop owes this customer, and where each part came from.
+ *
+ * A separate call from `fetchCustomerCredit`, matching the API: that answers
+ * what the customer may still buy ON ACCOUNT, this answers what they are owed.
+ * Keeping them apart in the client too is what stops a screen quietly showing
+ * one under the other's label — which is the confusion that prompted D175.
+ */
+export async function fetchStoreCredit(
+  session: Session,
+  id: string,
+): Promise<{ balance: number; entries: StoreCreditEntry[] }> {
+  const r = await api.get<{
+    balance: string | number;
+    entries: (Omit<StoreCreditEntry, 'amount'> & { amount: string | number })[];
+  }>(`/customers/${id}/store-credit`, auth(session));
+  return {
+    balance: Number(r.balance),
+    entries: (r.entries ?? []).map((e) => ({ ...e, amount: Number(e.amount) })),
   };
 }
 

@@ -154,6 +154,11 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /customers/:id': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
   // main, 2026-09-04 — live credit aggregate; class-level CUSTOMERS guard.
   'GET /customers/:id/credit': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
+  // D175 — what the SHOP owes the customer, from store-credit returns. Its
+  // own route beside `:id/credit` rather than a field on it: that one is what
+  // the customer may still buy ON ACCOUNT, this is what they are owed, and
+  // folding them together is the confusion D175 exists to end.
+  'GET /customers/:id/store-credit': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
   'PATCH /customers/:id': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },
   'POST /customers/:id/sync-to-quickbooks': { module: 'QUICKBOOKS', guard: 'ENFORCED', scope: T },
   'POST /customers/import/commit': { module: 'CUSTOMERS', guard: 'ENFORCED', scope: T },

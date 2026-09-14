@@ -29,6 +29,7 @@ import {
 } from './customers-import.service';
 import { CustomersService, type CustomerListItem } from './customers.service';
 import type { CustomerCredit } from '../credit/credit.service';
+import type { StoreCreditEntryView } from '../store-credit/store-credit.service';
 import { CommitCustomerImportDto } from './dto/commit-import.dto';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { QueryCustomersDto } from './dto/query-customers.dto';
@@ -125,6 +126,23 @@ export class CustomersController {
   @RequirePermissions(Permission.CUSTOMER_READ)
   credit(@TenantId() tenantId: string, @Param('id') id: string): Promise<CustomerCredit> {
     return this.customersService.creditFor(tenantId, id);
+  }
+
+  /**
+   * D175 — what the shop owes this customer, with the entries behind it.
+   *
+   * A separate route from `:id/credit` on purpose: that one is what the
+   * customer may still SPEND on account, this one is what they are OWED. Same
+   * permission — both are the customer's financial position, and anyone
+   * trusted with one is trusted with the other.
+   */
+  @Get(':id/store-credit')
+  @RequirePermissions(Permission.CUSTOMER_READ)
+  storeCredit(
+    @TenantId() tenantId: string,
+    @Param('id') id: string,
+  ): Promise<{ balance: number; entries: StoreCreditEntryView[] }> {
+    return this.customersService.storeCreditFor(tenantId, id);
   }
 
   @Patch(':id')

@@ -578,6 +578,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | CUST-021 | Available credit agrees with the limit guard | Attempt a credit sale for exactly the shown available credit | Sale completes — the displayed figure and the guard use the same number | P | Not Run |
 | CUST-035 | Mobile numbers are validated | Enter a malformed number in the customer form and in the POS capture popup | Refused with a message naming the expected shape; a valid local number is accepted and searchable | N | Not Run |
 | CUST-036 | QuickBooks columns only where QuickBooks is on | Compare the customers list and a customer page in the Tile Shop and in the restaurant | Tile Shop: Sync column, QuickBooks badges and detail fields; restaurant: none of them, and no "Not synced" | P | Not Run |
+| CUST-037 | A store-credit return updates the balance (D175) | Return an item choosing Store credit as the refund method, then open the customer | **Store credit balance** shows the refund. Before D175 nothing was recorded at all — and "Available credit" is a different figure (what they may buy ON ACCOUNT) which correctly never moved | P | Not Run |
+| CUST-038 | Store credit and available credit are separate figures (D175) | On a customer with both a credit limit and a store-credit balance, read the detail screen | Two distinct rows: "Available credit" is what they may still spend on account, "Store credit balance" is what the shop owes them. Confusing the two is what prompted this decision | N | Not Run |
+| CUST-039 | A cash refund creates no store credit (D175) | Return an item refunded as Cash, then open the customer | Store credit balance unchanged. A refund by any other method must not invent a liability | N | Not Run |
+| CUST-040 | The balance is the history (D175) | Issue store credit twice for one customer | The balance is the sum, and each movement is listed with the return it came from. The balance is `SUM(amount)` over an append-only ledger, never a stored column | P | Not Run |
+| CUST-041 | Existing store-credit returns were backfilled (D175) | After deploying, open a customer refunded as store credit before the migration | Their balance reflects those returns. The shop genuinely owed that money; starting at zero would have erased a real liability | P | Not Run |
+| CUST-042 | A return cannot credit twice (D175) | Retry a store-credit return that already completed | One entry, one balance. The guard is a UNIQUE INDEX on `returnId`, so a concurrent retry cannot slip past it | N | Not Run |
 
 ## CIMP — Customer Bulk Import
 
@@ -962,7 +968,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 
 | Module | Cases | Module | Cases |
 |---|---|---|---|
-| AUTH | 15 | CUST | 36 |
+| AUTH | 15 | CUST | 42 |
 | PERM | 17 | CIMP | 10 |
 | DASH | 31 | SUP | 15 |
 | PROD | 93 | SIMP | 8 |
@@ -978,7 +984,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 749 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 755 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

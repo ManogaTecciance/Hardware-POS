@@ -17,6 +17,8 @@ import {
   CUSTOMER_TYPE_LABELS,
   fetchCustomer,
   fetchCustomerCredit,
+  fetchStoreCredit,
+  type StoreCreditEntry,
   fetchCustomerPayments,
   syncCustomerToQuickBooks,
   type AccountPayment,
@@ -47,6 +49,16 @@ export default function CustomerDetailPage() {
   const [busy, setBusy] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
   const [credit, setCredit] = React.useState<CustomerCredit | null>(null);
+  /**
+   * D175 — what the shop OWES this customer. Held separately from `credit`
+   * above, which is what they may still buy on account: one number is a
+   * liability and the other is a limit, and a single state slot holding both is
+   * where they get shown under each other's label.
+   */
+  const [storeCredit, setStoreCredit] = React.useState<{
+    balance: number;
+    entries: StoreCreditEntry[];
+  } | null>(null);
   const [payments, setPayments] = React.useState<AccountPayment[]>([]);
   const [payOpen, setPayOpen] = React.useState(false);
   const canRecordPayment = hasPermission(Permission.PAYMENT_CREATE);
@@ -67,6 +79,9 @@ export default function CustomerDetailPage() {
     fetchCustomerCredit(session, id)
       .then((c) => !cancelled && setCredit(c))
       .catch(() => !cancelled && setCredit(null));
+    fetchStoreCredit(session, id)
+      .then((s) => !cancelled && setStoreCredit(s))
+      .catch(() => !cancelled && setStoreCredit(null));
     fetchCustomerPayments(session, id)
       .then((p) => !cancelled && setPayments(p))
       .catch(() => !cancelled && setPayments([]));
@@ -215,6 +230,19 @@ export default function CustomerDetailPage() {
                   value={credit.available != null ? formatMoney(Math.max(0, credit.available)) : '—'}
                 />
               </>
+            ) : null}
+            {/*
+              D175 — shown whenever the ledger has been read, including at zero.
+              "This customer has no store credit" is an answer a cashier needs;
+              hiding the row would make it indistinguishable from a screen that
+              does not know about store credit at all, which is what the old one
+              was.
+            */}
+            {storeCredit ? (
+              <Detail
+                label="Store credit balance"
+                value={formatMoney(storeCredit.balance)}
+              />
             ) : null}
           </CardContent>
         </Card>

@@ -8,6 +8,7 @@ import { ReturnsController } from './returns.controller';
 import { ReturnsSalesController } from './returns-sales.controller';
 import { ReturnsRepository } from './returns.repository';
 import { ReturnsService } from './returns.service';
+import { StoreCreditModule } from '../store-credit/store-credit.module';
 
 /**
  * `ProvidersModule` is imported here (Slice 6B) so `ReturnsService` can resolve the
@@ -16,7 +17,7 @@ import { ReturnsService } from './returns.service';
  * provider concern.
  */
 @Module({
-  imports: [AuthModule, SettingsModule, SyncModule, ProvidersModule],
+  imports: [StoreCreditModule, AuthModule, SettingsModule, SyncModule, ProvidersModule],
   controllers: [ReturnsController, ReturnsSalesController],
   providers: [ReturnsService, ReturnsRepository],
   exports: [ReturnsService],

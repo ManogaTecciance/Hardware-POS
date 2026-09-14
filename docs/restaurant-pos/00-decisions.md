@@ -11153,6 +11153,159 @@ is to be minimal.
 
 ---
 
+## D175 — store credit is a ledger, not a label
+
+**Status:** accepted and **built**, 2026-09-14. **Schema change and migration**
+`20260918000000_add_store_credit_ledger`.
+
+### What was reported
+
+> "when i return cloth and get store credit but customer available store credit
+> not updated in customer tab can you check that"
+
+### What was actually wrong: three things, not one
+
+**1. "Available credit" is a different figure entirely.** It is
+`creditLimit - outstandingCredit` — how much the customer may still buy **on
+account**. Money flowing the other way. It will never move when a refund is
+issued, because nothing about a refund changes their limit or what they owe.
+
+**2. Nothing was recorded.** `refundMethod = 'STORE_CREDIT'` was a **label** on
+a return. There was no store-credit table, column or ledger anywhere in the
+schema.
+
+**3. In retail the customer could not spend it.** The till offers Cash, Card,
+Bank Transfer, QR, Cheque, Split, Partial and Credit. `STORE_CREDIT` is not a
+tender option. The customer left with a slip naming a refund method against a
+balance that did not exist and could not have been redeemed if it had.
+
+### Why it was built that way
+
+The QuickBooks path explains it: a `STORE_CREDIT` return resolves to a **Credit
+Memo**, and QuickBooks owns the customer's credit balance. The feature assumed
+an accounting provider tracked it.
+
+A `LOCAL` inventory tenant with `NONE` accounting — which is every retail and
+restaurant workspace — has no such owner. And `allowStoreCredit` defaults to
+**true** with `STORE_CREDIT` in the default allowed refund methods, so every
+local shop has been able to give credit that goes nowhere.
+
+Three returns had already done exactly that: **Rs. 5,415 owed to one customer**,
+with no record of it.
+
+### The decision
+
+**A signed, append-only ledger. The balance is `SUM(amount)`.**
+
+A `Customer.storeCreditBalance` column is one `UPDATE` away from being wrong
+forever, and nothing in the row says how it got there. Two concurrent
+redemptions read the same figure and both write; a half-failed refund leaves a
+number nobody can explain; and the question a shopkeeper actually asks — *where
+did this come from?* — has no answer.
+
+Entries cannot drift from their own history because they **are** their own
+history. A correction is an offsetting `ADJUSTMENT`, so the trail survives the
+correction.
+
+### The entry lands in the return's own transaction
+
+`IssueStoreCredit` is a **third callback** on `createCompleted`, beside
+`postAccounting` and `restoreStock`. Same reasoning as those two: the repository
+keeps owning the transaction and stops deciding what belongs in it. Whether a
+return issues store credit depends on `refundMethod` and on there being a saved
+customer, and `ReturnsService` already owns both.
+
+Inside the transaction because the alternative is a return that committed its
+money and then failed to credit the customer — **invisibly**, because the refund
+slip still prints and the customer still leaves.
+
+### It applies to every tenant, including QuickBooks ones
+
+The ledger is written regardless of accounting provider, and it is what the till
+reads. A POS cannot settle a sale against a figure it would have to fetch from
+an external system that may be unreachable at the counter. The Credit Memo still
+goes to QuickBooks; that is where the two are reconciled.
+
+No branch on business type, so D56 does not arise — there is nothing to read a
+capability *for*.
+
+### The migration backfills, deliberately
+
+Every completed `STORE_CREDIT` return with a saved customer gets its entry. Not
+tidiness: **the shop genuinely owes that money**, and starting the ledger at zero
+would erase a real liability on the day the feature that records it shipped.
+Verified on the development database: one customer, three entries, **5,415.00**
+— exactly the three returns.
+
+### Blast radius on hardware and restaurant: zero
+
+- The migration creates **one enum and one table**. No existing table is
+  altered, no column changes type, no constraint is dropped.
+- A refund by any other method writes **nothing** — asserted, because without
+  that assertion "a return credits the customer" would pass for an
+  implementation that invented a liability out of every cash refund.
+- Redemption enforcement breaks no existing caller: **every** test reference to
+  `STORE_CREDIT` is a `refundMethod`, never a sale tender, and the live database
+  holds **zero** `STORE_CREDIT` payments.
+
+### The API keeps the two apart
+
+`GET /customers/:id/store-credit` is its own route beside `:id/credit`, and the
+client has its own fetcher. Folding "what we owe them" into the shape that
+answers "what they may spend" is how the two were confused in the first place,
+and an API that repeats the confusion teaches it to every screen that reads it.
+
+### Mutation proof
+
+Run against real PostgreSQL, because the guarantee is that the entry lands **in
+the same transaction as the return** — a mocked repository records the call
+whether or not the write ever committed, which is the failure mode itself. The
+duplicate guard is a UNIQUE INDEX, and only a database can refuse it.
+
+| Mutation | Fails |
+|---|---|
+| every refund method credits the ledger | "a CASH return writes NOTHING" |
+| `redeemForSale` skips the balance check | "refuses to spend more than the customer holds" **and** "refuses a customer with no credit at all" |
+
+### `@Global` was the wrong instinct, and the suite said so
+
+`StoreCreditModule` was `@Global` at first, on the reasoning that returns issue
+credit, sales redeem it and customers display it, so threading an import through
+three feature modules bought nothing.
+
+The integration suite refused it in **378 tests**:
+
+```
+Nest can't resolve dependencies of the ReturnsService (…, ?, …).
+Please make sure that the argument StoreCreditService at index [7]
+is available in the ReturnsModule module.
+```
+
+`@Global` only takes effect once the module is imported **somewhere** in the
+graph. `app.module.ts` did that for the running application, so the app booted
+and the whole unit suite passed — while every integration spec, which builds its
+own graph from the feature modules it needs, had no idea the module existed.
+
+The lesson is not about test wiring. **A module that declares its own
+dependencies works in any graph; one that relies on being registered elsewhere
+works only in the graph that registers it**, and the failure surfaces far from
+the cause. `ReturnsModule` and `CustomersModule` import it now, `app.module`
+does not, and the `@Global` is gone.
+
+It is recorded because the unit suite could not have caught it. 1,507 tests were
+green against a wiring that could not boot half the integration suite, and the
+thing that found it was running the slower suite before claiming the work was
+done.
+
+### Still to come
+
+**Redeeming at the till.** `redeemForSale` exists, is enforced and is tested,
+but the retail POS does not yet offer `STORE_CREDIT` as a tender. Until it does,
+a customer's balance is visible and correct and cannot be spent from the retail
+screen. Recorded as the known limit rather than left to be discovered.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

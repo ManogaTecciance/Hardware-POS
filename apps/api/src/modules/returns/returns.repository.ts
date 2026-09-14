@@ -35,6 +35,28 @@ export type RestoreStock = (
   returnId: string,
 ) => Promise<void>;
 
+/**
+ * D175 — credit the customer's store-credit ledger, inside the return's own
+ * transaction.
+ *
+ * A third callback rather than a repository import, for the reason the other
+ * two exist: the repository keeps owning the transaction and stops deciding
+ * what belongs in it. Whether this return issues store credit is a
+ * **return-domain** question — it depends on `refundMethod` and on there being
+ * a saved customer — and `ReturnsService` already owns both.
+ *
+ * Inside the transaction because the alternative is a return that committed its
+ * money and then failed to credit the customer. That is the exact failure this
+ * ledger exists to prevent, and it would be invisible: the refund slip prints,
+ * the customer leaves, and the shop has no record of what it owes.
+ *
+ * A no-op for every other refund method, which is every existing caller.
+ */
+export type IssueStoreCredit = (
+  tx: Prisma.TransactionClient,
+  returnId: string,
+) => Promise<void>;
+
 /** A return with everything the detail screen and receipt need. */
 export type ReturnWithRelations = Prisma.ReturnGetPayload<{
   include: {
@@ -223,6 +245,7 @@ export class ReturnsRepository {
     input: PersistReturnInput,
     postAccounting: PostReturnAccounting,
     restoreStock: RestoreStock,
+    issueStoreCredit: IssueStoreCredit,
   ): Promise<ReturnWithRelations> {
     return this.prisma.$transaction(async (tx) => {
       const returnNumber = await this.nextReturnNumber(tx, input.tenantId);
@@ -335,6 +358,11 @@ export class ReturnsRepository {
       // The `type: 'Inventory'` predicate that kept Service products out lives in
       // the provider, unchanged.
       await restoreStock(tx, input.restockLines, created.id);
+
+      // D175 — the customer is credited here, in the same transaction as the
+      // refund it belongs to. A no-op unless this return was refunded as store
+      // credit.
+      await issueStoreCredit(tx, created.id);
 
       // Per-sale return-status roll-up (recomputed from the fresh line states).
       const saleItems = await tx.saleItem.findMany({
