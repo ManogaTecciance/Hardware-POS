@@ -31,6 +31,7 @@ import type {
   PrintAgentView,
   PrintJobStatusView,
   PrintQueueStatus,
+  PrinterDiscoveryView,
   PrinterRole,
   TestPrintResult,
   KitchenTicketStatus,
@@ -1000,6 +1001,17 @@ export const printing = {
   },
   revokeAgent(session: Session, agentId: string) {
     return api.post<{ ok: true }>(`/printing/agents/${agentId}/revoke`, {}, auth(session));
+  },
+  /**
+   * D183 — what can be printed to: hosts answering on :9100 and the printers
+   * installed on the agent PC. The Add-printer form offers these instead of
+   * asking for an IP or a spooler name from memory.
+   */
+  discover(session: Session, branchId: string) {
+    return api.get<PrinterDiscoveryView>(
+      `/printing/discover?branchId=${encodeURIComponent(branchId)}`,
+      auth(session),
+    );
   },
 };
 

@@ -651,6 +651,37 @@ export interface PrintJobStatusView {
   updatedAt: string;
 }
 
+// ── Discovery (D183) ────────────────────────────────────────────────────────
+/** A device answering on the printer port, found by the agent or the server. */
+export interface DiscoveredHost {
+  host: string;
+  port: number;
+  latencyMs: number;
+  /** true = replied like a receipt printer; false = on 9100 but silent (an office printer?); absent = not checked. */
+  escpos?: boolean;
+}
+
+/** A printer installed on the agent's PC, as Windows names it. */
+export interface LocalPrinterView {
+  name: string;
+  driver: string | null;
+  port: string | null;
+}
+
+export interface PrinterDiscoveryView {
+  /** AGENT = the on-site agent's last report; SERVER = the API scanned its own LAN. */
+  source: 'AGENT' | 'SERVER';
+  agentName?: string;
+  /** When the agent reported (AGENT only). */
+  at?: string;
+  port: number;
+  printers: DiscoveredHost[];
+  /** Always empty for SERVER — only an agent has a spooler that matters. */
+  localPrinters: LocalPrinterView[];
+  /** SERVER only: why the scan found nothing, when it could not run. */
+  note?: string;
+}
+
 export interface TestPrintResult {
   ok: boolean;
   error?: string;
