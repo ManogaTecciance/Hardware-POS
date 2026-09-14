@@ -109,8 +109,10 @@ export class ProductsController {
   /** Download the blank .xlsx template for the bulk product import. */
   @Get('import/template')
   @RequirePermissions(Permission.PRODUCT_MANAGE)
-  async importTemplate(@Res() res: Response): Promise<void> {
-    const buffer = await this.productsImportService.buildTemplate();
+  async importTemplate(@TenantId() tenantId: string, @Res() res: Response): Promise<void> {
+    // D189 — per tenant: the sheet carries THIS workspace's business-detail
+    // columns, because D161 made those fields the tenant's own.
+    const buffer = await this.productsImportService.buildTemplate(tenantId);
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

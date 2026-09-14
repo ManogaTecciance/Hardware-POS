@@ -206,12 +206,42 @@ const sendRound = (key: string, quantity = 2) =>
 const drain = () =>
   http.request<{ kot: number; bill: number }>('POST', '/printing/drain', { token: ownerToken() });
 
-async function waitFor(check: () => Promise<boolean>, timeoutMs = 4_000): Promise<void> {
+/*
+ * Budget and failure mode, both chosen after this spec failed once in a full
+ * run and passed alone three times (D196). Alone, a drain spools in well
+ * under a second; in the full suite, running in-band behind fifty-seven other
+ * suites on a loaded machine, the same drain has been seen to miss four
+ * seconds. Fifteen is generous for the wait and costs nothing on the happy
+ * path, because the loop returns the moment the check is true.
+ *
+ * And it THROWS on timeout, where it used to return silently. A silent return
+ * let the assertion after it fail with "expected 0 to be greater than 0" —
+ * true, and useless — instead of saying the printer never spooled in time.
+ */
+async function waitFor(check: () => Promise<boolean>, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     await drain();
     if (await check()) return;
-    if (Date.now() > deadline) return;
+    if (Date.now() > deadline) {
+      throw new Error(`waitFor: the condition did not become true within ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/**
+ * Keep draining for a while and expect NOTHING new. The negative twin of
+ * `waitFor`: a test that asserts a second bill is NOT printed has to give the
+ * dispatcher a fair chance to print one, or the "still exactly one" below
+ * proves only that nobody looked. Written as its own helper rather than
+ * `waitFor(() => false, 500)`, which depended on `waitFor` returning silently
+ * on timeout — the very behaviour that hid a real failure (D196).
+ */
+async function drainFor(ms: number): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    await drain();
     await new Promise((r) => setTimeout(r, 100));
   }
 }
@@ -507,7 +537,7 @@ describe('D181 — takeaway: the ticket prints at placement, the bill when it se
       { token: ownerToken(), body: { status: 'HANDED_OVER' } },
     );
     expect(handover.status).toBe(200);
-    await waitFor(async () => false, 500);
+    await drainFor(500);
 
     // Exactly one bill job for this order — the customer gets one bill.
     expect(

@@ -20,6 +20,7 @@
     "db:seed": "prisma db seed",
     "db:provision": "tsx prisma/provision-tenant.ts",
     "db:add-staff": "tsx prisma/add-staff.ts",
+    "db:export-catalogue": "tsx prisma/export-catalogue.ts",
     "db:backfill-roles": "tsx prisma/backfill-tenant-roles.ts",
     "db:role-report": "tsx prisma/role-authority-report.ts",
     "build": "prisma generate && tsc -p tsconfig.json",

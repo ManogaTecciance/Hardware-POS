@@ -26,6 +26,8 @@ import { ProviderOperationUnavailableError } from '../providers/provider.errors'
 import { StockLine } from '../providers/provider.types';
 import { formatReceiptDateTime } from '../receipts/receipt-templates';
 import { SettingsService } from '../settings/settings.service';
+import { inlineImage } from '../../common/storage/inline-image';
+import { StorageService } from '../../common/storage/storage.service';
 import { SyncQueueService } from '../sync/queue/sync-queue.service';
 import {
   customerReturnDocumentLabel,
@@ -87,6 +89,14 @@ export class ReturnsService {
     private readonly syncQueue: SyncQueueService,
     private readonly accountingProviders: AccountingProviderFactory,
     private readonly inventoryProviders: InventoryProviderFactory,
+    /**
+     * D195 — reads the logo's bytes so the refund slip carries them.
+     *
+     * Appended, not slotted in: this constructor is called positionally in
+     * specs, and inserting a parameter in the middle shifts every argument
+     * after it.
+     */
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -835,9 +845,17 @@ export class ReturnsService {
     userId: string,
   ): Promise<{ printJobId: string; html: string }> {
     const settings = this.settingsService.getSettings(tenantId);
-    const html = renderReturnReceipt(
-      this.toReceiptData(ret, settings.receiptFooter, safeTimeZone(settings.timezone)),
-    );
+    /*
+     * D195 — the SAME `documents.logoUrl` the sales bill and the A4 letterhead
+     * use. One shop, one logo: asking an operator to upload it per document is
+     * how a refund slip ends up showing a different mark from the bill it
+     * reverses. `inlineImage` caches and never throws.
+     */
+    const logoDataUri = await inlineImage(this.storage, settings.documents.logoUrl);
+    const html = renderReturnReceipt({
+      ...this.toReceiptData(ret, settings.receiptFooter, safeTimeZone(settings.timezone)),
+      logoDataUri,
+    });
     const job = await this.repo.createReceiptPrintJob({
       tenantId,
       saleId: ret.originalSaleId,

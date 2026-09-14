@@ -7695,6 +7695,1420 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D196 — merging `feature/retail-template-v2` again: the sixteen commits that followed
+
+D173 merged that branch at `75b086d`. Sixteen more commits have landed since —
+the receipt says what crossed the counter and uses the trade's words, the
+tender is captured when it is true, a reprint keeps the tender it printed, the
+import template is the tenant's, two retail workspaces are seeded from the
+PO's real shops, a receipt number is unique per tenant, a document carries its
+pictures, an exchange is a basket — recorded there as D162–D174.
+
+**Migrations first, at the PO's request, and this one earned the attention.**
+Their branch adds `20260917000000_scope_receipt_number_per_tenant`, which
+shares its TIMESTAMP with D181's printing migration merged from another
+branch. Both are safe on their own: theirs adds a nullable column, backfills
+it from each receipt's own sale, sets NOT NULL only then, and swaps a global
+unique for a per-tenant one — a loosening, which no existing row can violate.
+The two touch disjoint tables, so their relative order is immaterial; Prisma
+orders same-timestamp folders by full name, which puts `d181_` before `scope_`
+deterministically. Neither had run anywhere when they met — not the dev
+database, not production — so NEITHER folder was renamed. Proven by applying
+theirs on top of the dev database's existing set and by the integration suite
+replaying all 87 from scratch. The "drop the stray FK-drift migration" commit
+in their log touched only docs; nothing on disk was removed.
+
+**Numbering: two ranges, one pass.** The twelve records D173 merged were still
+on their original D150–D161 on their side and moved by eleven again to land on
+identical text; the thirteen new ones took D162–D174, every one spent here
+(their own merged twelve, the last merge's record, the lane-counts fix), and
+became D183–D195. Their thirteen arrived as `## ` headings like the twelve
+before them and were normalised the same way.
+
+**Six conflicts.** The schema and `package.json` were both sides adding one
+line to the same spot; unioned. The migration tripwire had each side register
+its own migration and bump 85 to 86; both listed, 87, confirmed by the spec
+against the real directory. The payment page: D163 had hidden the print
+toggle where there is no A4 and their D187 brings it back naming whichever
+bill prints — the later decision on the same branch, taken. The catalogue and
+the decision log were rebuilt record by record, as D180 did, rather than
+resolved line by line; the four KIT rows both sides held keep D152's rewrite,
+which is newer than the D147 text theirs still carried.
+
+**Their branch deletes `temp/`, and the merge honours that.** Seventeen
+scratch files including the seven receipt photographs this branch committed
+under D149's merge; nothing in the repo referenced any of them, and their
+commit says why. They remain reachable at `c3c316f`.
+
+**One integration failure, and it was a real finding rather than a merge
+defect.** The printing spec failed once in the full run and passed alone three
+times. Its `waitFor` helper polled a dispatcher for four seconds and then
+RETURNED SILENTLY, so a slow full-suite run surfaced as a downstream assertion
+saying "expected 0 to be greater than 0" — true and useless. Two changes: the
+helper now throws on timeout with its own name, and its budget is fifteen
+seconds, which costs nothing on the happy path since it returns the moment the
+check passes. Making it throw exposed one test that had been passing only
+because the silent timeout let it: it used `waitFor(() => false, 500)` as a
+half-second sleep to prove a second bill is NOT printed. That intent now has
+its own helper, `drainFor`, so a negative wait cannot be mistaken for a
+positive one that gave up.
+
+Verified rather than assumed, as in every merge since D158: every file only
+they changed is byte-identical to their branch, every file only this branch
+changed is byte-identical to here, no decision heading appears twice, both
+tripwires pass, D151's removals and D177's wording hold.
+
+Gates on the merged tree: typecheck 8/8, api unit 1629 across 101 suites, web
+unit 1669 across 121 files (2 skipped), integration 1232 across 58 suites from
+a fresh database, run twice, lint 0 errors (12 warnings, all pre-existing).
+Playwright not run — it needs a live stack.
+
+### D195 — the refund slip gets the logo too
+
+**Status:** accepted and **built**, 2026-09-14. No schema change, no migration.
+
+### What was reported
+
+> "return/refund bill also needed to contain the bussiness logo"
+
+### What D193 missed
+
+D193 put the logo on the **sales** receipt and the **A4** letterhead and stopped
+there. `return-receipt.template.ts` is a separate renderer with its own data
+shape, and it was not in the diff.
+
+That is the wrong one to have missed. A refund slip is handed to a customer who
+is already unhappy, and it is the document they keep as proof the shop took the
+goods back — the piece of paper most likely to be brought back in and argued
+over.
+
+The A4 return document was already covered, because `returnHtml` goes through
+the same `render()` boundary D193 introduced. Only the thermal slip was left.
+
+### The decision
+
+**Same field, same contract, same rules.** `logoDataUri` on
+`ReturnReceiptData`, inlined by `ReturnsService` from the **same**
+`documents.logoUrl` the bill and the letterhead read.
+
+One shop, one logo. A per-document setting is how a refund slip ends up showing
+a different mark from the bill it reverses.
+
+The logo sits **above** the shop name and does not replace it, for D193's
+reason and one of its own: a customer disputing a refund needs the slip to say
+which shop owes them the money, and a monochrome roll can turn a colour logo
+into a smear.
+
+### Mutation proof
+
+| Mutation | Fails |
+|---|---|
+| drop the `if (!d.logoDataUri) return ''` guard | "prints no image at all when no logo is configured" **and** "treats an explicit null the same as an absent logo" |
+| the logo REPLACES the shop name | "prints the logo as inlined bytes when one is configured" |
+
+The template had **no spec at all** before this. The new one also pins what the
+header must not disturb: the refund total, the return and sale numbers, the
+document type, and the `RETURN / REFUND` stamp — which is the loudest thing on
+the page deliberately, because a refund slip mistaken for a sales receipt is one
+that can be presented as proof of purchase.
+
+### Now fully covered
+
+Every server-rendered document carries its branding: the sales bill (D193), the
+A4 letterhead, invoice, quotation and return (D193), and the refund slip
+(D195). The only printable left without one is `receipt-print.ts`'s
+**client-side fallback**, recorded in D193 and still deliberate: it exists to
+get paper out of the printer when the API is unreachable, and its whole design
+is to be minimal.
+
+---
+
+## Open decisions
+
+| ID | Question | Needed by |
+|---|---|---|
+| O1 | `mockSync()` fabricates QuickBooks document ids for a *disconnected Tile Shop tenant*, writing synthetic ids into financial records. Preserve, or change deliberately? | Phase 2 |
+| O2 | Redis: yes or no? Determines the Socket.IO multi-replica adapter (D7, D11) and the settings-cache invalidation strategy. **Deferred at Phase 1.5 (D39): the abstraction ships without the dependency, and multi-replica operation stays unsupported until this is answered.** | Phase 4 |
+| O3 | Service-charge tax treatment specifics, to be confirmed with an accountant (D8). | Phase 8 |
+| O4 | Pilot restaurant: which tenant, how many branches, which printers, which channels. | Phase 4 |
+| O5 | Commercial model (per-branch / per-register / per-module) — blocks subscription and entitlement design. | before entitlements |
+| O6 | `InventoryReceiptLine.productVariant`: `RESTRICT` (what the database has since D44) or `SetNull` (what the schema implies)? Until answered, `migrate diff` keeps emitting the FK pair and it keeps being stripped (D110). | next migration |
+| O7 | ~~Should a list's pager hide when the rows fit one page?~~ **Answered 2026-09-09 (D143a): no — every footer renders, with the paging steps disabled. The orders queue's hiding also hid its rows-per-page control, so a short list made the sizes unreachable.** | closed |
+| O8 | Cancelling a counter order that D117 has settled and paid: refuse it, or record the refund? The takeaway status write has no transition guard (D119). | before the next restaurant deploy |
+| O9 | How does the counter hand over a takeaway whose ticket the kitchen never bumped? The stepper D113/D117 named is gone (2026-08-10); handover is offered on READY only (D119). | before the next restaurant deploy |
+| O10 | Should the clothing Retail template (D120) offer the Salesperson, the hardware-only owner-equivalent of D108? It seeds Owner + Cashier today (D136). | before the first Retail workspace |
+| O11 | Their 5.10 (D136a) takes the SKU line off every 80mm SALES receipt (the return receipt still prints it) and turns the A4 SKU column's default off; both reach the Tile Shop, and a workspace that never saved its documents settings loses the column. Keep, or exempt the QuickBooks pilot (D16)? | before the next production deploy |
+| O12 | `startOfDayInTimeZone` resolves a local midnight that DST SKIPS backwards, so in a zone whose transition is at 00:00 (Cuba, Chile) a business day computed from it is an hour short at the end — the Done lane (D142), the dashboard's "today" and every `lastNDaysInTimeZone` report. Found by review, pre-existing, no tenant is in such a zone today. Fix the helper, or leave it? | before a tenant in Cuba/Chile |
+### D194 — an exchange is a basket, not a line
+
+**Status:** accepted and **built**, 2026-09-14. No schema change, no migration,
+**no server change at all**.
+
+### What was reported
+
+> "in here if i want to exchange all product on sales it cant do i have to do
+> one by one thats not right. lets say i bought 3 products i want to exchange 2
+> so i needed that option"
+
+### What was actually restricting it
+
+Four limits, stacked, and **every one of them lived in a single web page**:
+
+| | Limit | Where |
+|---|---|---|
+| 1 | one returned line — `<input type="radio">` over a single `chosenSaleItemId` | UI |
+| 2 | one replacement — a single `replacementVariantId` | UI |
+| 3 | the replacement had to be another variant of the **same product** | UI |
+| 4 | the whole line always came back — `returnQuantity: availableReturnQuantity` | UI |
+
+The server had none of them. `CompleteExchangeDto` declares
+
+```ts
+returnItems!: ReturnItemInputDto[];        // ArrayMinSize(1), no maximum
+replacementItems!: SaleItemInputDto[];     // any productId, any variant
+```
+
+and `ExchangesService` contains no same-product check — it builds a `Return` and
+a `Sale`, both of which have held many lines since they existed. `7.5` shipped
+the thinnest visible path deliberately and said so in the page's own header:
+*"multi-line exchanges … out of scope by agreement"*.
+
+That agreement did not survive contact with a shop. Served one at a time, a
+customer swapping two of three items produces **two exchange numbers, two
+returns and two replacement sales** for one visit to the counter.
+
+### The decision
+
+**Limits 1, 2 and 4 are closed. Limit 3 stays, for now.**
+
+The operator ticks every line coming back, says how many of each where a line
+was bought more than once, and picks a replacement per line. Cross-product
+swaps — a shirt for a tie — need a product search in the replacement step and
+their own answer to what the refund is measured against; the server already
+permits it, so it is a UI gap and is recorded as one rather than presented as a
+rule.
+
+### Approval is evaluated on the whole basket, once
+
+This is the part that is more than convenience. The screen previews through
+`POST /exchanges/preview` with **every** selected line, so the refund total and
+the approval verdict are the ones the completion will produce.
+
+Served as two exchanges, each could pass a cashier's per-refund limit that the
+combined basket exceeds. One basket, one verdict, decided on the server — the
+same reasoning D130 used when it moved the exchange waiver out of the screen.
+
+### The rules left the screen
+
+`selectedLines`, `everyLineAnswered`, `replacementTotal`, `toReturnItems`,
+`toReplacementItems`, `clampQuantity` — all pure, all in
+`lib/exchange-basket.ts`, the shape `product-presentation.ts` and
+`catalogue-labels.ts` already keep.
+
+Multi-line turns "which line" into real decisions: which lines are in, how many
+of each, whether every one has an answer, what the customer pays. **A decision
+made inside JSX is a decision nobody can test without a browser.** The page now
+reads these; it does not restate them, which is what makes the tests below
+guard the shipped path rather than a copy of it.
+
+### Three rules worth naming
+
+- **The selection is driven by the SALE, not by the choices.** A choice for a
+  line the sale no longer offers — returned in another tab, or the sale
+  refetched — must not survive as a phantom row. Mutation-proven.
+- **`quantity: 0` deselects; it does not delete.** Ticking a line off and back
+  on keeps the replacement already chosen for it.
+- **An unanswered line contributes NOTHING to the total**, never the returned
+  line's price. A half-filled basket showing a plausible figure is how an
+  operator takes the wrong money.
+
+And `toReplacementItems` **throws** rather than skipping a line with no
+replacement. It cannot fire behind `everyLineAnswered`; the alternative would
+send a basket that refunds three things and sells two — balanced on the screen,
+short at the till.
+
+### Mutation proof
+
+| Mutation | Fails |
+|---|---|
+| `everyLineAnswered` without its `length > 0` guard | "is false for an empty basket" |
+| `toReplacementItems` drops unanswered lines instead of throwing | "refuses to build a leg that would silently drop a line" |
+| the selection is driven by `choices` instead of the sale's lines | "ignores a choice for a line the sale no longer offers" **and** "keeps the order of the sale" |
+
+The first is the vacuity guard: `[].every(...)` is `true`, so without it a
+screen with nothing ticked offers a Complete button that submits an exchange of
+nothing.
+
+The payload tests assert the two legs as exact **ordered** sets, and assert
+they line up entry for entry. Counting them would pass for a basket that
+refunded the shirt and sold a replacement for the trousers.
+
+---
+
+### D193 — a document carries its pictures, it does not point at them
+
+**Status:** accepted and **built**, 2026-09-14. No schema change, no migration.
+
+### What was reported
+
+> "bill not contain the logo of our business … and also quatation A4 bill also
+> not containing the logo"
+
+One sentence, two entirely different faults.
+
+### Fault 1 — the A4 rendered the logo, as a broken image
+
+`document-templates.ts` had been emitting it all along:
+
+```ts
+const logo = s.logoUrl ? `<img src="${esc(s.logoUrl)}" alt="${esc(s.name)}" />` : '';
+```
+
+`s.logoUrl` is `/uploads/<key>` — a path with **no origin**, deliberately, so
+that switching storage backends does not invalidate stored rows. That is correct
+inside the app's own pages, where the browser is already talking to the API.
+
+It is wrong in a document. The API builds the HTML and the web app writes it
+into a popup:
+
+```ts
+win.document.write(html)   // origin: the WEB app, :3000
+```
+
+so the image is requested from the **web app**, which has never heard of it.
+Measured against the running stack:
+
+```
+http://localhost:4000/uploads/products/9384b575….webp  →  302
+http://localhost:3000/uploads/products/9384b575….webp  →  404
+```
+
+The `<img>` was always there. The picture never was.
+
+**The sales A4 does not have this bug**, which is why it was not reported: it is
+a React component that calls `resolveImageUrl()` and prefixes the API origin.
+One logo, two renderers, only one of them absolutising — and the one that did
+not is the one used for quotations.
+
+**The signature and the stamp had the identical defect**, on the same
+letterhead, unreported only because fewer tenants have uploaded one. Fixed with
+the logo; a fix that left two of three broken would print a letterhead with one
+picture and two broken icons.
+
+### Fault 2 — the thermal bill had no logo at all
+
+`receipt-templates.ts` contained zero references to one, and
+`CustomerReceiptData` had `storeName` and no image field. Never built. The bill
+printed the shop's name as text, which is why it looked like a rendering
+failure rather than a missing feature.
+
+### The decision
+
+**The bytes travel with the document.** Branding images are read once and
+inlined as `data:` URIs.
+
+Absolutising the URL against the API's origin would have fixed the popup and
+nothing else. A quotation is **shared** — printed to PDF, attached to an email,
+sent over WhatsApp — and a recipient's browser resolving `http://localhost:4000`
+finds their own machine. A document that needs the issuing server to still be
+reachable is not a document; it is a screen. Inlined, it prints, saves, forwards
+and opens on a machine that has never heard of this installation.
+
+`inline-image.ts` handles both provider shapes behind `StorageService.resolve`:
+`local` gives a path on disk, `s3` gives a short-lived signed URL this process
+fetches exactly as a browser would. Neither caller knows which is configured.
+
+### It never throws, and that is a decision
+
+Every failure path returns `null`, which the templates already render as "no
+image" — the state of every tenant before anyone uploads a logo. A branding
+asset is **decoration**; a quotation that 500s because a logo moved is a worse
+outcome than one that prints without it, and a receipt is the record of money
+that has already changed hands. Asserted directly: with storage unreachable,
+both the bill and the letterhead still print, with the business name and the
+totals intact.
+
+### Two limits, chosen
+
+- **512 KB cap.** `saveImage` downscales and re-encodes every upload, so a real
+  logo lands far under it; the cap is for rows written before that pipeline
+  existed. Base64 costs a third on top, and a 5 MB image inlined into every
+  receipt would make the printer the slowest part of the sale.
+- **Cached per stored path**, five minutes. A till prints all day, and
+  re-reading the logo per receipt is the difference between a cached string and
+  a round trip to S3 at the counter. Keyed per path, asserted negatively, so the
+  stamp's bytes cannot be served as the logo.
+
+### On the thermal bill, the name stays
+
+The logo sits **above** the shop name; it does not replace it. A roll is 80mm
+and **monochrome** — a colour image dithers, and a logo that prints as a grey
+smear on a bill carrying no shop name is worse than no logo. Sized with
+`max-height: 18mm`, in millimetres because the output is paper.
+
+That trade-off was put to the Product Owner before it was built. Whether a given
+logo survives thermal printing is a property of the artwork, not of this code:
+high-contrast line art prints, photographs do not.
+
+### Mutation proof
+
+| Mutation | Fails |
+|---|---|
+| drop the `if (!d.logoDataUri) return ''` guard | "prints no image at all when no logo is configured" **and** "prints the bill without the logo when the image cannot be read" |
+| the logo REPLACES the shop name | "prints the logo as inlined bytes when one is configured" |
+
+The second is the one worth having. It only fails because the positive case
+asserts the shop name is present **alongside** the logo — a test that merely
+looked for the image would have passed a bill with no shop name on it.
+
+The A4 cases assert a `data:` URI **and** the absence of any `/uploads/` src.
+Asserting an `<img>` exists would have passed against the broken version, which
+emitted one all along.
+
+### Known limit
+
+`receipt-print.ts` keeps a **client-side fallback** that prints a minimal
+receipt when the server render fails. It has no logo and is not given one: it
+exists to get paper out of the printer when the API is unreachable, and its
+whole design is to be minimal. Recorded so it is not mistaken for an oversight.
+
+---
+
+### D192 — a receipt number is unique per tenant, not per installation
+
+**Status:** accepted and **built**, 2026-09-14. **Schema change and migration**
+`20260917000000_scope_receipt_number_per_tenant`.
+
+### The defect
+
+`Receipt.receiptNumber` was `String @unique` — globally, across every tenant in
+the installation. The value is built in one place:
+
+```ts
+`RCP-${sale.saleNumber}`
+```
+
+and `Sale` is `@@unique([tenantId, saleNumber])`. **Every tenant's numbering
+restarts at S-000001.**
+
+So the first tenant to print claimed `RCP-S-000001` for the whole installation,
+and every other tenant printing its own first sale hit a `P2002` that surfaced
+as a **hard 500 at the till** — on a path with no workaround, since a receipt is
+the record of money that has already changed hands.
+
+Not theoretical. On the development database when this was found:
+
+| `saleNumber` | tenants holding it | receipts printed |
+|---|---|---|
+| `S-000001` | **4** | **1** |
+| `S-000002` | **4** | **1** |
+| `S-000003` | **4** | **1** |
+
+Three tenants out of four could not print a receipt for their own first sale,
+today, on the machine this was written on. D191 made it likelier rather than
+less likely: four seeded workspaces instead of two.
+
+### The decision
+
+**`@@unique([tenantId, receiptNumber])`, with a `tenantId` column to hang it
+on.**
+
+`InventoryReceipt` — the sibling model, same field name, same purpose for
+purchases — has carried exactly that pair since it was introduced. This brings
+`Receipt` into line rather than inventing a shape.
+
+### Why not simply drop the constraint
+
+It was tempting. `receiptNumber` is **never a lookup key**: every query in
+`ReceiptsRepository` reaches a receipt by `saleId` or `id`, scoped with
+`sale: { tenantId }`. And uniqueness per tenant is already implied by
+construction — `Receipt.saleId` is `@unique`, `Sale` is unique per
+`(tenantId, saleNumber)`, and the number is derived from the sale number.
+
+Dropping it would have been a one-line migration with no new column.
+
+It was rejected because **implied is not enforced**. The number a customer is
+handed is an identifier; the moment anything else derives a receipt number — a
+reprint path, an import, a correction — the implication stops holding and
+nothing catches it. The guarantee is cheap to state and the mutation proof below
+shows what its absence costs: with no constraint at all, four of the five tests
+still pass.
+
+### Why `tenantId` is denormalised onto `Receipt`
+
+A composite unique needs both columns on the table; `sale.tenantId` cannot be
+reached from an index. The column is written **on create and never on update**,
+deliberately: a receipt belongs to the tenant of its sale and a sale never
+changes hands, so putting `tenantId` in the `upsert`'s `update` branch would let
+a *reprint* move a receipt between tenants — a worse bug than the one being
+fixed. A test asserts the column agrees with the sale it hangs off.
+
+### Migration safety
+
+Additive then narrowing, in the only order safe on a populated table:
+
+1. `ADD COLUMN "tenantId" TEXT` — nullable, so existing rows stay legal;
+2. backfill each receipt from **its own sale**;
+3. `SET NOT NULL`;
+4. drop the global unique, create the composite, add the index and the FK.
+
+No row moves between tenants: each receipt takes the tenant it was already
+reachable through. `Receipt.saleId` is NOT NULL and `@unique`, so the backfill
+covers every row and cannot produce two answers for one receipt.
+
+The narrowing cannot fail on existing data, because **the old constraint was
+strictly stronger than the new one**: anything globally unique is unique within
+a tenant. A migration that loosens a constraint has no data to reject.
+
+### Blast radius on hardware and restaurant: zero
+
+Asserted, not assumed:
+
+- **The receipt number format is unchanged.** `RCP-${sale.saleNumber}` is
+  untouched, so every existing receipt keeps the string it was printed with and
+  a reprint renders byte-for-byte what it rendered before.
+- **No rendering code changed.** `receipt-templates.ts` is not in the diff. Its
+  55 assertions pass unmodified.
+- **No existing assertion was weakened.** One line moved in
+  `receipts.service.spec.ts` — `mock.calls[0][2]` became `[3]`, because
+  `tenantId` is now the first argument. The assertions either side of it are
+  identical, and the index was *supposed* to shift: had it not, the spec would
+  have silently begun reading the receipt number instead of the content.
+- **Both domains verified against real PostgreSQL**, not by inspection: the full
+  integration suite, which exercises hardware QuickBooks receipts and restaurant
+  bills end to end.
+
+The only behaviour that changes is the one that was broken: a second tenant
+printing its own sale N now succeeds instead of returning 500.
+
+#### What the blast-radius check turned up, and did not
+
+Running the integration suite for this found **two red specs that predate
+D192**: `no-accounting-documents.spec.ts` still matched `/Balance/i` against a
+thermal bill that has said `Bal. Amount` since D188 renamed the rows. D188 did
+not catch them because the **integration suite was not run** — the unit suite is
+green either way, and those two only fail against a real PostgreSQL and a real
+rendered document.
+
+They are recorded here rather than buried because they are the honest answer to
+"was the blast radius zero": the check found something, it was not this change,
+and the distinction is verifiable — D192's diff contains no rendering code, and
+`receipt-templates.ts` is not in it. Fixed in their own commit, with the
+assertions strengthened rather than merely re-pointed: `Bal. Amount` alone would
+pass for a bill printing an empty row.
+
+The lesson is about cadence, not about either change. A rename shipped with a
+decision record still slipped past, because the suite that could see it is the
+one nobody runs on a normal day.
+
+### Mutation proof
+
+`receipt-number-tenant-scope.spec.ts` runs against real PostgreSQL, because the
+defect lives in an **index**, not a branch — a mocked Prisma raises whatever the
+mock is told to raise and would have passed against the broken schema and the
+fixed one alike.
+
+Two mutations were applied to the live test database and the suite re-run:
+
+| Mutation | Result |
+|---|---|
+| restore the global `@unique` on `receiptNumber` | **2 failed** — "both tenants print their own S-000001" and "a receipt belongs to the tenant of its sale", with the original `Unique constraint failed on the fields: (receiptNumber)` |
+| drop the composite unique and add nothing | **1 failed** — "a duplicate within one tenant is still refused" |
+
+The second is the one that matters for test design. Four of five tests pass with
+**no constraint at all**, so the positive case alone would have green-lit
+removing the guarantee entirely. That is why the negative case is written.
+
+### The tripwire had to be told
+
+`provider-contract.spec.ts` pins the migration directories as an **exact set**,
+so a new migration fails it until someone names it and says why. That is the
+test working, not the test being in the way, and it is the reason the reasoning
+above now sits beside the directory name in the spec. The count moved 85 → 86.
+
+---
+
+### D191 — the demo shops are the Product Owner's shops, exported not invented
+
+**Status:** accepted and **built**, 2026-09-14. No schema change, no migration.
+Supersedes the `retail-demo` tenant from [D190](#d169).
+
+### What was reported
+
+> "we needed to do like resturant and hardware to retail grocery and clothing …
+> i have data of grocery and retail and i can login … but others cant login to
+> my clothing store and grocery"
+
+and, on the seeder D190 had wired up:
+
+> "why you create a clothing.ts file others dont use that kind of file"
+
+### Two things were wrong, and only one of them was the one reported
+
+**D190 seeded one retail tenant. There are two trades.** `RETAIL` covers
+clothing and grocery, and they exercise opposite halves of the catalogue:
+clothing sells a variant chain (Size × Colour, a barcode and a stock row each),
+grocery sells by weight (`DECIMAL` quantity, `kg` and `L`). A single demo tenant
+can only ever show one of them, and a developer reviewing grocery work inside a
+clothing shop is reviewing nothing.
+
+**D190 pointed the seeder at `seed-packs/clothing.ts`, which is the wrong file.**
+That is the **provisioning starter kit** (D120) — five empty categories and two
+token products, deliberately thin because a real shop deletes whatever we
+invent. Wiring the demo tenant to it produced a two-product workspace where the
+Product Owner had built twenty. The objection was right, though not for the
+reason given: `clothing.ts` was not written for this, and a separate data file
+is in fact the existing hardware pattern (`mock-catalog.ts`).
+
+### The decision
+
+**A demo workspace carries the catalogue somebody actually built, exported from
+the app, not a stand-in written to resemble one.**
+
+| | `clothing-demo` | `grocery-demo` |
+|---|---|---|
+| Name | Kandy Apparel | Colombo Grocery Mart |
+| Products | 16 | 6 |
+| Variants | 44 | 9 |
+| Sold by | the piece | **weight** — `DECIMAL`, `kg` and `L` |
+
+The point is that a teammate opens the shop the PO is describing in the message
+they just sent. A plausible invented catalogue cannot do that: it is right in
+shape and wrong in every particular, which is worse than empty because it looks
+finished.
+
+### Three files, three jobs
+
+| File | Job | Hand-edited? |
+|---|---|---|
+| `src/mock-clothing.ts`, `src/mock-grocery.ts` | **data** | never — generated |
+| `src/catalogue-pack.ts` | **behaviour**: apply a pack to a tenant | yes, once |
+| `prisma/export-catalogue.ts` | **the generator** | yes, once |
+
+This is `mock-catalog.ts`'s split, extended for variants. Hardware could keep
+its data in one flat file because a hardware product is a row; a clothing
+product is a row plus dimensions plus options plus a variant per combination
+plus a stock row per variant, so the data needed a richer shape and the writing
+needed a function. A bug in `seedCatalogue` is fixed once for every pack.
+
+`seed-packs/clothing.ts` is **not** replaced. It keeps its D120 job: what a
+brand-new shop is provisioned with. The two are opposite by design — a starter
+kit should be thin because a real shop clears it out, and a demo should look
+like a shop that has been trading.
+
+### The packs carry no ids, deliberately
+
+Every lookup in `seedCatalogue` is by the key a human would use — a category's
+name, a product's SKU, a dimension's name. Ids are generated, so a pack cannot
+carry one, and a pack that did would only apply to the database that made it.
+That is precisely the bug this decision exists to fix, so it must not reappear
+inside the fix.
+
+It is also what makes a re-seed converge: rename a seeded product in the app and
+the next seed matches its SKU and renames it back, rather than creating a second
+product beside it.
+
+### Why `seedRetailShop` can return `null`
+
+`Tenant.slug` is globally `@unique`, and the PO's own hand-made workspace holds
+`grocery-demo` on their machine. Creating the seeded tenant there raises `P2002`
+and takes the whole seed down — on the one machine whose database matters most.
+
+Both alternatives were worse:
+
+- **Rename their tenant to claim the slug.** D190 already refused this: it takes
+  someone's work hostage to a convention.
+- **Adopt the row and write into it.** The seed would then overwrite a workspace
+  someone is actively using.
+
+So the seed **stands aside**, says plainly that the slug is spoken for, and
+seeds nothing. Verified: the holding tenant came through with zero rows written
+into it. On every teammate's machine and in CI nothing holds the slug and both
+workspaces are created normally.
+
+### Two defects the fresh-database test caught
+
+Neither was reachable from the author's database, which is the argument for
+seeding from **empty** rather than re-running against a database that already
+has the answer.
+
+**1. Two default variants.** `ProductVariant_productId_default_key` is a
+**partial** unique index:
+
+```sql
+CREATE UNIQUE INDEX ... ON "ProductVariant" ("productId") WHERE ("isDefault" = true)
+```
+
+Prisma cannot express a partial index, so the schema does not declare it and
+nothing in the type system stops a second default. The applier asked each
+variant in turn *"are you the declared default, or are you index 0?"*, which
+made both true, and it failed as a `P2002` naming `productId` — which reads like
+a duplicate **product**. Now decided once per product, and every variant is
+written not-default before the winner is promoted, so a re-seed that moves the
+default never holds two at once.
+
+**2. The applier invented a default that the source never stated.** Every
+product in both shops has **no** default variant; the index forbids two, not
+zero. Falling back to "index 0 wins" made the seeded shop differ from the real
+one. A pack that invents is a pack that cannot be trusted to reproduce the shop
+it came from, so a product with no declared default now gets none.
+
+### Verification
+
+Seeded into a **database created empty**, migrations forward, then compared
+against the source workspaces field by field: name, SKU, type, description,
+prices, cost, category, subcategory, brand, `quantityType`, unit of measure,
+reorder level, `attributes`, and per variant the SKU, barcode, prices,
+`isDefault`, every option value and the stock quantity.
+
+- **16/16 and 6/6 products match exactly**, by SET and not by count — equal
+  totals is the standard way a comparison passes while holding different rows.
+- **Run twice** — identical, and still an exact match.
+- **Negative control**: the two shops share **0** product keys. A comparison
+  that matched everything would pass the positive test too.
+- The comparison **throws** if the source holds no products, so it cannot pass
+  by inspecting nothing.
+
+One difference during the first run turned out not to be a defect: a shirt read
+21 in the pack and 19 in the source. `StockMovement` showed a real sale of 2
+units at `2026-09-14 05:21`, after the export ran. The exporter was right and
+the live shop had moved under it.
+
+### The staff are the PO's too, not a house style
+
+> "but here i use `owner@kandyapparel.test` and then other team mates get
+> another email ???"
+
+The first cut seeded `clothing.owner@axlopos.test`, matching the restaurant's
+naming. It read tidily and was wrong in the way that matters: the PO demos with
+`owner@kandyapparel.test`, so the team would have been handed a different
+address for the same shop and **"use my login" stopped being true the moment it
+was written down**. The whole decision is about a teammate opening the shop the
+PO is describing; handing them a different door undoes it.
+
+So the seeded staff are the source workspaces' staff, names included — Nimal
+Perera and Sanduni Silva in clothing, and the grocery pair. Safe because
+`@@unique([tenantId, email])` is per **tenant**: the PO's own hand-made
+workspace and the seeded one hold the same address without colliding.
+
+They are also **branch-scoped**, matching the source. The hardware and
+restaurant owners are branch-less because those tenants are modelled as
+multi-branch; a one-shop retailer signs in at their shop, and an owner with no
+branch has no register to open a till on.
+
+The password is the seed's own (`Retail123!`, documented in `README.md` and
+never echoed). A bcrypt hash cannot be read back, so the PO's local password
+could not have been carried even in principle — and a teammate needs a
+documented credential rather than one they have to be told privately.
+
+### Excluded, not deleted
+
+Four experiments sat in the clothing workspace — `Test` (25 variants, a third of
+the whole catalogue), `Test-2`, `Test-3` and `Scaff`. The instruction was to
+delete them and re-export.
+
+They are not inert. `Test-3` carries **twelve sale lines and four quotation
+lines**; `Scaff` five sales; `Test` two sales and twenty-seven stock movements.
+And the foreign keys are not uniform:
+
+| Reference | On delete |
+|---|---|
+| `SaleItem.productId` | **SET NULL** |
+| `QuotationItem.productId` | **SET NULL** |
+| `StockMovement.productId` | **CASCADE** |
+| `BranchInventory`, `ProductVariant` | CASCADE |
+| `ReturnItem.productId` | RESTRICT |
+
+So deleting them would not have failed — it would have succeeded and quietly
+orphaned nineteen sale lines and four quotation lines, and destroyed fifty stock
+movements, in the Product Owner's own traded-in workspace.
+
+`--exclude` was added instead. It keeps a product out of the **pack** and
+deletes nothing. The team gets a catalogue with no `Test-3` in it, which was the
+entire point, and the author's trading history is untouched. It reports which
+names matched and warns about any that did not, so a typo in the flag is visible
+rather than a silently larger catalogue.
+
+Matched by NAME rather than SKU, because the products worth excluding are
+reliably the ones nobody bothered to give a SKU.
+
+### Still not carried
+
+Sales history, customers, suppliers, quotations and promotions. A pack is a
+**catalogue**. Seeding a tenant's trading history would freeze one shop's
+invoice numbers into every developer's database, and the numbers would be wrong
+the moment anyone rang up a sale.
+
+---
+
+### D190 — a workspace the team can sign in to is a seeded workspace
+
+**Status:** accepted and **built**, 2026-09-11. No schema change, no migration.
+
+### What was reported
+
+> "other users cant see my retail account when i give them my credential
+> created they cant visit it , they say needed to add it to … seed.ts"
+
+### What was actually wrong
+
+Nothing was wrong with the credentials. `seed.ts` seeded **three** tenants
+— `tnt_dev` (HARDWARE), `tnt_resto` (RESTAURANT) and `tnt_platform` — and
+**no RETAIL tenant at all**. The retail workspace everyone had been demoing in
+was created by hand on one machine through `provision-tenant` / the platform
+console, so it lives in one developer's database and nowhere else.
+
+A password is an answer to "who are you", not to "does this row exist". Handing
+it to a teammate whose database has no such tenant fails at the lookup, before
+authentication is ever reached. **Sharing a credential cannot share a row.**
+
+### The decision
+
+**Every workspace the team is expected to sign in to is seeded. A workspace
+created by hand is a workspace that exists on one machine.**
+
+So `seedRetail()` joins `seedRestaurant()` and `seedPlatformConsole()`:
+`retail-demo`, profile `RETAIL` · `LOCAL` inventory · `NONE` accounting, an
+Owner and a Cashier, and the clothing pack.
+
+The hand-made tenant is **not** migrated or renamed. It keeps its data and its
+owner keeps working in it; the seeded one is simply the workspace the team
+shares. Renaming someone's tenant to claim the slug would take their work
+hostage to a convention.
+
+### Clothing, and with samples
+
+`seedClothingPack` is **the same function `provision-tenant` calls** for a real
+RETAIL workspace (D120), not a second catalogue written for the demo. Shared
+deliberately: the workspace a developer reviews in and the workspace a shop is
+given must not be able to drift apart.
+
+Clothing rather than groceries because Q12 kept RETAIL as one business type, and
+clothing is what exercises the parts retail actually added — variants across
+Size and Colour (D44), the per-variant stock the till reads (D121), and business
+details the tenant owns (D161).
+
+`withSamples: true` here, where `provision-tenant` defaults it **off**. D120's
+reasoning is about a real shop: seeded products are frozen in that shop's
+database and someone then has to clear them out. This tenant exists to be looked
+at, and a demo workspace with no products shows nothing. Verified: 5 categories,
+2 products, **16 variants**, each with a barcode, and 16 branch-inventory rows
+totalling 144 units.
+
+### No role wiring, and that is the point
+
+The restaurant needs three explicit `role.findFirst` + `user.update` blocks,
+because `WAITER`, `KITCHEN_STAFF` and `RESTAURANT_CASHIER` have no matching
+`UserRole` enum value and `linkUsersToRoles` links only where the key matches.
+
+RETAIL uses `GENERAL_ROLE_TEMPLATES` — `Owner` and `Cashier` — whose keys
+**are** enum values, so the generic linker handles both. Adding the explicit
+blocks anyway would have been dead code that looked load-bearing. Proven rather
+than assumed: after seeding, both users resolve a role **row**, and the cashier's
+login returns `roleName: "Cashier"` with 17 permissions.
+
+### What is deliberately not written
+
+- **No business details.** D161 makes them a tenant *override*; `schemaFor`
+  falls back to RETAIL's shipped fields when there is none. Restating Material /
+  Fit / Care instructions / Gender / Season in the seed would freeze today's
+  list into this tenant and silently stop tracking the domain.
+- **No `TenantModule` rows**, for `provision-tenant`'s own reason: with a profile
+  and no per-module opinion the API resolves the defaults for the business type,
+  and writing them would freeze today's defaults.
+- **The timezone IS written**, matching `provision-tenant`. It equals
+  `DEFAULT_TIME_ZONE`, so nothing renders differently today; what the row buys is
+  that the setting is *stated* rather than inherited, so a later change to the
+  default cannot silently re-date this tenant.
+
+### Verification
+
+Idempotent by construction — every write is an upsert, the settings row is
+guarded by a lookup because `(tenantId, branchId)` carries no unique index, and
+the pack matches categories by name. The seed was run against a database that
+already held the hand-made tenant: `tnt_retail` appeared, and `kandy-apparel`
+came through unchanged at 20 products and 2 users.
+
+End to end, against the running API: `POST /v1/auth/login` with
+`workspace: retail-demo` returns **200** for both users, resolving `tnt_retail`,
+branch `Main Store` and register `Counter 1`.
+
+### The seed console does not print the password
+
+Same rule the restaurant follows: it points at the README's table instead.
+Echoing a credential to a terminal is how it reaches scrollback, CI logs and
+screenshots.
+
+---
+
+### D189 — the import template is the tenant's, not a fixed fourteen columns
+
+**Status:** accepted and **built**, 2026-09-11. No schema change, no migration.
+
+### What was reported
+
+> "in product there is a import button to download the template and upload it,
+> but template was little bit wrong now after the changes … because we add
+> business details from settings"
+
+### What was wrong
+
+`TEMPLATE_HEADERS` was a fixed list of the fourteen QuickBooks *Products &
+Services* columns, written long before D161. D161 made the catalogue's
+descriptive fields **the tenant's own**, so a clothing shop that configured
+Material, Fit, Care instructions, Gender and Season could set them one product
+at a time in the wizard — and **not at all** in a sheet of four hundred.
+
+`buildTemplate()` did not even take a `tenantId`. It could not have known.
+
+### The decision
+
+**The template is generated per tenant: the fourteen QuickBooks columns, then
+one column per configured business detail, under the tenant's own label.**
+
+- A **hardware** workspace configures none, so its sheet is byte-for-byte the
+  one it has always downloaded. Asserted directly, because that is the file
+  another team's operators use.
+- The example rows gain a plausible value per field type, so the expected shape
+  is visible rather than described.
+- The parser reads those columns back into `attributes`, **keyed by the field's
+  `key`, not its label**: the label is what a human types in a spreadsheet, the
+  key is what the product stores.
+
+### Validation is the API's own, not a second copy
+
+Each row's details are checked with `validateAttributes` — the same function
+`assertValidDocument` refuses with. So "Fit must be one of Regular, Slim,
+Relaxed, Oversized" is written once, and a sheet's error cannot drift from the
+endpoint's.
+
+It runs where the value will actually be applied:
+
+| Row | Behaviour |
+|---|---|
+| **create** | always validated — a missing required field is an error the operator sees while reviewing, not at row 12 of the commit |
+| **update**, columns filled | validated, and written |
+| **update**, columns blank | **nothing is sent** |
+
+That last row is the one that matters. D64 gives the attributes document
+**replace** semantics: `{}` means "this product has no business details", so an
+import that sent an empty object for a row whose columns were blank would
+**erase** what the product holds. `undefined` and `{}` look alike in a debugger
+and are opposite instructions; a sheet that ignores those columns must leave
+them alone.
+
+### Still not carried by the import
+
+`brandId` (D133), `quantityType` / `unitOfMeasure` (D134) and barcodes have no
+column either. They were out of scope here and are listed so the gap is
+recorded rather than rediscovered: this decision closes the one the PO reported.
+
+### Mutation proof
+
+Five mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the template ignores the tenant's fields (**the reported bug**) | "appends one column per configured field" |
+| columns keyed by LABEL instead of key | "keyed by field key not label" |
+| a blank update sends `{}` | "an UPDATE whose columns are blank sends NOTHING" |
+| commit drops the attributes again | "carries the attributes through commit" |
+| the per-row validation is skipped | the bad-value case and the required-field case |
+
+The template is asserted by **reading the workbook back**, not by inspecting the
+array handed to ExcelJS: a column that exists in a variable and never reaches
+the file is exactly the defect class here.
+
+### A worked example ships with it
+
+`Docs/product-import-example-clothing.xlsx` — ten products for a clothing shop,
+covering all three item types and every business-detail field. It was verified
+by running it through the **real** `preview` parser (10 rows, no errors), not by
+eye.
+
+---
+
+### D188 — the receipt uses the trade's words, not correct English
+
+**Status:** accepted and **built**, 2026-09-11. Display only. No schema change,
+no migration, no behaviour change.
+
+### What was asked
+
+> "for the thermal bills need a little change in raw names in bill
+> Total → Bill Amount, Cash → Paid Amount, Balance → Bal. Amount
+> because it is the standed way, in restaurant bill also use this way"
+
+### Checked before changing
+
+`thermal-bill.ts` — the food-service renderer, written long before this branch —
+prints exactly:
+
+```
+Bill Amount : …
+Paid Amount : …
+Bal. Amount : …
+```
+
+So the PO is describing what half the product already does. The retail receipt
+said `Total` / `Paid` / `Balance`: correct English, and not what a till roll
+says in this market. A customer handed a slip should not have to work out that
+two shops mean the same thing by different words.
+
+### The decision
+
+The retail customer receipt adopts the restaurant renderer's three labels.
+
+| Was | Now |
+|---|---|
+| `Total` | **`Bill Amount`** |
+| `Paid` (ordinary) / `Cash` (over-tender) | **`Paid Amount`** |
+| `Balance` | **`Bal. Amount`** |
+
+**The payment BREAKDOWN keeps its method names.** `Cash`, `Card`, `Credit`
+there name how the sale was settled, not an amount, and renaming those would
+turn a method into a total.
+
+**One gain beyond consistency:** both layouts now read identically. D185's
+four-row over-tender layout and the ordinary one carry the same three labels,
+so a cashier is not learning two receipts.
+
+**The ` :` suffix is NOT copied.** The restaurant renderer appends a colon to
+each label; this receipt puts one on none of its other rows (Subtotal, Tax,
+Status), and three colons among seven rows reads worse than none.
+
+### Consequence for the tests, worth recording
+
+Both layouts now share labels, so several assertions that told them apart by
+WORD no longer can. Those were rewritten to discriminate by what actually
+differs:
+
+- the figure's **count** (the over-tender layout prints the total once; the old
+  one printed it three times);
+- the **payment breakdown**, which the ordinary layout keeps and the short one
+  drops;
+- the **value** in a shared row (`Paid Amount` is the tender in one layout and
+  the settled amount in the other).
+
+One case lost its teeth in the rename and was caught by re-running the
+mutations: "prints neither when the customer paid the exact amount" passed
+against a receipt that had wrongly taken the short path, because after the
+rename both layouts print `Paid Amount 2,478` and `Bal. Amount 0.00`. It now
+asserts the breakdown is present, which is the only thing that still separates
+them.
+
+---
+
+### D187 — a till that prints one bill offers one bill
+
+**Status:** accepted and **built**, 2026-09-11. Frontend only. No schema change,
+no migration.
+
+### What was reported
+
+> "when cacheir giving bill its needed to show only thermal bill, only in
+> quotations we use A4 bill. after click complete payment its go to thermal bill
+> print like in restaurant-pos"
+
+On a RETAIL till, completing a sale opened a dialog whose **primary** action was
+**Print A4 Bill**, beside **Preview A4 Bill** — for a document D163 removed from
+retail — with the receipt demoted to a text link between them. And with the A4
+gone, `printAfter` had nothing to print, so a retail sale completed and printed
+**nothing at all**.
+
+### What D163 missed
+
+D163 gated the Settings screen, the sale page and the *"print A4 bill after
+payment"* toggle on `showA4SaleDocument`. Three doors, closed.
+
+The fourth was the payment-complete dialog, and it is the one the cashier
+actually stands in front of. The page **already computed** `canPrintA4` and used
+it twice; it simply never passed it to the dialog.
+
+### The decision
+
+**One capability, three consequences.**
+
+1. **The dialog offers the bill this workspace issues.** Where there is no A4,
+   the receipt is the single, primary action — not a link between two buttons
+   for a document that cannot be printed.
+2. **`printAfter` chooses instead of refusing.** It read
+   `printAfter && canPrintA4`, so retail printed nothing. It now prints the A4
+   where there is one and the receipt where there is not.
+3. **The toggle comes back, renamed.** D163 hid it because there was no A4 to
+   print. There is still a receipt, and now that it prints automatically the
+   operator needs the switch that turns it off. It reads *"Print A4 bill after
+   payment"* or *"Print receipt after payment"*.
+
+Hardware and every other A4 workspace are unchanged: same two buttons, same
+toggle wording, same auto-print.
+
+### Two implementation notes
+
+**The auto-print is safe after an `await`.** D78 prints receipts from a hidden
+iframe rather than a popup, so there is no transient-activation window to miss —
+unlike the A4 path, which D74 had to open in the click's own turn.
+
+**It uses the local `sale`, `ctx` and `tender`, not the state just set.** React
+has not re-rendered at that point, and reading state a beat too early is exactly
+the D184 defect.
+
+### `SuccessView` moved out of `page.tsx`
+
+Next's App Router forbids extra named exports from a route file, so the dialog
+could not be rendered by a test while it lived there. It is now
+`components/pos/payment-success-dialog.tsx`. That is why this defect survived
+D163: **nothing had ever rendered this page**, so no test could see which
+buttons it drew.
+
+### Mutation proof
+
+| Mutation | Fails |
+|---|---|
+| the dialog ignores the flag (**the reported bug**) | the retail case and the primary-action case |
+| the A4 pair is dropped for everyone | the hardware case |
+| the receipt is demoted back to a text link | the primary-action case |
+
+The third survived its first run against a weaker assertion (`tagName` is a
+button, class contains `h-`) — true of almost any control. It now asserts the
+receipt carries the same `h-14` the New sale button does and is **not** styled
+with `underline`, which is what "primary, not a link" actually means.
+
+---
+
+### D186 — a reprint keeps the tender the first print recorded
+
+**Status:** accepted and **built**, 2026-09-11. **No schema change, no
+migration** — the number was already on disk.
+
+### What was reported
+
+> "in we view the bill in sales its display balance as 0 still why is that"
+
+D183—D185 fixed the receipt printed at the counter. Viewing the same bill from
+Sales still showed `Balance 0.00`.
+
+### The cause — and why the migration turned out to be unnecessary
+
+D183 recorded a known limit: the tender is not stored, so a reprint cannot show
+it, and persisting it needs columns on `Sale`.
+
+**That was wrong, and the D183 record overstated the problem.** `Receipt.content`
+is a JSON column, and `toReceiptContent` spreads the whole receipt payload into
+it. The FIRST print therefore stored `amountTendered` already — incidentally,
+not by design.
+
+What went wrong is the other half: `upsertReceipt` **overwrites** `content` on
+every print, and a reprint arrives with no tender of its own. So the first
+reprint erased the stored number and then rendered without it. The data was
+being deleted, not missing.
+
+### The decision
+
+**Carry the stored tender forward when the caller supplies none.**
+
+```ts
+const tender = amountTendered ?? (await this.storedTender(tenantId, saleId));
+```
+
+- **A supplied tender always wins.** The till is the authority for the sale it
+  just took; a stale stored value must never override what was just counted.
+- **It is written back**, so the second reprint still has it — otherwise the
+  bug would return one print later.
+- **The stored value is read defensively.** `content` is JSON written by this
+  service, but it is still a column anything could have put a shape into, and a
+  receipt that cannot be re-rendered is worse than one missing a row. Junk is
+  ignored AND not written back, so a bad value cannot outlive whatever put it
+  there.
+
+### What this does and does not reach
+
+| | |
+|---|---|
+| the receipt printed at the till | ✅ D183/D184 |
+| **a reprint from Sales** | ✅ **this decision** |
+| the sale DETAIL page (`/sales/:id`) | ❌ still reads `paidAmount` / `balanceAmount` |
+| the A4 invoice | ❌ same |
+
+Receipts printed **before** D183 have nothing stored and render exactly as they
+always did, which is what the PO asked for: *"dont needed to fix old bill"*.
+
+### Mutation proof
+
+Three mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the stored tender is not carried forward (**the reported bug**) | the render case and the write-back case |
+| the stored value overrides a supplied one | "a supplied tender wins" |
+| the defensive type check is dropped | "ignores a stored value that is not a usable number" |
+
+The third survived its first run: `changeFor` already rejects junk when
+rendering, so the check looked redundant. It is not — without it the junk is
+**written back** into `content` and persists. The test now pins that, which is
+what makes the branch killable.
+
+---
+
+### D185 — the receipt says four things, and none of them twice
+
+**Status:** accepted and **built**, 2026-09-11. Frontend/API display only. No
+schema change, no migration.
+
+### What was reported
+
+D183/D184 worked, and the result was worse to read:
+
+```
+Total          Rs. 3,200.00
+Paid           Rs. 3,200.00     <- the total again
+Balance        Rs.     0.00     <- nothing
+Cash received  Rs. 3,500.00
+Change         Rs.   300.00
+Status         PAID
+Cash           Rs. 3,200.00     <- the total a third time
+```
+
+> "i think it display same data 3, like total, paid, cash — i want is display
+> total, customer given amount, customer recive balance and status"
+
+Correct. `Paid` equals the total on any settled sale, `Balance` is 0.00 by
+definition when it is, and the trailing `Cash` row is the payment breakdown
+repeating the total once more. The two figures the customer actually came for
+were buried among five that told them nothing.
+
+### The decision
+
+**On an over-tendered cash sale, four rows:**
+
+```
+Total     Rs. 3,200.00
+Cash      Rs. 3,500.00
+Balance   Rs.   300.00
+Status    PAID
+```
+
+`Cash` is what was handed over; `Balance` is what comes back. The PO chose
+those words, and on this receipt they are unambiguous: nothing is owed, so
+`Balance` can only mean the money going back across the counter.
+
+### What is deliberately unchanged
+
+Every other receipt keeps `Paid` / `Balance` and its full payment breakdown.
+There `Balance` means money still **owed**, and the breakdown is the only
+record of how a credit or split sale was settled. A card sale, a credit sale,
+a restaurant bill and every reprint are byte-for-byte as before.
+
+### The split-tender correction
+
+The first version suppressed the payment rows whenever there was change, and
+kept them only when there were several. Writing the test found the flaw: on a
+**split** tender the change is not `tendered — total` at all — the cash covers
+only its own share, so the subtraction is meaningless and would print a
+negative.
+
+The till never sends a tender for a split (it is sent only in single-method
+CASH mode), so the short layout is now gated on **exactly one payment**, which
+states what was already true instead of guarding a case the caller can reach.
+A split keeps the full layout, and a test pins it.
+
+### Mutation proof
+
+Six mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the short layout is never used (**the reported clutter, restored**) | the four-row case and the derivation case |
+| the change guard is dropped | all three "prints neither" cases |
+| `Cash` prints the total rather than the tender | the four-row case |
+| the change is computed the wrong way round | three cases |
+| a split tender takes the short layout | "KEEPS the full layout when split" |
+| the duplicated payment row is printed again | the four-row case and the suppression case |
+
+---
+
+### D184 — the tender is captured when it is true, not when it is printed
+
+**Status:** accepted and **built**, 2026-09-11. Frontend only, one file. No
+schema change, no migration.
+
+### What was reported
+
+D183 shipped and the receipt still printed no change. A Rs 3,776 sale paid with
+Rs 4,000 printed `Paid 3,776 / Balance 0.00` — exactly as before the fix.
+
+### Why D183 did not work
+
+Not the server. Verified against the RUNNING API before touching anything: the
+live build renders the rows correctly when the field arrives.
+
+```
+Total  2,750.00 | Paid  2,750.00 | Balance  0.00
+Cash received  9,999.00 | Change  7,249.00 | PAID
+```
+
+The client never sent it. `payment/page.tsx` carries:
+
+```ts
+React.useEffect(() => {
+  setTendered(total ? total.toFixed(2) : '');
+}, [total]);
+```
+
+Completing a sale calls `cart.clearCart()`. That changes `total`, which fires
+this effect, which **overwrites `tendered`** — and all of it happens before the
+operator reaches the Thermal receipt button. D183 read `tendered` at print time
+and always found the reset value, so its own guard correctly decided there was
+no change to report.
+
+### The decision
+
+**Snapshot the tender at completion, beside the sale itself.**
+
+`completedTender` is set in the same block as `setCompleted(sale)` and
+deliberately BEFORE `clearCart()`. `printReceipt` reads the snapshot, never the
+live field.
+
+The guard moves with it: only a cash over-tender is kept, so every other shape
+stores `null` and prints nothing, exactly as D183 intended.
+
+### Why the tests did not catch it
+
+D183's spec covers `renderCustomerReceipt` thoroughly — six cases, five
+mutations, all killed — and every one of them still passes. They test the
+TEMPLATE. Nothing tested the seam between the till and the template, and the
+defect lived entirely in that seam: correct renderer, correct endpoint, correct
+DTO, and a caller reading its own state one beat too late.
+
+This is the shape D134's spec was written for and the shape `6.1b` shipped in:
+every layer green, the chain broken at the join. The manual case that catches
+it — **DOC-050** — was written with D183 and had not been run yet.
+
+---
+
+### D183 — the receipt says what crossed the counter, and what went back
+
+**Status:** accepted and **built**, 2026-09-10. **No schema change, no
+migration.** Retail/hardware till only.
+
+### What was reported
+
+A sale of **Rs 2,478** paid with **Rs 5,000**. The payment screen showed
+“Change Rs 2,522.00” twice. The printed bill showed:
+
+> Total **2,478** · Paid **2,478** · Balance **0.00** · Status PAID · Cash **2,478**
+
+The customer walked away with no record of the 5,000 they handed over or the
+2,522 they got back.
+
+### Where it was lost
+
+`pos/payment/page.tsx`:
+
+```ts
+if (mode === 'CASH') {
+  paidAmount = total;
+  payments = [{ method: 'CASH', amount: total }];   // the tender dies here
+}
+```
+
+`tendered` is local state, used for the on-screen change display and then
+discarded. It never reached the API, so no document could print it. The
+receipt was faithfully printing the only numbers it was given.
+
+### What this decision does NOT do, and why
+
+The obvious fix — “set Paid to 6,000 and Balance to the change” — breaks two
+things, both silently:
+
+1. **`balanceAmount` means money still OWED.** `credit.service` sums sales with
+   `balanceAmount > 0` to build the debtors list. Writing the change there puts
+   a walk-in customer on it, owing the shop's own money back.
+2. **`Payment.amount` feeds cash reconciliation.** `dashboard.repository`
+   groups payments by method and sums `amount`. Recording 5,000 would report
+   Rs 2,522 more cash in the drawer than went into it.
+
+The sale genuinely was **paid 2,478, owing 0**. The accounting was never wrong.
+What was missing is that the tender and the change were **never recorded as
+receipt facts**.
+
+Two lighter routes were checked and are closed: `Sale` has no JSON column to
+tuck them into, and `SalePaymentInputDto.amount` is `@IsPositive()`, so the
+change cannot be stored as a negative payment row either.
+
+### The decision
+
+**`POST /receipts/:saleId/customer` takes an optional `amountTendered`, and the
+template derives the change from it.**
+
+```
+Total            Rs. 2,478.00
+Paid             Rs. 2,478.00
+Balance          Rs.     0.00
+Cash received    Rs. 5,000.00      <- new
+Change           Rs. 2,522.00      <- new
+Status           PAID
+```
+
+- **The change is DERIVED, not sent.** The caller passes only what it observed.
+  A caller cannot make the paper print a change figure that does not follow
+  from the two amounts printed beside it.
+- **Nothing prints unless there is real change.** Exact money, an under-tender
+  (that is a balance, and the rows above already say so) and a sub-cent
+  rounding artefact all print nothing.
+- **The body is optional.** A card sale, a credit sale, every restaurant bill
+  and every REPRINT send nothing and render byte-for-byte as before.
+- `paidAmount`, `balanceAmount` and `Payment.amount` are untouched.
+
+### Deliberately out of scope: the reprint and the A4
+
+The tender is **not stored**, so:
+
+- a **reprint** from Sales history re-renders without it — `reprintCustomerReceipt`
+  calls the same endpoint with no body, and cannot honestly claim a tender it
+  never saw;
+- `/sales/:id` and the **A4 invoice** likewise show only what is stored.
+
+Persisting it needs two nullable columns on `Sale`, which is a shared table
+that hardware and restaurant both write to. The PO declined that scope for now,
+correctly: there was an **unresolved drift migration**
+(`20260828081727`) making the API suite red at the time, and stacking a new
+migration on top of it is how a schema gets into a state nobody can reason
+about. Recorded here as the known limit rather than half-done.
+
+**2026-09-14:** that drift folder is gone and the suite is green, so this
+objection no longer stands. The scope decision does — persisting the tender is
+still two nullable columns on a table hardware and restaurant share, and still
+not done.
+
+One thing this DOES reach: `toReceiptContent` spreads the receipt data into
+`Receipt.content`, a JSON column, so the **original** receipt keeps a permanent
+record of the tender even though a reprint re-renders without it.
+
+### A redundant guard of my own, found by mutation
+
+The first version had two guards: `tendered <= total` and `change <= 0`. The
+second fully subsumes the first, so **no mutation could kill it** — which is
+the definition of a branch doing no work. Removed rather than covered with a
+test. Recorded because it is the D30 failure mode found in new code.
+
+### Mutation proof
+
+Five mutations, each failing the case that carries its decision:
+
+| Mutation | Fails |
+|---|---|
+| the rows are never printed (**the reported bug, restored**) | the value case and the derivation case |
+| the change guard is dropped | all three “prints neither” cases |
+| “Cash received” prints the total rather than the tender | the value case |
+| the change is computed the wrong way round | three cases |
+| the sub-cent guard is dropped | exact-money and rounding-artefact |
+
+`renderCustomerReceipt` had **no spec at all** before this, which is why every
+row it prints was unasserted and this went unnoticed.
+
+---
+
 ### D182 — merging `fix/restaurant-bill-preview`: how each clash was decided
 
 One commit, forked from `9ccc4bb`: unattended printing comes back — a print

@@ -19,6 +19,9 @@ import * as bcrypt from 'bcryptjs';
 import { BUSINESS_PROFILE_PRESETS } from '../src/business-profile-presets';
 import { linkUsersToRoles, seedTenantRoles, syncPermissionCatalogue } from '../src/seed-roles';
 import { MOCK_HARDWARE_PRODUCTS, mockCategoryId, mockCategoryNames } from '../src/mock-catalog';
+import { type CataloguePack, seedCatalogue } from '../src/catalogue-pack';
+import { CLOTHING_CATALOGUE } from '../src/mock-clothing';
+import { GROCERY_CATALOGUE } from '../src/mock-grocery';
 
 const prisma = new PrismaClient();
 
@@ -48,6 +51,40 @@ const RESTAURANT_OWNER_EMAIL = 'restaurant.owner@axlopos.test';
 const RESTAURANT_OWNER_PASSWORD = 'Restaurant123!';
 const RESTAURANT_BRANCH_ID = 'brn_resto';
 const RESTAURANT_REGISTER_ID = 'reg_resto';
+
+/*
+ * D190/D191 — the two RETAIL workspaces.
+ *
+ * The seed grew a hardware tenant, a restaurant tenant and a platform console,
+ * and never a retail one — so every retail workspace on the team was
+ * hand-provisioned on one machine. Credentials for it are useless to anyone
+ * else, because the tenant does not exist in their database: sharing a password
+ * cannot share a row.
+ *
+ * D191 made it TWO. `RETAIL` covers both trades and they exercise opposite
+ * halves of the catalogue: clothing sells a variant chain (Size x Colour, a
+ * barcode and a stock row each), grocery sells by weight (`DECIMAL` quantity,
+ * `kg` and `L`). One demo tenant could only ever show one of them, and a
+ * developer reviewing grocery work in a clothing shop is reviewing nothing.
+ *
+ * Both carry the catalogue the Product Owner actually built in the app,
+ * exported by `prisma/export-catalogue.ts` — not an invented stand-in. The
+ * whole point is that a teammate opens the same shop the PO is describing.
+ */
+const CLOTHING_TENANT_ID = 'tnt_clothing';
+const CLOTHING_BRANCH_ID = 'brn_clothing';
+const CLOTHING_REGISTER_ID = 'reg_clothing';
+const CLOTHING_SLUG = 'clothing-demo';
+const CLOTHING_OWNER_EMAIL = 'owner@kandyapparel.test';
+
+const GROCERY_TENANT_ID = 'tnt_grocery';
+const GROCERY_BRANCH_ID = 'brn_grocery';
+const GROCERY_REGISTER_ID = 'reg_grocery';
+const GROCERY_SLUG = 'grocery-demo';
+const GROCERY_OWNER_EMAIL = 'owner@grocery.test';
+
+/** Shared by both retail workspaces; documented in README.md, never printed. */
+const RETAIL_OWNER_PASSWORD = 'Retail123!';
 
 async function main(): Promise<void> {
   const tenant = await prisma.tenant.upsert({
@@ -219,12 +256,25 @@ async function main(): Promise<void> {
   const platform = await seedPlatformConsole(await bcrypt.hash(PLATFORM_ADMIN_PASSWORD, SALT_ROUNDS));
   const restaurant = await seedRestaurant(await bcrypt.hash(RESTAURANT_OWNER_PASSWORD, SALT_ROUNDS));
   const restaurantRoles = await seedTenantRoles(prisma, restaurant.id, 'RESTAURANT');
+  const retailHash = await bcrypt.hash(RETAIL_OWNER_PASSWORD, SALT_ROUNDS);
+  const clothing = await seedRetailShop(retailHash, CLOTHING_SHOP);
+  const grocery = await seedRetailShop(retailHash, GROCERY_SHOP);
+  const clothingRoles = clothing ? await seedTenantRoles(prisma, clothing.id, 'RETAIL') : [];
+  const groceryRoles = grocery ? await seedTenantRoles(prisma, grocery.id, 'RETAIL') : [];
 
   // Phase 1.5.4: link seeded users to their role rows so a development database
   // exercises DATABASE resolution rather than the legacy fallback. Safe because
   // parity is proven — the rows grant exactly what the enum granted.
+  /*
+   * D190 — retail needs no explicit role wiring, unlike the waiter and the
+   * kitchen below. Its templates are Owner and Cashier, whose keys match
+   * their `UserRole` values, so `linkUsersToRoles` matches them by name.
+   */
   const linked =
-    (await linkUsersToRoles(prisma, tenant.id)) + (await linkUsersToRoles(prisma, restaurant.id));
+    (await linkUsersToRoles(prisma, tenant.id)) +
+    (await linkUsersToRoles(prisma, restaurant.id)) +
+    (clothing ? await linkUsersToRoles(prisma, clothing.id) : 0) +
+    (grocery ? await linkUsersToRoles(prisma, grocery.id) : 0);
 
   /*
    * The waiter is the one user whose permissions do NOT come from their enum
@@ -305,14 +355,259 @@ async function main(): Promise<void> {
   console.log('  Waiter      waiter@axlopos.test  (approval PIN 4444) — no Kitchen/Sales/Reports, read-only catalogue');
   console.log('  Kitchen     kitchen@axlopos.test  (approval PIN 5555) — the kitchen board only');
   console.log('');
+  for (const [shop, seeded] of [
+    [CLOTHING_SHOP, clothing],
+    [GROCERY_SHOP, grocery],
+  ] as const) {
+    if (!seeded) continue;
+    const { categories, products, variants, stockRows } = seeded.pack;
+    console.log('Seeded tenant:', seeded.id, '(RETAIL · LOCAL inventory · no accounting)');
+    console.log(
+      `  ${shop.name} — ${products} products, ${variants} variants, ` +
+        `${categories} categories, ${stockRows} stock rows`,
+    );
+    console.log(`  ${shop.blurb}`);
+    console.log('Login users:');
+    // Same rule as the restaurant above: the password is documented, not echoed.
+    console.log(`  Owner       ${shop.ownerEmail.padEnd(30)} workspace: ${shop.slug}`);
+    console.log('              password: see the seeded-logins table in README.md');
+    console.log(`  Cashier     ${shop.cashierEmail.padEnd(30)} (approval PIN ${shop.cashierPin})`);
+    console.log('');
+  }
   console.log(`\nPlatform console: ${platform.id}`);
   console.log(`  Platform admin  ${PLATFORM_ADMIN_EMAIL} / ${PLATFORM_ADMIN_PASSWORD}`);
   console.log('                  manages workspaces and users; refused every workspace route.\n');
 
   console.log(`Permission catalogue: ${permissionCount} keys`);
-  console.log(`Roles: ${tileRoles.length} for ${tenant.id}, ${restaurantRoles.length} for ${restaurant.id}`);
+  console.log(
+    `Roles: ${tileRoles.length} for ${tenant.id}, ${restaurantRoles.length} for ${restaurant.id}, ` +
+      `${clothingRoles.length} for ${CLOTHING_TENANT_ID}, ${groceryRoles.length} for ${GROCERY_TENANT_ID}`,
+  );
   console.log(`Users linked to role rows: ${linked} (these resolve permissions from the database)`);
   /* eslint-enable no-console */
+}
+
+/**
+ * D191 — what distinguishes one retail workspace from another.
+ *
+ * Everything a clothing shop and a grocery need from the seed is the same
+ * except these fields and the catalogue. Writing the seeder twice would mean
+ * two places to fix the day a third trade appears, and the second copy would
+ * be the one that drifts.
+ */
+interface RetailShop {
+  tenantId: string;
+  branchId: string;
+  registerId: string;
+  slug: string;
+  name: string;
+  branchName: string;
+  /*
+   * The staff the Product Owner actually signs in as, not a house style.
+   *
+   * `clothing.owner@axlopos.test` read tidily and was wrong in the way that
+   * matters: the PO would demo with `owner@kandyapparel.test` and the team
+   * would be handed a different address for the same shop, so "use my login"
+   * stopped being true the moment it was written down. `@@unique([tenantId,
+   * email])` is per TENANT, so the seeded workspace and the PO's own hand-made
+   * one can hold the same address without colliding.
+   */
+  ownerName: string;
+  ownerEmail: string;
+  cashierName: string;
+  cashierEmail: string;
+  /** PINs answer in-POS approval prompts (D48); they are not a login. */
+  ownerPin: string;
+  cashierPin: string;
+  catalogue: CataloguePack;
+  /** One line for the seed console, so a reader knows why both exist. */
+  blurb: string;
+}
+
+const CLOTHING_SHOP: RetailShop = {
+  tenantId: CLOTHING_TENANT_ID,
+  branchId: CLOTHING_BRANCH_ID,
+  registerId: CLOTHING_REGISTER_ID,
+  slug: CLOTHING_SLUG,
+  name: 'Kandy Apparel',
+  branchName: 'Main Store',
+  ownerName: 'Nimal Perera',
+  ownerEmail: CLOTHING_OWNER_EMAIL,
+  cashierName: 'Sanduni Silva',
+  cashierEmail: 'cashier@kandyapparel.test',
+  ownerPin: '6666',
+  cashierPin: '7777',
+  catalogue: CLOTHING_CATALOGUE,
+  blurb: 'variants across Size and Colour, barcodes, per-variant stock',
+};
+
+const GROCERY_SHOP: RetailShop = {
+  tenantId: GROCERY_TENANT_ID,
+  branchId: GROCERY_BRANCH_ID,
+  registerId: GROCERY_REGISTER_ID,
+  slug: GROCERY_SLUG,
+  name: 'Colombo Grocery Mart',
+  branchName: 'Main Store',
+  ownerName: 'Grocery Owner',
+  ownerEmail: GROCERY_OWNER_EMAIL,
+  cashierName: 'Grocery Cashier',
+  cashierEmail: 'cashier@grocery.test',
+  ownerPin: '8888',
+  cashierPin: '9999',
+  catalogue: GROCERY_CATALOGUE,
+  blurb: 'sold by weight — DECIMAL quantities in kg and L',
+};
+
+/**
+ * D191 — one retail workspace, carrying a catalogue exported from the real shop.
+ *
+ * ## Why this can return `null`
+ *
+ * `Tenant.slug` is globally `@unique`, and the Product Owner's own hand-made
+ * workspaces hold `grocery-demo` on their machine. Creating the seeded tenant
+ * there would raise `P2002` and take the whole seed down with it — on the one
+ * machine whose database matters most.
+ *
+ * The alternatives were worse. Renaming their tenant to claim the slug takes
+ * their work hostage to a convention, which D190 already refused. Adopting the
+ * row and writing into it makes the seed overwrite a workspace someone is
+ * actively using. So the seed **stands aside**: it says plainly that the slug is
+ * spoken for, and seeds nothing.
+ *
+ * On every other machine — every teammate's, and CI's — nothing holds the slug
+ * and the workspace is created normally. That is the case this decision exists
+ * to serve, which is why it is verified against a database seeded from EMPTY
+ * rather than against the author's: the author's is the one database where the
+ * skip fires, so it is the one database that cannot prove the happy path.
+ */
+async function seedRetailShop(passwordHash: string, shop: RetailShop) {
+  const holder = await prisma.tenant.findUnique({
+    where: { slug: shop.slug },
+    select: { id: true, name: true },
+  });
+  if (holder && holder.id !== shop.tenantId) {
+    /* eslint-disable-next-line no-console */
+    console.warn(
+      `  ! '${shop.slug}' is already used by '${holder.name}' (${holder.id}); ` +
+        `skipping the seeded ${shop.name}. Rename or remove that workspace to seed it.`,
+    );
+    return null;
+  }
+
+  const tenant = await prisma.tenant.upsert({
+    where: { id: shop.tenantId },
+    update: { name: shop.name, slug: shop.slug },
+    create: { id: shop.tenantId, name: shop.name, slug: shop.slug },
+  });
+
+  const branch = await prisma.branch.upsert({
+    where: { id: shop.branchId },
+    update: {},
+    create: { id: shop.branchId, tenantId: tenant.id, name: shop.branchName, code: 'MAIN' },
+  });
+
+  await prisma.register.upsert({
+    where: { id: shop.registerId },
+    update: {},
+    create: {
+      id: shop.registerId,
+      tenantId: tenant.id,
+      branchId: branch.id,
+      name: 'Counter 1',
+      code: 'C1',
+    },
+  });
+
+  const profile = { businessType: 'RETAIL' as const, ...BUSINESS_PROFILE_PRESETS.RETAIL };
+  await prisma.tenantBusinessProfile.upsert({
+    where: { tenantId: tenant.id },
+    update: profile,
+    create: { tenantId: tenant.id, ...profile },
+  });
+
+  /*
+   * Pin the shop timezone, exactly as `provision-tenant` does, so the workspace
+   * a developer reviews has the same shape as one a shop is given. The value
+   * equals `DEFAULT_TIME_ZONE`, so nothing renders differently today — what the
+   * row buys is that it is a STATED setting rather than a fallback, and a later
+   * change to the default cannot silently re-date this tenant.
+   *
+   * Guarded by a lookup rather than upserted: `(tenantId, branchId)` carries no
+   * unique index, so a re-seed would otherwise stack a second row.
+   *
+   * No business detail DEFINITIONS are written. D161 makes them a tenant
+   * override and `schemaFor` falls back to RETAIL's shipped fields when there is
+   * none, so restating Material / Fit / Care instructions / Gender / Season here
+   * would freeze today's list into this tenant and stop it tracking the domain.
+   * The VALUES the PO set on each product travel in the catalogue `attributes`.
+   */
+  const settings = await prisma.tenantSettings.findFirst({
+    where: { tenantId: tenant.id, branchId: null },
+    select: { id: true },
+  });
+  if (!settings) {
+    await prisma.tenantSettings.create({
+      data: { tenantId: tenant.id, branchId: null, data: { timezone: 'Asia/Colombo' } },
+    });
+  }
+
+  const ownerPin = await bcrypt.hash(shop.ownerPin, SALT_ROUNDS);
+  const cashierPin = await bcrypt.hash(shop.cashierPin, SALT_ROUNDS);
+  const key = shop.slug.replace(/-demo$/, '').replace(/-/g, '_');
+  const users = [
+    {
+      id: `usr_${key}_owner`,
+      name: shop.ownerName,
+      email: shop.ownerEmail as string | null,
+      role: UserRole.OWNER,
+      passwordHash: passwordHash as string | null,
+      pinHash: ownerPin as string | null,
+      /*
+       * Branch-scoped, matching the source workspaces. The hardware and
+       * restaurant owners are branch-less because those tenants are modelled as
+       * multi-branch; a one-shop retailer signs in at their shop, and an owner
+       * with no branch has no register to open a till on.
+       */
+      branchId: branch.id as string | null,
+    },
+    {
+      id: `usr_${key}_cashier`,
+      name: shop.cashierName,
+      email: shop.cashierEmail,
+      role: UserRole.CASHIER,
+      passwordHash,
+      pinHash: cashierPin,
+      branchId: branch.id,
+    },
+  ];
+
+  for (const u of users) {
+    await prisma.user.upsert({
+      where: { id: u.id },
+      update: {
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        passwordHash: u.passwordHash,
+        pinHash: u.pinHash,
+        branchId: u.branchId,
+        isActive: true,
+      },
+      create: {
+        id: u.id,
+        tenantId: tenant.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        passwordHash: u.passwordHash,
+        pinHash: u.pinHash,
+        branchId: u.branchId,
+      },
+    });
+  }
+
+  const pack = await seedCatalogue(prisma, tenant.id, branch.id, shop.catalogue);
+  return { ...tenant, pack };
 }
 
 /**

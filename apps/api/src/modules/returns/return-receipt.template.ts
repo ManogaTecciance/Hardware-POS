@@ -19,6 +19,19 @@ export interface ReturnReceiptLine {
 
 export interface ReturnReceiptData {
   storeName: string;
+  /**
+   * D195 — the shop's logo, already inlined as a `data:` URI.
+   *
+   * D193 put this on the sales receipt and the A4 letterhead and missed the
+   * return, which is the one a customer is handed while they are unhappy. Same
+   * field, same contract: a `data:` URI and not a path, because this HTML is
+   * printed from a hidden iframe in the web app where `/uploads/<key>` would
+   * resolve against the web app and 404.
+   *
+   * Optional, and absent means no logo — the receipt then prints exactly what
+   * it printed before, which is what every tenant without one gets.
+   */
+  logoDataUri?: string | null;
   branchName: string | null;
   registerName: string | null;
   returnNumber: string;
@@ -56,6 +69,20 @@ function money(amount: number): string {
 
 const PRINT_BUTTON = `<button class="no-print print-btn" onclick="window.print()">Print</button>`;
 
+/**
+ * D195 — the logo above the shop name, when there is one.
+ *
+ * The NAME is never replaced by the logo, for the reason D193 gives: a roll is
+ * 80mm and monochrome, and a logo that prints as a grey smear on a refund slip
+ * carrying no shop name is worse than no logo. On THIS receipt it matters more
+ * than on the sales one — a refund slip is the document a customer keeps to
+ * prove the shop took the goods back.
+ */
+function logoBlock(d: ReturnReceiptData): string {
+  if (!d.logoDataUri) return '';
+  return `<div class="logo"><img src="${esc(d.logoDataUri)}" alt="${esc(d.storeName)}" /></div>`;
+}
+
 export function renderReturnReceipt(d: ReturnReceiptData): string {
   const rows = d.items
     .map(
@@ -75,6 +102,9 @@ export function renderReturnReceipt(d: ReturnReceiptData): string {
   * { box-sizing: border-box; }
   body { font-family: ui-monospace, "Courier New", monospace; color: #111; margin: 0; padding: 16px; }
   .receipt { max-width: 320px; margin: 0 auto; }
+  /* D195 — sized in mm because the output is paper, not a screen. */
+  .logo { text-align: center; margin-bottom: 6px; }
+  .logo img { max-height: 18mm; max-width: 100%; object-fit: contain; }
   h1 { font-size: 18px; text-align: center; margin: 0 0 2px; }
   .sub { text-align: center; color: #555; font-size: 12px; margin-bottom: 8px; }
   .refund-banner { text-align:center; font-weight:bold; letter-spacing:1px; border:1px solid #333; padding:4px; margin-bottom:10px; }
@@ -94,6 +124,7 @@ export function renderReturnReceipt(d: ReturnReceiptData): string {
 <body>
   ${PRINT_BUTTON}
   <div class="receipt">
+    ${logoBlock(d)}
     <h1>${esc(d.storeName)}</h1>
     <div class="sub">${d.branchName ? esc(d.branchName) : ''}${d.registerName ? ` · ${esc(d.registerName)}` : ''}</div>
     <div class="refund-banner">RETURN / REFUND</div>
