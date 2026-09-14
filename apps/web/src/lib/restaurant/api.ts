@@ -960,6 +960,13 @@ export const kitchenPrinters = {
     );
   },
   /** D181 — a self-test page: printed now, or queued for the branch's agent. */
+  /** D183 — a real delete; the server unlinks stations, clears defaults and fails queued jobs. */
+  remove(session: Session, branchId: string, printerId: string) {
+    return api.del<{ ok: true; unlinkedStations: number; failedPendingJobs: number }>(
+      `/restaurant/branches/${branchId}/kitchen-printers/${printerId}`,
+      auth(session),
+    );
+  },
   testPrint(session: Session, branchId: string, printerId: string) {
     return api.post<TestPrintResult>(
       `/restaurant/branches/${branchId}/kitchen-printers/${printerId}/test-print`,

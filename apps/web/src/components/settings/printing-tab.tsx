@@ -910,6 +910,7 @@ function PrinterRow({
   canManage: boolean;
   onChange: () => Promise<void>;
 }) {
+  const confirm = useConfirm();
   const [test, setTest] = React.useState<TestState>({ kind: 'idle' });
   const [editingStations, setEditingStations] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
@@ -976,6 +977,35 @@ function PrinterRow({
     try {
       await kitchenPrinters.update(session, branchId, printer.id, { isActive: !printer.isActive });
       await onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // D183 — gone for good, with the consequences said up front: the queue
+  // and the defaults are cleaned server-side, and the dialog names the
+  // stations that lose their printer so nobody discovers it at dinner.
+  const remove = async () => {
+    const served = printer.stationIds
+      .map((id) => stations.find((s) => s.id === id)?.name)
+      .filter((n): n is string => Boolean(n));
+    const ok = await confirm({
+      title: `Remove ${printer.name}?`,
+      message:
+        (served.length > 0
+          ? `${served.join(', ')} will have no printer until you link another. `
+          : '') +
+        'Anything still queued for it is marked failed. Tickets already printed keep their record. This cannot be undone.',
+      confirmLabel: 'Remove printer',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await kitchenPrinters.remove(session, branchId, printer.id);
+      await onChange();
+    } catch (err) {
+      setTest({ kind: 'failed', error: err instanceof Error ? err.message : 'Could not remove printer' });
     } finally {
       setBusy(false);
     }
@@ -1079,6 +1109,18 @@ function PrinterRow({
           {canManage ? (
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => void toggleActive()}>
               {printer.isActive ? 'Turn off' : 'Turn on'}
+            </Button>
+          ) : null}
+          {canManage ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              className="text-danger hover:text-danger"
+              onClick={() => void remove()}
+              aria-label={`Remove ${printer.name}`}
+            >
+              Remove
             </Button>
           ) : null}
           {canManage ? (

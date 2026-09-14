@@ -2,6 +2,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -176,6 +177,61 @@ export class KitchenPrintersController {
       updated,
       links.map((l) => l.stationId),
     );
+  }
+
+  /**
+   * D183 — remove a printer. "Turn off" already existed; this is for the
+   * printer that was replaced, mis-added, or moved to another PC, which
+   * otherwise lingers in every list forever.
+   *
+   * A real delete, because nothing that matters points at it by foreign
+   * key: print-attempt rows cascade (they are the printer's own history),
+   * tickets keep their record with `primaryPrinterId` set to null. What the
+   * database does NOT know about is cleaned up here in the same transaction:
+   * the station links (no FK on the printer side), the branch defaults that
+   * name it, and any bill or test page still queued for it — those are
+   * FAILED with a reason rather than left PENDING for a device that is gone.
+   */
+  @Delete(':printerId')
+  @RequirePermissions(Permission.KITCHEN_STATION_MANAGE)
+  async remove(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('branchId') branchId: string,
+    @Param('printerId') printerId: string,
+  ): Promise<{ ok: true; unlinkedStations: number; failedPendingJobs: number }> {
+    const printer = await this.prisma.kitchenPrinter.findFirst({
+      where: { id: printerId, tenantId, branchId },
+      select: { id: true, name: true, code: true, role: true },
+    });
+    if (!printer) throw new NotFoundException('Printer not found');
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const links = await tx.kitchenStationPrinter.deleteMany({ where: { printerId: printer.id } });
+      const jobs = await tx.printJob.updateMany({
+        where: { tenantId, printerId: printer.id, status: 'PENDING' },
+        data: { status: 'FAILED', lastError: `Printer "${printer.name}" was removed` },
+      });
+      await tx.restaurantBranchConfig.updateMany({
+        where: { tenantId, branchId, defaultKitchenPrinterId: printer.id },
+        data: { defaultKitchenPrinterId: null },
+      });
+      await tx.restaurantBranchConfig.updateMany({
+        where: { tenantId, branchId, defaultReceiptPrinterId: printer.id },
+        data: { defaultReceiptPrinterId: null },
+      });
+      await tx.kitchenPrinter.delete({ where: { id: printer.id } });
+      return { unlinkedStations: links.count, failedPendingJobs: jobs.count };
+    });
+
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'KITCHEN_PRINTER_DELETED',
+      entityType: 'KitchenPrinter',
+      entityId: printer.id,
+      metadata: { branchId, code: printer.code, name: printer.name, role: printer.role, ...result },
+    });
+    return { ok: true, ...result };
   }
 
   /**

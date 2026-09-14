@@ -386,6 +386,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'PATCH /restaurant/branches/:branchId/kitchen-printers/:printerId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'DELETE /restaurant/branches/:branchId/kitchen-printers/:printerId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   // D142b — the three lane counts, so every chip on the board carries one.
   'GET /restaurant/branches/:branchId/kitchen-tickets/counts': {
     module: 'KITCHEN',

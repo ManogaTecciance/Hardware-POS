@@ -38,6 +38,7 @@ vi.mock('@/lib/restaurant/api', () => ({
     update: vi.fn(),
     setStations: vi.fn(),
     testPrint: vi.fn(),
+    remove: vi.fn(),
   },
   kitchenStations: { list: vi.fn() },
   printing: {
@@ -123,6 +124,7 @@ const mock = {
   create: vi.mocked(kitchenPrinters.create),
   update: vi.mocked(kitchenPrinters.update),
   setStations: vi.mocked(kitchenPrinters.setStations),
+  remove: vi.mocked(kitchenPrinters.remove),
   stations: vi.mocked(kitchenStations.list),
   agents: vi.mocked(printing.agents),
   queue: vi.mocked(printing.queue),
@@ -140,6 +142,7 @@ async function open(opts: { printers?: KitchenPrinterView[]; discovery?: Printer
   mock.create.mockImplementation(async (_s, _b, body) => ({ ...Q80B, ...body, id: 'prn_new', stationIds: [] }) as KitchenPrinterView);
   mock.update.mockImplementation(async (_s, _b, id, body) => ({ ...Q80B, ...body, id }) as KitchenPrinterView);
   mock.setStations.mockResolvedValue(Q80B);
+  mock.remove.mockResolvedValue({ ok: true, unlinkedStations: 1, failedPendingJobs: 0 });
   render(
     <ConfirmProvider>
       <PrintingTab session={session} branchId={BRANCH} />
@@ -318,6 +321,30 @@ describe('PrintingTab — adding a printer from what the agent found', () => {
     const add = screen.getAllByRole('button', { name: 'Add printer' }).at(-1) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
     expect(mock.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PrintingTab — removing a printer', () => {
+  it('Remove asks first, names the stations that lose their printer, then deletes and reloads', async () => {
+    await open({ printers: [Q80B] });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Kitchen XP-Q80B' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('Remove Kitchen XP-Q80B?');
+    expect(dialog.textContent).toContain('Main Kitchen will have no printer');
+    expect(mock.remove).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove printer' }));
+    await waitFor(() => expect(mock.remove).toHaveBeenCalledWith(session, BRANCH, 'prn_q80b'));
+    await waitFor(() => expect(mock.list).toHaveBeenCalledTimes(2));
+  });
+
+  it('cancelling the dialog deletes nothing', async () => {
+    await open({ printers: [Q80B] });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Kitchen XP-Q80B' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(mock.remove).not.toHaveBeenCalled();
+    expect(mock.list).toHaveBeenCalledTimes(1);
   });
 });
 
