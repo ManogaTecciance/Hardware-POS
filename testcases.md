@@ -875,6 +875,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | ADM-019 | Re-seeding converges rather than stacking (D169) | Run `pnpm db:seed` twice on the same database and re-count `retail-demo` | Identical both times: 5 categories, 2 products, 16 variants, 16 branch-inventory rows, 2 users, 2 roles and **exactly 1** settings row. `(tenantId, branchId)` has no unique index, so the settings row is guarded by a lookup | N | Not Run |
 | ADM-020 | Seeding leaves a hand-made tenant alone (D169) | On a machine that already has a hand-provisioned retail tenant, run `pnpm db:seed` and re-open it | Its products, users and slug are unchanged. The seeded `retail-demo` is added alongside; D169 does not migrate or rename anyone's workspace to claim the slug | N | Not Run |
 | ADM-021 | The seed does not echo the retail password (D169) | Read the `pnpm db:seed` console output | It prints the emails and PINs and points at README.md for the password. A credential echoed to a terminal reaches scrollback, CI logs and screenshots | N | Not Run |
+| ADM-022 | Both retail trades are seeded (D170) | On a fresh database: `pnpm db:seed`, then sign in at `clothing-demo` and at `grocery-demo` | Both open. Kandy Apparel has 16 products / 44 variants; Colombo Grocery Mart has 6 products sold by weight. D169 seeded one retail tenant with 2 products, so half the product model had no demo at all | P | Not Run |
+| ADM-023 | The demo catalogue is the real one, not a stand-in (D170) | In `clothing-demo` open any product the PO has described → compare with their workspace | Same names, SKUs, prices, option values, barcodes and stock. The pack is exported from the workspace, so a teammate opens the shop the PO is talking about rather than one that merely resembles it | P | Not Run |
+| ADM-024 | Grocery exercises what clothing cannot (D170) | In `grocery-demo` sell Rice or Coconut Oil | Quantity accepts a DECIMAL amount in `kg` / `L`. Clothing sells by the piece, so a clothing-only demo leaves decimal quantity and unit of measure untested | P | Not Run |
+| ADM-025 | A product keeps its zero or one default variant (D170) | Re-seed, then inspect any multi-variant product | At most ONE variant is default, and a product whose source had none still has none. `ProductVariant_productId_default_key` is a partial unique index Prisma cannot express, so a second default fails as a P2002 naming `productId` — which reads like a duplicate product | N | Not Run |
+| ADM-026 | The seed stands aside when a slug is taken (D170) | On a machine with a hand-made workspace already using `grocery-demo`, run `pnpm db:seed` | The seed prints `! 'grocery-demo' is already used by ...` and seeds nothing for it. The existing workspace keeps every row — the seed neither renames it nor writes into it. `clothing-demo` still seeds normally | N | Not Run |
+| ADM-027 | Refreshing a pack after changing the shop (D170) | Change a price in the app, re-run `db:export-catalogue` for that slug, re-seed a fresh database | The new price appears. The packs are generated, never hand-edited, so the catalogue cannot drift from the workspace it documents | P | Not Run |
 
 ## UI — Theme, Layout & Responsiveness
 
@@ -948,12 +954,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
 | RET | 18 | KIT | 22 |
-| EXC-T | 12 | ADM | 21 |
+| EXC-T | 12 | ADM | 27 |
 | EXC-D | 4 | UI | 33 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 724 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 730 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

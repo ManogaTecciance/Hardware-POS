@@ -10486,6 +10486,219 @@ screenshots.
 
 ---
 
+## D170 — the demo shops are the Product Owner's shops, exported not invented
+
+**Status:** accepted and **built**, 2026-09-14. No schema change, no migration.
+Supersedes the `retail-demo` tenant from [D169](#d169).
+
+### What was reported
+
+> "we needed to do like resturant and hardware to retail grocery and clothing …
+> i have data of grocery and retail and i can login … but others cant login to
+> my clothing store and grocery"
+
+and, on the seeder D169 had wired up:
+
+> "why you create a clothing.ts file others dont use that kind of file"
+
+### Two things were wrong, and only one of them was the one reported
+
+**D169 seeded one retail tenant. There are two trades.** `RETAIL` covers
+clothing and grocery, and they exercise opposite halves of the catalogue:
+clothing sells a variant chain (Size × Colour, a barcode and a stock row each),
+grocery sells by weight (`DECIMAL` quantity, `kg` and `L`). A single demo tenant
+can only ever show one of them, and a developer reviewing grocery work inside a
+clothing shop is reviewing nothing.
+
+**D169 pointed the seeder at `seed-packs/clothing.ts`, which is the wrong file.**
+That is the **provisioning starter kit** (D120) — five empty categories and two
+token products, deliberately thin because a real shop deletes whatever we
+invent. Wiring the demo tenant to it produced a two-product workspace where the
+Product Owner had built twenty. The objection was right, though not for the
+reason given: `clothing.ts` was not written for this, and a separate data file
+is in fact the existing hardware pattern (`mock-catalog.ts`).
+
+### The decision
+
+**A demo workspace carries the catalogue somebody actually built, exported from
+the app, not a stand-in written to resemble one.**
+
+| | `clothing-demo` | `grocery-demo` |
+|---|---|---|
+| Name | Kandy Apparel | Colombo Grocery Mart |
+| Products | 16 | 6 |
+| Variants | 44 | 9 |
+| Sold by | the piece | **weight** — `DECIMAL`, `kg` and `L` |
+
+The point is that a teammate opens the shop the PO is describing in the message
+they just sent. A plausible invented catalogue cannot do that: it is right in
+shape and wrong in every particular, which is worse than empty because it looks
+finished.
+
+### Three files, three jobs
+
+| File | Job | Hand-edited? |
+|---|---|---|
+| `src/mock-clothing.ts`, `src/mock-grocery.ts` | **data** | never — generated |
+| `src/catalogue-pack.ts` | **behaviour**: apply a pack to a tenant | yes, once |
+| `prisma/export-catalogue.ts` | **the generator** | yes, once |
+
+This is `mock-catalog.ts`'s split, extended for variants. Hardware could keep
+its data in one flat file because a hardware product is a row; a clothing
+product is a row plus dimensions plus options plus a variant per combination
+plus a stock row per variant, so the data needed a richer shape and the writing
+needed a function. A bug in `seedCatalogue` is fixed once for every pack.
+
+`seed-packs/clothing.ts` is **not** replaced. It keeps its D120 job: what a
+brand-new shop is provisioned with. The two are opposite by design — a starter
+kit should be thin because a real shop clears it out, and a demo should look
+like a shop that has been trading.
+
+### The packs carry no ids, deliberately
+
+Every lookup in `seedCatalogue` is by the key a human would use — a category's
+name, a product's SKU, a dimension's name. Ids are generated, so a pack cannot
+carry one, and a pack that did would only apply to the database that made it.
+That is precisely the bug this decision exists to fix, so it must not reappear
+inside the fix.
+
+It is also what makes a re-seed converge: rename a seeded product in the app and
+the next seed matches its SKU and renames it back, rather than creating a second
+product beside it.
+
+### Why `seedRetailShop` can return `null`
+
+`Tenant.slug` is globally `@unique`, and the PO's own hand-made workspace holds
+`grocery-demo` on their machine. Creating the seeded tenant there raises `P2002`
+and takes the whole seed down — on the one machine whose database matters most.
+
+Both alternatives were worse:
+
+- **Rename their tenant to claim the slug.** D169 already refused this: it takes
+  someone's work hostage to a convention.
+- **Adopt the row and write into it.** The seed would then overwrite a workspace
+  someone is actively using.
+
+So the seed **stands aside**, says plainly that the slug is spoken for, and
+seeds nothing. Verified: the holding tenant came through with zero rows written
+into it. On every teammate's machine and in CI nothing holds the slug and both
+workspaces are created normally.
+
+### Two defects the fresh-database test caught
+
+Neither was reachable from the author's database, which is the argument for
+seeding from **empty** rather than re-running against a database that already
+has the answer.
+
+**1. Two default variants.** `ProductVariant_productId_default_key` is a
+**partial** unique index:
+
+```sql
+CREATE UNIQUE INDEX ... ON "ProductVariant" ("productId") WHERE ("isDefault" = true)
+```
+
+Prisma cannot express a partial index, so the schema does not declare it and
+nothing in the type system stops a second default. The applier asked each
+variant in turn *"are you the declared default, or are you index 0?"*, which
+made both true, and it failed as a `P2002` naming `productId` — which reads like
+a duplicate **product**. Now decided once per product, and every variant is
+written not-default before the winner is promoted, so a re-seed that moves the
+default never holds two at once.
+
+**2. The applier invented a default that the source never stated.** Every
+product in both shops has **no** default variant; the index forbids two, not
+zero. Falling back to "index 0 wins" made the seeded shop differ from the real
+one. A pack that invents is a pack that cannot be trusted to reproduce the shop
+it came from, so a product with no declared default now gets none.
+
+### Verification
+
+Seeded into a **database created empty**, migrations forward, then compared
+against the source workspaces field by field: name, SKU, type, description,
+prices, cost, category, subcategory, brand, `quantityType`, unit of measure,
+reorder level, `attributes`, and per variant the SKU, barcode, prices,
+`isDefault`, every option value and the stock quantity.
+
+- **16/16 and 6/6 products match exactly**, by SET and not by count — equal
+  totals is the standard way a comparison passes while holding different rows.
+- **Run twice** — identical, and still an exact match.
+- **Negative control**: the two shops share **0** product keys. A comparison
+  that matched everything would pass the positive test too.
+- The comparison **throws** if the source holds no products, so it cannot pass
+  by inspecting nothing.
+
+One difference during the first run turned out not to be a defect: a shirt read
+21 in the pack and 19 in the source. `StockMovement` showed a real sale of 2
+units at `2026-09-14 05:21`, after the export ran. The exporter was right and
+the live shop had moved under it.
+
+### The staff are the PO's too, not a house style
+
+> "but here i use `owner@kandyapparel.test` and then other team mates get
+> another email ???"
+
+The first cut seeded `clothing.owner@axlopos.test`, matching the restaurant's
+naming. It read tidily and was wrong in the way that matters: the PO demos with
+`owner@kandyapparel.test`, so the team would have been handed a different
+address for the same shop and **"use my login" stopped being true the moment it
+was written down**. The whole decision is about a teammate opening the shop the
+PO is describing; handing them a different door undoes it.
+
+So the seeded staff are the source workspaces' staff, names included — Nimal
+Perera and Sanduni Silva in clothing, and the grocery pair. Safe because
+`@@unique([tenantId, email])` is per **tenant**: the PO's own hand-made
+workspace and the seeded one hold the same address without colliding.
+
+They are also **branch-scoped**, matching the source. The hardware and
+restaurant owners are branch-less because those tenants are modelled as
+multi-branch; a one-shop retailer signs in at their shop, and an owner with no
+branch has no register to open a till on.
+
+The password is the seed's own (`Retail123!`, documented in `README.md` and
+never echoed). A bcrypt hash cannot be read back, so the PO's local password
+could not have been carried even in principle — and a teammate needs a
+documented credential rather than one they have to be told privately.
+
+### Excluded, not deleted
+
+Four experiments sat in the clothing workspace — `Test` (25 variants, a third of
+the whole catalogue), `Test-2`, `Test-3` and `Scaff`. The instruction was to
+delete them and re-export.
+
+They are not inert. `Test-3` carries **twelve sale lines and four quotation
+lines**; `Scaff` five sales; `Test` two sales and twenty-seven stock movements.
+And the foreign keys are not uniform:
+
+| Reference | On delete |
+|---|---|
+| `SaleItem.productId` | **SET NULL** |
+| `QuotationItem.productId` | **SET NULL** |
+| `StockMovement.productId` | **CASCADE** |
+| `BranchInventory`, `ProductVariant` | CASCADE |
+| `ReturnItem.productId` | RESTRICT |
+
+So deleting them would not have failed — it would have succeeded and quietly
+orphaned nineteen sale lines and four quotation lines, and destroyed fifty stock
+movements, in the Product Owner's own traded-in workspace.
+
+`--exclude` was added instead. It keeps a product out of the **pack** and
+deletes nothing. The team gets a catalogue with no `Test-3` in it, which was the
+entire point, and the author's trading history is untouched. It reports which
+names matched and warns about any that did not, so a typo in the flag is visible
+rather than a silently larger catalogue.
+
+Matched by NAME rather than SKU, because the products worth excluding are
+reliably the ones nobody bothered to give a SKU.
+
+### Still not carried
+
+Sales history, customers, suppliers, quotations and promotions. A pack is a
+**catalogue**. Seeding a tenant's trading history would freeze one shop's
+invoice numbers into every developer's database, and the numbers would be wrong
+the moment anyone rang up a sale.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
