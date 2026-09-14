@@ -138,7 +138,9 @@ describe('Phase 5 — table session lifecycle', () => {
       { token: ownerToken(restaurant), body: {} },
     );
     expect(close.status).toBe(200);
-    expect(close.data.session.status).toBe('CLOSED');
+    // D153 — was CLOSED. The close raises the bill and HOLDS the table; the
+    // session is CLOSED by the payment that clears the bill, not by this call.
+    expect(close.data.session.status).toBe('BILLING');
     expect(close.data.saleId).toBeTruthy();
 
     // POSITIVE CONTROL: the Sale exists and its total matches the round.
@@ -149,13 +151,19 @@ describe('Phase 5 — table session lifecycle', () => {
     expect(sale.tenantId).toBe(restaurant.tenantId);
     expect(sale.branchId).toBe(branchId);
 
-    // MUTATION PROOF: closing again is refused (session already closed).
-    const secondClose = await http.request(
+    // MUTATION PROOF: closing again raises no second Sale. D153 — was a 409;
+    // a repeat on a table already at the till now answers with the SAME bill
+    // (idempotent), and the proof is that exactly one Sale exists for it.
+    const secondClose = await http.request<{ saleId: string }>(
       'POST',
       `/restaurant/table-sessions/${session.data.id}/close`,
       { token: ownerToken(restaurant), body: {} },
     );
-    expect(secondClose.status).toBe(409);
+    expect(secondClose.status).toBe(200);
+    expect(secondClose.data.saleId).toBe(close.data.saleId);
+    expect(
+      await prisma.sale.count({ where: { sourceRefKind: 'TABLE_SESSION', sourceRefId: session.data.id } }),
+    ).toBe(1);
   });
 
   it('idempotent round submission — same key returns the same round (scenario 11)', async () => {

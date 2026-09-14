@@ -656,6 +656,8 @@ export type UnifiedOrderStatus =
   | 'CONFIRMED'
   | 'IN_PROGRESS'
   | 'READY'
+  /** D153 — a dine-in bill at the till, not yet paid. */
+  | 'AWAITING_PAYMENT'
   | 'HANDED_OVER'
   | 'COMPLETED'
   | 'CANCELLED';
@@ -687,8 +689,19 @@ export interface UnifiedOrderView {
   total: string | null;
   /** D83 — the settled Sale, for viewing and reprinting the bill in place. */
   saleId: string | null;
+  /**
+   * D153 — the table session behind a dine-in row, null otherwise. What
+   * "Open in POS" and "Proceed to pay" address from the queue.
+   */
+  sessionId: string | null;
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
+  /**
+   * D153a — each round and where the kitchen has it. The card lists these
+   * so a two-round table reads "Round 1 · Ready / Round 2 · Preparing"
+   * rather than a bare "Preparing". Empty for a third-party row.
+   */
+  rounds: { roundNumber: number; status: OrderRoundStatus; items: { name: string; qty: number }[] }[];
   /**
    * D152 — whose order this is: the table's waiter for dine-in, the person who
    * keyed it for takeaway, null for a third-party row (nobody on the floor

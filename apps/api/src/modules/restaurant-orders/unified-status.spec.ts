@@ -70,3 +70,55 @@ describe('unifiedStatusForRestaurantOrder (D113 — rounds drive the queue)', ()
     }
   });
 });
+
+/**
+ * D153 — the session outranks the rounds once the bill is at the till.
+ *
+ * Paired: BILLING yields AWAITING_PAYMENT whatever the rounds say (positive),
+ * and the SAME rounds under OPEN, CLOSED or an absent session yield exactly
+ * what they did before D153 (negative) — a derivation that read "any session
+ * status set" as "at the till" would fail the second half.
+ */
+describe('unifiedStatusForRestaurantOrder (D153 — the session drives To pay)', () => {
+  const withSession = (
+    sessionStatus: 'OPEN' | 'BILLING' | 'CLOSED' | null | undefined,
+    roundStatuses: string[] = ['DELIVERED'],
+    orderStatus: 'SUBMITTED' | 'COMPLETED' | 'CANCELLED' = 'SUBMITTED',
+  ) =>
+    unifiedStatusForRestaurantOrder({ orderStatus, roundStatuses, takeawayStatus: null, sessionStatus });
+
+  it('BILLING puts the order in To pay, however far the kitchen got', () => {
+    expect(withSession('BILLING', ['DELIVERED'])).toBe('AWAITING_PAYMENT');
+    expect(withSession('BILLING', ['READY', 'DELIVERED'])).toBe('AWAITING_PAYMENT');
+    // A round the kitchen still holds does not keep the bill off the till.
+    expect(withSession('BILLING', ['SUBMITTED'])).toBe('AWAITING_PAYMENT');
+    expect(withSession('BILLING', [])).toBe('AWAITING_PAYMENT');
+  });
+
+  it('serving alone does not — DELIVERED rounds under an OPEN session still read Ready', () => {
+    expect(withSession('OPEN', ['DELIVERED'])).toBe('READY');
+    expect(withSession('OPEN', ['DELIVERED', 'SUBMITTED'])).toBe('IN_PROGRESS');
+    // Callers from before D153 pass no session at all and derive as they did.
+    expect(withSession(undefined, ['DELIVERED'])).toBe('READY');
+    expect(withSession(null, ['READY'])).toBe('READY');
+  });
+
+  it('the order shell still wins: a COMPLETED or CANCELLED order is never To pay', () => {
+    expect(withSession('BILLING', ['DELIVERED'], 'COMPLETED')).toBe('COMPLETED');
+    expect(withSession('BILLING', ['DELIVERED'], 'CANCELLED')).toBe('CANCELLED');
+    // …and a CLOSED session (the bill is paid) is COMPLETED via the shell, not
+    // via the session — the payment writes both, and the shell is what is read.
+    expect(withSession('CLOSED', ['DELIVERED'], 'COMPLETED')).toBe('COMPLETED');
+  });
+
+  it('a takeaway profile still outranks everything, BILLING included', () => {
+    expect(
+      unifiedStatusForRestaurantOrder({
+        orderStatus: 'SUBMITTED',
+        roundStatuses: ['DELIVERED'],
+        takeawayStatus: 'READY',
+        sessionStatus: 'BILLING',
+      }),
+    ).toBe('READY');
+  });
+});

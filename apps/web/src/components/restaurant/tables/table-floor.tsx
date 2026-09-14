@@ -1710,23 +1710,25 @@ function OpenTableCard({
             </Button>
           );
         })}
-        {/* Who is serving each tab, under the buttons they belong to: a name
-            inside a 44px button on a one-cell-wide card pushes the elapsed
-            time — the part that decides whether to walk over — off the chip.
-            D151a: every tab, not only other people's, and read from the
-            unscoped list so the line does not change with the chips. */}
+        {/* Who is serving, under the buttons: a name inside a 44px button on
+            a one-cell-wide card pushes the elapsed time — the part that
+            decides whether to walk over — off the chip. D151a: every tab, not
+            only other people's, and read from the unscoped list so the line
+            does not change with the chips. D151b: NAMES, de-duplicated, with
+            no tab prefix — "surandi: Restaurant Waiter" repeated the tab
+            name that is already on the View button directly above it, and
+            one waiter running two tabs was named twice. */}
         {allTabs.some((s) => s.waiterName?.trim()) ? (
           <p className="flex items-start gap-1 text-xs text-muted-foreground">
             <UserRound className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span className="min-w-0">
-              {allTabs
-                .map((s) => {
-                  const owner = s.waiterName?.trim();
-                  if (!owner) return null;
-                  return s.tabName ? `${s.tabName}: ${owner}` : owner;
-                })
-                .filter((line): line is string => line !== null)
-                .join(' · ')}
+              {[
+                ...new Set(
+                  allTabs
+                    .map((s) => s.waiterName?.trim())
+                    .filter((name): name is string => !!name),
+                ),
+              ].join(' · ')}
             </span>
           </p>
         ) : null}

@@ -2,9 +2,11 @@ import { Injectable } from '@nestjs/common';
 import {
   DeliveryPlatformKind,
   ExternalOrderStatus,
+  OrderRoundStatus,
   Prisma,
   RestaurantOrderChannel,
   RestaurantOrderStatus,
+  TableSessionStatus,
   TakeawayOrderStatus,
 } from '@hardware-pos/database';
 
@@ -23,6 +25,12 @@ export type UnifiedOrderStatus =
   | 'CONFIRMED'
   | 'IN_PROGRESS'
   | 'READY'
+  /**
+   * D153 — a dine-in table whose bill has gone to the till and is not yet
+   * paid. Derived from the SESSION (BILLING), not from rounds: serving the
+   * food does not move the bucket, asking for the bill does.
+   */
+  | 'AWAITING_PAYMENT'
   | 'HANDED_OVER'
   | 'COMPLETED'
   | 'CANCELLED';
@@ -63,8 +71,24 @@ export interface OrderView {
    * looking at a closed order wants to do.
    */
   saleId: string | null;
+  /**
+   * D153 — the table session behind a dine-in row; null for takeaway (its
+   * session is the synthetic walk-in table, which nobody deep-links to) and
+   * for third party. This is what "Open in POS" and "Proceed to pay" on the
+   * queue address — the row carried a sale id for the bill but never the
+   * session id for the table, so the deep link sat disabled (D150, E18).
+   */
+  sessionId: string | null;
   itemCount: number;
   itemPreview: { name: string; qty: number }[];
+  /**
+   * D153a — each round and where the kitchen has it, for the card. The
+   * order-level `unifiedStatus` is not READY until EVERY round is, which is
+   * right, but it left a two-round table reading "Preparing" with no way to
+   * see that round 1 is up and round 2 is not. Empty for a third-party row,
+   * which has no rounds of ours.
+   */
+  rounds: RoundPreview[];
   /**
    * D152 — whose order this is, on the floor or at the counter.
    *
@@ -139,6 +163,23 @@ export interface OrderDetailView extends OrderView {
   takeawayProfileId: string | null;
 }
 
+/** D153a — one round on a queue card: its number, its kitchen state, what was in it. */
+export interface RoundPreview {
+  roundNumber: number;
+  status: OrderRoundStatus;
+  items: { name: string; qty: number }[];
+}
+
+/**
+ * D154 — what the queue may ask for. The unified statuses and `ALL` as
+ * before, plus two BUCKETS the tabs use: `OUTSTANDING` is everything that is
+ * not finished (the "All Orders" tab), `DONE` is COMPLETED or HANDED_OVER
+ * (the "Completed" tab). `ALL` and an omitted status still mean everything —
+ * the specs that read a row back through a bare list depend on that, and so
+ * does any bookmark from before D154.
+ */
+export type OrdersStatusFilter = UnifiedOrderStatus | 'ALL' | 'OUTSTANDING' | 'DONE';
+
 export interface OrdersQuery {
   /**
    * D152 — whose orders. `'mine'` narrows to the caller's own attribution
@@ -153,7 +194,7 @@ export interface OrdersQuery {
    */
   scope?: 'mine' | 'all';
   channel?: UnifiedChannel | 'ALL';
-  status?: UnifiedOrderStatus | 'ALL';
+  status?: OrdersStatusFilter;
   paymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | 'ALL';
   from?: Date;
   to?: Date;
@@ -290,14 +331,16 @@ export class RestaurantOrdersService {
           items: {
             where: { status: { not: 'VOIDED' } },
             orderBy: { createdAt: 'asc' },
-            select: { menuItemName: true, quantity: true },
+            select: { menuItemName: true, quantity: true, roundId: true },
           },
           rounds: {
             // D152 — `submittedByUserId` is the counter's attribution: a
             // takeaway order has no session, so the person who sent its first
             // round is the person whose order it is. Ordered so "first" is the
             // round the operator sent first and not whichever row came back.
-            select: { status: true, submittedByUserId: true },
+            // D153a — id and number, so the items can be grouped back onto
+            // the round the kitchen is cooking.
+            select: { id: true, roundNumber: true, status: true, submittedByUserId: true },
             orderBy: { roundNumber: 'asc' },
           },
           takeawayProfile: {
@@ -428,7 +471,14 @@ export class RestaurantOrdersService {
       if (r.unifiedStatus === 'READY' && r.channel !== 'DINE_IN') readyHandoverCount += 1;
     }
 
-    const filtered = status === 'ALL' ? scoped : scoped.filter((r) => r.unifiedStatus === status);
+    const filtered =
+      status === 'ALL'
+        ? scoped
+        : status === 'OUTSTANDING'
+          ? scoped.filter((r) => !DONE_STATUSES.has(r.unifiedStatus))
+          : status === 'DONE'
+            ? scoped.filter((r) => DONE_STATUSES.has(r.unifiedStatus))
+            : scoped.filter((r) => r.unifiedStatus === status);
 
     /*
      * Sorted newest first across channels BEFORE paging, so page 2 continues
@@ -483,7 +533,7 @@ export class RestaurantOrdersService {
             modifiers: { select: { optionName: true, groupName: true, priceDelta: true } },
           },
         },
-        rounds: { select: { status: true } },
+        rounds: { select: { id: true, roundNumber: true, status: true } },
         takeawayProfile: true,
       },
     });
@@ -596,10 +646,21 @@ function restaurantOrderBaseView(
     orderNumber: string;
     status: RestaurantOrderStatus;
     createdAt: Date;
-    rounds: { status: string; submittedByUserId?: string | null }[];
+    // D153a — `id`/`roundNumber` optional so the paging and scope specs'
+    // stubs, which carry only a status, keep compiling; a row without them
+    // simply previews no rounds.
+    rounds: {
+      id?: string;
+      roundNumber?: number;
+      status: string;
+      submittedByUserId?: string | null;
+    }[];
     // D104 — the tab's name rides alongside the table, so two parties sharing
     // one arrangement are two distinguishable rows in this list.
     session: {
+      id?: string;
+      // D153 — BILLING is what puts a dine-in row in the To-pay bucket.
+      status?: TableSessionStatus;
       tabName: string | null;
       // D152 — the table's waiter: whose dine-in order this is.
       waiterUserId?: string | null;
@@ -611,7 +672,7 @@ function restaurantOrderBaseView(
       customerPhone: string | null;
       pickupAt: Date | null;
     } | null;
-    items: { menuItemName: string; quantity: Prisma.Decimal | number }[];
+    items: { menuItemName: string; quantity: Prisma.Decimal | number; roundId?: string | null }[];
   },
   sale: {
     id: string;
@@ -624,6 +685,7 @@ function restaurantOrderBaseView(
     orderStatus: o.status,
     roundStatuses: o.rounds.map((r) => r.status),
     takeawayStatus: o.takeawayProfile?.status ?? null,
+    sessionStatus: o.session?.status ?? null,
   });
   const source: UnifiedSource = isTakeaway
     ? o.takeawayProfile?.customerPhone
@@ -656,11 +718,13 @@ function restaurantOrderBaseView(
     createdAt: o.createdAt.toISOString(),
     total: sale?.total?.toFixed(2) ?? null,
     saleId: sale?.id ?? null,
+    sessionId: isTakeaway ? null : o.session?.id ?? null,
     itemCount: o.items.reduce((s, i) => s + Number(i.quantity), 0),
     itemPreview: o.items.slice(0, 3).map((i) => ({
       name: i.menuItemName,
       qty: Number(i.quantity),
     })),
+    rounds: roundPreviews(o.rounds, o.items),
     /*
      * D152 — the table's waiter first, the first round's submitter second.
      *
@@ -736,6 +800,8 @@ function externalOrderBaseView(e: {
     // A third-party order settles on the partner's side; there is no
     // Sale of ours to open.
     saleId: null,
+    sessionId: null,
+    rounds: [],
     // ExternalOrder does not persist a per-item breakdown in this
     // schema; the UI shows the total as the only summary.
     itemCount: 0,
@@ -796,6 +862,33 @@ function splitDeliveryNotes(notes: string | null): {
 }
 
 /** Every status at zero, so a status absent from the page still has a count. */
+/** D154 — the two unified statuses that mean "nothing left to do here". */
+const DONE_STATUSES: ReadonlySet<UnifiedOrderStatus> = new Set(['COMPLETED', 'HANDED_OVER']);
+
+/**
+ * D153a — the rounds a queue card lists, oldest first, each with the items the
+ * kitchen received on it. Items are already the non-voided set (the callers'
+ * `where`), so a voided line does not reappear here. A round the caller did
+ * not identify (no `id`) previews nothing rather than swallowing every item.
+ */
+export function roundPreviews(
+  rounds: { id?: string; roundNumber?: number; status: string }[],
+  items: { menuItemName: string; quantity: Prisma.Decimal | number; roundId?: string | null }[],
+): RoundPreview[] {
+  return rounds
+    .filter((r): r is { id: string; roundNumber: number; status: string } =>
+      typeof r.id === 'string' && typeof r.roundNumber === 'number',
+    )
+    .sort((a, b) => a.roundNumber - b.roundNumber)
+    .map((r) => ({
+      roundNumber: r.roundNumber,
+      status: r.status as OrderRoundStatus,
+      items: items
+        .filter((i) => i.roundId === r.id)
+        .map((i) => ({ name: i.menuItemName, qty: Number(i.quantity) })),
+    }));
+}
+
 function emptyStatusCounts(): Record<UnifiedOrderStatus, number> {
   return {
     DRAFT: 0,
@@ -803,6 +896,7 @@ function emptyStatusCounts(): Record<UnifiedOrderStatus, number> {
     CONFIRMED: 0,
     IN_PROGRESS: 0,
     READY: 0,
+    AWAITING_PAYMENT: 0,
     HANDED_OVER: 0,
     COMPLETED: 0,
     CANCELLED: 0,
@@ -817,6 +911,12 @@ export function unifiedStatusForRestaurantOrder(input: {
   orderStatus: RestaurantOrderStatus;
   roundStatuses: readonly string[];
   takeawayStatus: TakeawayOrderStatus | null;
+  /**
+   * D153 — optional so every caller and spec written before the To-pay
+   * bucket existed keeps deriving exactly what it did. Only BILLING is
+   * read; OPEN and CLOSED fall through to the order/round derivation.
+   */
+  sessionStatus?: TableSessionStatus | null;
 }): UnifiedOrderStatus {
   if (input.takeawayStatus) {
     switch (input.takeawayStatus) {
@@ -835,6 +935,10 @@ export function unifiedStatusForRestaurantOrder(input: {
   if (input.orderStatus === 'CANCELLED') return 'CANCELLED';
   if (input.orderStatus === 'COMPLETED') return 'COMPLETED';
   if (input.orderStatus === 'DRAFT') return 'DRAFT';
+  // D153 — the bill is at the till. Checked before the rounds because the
+  // rounds still say READY/DELIVERED, and "Ready" is the wrong answer to
+  // "where is this order" once the guest has asked to pay.
+  if (input.sessionStatus === TableSessionStatus.BILLING) return 'AWAITING_PAYMENT';
   // SUBMITTED / PARTIAL — derive from round status.
   const rs = input.roundStatuses;
   if (rs.length === 0) return 'PENDING';

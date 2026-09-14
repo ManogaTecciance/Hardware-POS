@@ -16,13 +16,19 @@ import { normalizeSearchTerm } from '@/lib/search-term';
 import { staffLabel } from '@/lib/restaurant/session-ownership';
 import { type Session } from '@/lib/auth';
 import { restaurantOrders } from '@/lib/restaurant/api';
-import { formatElapsed, formatMoney } from '@/lib/restaurant/labels';
+import {
+  ROUND_STATUS_LABELS,
+  ROUND_STATUS_TONES,
+  formatElapsed,
+  formatMoney,
+} from '@/lib/restaurant/labels';
 import type {
   UnifiedChannel,
   UnifiedOrderStatus,
   UnifiedOrderView,
 } from '@/lib/restaurant/types';
 
+import { OrderCardActions } from './order-card-actions';
 import { OrderDetailDrawer } from './order-detail-drawer';
 import {
   PAYMENT_LABELS,
@@ -47,21 +53,35 @@ interface Props {
   branchId: string;
 }
 
-/*
- * D117 (PO): no Completed tab. COMPLETED is the dine-in shell's closed
- * state — those rows still exist under All Orders (and the server still
- * accepts ?status=COMPLETED from an old bookmark); the strip shows the
- * lifecycle the counter actually works: Pending → Preparing → Ready →
- * Handed over, plus Cancelled.
+/**
+ * D154 — the strip is the lifecycle, then a Completed drawer at the end.
+ *
+ * "All Orders" is the LIVE queue: it asks the server for `OUTSTANDING`, which
+ * is everything that is not finished. Finished rows — a dine-in table whose
+ * bill is paid (COMPLETED, reachable since D153) and a takeaway that has been
+ * handed over — live under **Completed**, which asks for `DONE`. That tab
+ * replaces D117's "Handed over" tab (the PO's "no Completed tab" was for a
+ * counter whose orders never reached COMPLETED; now they do) and the
+ * server still accepts `?status=COMPLETED` / `?status=HANDED_OVER` from an
+ * old bookmark.
+ *
+ * D153 — "To pay" sits between Ready and Completed: a dine-in table whose
+ * bill is at the till and not yet paid. It is the cashier's queue — the
+ * card carries Print bill and Collect payment for a role that can settle —
+ * and the waiter's answer to "did my table's bill go through".
  */
-const STATUS_TABS: Array<{ key: UnifiedOrderStatus | 'ALL'; label: string }> = [
+type StatusTabKey = UnifiedOrderStatus | 'ALL' | 'DONE';
+const STATUS_TABS: Array<{ key: StatusTabKey; label: string }> = [
   { key: 'ALL', label: 'All Orders' },
   { key: 'PENDING', label: 'Pending' },
   { key: 'IN_PROGRESS', label: 'Preparing' },
   { key: 'READY', label: 'Ready' },
-  { key: 'HANDED_OVER', label: 'Handed over' },
+  { key: 'AWAITING_PAYMENT', label: 'To pay' },
+  { key: 'DONE', label: 'Completed' },
   { key: 'CANCELLED', label: 'Cancelled' },
 ];
+/** D154 — the statuses the Completed tab holds and the All tab hides. */
+const DONE_STATUSES: readonly UnifiedOrderStatus[] = ['COMPLETED', 'HANDED_OVER'];
 
 const CHANNEL_CHIPS: Array<{ key: UnifiedChannel | 'ALL'; label: string }> = [
   { key: 'ALL', label: 'All' },
@@ -103,7 +123,7 @@ export function OrdersPage({ session, branchId }: Props) {
   const params = useSearchParams();
 
   const channel = (params.get('channel') ?? 'ALL') as UnifiedChannel | 'ALL';
-  const status = (params.get('status') ?? 'ALL') as UnifiedOrderStatus | 'ALL';
+  const status = (params.get('status') ?? 'ALL') as StatusTabKey;
   const partner = params.get('partner') ?? 'ALL';
   const search = params.get('search') ?? '';
   // Guarded like the server guards it: a mangled shared link degrades to
@@ -229,7 +249,9 @@ export function OrdersPage({ session, branchId }: Props) {
       .list(session, branchId, {
         scope,
         channel,
-        status,
+        // D154 — the All tab is the live queue, so it asks for OUTSTANDING;
+        // the URL stays clean (no ?status) so a first load looks as it did.
+        status: status === 'ALL' ? 'OUTSTANDING' : status,
         paymentStatus: payment,
         search: search || undefined,
         /*
@@ -314,7 +336,7 @@ export function OrdersPage({ session, branchId }: Props) {
   const patch = (next: Partial<{
     scope: 'mine' | 'all';
     channel: UnifiedChannel | 'ALL';
-    status: UnifiedOrderStatus | 'ALL';
+    status: StatusTabKey;
     partner: string;
     payment: PaymentFilter;
     from: string;
@@ -414,12 +436,16 @@ export function OrdersPage({ session, branchId }: Props) {
             >
               {STATUS_TABS.map((t) => {
                 const on = t.key === status;
+                // D154 — All counts the live queue (everything minus the
+                // finished rows), Completed counts exactly those rows; the
+                // two tallies still sum to the whole branch.
+                const done = DONE_STATUSES.reduce((n, s) => n + (statusCounts?.[s] ?? 0), 0);
                 const count =
                   t.key === 'ALL'
-                    ? // The ALL tab counts every status, which is what the
-                      // tally sums to — `total` narrows to the active status.
-                      Object.values(statusCounts ?? {}).reduce((a, b) => a + b, 0)
-                    : (statusCounts?.[t.key] ?? 0);
+                    ? Object.values(statusCounts ?? {}).reduce((a, b) => a + b, 0) - done
+                    : t.key === 'DONE'
+                      ? done
+                      : (statusCounts?.[t.key] ?? 0);
                 return (
                   <button
                     key={t.key}
@@ -731,15 +757,29 @@ export function OrdersPage({ session, branchId }: Props) {
         // the item preview badly. The third column returns at xl: (1280).
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 tab:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {filteredByPartner.map((r) => (
-            <button
+            /*
+             * D153 — the card is a <div>, not a <button>. It used to be one
+             * button wrapping everything, which cannot hold a second button
+             * (nested interactive content is invalid HTML and Chrome silently
+             * un-nests it). The whole card stays tappable through the
+             * STRETCHED button on the order number — `after:absolute
+             * after:inset-0` covers the card — and the footer's actions sit
+             * above it (`relative z-10`) so they get the tap instead.
+             */
+            <div
               key={r.id}
-              type="button"
-              onClick={() => patch({ open: r.id })}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary hover:shadow"
+              data-testid="order-card"
+              className="relative flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors focus-within:border-primary hover:border-primary hover:shadow"
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-sm font-bold">#{r.orderNumber}</p>
+                  <button
+                    type="button"
+                    onClick={() => patch({ open: r.id })}
+                    className="text-sm font-bold after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+                  >
+                    #{r.orderNumber}
+                  </button>
                   <p className="text-sm">{r.contextLabel ?? r.customerName ?? '—'}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
@@ -766,7 +806,33 @@ export function OrdersPage({ session, branchId }: Props) {
                     they already know, repeated down the whole list. */}
                 {staffLabel(r, session.user.id) ? ` · ${staffLabel(r, session.user.id)}` : ''}
               </p>
-              {r.itemPreview.length > 0 ? (
+              {/* D153a — one line per round, with where the kitchen has it.
+                  The order's own badge below is not READY until every round
+                  is (correct, and what gates Proceed to pay), which left a
+                  table with the rice up and the shake still on the pass
+                  reading a bare "Preparing". A third-party row has no rounds
+                  of ours and keeps the item preview. */}
+              {r.rounds.length > 0 ? (
+                <ul className="space-y-0.5 text-xs" data-testid="round-lines">
+                  {r.rounds.map((round) => (
+                    <li
+                      key={round.roundNumber}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="line-clamp-1 min-w-0 text-muted-foreground">
+                        <span className="font-medium text-foreground">Round {round.roundNumber}</span>
+                        {round.items.length > 0
+                          ? ` · ${round.items.map((i) => `${i.qty}× ${i.name}`).join(', ')}`
+                          : ''}
+                      </span>
+                      <StatusBadge
+                        label={ROUND_STATUS_LABELS[round.status]}
+                        tone={ROUND_STATUS_TONES[round.status]}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              ) : r.itemPreview.length > 0 ? (
                 <p className="line-clamp-2 text-xs text-muted-foreground">
                   {r.itemCount} item{r.itemCount === 1 ? '' : 's'} —{' '}
                   {r.itemPreview.map((i) => `${i.qty}× ${i.name}`).join(', ')}
@@ -800,7 +866,13 @@ export function OrdersPage({ session, branchId }: Props) {
                   {r.total ? formatMoney(r.total) : '—'}
                 </span>
               </div>
-            </button>
+              <OrderCardActions
+                session={session}
+                order={r}
+                onMutated={load}
+                className="relative z-10"
+              />
+            </div>
           ))}
         </div>
       )}
@@ -889,7 +961,7 @@ function buildQuery(f: {
   /** D152 — omitted (undefined) means "let the server decide whose". */
   scope?: 'mine' | 'all';
   channel: UnifiedChannel | 'ALL';
-  status: UnifiedOrderStatus | 'ALL';
+  status: StatusTabKey;
   partner: string;
   payment: PaymentFilter;
   from: string;

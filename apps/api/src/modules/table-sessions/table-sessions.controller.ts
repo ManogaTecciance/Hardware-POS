@@ -202,6 +202,44 @@ export class TableSessionsController {
     });
   }
 
+  /**
+   * D153 — "Proceed to pay". The waiter raises the bill and sends it to the
+   * till; the table is held (BILLING) until the cashier records the payment
+   * that clears it. TABLE_CLOSE, because this is what closing a table has
+   * always meant on the floor — the Waiter template holds it and the Cashier
+   * does not, which is the right way round: the waiter sends, the till
+   * settles.
+   */
+  @Post('table-sessions/:sessionId/send-to-cashier')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.TABLE_CLOSE)
+  async sendToCashier(
+    @TenantId() tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('sessionId') sessionId: string,
+    @Body() dto: CloseSessionDto,
+  ) {
+    const result = await this.service.sendToCashier(
+      tenantId,
+      sessionId,
+      dto,
+      actor.id,
+      await this.sessionScope(actor),
+    );
+    await this.audit.record(tenantId, {
+      userId: actor.id,
+      action: 'TABLE_SESSION_SENT_TO_CASHIER',
+      entityType: 'TableSession',
+      entityId: sessionId,
+      metadata: { saleId: result.saleId, sessionNumber: result.session.sessionNumber },
+    });
+    return result;
+  }
+
+  /**
+   * Pre-D153 route, kept mounted for older callers. Same handler as
+   * `send-to-cashier`; a "close" has held the table until payment since D153.
+   */
   @Post('table-sessions/:sessionId/close')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(Permission.TABLE_CLOSE)
@@ -223,17 +261,7 @@ export class TableSessionsController {
       action: 'TABLE_SESSION_CLOSED',
       entityType: 'TableSession',
       entityId: sessionId,
-      metadata: {
-        saleId: result.saleId,
-        sessionNumber: result.session.sessionNumber,
-        // D50: what the close did to a shared arrangement's physical tables.
-        ...(result.openTableRelease
-          ? {
-              releasedTableIds: result.openTableRelease.released.map((t) => t.id),
-              stillReservedTableIds: result.openTableRelease.stillReserved.map((t) => t.id),
-            }
-          : {}),
-      },
+      metadata: { saleId: result.saleId, sessionNumber: result.session.sessionNumber },
     });
     return result;
   }

@@ -11,6 +11,7 @@ import { useConfirm } from '@/components/ui/confirm';
 import { Sheet } from '@/components/ui/sheet';
 import { type Session } from '@/lib/auth';
 import { billing, tableSessions } from '@/lib/restaurant/api';
+import { freshIdempotencyKey } from '@/lib/restaurant/idempotency';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { SessionBillPreview } from '@/lib/restaurant/types';
 
@@ -22,7 +23,7 @@ interface Props {
   hasUnsentDraft: boolean;
   canSplit: boolean;
   onClose: () => void;
-  /** Fired after the session is closed. `splitCount` is 0 for one bill. */
+  /** Fired after the bill is at the till. `splitCount` is 0 for one bill. */
   onClosed: (result: { saleId: string; splitCount: number; warning?: string }) => void;
 }
 
@@ -100,24 +101,29 @@ export function TableBillSheet({
   const confirmUnsent = async () =>
     !hasUnsentDraft ||
     (await confirm({
-      title: 'Close the session anyway?',
+      title: 'Send the bill anyway?',
       message:
         'The cart still has items that were never sent to the kitchen. They are NOT on this bill.',
-      confirmLabel: 'Close session',
+      confirmLabel: 'Send bill',
       tone: 'danger',
     }));
 
+  /*
+   * D153 — "Proceed to pay". The Sale is raised exactly as the close always
+   * raised it; what changed is that the table is HELD (BILLING) until the
+   * cashier records the payment, rather than freed on the spot.
+   */
   const closeOnly = async () => {
     if (busy || !(await confirmUnsent())) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await tableSessions.close(session, sessionId, {
-        idempotencyKey: freshKey(),
+      const result = await tableSessions.sendToCashier(session, sessionId, {
+        idempotencyKey: freshIdempotencyKey(),
       });
       onClosed({ saleId: result.saleId, splitCount: 0 });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not close the session');
+      setError(err instanceof Error ? err.message : 'Could not send this bill to the cashier');
       setBusy(false);
     }
   };
@@ -129,14 +135,16 @@ export function TableBillSheet({
     let saleId: string;
     try {
       saleId = (
-        await tableSessions.close(session, sessionId, { idempotencyKey: freshKey() })
+        await tableSessions.sendToCashier(session, sessionId, {
+          idempotencyKey: freshIdempotencyKey(),
+        })
       ).saleId;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not close the session');
+      setError(err instanceof Error ? err.message : 'Could not send this bill to the cashier');
       setBusy(false);
       return;
     }
-    // Past this point the table IS closed. A failure here costs the split,
+    // Past this point the bill IS at the till. A failure here costs the split,
     // never the bill, and the operator is told exactly what to do next.
     try {
       await billing.splitByItems(session, saleId, { splits });
@@ -145,7 +153,7 @@ export function TableBillSheet({
       onClosed({
         saleId,
         splitCount: 0,
-        warning: `${tableLabel} is closed, but the split did not save (${
+        warning: `${tableLabel}'s bill is at the till, but the split did not save (${
           err instanceof Error ? err.message : 'unknown error'
         }). The cashier can split it on the bill screen.`,
       });
@@ -187,7 +195,7 @@ export function TableBillSheet({
               leftIcon={<Receipt className="h-4 w-4" />}
               onClick={() => void closeOnly()}
             >
-              Close &amp; send one bill
+              Proceed to pay
             </Button>
           </div>
         ) : null
@@ -209,7 +217,7 @@ export function TableBillSheet({
           items={preview.items}
           busy={busy}
           error={error}
-          submitLabel="Close and create"
+          submitLabel="Send and split"
           onCancel={() => setStage('review')}
           onSubmit={closeAndSplit}
         />
@@ -334,7 +342,3 @@ function trimQuantity(q: string): string {
   return String(Number(q));
 }
 
-/** A fresh key per attempt: reusing one would replay the previous close. */
-function freshKey(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `k_${Math.random().toString(36).slice(2)}`;
-}

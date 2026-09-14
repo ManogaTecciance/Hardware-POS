@@ -3,6 +3,7 @@ import { PaymentMethod, PaymentStatus, Prisma } from '@hardware-pos/database';
 
 import { withTabName } from '../../common/place-label';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TableSessionsService } from '../table-sessions/table-sessions.service';
 import {
   BillSplitInputDto,
   CollectPaymentDto,
@@ -73,7 +74,11 @@ export interface BillView {
 
 @Injectable()
 export class BillingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // D153 — the payment that clears a dine-in bill is what frees the table.
+    private readonly tableSessions: TableSessionsService,
+  ) {}
 
   async getBill(tenantId: string, saleId: string): Promise<BillView> {
     const sale = await this.prisma.sale.findFirst({
@@ -232,6 +237,16 @@ export class BillingService {
           where: { id: split.id },
           data: { paidAmount: split.paidAmount.plus(paymentAmount) },
         });
+      }
+      /*
+       * D153 — the bill is paid, so the table is done. Same transaction,
+       * AFTER the version check: a cashier who lost the race rolls the
+       * release back with their payment rather than freeing a table whose
+       * money never landed. A no-op for anything that is not a dine-in
+       * session sitting in BILLING — the service decides that, not this file.
+       */
+      if (nextStatus === PaymentStatus.PAID) {
+        await this.tableSessions.settleBilledSession(tx, tenantId, sale.id, actorUserId);
       }
     });
     // See splitByItems — read after commit, not inside the transaction.
