@@ -97,8 +97,10 @@ function serviceWith(stub: Stub) {
   const service = new TableSessionsService(
     prisma,
     // The collaborators this method never reaches. Passing undefined rather
-    // than mocks is deliberate: if the reassign ever starts settling, pricing
-    // or depleting, this spec fails loudly instead of quietly allowing it.
+    // than mocks is deliberate: if the reassign ever starts settling, pricing,
+    // depleting or printing, this spec fails loudly instead of quietly
+    // allowing it.
+    undefined as never,
     undefined as never,
     undefined as never,
     undefined as never,
