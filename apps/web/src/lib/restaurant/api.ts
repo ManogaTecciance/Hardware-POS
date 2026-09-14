@@ -711,13 +711,24 @@ export const tableSessions = {
       auth(session),
     );
   },
+  /**
+   * D178 — "Proceed to pay". Raises the bill and holds the table (BILLING)
+   * until the cashier records the payment that clears it. Idempotent: a
+   * second call on a table already at the till returns the same sale.
+   */
+  sendToCashier(session: Session, sessionId: string, body: { idempotencyKey?: string } = {}) {
+    return api.post<{ session: TableSessionView; saleId: string }>(
+      `/restaurant/table-sessions/${sessionId}/send-to-cashier`,
+      body,
+      auth(session),
+    );
+  },
+  /**
+   * Pre-D178 route, same behaviour as `sendToCashier` since D178. Kept so an
+   * older client keeps working; new code calls `sendToCashier`.
+   */
   close(session: Session, sessionId: string, body: { idempotencyKey?: string } = {}) {
-    return api.post<{
-      session: TableSessionView;
-      saleId: string;
-      /** D50 — present only when an OPEN table closed; drives the reminder. */
-      openTableRelease?: OpenTableReleaseSummary;
-    }>(
+    return api.post<{ session: TableSessionView; saleId: string }>(
       `/restaurant/table-sessions/${sessionId}/close`,
       body,
       auth(session),
@@ -1071,7 +1082,13 @@ export interface OrdersQuery {
    */
   scope?: 'mine' | 'all';
   channel?: UnifiedChannel | 'ALL';
-  status?: UnifiedOrderStatus | 'ALL';
+  /**
+   * D179 — a unified status, or one of two buckets the tabs use:
+   * `OUTSTANDING` (everything not finished — the "All Orders" tab) and
+   * `DONE` (COMPLETED or HANDED_OVER — the "Completed" tab). `ALL` is still
+   * literally everything.
+   */
+  status?: UnifiedOrderStatus | 'ALL' | 'OUTSTANDING' | 'DONE';
   paymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | 'ALL';
   search?: string;
   from?: string;

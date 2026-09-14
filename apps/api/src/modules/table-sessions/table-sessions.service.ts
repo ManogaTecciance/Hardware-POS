@@ -617,7 +617,10 @@ export class TableSessionsService {
       where: {
         tenantId,
         branchId,
-        status: TableSessionStatus.OPEN,
+        // D178 — a table waiting for its bill is still a table with guests at
+        // it. Filtering on OPEN alone made every session vanish from the floor
+        // the moment the waiter pressed "Proceed to pay".
+        status: { in: [...LIVE_SESSION_STATUSES] },
         ...(onlyWaiterUserId ? { waiterUserId: onlyWaiterUserId } : {}),
       },
       include: {
@@ -930,22 +933,38 @@ export class TableSessionsService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Close session → Sale (D1 junction point)
+  // Proceed to pay → Sale (D1 junction point, re-timed by D178)
   // ─────────────────────────────────────────────────────────────
 
-  async closeSession(
+  /**
+   * D178 — the waiter sends the table to the cashier.
+   *
+   * This is what "Close & send one bill" always did — raise the Sale from
+   * every non-voided item on the session — with ONE thing removed: the table
+   * is no longer freed here. It goes to BILLING, and stays in its chairs
+   * until the bill is PAID (see `settleBilledSession`, called from the
+   * payment path). D68's sentence, made literal: the waiter completes the
+   * order; the cashier prints the bill.
+   *
+   * Idempotent on a session already in BILLING: the existing Sale is
+   * returned rather than a second one raised. `finalSaleId @unique` stays
+   * the structural guard underneath that.
+   *
+   * Also the "served" record. Every round the kitchen has bumped (READY)
+   * moves to DELIVERED on the way past — the waiter pressing "Proceed to pay"
+   * has, by definition, put the food down — and DELIVERED sits outside the
+   * kitchen's `KITCHEN_OWNED` set, so a later recall of that ticket cannot
+   * drag a served round backwards. Rounds the kitchen still holds are left
+   * to the kitchen.
+   */
+  async sendToCashier(
     tenantId: string,
     sessionId: string,
     dto: CloseSessionDto,
     actorUserId: string,
     onlyWaiterUserId: string | null = null,
-  ): Promise<{
-    session: TableSessionView;
-    saleId: string;
-    /** D50 — present only when an OPEN table closed; drives the billing reminder. */
-    openTableRelease?: OpenTableReleaseSummary;
-  }> {
-    const result = await this.prisma.$transaction(async (tx) => {
+  ): Promise<{ session: TableSessionView; saleId: string }> {
+    return this.prisma.$transaction(async (tx) => {
       const session = await tx.tableSession.findFirst({
         where: { id: sessionId, tenantId },
         include: {
@@ -963,183 +982,316 @@ export class TableSessionsService {
       if (!session) throw new SessionNotFoundError();
       assertOwnedBy(session.waiterUserId, onlyWaiterUserId);
       if (session.status === TableSessionStatus.CLOSED) throw new SessionAlreadyClosedError();
-
-      // Sum all non-voided items. Money is Decimal(12,2); use Prisma.Decimal
-      // arithmetic to preserve precision.
-      let subtotal = new Prisma.Decimal(0);
-      for (const order of session.orders) {
-        for (const item of order.items) {
-          const lineTotal = item.unitPrice
-            .plus(item.modifierTotal)
-            .mul(item.quantity);
-          subtotal = subtotal.plus(lineTotal);
-        }
+      if (session.status === TableSessionStatus.BILLING && session.finalSaleId) {
+        return { session: this.sessionToView(session), saleId: session.finalSaleId };
       }
 
-      // D52: every charge on the bill comes from one shared calculator, so
-      // dine-in and takeaway cannot drift. Tax is the tenant's configured rate
-      // — it was hardcoded to zero here while retail applied it correctly.
-      const config = await tx.restaurantBranchConfig.findUnique({
-        where: { branchId: session.branchId },
-        select: {
-          serviceChargePercent: true,
-          serviceChargeChannels: true,
-          serviceChargeTaxable: true,
-          packagingChargeAmount: true,
-          taxRatePercent: true,
-        },
-      });
-      /*
-       * Promotions, priced inside the transaction over the same rows the
-       * projection below will settle. The preview the waiter showed the table
-       * ran the identical call, so the guest is charged what they were quoted
-       * unless the order itself changed in between.
-       */
-      const promotion = await this.promotionPricing.priceOrderItems(
-        tenantId,
-        session.branchId,
-        RestaurantOrderChannel.DINE_IN,
-        session.orders.flatMap((order) => order.items),
-        tx,
-      );
-      const promotionByItemId: ReadonlyMap<string, ProjectedPromotion> = new Map(
-        promotion.lines.map((l) => [l.id, l]),
-      );
+      const sale = await this.raiseSaleForSession(tx, tenantId, session, dto, actorUserId);
 
-      const appSettings = this.settings.getSettings(tenantId);
-      const totals = computeRestaurantTotals(
-        subtotal,
-        RestaurantOrderChannel.DINE_IN,
-        {
-          serviceChargePercent: config?.serviceChargePercent ?? new Prisma.Decimal(0),
-          serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
-          serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
-          packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
-          // D59/Q5: the branch override wins when set; NULL inherits the
-          // tenant-wide rate. 0 is a real rate, which is why the column is
-          // nullable rather than defaulted.
-          taxRatePercent:
-            config?.taxRatePercent != null
-              ? config.taxRatePercent.toNumber()
-              : appSettings.taxRatePercent,
-        },
-        { lineDiscount: promotion.totalLineDiscount, orderDiscount: promotion.orderDiscountAmount },
-      );
-
-      // D52: the till that took the money. An explicit registerId wins; the
-      // fallback is ordered by code so it is at least deterministic — the
-      // previous findFirstOrThrow had no orderBy and could return a different
-      // register between two closes on the same branch.
-      const register = dto.registerId
-        ? await tx.register.findFirst({
-            where: { id: dto.registerId, branchId: session.branchId, isActive: true },
-            select: { id: true },
-          })
-        : await tx.register.findFirst({
-            where: { branchId: session.branchId, isActive: true },
-            orderBy: { code: 'asc' },
-            select: { id: true },
-          });
-      if (!register) throw new RegisterNotFoundError();
-
-      // D52: the human who closed the bill. Was "first active user in the
-      // tenant" — not branch-scoped, so it booked untagged sales to whoever
-      // the query returned, in practice the owner.
-      const cashierId = session.waiterUserId ?? actorUserId;
-
-      const saleNumber = `S-${padSequence(await nextDocumentNumber(tx, tenantId, 'SALE'))}`;
-      /*
-       * D58: the settled document carries its lines, projected from the order
-       * items inside THIS transaction — a copy of the submit-time snapshots,
-       * with the sum invariant asserted before anything persists.
-       */
-      // D61: collection goes through the fulfilment provider — an independent
-      // query over the same rows the subtotal loop read, so the invariant
-      // below compares two computations rather than one restated.
-      const projected = await this.fulfilment.collectSettlementLines(
-        tx,
-        tenantId,
-        { kind: 'TABLE_SESSION', sessionId: session.id },
-        promotionByItemId,
-      );
-      assertProjectionMatchesSubtotal(projected, subtotal, totals.promotionLineDiscount);
-      const sale = await tx.sale.create({
-        data: {
+      await tx.orderRound.updateMany({
+        where: {
           tenantId,
-          branchId: session.branchId,
-          registerId: register.id,
-          cashierId,
-          saleNumber,
-          subtotal,
-          /*
-           * The line-level promotions, which is what `discountedSubtotal =
-           * subtotal - totalDiscount` has to mean for the returns calculation
-           * to reverse a refund correctly. A cart-level promotion is NOT here:
-           * it lives in its own columns and comes off after tax, exactly as on
-           * a retail sale.
-           */
-          totalDiscount: totals.promotionLineDiscount,
-          promotionOrderDiscountAmount: totals.promotionOrderDiscount,
-          promotionOrderId: promotion.orderPromotionId,
-          promotionOrderNameSnapshot: promotion.orderPromotionNameSnapshot,
-          taxAmount: totals.taxAmount,
-          serviceChargeAmount: totals.serviceChargeAmount,
-          packagingCharge: totals.packagingCharge,
-          total: totals.total,
-          paidAmount: new Prisma.Decimal(0),
-          balanceAmount: totals.total,
-          paymentStatus: 'UNPAID',
-          status: 'COMPLETED',
-          completedAt: new Date(),
-          // D58 — what kind of sale this was, on the document itself.
-          fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
-          channel: OrderChannel.DINE_IN,
-          sourceRefKind: 'TABLE_SESSION',
-          sourceRefId: session.id,
-          servedByUserId: session.waiterUserId,
+          order: { sessionId: session.id },
+          status: OrderRoundStatus.READY,
         },
+        data: { status: OrderRoundStatus.DELIVERED },
       });
-      for (const line of projected) {
-        const { modifiers, ...data } = line;
-        const saleItem = await tx.saleItem.create({ data: { saleId: sale.id, ...data } });
-        if (modifiers.length > 0) {
-          await tx.saleItemModifier.createMany({
-            data: modifiers.map((m) => ({ tenantId, saleItemId: saleItem.id, ...m })),
-          });
-        }
-      }
+      await tx.restaurantOrderItem.updateMany({
+        where: {
+          tenantId,
+          order: { sessionId: session.id },
+          round: { status: OrderRoundStatus.DELIVERED },
+          status: { not: RestaurantOrderItemStatus.VOIDED },
+        },
+        data: { status: RestaurantOrderItemStatus.DELIVERED },
+      });
 
       const updated = await tx.tableSession.update({
         where: { id: session.id },
         data: {
-          status: TableSessionStatus.CLOSED,
-          closedAt: new Date(),
+          status: TableSessionStatus.BILLING,
           finalSaleId: sale.id,
           version: { increment: 1 },
         },
       });
       /*
-       * D61: resource release belongs to the fulfilment provider — the same
-       * transaction, so "bill closed" and "tables released" cannot be
-       * observed apart. Physical tables go AVAILABLE; an open table (D49)
-       * dissolves the whole arrangement.
+       * The table shows "Bill requested" — but only once NO tab on it is still
+       * ordering. D104: an arrangement carries several parties, and one of
+       * them asking for its bill must not read on the floor as the whole
+       * table being done. A physical table has one tab, so this is simply
+       * "always" there.
        */
-      const release = await this.fulfilment.releaseResources(tx, tenantId, {
-        kind: 'TABLE_SESSION',
-        sessionId: session.id,
+      const stillOrdering = await tx.tableSession.count({
+        where: { tableId: session.tableId, status: TableSessionStatus.OPEN },
       });
-
-      if (release.openTableRelease !== undefined) {
-        return {
-          session: this.sessionToView(updated),
-          saleId: sale.id,
-          openTableRelease: release.openTableRelease,
-        };
+      if (stillOrdering === 0) {
+        await tx.restaurantTable.updateMany({
+          where: { tenantId, id: session.tableId },
+          data: { status: RestaurantTableStatus.BILLING },
+        });
       }
-
+      /*
+       * A bill for nothing is paid already. A party that walked out before
+       * ordering leaves a zero-total Sale (as the close always did), and no
+       * payment can ever land on it — `collectPayment` refuses an amount of
+       * zero — so a table held "until paid" would be held forever. Settle it
+       * here, through the same path the paying cashier takes.
+       */
+      if (sale.total.isZero()) {
+        await this.settleBilledSession(tx, tenantId, sale.id, actorUserId);
+        const settled = await tx.tableSession.findUniqueOrThrow({ where: { id: session.id } });
+        return { session: this.sessionToView(settled), saleId: sale.id };
+      }
       return { session: this.sessionToView(updated), saleId: sale.id };
     });
-    return result;
+  }
+
+  /**
+   * D178 — the bill is paid; the table is done.
+   *
+   * Called by `BillingService.collectPayment` INSIDE its transaction, once the
+   * payment that clears the balance has landed and the optimistic-concurrency
+   * check has passed, so "paid" and "table freed" cannot be observed apart
+   * and a losing writer rolls its release back with its payment.
+   *
+   * Inert unless the sale is a table session's AND that session is BILLING.
+   * That one check makes it a no-op for a partial payment (the caller only
+   * asks on PAID), for a sale raised before D178 (session already CLOSED,
+   * table long free), for a counter or takeaway sale (no session, or one
+   * that never went to BILLING), and for a split bill whose siblings are
+   * still outstanding (the sale is one document; it is PAID once).
+   */
+  async settleBilledSession(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    saleId: string,
+    actorUserId: string,
+  ): Promise<{ sessionId: string; openTableRelease?: OpenTableReleaseSummary } | null> {
+    const session = await tx.tableSession.findFirst({
+      where: { tenantId, finalSaleId: saleId, status: TableSessionStatus.BILLING },
+      select: { id: true, orders: { select: { id: true, status: true } } },
+    });
+    if (!session) return null;
+
+    for (const order of session.orders) {
+      if (
+        order.status === RestaurantOrderStatus.COMPLETED ||
+        order.status === RestaurantOrderStatus.CANCELLED
+      ) {
+        continue;
+      }
+      await tx.restaurantOrder.update({
+        where: { id: order.id },
+        data: { status: RestaurantOrderStatus.COMPLETED, version: { increment: 1 } },
+      });
+      await tx.restaurantOrderStatusHistory.create({
+        data: {
+          tenantId,
+          orderId: order.id,
+          fromStatus: order.status,
+          toStatus: RestaurantOrderStatus.COMPLETED,
+          reason: 'Bill paid',
+          changedByUserId: actorUserId,
+        },
+      });
+    }
+    await tx.tableSession.update({
+      where: { id: session.id },
+      data: {
+        status: TableSessionStatus.CLOSED,
+        closedAt: new Date(),
+        version: { increment: 1 },
+      },
+    });
+    /*
+     * D61: resource release belongs to the fulfilment provider — unchanged,
+     * just called from here rather than from the close. Physical tables go
+     * AVAILABLE; an open table (D49) releases last-one-out (D104).
+     */
+    const release = await this.fulfilment.releaseResources(tx, tenantId, {
+      kind: 'TABLE_SESSION',
+      sessionId: session.id,
+    });
+    return release.openTableRelease !== undefined
+      ? { sessionId: session.id, openTableRelease: release.openTableRelease }
+      : { sessionId: session.id };
+  }
+
+  /**
+   * Pre-D178 name for `sendToCashier`, kept so the mounted `/close` route and
+   * any older caller keep working. Nothing behind it is different: since D178
+   * a "close" holds the table until the bill is paid.
+   */
+  async closeSession(
+    tenantId: string,
+    sessionId: string,
+    dto: CloseSessionDto,
+    actorUserId: string,
+    onlyWaiterUserId: string | null = null,
+  ): Promise<{ session: TableSessionView; saleId: string }> {
+    return this.sendToCashier(tenantId, sessionId, dto, actorUserId, onlyWaiterUserId);
+  }
+
+  /**
+   * The Sale-raising half of what used to be `closeSession`, verbatim: sum,
+   * price, project, write. Nothing about the money maths lives anywhere
+   * else, which is the point of it being one function.
+   */
+  private async raiseSaleForSession(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    session: Prisma.TableSessionGetPayload<{
+      include: { orders: { include: { items: { include: { modifiers: true } } } } };
+    }>,
+    dto: CloseSessionDto,
+    actorUserId: string,
+  ): Promise<{ id: string; total: Prisma.Decimal }> {
+    // Sum all non-voided items. Money is Decimal(12,2); use Prisma.Decimal
+    // arithmetic to preserve precision.
+    let subtotal = new Prisma.Decimal(0);
+    for (const order of session.orders) {
+      for (const item of order.items) {
+        const lineTotal = item.unitPrice.plus(item.modifierTotal).mul(item.quantity);
+        subtotal = subtotal.plus(lineTotal);
+      }
+    }
+
+    // D52: every charge on the bill comes from one shared calculator, so
+    // dine-in and takeaway cannot drift. Tax is the tenant's configured rate
+    // — it was hardcoded to zero here while retail applied it correctly.
+    const config = await tx.restaurantBranchConfig.findUnique({
+      where: { branchId: session.branchId },
+      select: {
+        serviceChargePercent: true,
+        serviceChargeChannels: true,
+        serviceChargeTaxable: true,
+        packagingChargeAmount: true,
+        taxRatePercent: true,
+      },
+    });
+    /*
+     * Promotions, priced inside the transaction over the same rows the
+     * projection below will settle. The preview the waiter showed the table
+     * ran the identical call, so the guest is charged what they were quoted
+     * unless the order itself changed in between.
+     */
+    const promotion = await this.promotionPricing.priceOrderItems(
+      tenantId,
+      session.branchId,
+      RestaurantOrderChannel.DINE_IN,
+      session.orders.flatMap((order) => order.items),
+      tx,
+    );
+    const promotionByItemId: ReadonlyMap<string, ProjectedPromotion> = new Map(
+      promotion.lines.map((l) => [l.id, l]),
+    );
+
+    const appSettings = this.settings.getSettings(tenantId);
+    const totals = computeRestaurantTotals(
+      subtotal,
+      RestaurantOrderChannel.DINE_IN,
+      {
+        serviceChargePercent: config?.serviceChargePercent ?? new Prisma.Decimal(0),
+        serviceChargeChannels: config?.serviceChargeChannels ?? [RestaurantOrderChannel.DINE_IN],
+        serviceChargeTaxable: config?.serviceChargeTaxable ?? true,
+        packagingChargeAmount: config?.packagingChargeAmount ?? new Prisma.Decimal(0),
+        // D59/Q5: the branch override wins when set; NULL inherits the
+        // tenant-wide rate. 0 is a real rate, which is why the column is
+        // nullable rather than defaulted.
+        taxRatePercent:
+          config?.taxRatePercent != null
+            ? config.taxRatePercent.toNumber()
+            : appSettings.taxRatePercent,
+      },
+      { lineDiscount: promotion.totalLineDiscount, orderDiscount: promotion.orderDiscountAmount },
+    );
+
+    // D52: the till that took the money. An explicit registerId wins; the
+    // fallback is ordered by code so it is at least deterministic — the
+    // previous findFirstOrThrow had no orderBy and could return a different
+    // register between two closes on the same branch.
+    const register = dto.registerId
+      ? await tx.register.findFirst({
+          where: { id: dto.registerId, branchId: session.branchId, isActive: true },
+          select: { id: true },
+        })
+      : await tx.register.findFirst({
+          where: { branchId: session.branchId, isActive: true },
+          orderBy: { code: 'asc' },
+          select: { id: true },
+        });
+    if (!register) throw new RegisterNotFoundError();
+
+    // D52: the human who closed the bill. Was "first active user in the
+    // tenant" — not branch-scoped, so it booked untagged sales to whoever
+    // the query returned, in practice the owner.
+    const cashierId = session.waiterUserId ?? actorUserId;
+
+    const saleNumber = `S-${padSequence(await nextDocumentNumber(tx, tenantId, 'SALE'))}`;
+    /*
+     * D58: the settled document carries its lines, projected from the order
+     * items inside THIS transaction — a copy of the submit-time snapshots,
+     * with the sum invariant asserted before anything persists.
+     */
+    // D61: collection goes through the fulfilment provider — an independent
+    // query over the same rows the subtotal loop read, so the invariant
+    // below compares two computations rather than one restated.
+    const projected = await this.fulfilment.collectSettlementLines(
+      tx,
+      tenantId,
+      { kind: 'TABLE_SESSION', sessionId: session.id },
+      promotionByItemId,
+    );
+    assertProjectionMatchesSubtotal(projected, subtotal, totals.promotionLineDiscount);
+    const sale = await tx.sale.create({
+      data: {
+        tenantId,
+        branchId: session.branchId,
+        registerId: register.id,
+        cashierId,
+        saleNumber,
+        subtotal,
+        /*
+         * The line-level promotions, which is what `discountedSubtotal =
+         * subtotal - totalDiscount` has to mean for the returns calculation
+         * to reverse a refund correctly. A cart-level promotion is NOT here:
+         * it lives in its own columns and comes off after tax, exactly as on
+         * a retail sale.
+         */
+        totalDiscount: totals.promotionLineDiscount,
+        promotionOrderDiscountAmount: totals.promotionOrderDiscount,
+        promotionOrderId: promotion.orderPromotionId,
+        promotionOrderNameSnapshot: promotion.orderPromotionNameSnapshot,
+        taxAmount: totals.taxAmount,
+        serviceChargeAmount: totals.serviceChargeAmount,
+        packagingCharge: totals.packagingCharge,
+        total: totals.total,
+        paidAmount: new Prisma.Decimal(0),
+        balanceAmount: totals.total,
+        // D52 — COMPLETED before payment, deliberately; UNPAID is the
+        // financial state. D178 changes when the TABLE frees, not this.
+        paymentStatus: 'UNPAID',
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        // D58 — what kind of sale this was, on the document itself.
+        fulfilmentKind: FulfilmentKind.TABLE_SERVICE,
+        channel: OrderChannel.DINE_IN,
+        sourceRefKind: 'TABLE_SESSION',
+        sourceRefId: session.id,
+        servedByUserId: session.waiterUserId,
+      },
+      select: { id: true, total: true },
+    });
+    for (const line of projected) {
+      const { modifiers, ...data } = line;
+      const saleItem = await tx.saleItem.create({ data: { saleId: sale.id, ...data } });
+      if (modifiers.length > 0) {
+        await tx.saleItemModifier.createMany({
+          data: modifiers.map((m) => ({ tenantId, saleItemId: saleItem.id, ...m })),
+        });
+      }
+    }
+    return sale;
   }
 
   // ─────────────────────────────────────────────────────────────

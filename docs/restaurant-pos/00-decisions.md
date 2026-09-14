@@ -4807,6 +4807,8 @@ Cancelled at once → the board no longer shows it.
 
 ### D117 — payment settles; handover is a hand
 
+> **Superseded 2026-09-11 on its tab strip by [D179](#d179--a-completed-tab-and-all-orders-is-the-live-queue):** a Completed tab exists and the Handed over tab is folded into it. The settle/handover split this record made is unchanged.
+
 PO, 2026-09-07: "i found the bug, when takeaway place it shows handed
 over. but it need to show like other pending, preparing, handed over,
 also no need completed tab hide it." Correct on both counts. The
@@ -7692,6 +7694,330 @@ the inventory tabs above the list already carry a Categories tab to the
 same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
+
+### D180 — merging `fix/waiter-status-change`: how each clash was decided
+
+One commit, forked from `fix/restaurant-owner-v2` at `985f3b6` before that
+branch's own last two commits: the waiter sends the bill and the till settles
+it, with the table freeing when paid; the arrangement's server line names
+people rather than tabs; the queue card shows each round's kitchen state; and
+a Completed tab so All Orders is the live queue. Recorded there as D151b, D153,
+D153a and D154.
+
+**No migration on either side**, checked first because the PO asked for it:
+their commit touches neither the schema nor the migrations directory, so
+production's set is not in play.
+
+**Numbering: a fork of a fork.** The branch inherits the restaurant branch's
+D150–D152b, already D155–D157b here, and its own four collided with this
+log's D153 (the printed KOT) and D154 (the board's polling cost). Two branches
+off the same parent had both taken D153 for different subjects. Mapped so the
+inherited records land on identical text and the four new ones take the next
+free numbers: D151b → D156b (a correction to their D151, which is D156 here),
+D153 → D178, D153a → D178a, D154 → D179. The first attempt left D152a/b out of
+the map and the sweep's unmapped-token report caught it.
+
+**Seven conflicts. Four were the fork predating a later decision.** The floor,
+the session panel and the my-tables spec all conflicted on D157c's "a
+supervisor works the whole room", which the restaurant branch added after this
+one forked; HEAD kept in each case. The floor's server-line COMMENT conflicted
+while the code beneath it had auto-merged from their side, so theirs was taken
+— it describes the de-duplication that is actually there. Two were additive:
+`rounds` on the queue's view type and on its service, theirs taken whole.
+
+**The route matrix hid a third total again.** HEAD had 322 and theirs 319 from
+a shared 318; git conflicted on the two sub-totals but would have accepted
+either headline. Set to 323/221/102 from the two deltas and confirmed by the
+tripwire.
+
+**The decision log needed rebuilding, not resolving.** Git had aligned two
+unrelated blocks of appended prose and produced eleven interleaved regions;
+resolving them line by line would have spliced a retail record into a
+restaurant one. The file was rebuilt record by record instead: HEAD's log, plus
+the four records their side has and HEAD lacks, plus their one edit to a
+shared record — a supersede note on D117 pointing at D154, re-pointed at D179.
+Verified by asserting no heading appears twice.
+
+**One thing brought into line after the merge.** Their queue card labels each
+round "Round n"; D177 retired that word three days after they forked. It now
+goes through `sendLabel` like every other surface, and their spec follows.
+
+Verified rather than assumed, as in D158/D160/D173: every file only they
+changed is byte-identical to their branch, every file only this branch changed
+is byte-identical to here. D151's removals hold. Their one new route reached
+the route-module tripwire.
+
+Left undone: their four decisions ship no `testcases.md` rows.
+
+Gates on the merged tree: typecheck 7/7, api unit 1549 across 95 suites, web
+unit 1643 across 119 files (2 skipped), integration 1209 across 56 suites, lint
+0 errors (13 warnings, all pre-existing). Playwright not run — it needs a live
+stack.
+
+### D179 — a Completed tab, and All Orders is the live queue
+
+**Asked by the PO, 2026-09-11**: *"add a section in the order section add a
+completed tab then move all the completed orders to it."*
+
+**Supersedes D117 on its tab strip.** D117's *"no need completed tab hide it"*
+was said of a counter whose orders never reached COMPLETED — the dine-in
+shell had no writer for it, so a Completed tab would have been a tab for
+nothing. D178 gave it a writer: a paid table is COMPLETED. The PO now wants
+them somewhere, and out of the way.
+
+**Now.**
+- The strip reads **All Orders · Pending · Preparing · Ready · To pay ·
+  Completed · Cancelled**. The **Handed over** tab is gone; a handed-over
+  takeaway is a finished order and lives under Completed beside a paid table,
+  which is also how the metric strip has always counted them.
+- **All Orders is the live queue.** It asks the server for a new bucket,
+  `status=OUTSTANDING` — everything that is not COMPLETED or HANDED_OVER.
+  Cancelled stays in it, as today. The Completed tab asks for `status=DONE`.
+- Tab counts: All is the whole branch **minus** the finished rows; Completed
+  is exactly those rows; the two still add up to everything.
+
+**A bare list still returns everything — deliberately.** `OUTSTANDING` and
+`DONE` are two more values the query accepts beside the unified statuses and
+`ALL`; an omitted status, and `ALL`, mean what they meant. Three reasons, in
+order of weight: every spec that reads a row back through an unfiltered
+`listOrders` (the payment-status cases read a HANDED_OVER takeaway that way,
+the kitchen-board cases read a round's status that way) keeps passing without
+being edited (D16); `?status=COMPLETED` and `?status=HANDED_OVER` from an old
+bookmark still mean that one status; and the page's default tab keeps a clean
+URL — it maps ALL to `OUTSTANDING` at the request, so a first load looks as it
+always did.
+
+**Deliberately not done:** hiding Cancelled from All (it has its own tab and
+the PO did not ask); a date cut-off on Completed (the existing date filter
+does that already).
+
+**Paired per D30** (`orders-page.completed-tab.render.test.tsx`,
+`round-preview.spec.ts`): Completed present and Handed over absent; the
+default load sends OUTSTANDING and writes nothing to the URL; tapping
+Completed writes and sends DONE; a plain status still sends itself; the
+counts. Server side: OUTSTANDING is exactly the unfinished rows, DONE exactly
+the finished ones, and no status / ALL is still the whole set. Mutation-proven
+on the ALL→OUTSTANDING mapping and on the All count (1 failed / 4 passed
+each).
+
+**Migration: none.** Nothing new is stored; `OrderRoundStatus` was already on
+the wire, and the buckets are query values.
+
+## Open decisions
+
+| ID | Question | Needed by |
+|---|---|---|
+| O1 | `mockSync()` fabricates QuickBooks document ids for a *disconnected Tile Shop tenant*, writing synthetic ids into financial records. Preserve, or change deliberately? | Phase 2 |
+| O2 | Redis: yes or no? Determines the Socket.IO multi-replica adapter (D7, D11) and the settings-cache invalidation strategy. **Deferred at Phase 1.5 (D39): the abstraction ships without the dependency, and multi-replica operation stays unsupported until this is answered.** | Phase 4 |
+| O3 | Service-charge tax treatment specifics, to be confirmed with an accountant (D8). | Phase 8 |
+| O4 | Pilot restaurant: which tenant, how many branches, which printers, which channels. | Phase 4 |
+| O5 | Commercial model (per-branch / per-register / per-module) — blocks subscription and entitlement design. | before entitlements |
+| O6 | `InventoryReceiptLine.productVariant`: `RESTRICT` (what the database has since D44) or `SetNull` (what the schema implies)? Until answered, `migrate diff` keeps emitting the FK pair and it keeps being stripped (D110). | next migration |
+| O7 | ~~Should a list's pager hide when the rows fit one page?~~ **Answered 2026-09-09 (D143a): no — every footer renders, with the paging steps disabled. The orders queue's hiding also hid its rows-per-page control, so a short list made the sizes unreachable.** | closed |
+| O8 | Cancelling a counter order that D117 has settled and paid: refuse it, or record the refund? The takeaway status write has no transition guard (D119). | before the next restaurant deploy |
+| O9 | How does the counter hand over a takeaway whose ticket the kitchen never bumped? The stepper D113/D117 named is gone (2026-08-10); handover is offered on READY only (D119). | before the next restaurant deploy |
+| O10 | Should the clothing Retail template (D120) offer the Salesperson, the hardware-only owner-equivalent of D108? It seeds Owner + Cashier today (D136). | before the first Retail workspace |
+| O11 | Their 5.10 (D136a) takes the SKU line off every 80mm SALES receipt (the return receipt still prints it) and turns the A4 SKU column's default off; both reach the Tile Shop, and a workspace that never saved its documents settings loses the column. Keep, or exempt the QuickBooks pilot (D16)? | before the next production deploy |
+| O12 | `startOfDayInTimeZone` resolves a local midnight that DST SKIPS backwards, so in a zone whose transition is at 00:00 (Cuba, Chile) a business day computed from it is an hour short at the end — the Done lane (D142), the dashboard's "today" and every `lastNDaysInTimeZone` report. Found by review, pre-existing, no tenant is in such a zone today. Fix the helper, or leave it? | before a tenant in Cuba/Chile |
+### D178a — the queue card shows each round's kitchen state
+
+**Asked by the PO, 2026-09-11**: *"im order fried rice then after go to the
+kitchen … in the second time im order a milkshake … the kitchen the fried rice
+mark as done in the waiter order page shows its now preparing … the card show
+pls the fried rice ready not the milkshake ready. now the all are completed
+then show its proceed to pay."*
+
+**What was there.** The card carried the order's unified status and a flat
+item preview. The status is derived correctly — an order is READY only when
+*every* round is (D113), and that is what gates **Proceed to pay** (D178) —
+but a two-round table with the rice up and the shake still on the pass read a
+bare **Preparing**, with nothing saying which was which.
+
+**Now.** The row carries `rounds[]` — number, `OrderRoundStatus`, and the
+items the kitchen received on it — and the card lists **one line per round**
+with its own badge (`Sent` / `Preparing` / `Ready` / `Served`, the same map the
+rounds sheet uses). The order-level badge and the button are unchanged: the
+badge flips to Ready and the button appears when the last round is bumped,
+exactly as before. A third-party row has no rounds of ours and keeps its item
+preview.
+
+**Also fixed here.** The controller's status allow-list never learned
+`AWAITING_PAYMENT`, so the To pay tab's filter fell back to ALL on the server
+and the tab showed every order. Caught by the live walkthrough for this
+record; pinned in the D178 spec.
+
+**Paired per D30** (`orders-page.rounds.render.test.tsx`,
+`round-preview.spec.ts`): the half-ready row shows Round 1 · Ready and Round
+2 · Preparing with no button; the all-ready row shows both Ready with the
+button; items group onto their round and rounds sort by number; a stub with
+no round ids previews nothing rather than a phantom round. Mutation-proven
+on the per-line status (every line restating round 1's — 1 failed / 3
+passed); honest that keying the list on the item preview instead of the
+rounds is unprovable, since on every real row the two are empty together.
+
+### D178 — the waiter sends the bill, the till settles it, and the table frees when it is paid
+
+**Asked by the PO, 2026-09-11**: *"after ready then the waiter after give to the
+customer then give a button … proceed to pay … the cashier can print the bill
+without payment then after waiter give the printed bill to customer then after
+with the cash the waiter go with cash and give to the cashier and after paid
+bill printed and order status marked completed … then the table also
+unreserved. That is the flow."*
+
+**What was there.** One forward move, and it did too much at once. "Close &
+send one bill" raised the Sale and, in the same transaction, set the table back
+to AVAILABLE — before a rupee had moved. The floor showed a free table with
+guests still at it waiting for their bill; the till had no queue telling it a
+bill was waiting; nothing recorded that the food had been served; and the
+order shell never left SUBMITTED, so "Completed" was a status nobody could
+reach. D68 wrote the sentence — *the waiter completes the order; the cashier
+prints the bill* — and the code released the table one step early.
+
+**Now — the flow, in the order it happens on the floor.**
+
+1. **The kitchen bumps** the ticket. Unchanged (D113): the round is READY, the
+   floor shows *Food ready*, the queue shows the order under **Ready**.
+2. **The waiter presses "Proceed to pay."** On the Ready card's footer, in the
+   order drawer, and on the POS table strip (where "Close & send one bill" used
+   to be) — three doors onto one verb,
+   `POST /restaurant/table-sessions/:id/send-to-cashier`, `TABLE_CLOSE`. It
+   raises the Sale exactly as the close always did — the money maths did not
+   move a line — and then:
+   - every READY round goes **DELIVERED** (the waiter pressing this has, by
+     definition, put the food down; a round the kitchen still holds is left to
+     the kitchen, and lands READY when bumped exactly as on an open table);
+   - the session goes **BILLING**, `finalSaleId` set, `closedAt` **null**;
+   - the physical table goes **BILLING** — *Bill requested* on the floor, a
+     label and a dashboard tile that were written under D49 and had never once
+     been true;
+   - **nothing is released.**
+3. **The till sees it under "To pay"** — a new bucket between Ready and Handed
+   over, from a new unified status `AWAITING_PAYMENT` derived from the SESSION
+   being BILLING (serving does not move the bucket; asking for the bill does).
+   The card carries **Print bill** and **Collect payment** for a role holding
+   `PAYMENT_COLLECT`; the waiter sees the same row with no buttons.
+4. **The cashier prints the bill unpaid.** D87 stands: only the till prints.
+   The waiter carries paper the cashier printed — a floor process, not a
+   permission change. `Paid Amount : 0.00`, balance = total.
+5. **The cashier records the cash.** The existing `collectPayment`, unchanged in
+   what it writes to the Sale. A PARTIAL payment settles nothing.
+6. **The payment that clears the balance ends it**, inside the same
+   transaction and after the `billingVersion` check: every order on the
+   session → **COMPLETED** with an append-only history row (`reason: 'Bill
+   paid'`, the cashier's id); the session → **CLOSED** with `closedAt`; and
+   the table is released through the SAME `releaseResources` the close used
+   to call — physical → AVAILABLE, arrangement last-one-out (D104). The paid
+   bill prints itself from the queue card: the guest is leaving and that is
+   the paper they leave with.
+
+**A table at the till is still a table with guests at it.** `LIVE_SESSION_STATUSES`
+already said so (D104); `listOpenSessions` did not, and filtered on OPEN alone,
+so the first thing "Proceed to pay" did was make the table vanish from the
+floor. It now lists OPEN and BILLING. `openSession` refuses to reseat it and
+`createOrder` refuses to add to it — the order is locked by the session not
+being OPEN, which is the lock the PO asked about and the one that costs nothing.
+
+**`Sale.status` is untouched.** D52 parked "a bill that exists before payment"
+as a financial-state redesign, and this record does not reopen it. The Sale is
+still written COMPLETED / UNPAID at the moment it is raised; every report, the
+returns path and the sync see exactly what they saw. What moved is *when the
+table frees*, which is a floor state, not a financial one.
+
+**The hook is inert where it must be**, by one check — the sale's session must
+be BILLING: a bill raised before this record (session already CLOSED, table
+long free — proven with the next party already seated at it), a counter or
+takeaway sale (no session, or one `takeaway.settle` closed itself), a partial
+payment, and a split bill whose siblings are outstanding (one Sale, PAID once).
+
+**A bill for nothing is paid already.** A party that walks out before ordering
+leaves a 0.00 Sale (as the close always did), and no payment can ever land on
+it — `collectPayment` refuses an amount of zero — so a table held "until paid"
+would be held forever. `sendToCashier` settles a zero-total bill on the spot,
+through the same `settleBilledSession` the paying cashier goes through: CLOSED,
+COMPLETED, released. Found on the running stack, not on paper; pinned in the
+D178 spec. (The Sale stays UNPAID with a zero balance, exactly as the old close
+left it — a pre-existing oddity D52 owns, not this record.)
+
+**Idempotent.** A second "Proceed to pay" on a table already at the till
+answers with the same Sale, 200, and raises no second one. `finalSaleId
+@unique` stays the structural guard underneath. The old `/close` route stays
+mounted and does the same thing.
+
+**The queue row carries `sessionId` now.** It was E18 (D155): the view had a
+sale id for the bill but never the session id for the table, so the drawer's
+*Open in POS* sat disabled behind a stub returning `''`. The card's button
+needed the id anyway; the stub is gone and *Open in POS* works.
+
+**The card is a `<div>`.** It was one `<button>` wrapping everything, which
+cannot hold a second button (nested interactive content is invalid HTML and
+Chrome un-nests it silently). The order number is a stretched button — the
+whole card still opens the drawer — and the footer's actions sit above it.
+
+**Existing assertions this supersedes (D16 — named, not quietly edited):**
+- `apps/api/test/integration/specs/table-sessions.spec.ts` — the close returned
+  `session.status: 'CLOSED'`; now `'BILLING'`. The mutation proof was "a
+  second close is refused (409)"; it is now "a second close answers with the
+  same sale and exactly one Sale row exists", which is the same claim stated
+  about the thing that matters.
+- `apps/api/test/integration/specs/open-table-multi-tab.spec.ts` (D104/D105/D106)
+  — every "close" is now settle (send, then pay in full), and the
+  `openTableRelease` summary the `/close` response carried is read back from
+  the tables and the arrangement's live tabs. Which members come back, and
+  when, is asserted exactly as before. One case is added: sending alone frees
+  nothing.
+- `apps/web/src/components/pos/dine-in/table-bill-sheet.render.test.tsx` — the
+  verb is `sendToCashier`, the button *Proceed to pay*, the unsent-items
+  question *"Send the bill anyway?"*, and the split-failure warning says the
+  bill is *at the till* rather than that the table is *closed* — because it is
+  not.
+
+**Paired per D30.** `table-sessions-proceed-to-pay-d153.spec.ts`: the send is
+asserted to have raised the bill (positive) AND to have moved nothing on the
+floor (negative); the partial payment to have landed AND freed nothing; the
+recall of a served ticket to move the ticket AND not the round; the waiter to
+send and be refused on collect, the till the reverse. `unified-status.spec.ts`:
+BILLING → To pay whatever the rounds say, and the same rounds under OPEN /
+CLOSED / no session derive as before. `orders-page.proceed-to-pay.render.test.tsx`:
+which rows carry which verb, for which role; mutation-proven on the DINE_IN
+guard and the tab (1 failed / 9 passed each), and honest that the overlay's
+stacking cannot be proven in jsdom.
+
+**Deliberately not done.**
+- A separate "Mark served" tap. The PO's own description has none; "Proceed to
+  pay" records it. The per-round verb remains available to a later record.
+- A "needs cleaning" state on release. `CLEANING` exists in the enum, unwritten
+  since D49; this record does not start writing it.
+- A waiter-side Print. D87.
+- Server-side `PrintJob` rows for restaurant bills. Printing stays
+  browser-side, as D68/D69 left it.
+- Carrying `openTableRelease` on the payment response. D155 dropped the D50
+  release reminder it fed; nothing reads it.
+
+**Migration: none.** Every value this record starts writing already exists —
+`TableSessionStatus.BILLING` and `RestaurantTableStatus.BILLING` (D49),
+`OrderRoundStatus.DELIVERED` and `RestaurantOrderItemStatus.DELIVERED` (Phase
+5), `RestaurantOrderStatus.COMPLETED` (Phase 5). `UnifiedOrderStatus` is a
+TypeScript union on both sides of the wire, not a database enum. One route is
+added and classified in `route-module-matrix.spec.ts` (319 routes, 219 guarded).
+
+### D156b — the arrangement's server line names people, not tabs
+
+**Asked by the PO, 2026-09-11**: *"in the waiter section in the tables tab
+shows the surandi: Restaurant Waiter like one i think its not the best."*
+
+**What was there.** D156a put a name on every table. On a joined table it
+rendered one entry per tab as `<tab>: <waiter>`, so an arrangement with a tab
+called "surandi" read **surandi: Restaurant Waiter** — directly under a button
+that already says **View surandi**. The tab name was on the card twice, and a
+waiter running two tabs was named twice.
+
+**Now.** The line is the **distinct waiter names**, joined ` · `, nothing
+else. The tab name lives on its View button, which is where somebody looking
+for a tab is already looking. A physical table's line (D156a) is unchanged.
+
+**Paired per D30** (`table-floor.server-line.render.test.tsx`): one waiter on
+two tabs is named once and the `tab:` form is asserted absent; two waiters
+are both named; the physical card is the control.
 
 ### D177 — a round is a "send" on screen, and a card is wide enough for its number
 

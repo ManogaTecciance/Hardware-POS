@@ -12,6 +12,7 @@ import {
   OrderDetailView,
   OrdersPage,
   OrdersQuery,
+  OrdersStatusFilter,
   RestaurantOrdersService,
   UnifiedChannel,
   UnifiedOrderStatus,
@@ -99,12 +100,20 @@ const STATUSES: UnifiedOrderStatus[] = [
   'CONFIRMED',
   'IN_PROGRESS',
   'READY',
+  // D178 — was missing from this list, so the To pay tab's filter fell back
+  // to ALL on the server and the tab showed everything.
+  'AWAITING_PAYMENT',
   'HANDED_OVER',
   'COMPLETED',
   'CANCELLED',
 ];
-function parseStatus(v: string | undefined): UnifiedOrderStatus | 'ALL' {
-  return v && (STATUSES as string[]).includes(v) ? (v as UnifiedOrderStatus) : 'ALL';
+/** D179 — the two buckets the queue's tabs ask for; see `OrdersQuery.status`. */
+const BUCKETS: OrdersStatusFilter[] = ['OUTSTANDING', 'DONE'];
+function parseStatus(v: string | undefined): OrdersStatusFilter {
+  if (!v) return 'ALL';
+  if ((STATUSES as string[]).includes(v)) return v as UnifiedOrderStatus;
+  if ((BUCKETS as string[]).includes(v)) return v as OrdersStatusFilter;
+  return 'ALL';
 }
 function parsePayment(v: string | undefined) {
   return v === 'UNPAID' || v === 'PARTIAL' || v === 'PAID' || v === 'REFUNDED' ? v : 'ALL';

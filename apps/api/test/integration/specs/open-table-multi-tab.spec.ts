@@ -24,11 +24,19 @@
  *   proven scoped rather than global.
  *
  * The close-then-release ORDERING is load-bearing and is pinned here:
- * `closeSession` marks its own session CLOSED before the fulfilment provider
- * asks "is anybody else still sitting here", so the plain count in
+ * `settleBilledSession` marks its own session CLOSED before the fulfilment
+ * provider asks "is anybody else still sitting here", so the plain count in
  * `releaseOpenTable` excludes the tab that is closing. Were that reordered, the
  * last close would see itself as a survivor and never dissolve — which is
  * exactly what the third test would catch.
+ *
+ * D178 re-timed "close". A tab is done when its bill is PAID, not when the
+ * waiter sends it to the till, so `settleTab` below does both — send, then
+ * pay in full — and the release facts the old `/close` response used to carry
+ * (`openTableRelease`) are read back from the tables themselves, which is
+ * where the claim lives anyway. Every assertion about WHICH members come back
+ * and WHEN is unchanged; only the trigger moved, and one test is added to pin
+ * the new half: sending alone frees nothing.
  */
 import {
   seedTenantRoles,
@@ -125,16 +133,58 @@ async function sendRound(sessionId: string, key: string) {
   expect(round.status).toBe(201);
 }
 
-async function closeTab(sessionId: string) {
-  return http.request<{
-    session: { status: string };
-    saleId: string;
-    openTableRelease?: {
-      released: Array<{ code: string }>;
-      stillReserved: Array<{ code: string }>;
-      remainingTabs: number;
-    };
-  }>('POST', `/restaurant/table-sessions/${sessionId}/close`, { token: token(), body: {} });
+/** D178 — the waiter's half alone: the bill goes to the till, the table is held. */
+async function sendTab(sessionId: string) {
+  return http.request<{ session: { status: string }; saleId: string }>(
+    'POST',
+    `/restaurant/table-sessions/${sessionId}/send-to-cashier`,
+    { token: token(), body: {} },
+  );
+}
+
+/**
+ * D178 — what "close" means now: send the bill, then pay it in full. Returns
+ * the shape the old `/close` response carried, with the release summary
+ * derived from the tables and the arrangement's live tabs after settlement.
+ */
+async function settleTab(sessionId: string) {
+  const sent = await sendTab(sessionId);
+  if (sent.status !== 200) {
+    return { status: sent.status, data: { ...sent.data, openTableRelease: undefined } };
+  }
+  const sale = await prisma.sale.findUniqueOrThrow({ where: { id: sent.data.saleId } });
+  const paid = await http.request('POST', `/restaurant/bills/${sale.id}/payments`, {
+    token: token(),
+    body: { amount: Number(sale.total.toFixed(2)), method: 'CASH' },
+  });
+  expect(paid.status).toBe(201);
+
+  const session = await prisma.tableSession.findUniqueOrThrow({ where: { id: sessionId } });
+  const members = await prisma.openTableMember.findMany({
+    where: { openTableId: session.tableId },
+    select: { memberTableId: true },
+  });
+  const memberRows = await prisma.restaurantTable.findMany({
+    where: { id: { in: [m1, m2] } },
+    select: { code: true, status: true, id: true },
+    orderBy: { code: 'asc' },
+  });
+  const stillMember = new Set(members.map((m) => m.memberTableId));
+  const remainingTabs = await prisma.tableSession.count({
+    where: { tableId: session.tableId, status: { in: ['OPEN', 'BILLING'] } },
+  });
+  return {
+    status: 200,
+    data: {
+      session: { status: session.status },
+      saleId: sale.id,
+      openTableRelease: {
+        released: memberRows.filter((t) => !stillMember.has(t.id) && t.status === 'AVAILABLE'),
+        stillReserved: memberRows.filter((t) => !stillMember.has(t.id) && t.status !== 'AVAILABLE'),
+        remainingTabs,
+      },
+    },
+  };
 }
 
 const statusOf = async (id: string) =>
@@ -209,8 +259,8 @@ describe('D104 — several tabs on one joined table', () => {
     await sendRound(first.data.id, 'k1');
     await sendRound(second.data.id, 'k2');
 
-    const closeA = await closeTab(first.data.id);
-    const closeB = await closeTab(second.data.id);
+    const closeA = await settleTab(first.data.id);
+    const closeB = await settleTab(second.data.id);
     expect(closeA.status).toBe(200);
     expect(closeB.status).toBe(200);
 
@@ -231,7 +281,7 @@ describe('D104 — several tabs on one joined table', () => {
     const second = await openTab(arrangement.id, { guestCount: 2, tabName: 'Nuwan' });
     await sendRound(first.data.id, 'k1');
 
-    const close = await closeTab(first.data.id);
+    const close = await settleTab(first.data.id);
     expect(close.status).toBe(200);
 
     // POSITIVE — the summary says why nothing moved, rather than returning an
@@ -258,6 +308,32 @@ describe('D104 — several tabs on one joined table', () => {
     expect(still.status).toBe('OPEN');
   });
 
+  it('D178 — sending a bill to the till frees nothing; paying it does', async () => {
+    const arrangement = await createArrangement(6);
+    const tab = await openTab(arrangement.id, { guestCount: 4 });
+    await sendRound(tab.data.id, 'k1');
+
+    const sent = await sendTab(tab.data.id);
+    expect(sent.status).toBe(200);
+    expect(sent.data.session.status).toBe('BILLING');
+
+    // NEGATIVE — the bill exists, and NOTHING has moved on the floor.
+    expect(await statusOf(m1)).toBe('RESERVED');
+    expect(await statusOf(m2)).toBe('RESERVED');
+    expect(
+      (await prisma.restaurantTable.findUniqueOrThrow({ where: { id: arrangement.id } })).isActive,
+    ).toBe(true);
+    expect(
+      await prisma.openTableMember.count({ where: { openTableId: arrangement.id } }),
+    ).toBe(2);
+
+    // POSITIVE — the payment is what ends it.
+    const settled = await settleTab(tab.data.id);
+    expect(settled.data.session.status).toBe('CLOSED');
+    expect(await statusOf(m1)).toBe('AVAILABLE');
+    expect(await statusOf(m2)).toBe('AVAILABLE');
+  });
+
   it('the LAST close dissolves the arrangement and frees the members', async () => {
     const arrangement = await createArrangement(6);
     const first = await openTab(arrangement.id, { guestCount: 4 });
@@ -265,8 +341,8 @@ describe('D104 — several tabs on one joined table', () => {
     await sendRound(first.data.id, 'k1');
     await sendRound(second.data.id, 'k2');
 
-    await closeTab(first.data.id);
-    const close = await closeTab(second.data.id);
+    await settleTab(first.data.id);
+    const close = await settleTab(second.data.id);
     expect(close.status).toBe(200);
 
     // POSITIVE — this is the close that ends the arrangement.
@@ -387,7 +463,7 @@ describe('D105 — a joined table cannot be joined again', () => {
     const first = await createArrangement(6);
     const tab = await openTab(first.id, { guestCount: 4 });
     await sendRound(tab.data.id, 'k1');
-    const close = await closeTab(tab.data.id);
+    const close = await settleTab(tab.data.id);
     expect(close.data.openTableRelease?.remainingTabs).toBe(0);
     expect(await statusOf(m1)).toBe('AVAILABLE');
 
@@ -454,7 +530,7 @@ describe('D106 — unreserving a member of a live arrangement', () => {
     await sendRound(tab.data.id, 'k1');
     expect((await tryRelease(m1)).status).toBe(409);
 
-    const close = await closeTab(tab.data.id);
+    const close = await settleTab(tab.data.id);
     expect(close.status).toBe(200);
     expect(close.data.openTableRelease?.released.map((t) => t.code).sort()).toEqual(['M1', 'M2']);
     expect(await statusOf(m1)).toBe('AVAILABLE');

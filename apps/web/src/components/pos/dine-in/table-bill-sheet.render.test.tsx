@@ -18,6 +18,11 @@
  * Totals are asserted to come from the SERVER's preview rather than from
  * re-adding the lines: 3 × 1000 is 3000, but the total shown is 3300 with
  * service charge, and only the server knows that.
+ *
+ * D178 — the primary action is "Proceed to pay" and calls `sendToCashier`,
+ * which raises the Sale exactly as `close` did and holds the table. Every
+ * claim below is unchanged; only the verb's name and the wording of the
+ * unsent-items question moved with it (recorded in D178).
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
@@ -27,13 +32,13 @@ import { ConfirmProvider } from '@/components/ui/confirm';
 import type { SessionBillPreview } from '@/lib/restaurant/types';
 
 const billPreview = vi.fn<() => Promise<SessionBillPreview>>();
-const closeSession = vi.fn();
+const sendToCashier = vi.fn();
 const splitByItems = vi.fn();
 
 vi.mock('@/lib/restaurant/api', () => ({
   tableSessions: {
     billPreview: () => billPreview(),
-    close: (...args: unknown[]) => closeSession(...args),
+    sendToCashier: (...args: unknown[]) => sendToCashier(...args),
   },
   billing: { splitByItems: (...args: unknown[]) => splitByItems(...args) },
 }));
@@ -116,7 +121,7 @@ const sheet = (
   return onClosed;
 };
 
-const UNSENT_QUESTION = 'Close the session anyway?';
+const UNSENT_QUESTION = 'Send the bill anyway?';
 
 /*
  * Both the sheet and the confirm are `role="dialog"`, and the assigner has a
@@ -196,17 +201,17 @@ describe('reviewing the bill', () => {
      * Matched on the full action name: the Sheet's own dismiss control is
      * also called "Close", and a loose regex would pass on that instead.
      */
-    expect(screen.getByRole('button', { name: /Close .* one bill/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Proceed to pay/ })).toBeTruthy();
   });
 });
 
 describe('closing', () => {
   it('closes into one bill', async () => {
     billPreview.mockResolvedValue(PREVIEW);
-    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    sendToCashier.mockResolvedValue({ saleId: 'sale_1' });
     const onClosed = sheet();
 
-    fireEvent.click(await screen.findByRole('button', { name: /Close .* one bill/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Proceed to pay/ }));
 
     await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
     expect(onClosed).toHaveBeenCalledWith({ saleId: 'sale_1', splitCount: 0 });
@@ -215,7 +220,7 @@ describe('closing', () => {
 
   it('closes THEN splits, and passes the new sale to the split', async () => {
     billPreview.mockResolvedValue(PREVIEW);
-    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    sendToCashier.mockResolvedValue({ saleId: 'sale_1' });
     splitByItems.mockResolvedValue({});
     const onClosed = sheet();
 
@@ -223,24 +228,27 @@ describe('closing', () => {
     // Assign everything to the first guest — the assigner refuses to submit
     // while any unit is unassigned.
     fireEvent.click(await screen.findByRole('button', { name: /Assign rest to/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Close and create/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Send and split/ }));
 
     await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
-    expect(closeSession).toHaveBeenCalledTimes(1);
+    expect(sendToCashier).toHaveBeenCalledTimes(1);
     // The split targets the sale the close just produced — not the session.
     expect(splitByItems.mock.calls[0]![1]).toBe('sale_1');
     expect(onClosed).toHaveBeenCalledWith({ saleId: 'sale_1', splitCount: 1 });
   });
 
-  it('reports the table CLOSED when the split fails afterwards', async () => {
+  // D178 — was "reports the table CLOSED": the bill is at the till and the
+  // table is HELD, so the message says that instead. The claim is the same —
+  // a half-success is reported as the success it is, naming who finishes it.
+  it('reports the bill AT THE TILL when the split fails afterwards', async () => {
     billPreview.mockResolvedValue(PREVIEW);
-    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    sendToCashier.mockResolvedValue({ saleId: 'sale_1' });
     splitByItems.mockRejectedValue(new Error('shares do not add up'));
     const onClosed = sheet();
 
     fireEvent.click(await screen.findByRole('button', { name: /Split between guests/ }));
     fireEvent.click(await screen.findByRole('button', { name: /Assign rest to/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Close and create/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Send and split/ }));
 
     await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
     const result = onClosed.mock.calls[0]![0] as {
@@ -253,7 +261,7 @@ describe('closing', () => {
     expect(result.saleId).toBe('sale_1');
     expect(result.splitCount).toBe(0);
     // …and the message says who finishes the job.
-    expect(result.warning).toMatch(/closed/i);
+    expect(result.warning).toMatch(/at the till/i);
     expect(result.warning).toMatch(/cashier/i);
     expect(result.warning).toContain('shares do not add up');
   });
@@ -267,9 +275,9 @@ describe('closing', () => {
     // have been attempted. This is the ordering guarantee in the other
     // direction — the session is never closed "just in case".
     expect(
-      screen.getByRole('button', { name: /Close and create/ }).hasAttribute('disabled'),
+      screen.getByRole('button', { name: /Send and split/ }).hasAttribute('disabled'),
     ).toBe(true);
-    expect(closeSession).not.toHaveBeenCalled();
+    expect(sendToCashier).not.toHaveBeenCalled();
     expect(onClosed).not.toHaveBeenCalled();
   });
 });
@@ -287,10 +295,10 @@ describe('closing', () => {
 describe('the unsent-items question (D145)', () => {
   it('does not ask when nothing is unsent, and closes straight away', async () => {
     billPreview.mockResolvedValue(PREVIEW);
-    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    sendToCashier.mockResolvedValue({ saleId: 'sale_1' });
     const onClosed = sheet({ hasUnsentDraft: false });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Close .* one bill/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Proceed to pay/ }));
 
     await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
     // POSITIVE CONTROL for the two tests below: the question is conditional,
@@ -301,30 +309,30 @@ describe('the unsent-items question (D145)', () => {
 
   it('asks before closing one bill, and closes when the waiter confirms', async () => {
     billPreview.mockResolvedValue(PREVIEW);
-    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    sendToCashier.mockResolvedValue({ saleId: 'sale_1' });
     const onClosed = sheet({ hasUnsentDraft: true });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Close .* one bill/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Proceed to pay/ }));
 
     // Nothing has moved yet: the close waits on the answer.
     await screen.findByRole('heading', { name: UNSENT_QUESTION });
-    expect(closeSession).not.toHaveBeenCalled();
+    expect(sendToCashier).not.toHaveBeenCalled();
     // The consequence is still spelled out, in the words the native dialog used.
     expect(screen.getByText(/never sent to the kitchen/)).toBeTruthy();
 
-    fireEvent.click(unsentDialog().getByRole('button', { name: 'Close session' }));
+    fireEvent.click(unsentDialog().getByRole('button', { name: 'Send bill' }));
 
     await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
     expect(onClosed).toHaveBeenCalledWith({ saleId: 'sale_1', splitCount: 0 });
-    expect(closeSession).toHaveBeenCalledTimes(1);
+    expect(sendToCashier).toHaveBeenCalledTimes(1);
   });
 
   it('leaves the session OPEN when the waiter cancels', async () => {
     billPreview.mockResolvedValue(PREVIEW);
-    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    sendToCashier.mockResolvedValue({ saleId: 'sale_1' });
     const onClosed = sheet({ hasUnsentDraft: true });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Close .* one bill/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Proceed to pay/ }));
 
     await screen.findByRole('heading', { name: UNSENT_QUESTION });
     fireEvent.click(unsentDialog().getByRole('button', { name: 'Cancel' }));
@@ -335,19 +343,19 @@ describe('the unsent-items question (D145)', () => {
       expect(screen.queryByRole('heading', { name: UNSENT_QUESTION })).toBeNull(),
     );
     expect(screen.getByText(/Beef Steak/)).toBeTruthy();
-    expect(closeSession).not.toHaveBeenCalled();
+    expect(sendToCashier).not.toHaveBeenCalled();
     expect(onClosed).not.toHaveBeenCalled();
   });
 
   it('guards the SPLIT close too — cancelling raises no Sale to split', async () => {
     billPreview.mockResolvedValue(PREVIEW);
-    closeSession.mockResolvedValue({ saleId: 'sale_1' });
+    sendToCashier.mockResolvedValue({ saleId: 'sale_1' });
     splitByItems.mockResolvedValue({});
     const onClosed = sheet({ hasUnsentDraft: true });
 
     fireEvent.click(await screen.findByRole('button', { name: /Split between guests/ }));
     fireEvent.click(await screen.findByRole('button', { name: /Assign rest to/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Close and create/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Send and split/ }));
 
     await screen.findByRole('heading', { name: UNSENT_QUESTION });
     fireEvent.click(unsentDialog().getByRole('button', { name: 'Cancel' }));
@@ -355,18 +363,18 @@ describe('the unsent-items question (D145)', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: UNSENT_QUESTION })).toBeNull(),
     );
-    expect(closeSession).not.toHaveBeenCalled();
+    expect(sendToCashier).not.toHaveBeenCalled();
     expect(splitByItems).not.toHaveBeenCalled();
     expect(onClosed).not.toHaveBeenCalled();
 
     // …and confirming the same action still goes through, so the assertions
     // above are about the answer and not about a split that never worked.
-    fireEvent.click(screen.getByRole('button', { name: /Close and create/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Send and split/ }));
     await screen.findByRole('heading', { name: UNSENT_QUESTION });
-    fireEvent.click(unsentDialog().getByRole('button', { name: 'Close session' }));
+    fireEvent.click(unsentDialog().getByRole('button', { name: 'Send bill' }));
 
     await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
-    expect(closeSession).toHaveBeenCalledTimes(1);
+    expect(sendToCashier).toHaveBeenCalledTimes(1);
     expect(splitByItems).toHaveBeenCalledTimes(1);
     expect(onClosed).toHaveBeenCalledWith({ saleId: 'sale_1', splitCount: 1 });
   });

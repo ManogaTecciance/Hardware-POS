@@ -93,6 +93,7 @@ function row(id: string, staffUserId: string | null, staffName: string | null) {
     saleId: null,
     itemCount: 1,
     itemPreview: [{ name: 'Kottu', qty: 1 }],
+    rounds: [],
     staffUserId,
     staffName,
   };

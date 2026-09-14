@@ -65,6 +65,10 @@ const ROW: UnifiedOrderView = {
   // shape carries it now and a fixture missing it would not be a real row.
   staffUserId: 'usr_till',
   staffName: 'Restaurant Cashier',
+  // D178 — takeaway has no table to address; the row shape carries it now.
+  sessionId: null,
+  // D178a — not this spec's subject either; a real row carries it.
+  rounds: [],
   id: 'ord_1',
   channel: 'TAKEAWAY',
   source: 'PHONE_ORDER',
@@ -215,6 +219,7 @@ describe('the source chip', () => {
       saleId: null,
       itemCount: 0,
       itemPreview: [],
+      rounds: [],
     };
     render(<OrderDetailDrawer order={thirdParty} branchId="brn_1" onClose={() => undefined} />);
 

@@ -772,10 +772,12 @@ export function PosCounterWorkspace({
           ) : null}
           {closedBill ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-success/40 bg-success-soft/50 p-3 text-sm">
+              {/* D178 — the table is HELD, not closed: it stays on the floor as
+                  "Bill requested" until the cashier records the payment. */}
               <span>
-                {closedBill.table} closed
-                {closedBill.splitCount > 1 ? ` into ${closedBill.splitCount} bills` : ''}
-                . Ready for the cashier to settle.
+                {closedBill.table} sent to the cashier
+                {closedBill.splitCount > 1 ? ` as ${closedBill.splitCount} bills` : ''}
+                . The table stays yours until the bill is paid.
               </span>
               {/* D83 — reopen the same dialog. A waiter who dismissed it and
                   then had the guests ask for the total should not have to

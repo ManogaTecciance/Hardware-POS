@@ -26,6 +26,7 @@ import { printReceipt, renderSplitBill } from '@/lib/receipt-print';
 import { printBillView } from '@/lib/restaurant/bill-print';
 import { renderThermalBill } from '@/lib/thermal-bill';
 
+import { CollectPaymentDialog, PAYMENT_METHODS } from './collect-payment-dialog';
 import { ItemSplitAssigner } from './item-split-assigner';
 import { getActiveCurrency } from '@/lib/tenant-money';
 import type { BillLineItem, BillView, PaymentMethod } from '@/lib/restaurant/types';
@@ -35,15 +36,6 @@ interface Props {
   saleId: string;
 }
 
-const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'CARD', label: 'Card' },
-  { value: 'BANK_TRANSFER', label: 'Bank transfer' },
-  { value: 'QR_PAYMENT', label: 'QR payment' },
-  { value: 'CHECK', label: 'Check' },
-  { value: 'STORE_CREDIT', label: 'Store credit' },
-  { value: 'OTHER', label: 'Other' },
-];
 
 /**
  * Bill screen for a closed session.
@@ -630,113 +622,6 @@ function SplitsEditorDialog({
                 : `Over by ${formatMoney(Math.abs(diff))}`}
             </p>
           ) : null}
-        </div>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-      </div>
-    </Dialog>
-  );
-}
-
-function CollectPaymentDialog({
-  bill,
-  suggested,
-  splitId,
-  onClose,
-  onCollected,
-  session,
-}: {
-  bill: BillView;
-  suggested: string;
-  /** D51 — when set, the tender is allocated to this split, not the whole bill. */
-  splitId: string | null;
-  onClose: () => void;
-  onCollected: () => Promise<void>;
-  session: Session;
-}) {
-  const [amount, setAmount] = React.useState(suggested);
-  const [method, setMethod] = React.useState<PaymentMethod>('CASH');
-  const [reference, setReference] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-
-  const numAmount = Number(amount);
-  const valid = numAmount > 0;
-
-  const submit = async () => {
-    if (!valid) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await billing.collectPayment(session, bill.saleId, {
-        amount: numAmount,
-        method,
-        reference: reference.trim() || undefined,
-        splitId: splitId ?? undefined,
-      });
-      await onCollected();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to record payment');
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="Collect payment"
-      description={`Bill balance: ${formatMoney(bill.balanceAmount)}`}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={submit} isLoading={saving} disabled={!valid}>
-            Record payment
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor="pay-amount">
-            Amount
-          </label>
-          <Input
-            id="pay-amount"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            inputMode="decimal"
-            autoFocus
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor="pay-method">
-            Method
-          </label>
-          <select
-            id="pay-method"
-            value={method}
-            onChange={(e) => setMethod(e.target.value as PaymentMethod)}
-            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm"
-          >
-            {PAYMENT_METHODS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor="pay-reference">
-            Reference (optional)
-          </label>
-          <Input
-            id="pay-reference"
-            value={reference}
-            onChange={(e) => setReference(e.target.value)}
-            placeholder="Auth code, cheque #, etc."
-          />
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
       </div>

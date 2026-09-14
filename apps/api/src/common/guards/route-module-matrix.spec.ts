@@ -379,6 +379,9 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /restaurant/table-sessions/:sessionId/orders': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/orders/:orderId/rounds': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/order-items/:itemId/void': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
+  // D178 — "Proceed to pay": raises the bill and holds the table until it is
+  // paid. TABLE_CLOSE, same as the older /close it replaced on the floor.
+  'POST /restaurant/table-sessions/:sessionId/send-to-cashier': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'POST /restaurant/table-sessions/:sessionId/close': { module: 'TABLE_MANAGEMENT', guard: 'ENFORCED', scope: T },
   'GET /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-printers': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },

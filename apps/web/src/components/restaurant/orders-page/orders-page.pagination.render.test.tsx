@@ -81,6 +81,7 @@ function order(id: string) {
     saleId: null,
     itemCount: 1,
     itemPreview: [],
+    rounds: [],
   };
 }
 

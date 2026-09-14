@@ -16,6 +16,7 @@ import { formatElapsed, formatMoney, formatTime } from '@/lib/restaurant/labels'
 import type { UnifiedOrderDetail, UnifiedOrderView } from '@/lib/restaurant/types';
 import { useOrientation } from '@/lib/use-viewport';
 
+import { OrderCardActions } from './order-card-actions';
 import {
   PAYMENT_LABELS,
   PAYMENT_METHOD_LABELS,
@@ -462,18 +463,24 @@ function OrderDetailActions({
   };
   return (
     <>
-      {order.channel === 'DINE_IN' ? (
+      {/* D178 — Proceed to pay / Print bill / Collect payment, the same
+          component the queue card renders, so the two cannot disagree. */}
+      {session ? (
+        <OrderCardActions session={session} order={order} onMutated={onMutated} />
+      ) : null}
+      {/*
+        * D178 — the row carries the session id now (it was E18: the view had
+        * a sale id for the bill but never the session id for the table, so
+        * this sat disabled with a title explaining itself). Absent rather
+        * than disabled for the one dine-in row that has none — the synthetic
+        * walk-in session behind a counter order, which nobody deep-links to.
+        */}
+      {order.channel === 'DINE_IN' && order.sessionId ? (
         <Button
           size="sm"
           variant="outline"
           onClick={() =>
-            go(`/pos?mode=dine-in&sessionId=${encodeURIComponent(deriveSessionId(order))}`)
-          }
-          disabled={!deriveSessionId(order)}
-          title={
-            deriveSessionId(order)
-              ? undefined
-              : 'Session id not available from this row'
+            go(`/pos?mode=dine-in&sessionId=${encodeURIComponent(order.sessionId!)}`)
           }
         >
           Open in POS
@@ -593,8 +600,3 @@ function Kv({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
   );
 }
 
-// Placeholder: `UnifiedOrderView` does not carry sessionId today.
-// A future slice adds it to the view for the Dine-In deep link.
-function deriveSessionId(_order: UnifiedOrderView): string {
-  return '';
-}

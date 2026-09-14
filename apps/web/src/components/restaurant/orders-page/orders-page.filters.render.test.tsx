@@ -226,6 +226,7 @@ function orderRow(over: Partial<Record<string, unknown>> = {}) {
     saleId: null,
     itemCount: 1,
     itemPreview: [{ name: 'Rice and Curry', qty: 1 }],
+    rounds: [],
     ...over,
   };
 }
