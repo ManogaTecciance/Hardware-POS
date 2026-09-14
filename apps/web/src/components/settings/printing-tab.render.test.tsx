@@ -22,13 +22,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConfirmProvider } from '@/components/ui/confirm';
 import { PrintingTab } from './printing-tab';
-import { kitchenPrinters, kitchenStations, printing, restaurantConfig } from '@/lib/restaurant/api';
+import { kitchenPrinters, kitchenStations, printing } from '@/lib/restaurant/api';
 import type {
   KitchenPrinterView,
   KitchenStationView,
   PrintAgentView,
   PrinterDiscoveryView,
-  RestaurantBranchConfigView,
 } from '@/lib/restaurant/types';
 
 vi.mock('@/lib/restaurant/api', () => ({
@@ -50,7 +49,6 @@ vi.mock('@/lib/restaurant/api', () => ({
     revokeAgent: vi.fn(),
     discover: vi.fn(),
   },
-  restaurantConfig: { get: vi.fn(), update: vi.fn() },
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -92,16 +90,6 @@ const AGENT_ONLINE: PrintAgentView = {
   online: true,
 };
 
-const CONFIG = {
-  branchId: BRANCH,
-  autoPrintKot: true,
-  autoPrintBill: true,
-  billCopies: 1,
-  defaultReceiptPrinterId: null,
-  defaultKitchenPrinterId: null,
-  version: 1,
-} as unknown as RestaurantBranchConfigView;
-
 const DISCOVERY: PrinterDiscoveryView = {
   source: 'AGENT',
   agentName: 'Counter PC',
@@ -129,14 +117,12 @@ const mock = {
   agents: vi.mocked(printing.agents),
   queue: vi.mocked(printing.queue),
   discover: vi.mocked(printing.discover),
-  config: vi.mocked(restaurantConfig.get),
 };
 
 async function open(opts: { printers?: KitchenPrinterView[]; discovery?: PrinterDiscoveryView; agents?: PrintAgentView[] } = {}) {
   mock.list.mockResolvedValue(opts.printers ?? []);
   mock.stations.mockResolvedValue(STATIONS);
   mock.agents.mockResolvedValue(opts.agents ?? [AGENT_ONLINE]);
-  mock.config.mockResolvedValue(CONFIG);
   mock.queue.mockResolvedValue({ pendingKitchenAttempts: 0, failedKitchenTickets: 0, pendingBillJobs: 0, failedBillJobs: [] });
   mock.discover.mockResolvedValue(opts.discovery ?? DISCOVERY);
   mock.create.mockImplementation(async (_s, _b, body) => ({ ...Q80B, ...body, id: 'prn_new', stationIds: [] }) as KitchenPrinterView);

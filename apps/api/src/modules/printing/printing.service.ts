@@ -47,12 +47,10 @@ export class PrintingService {
       });
       if (config && !config.autoPrintBill) return;
 
-      const printerId = config?.defaultReceiptPrinterId ?? null;
-      if (!printerId) return;
-
-      const printer = await tx.kitchenPrinter.findFirst({
-        where: { id: printerId, tenantId: input.tenantId, isActive: true },
-        select: { id: true },
+      const printer = await resolveBillPrinter(tx, {
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        chosenId: config?.defaultReceiptPrinterId ?? null,
       });
       if (!printer) return;
 
@@ -114,12 +112,10 @@ export class PrintingService {
       });
       if (config && !config.autoPrintBill) return;
 
-      const printerId = config?.defaultReceiptPrinterId ?? null;
-      if (!printerId) return;
-
-      const printer = await tx.kitchenPrinter.findFirst({
-        where: { id: printerId, tenantId: input.tenantId, isActive: true },
-        select: { id: true },
+      const printer = await resolveBillPrinter(tx, {
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        chosenId: config?.defaultReceiptPrinterId ?? null,
       });
       if (!printer) return;
 
@@ -338,6 +334,31 @@ export class PrintingService {
  * Only ACTIVE printers of this tenant are returned, so a link left pointing
  * at a retired device produces no attempt rather than three failed ones.
  */
+/**
+ * D183 — which printer prints the bill. A chosen default wins while it is
+ * active; otherwise the branch's first active CASHIER printer, so a shop that
+ * plugged in one bill printer and never opened a settings card still gets
+ * paper. Two active cashier printers and no choice is unusual enough that
+ * "the one added first" is a better answer than none.
+ */
+export async function resolveBillPrinter(
+  tx: Prisma.TransactionClient,
+  input: { tenantId: string; branchId: string; chosenId: string | null },
+): Promise<{ id: string } | null> {
+  if (input.chosenId) {
+    const chosen = await tx.kitchenPrinter.findFirst({
+      where: { id: input.chosenId, tenantId: input.tenantId, isActive: true },
+      select: { id: true },
+    });
+    if (chosen) return chosen;
+  }
+  return tx.kitchenPrinter.findFirst({
+    where: { tenantId: input.tenantId, branchId: input.branchId, role: 'CASHIER', isActive: true },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+}
+
 export async function resolveStationPrinterIds(
   tx: Prisma.TransactionClient,
   input: { tenantId: string; branchId: string; stationId: string },
@@ -355,7 +376,6 @@ export async function resolveStationPrinterIds(
     });
     if (config?.defaultKitchenPrinterId) candidates = [config.defaultKitchenPrinterId];
   }
-  if (candidates.length === 0) return [];
 
   const active = await tx.kitchenPrinter.findMany({
     where: { id: { in: candidates }, tenantId: input.tenantId, isActive: true },
@@ -363,5 +383,18 @@ export async function resolveStationPrinterIds(
   });
   const activeIds = new Set(active.map((p) => p.id));
   // Preserve the primary-first order the link query gave us.
-  return candidates.filter((id) => activeIds.has(id));
+  const resolved = candidates.filter((id) => activeIds.has(id));
+  if (resolved.length > 0) return resolved;
+
+  // D183 — nothing linked and nothing chosen: the branch's first active
+  // KITCHEN printer catches the station, so a one-printer kitchen prints
+  // every ticket without anyone ticking a station or opening a settings
+  // card. Only when there is no kitchen printer at all does a ticket stay
+  // on the board alone.
+  const fallback = await tx.kitchenPrinter.findFirst({
+    where: { tenantId: input.tenantId, branchId: input.branchId, role: 'KITCHEN', isActive: true },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  return fallback ? [fallback.id] : [];
 }

@@ -9,10 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useConfirm } from '@/components/ui/confirm';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
-import { kitchenPrinters, kitchenStations, printing, restaurantConfig } from '@/lib/restaurant/api';
+import { kitchenPrinters, kitchenStations, printing } from '@/lib/restaurant/api';
 import type {
   KitchenPrinterKind,
   KitchenPrinterView,
@@ -22,16 +21,15 @@ import type {
   PrintQueueStatus,
   PrinterDiscoveryView,
   PrinterRole,
-  RestaurantBranchConfigView,
 } from '@/lib/restaurant/types';
 
 /**
  * D181 — unattended printing, where the owner sets it up.
  *
- * Four things on one tab, in the order an installer meets them: the printers
+ * Three things on one tab, in the order an installer meets them: the printers
  * (add, link to stations, test), the agent that reaches them from the cloud
- * (pair once, watch it come online), the switches that decide what prints by
- * itself, and the queue — what is waiting and what gave up.
+ * (pair once, watch it come online), and the queue — what is waiting and what
+ * gave up.
  *
  * Restored from D67's `/settings/printing` page and reshaped as a Settings
  * tab, because that is where every other per-branch setting has lived since
@@ -39,35 +37,35 @@ import type {
  * D152 made the STATION decide the device, so there is nothing personal left
  * to pick.
  *
- * Self-saving (like Charges and Hours): the switches write the restaurant
- * branch config row, which is versioned, and must not share a Save button
- * with the document profile the sticky bar below writes.
+ * D183 took the "What prints by itself" card away again: every switch on it
+ * had an answer the printers themselves already give. Tickets and bills print
+ * by default; the bill goes to the cashier printer and an unlinked station to
+ * the first kitchen printer (`resolveBillPrinter` / `resolveStationPrinterIds`
+ * in the API), so an owner who adds two printers and presses Test print is
+ * done. The branch-config fields remain on the API for the rare shop that
+ * needs to turn auto-printing off or pin a default.
  */
 export function PrintingTab({ session, branchId }: { session: Session; branchId: string }) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission(Permission.KITCHEN_STATION_MANAGE);
-  const canConfig = hasPermission(Permission.RESTAURANT_CONFIG_MANAGE);
 
   const [printers, setPrinters] = React.useState<KitchenPrinterView[]>([]);
   const [stations, setStations] = React.useState<KitchenStationView[]>([]);
   const [agents, setAgents] = React.useState<PrintAgentView[]>([]);
-  const [config, setConfig] = React.useState<RestaurantBranchConfigView | null>(null);
   const [queue, setQueue] = React.useState<PrintQueueStatus | null>(null);
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = React.useState<string | null>(null);
 
   const reload = React.useCallback(async () => {
-    const [p, s, a, c, q] = await Promise.all([
+    const [p, s, a, q] = await Promise.all([
       kitchenPrinters.list(session, branchId),
       kitchenStations.list(session, branchId),
       printing.agents(session, branchId),
-      restaurantConfig.get(session, branchId),
       printing.queue(session, branchId),
     ]);
     setPrinters(p);
     setStations(s);
     setAgents(a);
-    setConfig(c);
     setQueue(q);
   }, [session, branchId]);
 
@@ -96,7 +94,7 @@ export function PrintingTab({ session, branchId }: { session: Session; branchId:
       </Card>
     );
   }
-  if (status === 'error' || !config) {
+  if (status === 'error') {
     return (
       <Card className="max-w-3xl">
         <CardContent className="py-16 text-center text-sm text-danger">
@@ -125,14 +123,6 @@ export function PrintingTab({ session, branchId }: { session: Session; branchId:
         agents={agents}
         canManage={canManage}
         onChange={reload}
-      />
-      <AutoPrintCard
-        session={session}
-        branchId={branchId}
-        config={config}
-        printers={printers}
-        canConfig={canConfig}
-        onSaved={setConfig}
       />
       <QueueCard session={session} queue={queue} canRetry={canManage} onChange={reload} />
     </div>
@@ -304,8 +294,8 @@ function PrintersCard({
             <Printer className="h-4 w-4" aria-hidden /> Printers
           </CardTitle>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            A kitchen printer prints the tickets for the stations it serves. The cashier printer
-            prints the bill.
+            A kitchen printer prints the tickets for the stations it serves; a station with no
+            printer goes to the first kitchen printer. The cashier printer prints the bill.
           </p>
         </div>
         {canManage && !adding ? (
@@ -824,8 +814,9 @@ function PrinterForm({
 }
 
 /**
- * Which stations a KITCHEN printer serves. Empty is allowed and means "the
- * branch default, if I am it": a one-printer shop never has to tick anything.
+ * Which stations a KITCHEN printer serves. Empty is allowed: a station nobody
+ * serves goes to the branch's first kitchen printer, so a one-printer shop
+ * never has to tick anything.
  */
 function StationPicker({
   stations,
@@ -871,8 +862,7 @@ function StationPicker({
         </div>
       )}
       <p className="mt-1.5 text-xs text-muted-foreground">
-        Nothing ticked means this printer only prints when it is the branch’s default kitchen
-        printer below.
+        Nothing ticked: a station no printer serves goes to the first kitchen printer added.
       </p>
     </div>
   );
@@ -1073,7 +1063,7 @@ function PrinterRow({
             <p className="mt-1 text-xs text-muted-foreground">
               {stationNames.length > 0
                 ? `Prints tickets for ${stationNames.join(', ')}`
-                : 'Prints only as the branch default kitchen printer'}
+                : 'No stations ticked — catches only stations no printer serves'}
             </p>
           ) : null}
         </div>
@@ -1353,177 +1343,6 @@ function AgentsCard({
           </div>
         ) : null}
         {error ? <p className="text-sm text-danger">{error}</p> : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Auto-print switches ─────────────────────────────────────────────────────
-
-function AutoPrintCard({
-  session,
-  branchId,
-  config,
-  printers,
-  canConfig,
-  onSaved,
-}: {
-  session: Session;
-  branchId: string;
-  config: RestaurantBranchConfigView;
-  printers: KitchenPrinterView[];
-  canConfig: boolean;
-  onSaved: (next: RestaurantBranchConfigView) => void;
-}) {
-  const [autoKot, setAutoKot] = React.useState(config.autoPrintKot);
-  const [autoBill, setAutoBill] = React.useState(config.autoPrintBill);
-  const [copies, setCopies] = React.useState(String(config.billCopies));
-  const [kitchenId, setKitchenId] = React.useState(config.defaultKitchenPrinterId ?? '');
-  const [cashierId, setCashierId] = React.useState(config.defaultReceiptPrinterId ?? '');
-  const [saving, setSaving] = React.useState(false);
-  const [message, setMessage] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    setAutoKot(config.autoPrintKot);
-    setAutoBill(config.autoPrintBill);
-    setCopies(String(config.billCopies));
-    setKitchenId(config.defaultKitchenPrinterId ?? '');
-    setCashierId(config.defaultReceiptPrinterId ?? '');
-  }, [config]);
-
-  const kitchenPrintersList = printers.filter((p) => p.role === 'KITCHEN' && p.isActive);
-  const cashierPrintersList = printers.filter((p) => p.role === 'CASHIER' && p.isActive);
-
-  const save = async () => {
-    if (saving) return;
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const next = await restaurantConfig.update(session, branchId, {
-        autoPrintKot: autoKot,
-        autoPrintBill: autoBill,
-        billCopies: Math.min(Math.max(Number(copies) || 1, 1), 3),
-        defaultKitchenPrinterId: kitchenId || null,
-        defaultReceiptPrinterId: cashierId || null,
-        expectedVersion: config.version,
-      });
-      onSaved(next);
-      setMessage('Saved. The next order uses these settings.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>What prints by itself</CardTitle>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          The kitchen board always shows every order. These decide what comes out on paper as
-          well, without anyone pressing anything.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <span id="auto-kot-label" className="text-sm">
-              <span className="block font-medium">Print kitchen tickets when an order is sent</span>
-              <span className="block text-xs text-muted-foreground">
-                One ticket per station, on that station’s printer.
-              </span>
-            </span>
-            <Switch
-              checked={autoKot}
-              onCheckedChange={setAutoKot}
-              disabled={!canConfig}
-              aria-labelledby="auto-kot-label"
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <span id="auto-bill-label" className="text-sm">
-              <span className="block font-medium">Print the bill when an order closes</span>
-              <span className="block text-xs text-muted-foreground">
-                On the cashier printer. Needs one chosen below; otherwise the Print bill button is
-                the only way, as before.
-              </span>
-            </span>
-            <Switch
-              checked={autoBill}
-              onCheckedChange={setAutoBill}
-              disabled={!canConfig}
-              aria-labelledby="auto-bill-label"
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">Default kitchen printer</span>
-            <Select
-              value={kitchenId}
-              disabled={!canConfig}
-              onChange={(e) => setKitchenId(e.target.value)}
-              aria-label="Default kitchen printer"
-            >
-              <option value="">None</option>
-              {kitchenPrintersList.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-            <span className="mt-1 block text-xs text-muted-foreground">
-              Used by any station with no printer of its own.
-            </span>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">Cashier (bill) printer</span>
-            <Select
-              value={cashierId}
-              disabled={!canConfig}
-              onChange={(e) => setCashierId(e.target.value)}
-              aria-label="Cashier printer"
-            >
-              <option value="">None — print from the browser</option>
-              {cashierPrintersList.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">Bill copies</span>
-            <Select
-              value={copies}
-              disabled={!canConfig}
-              onChange={(e) => setCopies(e.target.value)}
-              aria-label="Bill copies"
-            >
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-            </Select>
-          </label>
-        </div>
-
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-        {message ? <p className="text-sm text-success">{message}</p> : null}
-
-        <div className="flex items-center gap-3 border-t border-border pt-4">
-          <Button isLoading={saving} disabled={!canConfig} onClick={() => void save()}>
-            Save printing
-          </Button>
-          {!canConfig ? (
-            <span className="text-xs text-muted-foreground">
-              Your role can view these but not change them.
-            </span>
-          ) : null}
-        </div>
       </CardContent>
     </Card>
   );

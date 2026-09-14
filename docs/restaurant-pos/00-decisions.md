@@ -8120,6 +8120,17 @@ only; nothing changed → no PATCH; how-to and offline warning follow the kind).
 Proven live on the counter PC: the form listed `192.168.123.100`, `Xprinter
 XP-365B` and `Canon G3010 series` from the agent's report.
 
+**Addendum (2026-09-14, owner).** The "What prints by itself" card is gone from the
+tab: every switch on it had an answer the printers already give. Bills go to the
+chosen cashier printer while it is active, else the branch's first active CASHIER
+printer (`resolveBillPrinter`); a station nobody serves goes to the chosen kitchen
+default, else the first active KITCHEN printer (`resolveStationPrinterIds`). Auto-print
+stays on and copies at 1 by default. The branch-config fields and `PUT
+/restaurant/branches/:id/config` remain for the shop that must turn auto-printing
+off or pin a default; nothing on the tab writes them any more. Every printer row
+also gained **Remove** (a real delete that unlinks stations, clears defaults and
+fails queued jobs for it).
+
 ---
 
 ### D180 — merging `fix/waiter-status-change`: how each clash was decided
