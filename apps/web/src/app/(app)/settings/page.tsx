@@ -121,7 +121,7 @@ function previewSegment(active: boolean): string {
  * owner has been shown two tabs that answer "Feature not available" — verified
  * live. The resolver decides now.
  */
-// D174 — Printing joins them: kitchen tickets and cashier bills are the
+// D181 — Printing joins them: kitchen tickets and cashier bills are the
 // restaurant's, and the tab reads the same per-branch config row Charges does.
 const FOOD_SERVICE_ONLY_TABS: readonly Tab[] = ['Charges', 'Hours', 'Printing'];
 
@@ -502,7 +502,7 @@ export default function SettingsPage() {
         )
       ) : tab === 'Printing' ? (
         /*
-         * D174 — its own save button, for the reason Charges has one: the
+         * D181 — its own save button, for the reason Charges has one: the
          * auto-print switches live on the versioned branch config row, and
          * the printers and agents are records of their own.
          */

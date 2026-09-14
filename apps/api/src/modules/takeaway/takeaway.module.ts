@@ -16,7 +16,7 @@ import { TakeawayService } from './takeaway.service';
     SettingsModule,
     ProvidersModule,
     PromotionsModule,
-    // D174 — KOTs at create, bill at settle, dispatcher nudge after commit.
+    // D181 — KOTs at create, bill at settle, dispatcher nudge after commit.
     PrintingModule,
   ],
   controllers: [TakeawayController],

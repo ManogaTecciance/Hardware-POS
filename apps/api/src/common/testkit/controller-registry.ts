@@ -145,7 +145,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   DeliveryWebhookController,
   KdsController,
   RestaurantOrdersController,
-  // D174 — the print queue's operator surface and the on-site agent's API.
+  // D181 — the print queue's operator surface and the on-site agent's API.
   PrintingController,
   PrintAgentController,
   // D44 — Product variants + purchase receipts.
@@ -256,7 +256,7 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'delivery-webhook',
   'kds',
   'restaurant-orders',
-  // D174.
+  // D181.
   'printing',
   'print-agent',
   // D44 — Product variants + purchase receipts.

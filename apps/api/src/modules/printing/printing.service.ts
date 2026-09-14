@@ -162,7 +162,7 @@ export class PrintingService {
    * answer about whether a printer is reachable, without placing a real
    * order.
    *
-   * D174 — transport-aware, because the answer depends on WHO can see the
+   * D181 — transport-aware, because the answer depends on WHO can see the
    * printer. A branch served by an on-site agent gets a queued PRINTER_TEST
    * job (the API is in the cloud and cannot reach the device; the agent
    * leases the job like any other and the outcome lands on the row, which
@@ -263,7 +263,7 @@ export class PrintingService {
   }
 
   /**
-   * D174 — the branch's printing configuration as the settings screen shows
+   * D181 — the branch's printing configuration as the settings screen shows
    * it. Read-only here: the switches are written through the restaurant
    * branch config PUT, which is the one authority for that row (its
    * optimistic version must not be bypassed by a second writer).
@@ -322,7 +322,7 @@ export class PrintingService {
 
 
 /**
- * D174 — which printer(s) a station's ticket comes out of.
+ * D181 — which printer(s) a station's ticket comes out of.
  *
  * D152 decides the STATION; this only decides the DEVICE. Precedence:
  *   1. the station's linked printers, primary first (a shop that routes grill

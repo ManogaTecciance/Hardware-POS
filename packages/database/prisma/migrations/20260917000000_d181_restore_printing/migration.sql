@@ -1,4 +1,4 @@
--- D174 — the kitchen prints again, and the board is what makes that safe.
+-- D181 — the kitchen prints again, and the board is what makes that safe.
 --
 -- Restores the columns and tables D68 dropped in
 -- `20260903000000_kitchen_ticket_completion`, so that unattended printing has
@@ -6,7 +6,7 @@
 -- stays: `KitchenTicket.completedAt`/`completedByUserId` and the
 -- IN_PROGRESS/COMPLETED statuses are untouched, because print state now lives
 -- ENTIRELY on `KitchenPrintAttempt` and never writes back to the ticket. That
--- separation is the schema half of D174's safety condition — a printer cannot
+-- separation is the schema half of D181's safety condition — a printer cannot
 -- move a ticket on the board.
 --
 -- `UserPrinterPreference` is deliberately NOT restored. D67 needed it because

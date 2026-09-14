@@ -319,7 +319,7 @@ export class KitchenService {
     const ticketIds: string[] = [];
     for (const [stationId, stationItems] of perStation) {
       /*
-       * D174 — which device this station's paper comes out of. Resolved
+       * D181 — which device this station's paper comes out of. Resolved
        * INSIDE the transaction so the ticket and its queue rows commit
        * together; the actual printing happens out of band in the dispatcher,
        * so a dead printer can only ever leave a FAILED attempt, never a

@@ -408,7 +408,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   // D100 — recall: a wrong bump reopens on the board; same permission as
   // completing.
   'POST /restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
-  // D174 — auto-printing returns: station links, the self-test page, the
+  // D181 — auto-printing returns: station links, the self-test page, the
   // queue, the network scan, agent pairing, and the branch's printing config.
   'PUT /restaurant/branches/:branchId/kitchen-printers/:printerId/stations': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /restaurant/branches/:branchId/kitchen-printers/:printerId/test-print': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
@@ -423,7 +423,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'GET /printing/agents': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /printing/agents/:agentId/revoke': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   /*
-   * D174 — the on-site print agent's own API. `public-no-tenant` in this
+   * D181 — the on-site print agent's own API. `public-no-tenant` in this
    * table's vocabulary means "not a workspace-user route": these carry
    * @Public() to switch OFF the user stack and are guarded by
    * PrintAgentGuard instead, which resolves a branch-scoped device token.

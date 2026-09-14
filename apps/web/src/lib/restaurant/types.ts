@@ -144,7 +144,7 @@ export interface RestaurantBranchConfigView {
   takeawayEnabled: boolean;
   dineInEnabled: boolean;
   defaultTicketTargetMinutes: number | null;
-  /** D174 — auto-printing, per branch. */
+  /** D181 — auto-printing, per branch. */
   autoPrintKot: boolean;
   autoPrintBill: boolean;
   billCopies: number;
@@ -598,7 +598,7 @@ export interface KitchenHistoryPage {
   pageSize: number;
 }
 
-/** D174 — KITCHEN devices are station-routed; CASHIER devices print bills. */
+/** D181 — KITCHEN devices are station-routed; CASHIER devices print bills. */
 export type PrinterRole = 'KITCHEN' | 'CASHIER';
 
 export interface KitchenPrinterView {
@@ -616,7 +616,7 @@ export interface KitchenPrinterView {
   stationIds: string[];
 }
 
-// ── Printing (D174) ─────────────────────────────────────────────────────────
+// ── Printing (D181) ─────────────────────────────────────────────────────────
 export interface PrintAgentView {
   id: string;
   name: string;

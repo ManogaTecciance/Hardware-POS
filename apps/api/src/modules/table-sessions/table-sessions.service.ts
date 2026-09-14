@@ -229,7 +229,7 @@ export class TableSessionsService {
     private readonly roundDepletion: RoundDepletionService,
     // Promotions on the bill: the same applier retail charges through.
     private readonly promotionPricing: RestaurantPromotionPricingService,
-    // D174 — auto-printing: queue the bill on close, nudge the dispatcher
+    // D181 — auto-printing: queue the bill on close, nudge the dispatcher
     // after each commit. Never in the transaction's critical path.
     private readonly printing: PrintingService,
   ) {}
@@ -883,7 +883,7 @@ export class TableSessionsService {
       // commits, with nothing downstream to go wrong. D152 — one ticket per
       // STATION the round routes to, and an item that routes to none goes to
       // the branch's Main station, so no item of it reaches the board on none.
-      // D174 — the same call queues one PENDING print attempt per station
+      // D181 — the same call queues one PENDING print attempt per station
       // printer; the paper is a copy of the board, and its failure stays on
       // the attempt row.
       await this.kitchen.generateTicketsForRound(tx, tenantId, session.branchId, round.id);
@@ -895,7 +895,7 @@ export class TableSessionsService {
       return this.roundToView(roundFull);
     });
     /*
-     * D174 — the tickets and their attempts are committed. This nudges the
+     * D181 — the tickets and their attempts are committed. This nudges the
      * dispatcher so they reach the station printer within a second of the
      * waiter tapping Send, instead of on the worker's next tick. Never
      * awaited: the round is already committed and a printer must not delay
@@ -1134,7 +1134,7 @@ export class TableSessionsService {
         },
       });
       /*
-       * D174 — closing the order is what prints the finalised bill on the
+       * D181 — closing the order is what prints the finalised bill on the
        * branch's cashier printer, when one is configured. Queued INSIDE this
        * transaction so a rolled-back close cannot leave a bill job for a sale
        * that does not exist; the bytes go out after commit, so no printer can

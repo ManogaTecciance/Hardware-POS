@@ -20,7 +20,7 @@ export interface RestaurantBranchConfigView {
   serviceChargeTaxable: boolean;
   /** D52 — flat per-order packaging charge for TAKEAWAY / ONLINE. */
   packagingChargeAmount: string;
-  /** D174 — auto-printing, per branch. */
+  /** D181 — auto-printing, per branch. */
   autoPrintKot: boolean;
   autoPrintBill: boolean;
   billCopies: number;
@@ -110,7 +110,7 @@ export class RestaurantConfigService {
               dto.packagingChargeAmount !== undefined
                 ? new Prisma.Decimal(dto.packagingChargeAmount)
                 : undefined,
-            // D174 — auto-printing switches + the branch's default printers.
+            // D181 — auto-printing switches + the branch's default printers.
             autoPrintKot: dto.autoPrintKot ?? undefined,
             autoPrintBill: dto.autoPrintBill ?? undefined,
             billCopies: dto.billCopies ?? undefined,

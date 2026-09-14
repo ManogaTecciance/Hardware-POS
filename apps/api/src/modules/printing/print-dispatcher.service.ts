@@ -37,7 +37,7 @@ import { sendToPrinter, type PrinterTarget } from './printer-drivers';
  * without a second copy of the data, and a template fix applies to a stuck
  * queue without a backfill.
  *
- * ## D174 — print state never touches the ticket
+ * ## D181 — print state never touches the ticket
  *
  * D67's dispatcher wrote PRINTED / FAILED onto `KitchenTicket.status`. Since
  * D68 that column is the BOARD's (QUEUED → IN_PROGRESS → COMPLETED, restated
@@ -45,7 +45,7 @@ import { sendToPrinter, type PrinterTarget } from './printer-drivers';
  * would un-prepare a dish the cook had started, or make the Orders queue lie.
  * Every print outcome therefore lives on `KitchenPrintAttempt` alone; the
  * ticket is read here and never written. That separation is the code half of
- * D174's safety condition — a printer cannot move a ticket on the board.
+ * D181's safety condition — a printer cannot move a ticket on the board.
  */
 
 /** A job stops retrying after this many failures; the operator reprints. */
@@ -244,7 +244,7 @@ export class PrintDispatcherService {
   }
 
   /**
-   * D174 — the bytes for one `PrintJob`, whichever kind it is. Shared with
+   * D181 — the bytes for one `PrintJob`, whichever kind it is. Shared with
    * the agent transport so a bill or a test page printed by an on-site agent
    * is byte-identical to one printed directly. Null when there is nothing to
    * render (a sale that no longer exists), which the caller fails the job on.
@@ -326,7 +326,7 @@ export class PrintDispatcherService {
       });
     }
     // Retries spent: the FAILED attempt row is the record. The ticket is not
-    // touched (D174) — it is still on the board, which is where the kitchen
+    // touched (D181) — it is still on the board, which is where the kitchen
     // will actually find out about the dish.
   }
 
@@ -692,7 +692,7 @@ export class PrintDispatcherService {
 }
 
 /**
- * D174 — how a document is rendered follows the printer's KIND. An office
+ * D181 — how a document is rendered follows the printer's KIND. An office
  * printer (A4_NETWORK) gets plain text, which the agent hands to the Windows
  * spooler as a text document; everything else gets ESC/POS.
  */

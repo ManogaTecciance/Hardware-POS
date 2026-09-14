@@ -2,7 +2,7 @@ import { EscPosBuilder, wrap, type BuilderOptions } from '../escpos';
 
 /**
  * The Kitchen Order Ticket, as bytes — laid out the way the mainstream POS
- * kitchen printers lay it out (D174, on the owner's instruction: "industry
+ * kitchen printers lay it out (D181, on the owner's instruction: "industry
  * standard"), because a cook who has worked anywhere else should read this
  * one without being taught it.
  *

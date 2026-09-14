@@ -73,7 +73,7 @@ export class TakeawayService {
     // D65 — takeaway rounds deplete exactly as dine-in rounds do.
     private readonly roundDepletion: RoundDepletionService,
     private readonly promotionPricing: RestaurantPromotionPricingService,
-    // D174 — same auto-printing as dine-in: KOTs at create, bill at settle.
+    // D181 — same auto-printing as dine-in: KOTs at create, bill at settle.
     private readonly printing: PrintingService,
   ) {}
 
@@ -185,7 +185,7 @@ export class TakeawayService {
       // or, failing that, on handover.
       return this.toView(profile, order.orderNumber, null);
     });
-    // D174 — print the KOTs the round just queued, without making the
+    // D181 — print the KOTs the round just queued, without making the
     // response wait for a printer.
     this.printing.kick();
     return created;
@@ -245,7 +245,7 @@ export class TakeawayService {
       }
       return this.toView(updated, updated.order.orderNumber, finalSaleId);
     }).then((view) => {
-      // D174 — a handover that settled queued a bill; print it now.
+      // D181 — a handover that settled queued a bill; print it now.
       this.printing.kick();
       return view;
     });
@@ -280,7 +280,7 @@ export class TakeawayService {
       const finalSaleId = await this.settleSessionIntoSale(tx, tenantId, sessionId, actorUserId);
       return this.toView(existing, existing.order.orderNumber, finalSaleId);
     });
-    // D174 — the bill queued at settle goes out now, not on the next tick.
+    // D181 — the bill queued at settle goes out now, not on the next tick.
     this.printing.kick();
     return view;
   }
@@ -429,7 +429,7 @@ export class TakeawayService {
         data: { status: 'CLOSED', closedAt: new Date(), finalSaleId: sale.id },
       });
       /*
-       * D174 — the counter's bill prints when the takeaway SETTLES (D117: at
+       * D181 — the counter's bill prints when the takeaway SETTLES (D117: at
        * payment), which is the moment a Sale exists to print from. D67 printed
        * it at placement instead, against the unsettled order; D117 moved
        * settlement to placement-time in practice, so the settled Sale is the

@@ -1,7 +1,7 @@
 import { EscPosBuilder, type BuilderOptions } from '../escpos';
 
 /**
- * D174 — the printer self-test page, as bytes.
+ * D181 — the printer self-test page, as bytes.
  *
  * One template for both transports: the direct dispatcher and the on-site
  * agent print byte-identical pages, so "the test page came out" means the

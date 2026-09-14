@@ -278,7 +278,7 @@ export class PrintAgentService {
     });
     if (attempt) {
       if (input.ok) {
-        // D174 — the outcome lands on the attempt only. The ticket's status
+        // D181 — the outcome lands on the attempt only. The ticket's status
         // is the board's (D68/D106) and a printer never writes it.
         await this.prisma.kitchenPrintAttempt.update({
           where: { id: attempt.id },

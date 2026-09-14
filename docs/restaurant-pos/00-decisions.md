@@ -10777,7 +10777,7 @@ The last one is the control that matters: without it, "View Reports goes to
 `/reports`" would pass for a dashboard whose every action had been rewritten to
 the same string.
 
-### D174 — the kitchen prints again, and the board is what makes that safe
+### D181 — the kitchen prints again, and the board is what makes that safe
 
 **Status:** ACCEPTED, 2026-09-11, and being built. Supersedes exactly one clause
 of D68. Recorded before implementation began, so that reversing a PO decision is
@@ -11076,4 +11076,4 @@ both via the agent.
 | O10 | Should the clothing Retail template (D120) offer the Salesperson, the hardware-only owner-equivalent of D108? It seeds Owner + Cashier today (D136). | before the first Retail workspace |
 | O11 | Their 5.10 (D136a) takes the SKU line off every 80mm SALES receipt (the return receipt still prints it) and turns the A4 SKU column's default off; both reach the Tile Shop, and a workspace that never saved its documents settings loses the column. Keep, or exempt the QuickBooks pilot (D16)? | before the next production deploy |
 | O12 | `startOfDayInTimeZone` resolves a local midnight that DST SKIPS backwards, so in a zone whose transition is at 00:00 (Cuba, Chile) a business day computed from it is an hour short at the end — the Done lane (D142), the dashboard's "today" and every `lastNDaysInTimeZone` report. Found by review, pre-existing, no tenant is in such a zone today. Fix the helper, or leave it? | before a tenant in Cuba/Chile |
-| O13 | No ESC/POS code page encodes Sinhala or Tamil, so a menu with non-Latin item names needs the KOT and bill rendered as bitmaps rather than text. Latin-only, or bitmap rendering? Raised by D174. | before the printing templates are written |
+| O13 | No ESC/POS code page encodes Sinhala or Tamil, so a menu with non-Latin item names needs the KOT and bill rendered as bitmaps rather than text. Latin-only, or bitmap rendering? Raised by D181. | before the printing templates are written |

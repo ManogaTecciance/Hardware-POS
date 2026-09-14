@@ -6,7 +6,7 @@
  * behind it, which is the point — so the assertions are about the ROW being
  * complete and reachable, and about who is allowed to touch it.
  *
- * D174 brought unattended printing back as a COPY of the board, and this
+ * D181 brought unattended printing back as a COPY of the board, and this
  * spec's fixture configures no printer on purpose: the board must be whole
  * with nothing to print to. The "no print work" negatives below therefore
  * still hold, now as the proof that a branch without a printer enqueues
@@ -309,7 +309,7 @@ describe('D68 — a sent round lands on the kitchen board', () => {
     expect(ticket.items[0]!.specialInstructions).toBe('no pepper');
 
     // NEGATIVE — nothing was queued for a printer, because this branch has
-    // none (D174: no printer means no attempt, and the ticket is still whole).
+    // none (D181: no printer means no attempt, and the ticket is still whole).
     // Paired with the positives above: this cannot pass by virtue of no
     // ticket having been generated.
     const attempts = await prisma.kitchenPrintAttempt.count({

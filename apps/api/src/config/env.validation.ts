@@ -130,7 +130,7 @@ export class EnvironmentVariables {
   @IsOptional()
   SYNC_WORKER_BATCH_SIZE = 10;
 
-  // ── D174 print worker ──
+  // ── D181 print worker ──
   // Drains the print outbox (kitchen tickets + bills). Disable ('false') in
   // tests, so specs drive the dispatcher explicitly and never race a timer.
   @IsString()

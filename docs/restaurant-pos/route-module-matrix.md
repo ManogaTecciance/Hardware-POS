@@ -481,9 +481,9 @@ and the per-row detail the drawer fetches.
 | POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/start` | KITCHEN | ENFORCED | kitchen:status:update |
 | POST | `/restaurant/branches/:branchId/kitchen-tickets/:ticketId/reopen` | KITCHEN | ENFORCED | kitchen:status:update |
 
-### PrintingController / KitchenPrintersController (D174 auto-printing)
+### PrintingController / KitchenPrintersController (D181 auto-printing)
 
-D174, restoring D67: printers are added once per branch by the owner
+D181, restoring D67: printers are added once per branch by the owner
 (discovery-assisted), given a role (KITCHEN / CASHIER) and linked to stations;
 the branch's auto-print switches and default printers live on the restaurant
 branch config (`PUT /restaurant/branches/:branchId/config`). D67's per-user
@@ -504,7 +504,7 @@ printer choice is not restored — D152's station decides the device.
 | GET | `/printing/agents` | KITCHEN | ENFORCED | kitchen:station:manage |
 | POST | `/printing/agents/:agentId/revoke` | KITCHEN | ENFORCED | kitchen:station:manage |
 
-### PrintAgentController (D174 — the on-site agent's own API)
+### PrintAgentController (D181 — the on-site agent's own API)
 
 Not workspace-user routes: `@Public()` switches off the user stack and
 `PrintAgentGuard` authenticates a branch-scoped **device** token, supplying

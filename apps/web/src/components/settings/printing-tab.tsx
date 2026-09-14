@@ -24,7 +24,7 @@ import type {
 } from '@/lib/restaurant/types';
 
 /**
- * D174 — unattended printing, where the owner sets it up.
+ * D181 — unattended printing, where the owner sets it up.
  *
  * Four things on one tab, in the order an installer meets them: the printers
  * (add, link to stations, test), the agent that reaches them from the cloud

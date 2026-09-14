@@ -61,7 +61,7 @@ const STATIONS = {
 const MAIN_STATION_ID = 'stn_main_fallback';
 
 /*
- * D174 — printers. The grill has its own device plus a RETIRED backup; the
+ * D181 — printers. The grill has its own device plus a RETIRED backup; the
  * bar has none linked and inherits the branch default; the hotline's only
  * link is to the retired device, so it must produce no attempt rather than
  * one that fails three times. Pastry and Main link nothing, and the branch
@@ -168,7 +168,7 @@ const EXPECTED_SPLIT: Record<string, string[]> = {
 type CreatedTicket = {
   id: string;
   stationId: string | null;
-  /** D174 — the device the ticket recorded, null when nothing was routable. */
+  /** D181 — the device the ticket recorded, null when nothing was routable. */
   primaryPrinterId: string | null;
   ticketNumber: string;
 };
@@ -197,7 +197,7 @@ type Harness = {
   };
   created: CreatedTicket[];
   written: WrittenItem[];
-  /** D174 — every PENDING attempt the round queued, in creation order. */
+  /** D181 — every PENDING attempt the round queued, in creation order. */
   attempts: { ticketId: string; printerId: string }[];
 };
 
@@ -242,7 +242,7 @@ function makeHarness(
     // `nextDocumentNumber` is a raw INSERT … RETURNING; one call, one number.
     $queryRaw: jest.fn().mockImplementation(() => Promise.resolve([{ value: seq++ }])),
     /*
-     * D174 — the printer chain, each stub honouring its `where` for the same
+     * D181 — the printer chain, each stub honouring its `where` for the same
      * reason the junction stubs do: a resolver that ignored the station would
      * still get "the right printer" from a stub that returned everything.
      */
@@ -718,11 +718,11 @@ describe('KitchenService.generateTicketsForRound — the split (D152)', () => {
 });
 
 /**
- * D174 — the printer is decided per station INSIDE the round transaction, and
+ * D181 — the printer is decided per station INSIDE the round transaction, and
  * a station without one still gets its ticket. These sit beside the split
  * because the split is what they ride on: the station chooses the device.
  */
-describe('KitchenService.generateTicketsForRound — the printer (D174)', () => {
+describe('KitchenService.generateTicketsForRound — the printer (D181)', () => {
   const byStation = (h: Harness) =>
     Object.fromEntries(h.created.map((t) => [t.stationId, t]));
   const attemptsFor = (h: Harness, stationId: string) =>

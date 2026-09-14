@@ -1,4 +1,4 @@
-# D174 — RAW bytes to a Windows-installed printer, by its Windows name.
+# D181 — RAW bytes to a Windows-installed printer, by its Windows name.
 #
 # A USB thermal printer on Windows has no device path a Node process can
 # open; the spooler owns it. This hands the spooler a RAW document through
@@ -15,7 +15,7 @@ param(
   [Parameter(Mandatory=$true)][string]$FilePath,
   # RAW = bytes straight to the device (ESC/POS). TEXT = the spooler's print
   # processor lays the file out as plain text through the printer's driver,
-  # which is how an office printer prints a ticket (D174).
+  # which is how an office printer prints a ticket (D181).
   [ValidateSet("RAW","TEXT")][string]$DataType = "RAW"
 )
 

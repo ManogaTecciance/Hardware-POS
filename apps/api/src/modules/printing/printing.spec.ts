@@ -77,7 +77,7 @@ describe('EscPosBuilder', () => {
   });
 });
 
-describe('renderKotTicket — the industry layout (D174)', () => {
+describe('renderKotTicket — the industry layout (D181)', () => {
   const base = {
     ticketNumber: 'KOT-000123',
     stationName: 'Grill',
@@ -323,13 +323,13 @@ describe('sendToPrinter — ESC_POS_USB', () => {
 });
 
 /**
- * D174 — the test print asks whether the thing on port 9100 is a receipt
+ * D181 — the test print asks whether the thing on port 9100 is a receipt
  * printer at all. Two real listeners on loopback stand in for the two kinds
  * of device: one answers DLE EOT with a status byte the way an ESC/POS
  * printer does; one accepts the bytes and says nothing, the way the Canon
  * inkjet that prompted this did. The third case is nothing listening.
  */
-describe('probeEscPos (D174)', () => {
+describe('probeEscPos (D181)', () => {
   const listen = (onData: (socket: import('node:net').Socket) => void): Promise<{ server: Server; port: number }> =>
     new Promise((resolve) => {
       const server = createServer((socket) => {
@@ -386,12 +386,12 @@ describe('probeEscPos (D174)', () => {
 });
 
 /**
- * D174 — plain-text mode, for an office printer fed through the Windows
+ * D181 — plain-text mode, for an office printer fed through the Windows
  * spooler as a text document. The SAME template, so the negative here is the
  * whole point: not one ESC or GS byte may reach a printer that would print
  * them as punctuation, while every word of the ticket still must.
  */
-describe('plain-text rendering (D174, A4_NETWORK)', () => {
+describe('plain-text rendering (D181, A4_NETWORK)', () => {
   const kot = {
     ticketNumber: 'KOT-000042',
     stationName: 'Grill',

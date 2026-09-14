@@ -20,7 +20,7 @@ export type Align = 'left' | 'center' | 'right';
 
 export interface BuilderOptions {
   /**
-   * D174 — emit plain text instead of ESC/POS: no control sequences at all,
+   * D181 — emit plain text instead of ESC/POS: no control sequences at all,
    * centring done with spaces, a cut becomes a form feed. For an OFFICE
    * printer driven through the Windows spooler as a text document (kind
    * A4_NETWORK) — a device that would print an ESC/POS stream as nothing, or
@@ -172,7 +172,7 @@ export function encode(text: string): number[] {
 }
 
 /**
- * D174 — the same transliteration for a plain-text document, but to ASCII
+ * D181 — the same transliteration for a plain-text document, but to ASCII
  * only: CP437's extra glyphs are different characters in every other code
  * page, and the Windows text print processor uses the machine's own.
  */

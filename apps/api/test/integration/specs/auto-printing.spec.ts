@@ -1,5 +1,5 @@
 /**
- * D174 — unattended printing, end to end, as a COPY of the kitchen board.
+ * D181 — unattended printing, end to end, as a COPY of the kitchen board.
  *
  * The behaviour under test, in the request's words: when a cashier, a waiter
  * or an owner sends an order to the kitchen, the kitchen's own printer
@@ -15,7 +15,7 @@
  *    nothing is queued when no cashier printer is configured (the browser
  *    path still owns that case); a branch served by a live agent is left
  *    alone by the server-side dispatcher.
- *  - THE D174 INVARIANT, asserted on every path that prints or fails: the
+ *  - THE D181 INVARIANT, asserted on every path that prints or fails: the
  *    ticket's board status is NEVER written by printing. A successful print
  *    leaves it QUEUED; three failures leave it QUEUED; and the board still
  *    lists it as outstanding either way. D67 wrote PRINTED/FAILED here, and
@@ -232,7 +232,7 @@ const board = () =>
 const theTicket = () =>
   prisma.kitchenTicket.findFirstOrThrow({ where: { tenantId: restaurant.tenantId } });
 
-describe('D174 — kitchen tickets print when the order is sent', () => {
+describe('D181 — kitchen tickets print when the order is sent', () => {
   it('a submitted round queues an attempt on the station printer, prints it, and the board status is untouched', async () => {
     expect((await sendRound('r1')).status).toBe(201);
 
@@ -264,7 +264,7 @@ describe('D174 — kitchen tickets print when the order is sent', () => {
     expect(attempt.status).toBe('SUCCEEDED');
     expect(attempt.completedAt).not.toBeNull();
     // …and the TICKET is exactly where the board left it. D67 wrote PRINTED
-    // here; under D174 that would be a printer moving a card on the pass.
+    // here; under D181 that would be a printer moving a card on the pass.
     const ticket = await theTicket();
     expect(ticket.status).toBe('QUEUED');
     const outstanding = await board();
@@ -340,7 +340,7 @@ describe('D174 — kitchen tickets print when the order is sent', () => {
     const ticket = await theTicket();
     expect(ticket.status).toBe('QUEUED');
     expect((await board()).data.items.map((t) => t.id)).toEqual([ticket.id]);
-    // The ORDER is untouched — printing can never lose an order (D53/D174).
+    // The ORDER is untouched — printing can never lose an order (D53/D181).
     expect(
       await prisma.restaurantOrderItem.count({ where: { tenantId: restaurant.tenantId } }),
     ).toBe(1);
@@ -373,7 +373,7 @@ describe('D174 — kitchen tickets print when the order is sent', () => {
   });
 });
 
-describe('D174 — the bill prints when the order closes', () => {
+describe('D181 — the bill prints when the order closes', () => {
   it('closing queues a bill job for the branch cashier printer and prints it', async () => {
     await sendRound('r4');
     await drain();
@@ -447,7 +447,7 @@ describe('D174 — the bill prints when the order closes', () => {
   });
 });
 
-describe('D174 — takeaway: the ticket prints at placement, the bill when it settles', () => {
+describe('D181 — takeaway: the ticket prints at placement, the bill when it settles', () => {
   const placeTakeaway = (key: string, quantity: number) =>
     http.request<{ id: string; orderId: string }>('POST', '/restaurant/takeaway', {
       token: ownerToken(),
@@ -519,7 +519,7 @@ describe('D174 — takeaway: the ticket prints at placement, the bill when it se
   });
 });
 
-describe('D174 — transport: an on-site agent takes over from the server', () => {
+describe('D181 — transport: an on-site agent takes over from the server', () => {
   const AGENT_TOKEN = 'pat_integration_live_agent_token';
 
   async function pairLiveAgent(): Promise<string> {

@@ -3,7 +3,7 @@ import { loadConfig, type AgentConfig } from './config';
 import { probe, scanLan, sendToPrinter, type Discovered } from './printer';
 
 /**
- * AxloPOS on-site print agent (D67, restored by D174).
+ * AxloPOS on-site print agent (D67, restored by D181).
  *
  * ## Why this program exists
  *

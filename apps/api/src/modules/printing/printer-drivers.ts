@@ -55,7 +55,7 @@ export async function sendToPrinter(
       // running this API: writing raw bytes to the path IS the driver.
       return writeDevice(target.address, payload);
     case KitchenPrinterKind.A4_NETWORK:
-      // D174 — an office printer is driven through the WINDOWS SPOOLER of the
+      // D181 — an office printer is driven through the WINDOWS SPOOLER of the
       // PC it is installed on, as a plain-text document; that PC runs the
       // agent. This process has no spooler to hand it to.
       return {
@@ -168,7 +168,7 @@ function writeSpoolFile(target: PrinterTarget, payload: Buffer): Promise<PrintOu
 
 /** `192.168.1.50:9100` → `{host, port}`; a bare host defaults to 9100. */
 /**
- * D174 — does the device at this address behave like an ESC/POS printer?
+ * D181 — does the device at this address behave like an ESC/POS printer?
  *
  * Port 9100 is not a receipt-printer port; it is the generic "raw" port, and
  * an office inkjet answers on it too. It accepts the bytes, prints nothing,

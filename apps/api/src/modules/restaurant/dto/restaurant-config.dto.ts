@@ -73,7 +73,7 @@ export class UpdateRestaurantBranchConfigDto {
   packagingChargeAmount?: number;
 
   /*
-   * D174 — auto-printing, set once per branch by the owner. The printer ids
+   * D181 — auto-printing, set once per branch by the owner. The printer ids
    * are workspace printers (KitchenPrinter rows). The kitchen default sits
    * below the station links (D152 decides the station; this decides the
    * device when the station links none).

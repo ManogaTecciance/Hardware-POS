@@ -117,7 +117,7 @@ export class PrintingController {
   }
 
   /**
-   * D174 — the branch's printing configuration, for the settings screen.
+   * D181 — the branch's printing configuration, for the settings screen.
    * The switches themselves are written through the restaurant branch config
    * PUT (one authority for that row); this is the read the screen opens on.
    */
@@ -133,7 +133,7 @@ export class PrintingController {
     return this.printing.queueStatus(tenantId, branchId);
   }
 
-  /** D174 — poll one job's outcome (a queued test page, a stuck bill). */
+  /** D181 — poll one job's outcome (a queued test page, a stuck bill). */
   @Get('jobs/:jobId')
   @RequirePermissions(Permission.KOT_VIEW)
   job(@TenantId() tenantId: string, @Param('jobId') jobId: string) {

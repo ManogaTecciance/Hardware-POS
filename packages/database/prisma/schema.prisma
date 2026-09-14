@@ -126,11 +126,11 @@ enum PrintJobType {
   /// D127 (Phase 5, 5.7) — a sheet of shelf/product labels. The only job type
   /// with no sale behind it; see `PrintJob.saleId`.
   PRODUCT_LABEL
-  /// D174, restoring D67 — the finalised restaurant bill, printed on the
+  /// D181, restoring D67 — the finalised restaurant bill, printed on the
   /// branch's CASHIER printer. Removed by D68 along with the machinery that
   /// drained it; back because a browser cannot kick a cash drawer.
   ORDER_BILL
-  /// D174 — a printer self-test page. A job rather than a synchronous call
+  /// D181 — a printer self-test page. A job rather than a synchronous call
   /// because in the cloud deployment the API cannot reach the shop's printer:
   /// the test rides the same queue the on-site agent drains, and the settings
   /// screen reads the outcome off the row. On-prem it prints directly.
@@ -1364,10 +1364,10 @@ model PrintJob {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  /// D174, restoring D67 — a bill queued by the restaurant close/handover
+  /// D181, restoring D67 — a bill queued by the restaurant close/handover
   /// path carries the branch it belongs to and the resolved CASHIER printer.
   /// NULL `printerId` means the branch has configured no cashier printer: the
-  /// row stays PENDING and the browser path owns it, exactly as before D174.
+  /// row stays PENDING and the browser path owns it, exactly as before D181.
   ///
   /// `orderId` is for a bill printed BEFORE the order settles (a takeaway
   /// priced at placement has no Sale yet); the renderer prices it with the
@@ -2118,7 +2118,7 @@ model RestaurantBranchConfig {
   /// nothing to fill them.
   packagingChargeAmount Decimal                  @default(0) @db.Decimal(12, 2)
 
-  /// D174, restoring D67 — KOTs print on the station printers the moment a
+  /// D181, restoring D67 — KOTs print on the station printers the moment a
   /// round is submitted; the finalised bill prints on the branch's CASHIER
   /// printer when the order is closed. Both default ON, which is safe because
   /// a branch that has configured no printers enqueues nothing that can print:
@@ -2941,7 +2941,7 @@ model RestaurantOrder {
   items           RestaurantOrderItem[]
   takeawayProfile TakeawayOrderProfile?
 
-  /// D174 — bills printed for this order before it settled.
+  /// D181 — bills printed for this order before it settled.
   printJobs       PrintJob[]
 
   @@unique([tenantId, orderNumber])
@@ -3214,7 +3214,7 @@ model StockMovement {
 // printer failure never loses the order (scenario 20 — the sale is already
 // recorded; the ticket is a downstream side effect).
 
-/// D174, restoring D67 — what a printer is FOR. The registry is still called
+/// D181, restoring D67 — what a printer is FOR. The registry is still called
 /// KitchenPrinter, deliberately un-renamed: a rename migration would buy
 /// nothing. KITCHEN devices are reached through station links (D152);
 /// CASHIER devices through the branch's `defaultReceiptPrinterId`.
@@ -3257,7 +3257,7 @@ enum KitchenPrintAttemptStatus {
   FAILED
 }
 
-/// D174, restoring D67 — an on-site Print Agent.
+/// D181, restoring D67 — an on-site Print Agent.
 ///
 /// The web app is on Amplify and the API on EC2; the printers are on the
 /// SHOP's LAN behind NAT. Nothing in the cloud can open a socket to
@@ -3308,7 +3308,7 @@ model KitchenPrinter {
   address  String
   isActive Boolean            @default(true)
 
-  /// D174, restoring D67 — KITCHEN (station-routed KOTs) or CASHIER (bills).
+  /// D181, restoring D67 — KITCHEN (station-routed KOTs) or CASHIER (bills).
   /// Existing rows backfill to KITCHEN: that is the only thing they were ever
   /// used for.
   role     PrinterRole        @default(KITCHEN)
@@ -3414,7 +3414,7 @@ model KitchenPrintAttempt {
   attemptedAt DateTime                  @default(now())
   completedAt DateTime?
 
-  /// D174, restoring D67 — held by an on-site agent while it prints. The
+  /// D181, restoring D67 — held by an on-site agent while it prints. The
   /// lease expires (PRINT_LEASE_TTL) so an agent that dies mid-print releases
   /// the row instead of stranding it. A row under lease is invisible to the
   /// direct dispatcher, which is what keeps the two transports off each

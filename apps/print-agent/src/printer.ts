@@ -30,7 +30,7 @@ export async function sendToPrinter(
   timeoutMs = 5_000,
 ): Promise<SendResult> {
   if (target.kind === 'ESC_POS_USB') return writeUsb(target.address, payload);
-  // D174 — an OFFICE printer: the server rendered plain text for it, and the
+  // D181 — an OFFICE printer: the server rendered plain text for it, and the
   // Windows spooler renders that through whatever driver the printer has
   // (Canon, HP, "Generic / Text Only" — all of them print a text document).
   if (target.kind === 'A4_NETWORK') return writeWindowsPrinter(target.address, payload, 'TEXT');
@@ -66,7 +66,7 @@ export async function sendToPrinter(
 }
 
 /**
- * D174 — a USB printer, which is a different animal per platform.
+ * D181 — a USB printer, which is a different animal per platform.
  *
  * On Windows the spooler owns the device and there is no path a process can
  * open, so the address is the printer's WINDOWS NAME ("POS-80") and the bytes

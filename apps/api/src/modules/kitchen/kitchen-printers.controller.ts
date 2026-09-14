@@ -30,10 +30,10 @@ interface PrinterView {
   kind: KitchenPrinterKind;
   address: string;
   isActive: boolean;
-  /** D174 — KITCHEN (station-routed) or CASHIER (bills). */
+  /** D181 — KITCHEN (station-routed) or CASHIER (bills). */
   role: PrinterRole;
   columns: number;
-  /** D174 — stations this printer serves. Empty on a CASHIER printer. */
+  /** D181 — stations this printer serves. Empty on a CASHIER printer. */
   stationIds: string[];
 }
 
@@ -179,7 +179,7 @@ export class KitchenPrintersController {
   }
 
   /**
-   * D174 — which stations this printer serves. Replace-all.
+   * D181 — which stations this printer serves. Replace-all.
    *
    * KOT print attempts are created per station→printer link, so a KITCHEN
    * printer with no links is a printer that never prints. Before this
@@ -230,7 +230,7 @@ export class KitchenPrintersController {
   }
 
   /**
-   * D174 — print a self-test page and report the outcome verbatim.
+   * D181 — print a self-test page and report the outcome verbatim.
    *
    * The one place an operator can answer "can anything reach this printer?"
    * without placing a real order. With no agent the server prints now and the

@@ -26,9 +26,9 @@ export class CreatePrinterDto {
   @IsIn(['ESC_POS_NETWORK', 'ESC_POS_USB', 'A4_NETWORK', 'MOCK']) kind!: string;
   /** `host:port` for a network printer (port defaults to 9100), else a device path. */
   @IsString() @Length(1, 200) address!: string;
-  /** D174 — KITCHEN (station-routed KOTs) or CASHIER (bills). */
+  /** D181 — KITCHEN (station-routed KOTs) or CASHIER (bills). */
   @IsOptional() @IsIn(['KITCHEN', 'CASHIER']) role?: string;
-  /** D174 — characters per line: 48 = 80 mm paper, 32 = 58 mm. */
+  /** D181 — characters per line: 48 = 80 mm paper, 32 = 58 mm. */
   @IsOptional() @Type(() => Number) @IsInt() @Min(24) @Max(96) columns?: number;
 }
 
@@ -42,7 +42,7 @@ export class UpdatePrinterDto {
 }
 
 /**
- * D174 — which stations a printer serves. Replace-all: the body IS the set,
+ * D181 — which stations a printer serves. Replace-all: the body IS the set,
  * which is how the settings screen edits it (tick the stations, save).
  * A KITCHEN printer with no links still prints when it is the branch's
  * default kitchen printer; otherwise it prints nothing, because KOT attempts

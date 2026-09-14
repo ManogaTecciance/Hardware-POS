@@ -23,7 +23,7 @@ import { TableSessionsService } from './table-sessions.service';
     ProvidersModule,
     // Promotions on the bill (see RestaurantPromotionPricingService).
     PromotionsModule,
-    // D174 — bill on close, dispatcher nudge after each commit.
+    // D181 — bill on close, dispatcher nudge after each commit.
     PrintingModule,
   ],
   controllers: [TableSessionsController],
