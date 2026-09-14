@@ -9908,10 +9908,15 @@ The tender is **not stored**, so:
 
 Persisting it needs two nullable columns on `Sale`, which is a shared table
 that hardware and restaurant both write to. The PO declined that scope for now,
-correctly: there is an **unresolved drift migration**
-(`20260828081727`) already making the API suite red, and stacking a new
+correctly: there was an **unresolved drift migration**
+(`20260828081727`) making the API suite red at the time, and stacking a new
 migration on top of it is how a schema gets into a state nobody can reason
 about. Recorded here as the known limit rather than half-done.
+
+**2026-09-14:** that drift folder is gone and the suite is green, so this
+objection no longer stands. The scope decision does — persisting the tender is
+still two nullable columns on a table hardware and restaurant share, and still
+not done.
 
 One thing this DOES reach: `toReceiptContent` spreads the receipt data into
 `Receipt.content`, a JSON column, so the **original** receipt keeps a permanent

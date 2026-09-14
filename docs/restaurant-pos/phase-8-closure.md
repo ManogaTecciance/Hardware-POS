@@ -19,7 +19,7 @@ the handover of what remains.
 | ☑ | No migration without a decision record | `8.7` → `D132`, `8.9` → `D133`; both verified with `migrate diff` before commit |
 | ☑ | Schema and migrations agree | "This is an empty migration", both times — **with the untracked drift folder present, as it is on this machine**. Without it the diff emits one pre-existing D44 foreign-key pair and nothing else; see handover item 5 |
 | ☑ | No restaurant source file edited | Checked, not assumed: `git diff --name-only b703721~1..HEAD` filtered for `restaurant|menu|dining|kitchen|table-session|takeaway|billing|delivery` returns **three files, all documentation** — `docs/restaurant-pos/{00-decisions,route-module-matrix,phase-8-verification}.md`, which live under a folder that happens to be named for Phase 1. **Zero source files** |
-| ☑ | The protected drift folder untouched | `packages/database/prisma/migrations/20260828081727/` still untracked, never staged |
+| ☑ | The protected drift folder untouched | `packages/database/prisma/migrations/20260828081727/` still untracked, never staged. **Superseded 2026-09-14:** deleted, restoring the strip-the-pair convention the `20260826000000` header records. It was the sole cause of the two red tests; apps/api is now 92 suites / 1484 tests / 0 failures |
 | ☑ | Test baselines held | API unit 10 failures, web unit 6 — the same pre-existing Windows path-separator failures as before the phase |
 | ☑ | Full integration suite | 975 / 976; the one failure proven environmental |
 | ☑ | Acceptance pass over real HTTP | 23 / 23 |
