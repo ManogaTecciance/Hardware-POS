@@ -10811,6 +10811,26 @@ Asserted, not assumed:
 The only behaviour that changes is the one that was broken: a second tenant
 printing its own sale N now succeeds instead of returning 500.
 
+#### What the blast-radius check turned up, and did not
+
+Running the integration suite for this found **two red specs that predate
+D171**: `no-accounting-documents.spec.ts` still matched `/Balance/i` against a
+thermal bill that has said `Bal. Amount` since D167 renamed the rows. D167 did
+not catch them because the **integration suite was not run** — the unit suite is
+green either way, and those two only fail against a real PostgreSQL and a real
+rendered document.
+
+They are recorded here rather than buried because they are the honest answer to
+"was the blast radius zero": the check found something, it was not this change,
+and the distinction is verifiable — D171's diff contains no rendering code, and
+`receipt-templates.ts` is not in it. Fixed in their own commit, with the
+assertions strengthened rather than merely re-pointed: `Bal. Amount` alone would
+pass for a bill printing an empty row.
+
+The lesson is about cadence, not about either change. A rename shipped with a
+decision record still slipped past, because the suite that could see it is the
+one nobody runs on a normal day.
+
 ### Mutation proof
 
 `receipt-number-tenant-scope.spec.ts` runs against real PostgreSQL, because the
