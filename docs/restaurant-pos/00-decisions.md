@@ -10987,6 +10987,112 @@ whole design is to be minimal. Recorded so it is not mistaken for an oversight.
 
 ---
 
+## D173 — an exchange is a basket, not a line
+
+**Status:** accepted and **built**, 2026-09-14. No schema change, no migration,
+**no server change at all**.
+
+### What was reported
+
+> "in here if i want to exchange all product on sales it cant do i have to do
+> one by one thats not right. lets say i bought 3 products i want to exchange 2
+> so i needed that option"
+
+### What was actually restricting it
+
+Four limits, stacked, and **every one of them lived in a single web page**:
+
+| | Limit | Where |
+|---|---|---|
+| 1 | one returned line — `<input type="radio">` over a single `chosenSaleItemId` | UI |
+| 2 | one replacement — a single `replacementVariantId` | UI |
+| 3 | the replacement had to be another variant of the **same product** | UI |
+| 4 | the whole line always came back — `returnQuantity: availableReturnQuantity` | UI |
+
+The server had none of them. `CompleteExchangeDto` declares
+
+```ts
+returnItems!: ReturnItemInputDto[];        // ArrayMinSize(1), no maximum
+replacementItems!: SaleItemInputDto[];     // any productId, any variant
+```
+
+and `ExchangesService` contains no same-product check — it builds a `Return` and
+a `Sale`, both of which have held many lines since they existed. `7.5` shipped
+the thinnest visible path deliberately and said so in the page's own header:
+*"multi-line exchanges … out of scope by agreement"*.
+
+That agreement did not survive contact with a shop. Served one at a time, a
+customer swapping two of three items produces **two exchange numbers, two
+returns and two replacement sales** for one visit to the counter.
+
+### The decision
+
+**Limits 1, 2 and 4 are closed. Limit 3 stays, for now.**
+
+The operator ticks every line coming back, says how many of each where a line
+was bought more than once, and picks a replacement per line. Cross-product
+swaps — a shirt for a tie — need a product search in the replacement step and
+their own answer to what the refund is measured against; the server already
+permits it, so it is a UI gap and is recorded as one rather than presented as a
+rule.
+
+### Approval is evaluated on the whole basket, once
+
+This is the part that is more than convenience. The screen previews through
+`POST /exchanges/preview` with **every** selected line, so the refund total and
+the approval verdict are the ones the completion will produce.
+
+Served as two exchanges, each could pass a cashier's per-refund limit that the
+combined basket exceeds. One basket, one verdict, decided on the server — the
+same reasoning D130 used when it moved the exchange waiver out of the screen.
+
+### The rules left the screen
+
+`selectedLines`, `everyLineAnswered`, `replacementTotal`, `toReturnItems`,
+`toReplacementItems`, `clampQuantity` — all pure, all in
+`lib/exchange-basket.ts`, the shape `product-presentation.ts` and
+`catalogue-labels.ts` already keep.
+
+Multi-line turns "which line" into real decisions: which lines are in, how many
+of each, whether every one has an answer, what the customer pays. **A decision
+made inside JSX is a decision nobody can test without a browser.** The page now
+reads these; it does not restate them, which is what makes the tests below
+guard the shipped path rather than a copy of it.
+
+### Three rules worth naming
+
+- **The selection is driven by the SALE, not by the choices.** A choice for a
+  line the sale no longer offers — returned in another tab, or the sale
+  refetched — must not survive as a phantom row. Mutation-proven.
+- **`quantity: 0` deselects; it does not delete.** Ticking a line off and back
+  on keeps the replacement already chosen for it.
+- **An unanswered line contributes NOTHING to the total**, never the returned
+  line's price. A half-filled basket showing a plausible figure is how an
+  operator takes the wrong money.
+
+And `toReplacementItems` **throws** rather than skipping a line with no
+replacement. It cannot fire behind `everyLineAnswered`; the alternative would
+send a basket that refunds three things and sells two — balanced on the screen,
+short at the till.
+
+### Mutation proof
+
+| Mutation | Fails |
+|---|---|
+| `everyLineAnswered` without its `length > 0` guard | "is false for an empty basket" |
+| `toReplacementItems` drops unanswered lines instead of throwing | "refuses to build a leg that would silently drop a line" |
+| the selection is driven by `choices` instead of the sale's lines | "ignores a choice for a line the sale no longer offers" **and** "keeps the order of the sale" |
+
+The first is the vacuity guard: `[].every(...)` is `true`, so without it a
+screen with nothing ticked offers a Complete button that submits an exchange of
+nothing.
+
+The payload tests assert the two legs as exact **ordered** sets, and assert
+they line up entry for entry. Counting them would pass for a basket that
+refunded the shirt and sold a replacement for the trousers.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

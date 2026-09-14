@@ -493,6 +493,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | EXC-D-002 | Returned lines are negative, replacements positive | Preview an exchange with both line kinds | Returned lines prefixed "Return:" and negated; replacements prefixed "New:" | P | Passed |
 | EXC-D-003 | Exchange document honours letterhead settings | Change logo/accent/margins, re-preview | Exchange doc reflects the same document settings as invoice/quotation | P | Passed |
 | EXC-D-004 | Signature blocks present on the exchange doc | Preview exchange | Same signature chain as other document types (see DOC-014) | P | Passed |
+| EXC-D-005 | Several lines come back in one exchange (D173) | On a sale with three lines, tick two, choose a replacement for each, complete | ONE exchange number, one return and one replacement sale covering both lines. Before D173 the screen offered radio buttons, so this took two separate exchanges | P | Not Run |
+| EXC-D-006 | Part of a line comes back (D173) | On a line bought ×3, tick it and set the quantity to 2 | Two come back and two go out; one stays with the customer. The old screen always returned `availableReturnQuantity`, so this could not be expressed at all | P | Not Run |
+| EXC-D-007 | Every line needs its own answer (D173) | Tick two lines, choose a replacement for one only | Complete is disabled and the screen says a replacement is needed for every line. The money box does not show a difference — a half-filled basket showing a plausible total is how the wrong money gets taken | N | Not Run |
+| EXC-D-008 | An empty basket cannot be completed (D173) | Untick everything | Complete is disabled. `[].every(...)` is true, so without an explicit rule this state would offer to complete an exchange of nothing | N | Not Run |
+| EXC-D-009 | Approval is judged on the whole basket (D173) | As a cashier with a refund limit, tick lines that individually sit under it but together exceed it | The manager PIN is demanded once, for the combined basket. Served as two exchanges each could slip under the limit separately | N | Not Run |
+| EXC-D-010 | The quantity cannot exceed what is left (D173) | Type a number larger than the line's remaining quantity, or paste text | Clamped to the available quantity; text becomes 0. The server is never asked to refuse a number the screen offered | N | Not Run |
 | EXC-T-001 | Create an exchange transaction | Completed sale of one Medium → sale detail → Exchange (`/exchanges/new?saleId=`) → choose the returned item, choose the Large at the same price as replacement → Complete exchange | 201 from POST /v1/exchanges with `exchangeNumber` X-000001, `returnedValue` = `replacementValue`, `netDifference` 0 and `complete` true; a Return R-… and a Sale S-… exist and are linked; the page reads "Both legs completed." with "Refunded to customer" and "Charged for replacement"; GET /v1/exchanges lists it and another tenant cannot read it by id | P | Not Run |
 | EXC-T-002 | Exchange adjusts stock for returned and replacement items | Medium and Large both at 10; exchange one Medium for one Large; replay the identical request with the same `Idempotency-Key` | Medium 11 and Large 9, each moved exactly once with its own `StockMovement`; the replay returns the SAME exchange (same id and number), refunds nothing again and moves no stock; the body field `idempotencyKey` behaves like the header | P | Not Run |
 | EXC-T-003 | Exchange with a net amount due collects payment | Returned Medium 1,000, replacement Large 1,500, `payments` CASH 1,500, `refundMethod` left default | The return refunds 1,000 CASH and the sale is paid 1,500 in full — gross settlement (D128a), never netted through store credit; `netDifference` 500 and the page reads "Customer paid extra"; a `payments` total short of the replacement is refused by the sale path exactly as an ordinary sale | P | Not Run |
@@ -965,11 +971,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE | 33 | BSPL | 14 |
 | RET | 18 | KIT | 22 |
 | EXC-T | 12 | ADM | 31 |
-| EXC-D | 4 | UI | 33 |
+| EXC-D | 10 | UI | 33 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 740 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 746 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 
