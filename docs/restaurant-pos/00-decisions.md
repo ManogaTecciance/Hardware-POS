@@ -8038,6 +8038,90 @@ both via the agent.
 
 ---
 
+### D183 — a printer is chosen, not typed
+
+**Status:** ACCEPTED, 2026-09-14. Extends D181; changes no route and no table.
+
+### What the first real install showed
+
+Three printers went live on a counter PC in one afternoon — an Xprinter XP-Q80B
+on the LAN, an XP-365B on USB, a Canon G3010 on Wi-Fi — and every one of them
+needed someone at the API rather than the owner at the Printing tab:
+
+- The Q80B's IP had to be found with a subnet scan and typed as
+  `192.168.123.100:9100`. The API already had `GET /printing/discover` and the
+  agent already swept the LAN every two minutes; nothing on the screen used it.
+- The Q80B's row still carried an address from an earlier test bench, and the
+  only way to change it was a PATCH by hand: the row offered Stations, Turn
+  off and Test print, not Edit — although the update route accepted every field.
+- The Canon and the 365B are addressed by their **Windows printer name**, a
+  string the owner has to copy from *Printers & scanners* without a typo. And
+  when the name was right but the printer was in label mode, "Test page
+  printed" said so anyway (fixed in the helper script the same day: a thrown
+  exception now exits 1).
+- The three facts that decide whether a printer will ever print — into the
+  router, not the PC; the self-test page shows the IP; DIP pin 1 OFF for a
+  dual-mode Xprinter — were in nobody's screen.
+
+### Decision
+
+**The agent reports what can be printed to, and the owner picks from it.**
+
+- The agent (0.2.0) enumerates the printers its own Windows spooler has
+  (`Get-Printer`) beside its LAN sweep and sends both on every heartbeat as
+  `discovered` and `localPrinters`. Discovery runs *beside* the poll loop, not
+  in it: `Get-Printer` was measured at 15–20 s on a busy laptop, and a
+  heartbeat that late would mark the agent offline — the one thing the agent
+  exists to prevent. Until the first sweep has finished the heartbeat says
+  nothing about printers, so a restart never blanks the server's last good
+  list.
+- The API keeps `localPrinters` beside the LAN hosts in the same in-memory,
+  per-branch entry. A heartbeat **without** the field (a 0.1.0 agent, a Linux
+  agent) keeps the previous list; one **with an empty list** replaces it —
+  "cannot say" and "looked, found none" are different answers.
+  `GET /printing/discover` returns both; the SERVER branch returns
+  `localPrinters: []`, because the server's spooler is never the shop's.
+- The Add-printer form loads discovery when it opens. **Network (LAN)** shows
+  the hosts answering on :9100 as chips that fill the address; **USB** and
+  **Wi-Fi / office printer** (an owner's name for an inkjet on the shop Wi-Fi;
+  reached through the agent PC) show the agent PC's printers in a select, real ones first
+  and Windows' print-to-file devices last and labelled, with "Type the name
+  myself…" as the escape. Nothing reported → the free-text field, and a line
+  saying the agent has not reported yet. A spooler kind with no agent online
+  warns before Save rather than after the first lost ticket.
+- Every kind carries its **How to connect** steps in the form. The code is
+  suggested (`KITCHEN-1`, `CASHIER-1`, next free) and checked against the
+  server's rule before submit, so its message never has to appear.
+- **Edit** on every row opens the same form with the code fixed; the PATCH
+  carries only what changed. Addresses change — a router hands out a new
+  lease, a printer is replaced — and re-adding a printer would orphan its
+  station links and its history.
+- A failed test on a spooler printer whose name the agent does not report
+  says so, and points at Edit.
+
+### Why not probe on the server, or hide the virtual printers
+
+`POST /printing/probe` still exists but the form does not use it: in the cloud
+deployment the server cannot reach the shop LAN, so its answer would be a
+confident wrong one (the same reasoning D181 gave for `discover`). The agent's
+report *is* the probe. Windows' print-to-file devices are listed rather than
+hidden because a shop with a printer on order may genuinely want tickets in a
+PDF for a week; last and labelled is enough.
+
+**As built (2026-09-14).** Agent: `listLocalPrinters` / `parseLocalPrinterList`
+in `apps/print-agent/src/printer.ts`, non-blocking `refreshDiscovery` in
+`index.ts`, VERSION 0.2.0. API: `LocalPrinterDto`, `HeartbeatDto.localPrinters`,
+`PrintAgentService.reportDiscovery(…, localPrinters?)`, `discover` response.
+Web: `printing.discover`, `PrinterDiscoveryView`, the rewritten Printers card.
+Tests: `print-agent-discovery.spec.ts` (store semantics, DTO limits) and
+`printing-tab.render.test.tsx` (payloads asserted exactly: discovered host →
+`192.168.123.100:9100`; picked name → `Xprinter XP-365B`; Edit → `{ address }`
+only; nothing changed → no PATCH; how-to and offline warning follow the kind).
+Proven live on the counter PC: the form listed `192.168.123.100`, `Xprinter
+XP-365B` and `Canon G3010 series` from the agent's report.
+
+---
+
 ### D180 — merging `fix/waiter-status-change`: how each clash was decided
 
 One commit, forked from `fix/restaurant-owner-v2` at `985f3b6` before that
