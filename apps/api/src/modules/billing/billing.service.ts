@@ -35,6 +35,14 @@ export interface BillLineItem {
 export interface BillView {
   saleId: string;
   saleNumber: string;
+  /**
+   * D197 — the order(s) this bill settled, each with its call-out number and
+   * permanent `RO-` identifier. The bill's title stays the sale number (the
+   * invoice series returns and QuickBooks key on); this is what lets the
+   * screen ALSO say "#47", the number the guest has been quoting all meal.
+   * Empty for a Sale that has no session behind it.
+   */
+  orders: { orderNumber: string; callNumber: number | null }[];
   subtotal: string;
   /** D72 — discount taken off the bill. Zero today for a restaurant close
    *  (D52 defers promotion pricing), but a printed bill must show one the
@@ -118,6 +126,11 @@ export class BillingService {
         // arrangement would otherwise be handed identical headers.
         tabName: true,
         table: { select: { code: true, area: { select: { name: true } } } },
+        // D197 — the order numbers the bill covers.
+        orders: {
+          select: { orderNumber: true, callNumber: true },
+          orderBy: { createdAt: 'asc' },
+        },
       },
     });
     const table = session?.table ?? null;
@@ -135,6 +148,7 @@ export class BillingService {
       await this.loadOrderItems(tenantId, sale.id),
       servedBy?.name ?? null,
       placeLabel,
+      session?.orders ?? [],
     );
   }
 
@@ -447,6 +461,7 @@ export class BillingService {
     /** D72 — resolved by the caller; `toView` stays a pure projection. */
     servedByName: string | null = null,
     placeLabel: string | null = null,
+    orders: { orderNumber: string; callNumber: number | null }[] = [],
   ): BillView {
     const assignedByItem = new Map<string, Prisma.Decimal>();
     for (const split of sale.billSplits) {
@@ -460,6 +475,7 @@ export class BillingService {
     return {
       saleId: sale.id,
       saleNumber: sale.saleNumber,
+      orders,
       subtotal: sale.subtotal.toFixed(2),
       totalDiscount: sale.totalDiscount.toFixed(2),
       serviceChargeAmount: sale.serviceChargeAmount.toFixed(2),

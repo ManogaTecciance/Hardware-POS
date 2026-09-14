@@ -53,6 +53,13 @@ export interface OrderView {
   channel: UnifiedChannel;
   source: UnifiedSource;
   orderNumber: string;
+  /**
+   * D197 — the call-out number ("#47"), per branch per business day. Null on
+   * orders minted before D197, and on every third-party row: the partner's
+   * reference IS what a rider quotes at the door, so `orderNumber` already
+   * carries the number that gets said out loud there.
+   */
+  callNumber: number | null;
   unifiedStatus: UnifiedOrderStatus;
   paymentStatus: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | null;
   customerName: string | null;
@@ -398,9 +405,15 @@ export class RestaurantOrdersService {
     }
     if (query.search) {
       const q = query.search.trim().toLowerCase();
+      // D197 — "47" or "#47" finds today's call number 47 EXACTLY, never 147
+      // or 470: a call number is two or three digits, and a substring test
+      // would light up a third of the queue for "4".
+      const call = /^#?(\d+)$/.exec(q)?.[1];
+      const callNumber = call ? Number(call) : null;
       base = base.filter(
         (r) =>
           r.orderNumber.toLowerCase().includes(q) ||
+          (callNumber !== null && r.callNumber === callNumber) ||
           (r.customerName ?? '').toLowerCase().includes(q) ||
           (r.customerPhone ?? '').toLowerCase().includes(q) ||
           (r.contextLabel ?? '').toLowerCase().includes(q),
@@ -644,6 +657,9 @@ function restaurantOrderBaseView(
     id: string;
     channel: RestaurantOrderChannel;
     orderNumber: string;
+    // D197 — optional for the same reason `rounds`' fields are: older specs'
+    // stubs predate it and a stub without one reads as a pre-D197 order.
+    callNumber?: number | null;
     status: RestaurantOrderStatus;
     createdAt: Date;
     // D178a — `id`/`roundNumber` optional so the paging and scope specs'
@@ -709,6 +725,7 @@ function restaurantOrderBaseView(
     channel: isTakeaway ? 'TAKEAWAY' : 'DINE_IN',
     source,
     orderNumber: o.orderNumber,
+    callNumber: o.callNumber ?? null,
     unifiedStatus: unified,
     paymentStatus: sale?.paymentStatus ?? unbilledPaymentStatus(unified),
     customerName: o.takeawayProfile?.customerName ?? null,
@@ -786,6 +803,7 @@ function externalOrderBaseView(e: {
     channel: 'THIRD_PARTY',
     source: platformToSource(e.platform.kind),
     orderNumber: e.externalOrderRef,
+    callNumber: null,
     unifiedStatus: unifiedStatusForExternalOrder(e.status),
     // Payment status for 3rd party lives on the platform side; the
     // MOCK adapter does not surface it, so we return null and the

@@ -322,13 +322,11 @@ test.describe('POS-CTR-3 — Takeaway golden path', () => {
     // Pay & Complete.
     await paymentDialog.getByRole('button', { name: /pay & complete/i }).click();
 
-    // Completion screen — read the order number from the header.
-    const titleHeading = page
-      .getByRole('heading', { name: /Order #RO-\d+ created/i })
-      .first();
+    // Completion screen — D197: the heading carries the call number ("#47")
+    // and the permanent RO- reference sits in its own element.
+    const titleHeading = page.getByRole('heading', { name: /Order #\S+ created/i }).first();
     await expect(titleHeading).toBeVisible({ timeout: 20_000 });
-    const dialogTitle = (await titleHeading.textContent()) ?? '';
-    const orderNumber = dialogTitle.match(/#(RO-\d+)/i)?.[1] ?? '';
+    const orderNumber = ((await page.getByTestId('order-reference').first().textContent()) ?? '').trim();
     expect(orderNumber).toMatch(/^RO-\d+$/i);
 
     // KOT and payment indicators.
@@ -531,12 +529,10 @@ test.describe('POS-CTR-4 — Delivery COD', () => {
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 
-    const titleHeading = page
-      .getByRole('heading', { name: /Order #RO-\d+ created/i })
-      .first();
+    // D197 — see the takeaway case above: the RO- reference has its own element.
+    const titleHeading = page.getByRole('heading', { name: /Order #\S+ created/i }).first();
     await expect(titleHeading).toBeVisible({ timeout: 20_000 });
-    const title = (await titleHeading.textContent()) ?? '';
-    const orderNumber = title.match(/#(RO-\d+)/i)?.[1] ?? '';
+    const orderNumber = ((await page.getByTestId('order-reference').first().textContent()) ?? '').trim();
     expect(orderNumber).toMatch(/^RO-\d+$/i);
     // Delivery should show the COD state, NOT "Payment completed".
     await expect(page.getByText(/kot sent to kitchen/i).first()).toBeVisible();

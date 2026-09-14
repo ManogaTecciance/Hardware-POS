@@ -34,6 +34,8 @@ export interface KitchenOrderView {
   ticketId: string;
   ticketNumber: string;
   orderNumber: string | null;
+  /** D197 — the call-out number; null before D197. */
+  callNumber: number | null;
   placeLabel: string | null;
   waiterName: string | null;
   placedAt: string;
@@ -117,6 +119,8 @@ export interface KitchenTicketView {
    * tell the pass which table to plate for.
    */
   orderNumber: string | null;
+  /** D197 — the call-out number the pass names a bag by; null before D197. */
+  callNumber: number | null;
   placeLabel: string | null;
   roundNumber: number | null;
   waiterName: string | null;
@@ -852,6 +856,10 @@ export class KitchenService {
             OR: [
               { ticketNumber: { contains: search, mode: 'insensitive' } },
               { round: { order: { orderNumber: { contains: search, mode: 'insensitive' } } } },
+              // D197 — "47" or "#47" is the call number, matched exactly.
+              ...(callNumberSearch(search) !== null
+                ? [{ round: { order: { callNumber: callNumberSearch(search)! } } }]
+                : []),
               { items: { some: { menuItemName: { contains: search, mode: 'insensitive' } } } },
             ],
           }
@@ -962,6 +970,7 @@ export class KitchenService {
       where: { id: round.orderId, tenantId },
       select: {
         orderNumber: true,
+        callNumber: true,
         createdAt: true,
         session: {
           select: {
@@ -1020,6 +1029,7 @@ export class KitchenService {
       ticketId: ticket.id,
       ticketNumber: ticket.ticketNumber,
       orderNumber: order.orderNumber,
+      callNumber: order.callNumber,
       placeLabel: withTabName(
         table
           ? table.code === 'WALK-IN'
@@ -1288,6 +1298,7 @@ const TICKET_INCLUDE = {
       order: {
         select: {
           orderNumber: true,
+          callNumber: true,
           session: {
             select: {
               waiterUserId: true,
@@ -1301,6 +1312,12 @@ const TICKET_INCLUDE = {
     },
   },
 } satisfies Prisma.KitchenTicketInclude;
+
+/** D197 — a bare or `#`-prefixed integer is a call number; anything else is not. */
+function callNumberSearch(search: string): number | null {
+  const m = /^#?(\d+)$/.exec(search.trim());
+  return m ? Number(m[1]) : null;
+}
 
 function toView(
   row: Prisma.KitchenTicketGetPayload<{ include: typeof TICKET_INCLUDE }>,
@@ -1317,6 +1334,7 @@ function toView(
     stationName: row.station?.name ?? null,
     status: row.status,
     orderNumber: row.round?.order?.orderNumber ?? null,
+    callNumber: row.round?.order?.callNumber ?? null,
     // The synthetic walk-in table backs every counter and takeaway order;
     // the pass wants to read "Takeaway", not a table code nobody can find.
     placeLabel: withTabName(

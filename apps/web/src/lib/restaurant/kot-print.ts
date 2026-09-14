@@ -62,6 +62,8 @@ export interface KotPrintInput {
   /** The station this ticket belongs to (D152). Null for a D147-window row. */
   stationName?: string | null;
   orderNumber?: string | null;
+  /** D197 — the call-out number; printed as "#47" ahead of the RO- fallback. */
+  callNumber?: number | null;
   /** When the ticket reached the kitchen. */
   createdAt: string | Date;
   items: readonly KotPrintItem[];
@@ -197,7 +199,10 @@ export function renderKitchenTicket(input: KotPrintInput, geometry?: BillGeometr
    * D147-window ticket has no station.
    */
   const sub = [
-    input.orderNumber ? esc(input.orderNumber) : '',
+    // D197 — "#47" when the order has a call number; "RO-000120" as before
+    // for an order that predates it (the tag helper would prefix that too,
+    // and this paper never did).
+    input.callNumber != null ? `#${input.callNumber}` : input.orderNumber ? esc(input.orderNumber) : '',
     input.roundNumber != null ? sendLabel(input.roundNumber) : '',
     input.stationName ? esc(input.stationName) : '',
   ]

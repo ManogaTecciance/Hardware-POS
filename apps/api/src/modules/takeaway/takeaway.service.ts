@@ -11,6 +11,7 @@ import {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { mintOrderNumbers } from '../../common/order-numbering';
 import { KitchenService } from '../kitchen/kitchen.service';
 import { PrintingService } from '../printing/printing.service';
 import { RestaurantPromotionPricingService } from '../promotions/restaurant-promotion-pricing.service';
@@ -41,6 +42,8 @@ export interface TakeawayView {
   id: string;
   orderId: string;
   orderNumber: string;
+  /** D197 — the call-out number; null on orders minted before it existed. */
+  callNumber: number | null;
   status: TakeawayOrderStatus;
   customerName: string | null;
   customerPhone: string | null;
@@ -111,13 +114,19 @@ export class TakeawayService {
         },
       });
 
-      const orderSeq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
+      // D197 — both numbers from the one minter, inside this transaction.
+      const numbers = await mintOrderNumbers(
+        tx,
+        tenantId,
+        dto.branchId,
+        this.settings.getSettings(tenantId).timezone,
+      );
       const order = await tx.restaurantOrder.create({
         data: {
           tenantId,
           branchId: dto.branchId,
           sessionId: session.id,
-          orderNumber: `RO-${padSequence(orderSeq)}`,
+          ...numbers,
           channel: RestaurantOrderChannel.TAKEAWAY,
           status: 'DRAFT',
         },
@@ -183,7 +192,7 @@ export class TakeawayService {
 
       // A freshly-created takeaway has no Sale yet — it lands on settle (D117)
       // or, failing that, on handover.
-      return this.toView(profile, order.orderNumber, null);
+      return this.toView(profile, order, null);
     });
     // D181 — print the KOTs the round just queued, without making the
     // response wait for a printer.
@@ -198,15 +207,14 @@ export class TakeawayService {
         order: {
           select: {
             orderNumber: true,
+            callNumber: true,
             session: { select: { finalSaleId: true } },
           },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((r) =>
-      this.toView(r, r.order.orderNumber, r.order.session?.finalSaleId ?? null),
-    );
+    return rows.map((r) => this.toView(r, r.order, r.order.session?.finalSaleId ?? null));
   }
 
   async updateStatus(
@@ -217,7 +225,9 @@ export class TakeawayService {
   ): Promise<TakeawayView> {
     const existing = await this.prisma.takeawayOrderProfile.findFirst({
       where: { id: profileId, tenantId },
-      include: { order: { select: { orderNumber: true, sessionId: true, branchId: true } } },
+      include: {
+        order: { select: { orderNumber: true, callNumber: true, sessionId: true, branchId: true } },
+      },
     });
     if (!existing) throw new NotFoundException('Takeaway order not found');
 
@@ -228,7 +238,9 @@ export class TakeawayService {
       const updated = await tx.takeawayOrderProfile.update({
         where: { id: existing.id },
         data: { status: nextStatus, handoverAt },
-        include: { order: { select: { orderNumber: true, sessionId: true, branchId: true } } },
+        include: {
+        order: { select: { orderNumber: true, callNumber: true, sessionId: true, branchId: true } },
+      },
       });
       let finalSaleId: string | null = null;
       // On handover, close the underlying session into a Sale (D1 junction).
@@ -243,7 +255,7 @@ export class TakeawayService {
           actorUserId,
         );
       }
-      return this.toView(updated, updated.order.orderNumber, finalSaleId);
+      return this.toView(updated, updated.order, finalSaleId);
     }).then((view) => {
       // D181 — a handover that settled queued a bill; print it now.
       this.printing.kick();
@@ -266,7 +278,9 @@ export class TakeawayService {
   async settle(tenantId: string, profileId: string, actorUserId: string): Promise<TakeawayView> {
     const existing = await this.prisma.takeawayOrderProfile.findFirst({
       where: { id: profileId, tenantId },
-      include: { order: { select: { orderNumber: true, sessionId: true, branchId: true } } },
+      include: {
+        order: { select: { orderNumber: true, callNumber: true, sessionId: true, branchId: true } },
+      },
     });
     if (!existing) throw new NotFoundException('Takeaway order not found');
     if (existing.status === 'CANCELLED') {
@@ -278,7 +292,7 @@ export class TakeawayService {
     const sessionId = existing.order.sessionId;
     const view = await this.prisma.$transaction(async (tx) => {
       const finalSaleId = await this.settleSessionIntoSale(tx, tenantId, sessionId, actorUserId);
-      return this.toView(existing, existing.order.orderNumber, finalSaleId);
+      return this.toView(existing, existing.order, finalSaleId);
     });
     // D181 — the bill queued at settle goes out now, not on the next tick.
     this.printing.kick();
@@ -520,13 +534,14 @@ export class TakeawayService {
 
   private toView(
     row: Prisma.TakeawayOrderProfileGetPayload<Record<string, never>>,
-    orderNumber: string,
+    order: { orderNumber: string; callNumber: number | null },
     finalSaleId: string | null,
   ): TakeawayView {
     return {
       id: row.id,
       orderId: row.orderId,
-      orderNumber,
+      orderNumber: order.orderNumber,
+      callNumber: order.callNumber,
       status: row.status,
       customerName: row.customerName,
       customerPhone: row.customerPhone,

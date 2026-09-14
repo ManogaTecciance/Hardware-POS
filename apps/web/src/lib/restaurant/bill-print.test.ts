@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/tenant-money', () => ({ getActiveCurrency: () => 'LKR' }));
 
-import { billToThermalInput } from './bill-print';
+import { billOrderRef, billToThermalInput } from './bill-print';
 import type { BillView } from './types';
 
 /**
@@ -18,6 +18,8 @@ import type { BillView } from './types';
 const view: BillView = {
   saleId: 'sale_1',
   saleNumber: 'S-000123',
+  // D197 — the order this bill settled.
+  orders: [{ orderNumber: 'RO-000120', callNumber: 47 }],
   placeLabel: 'Takeaway',
   servedByName: 'Nimal',
   closedAt: '2026-07-15T13:40:00.000Z',
@@ -59,6 +61,7 @@ describe('billToThermalInput', () => {
      */
     expect(input).toMatchObject({
       documentNumber: 'S-000123',
+      orderRef: '#47 · RO-000120',
       placeLabel: 'Takeaway',
       servedBy: 'Nimal',
       cashierName: 'Kamala',
@@ -111,6 +114,34 @@ describe('billToThermalInput', () => {
     // The default matters: a bill that always said COPY could not be given to
     // a customer as an original.
     expect(billToThermalInput(view, profile, { fallbackName: '', cashierName: 'K' }).copyLabel).toBeNull();
+  });
+
+  describe('D197 — the order reference under the bill number', () => {
+    it('names the call number and the RO- together, and lists each order of an arrangement', () => {
+      expect(billOrderRef(view)).toBe('#47 · RO-000120');
+      expect(
+        billOrderRef({
+          orders: [
+            { orderNumber: 'RO-000120', callNumber: 47 },
+            { orderNumber: 'RO-000121', callNumber: 48 },
+          ],
+        }),
+      ).toBe('#47 · RO-000120, #48 · RO-000121');
+    });
+
+    it('an order minted before D197 reads by its RO- number, once', () => {
+      expect(billOrderRef({ orders: [{ orderNumber: 'RO-000009', callNumber: null }] })).toBe('#RO-000009');
+    });
+
+    it('is null — so the paper omits the line — when the bill has no order behind it', () => {
+      expect(billOrderRef({ orders: [] })).toBeNull();
+      // A server that predates the field: the paper must still print.
+      expect(billOrderRef({ orders: undefined as never })).toBeNull();
+      expect(
+        billToThermalInput({ ...view, orders: [] }, profile, { fallbackName: '', cashierName: null })
+          .orderRef,
+      ).toBeNull();
+    });
   });
 
   it('an empty bill note becomes null, not an empty line on the paper', () => {

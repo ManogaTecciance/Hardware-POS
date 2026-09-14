@@ -1,3 +1,5 @@
+import { orderCallTag, orderFullRef, type OrderCallRef } from '@hardware-pos/shared';
+
 import { EscPosBuilder, type BuilderOptions } from '../escpos';
 
 /**
@@ -16,7 +18,20 @@ export interface BillTemplateData {
   currency: string;
   footer: string | null;
 
-  saleNumber: string;
+  /**
+   * D197 — the settled Sale's number (`S-000087`), labelled "Bill" on the
+   * paper. NULL on the bill printed BEFORE settlement: there is no invoice
+   * yet, and printing the order number in this slot (what the template did
+   * until D197) handed the guest a different number from the one the till
+   * would show them minutes later.
+   */
+  saleNumber: string | null;
+  /**
+   * D197 — the order(s) this bill covers. Usually one; an arrangement whose
+   * tabs settled together lists each. Read as `#47 · RO-000120` so the paper
+   * the guest kept from before paying and the one they get after agree.
+   */
+  orders: OrderCallRef[];
   placeLabel: string | null;
   staffName: string | null;
   closedAt: Date;
@@ -53,7 +68,22 @@ export function renderBill(data: BillTemplateData, columns = 48, options?: Build
   b.line();
 
   b.align('left').hr();
-  b.row(data.saleNumber, formatStamp(data.closedAt));
+  // D197 — the settled bill leads with its invoice number and names the
+  // order beneath; the pre-settlement bill leads with the order's call tag,
+  // because that is the only number it has and the one the guest was told.
+  const orderLine = data.orders
+    .map((o) => orderFullRef(o))
+    .filter((ref): ref is string => ref !== null)
+    .join(', ');
+  if (data.saleNumber) {
+    b.row(`Bill ${data.saleNumber}`, formatStamp(data.closedAt));
+    if (orderLine) b.line(`Order ${orderLine}`);
+  } else {
+    const tag = data.orders[0] ? orderCallTag(data.orders[0]) : null;
+    b.row(tag ? `Order ${tag}` : 'Order', formatStamp(data.closedAt));
+    const permanent = data.orders[0]?.orderNumber;
+    if (tag && permanent && tag !== `#${permanent}`) b.line(permanent);
+  }
   if (data.placeLabel) b.row(data.placeLabel, data.staffName ?? '');
   else if (data.staffName) b.row('Served by', data.staffName);
   b.hr();

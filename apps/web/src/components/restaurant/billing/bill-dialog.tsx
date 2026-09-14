@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
-import { printBillView } from '@/lib/restaurant/bill-print';
+import { billOrderRef, printBillView } from '@/lib/restaurant/bill-print';
 import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import type { BillView } from '@/lib/restaurant/types';
@@ -96,10 +96,18 @@ export function BillDialog({ session, saleId, title, onClose }: Props) {
     <Dialog
       open
       onClose={onClose}
-      title={title ?? bill?.saleNumber ?? 'Bill'}
+      title={title ?? (bill ? `Bill ${bill.saleNumber}` : 'Bill')}
       description={
         bill
-          ? `${bill.saleNumber}${bill.placeLabel ? ` · ${bill.placeLabel}` : ''}`
+          ? // D197 — both numbers, each labelled, so "S-" and "#47" are never
+            // left for the reader to reconcile.
+            [
+              `Bill ${bill.saleNumber}`,
+              billOrderRef(bill) ? `Order ${billOrderRef(bill)}` : null,
+              bill.placeLabel,
+            ]
+              .filter(Boolean)
+              .join(' · ')
           : 'Loading the bill…'
       }
       className="sm:max-w-lg"

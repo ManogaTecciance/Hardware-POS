@@ -10,7 +10,9 @@ import {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { mintOrderNumbers } from '../../common/order-numbering';
 import { KitchenService } from '../kitchen/kitchen.service';
+import { SettingsService } from '../settings/settings.service';
 import { DeliveryPlatformRegistry } from './delivery-platform-registry';
 
 export interface ExternalOrderView {
@@ -29,6 +31,8 @@ export class DeliveryHubService {
     private readonly prisma: PrismaService,
     private readonly kitchen: KitchenService,
     private readonly registry: DeliveryPlatformRegistry,
+    // D197 — the call number counts within the tenant's business day.
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -173,13 +177,20 @@ export class DeliveryHubService {
           status: TableSessionStatus.OPEN,
         },
       });
-      const orderSeq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
+      // D197 — a third-party order gets a call number too: at handover the
+      // counter names the bag the same way whichever channel it came from.
+      const numbers = await mintOrderNumbers(
+        tx,
+        tenantId,
+        external.branchId,
+        this.settings.getSettings(tenantId).timezone,
+      );
       const restaurantOrder = await tx.restaurantOrder.create({
         data: {
           tenantId,
           branchId: external.branchId,
           sessionId: session.id,
-          orderNumber: `RO-${padSequence(orderSeq)}`,
+          ...numbers,
           channel: RestaurantOrderChannel.ONLINE,
           status: 'SUBMITTED',
         },

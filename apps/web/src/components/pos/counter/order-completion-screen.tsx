@@ -1,5 +1,6 @@
 'use client';
 
+import { orderCallTag } from '@hardware-pos/shared';
 import { CheckCircle2, ChefHat, Receipt, ShoppingCart } from 'lucide-react';
 import * as React from 'react';
 
@@ -12,6 +13,8 @@ import type { PosMode } from '../pos-mode-selector';
 
 export interface CompletionSummary {
   orderNumber: string;
+  /** D197 — the call-out number the cashier tells the customer; null before D197. */
+  callNumber: number | null;
   mode: PosMode;
   paidNow: boolean;
   change: number | null;
@@ -47,7 +50,7 @@ export function OrderCompletionScreen({ summary, onNewOrder, onViewOrder }: Prop
     <Dialog
       open
       onClose={onNewOrder}
-      title={`Order #${summary.orderNumber} created`}
+      title={`Order ${orderCallTag(summary)} created`}
       description={
         isDelivery
           ? 'Delivery order confirmed. Rider marks Handed Over when the customer receives it.'
@@ -67,6 +70,26 @@ export function OrderCompletionScreen({ summary, onNewOrder, onViewOrder }: Prop
       }
     >
       <div className="space-y-3">
+        {/* D197 — the one thing this screen exists to hand over: the number
+            the customer listens for. Big, first, and gone on a delivery order,
+            where the rider collects by the partner's reference instead. */}
+        {!isDelivery && summary.callNumber !== null ? (
+          <div className="rounded-md border border-border bg-muted/40 p-3 text-center" data-testid="call-number">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Tell the customer
+            </p>
+            <p className="text-4xl font-bold tabular-nums">#{summary.callNumber}</p>
+            <p className="text-xs text-muted-foreground" data-testid="order-reference">
+              {summary.orderNumber}
+            </p>
+          </div>
+        ) : (
+          // The permanent reference still has to be on the screen: it is what
+          // the queue, the audit log and the e2e proof look the order up by.
+          <p className="text-xs text-muted-foreground" data-testid="order-reference">
+            {summary.orderNumber}
+          </p>
+        )}
         <StatusRow
           icon={<Receipt className="h-4 w-4" />}
           label={

@@ -1,5 +1,6 @@
 'use client';
 
+import { orderFullRef } from '@hardware-pos/shared';
 import { Filter, Search, X } from 'lucide-react';
 import * as React from 'react';
 
@@ -536,7 +537,7 @@ export function KitchenHistory({ session, branchId }: Props) {
                     <td className="px-4 py-3">
                       <div>{t.placeLabel ?? '—'}</div>
                       <div className="text-xs text-muted-foreground">
-                        {t.orderNumber ?? '—'}
+                        {orderFullRef(t) ?? '—'}
                         {t.roundNumber !== null ? ` · ${sendLabel(t.roundNumber)}` : ''}
                       </div>
                     </td>

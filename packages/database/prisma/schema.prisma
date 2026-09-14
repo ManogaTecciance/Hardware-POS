@@ -1954,7 +1954,8 @@ model QuotationShareLog {
 /// that collided under concurrent checkouts and after deletions.
 model DocumentSequence {
   tenantId String
-  /// Document type: SALE | RETURN | QUOTATION.
+  /// Document type (`SALE`, `RETURN`, `QUOTATION`, `RESTAURANT_ORDER`, …) or,
+  /// since D197, a scoped counter key such as `ORDER_CALL:<branchId>:<day>`.
   docType  String
   /// Last-issued sequence number; the next document uses value + 1.
   value    Int    @default(0)
@@ -2937,6 +2938,12 @@ model RestaurantOrder {
   sessionId String
 
   orderNumber String
+  /// D197 — the call-out number ("#47"): restarts at 1 per branch per
+  /// business day. Null on orders minted before D197, which keep reading by
+  /// their `orderNumber`.
+  callNumber Int?
+  /// D197 — the `YYYY-MM-DD` (tenant zone) `callNumber` counts within.
+  callDay    String?
   channel     RestaurantOrderChannel @default(DINE_IN)
   status      RestaurantOrderStatus  @default(DRAFT)
 
@@ -2958,6 +2965,9 @@ model RestaurantOrder {
   printJobs       PrintJob[]
 
   @@unique([tenantId, orderNumber])
+  /// D197 — one call number per branch per day; NULLs (pre-D197 rows) are
+  /// distinct under Postgres, so legacy orders never collide.
+  @@unique([branchId, callDay, callNumber])
   @@index([tenantId])
   @@index([branchId])
   @@index([sessionId])

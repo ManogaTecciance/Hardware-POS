@@ -82,6 +82,9 @@ describe('renderKotTicket — the industry layout (D181)', () => {
     ticketNumber: 'KOT-000123',
     stationName: 'Grill',
     orderNumber: 'RO-000045',
+    // Pre-D197 shape: no call number, so every assertion below reads the
+    // RO- fallback exactly as the paper printed before D197.
+    callNumber: null,
     orderType: 'DINE_IN' as const,
     tableCode: 'T4',
     areaName: 'Main Hall',
@@ -183,6 +186,39 @@ describe('renderKotTicket — the industry layout (D181)', () => {
     expect(out).not.toContain('Order RO-000045');
   });
 
+  describe('D197 — the call number is the "#" on the paper', () => {
+    it('a takeaway headlines "#47", and the RO- number is nowhere on the ticket', () => {
+      const out = text(
+        renderKotTicket({
+          ...base,
+          callNumber: 47,
+          orderType: 'TAKEAWAY',
+          tableCode: null,
+          areaName: null,
+          customerName: 'Nimal Perera',
+        }),
+      );
+      // POSITIVE — the headline is the call tag, in the double-size block.
+      const big = out.slice(out.indexOf(text(DOUBLE_SIZE)) + 3, out.indexOf(text(SIZE_OFF)));
+      expect(big).toContain('#47');
+      // NEGATIVE — six digits the pass cannot shout are not printed at all.
+      expect(out).not.toContain('RO-000045');
+    });
+
+    it('a dine-in names the order "#47" on the meta line, under the table', () => {
+      const out = text(renderKotTicket({ ...base, callNumber: 47 }));
+      expect(out).toContain('TABLE T4');
+      expect(out).toContain('Order #47');
+      expect(out).not.toContain('Order RO-000045');
+    });
+
+    it('MUTATION — an order without a call number still reads by its RO- number (history is not renumbered)', () => {
+      const out = text(renderKotTicket({ ...base, callNumber: null }));
+      expect(out).toContain('Order RO-000045');
+      expect(out).not.toContain('#47');
+    });
+  });
+
   it('wraps a long dish name at our word boundary, continuation lines under the name', () => {
     const out = text(
       renderKotTicket({
@@ -215,6 +251,7 @@ describe('renderBill', () => {
     currency: 'LKR',
     footer: 'Thank you',
     saleNumber: 'S-000021',
+    orders: [{ orderNumber: 'RO-000045', callNumber: 47 }],
     placeLabel: 'Table T4',
     staffName: 'Nimal',
     closedAt: new Date('2026-08-18T20:10:00'),
@@ -256,6 +293,49 @@ describe('renderBill', () => {
 
     const unpaid = text(renderBill({ ...base, paid: '0.00', balance: '7040.00', payments: [] }));
     expect(unpaid).toContain('BALANCE DUE');
+  });
+
+  describe('D197 — the settled bill names both numbers, labelled; the pre-settlement bill has no bill number', () => {
+    it('settled: "Bill S-…" leads and "Order #47 · RO-…" sits under it', () => {
+      const out = text(renderBill(base));
+      expect(out).toContain('Bill S-000021');
+      // The separator is a middle dot, which the code page encodes as one
+      // byte the latin1 decode does not round-trip — match around it.
+      expect(out).toMatch(/Order #47 \S RO-000045/);
+      expect(out.indexOf('Bill S-000021')).toBeLessThan(out.indexOf('Order #47'));
+    });
+
+    it('before settlement: leads with the call tag, prints the RO- beneath, and NEVER a bare number in the bill slot', () => {
+      const out = text(renderBill({ ...base, saleNumber: null }));
+      expect(out).toContain('Order #47');
+      expect(out).toContain('RO-000045');
+      // NEGATIVE — what the template did before D197: the order number
+      // printed where the invoice number goes, unlabelled.
+      expect(out).not.toContain('Bill ');
+      expect(out).not.toMatch(/\nRO-000045\s+\d\d\//);
+    });
+
+    it('an order minted before D197 keeps its RO- number as the tag', () => {
+      const out = text(
+        renderBill({ ...base, saleNumber: null, orders: [{ orderNumber: 'RO-000045', callNumber: null }] }),
+      );
+      expect(out).toContain('Order #RO-000045');
+      // …and does not print the same number twice under itself.
+      expect(out.split('RO-000045').length - 1).toBe(1);
+    });
+
+    it('an arrangement that settled several orders lists each', () => {
+      const out = text(
+        renderBill({
+          ...base,
+          orders: [
+            { orderNumber: 'RO-000045', callNumber: 47 },
+            { orderNumber: 'RO-000046', callNumber: 48 },
+          ],
+        }),
+      );
+      expect(out).toMatch(/Order #47 \S RO-000045, #48 \S RO-000046/);
+    });
   });
 
   it('never invents money — it prints exactly the figures it is given', () => {
@@ -400,6 +480,7 @@ describe('plain-text rendering (D181, A4_NETWORK)', () => {
     ticketNumber: 'KOT-000042',
     stationName: 'Grill',
     orderNumber: 'RO-000007',
+    callNumber: null,
     orderType: 'DINE_IN' as const,
     tableCode: 'T4',
     areaName: 'Terrace',

@@ -1,5 +1,6 @@
 'use client';
 
+import { orderFullRef } from '@hardware-pos/shared';
 import { CalendarClock, ChefHat, Clock, ShoppingBag, UtensilsCrossed } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
@@ -562,7 +563,7 @@ function TakeawayCard({
               className="flex items-start justify-between gap-3 rounded-xl border border-border p-3"
             >
               <div className="min-w-0">
-                <p className="text-sm font-semibold">{t.orderNumber}</p>
+                <p className="text-sm font-semibold">{orderFullRef(t)}</p>
                 <p className="truncate text-xs text-muted-foreground">
                   {t.customerName ?? 'Walk-in'} · {formatElapsed(t.createdAt)}
                 </p>

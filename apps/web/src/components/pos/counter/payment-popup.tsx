@@ -251,6 +251,7 @@ export function PaymentPopup(props: Props) {
 
       onCompleted({
         orderNumber: takeawayRow.orderNumber,
+        callNumber: takeawayRow.callNumber,
         mode,
         paidNow,
         change: paidNow ? change : null,

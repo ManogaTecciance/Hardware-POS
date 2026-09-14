@@ -68,6 +68,7 @@ function ticket(over: Partial<KitchenTicketView> = {}): KitchenTicketView {
     stationName: 'Hot line',
     status: 'COMPLETED',
     orderNumber: 'O-000045',
+    callNumber: null,
     placeLabel: 'T3 · Garden',
     roundNumber: 2,
     waiterName: 'Nimal',

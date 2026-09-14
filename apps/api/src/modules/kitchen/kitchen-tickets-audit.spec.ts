@@ -35,6 +35,7 @@ function view(stationId: string | null): KitchenTicketView {
     stationName: stationId ? 'Grill' : null,
     status: 'QUEUED',
     orderNumber: 'RO-000026',
+    callNumber: null,
     placeLabel: 'T4 · Terrace',
     roundNumber: 1,
     waiterName: 'Nimal',

@@ -213,7 +213,7 @@ export class TableSessionsController {
       action: 'RESTAURANT_ORDER_CREATED',
       entityType: 'RestaurantOrder',
       entityId: order.id,
-      metadata: { sessionId, orderNumber: order.orderNumber },
+      metadata: { sessionId, orderNumber: order.orderNumber, callNumber: order.callNumber },
     });
     return order;
   }

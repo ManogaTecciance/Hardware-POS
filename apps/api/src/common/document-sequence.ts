@@ -46,7 +46,22 @@ export type DocumentType =
   | 'STOCK_TAKE';
 
 /** A Prisma client or an interactive-transaction client — both can run raw SQL. */
-type PrismaLike = PrismaService | Prisma.TransactionClient;
+export type PrismaLike = PrismaService | Prisma.TransactionClient;
+
+/**
+ * D197 — a counter that is scoped finer than "the tenant's document type".
+ *
+ * The order call number restarts per BRANCH per BUSINESS DAY, so its key
+ * carries both. It rides on the same `DocumentSequence` row and the same
+ * atomic upsert as every document number; only the key differs. One row per
+ * branch per trading day is the whole footprint — nothing is ever reset,
+ * because a fresh day is simply a fresh key.
+ */
+export type ScopedCounterKey = `ORDER_CALL:${string}:${string}`;
+
+export function orderCallCounterKey(branchId: string, day: string): ScopedCounterKey {
+  return `ORDER_CALL:${branchId}:${day}`;
+}
 
 /**
  * Atomically reserve the next sequence number for a tenant's document type.
@@ -62,6 +77,19 @@ export async function nextDocumentNumber(
   tenantId: string,
   docType: DocumentType,
 ): Promise<number> {
+  return reserveNext(client, tenantId, docType);
+}
+
+/** D197 — same guarantees as `nextDocumentNumber`, on a scoped key. */
+export async function nextScopedCounter(
+  client: PrismaLike,
+  tenantId: string,
+  key: ScopedCounterKey,
+): Promise<number> {
+  return reserveNext(client, tenantId, key);
+}
+
+async function reserveNext(client: PrismaLike, tenantId: string, docType: string): Promise<number> {
   const rows = await client.$queryRaw<Array<{ value: number }>>(Prisma.sql`
     INSERT INTO "DocumentSequence" ("tenantId", "docType", "value")
     VALUES (${tenantId}, ${docType}, 1)

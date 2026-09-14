@@ -120,6 +120,7 @@ export class PrintDispatcherService {
                 order: {
                   select: {
                     orderNumber: true,
+                    callNumber: true,
                     channel: true,
                     session: { select: { tableId: true, waiterUserId: true } },
                     takeawayProfile: { select: { customerName: true } },
@@ -226,6 +227,7 @@ export class PrintDispatcherService {
             order: {
               select: {
                 orderNumber: true,
+                callNumber: true,
                 channel: true,
                 session: { select: { tableId: true, waiterUserId: true } },
                 takeawayProfile: { select: { customerName: true } },
@@ -346,6 +348,7 @@ export class PrintDispatcherService {
             order: {
               select: {
                 orderNumber: true;
+                callNumber: true;
                 channel: true;
                 session: { select: { tableId: true; waiterUserId: true } };
                 takeawayProfile: { select: { customerName: true } };
@@ -391,6 +394,7 @@ export class PrintDispatcherService {
       // stationless ticket carrying every station's items (D152).
       stationName: ticket.station?.name ?? null,
       orderNumber: order?.orderNumber ?? null,
+      callNumber: order?.callNumber ?? null,
       orderType,
       tableCode: table && !walkIn ? table.code : null,
       areaName: table && !walkIn ? (table.area?.name ?? null) : null,
@@ -519,7 +523,15 @@ export class PrintDispatcherService {
     // the table label is a second lookup rather than an include.
     const session = await this.prisma.tableSession.findFirst({
       where: { finalSaleId: saleId, tenantId },
-      select: { table: { select: { code: true, area: { select: { name: true } } } } },
+      select: {
+        table: { select: { code: true, area: { select: { name: true } } } },
+        // D197 — the order(s) behind this bill, so the paper names the
+        // number the guest was told before they paid.
+        orders: {
+          select: { orderNumber: true, callNumber: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
 
     const settings = this.settings.getSettings(tenantId);
@@ -532,6 +544,7 @@ export class PrintDispatcherService {
       currency: settings.currency,
       footer: settings.receiptFooter ?? null,
       saleNumber: sale.saleNumber,
+      orders: session?.orders ?? [],
       placeLabel: table
         ? table.code === 'WALK-IN'
           ? 'Takeaway'
@@ -655,7 +668,10 @@ export class PrintDispatcherService {
       taxNumber: settings.documents.taxNumber ?? null,
       currency: settings.currency,
       footer: settings.receiptFooter ?? null,
-      saleNumber: order.orderNumber,
+      // D197 — no Sale exists yet, so no bill number: the order is named by
+      // its call tag, never by a number masquerading as the invoice.
+      saleNumber: null,
+      orders: [{ orderNumber: order.orderNumber, callNumber: order.callNumber }],
       placeLabel: order.channel === RestaurantOrderChannel.TAKEAWAY ? 'Takeaway' : null,
       staffName: staff?.name ?? null,
       closedAt: order.createdAt,

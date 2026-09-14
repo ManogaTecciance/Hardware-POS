@@ -1,5 +1,6 @@
 'use client';
 
+import { orderCallTag, orderFullRef } from '@hardware-pos/shared';
 import { Ban, PackageCheck, Receipt, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
@@ -98,7 +99,7 @@ export function OrderDetailDrawer({
 
   if (isPortrait) {
     return (
-      <Sheet open onClose={onClose} height="full" title={`#${order.orderNumber}`}>
+      <Sheet open onClose={onClose} height="full" title={orderFullRef(order) ?? ''}>
         <OrderDetailBody order={order} detail={detail} onClose={onClose} onMutated={onMutated} />
       </Sheet>
     );
@@ -116,7 +117,11 @@ export function OrderDetailDrawer({
         <div className="flex items-start gap-3 border-b border-border p-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-bold">#{order.orderNumber}</p>
+              {/* D197 — "#47" leads; the RO- identifier follows, muted. */}
+              <p className="text-sm font-bold">{orderCallTag(order)}</p>
+              {order.callNumber !== null ? (
+                <span className="text-xs text-muted-foreground">{order.orderNumber}</span>
+              ) : null}
               <StatusBadge
                 label={UNIFIED_CHANNEL_LABELS[order.channel]}
                 tone={UNIFIED_CHANNEL_TONES[order.channel]}
@@ -499,7 +504,7 @@ function OrderDetailActions({
         <BillDialog
           session={session}
           saleId={billFor}
-          title={order.orderNumber}
+          title={orderCallTag(order) ?? order.orderNumber}
           onClose={() => setBillFor(null)}
         />
       ) : null}
@@ -555,7 +560,7 @@ function OrderDetailActions({
         <Dialog
           open
           onClose={() => setConfirmCancel(false)}
-          title={`Cancel ${order.orderNumber}?`}
+          title={`Cancel ${orderCallTag(order) ?? order.orderNumber}?`}
           description="The kitchen stops making it and the order is marked Cancelled."
           footer={
             <>

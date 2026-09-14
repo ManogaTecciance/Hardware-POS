@@ -186,6 +186,16 @@ describe('the shapes a real kitchen sends', () => {
     expect(text).not.toContain('·');
   });
 
+  it('D197 — names the order by its call number, and by the RO- only when it has none', () => {
+    const called = asText(renderKitchenTicket({ ...TICKET, callNumber: 47 }));
+    expect(called).toContain('#47');
+    expect(called).not.toContain('RO-000026');
+    // An order minted before D197 prints what its paper always printed.
+    const legacy = asText(renderKitchenTicket({ ...TICKET, callNumber: null }));
+    expect(legacy).toContain('RO-000026');
+    expect(legacy).not.toContain('#');
+  });
+
   it('omits the station for a ticket that has none, without printing null', () => {
     const text = asText(renderKitchenTicket({ ...TICKET, stationName: null }));
 

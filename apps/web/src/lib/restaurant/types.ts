@@ -434,6 +434,8 @@ export interface OrderView {
   sessionId: string;
   branchId: string;
   orderNumber: string;
+  /** D197 — the call-out number ("#47"); null on orders minted before it existed. */
+  callNumber: number | null;
   channel: RestaurantOrderChannel;
   status: RestaurantOrderStatus;
   version: number;
@@ -513,6 +515,8 @@ export interface KitchenOrderView {
   ticketId: string;
   ticketNumber: string;
   orderNumber: string | null;
+  /** D197 — the call-out number ("#47"); null on orders minted before it existed. */
+  callNumber: number | null;
   placeLabel: string | null;
   waiterName: string | null;
   placedAt: string;
@@ -556,6 +560,8 @@ export interface KitchenTicketView {
   status: KitchenTicketStatus;
   /** D68 — where the food is going. The board is the only delivery. */
   orderNumber: string | null;
+  /** D197 — the call-out number ("#47"); null on orders minted before it existed. */
+  callNumber: number | null;
   placeLabel: string | null;
   roundNumber: number | null;
   waiterName: string | null;
@@ -666,6 +672,8 @@ export interface TakeawayView {
   id: string;
   orderId: string;
   orderNumber: string;
+  /** D197 — the call-out number ("#47"); null on orders minted before it existed. */
+  callNumber: number | null;
   status: TakeawayOrderStatus;
   customerName: string | null;
   customerPhone: string | null;
@@ -699,6 +707,8 @@ export interface BillLineItem {
 export interface BillView {
   saleId: string;
   saleNumber: string;
+  /** D197 — the order(s) this bill settled: call-out number + permanent RO-. */
+  orders: { orderNumber: string; callNumber: number | null }[];
   subtotal: string;
   /** D72 — discount taken off the bill; printed whenever it is non-zero. */
   totalDiscount: string;
@@ -762,6 +772,12 @@ export interface UnifiedOrderView {
   channel: UnifiedChannel;
   source: UnifiedSource;
   orderNumber: string;
+  /**
+   * D197 — the call-out number ("#47"). Null on orders minted before it
+   * existed and on every third-party row, whose `orderNumber` is already the
+   * partner's reference — the number the rider quotes.
+   */
+  callNumber: number | null;
   unifiedStatus: UnifiedOrderStatus;
   paymentStatus: 'UNPAID' | 'PARTIAL' | 'PAID' | 'REFUNDED' | null;
   customerName: string | null;

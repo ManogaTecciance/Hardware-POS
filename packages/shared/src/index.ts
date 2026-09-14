@@ -14,6 +14,7 @@ export * from './phone.js';
 export * from './returns.js';
 export * from './time.js';
 export * from './sale-line-label.js';
+export * from './order-call-label.js';
 export * from './tax-breakdown.js';
 export * from './variant-price-display.js';
 export * from './promotions/index.js';

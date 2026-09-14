@@ -7695,6 +7695,212 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D197 — an order has a call number, and the bill names both numbers
+
+**Status:** accepted and **built**, 2026-09-14. **Schema change and migration**
+`20260918000000_d197_order_call_number` (additive: two nullable columns and
+one unique index on `RestaurantOrder`; no existing row is touched).
+
+PO, 2026-09-14, on being shown that the queue card said `#RO-000120` while the
+bill for the same order said `S-000087`:
+
+> "so there is confusing instead that S - can we use RO- ? and do we need S- ?
+> how industry handle this?"
+
+and, on the answer:
+
+> "yes do it. keep #. and fix wide number issue"
+
+### What was wrong
+
+Three separate things, each real.
+
+**Two numbers, neither labelled.** A restaurant order carries `RO-000120` from
+the moment it is opened; the Sale that settles it is minted at close and
+carries `S-000087`. The Orders queue named the order by the first, the bill
+screen and dialog by the second, and nothing on either surface said which
+series it was reading. A cashier holding the guest's paper and looking at the
+screen had two numbers and no stated relationship between them.
+
+**The pre-settlement bill lied about which number it was printing.** The
+unattended `ORDER_BILL` (D181) is printed before the Sale exists, so the
+dispatcher put the ORDER number into the template's `saleNumber` slot — the
+one the template lays out where an invoice number goes. So the paper the guest
+was handed before paying read `RO-000120` in the position where the paper
+after paying reads `S-000087`. That is the confusion the PO reported, and it
+was the code's doing, not the guest's.
+
+**`RO-000120` is not a number anybody says out loud.** It is tenant-wide and
+only grows: six digits today, "twelve thousand three hundred and forty" in a
+year. Fine as an identifier; useless at a takeaway counter, where the whole
+job of an order number is to be shouted once and remembered for ten minutes.
+
+### Why not replace `S-` with `RO-`
+
+Put to the PO before building, and the answer stands:
+
+- **A bill is per session, not per order.** `TableSession.orders[]` is
+  one-to-many (an arrangement's tabs each carry their own `RO-`) and
+  `finalSaleId` is one Sale. A merged table's bill would have no single `RO-`
+  to take.
+- **`S-` is the tenant's one invoice series.** Retail counter sales and
+  restaurant bills draw from the same `SALE` counter. Numbering restaurant
+  bills `RO-` would leave two interleaved invoice series, which is what an
+  auditor flags, and a continuous serial series on a tax invoice is a legal
+  requirement in the tenant's jurisdiction (VAT Act s.20).
+- **Everything downstream keys on `Sale.saleNumber`:** `R-` returns, `X-`
+  exchanges, `RCP-<saleNumber>` receipts, the QuickBooks push, sales history,
+  the A4 invoice.
+- Not every `RO-` becomes an `S-` (cancelled orders), and not every `S-` has
+  an `RO-` (counter-mode sales).
+
+So both numbers stay. What changes is that each is labelled wherever it
+appears, the settled bill names both, and there is now a third, SHORT number
+whose only job is to be said.
+
+### How the industry does it
+
+Every mainstream restaurant POS runs exactly two numbers with different jobs:
+
+| Number | Job | Toast | Square | Oracle Micros | Petpooja / Posist |
+|---|---|---|---|---|---|
+| Order / check | Operational: spoken aloud, on the KOT, on the pre-payment check. Short; resets daily. | Check # | Order # | Check no. | Order no. |
+| Invoice / receipt | Fiscal: continuous, never reused, one per settled transaction. | Receipt # | Receipt # | Transaction no. | Bill no. |
+
+Nobody drops the invoice number. What they do is (1) never print a bare
+number — it is always "Order #47" or "Invoice …", (2) print BOTH on the final
+receipt so the guest's earlier paper visibly matches, and (3) have staff speak
+in order numbers and accounting speak in invoice numbers.
+
+### The decision
+
+**1. A restaurant order gets a `callNumber`.** An integer that restarts at 1
+for each BRANCH each BUSINESS DAY, minted in the same transaction as the
+order, alongside the `RO-` number, by ONE function —
+`apps/api/src/common/order-numbering.ts` `mintOrderNumbers`. Dine-in,
+takeaway and third-party orders all pass through it, so a channel cannot
+drift onto its own scheme: a third-party order that reached the kitchen
+without a call number would be the one bag the pass could not name.
+
+The counter rides on `DocumentSequence` under the key
+`ORDER_CALL:<branchId>:<YYYY-MM-DD>` — the same atomic `INSERT … ON CONFLICT`
+upsert every document number uses (`nextScopedCounter`), so two tills opening
+an order in the same instant cannot both be #47. One row per branch per
+trading day is the whole footprint; nothing is ever reset, because a new day
+is a new key. The day is the calendar day in the tenant's zone
+(`SettingsService.timezone`, `dayInTimeZone`); `callDay` is stored beside the
+number so "#47" is never ambiguous in the database and the unique index
+`(branchId, callDay, callNumber)` can refuse a double issue. Postgres treats
+NULLs as distinct in a unique index, so every pre-D197 row (null, null)
+satisfies it.
+
+**2. The call tag is how an order is NAMED, and it keeps the `#`.** One
+function in `shared` spells it (`orderCallTag`: `#47`; `orderFullRef`:
+`#47 · RO-000120`), because the sale-line label (D120 2.12) showed what
+eight hand-spelled copies of one format do. Every surface reads it:
+
+| Surface | Before | After |
+|---|---|---|
+| Orders queue card | `#RO-000120` | **`#47`**, `RO-000120` beside it, muted |
+| Order drawer, cancel prompt, bill title from the drawer | `#RO-000120` / `Cancel RO-000120?` | `#47` · `RO-000120` / `Cancel #47?` |
+| Kitchen board provenance | `RO-000120 · Nimal` | `#47 · Nimal` |
+| Kitchen history, ticket dialog | `RO-000120` | `#47 · RO-000120` |
+| Session sheet (POS) | `Order RO-000120` | `Order #47` |
+| Counter completion screen | `Order #RO-000120 created` | `Order #47 created`, plus a **Tell the customer** block with the number large |
+| Dashboard takeaway list | `RO-000120` | `#47 · RO-000120` |
+| Printed KOT, takeaway headline | `#RO-000120` | `#47` |
+| Printed KOT, dine-in meta line | `Order RO-000120` | `Order #47` |
+
+The queue's search accepts `47` or `#47` and matches the call number
+**exactly** — a substring test would light up a third of the queue for "4",
+and 147 and 470 are not 47. The `RO-` substring rule is unchanged. The kitchen
+history search does the same.
+
+**Pre-D197 orders are not renumbered.** An order minted before this record
+has no call number and reads by its `RO-` number — on screen as `#RO-000120`
+(every screen names an order with a `#` now, the PO's "keep #"), and on paper
+byte-for-byte what its paper printed before: the printed KOT's dine-in meta
+line and the browser KOT keep `Order RO-000045` / `RO-000026` for a
+call-number-less order, so a reprint of history matches the original. A
+backfill would have invented numbers nobody was ever handed.
+
+**Third-party rows in the queue carry no call number** even though the
+`RestaurantOrder` behind them was minted one: the row's `orderNumber` is
+already the partner's reference (`UE-9F3K`), and that IS the number the rider
+quotes at the door. The KOT and the pre-settlement bill for that order still
+show its call number, so the kitchen names every bag the same way.
+
+**3. The bill names both numbers, labelled, and the pre-settlement bill has
+no bill number.** `BillTemplateData.saleNumber` is nullable and the template
+carries `orders: OrderCallRef[]`:
+
+- Settled: `Bill S-000087` leads, `Order #47 · RO-000120` under it (each
+  order of an arrangement listed).
+- Before settlement: `Order #47` leads, `RO-000120` under it, and NOTHING
+  in the invoice slot — there is no invoice yet, and the previous behaviour of
+  printing the order number there unlabelled is exactly what confused the PO.
+
+The on-screen bill (`/bills/[saleId]`) is titled `Bill S-000087` with
+`Order #47 · RO-000120` beneath; the bill dialog's description reads
+`Bill S-… · Order #47 · RO-… · Table T4`; the browser-printed thermal bill
+gains an `Order …` line under `Bill #` (`ThermalBillInput.orderRef`), omitted
+when the Sale has no order behind it. `BillView.orders` is the new field the
+server sends; a server that predates it leaves the line off rather than
+printing "Order" over nothing.
+
+### What is deliberately not done
+
+- **No configurable business-day rollover.** A branch trading past midnight
+  rolls at 00:00 local, not at close. Toast's "business day start" is a real
+  feature; whether this tenant needs it is O14, not a silent assumption.
+- **No short number for retail.** A retail sale's `S-` is spoken rarely and
+  read often; nothing here touches it.
+- **No change to `RO-`, `S-`, `TS-` or `KOT-`.** Every existing series
+  continues; D176's independence of orders and tickets is untouched.
+
+### Verification
+
+Unit, API: `order-numbering.spec.ts` (the two counters, the branch-and-day
+key, the tenant's zone versus the server's, a MUTATION case pinning the key's
+shape so a "simplification" to `ORDER_CALL:<branch>` fails on day two);
+`printing.spec.ts` (takeaway KOT headlines `#47` and carries no `RO-`; dine-in
+meta line `Order #47`; a call-number-less order prints `Order RO-000045` as
+before; the settled bill leads `Bill S-…` with `Order #47 · RO-…` under it;
+the pre-settlement bill leads `Order #47` and has NO bill number; an
+arrangement lists each order); `orders-call-number.spec.ts` (rows carry the
+number, third-party rows carry null, `47` and `#47` match exactly with 147 and
+470 as the controls).
+
+Unit, web: `orders-page.call-number.render.test.tsx` (the card's name is
+`#47`, the RO- is beside it and not in the name; a legacy row reads `#RO-…`
+alone; the partner ref names a third-party row; the multiset of card names as
+the control); `order-completion-screen.render.test.tsx` (the headline and
+the block; no block for a legacy order; no block on a delivery order);
+`bill-print.test.ts` (`orderRef` reaches the paper; an arrangement lists each;
+null when there is no order, including against a server that predates the
+field); `kot-print.test.ts`; `order-call-label.test.ts` (`shared` has no
+runner). Five existing assertions on the un-prefixed form
+(`RO-000010 · Nimal` ×4, `Cancel RO-000028?`) were changed to the `#` form
+under this record — a behaviour change the PO asked for, not a refactor (D16).
+
+Integration (`restaurant-order-call-number.spec.ts`, against the migration
+applied by `migrate deploy`): dine-in and takeaway count 1, 2, 3 on ONE
+branch-day counter while the `RO-` stream advances by one each; a planted
+counter of 212 under yesterday's key leaves today at #1 and stays at 212; a
+second branch starts its own #1 while the `RO-` series does not restart; two
+legacy rows with (null, null) coexist under the unique index and a second row
+claiming today's #1 is refused with P2002.
+
+### Rollout note
+
+The migration is additive and safe to deploy ahead of the API. The API must be
+restarted after `prisma generate`: the new columns are read by every order
+query. Orders open at the moment of deployment keep reading by their `RO-`
+number until they close; the first order opened afterwards is that branch's
+#1 for the day.
+
+---
+
 ### D196 — merging `feature/retail-template-v2` again: the sixteen commits that followed
 
 D173 merged that branch at `75b086d`. Sixteen more commits have landed since —
@@ -13027,3 +13233,4 @@ the same string.
 | O11 | Their 5.10 (D136a) takes the SKU line off every 80mm SALES receipt (the return receipt still prints it) and turns the A4 SKU column's default off; both reach the Tile Shop, and a workspace that never saved its documents settings loses the column. Keep, or exempt the QuickBooks pilot (D16)? | before the next production deploy |
 | O12 | `startOfDayInTimeZone` resolves a local midnight that DST SKIPS backwards, so in a zone whose transition is at 00:00 (Cuba, Chile) a business day computed from it is an hour short at the end — the Done lane (D142), the dashboard's "today" and every `lastNDaysInTimeZone` report. Found by review, pre-existing, no tenant is in such a zone today. Fix the helper, or leave it? | before a tenant in Cuba/Chile |
 | O13 | No ESC/POS code page encodes Sinhala or Tamil, so a menu with non-Latin item names needs the KOT and bill rendered as bitmaps rather than text. Latin-only, or bitmap rendering? Raised by D181. | before the printing templates are written |
+| O14 | The order call number (D197) restarts at 00:00 in the tenant's zone. A branch that trades past midnight would rather it rolled at close ("business day starts at 04:00", as Toast offers). Configurable rollover hour, or leave it at midnight? | before a late-night branch goes live |

@@ -84,6 +84,7 @@ function row(id: string, over: Partial<UnifiedOrderView>): UnifiedOrderView {
     channel: 'DINE_IN',
     source: 'POS',
     orderNumber: id.toUpperCase(),
+    callNumber: null,
     unifiedStatus: 'IN_PROGRESS',
     paymentStatus: 'UNPAID',
     customerName: null,

@@ -1,3 +1,4 @@
+import { orderFullRef } from '@hardware-pos/shared';
 import { getDocumentProfile } from '@/lib/document-template-service';
 import { printReceipt } from '@/lib/receipt-print';
 import { billing } from '@/lib/restaurant/api';
@@ -38,6 +39,17 @@ export interface BillPrintContext {
 }
 
 /**
+ * D197 — the order(s) a bill settled, as one printable string
+ * (`#47 · RO-000120`, comma-joined for an arrangement). Null when the bill
+ * carries no order, so the template omits the line rather than printing
+ * "Order" over nothing. Shared by the paper and the on-screen bill header.
+ */
+export function billOrderRef(view: Pick<BillView, 'orders'>): string | null {
+  const refs = (view.orders ?? []).map((o) => orderFullRef(o)).filter((r): r is string => r !== null);
+  return refs.length > 0 ? refs.join(', ') : null;
+}
+
+/**
  * The single map from a bill to the thing that gets printed.
  *
  * Pure, so a test can assert the whole shape without a browser, a network or a
@@ -54,6 +66,7 @@ export function billToThermalInput(
     fallbackName: ctx.fallbackName,
     currency: getActiveCurrency(),
     documentNumber: view.saleNumber,
+    orderRef: billOrderRef(view),
     placeLabel: view.placeLabel,
     servedBy: view.servedByName,
     cashierName: ctx.cashierName,

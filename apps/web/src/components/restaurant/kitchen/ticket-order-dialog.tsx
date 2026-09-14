@@ -1,5 +1,6 @@
 'use client';
 
+import { orderFullRef } from '@hardware-pos/shared';
 import { sendLabel } from '@/lib/restaurant/labels';
 import * as React from 'react';
 
@@ -80,7 +81,7 @@ export function TicketOrderDialog({
       title={ticket.placeLabel ?? ticket.ticketNumber}
       description={
         order
-          ? `${order.orderNumber ?? ''}${order.waiterName ? ` · ${order.waiterName}` : ''} · whole order`
+          ? `${orderFullRef(order) ?? ''}${order.waiterName ? ` · ${order.waiterName}` : ''} · whole order`
           : 'Loading the order…'
       }
       className="sm:max-w-lg"

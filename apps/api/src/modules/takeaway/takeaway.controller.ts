@@ -45,6 +45,7 @@ export class TakeawayController {
       metadata: {
         branchId: dto.branchId,
         orderNumber: created.orderNumber,
+        callNumber: created.callNumber,
         customerName: dto.customerName,
       },
     });

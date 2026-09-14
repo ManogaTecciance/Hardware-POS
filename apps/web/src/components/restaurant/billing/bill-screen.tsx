@@ -23,7 +23,7 @@ import { billing } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
 import { getDocumentProfile } from '@/lib/document-template-service';
 import { printReceipt, renderSplitBill } from '@/lib/receipt-print';
-import { printBillView } from '@/lib/restaurant/bill-print';
+import { billOrderRef, printBillView } from '@/lib/restaurant/bill-print';
 import { renderThermalBill } from '@/lib/thermal-bill';
 
 import { CollectPaymentDialog, PAYMENT_METHODS } from './collect-payment-dialog';
@@ -146,7 +146,14 @@ export function BillScreen({ session, saleId }: Props) {
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <div>
-              <CardTitle>{bill.saleNumber}</CardTitle>
+              {/* D197 — the invoice number is the title; the order the guest
+                  has been quoting all meal sits under it. */}
+              <CardTitle>Bill {bill.saleNumber}</CardTitle>
+              {billOrderRef(bill) ? (
+                <p className="text-sm text-muted-foreground" data-testid="bill-order-ref">
+                  Order {billOrderRef(bill)}
+                </p>
+              ) : null}
             </div>
             <div className="flex items-center gap-2">
               {canPrint ? (

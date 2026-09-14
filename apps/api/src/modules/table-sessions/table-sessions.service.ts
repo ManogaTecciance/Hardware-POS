@@ -16,6 +16,7 @@ import {
 import { Permission } from '../auth/permissions';
 import { PrismaService } from '../../prisma/prisma.service';
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
+import { mintOrderNumbers } from '../../common/order-numbering';
 import { LIVE_SESSION_STATUSES } from '../../common/live-sessions';
 import { DiningService, type OpenTableReleaseSummary } from '../dining/dining.service';
 import type { PricedDocument } from '../promotions/promotion-pricing';
@@ -79,6 +80,8 @@ export interface OrderView {
   sessionId: string;
   branchId: string;
   orderNumber: string;
+  /** D197 — the call-out number; null on orders minted before it existed. */
+  callNumber: number | null;
   channel: RestaurantOrderChannel;
   status: RestaurantOrderStatus;
   version: number;
@@ -767,14 +770,19 @@ export class TableSessionsService {
       assertOwnedBy(session.waiterUserId, onlyWaiterUserId);
       if (session.status !== TableSessionStatus.OPEN) throw new SessionNotOpenError();
 
-      const seq = await nextDocumentNumber(tx, tenantId, 'RESTAURANT_ORDER');
-      const orderNumber = `RO-${padSequence(seq)}`;
+      // D197 — both numbers from the one minter, inside this transaction.
+      const numbers = await mintOrderNumbers(
+        tx,
+        tenantId,
+        session.branchId,
+        this.settings.getSettings(tenantId).timezone,
+      );
       const order = await tx.restaurantOrder.create({
         data: {
           tenantId,
           branchId: session.branchId,
           sessionId: session.id,
-          orderNumber,
+          ...numbers,
           channel,
           status: RestaurantOrderStatus.DRAFT,
         },
@@ -1359,6 +1367,7 @@ export class TableSessionsService {
       sessionId: row.sessionId,
       branchId: row.branchId,
       orderNumber: row.orderNumber,
+      callNumber: row.callNumber,
       channel: row.channel,
       status: row.status,
       version: row.version,

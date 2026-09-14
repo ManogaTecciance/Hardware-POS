@@ -40,6 +40,12 @@ export interface ThermalBillInput {
   currency?: string;
   /** "Bill # 57" — the sale or order number. */
   documentNumber: string;
+  /**
+   * D197 — "Order #47 · RO-000120", printed under the bill number so the
+   * paper the guest kept before paying and this one agree. Omitted when the
+   * bill has no restaurant order behind it (a retail-style sale).
+   */
+  orderRef?: string | null;
   /** "M1/10" in the reference bill: the table, or Takeaway. */
   placeLabel?: string | null;
   /** The WAITER who worked the table — captured on the Sale at close. */
@@ -356,6 +362,7 @@ ${input.cashierName ? `<div>Cashier: ${esc(input.cashierName)}</div>` : ''}
 <div class="row"><span>Bill # ${esc(input.documentNumber)}</span><span>${esc(
     input.placeLabel ?? '',
   )}</span></div>
+${input.orderRef ? `<div>Order ${esc(input.orderRef)}</div>` : ''}
 </div>
 
 <hr>

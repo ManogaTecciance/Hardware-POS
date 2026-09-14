@@ -1,5 +1,6 @@
 'use client';
 
+import { orderCallTag } from '@hardware-pos/shared';
 import { Check, ChefHat, Clock, ListTree, Printer, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
@@ -773,7 +774,8 @@ function TicketCard({
    * takeaway before its order number lands carries neither part, which is why
    * an empty line is dropped instead of printed.
    */
-  const provenance = [ticket.orderNumber, ticket.waiterName].filter(Boolean).join(' · ');
+  // D197 — the call tag ("#47"), which is what the pass says at handover.
+  const provenance = [orderCallTag(ticket), ticket.waiterName].filter(Boolean).join(' · ');
   /*
    * D152 — a ticket cut during the D147 window was routed to no station at all
    * and carries no name for one. The band still earns its place on those: the

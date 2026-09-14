@@ -1,5 +1,6 @@
 'use client';
 
+import { orderCallTag } from '@hardware-pos/shared';
 import { Filter, RefreshCw, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import * as React from 'react';
@@ -788,13 +789,24 @@ export function OrdersPage({ session, branchId }: Props) {
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
+                  {/* D197 — the call tag ("#47") is the card's name: short
+                      enough to say across the counter. The permanent RO-
+                      identifier sits beside it, muted, so the two never have
+                      to be looked up against each other. An order minted
+                      before D197 reads "#RO-000120" alone, as it always did;
+                      a third-party row shows the partner's reference. */}
                   <button
                     type="button"
                     onClick={() => patch({ open: r.id })}
-                    className="text-sm font-bold after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+                    className="text-base font-bold after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
                   >
-                    #{r.orderNumber}
+                    {orderCallTag(r)}
                   </button>
+                  {r.callNumber !== null ? (
+                    <span className="ml-2 text-xs text-muted-foreground" data-testid="order-permanent-number">
+                      {r.orderNumber}
+                    </span>
+                  ) : null}
                   <p className="text-sm">{r.contextLabel ?? r.customerName ?? '—'}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">

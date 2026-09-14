@@ -73,6 +73,7 @@ const ROW: UnifiedOrderView = {
   channel: 'TAKEAWAY',
   source: 'PHONE_ORDER',
   orderNumber: 'RO-000028',
+  callNumber: null,
   unifiedStatus: 'HANDED_OVER',
   paymentStatus: 'PAID',
   customerName: 'lahiru',
@@ -332,7 +333,8 @@ describe('Cancel order (D116)', () => {
     );
     fireEvent.click(await screen.findByRole('button', { name: /cancel order/i }));
     // The confirm dialog names the order and offers a way out.
-    expect(screen.getByText(/Cancel RO-000028\?/)).toBeTruthy();
+    // D197 — the prompt names the order the way the card does, "#" included.
+    expect(screen.getByText(/Cancel #RO-000028\?/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /keep order/i })).toBeTruthy();
 
     fireEvent.click(

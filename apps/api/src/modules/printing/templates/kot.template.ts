@@ -1,3 +1,5 @@
+import { orderCallTag } from '@hardware-pos/shared';
+
 import { EscPosBuilder, wrap, type BuilderOptions } from '../escpos';
 
 /**
@@ -37,6 +39,11 @@ export interface KotTicketData {
   /** NULL for a D147-window ticket that belonged to every station at once. */
   stationName: string | null;
   orderNumber: string | null;
+  /**
+   * D197 — the call-out number. When present it is the "#" the paper shows;
+   * `orderNumber` is the fallback for orders minted before it existed.
+   */
+  callNumber: number | null;
   orderType: KotOrderType;
   /** The table's code ("T4") and its area, for a dine-in ticket. */
   tableCode: string | null;
@@ -65,6 +72,8 @@ const ORDER_TYPE_LABEL: Record<KotOrderType, string> = {
 /** Width of the quantity column: "12 " — three characters, then the name. */
 const QTY_COLUMN = 4;
 
+
+
 export function renderKotTicket(data: KotTicketData, columns = 48, options?: BuilderOptions): Buffer {
   const b = new EscPosBuilder(columns, options);
   b.init();
@@ -77,12 +86,13 @@ export function renderKotTicket(data: KotTicketData, columns = 48, options?: Bui
   b.hr('=');
   b.align('center').doubleSize(true).bold(true);
   b.line(ORDER_TYPE_LABEL[data.orderType]);
+  const callTag = orderCallTag(data);
   if (data.orderType === 'DINE_IN' && data.tableCode) {
     b.line(`TABLE ${data.tableCode}`);
-  } else if (data.orderNumber) {
+  } else if (callTag) {
     // The counter calls the order by its number; the customer, when the
     // order has one, is what the runner shouts.
-    b.line(`#${data.orderNumber}`);
+    b.line(callTag);
   }
   b.doubleSize(false).bold(false);
   if (data.orderType === 'DINE_IN' && data.areaName) b.line(data.areaName);
@@ -92,7 +102,13 @@ export function renderKotTicket(data: KotTicketData, columns = 48, options?: Bui
   // ── The ticket's identity ───────────────────────────────────────────────
   b.bold(true).row(data.ticketNumber, formatStamp(data.createdAt)).bold(false);
   const meta = [
-    data.orderType === 'DINE_IN' && data.orderNumber ? `Order ${data.orderNumber}` : null,
+    // D197 — "Order #47"; an order minted before D197 keeps reading
+    // "Order RO-000045", byte for byte what its paper said then.
+    data.orderType === 'DINE_IN' && data.callNumber !== null
+      ? `Order ${callTag}`
+      : data.orderType === 'DINE_IN' && data.orderNumber
+        ? `Order ${data.orderNumber}`
+        : null,
     data.roundNumber !== null ? `Round ${data.roundNumber}` : null,
   ].filter((part): part is string => part !== null);
   if (meta.length > 0) b.line(meta.join('  ·  '));

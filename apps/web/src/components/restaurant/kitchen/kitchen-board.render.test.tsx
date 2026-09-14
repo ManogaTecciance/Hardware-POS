@@ -145,6 +145,9 @@ function ticket(overrides: Partial<KitchenTicketView> & { id: string }): Kitchen
     stationName: 'Grill',
     status: 'QUEUED',
     orderNumber: 'RO-000010',
+    // D197 — pre-D197 shape (no call number) unless a case says otherwise,
+    // so every assertion below reads the RO- fallback the screen showed before.
+    callNumber: null,
     placeLabel: 'T1 · Main',
     roundNumber: 1,
     waiterName: 'Nimal',
@@ -523,6 +526,7 @@ describe('the Details dialog', () => {
       ticketId: 'tk_1',
       ticketNumber: 'KOT-000001',
       orderNumber: 'RO-000010',
+      callNumber: null,
       placeLabel: 'T7',
       waiterName: 'Nimal',
       placedAt: minutesAgo(5),
@@ -743,7 +747,7 @@ describe('card layout', () => {
     const timer = screen.getByText('2 min');
     // D152 — the order and the waiter. The station and the round are on the
     // ribbon above, which the station-ribbon suite pins.
-    const provenance = screen.getByText('RO-000010 · Nimal');
+    const provenance = screen.getByText('#RO-000010 · Nimal');
     const headerRow = title.parentElement as HTMLElement;
 
     // Positive: the place shares its row with the timer, which is the pair
@@ -1271,7 +1275,7 @@ describe('station ribbon (D152)', () => {
     expect(ribbon.className).toContain('bg-brand-50');
 
     // Negative: the subtitle it used to lead is still there, without it.
-    const subtitle = screen.getByText('RO-000010 · Nimal');
+    const subtitle = screen.getByText('#RO-000010 · Nimal');
     expect(subtitle.textContent).not.toContain('Grill');
 
     /*
@@ -1323,11 +1327,24 @@ describe('station ribbon (D152)', () => {
 
     await waitFor(() => expect(screen.getByText('T2')).toBeTruthy());
 
-    // Positive: a full ticket still joins every survivor.
-    expect(screen.getByText('RO-000010 · Nimal')).toBeTruthy();
+    // Positive: a full ticket still joins every survivor. (D197: an order
+    // is named with a "#" on every screen, pre-D197 orders included.)
+    expect(screen.getByText('#RO-000010 · Nimal')).toBeTruthy();
     // Negative: a thin one starts at its first surviving part, not at " · ".
     const thin = screen.getByText('Nimal');
     expect(thin.textContent).toBe('Nimal');
+  });
+
+  it('D197 — names the order by its call number, and the six-digit RO- is nowhere on the card', async () => {
+    outstandingRows = [ticket({ id: 'tk_call', placeLabel: 'T1', callNumber: 47 })];
+    render(<KitchenBoard session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
+
+    // POSITIVE — "#47" is what the pass shouts at handover.
+    expect(screen.getByText('#47 · Nimal')).toBeTruthy();
+    // NEGATIVE — the permanent identifier is not the kitchen's business.
+    expect(screen.queryByText(/RO-000010/)).toBeNull();
   });
 
   it('carries the round at the far end of the ribbon, opposite the station', async () => {
@@ -1346,7 +1363,7 @@ describe('station ribbon (D152)', () => {
     expect(round.className).toContain('shrink-0');
 
     // Negative: the round MOVED to the ribbon rather than being shown twice.
-    expect(screen.getByText('RO-000010 · Nimal').textContent).not.toContain('Round');
+    expect(screen.getByText('#RO-000010 · Nimal').textContent).not.toContain('Round');
   });
 
   it('leaves the round half empty rather than printing a bare "Round"', async () => {
@@ -1486,6 +1503,7 @@ describe('station ribbon (D152)', () => {
         ticketId: 'tk_1',
         ticketNumber: 'KOT-000001',
         orderNumber: 'RO-000010',
+        callNumber: null,
         placeLabel: 'T7',
         waiterName: 'Nimal',
         placedAt: minutesAgo(5),
