@@ -1,4 +1,4 @@
-# D181 — RAW bytes to a Windows-installed printer, by its Windows name.
+﻿# D181 — RAW bytes to a Windows-installed printer, by its Windows name.
 #
 # A USB thermal printer on Windows has no device path a Node process can
 # open; the spooler owns it. This hands the spooler a RAW document through
@@ -13,11 +13,34 @@
 param(
   [Parameter(Mandatory=$true)][string]$PrinterName,
   [Parameter(Mandatory=$true)][string]$FilePath,
-  # RAW = bytes straight to the device (ESC/POS). TEXT = the spooler's print
-  # processor lays the file out as plain text through the printer's driver,
-  # which is how an office printer prints a ticket (D181).
+  # RAW = bytes straight to the device (ESC/POS). TEXT = the file is plain
+  # text, rendered as a page through the printer's driver, which is how an
+  # office printer prints a ticket (D181).
   [ValidateSet("RAW","TEXT")][string]$DataType = "RAW"
 )
+
+# A failure here must be an exit code, not a red line on stderr: the agent
+# reads only the exit code, and a 0 after a thrown exception was reported to
+# the queue as "printed" while the printer sat idle (Canon G3010, 2026-09-14).
+$ErrorActionPreference = "Stop"
+trap {
+  [Console]::Error.WriteLine("windows-raw-printer: $($_.Exception.Message)")
+  exit 1
+}
+
+# TEXT does NOT go through winspool's "TEXT" datatype. That datatype is a
+# service of the driver's print processor, and the v4 / class drivers Windows
+# installs on its own for a network printer (e.g. "Microsoft IPP Class Driver")
+# refuse it: StartDocPrinter fails and nothing prints. Out-Printer renders the
+# text through GDI like any application would, so it prints on whatever driver
+# the printer has — vendor, class or Generic / Text Only.
+if ($DataType -eq "TEXT") {
+  if (-not (Get-Printer -Name $PrinterName -ErrorAction SilentlyContinue)) {
+    throw "printer '$PrinterName' is not installed on this machine"
+  }
+  Get-Content -LiteralPath $FilePath -Raw -Encoding UTF8 | Out-Printer -Name $PrinterName
+  exit 0
+}
 
 $source = @"
 using System;
