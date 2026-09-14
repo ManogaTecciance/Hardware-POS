@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { loadConfig, type AgentConfig } from './config';
-import { probe, scanLan, sendToPrinter, type Discovered } from './printer';
+import {
+  listLocalPrinters,
+  probe,
+  scanLan,
+  sendToPrinter,
+  type Discovered,
+  type LocalPrinter,
+} from './printer';
 
 /**
  * AxloPOS on-site print agent (D67, restored by D181).
@@ -22,8 +29,9 @@ import { probe, scanLan, sendToPrinter, type Discovered } from './printer';
  *                   next to the order rather than dying in a log here.
  *
  * It also scans the LAN periodically and reports what answers on the
- * printer port, which is how "detected printers" reaches a settings screen
- * that is being rendered a continent away.
+ * printer port, and (on Windows) which printers the spooler has installed,
+ * which is how "detected printers" reaches a settings screen that is being
+ * rendered a continent away.
  *
  * ## Failure behaviour
  *
@@ -35,7 +43,8 @@ import { probe, scanLan, sendToPrinter, type Discovered } from './printer';
  * is not.
  */
 
-const VERSION = '0.1.0';
+// 0.2.0 — heartbeats carry the machine's installed printers (D183).
+const VERSION = '0.2.0';
 
 interface LeasedJob {
   leaseId: string;
@@ -52,8 +61,36 @@ async function main(): Promise<void> {
   log(`starting v${VERSION} → ${config.apiUrl} (poll ${config.pollSeconds}s)`);
 
   let lastDiscovery = 0;
+  let discovering = false;
+  let discoveryReady = false;
   let discovered: Discovered[] = [];
+  let localPrinters: LocalPrinter[] = [];
   let backoffMs = 0;
+
+  // Discovery runs beside the loop, never in it: a /24 sweep takes seconds
+  // and Get-Printer can take twenty on a slow PC, and a heartbeat that late
+  // would mark the agent offline and hand the branch back to the server —
+  // the one thing this program exists to prevent. The loop sends whatever
+  // the last finished scan found.
+  const refreshDiscovery = () => {
+    if (discovering) return;
+    discovering = true;
+    lastDiscovery = Date.now();
+    void Promise.all([scanLan(config.printerPort), listLocalPrinters()])
+      .then(([hosts, printers]) => {
+        discovered = hosts;
+        localPrinters = printers;
+        discoveryReady = true;
+        log(
+          `discovery: ${discovered.length} device(s) answering on :${config.printerPort}, ` +
+            `${localPrinters.length} Windows printer(s)`,
+        );
+      })
+      .catch((err: unknown) => log(`discovery failed: ${err instanceof Error ? err.message : String(err)}`))
+      .finally(() => {
+        discovering = false;
+      });
+  };
 
   // One-shot self test: `axlo-print-agent --test 192.168.1.50:9100`
   const testTarget = argValue('--test');
@@ -68,15 +105,24 @@ async function main(): Promise<void> {
     try {
       // Re-scan on a slow cadence: the network rarely changes, and a /24
       // sweep every few seconds would be rude to the shop's switch.
-      if (Date.now() - lastDiscovery > config.discoverySeconds * 1000) {
-        discovered = await scanLan(config.printerPort);
-        lastDiscovery = Date.now();
-        log(`discovery: ${discovered.length} device(s) answering on :${config.printerPort}`);
-      }
+      if (Date.now() - lastDiscovery > config.discoverySeconds * 1000) refreshDiscovery();
 
+      // Until the first scan has finished, say nothing about printers: an
+      // empty list would replace the server's last good one every time this
+      // process restarts, and "nothing found" must mean nothing was found.
       await post(config, '/print-agent/heartbeat', {
         version: VERSION,
-        discovered: discovered.map((d) => ({ host: d.host, port: d.port, latencyMs: d.latencyMs })),
+        ...(discoveryReady
+          ? {
+              discovered: discovered.map((d) => ({
+                host: d.host,
+                port: d.port,
+                latencyMs: d.latencyMs,
+                escpos: d.escpos,
+              })),
+              localPrinters: localPrinters.map((p) => ({ name: p.name, driver: p.driver, port: p.port })),
+            }
+          : {}),
       });
 
       const jobs = (await post(config, '/print-agent/lease', { maxJobs: 8 })) as LeasedJob[];

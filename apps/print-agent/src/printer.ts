@@ -82,9 +82,10 @@ async function writeUsb(address: string, payload: Buffer): Promise<SendResult> {
 
 /**
  * Hand a document to the Windows spooler by printer name. RAW passes the
- * bytes through untouched (ESC/POS to a thermal printer); TEXT lets the
- * spooler's print processor lay plain text out through the printer's own
- * driver (a KOT on an office printer's A4 page).
+ * bytes through untouched (ESC/POS to a thermal printer); TEXT has the helper
+ * render plain text as a page through the printer's own driver (a KOT on an
+ * office printer's A4 page) — via GDI, not winspool's TEXT datatype, which the
+ * class drivers Windows auto-installs for network printers reject.
  */
 async function writeWindowsPrinter(
   address: string,
@@ -164,6 +165,13 @@ export interface Discovered {
   host: string;
   port: number;
   latencyMs: number;
+  /**
+   * D183 — whether the device answered a DLE EOT status query like a receipt
+   * printer. An office printer listens on 9100 too (a Canon G3010 was the
+   * first found), and offering it as a receipt printer means ESC/POS bytes
+   * on an inkjet; undefined when the check could not run.
+   */
+  escpos?: boolean;
 }
 
 /**
@@ -194,7 +202,117 @@ export async function scanLan(port: number): Promise<Discovered[]> {
       for (const result of results) if (result) found.push(result);
     }
   }
+  // Only the few that answered get the second, slower question.
+  await Promise.all(
+    found.map(async (d) => {
+      const verdict = await probeEscPos(d.host, d.port);
+      if (verdict !== 'UNREACHABLE') d.escpos = verdict === 'ESC_POS';
+    }),
+  );
   return found;
+}
+
+/**
+ * Mirrors the server's `probeEscPos`: DLE EOT 1 asks for printer status, and
+ * a real ESC/POS printer answers with one byte. Anything else on port 9100
+ * (an office printer's raw port, a print server) stays silent.
+ */
+export function probeEscPos(
+  host: string,
+  port: number,
+  timeoutMs = 1_500,
+): Promise<'ESC_POS' | 'SILENT' | 'UNREACHABLE'> {
+  return new Promise((resolvePromise) => {
+    let settled = false;
+    const done = (verdict: 'ESC_POS' | 'SILENT' | 'UNREACHABLE') => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolvePromise(verdict);
+    };
+    const socket = connect({ host, port });
+    socket.setTimeout(timeoutMs);
+    socket.on('error', () => done('UNREACHABLE'));
+    socket.on('timeout', () => done(socket.connecting ? 'UNREACHABLE' : 'SILENT'));
+    socket.on('connect', () => socket.write(Buffer.from([0x10, 0x04, 0x01])));
+    socket.on('data', () => done('ESC_POS'));
+    socket.on('close', () => done('SILENT'));
+  });
+}
+
+/**
+ * A printer the Windows spooler knows on THIS machine — what a USB or
+ * office printer's "address" actually is on Windows. Reported with each
+ * heartbeat so the settings screen can offer the names instead of asking
+ * the owner to copy one from "Printers & scanners" without a typo.
+ */
+export interface LocalPrinter {
+  name: string;
+  driver: string | null;
+  port: string | null;
+}
+
+/**
+ * Parse `Get-Printer | Select-Object Name,DriverName,PortName | ConvertTo-Json`.
+ * PowerShell emits a bare object for a single printer and an array for
+ * several; anything else (empty output, garbage, a stray warning line)
+ * means "no printers reported", never a crash — the heartbeat must go out.
+ */
+export function parseLocalPrinterList(json: string): LocalPrinter[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json.trim() || 'null');
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+  const printers: LocalPrinter[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as { Name?: unknown; DriverName?: unknown; PortName?: unknown };
+    if (typeof r.Name !== 'string' || r.Name.trim() === '') continue;
+    printers.push({
+      name: r.Name,
+      driver: typeof r.DriverName === 'string' && r.DriverName !== '' ? r.DriverName : null,
+      port: typeof r.PortName === 'string' && r.PortName !== '' ? r.PortName : null,
+    });
+  }
+  return printers;
+}
+
+/** Installed printers on this machine; `[]` off Windows (Linux USB is a device path, not a name). */
+export function listLocalPrinters(): Promise<LocalPrinter[]> {
+  if (process.platform !== 'win32') return Promise.resolve([]);
+  return new Promise((resolvePromise) => {
+    const child = spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        'Get-Printer | Select-Object Name,DriverName,PortName | ConvertTo-Json -Compress',
+      ],
+      // stdin closed on purpose: with an open pipe, powershell -Command waits
+      // on it and only the 10 s guard below ends the call — with nothing.
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let stdout = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += String(chunk);
+    });
+    // Get-Printer walks every port, and a WSD printer that has gone quiet can
+    // hold it for a long time (15–20 s seen on a busy laptop); the cap is
+    // generous because the caller never waits on this — see index.ts.
+    const timer = setTimeout(() => child.kill(), 60_000);
+    child.once('error', () => {
+      clearTimeout(timer);
+      resolvePromise([]);
+    });
+    child.once('close', () => {
+      clearTimeout(timer);
+      resolvePromise(parseLocalPrinterList(stdout));
+    });
+  });
 }
 
 export function probe(host: string, port: number, timeoutMs = 400): Promise<Discovered | null> {
