@@ -38,8 +38,17 @@ const profilesStub = {
   getEffectiveProfile: jest.fn(async () => ({ businessType: 'HARDWARE' })),
 } as any;
 
+/*
+ * D172 — branding images are inlined at render time, so the service now takes
+ * a StorageService. This stub resolves NOTHING, which is the honest default for
+ * these specs: they assert layout and wording, and a tenant with no logo
+ * uploaded is exactly the state they were written against. `inline-image.spec`
+ * covers the resolving behaviour itself.
+ */
+const storageStub = { resolve: jest.fn(async () => null) } as any;
+
 function service(): DocumentsService {
-  return new DocumentsService(prismaStub, new SettingsService(prismaStub), pdfStub, profilesStub);
+  return new DocumentsService(prismaStub, new SettingsService(prismaStub), pdfStub, profilesStub, storageStub);
 }
 
 /**
@@ -53,7 +62,7 @@ function serviceWithDocs(overrides: Partial<DocumentSettings>): DocumentsService
   const settings = {
     getSettings: () => ({ ...base, documents: { ...base.documents, ...overrides } }),
   } as unknown as SettingsService;
-  return new DocumentsService(prismaStub, settings, pdfStub, profilesStub);
+  return new DocumentsService(prismaStub, settings, pdfStub, profilesStub, storageStub);
 }
 
 /** Column LABELS. `doc.columns` holds objects, so comparing it to strings

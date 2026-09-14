@@ -40,6 +40,18 @@ export interface ReceiptLine {
 
 export interface CustomerReceiptData {
   storeName: string;
+  /**
+   * D172 — the shop's logo, already inlined as a `data:` URI.
+   *
+   * A `data:` URI and not a path, because this HTML is printed from a hidden
+   * iframe in the WEB app (D78) and `/uploads/<key>` would resolve against the
+   * web app, which has never heard of it. The service inlines it; the template
+   * only places it.
+   *
+   * Optional, and absent means no logo — the receipt then prints exactly what it
+   * printed before D172, which is what every tenant without one gets.
+   */
+  logoDataUri?: string | null;
   saleNumber: string;
   dateTime: string;
   documentType: string | null;
@@ -102,6 +114,23 @@ export interface CustomerReceiptData {
  * silence. A card sale, a credit sale, a restaurant bill and every REPRINT
  * arrive with no tender at all and take the same path.
  */
+/**
+ * D172 — the logo above the shop name, when there is one.
+ *
+ * The NAME is never replaced by the logo. A roll is 80mm and monochrome: a
+ * colour image dithers, and a logo that prints as a grey smear on a bill with
+ * no shop name on it is worse than no logo. Both, so the receipt is still
+ * readable when the image fails to render at all.
+ *
+ * `max-height` in millimetres rather than pixels because the output is paper.
+ * The source is a `data:` URI produced by the service, so nothing here can
+ * reach the network while a customer waits at the counter.
+ */
+function logoBlock(d: CustomerReceiptData): string {
+  if (!d.logoDataUri) return '';
+  return `<div class="logo"><img src="${esc(d.logoDataUri)}" alt="${esc(d.storeName)}" /></div>`;
+}
+
 function changeFor(d: CustomerReceiptData): number | null {
   const tendered = d.amountTendered;
   if (tendered == null || !Number.isFinite(tendered)) return null;
@@ -276,6 +305,9 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
   * { box-sizing: border-box; }
   body { font-family: ui-monospace, "Courier New", monospace; color: #111; margin: 0; padding: 16px; }
   .receipt { max-width: 320px; margin: 0 auto; }
+  /* D172 — sized in mm because the output is paper, not a screen. */
+  .logo { text-align: center; margin-bottom: 6px; }
+  .logo img { max-height: 18mm; max-width: 100%; object-fit: contain; }
   h1 { font-size: 18px; text-align: center; margin: 0 0 2px; }
   .sub { text-align: center; color: #555; font-size: 12px; margin-bottom: 12px; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -298,6 +330,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
 <body>
   ${PRINT_BUTTON}
   <div class="receipt">
+    ${logoBlock(d)}
     <h1>${esc(d.storeName)}</h1>
     <div class="sub">Sales Receipt · ${esc(d.saleNumber)}<br>${esc(d.dateTime)}</div>
     ${d.voided ? '<div class="void">VOID</div><div class="void-note">This sale was voided. Not valid as proof of purchase.</div>' : ''}

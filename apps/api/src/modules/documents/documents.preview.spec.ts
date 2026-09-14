@@ -2,6 +2,7 @@ import { DocumentsService } from './documents.service';
 import { BUSINESS_TYPE_VALUES, domainFor, type BusinessType } from '@hardware-pos/shared';
 
 import { SettingsService } from '../settings/settings.service';
+import { clearInlineImageCache } from '../../common/storage/inline-image';
 
 /**
  * Prisma stub.
@@ -33,9 +34,18 @@ const profilesStub = {
   getEffectiveProfile: jest.fn(async () => ({ businessType })),
 } as any;
 
+/*
+ * D172 — branding images are inlined at render time, so the service now takes
+ * a StorageService. This stub resolves NOTHING, which is the honest default for
+ * these specs: they assert layout and wording, and a tenant with no logo
+ * uploaded is exactly the state they were written against. `inline-image.spec`
+ * covers the resolving behaviour itself.
+ */
+const storageStub = { resolve: jest.fn(async () => null) } as any;
+
 function service() {
   const settings = new SettingsService(prismaStub);
-  return new DocumentsService(prismaStub, settings, pdfStub, profilesStub);
+  return new DocumentsService(prismaStub, settings, pdfStub, profilesStub, storageStub);
 }
 
 describe('DocumentsService — A4 template preview', () => {
@@ -317,5 +327,91 @@ describe('D154 — sample goods come from the tenant’s vertical', () => {
       expect(html).not.toContain('Portland Cement 50kg');
       expect(html).toContain('Standard Item 1');
     });
+  });
+});
+
+/**
+ * D172 — the letterhead carries its pictures, it does not point at them.
+ *
+ * ## The defect
+ *
+ * Branding assets are stored as `/uploads/<key>` — a path with no origin. The
+ * A4 HTML is built by the API and then written into a popup by the web app
+ * (`win.document.write`), so the popup's origin is the WEB app and
+ * `<img src="/uploads/…">` asks a server that has never heard of the file.
+ * Proven against the running stack: the API answered that path with 302 and the
+ * web app with 404, and the quotation printed a broken image where the logo
+ * should be.
+ *
+ * ## What makes these non-vacuous (D30)
+ *
+ * The positive case asserts a `data:` URI AND the absence of any `/uploads/`
+ * src. Asserting only that an `<img>` is present would pass against the broken
+ * version, which emitted one all along — the tag was never the problem.
+ *
+ * All three assets are asserted, because they are three separate fields that
+ * were each emitted raw: a fix that inlined the logo and left the signature and
+ * stamp pointing at the API would print a letterhead with one picture and two
+ * broken icons, and a logo-only test would call that a pass.
+ */
+describe('D172 — A4 branding images are inlined', () => {
+  const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+  const TENANT = 'tnt_1';
+
+  function serviceWithAssets() {
+    const settings = new SettingsService(prismaStub);
+    const storage = {
+      resolve: jest.fn(async () => ({
+        kind: 'redirect' as const,
+        url: 'https://s3.test/asset',
+        maxAgeSeconds: 60,
+      })),
+    } as any;
+    return new DocumentsService(prismaStub, settings, pdfStub, profilesStub, storage);
+  }
+
+  beforeEach(() => {
+    clearInlineImageCache();
+    globalThis.fetch = jest.fn(async () => new Response(PIXEL)) as unknown as typeof fetch;
+  });
+
+  it('inlines the logo, the signature and the stamp', async () => {
+    const html = await serviceWithAssets().previewHtml(TENANT, 'quotation', {
+      logoUrl: '/uploads/branding/logo.webp',
+      signatureUrl: '/uploads/branding/sign.webp',
+      stampUrl: '/uploads/branding/stamp.webp',
+    });
+
+    // Three images, all carrying their bytes.
+    expect(html.match(/<img src="data:image\/webp;base64,/g) ?? []).toHaveLength(3);
+    // And none of them pointing at a path the reader's browser cannot resolve.
+    expect(html).not.toContain('src="/uploads/');
+  });
+
+  it('renders the letterhead unchanged when nothing is uploaded', async () => {
+    // Every tenant until someone uploads a logo. This must print exactly what
+    // it printed before D172 — no image element, and the business name intact.
+    const html = await serviceWithAssets().previewHtml(TENANT, 'quotation', {
+      companyName: 'Kandy Apparel',
+    });
+
+    expect(html).not.toContain('<img');
+    expect(html).toContain('Kandy Apparel');
+  });
+
+  it('prints the document without the picture when the asset cannot be read', async () => {
+    globalThis.fetch = jest.fn(async () => {
+      throw new Error('storage unreachable');
+    }) as unknown as typeof fetch;
+
+    const html = await serviceWithAssets().previewHtml(TENANT, 'quotation', {
+      companyName: 'Kandy Apparel',
+      logoUrl: '/uploads/branding/logo.webp',
+    });
+
+    // Decoration, not content: a quotation is still a quotation.
+    expect(html).not.toContain('<img');
+    expect(html).toContain('Kandy Apparel');
+    expect(html).toContain('QT-2026-000124');
   });
 });

@@ -1,6 +1,21 @@
 import { ReceiptsService } from './receipts.service';
 import type { ReceiptsRepository, SaleForReceipt } from './receipts.repository';
 import type { SettingsService } from '../settings/settings.service';
+import type { StorageService } from '../../common/storage/storage.service';
+import { clearInlineImageCache } from '../../common/storage/inline-image';
+
+/** A 1x1 transparent GIF, served to the inliner in place of a real logo. */
+const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+const PIXEL_URL = 'http://storage.test/logo.webp';
+
+beforeEach(() => {
+  // The inliner caches by stored path; without this a case that expects NO
+  // logo could read one a previous case put there.
+  clearInlineImageCache();
+  globalThis.fetch = jest.fn(async () =>
+    new Response(PIXEL, { headers: { 'content-type': 'image/gif' } }),
+  ) as unknown as typeof fetch;
+});
 
 /**
  * D165 — a reprint keeps the tender the first print recorded.
@@ -83,7 +98,7 @@ function makeSale(): SaleForReceipt {
   } as unknown as SaleForReceipt;
 }
 
-function setup(storedContent: unknown): Stub {
+function setup(storedContent: unknown, logoUrl: string | null = null): Stub {
   let lastHtml = '';
   const repo = {
     findSaleForReceipt: jest.fn().mockResolvedValue(makeSale()),
@@ -102,12 +117,25 @@ function setup(storedContent: unknown): Stub {
       currency: 'LKR',
       receiptFooter: 'Thank you for your purchase!',
       timezone: 'Asia/Colombo',
+      // D172 — the bill reads the SAME `documents.logoUrl` the A4 letterhead
+      // uses. One shop, one logo.
+      documents: { logoUrl },
     }),
   } as unknown as SettingsService;
 
+  /*
+   * D172 — `resolve` is what `inlineImage` calls, and returning a `redirect`
+   * exercises the branch the S3 provider actually takes in this installation.
+   * The bytes are a one-pixel GIF so the assertion is about the PLUMBING —
+   * that real bytes reach the template as a data URI — and not about an image.
+   */
+  const storage = {
+    resolve: jest.fn(async () => ({ kind: 'redirect' as const, url: PIXEL_URL, maxAgeSeconds: 60 })),
+  } as unknown as StorageService;
+
   return {
     repo,
-    service: new ReceiptsService(repo as unknown as ReceiptsRepository, settings),
+    service: new ReceiptsService(repo as unknown as ReceiptsRepository, settings, storage),
     html: () => lastHtml,
   };
 }
@@ -202,5 +230,61 @@ describe('D165 — a reprint keeps the tender', () => {
       >;
       expect(written).not.toHaveProperty('amountTendered');
     }
+  });
+});
+
+/**
+ * D172 — the shop's logo on the printed bill.
+ *
+ * ## What makes these non-vacuous (D30)
+ *
+ * The positive case asserts the bytes arrive as a `data:` URI, not merely that
+ * an `<img>` exists. A template emitting `src="/uploads/…"` would satisfy "there
+ * is an image" and is exactly the bug this fixes on the A4 side: the tag is
+ * there, the picture is not, because the path resolves against the web app.
+ *
+ * The negative case is the one that stops the fix over-reaching. Every tenant
+ * without a logo — which is every tenant until someone uploads one — must print
+ * precisely what it printed before, so "no logo configured" asserts no `<img>`
+ * at all AND that the shop name is still there.
+ *
+ * The name is asserted in BOTH cases. A logo that replaced the shop name would
+ * pass a test that only looked for the image, and a bill whose branding failed
+ * to render would then carry nothing identifying the shop at all.
+ */
+describe('D172 — the logo on the thermal bill', () => {
+  it('prints the logo as inlined bytes when one is configured', async () => {
+    const s = setup(undefined, '/uploads/products/logo.webp');
+
+    await s.service.generateCustomer('t1', 'sale_1', 'usr_1');
+
+    expect(s.html()).toContain('<img src="data:image/webp;base64,');
+    // Not a path. A src the print iframe cannot resolve is the defect itself.
+    expect(s.html()).not.toContain('src="/uploads/');
+    expect(text(s.html())).toContain('Kandy Apparel');
+  });
+
+  it('prints no image at all when no logo is configured', async () => {
+    const s = setup(undefined, null);
+
+    await s.service.generateCustomer('t1', 'sale_1', 'usr_1');
+
+    expect(s.html()).not.toContain('<img');
+    expect(text(s.html())).toContain('Kandy Apparel');
+  });
+
+  it('prints the bill without the logo when the image cannot be read', async () => {
+    // Decoration, not content: a storage outage must not cost the customer a
+    // receipt for money that has already changed hands.
+    globalThis.fetch = jest.fn(async () => {
+      throw new Error('storage unreachable');
+    }) as unknown as typeof fetch;
+    const s = setup(undefined, '/uploads/products/logo.webp');
+
+    await s.service.generateCustomer('t1', 'sale_1', 'usr_1');
+
+    expect(s.html()).not.toContain('<img');
+    expect(text(s.html())).toContain('Kandy Apparel');
+    expect(text(s.html())).toContain('Bill Amount');
   });
 });

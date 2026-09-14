@@ -6,6 +6,8 @@ import { paginate } from '../../common/pagination';
 import { safeTimeZone } from '@hardware-pos/shared';
 
 import { SettingsService } from '../settings/settings.service';
+import { inlineImage } from '../../common/storage/inline-image';
+import { StorageService } from '../../common/storage/storage.service';
 import {
   customerDocumentLabel,
   resolveCustomerDocumentKind,
@@ -35,6 +37,8 @@ export class ReceiptsService {
   constructor(
     private readonly receiptsRepository: ReceiptsRepository,
     private readonly settingsService: SettingsService,
+    /** D172 — reads the logo's bytes so the printed bill carries them. */
+    private readonly storage: StorageService,
   ) {}
 
   // ── generation ─────────────────────────────────────────────────────────────
@@ -75,12 +79,27 @@ export class ReceiptsService {
      */
     const tender = amountTendered ?? (await this.storedTender(tenantId, saleId));
 
+    /*
+     * D172 — the shop's logo, inlined.
+     *
+     * The SAME `documents.logoUrl` the A4 letterhead uses, not a second
+     * setting: a shop has one logo, and asking an operator to upload it twice
+     * is how the bill and the invoice end up showing different marks.
+     *
+     * Resolved to a `data:` URI here rather than passed as a path, because this
+     * HTML is printed from a hidden iframe in the web app (D78) where
+     * `/uploads/<key>` resolves against the web app and 404s. `inlineImage`
+     * caches and never throws, so a missing logo costs a receipt nothing.
+     */
+    const logoDataUri = await inlineImage(this.storage, settings.documents.logoUrl);
+
     const receiptData = this.toCustomerReceiptData(
       sale,
       settings.currency,
       settings.receiptFooter,
       safeTimeZone(settings.timezone),
       tender,
+      logoDataUri,
     );
     const receipt = await this.receiptsRepository.upsertReceipt(
       tenantId,
@@ -193,6 +212,7 @@ export class ReceiptsService {
     footer: string,
     tz: string,
     amountTendered?: number,
+    logoDataUri?: string | null,
   ): CustomerReceiptData {
     return {
       // D162 — spread into the stored `Receipt.content` too (it is a JSON
@@ -201,6 +221,7 @@ export class ReceiptsService {
       // it does today.
       ...(amountTendered != null ? { amountTendered } : {}),
       storeName: sale.tenant.name,
+      logoDataUri,
       saleNumber: sale.saleNumber,
       dateTime: formatReceiptDateTime(sale.completedAt ?? sale.createdAt, tz),
       // External-integration metadata when the tenant has an accounting provider —

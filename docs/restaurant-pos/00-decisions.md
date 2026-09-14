@@ -10858,6 +10858,135 @@ above now sits beside the directory name in the spec. The count moved 85 → 86.
 
 ---
 
+## D172 — a document carries its pictures, it does not point at them
+
+**Status:** accepted and **built**, 2026-09-14. No schema change, no migration.
+
+### What was reported
+
+> "bill not contain the logo of our business … and also quatation A4 bill also
+> not containing the logo"
+
+One sentence, two entirely different faults.
+
+### Fault 1 — the A4 rendered the logo, as a broken image
+
+`document-templates.ts` had been emitting it all along:
+
+```ts
+const logo = s.logoUrl ? `<img src="${esc(s.logoUrl)}" alt="${esc(s.name)}" />` : '';
+```
+
+`s.logoUrl` is `/uploads/<key>` — a path with **no origin**, deliberately, so
+that switching storage backends does not invalidate stored rows. That is correct
+inside the app's own pages, where the browser is already talking to the API.
+
+It is wrong in a document. The API builds the HTML and the web app writes it
+into a popup:
+
+```ts
+win.document.write(html)   // origin: the WEB app, :3000
+```
+
+so the image is requested from the **web app**, which has never heard of it.
+Measured against the running stack:
+
+```
+http://localhost:4000/uploads/products/9384b575….webp  →  302
+http://localhost:3000/uploads/products/9384b575….webp  →  404
+```
+
+The `<img>` was always there. The picture never was.
+
+**The sales A4 does not have this bug**, which is why it was not reported: it is
+a React component that calls `resolveImageUrl()` and prefixes the API origin.
+One logo, two renderers, only one of them absolutising — and the one that did
+not is the one used for quotations.
+
+**The signature and the stamp had the identical defect**, on the same
+letterhead, unreported only because fewer tenants have uploaded one. Fixed with
+the logo; a fix that left two of three broken would print a letterhead with one
+picture and two broken icons.
+
+### Fault 2 — the thermal bill had no logo at all
+
+`receipt-templates.ts` contained zero references to one, and
+`CustomerReceiptData` had `storeName` and no image field. Never built. The bill
+printed the shop's name as text, which is why it looked like a rendering
+failure rather than a missing feature.
+
+### The decision
+
+**The bytes travel with the document.** Branding images are read once and
+inlined as `data:` URIs.
+
+Absolutising the URL against the API's origin would have fixed the popup and
+nothing else. A quotation is **shared** — printed to PDF, attached to an email,
+sent over WhatsApp — and a recipient's browser resolving `http://localhost:4000`
+finds their own machine. A document that needs the issuing server to still be
+reachable is not a document; it is a screen. Inlined, it prints, saves, forwards
+and opens on a machine that has never heard of this installation.
+
+`inline-image.ts` handles both provider shapes behind `StorageService.resolve`:
+`local` gives a path on disk, `s3` gives a short-lived signed URL this process
+fetches exactly as a browser would. Neither caller knows which is configured.
+
+### It never throws, and that is a decision
+
+Every failure path returns `null`, which the templates already render as "no
+image" — the state of every tenant before anyone uploads a logo. A branding
+asset is **decoration**; a quotation that 500s because a logo moved is a worse
+outcome than one that prints without it, and a receipt is the record of money
+that has already changed hands. Asserted directly: with storage unreachable,
+both the bill and the letterhead still print, with the business name and the
+totals intact.
+
+### Two limits, chosen
+
+- **512 KB cap.** `saveImage` downscales and re-encodes every upload, so a real
+  logo lands far under it; the cap is for rows written before that pipeline
+  existed. Base64 costs a third on top, and a 5 MB image inlined into every
+  receipt would make the printer the slowest part of the sale.
+- **Cached per stored path**, five minutes. A till prints all day, and
+  re-reading the logo per receipt is the difference between a cached string and
+  a round trip to S3 at the counter. Keyed per path, asserted negatively, so the
+  stamp's bytes cannot be served as the logo.
+
+### On the thermal bill, the name stays
+
+The logo sits **above** the shop name; it does not replace it. A roll is 80mm
+and **monochrome** — a colour image dithers, and a logo that prints as a grey
+smear on a bill carrying no shop name is worse than no logo. Sized with
+`max-height: 18mm`, in millimetres because the output is paper.
+
+That trade-off was put to the Product Owner before it was built. Whether a given
+logo survives thermal printing is a property of the artwork, not of this code:
+high-contrast line art prints, photographs do not.
+
+### Mutation proof
+
+| Mutation | Fails |
+|---|---|
+| drop the `if (!d.logoDataUri) return ''` guard | "prints no image at all when no logo is configured" **and** "prints the bill without the logo when the image cannot be read" |
+| the logo REPLACES the shop name | "prints the logo as inlined bytes when one is configured" |
+
+The second is the one worth having. It only fails because the positive case
+asserts the shop name is present **alongside** the logo — a test that merely
+looked for the image would have passed a bill with no shop name on it.
+
+The A4 cases assert a `data:` URI **and** the absence of any `/uploads/` src.
+Asserting an `<img>` exists would have passed against the broken version, which
+emitted one all along.
+
+### Known limit
+
+`receipt-print.ts` keeps a **client-side fallback** that prints a minimal
+receipt when the server render fails. It has no logo and is not given one: it
+exists to get paper out of the printer when the API is unreachable, and its
+whole design is to be minimal. Recorded so it is not mistaken for an oversight.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

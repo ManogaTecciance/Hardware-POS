@@ -28,6 +28,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessProfileService } from '../platform/business-profile.service';
 import { SettingsService } from '../settings/settings.service';
 import { DocumentSettings } from '../settings/settings.interfaces';
+import { inlineImage } from '../../common/storage/inline-image';
+import { StorageService } from '../../common/storage/storage.service';
 import { QuotationDetail } from '../quotations/quotations.types';
 import {
   A4Column,
@@ -217,6 +219,20 @@ export class DocumentsService {
      * about a transaction, and reads the registry rather than branching.
      */
     private readonly profiles: BusinessProfileService,
+    /**
+     * D172 — reads the branding assets' BYTES so a document can carry them.
+     *
+     * Appended rather than slotted in beside the other presentation collaborator:
+     * this constructor is called positionally in specs, and inserting a
+     * parameter in the middle silently shifts every argument after it. It was
+     * caught here by `profiles.getEffectiveProfile is not a function`, which is
+     * a confusing way to learn about an argument order.
+     *
+     * Presentation only: it resolves a stored path to a file or a signed URL and
+     * decides nothing about a transaction, so D28's rule about services not
+     * injecting their way to a business decision is not in play.
+     */
+    private readonly storage: StorageService,
   ) {}
 
   /** Whether a server-side PDF engine (Puppeteer) is installed. */
@@ -283,7 +299,7 @@ export class DocumentsService {
 
   async quotationHtml(tenantId: string, q: QuotationDetail): Promise<string> {
     const sellerName = await this.tenantName(tenantId);
-    return renderA4Document(this.buildQuotationDocument(tenantId, q, sellerName));
+    return this.render(this.buildQuotationDocument(tenantId, q, sellerName));
   }
 
   async quotationPdf(tenantId: string, q: QuotationDetail): Promise<Buffer | null> {
@@ -452,13 +468,13 @@ export class DocumentsService {
 
   async saleHtml(tenantId: string, saleId: string): Promise<string> {
     const sale = await this.loadSale(tenantId, saleId);
-    return renderA4Document(this.buildSaleDocument(tenantId, sale));
+    return this.render(this.buildSaleDocument(tenantId, sale));
   }
 
   async salePdf(tenantId: string, saleId: string): Promise<Buffer | null> {
     const sale = await this.loadSale(tenantId, saleId);
     const docs = this.settings.getSettings(tenantId).documents;
-    return this.pdf.htmlToPdf(renderA4Document(this.buildSaleDocument(tenantId, sale)), {
+    return this.pdf.htmlToPdf(await this.render(this.buildSaleDocument(tenantId, sale)), {
       showPageNumbers: docs.showPageNumbers,
       footerLabel: `Invoice ${sale.saleNumber}`,
     });
@@ -570,13 +586,13 @@ export class DocumentsService {
 
   async returnHtml(tenantId: string, returnId: string): Promise<string> {
     const ret = await this.loadReturn(tenantId, returnId);
-    return renderA4Document(this.buildReturnDocument(tenantId, ret));
+    return this.render(this.buildReturnDocument(tenantId, ret));
   }
 
   async returnPdf(tenantId: string, returnId: string): Promise<Buffer | null> {
     const ret = await this.loadReturn(tenantId, returnId);
     const docs = this.settings.getSettings(tenantId).documents;
-    return this.pdf.htmlToPdf(renderA4Document(this.buildReturnDocument(tenantId, ret)), {
+    return this.pdf.htmlToPdf(await this.render(this.buildReturnDocument(tenantId, ret)), {
       showPageNumbers: docs.showPageNumbers,
       footerLabel: `Return ${ret.returnNumber}`,
     });
@@ -709,7 +725,7 @@ export class DocumentsService {
       taxAmount: num(it.taxAmount),
     }));
 
-    return renderA4Document(
+    return this.render(
       this.buildExchangeDocument(
         tenantId,
         row.tenant.name,
@@ -751,7 +767,7 @@ export class DocumentsService {
     lineCount = 6,
   ): Promise<string> {
     const fallbackName = await this.tenantName(tenantId);
-    return renderA4Document(
+    return this.render(
       this.buildSampleDocument(
         tenantId,
         type,
@@ -930,6 +946,36 @@ export class DocumentsService {
       showPageNumbers: docs.showPageNumbers,
       generatedAt: this.dateTime(new Date(), tz),
     };
+  }
+
+  /**
+   * D172 — render an A4 document with its branding images inlined.
+   *
+   * The builders stay SYNCHRONOUS, which is deliberate: every other input they
+   * take is already resolved, and making them async to fetch a logo would put an
+   * await inside every document shape for the sake of decoration. So the bytes
+   * are fetched once here, at the boundary where HTML is produced, and the eight
+   * call sites go through this instead of `renderA4Document` directly.
+   *
+   * Stored branding paths are `/uploads/<key>` — no origin, by design. Written
+   * into a popup by the web app they resolve against the WEB app and 404. See
+   * `inline-image.ts` for why absolutising the URL is not the fix.
+   *
+   * The three assets are fetched in parallel and independently: a broken stamp
+   * must not cost the document its logo.
+   */
+  private async render(doc: A4Document): Promise<string> {
+    const [logoUrl, signatureImageUrl, stampImageUrl] = await Promise.all([
+      inlineImage(this.storage, doc.seller.logoUrl),
+      inlineImage(this.storage, doc.signatureImageUrl),
+      inlineImage(this.storage, doc.stampImageUrl),
+    ]);
+    return renderA4Document({
+      ...doc,
+      seller: { ...doc.seller, logoUrl },
+      signatureImageUrl,
+      stampImageUrl,
+    });
   }
 
   private dateTime(d: Date, tz: string): string {

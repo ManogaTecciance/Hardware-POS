@@ -712,6 +712,12 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DOC-062 | The toggle names the right bill and still works (D166) | Read the toggle on retail, then on hardware; turn it off and complete a sale | Retail reads *Print receipt after payment*, hardware *Print A4 bill after payment*. With it off, nothing prints automatically on either | P | Not Run |
 | DOC-063 | The receipt uses the standard money labels (D167) | Print any retail thermal receipt and read the money rows | **Bill Amount**, **Paid Amount**, **Bal. Amount** — the same words the restaurant bill has always used. Not Total / Paid / Balance | P | Not Run |
 | DOC-064 | The payment breakdown keeps its method names (D167) | Print a receipt settled by card, or split card + cash | The breakdown rows still read **Card** and **Cash**. Those name a METHOD, not an amount, and renaming them would turn a method into a total | N | Not Run |
+| DOC-065 | The quotation letterhead shows the logo (D172) | Settings → upload a logo, then open a quotation and click Print | The logo prints on the letterhead. Before D172 the `<img>` was emitted with a `/uploads/…` src, which the print popup resolved against the WEB app and got a 404 — a broken image, not a missing one | P | Not Run |
+| DOC-066 | Signature and stamp print too (D172) | Upload a signature and a stamp, then print a quotation | All three images appear. They shared the logo's defect on the same letterhead and were fixed with it | P | Not Run |
+| DOC-067 | The thermal bill shows the logo above the shop name (D172) | With a logo configured, complete a sale and print the bill | The logo prints, and the shop NAME is still printed under it. A roll is monochrome; a logo that replaced the name would leave nothing identifying the shop when the image prints badly | P | Not Run |
+| DOC-068 | A workspace with no logo prints exactly as before (D172) | On a workspace with no logo uploaded, print a bill and a quotation | No image element at all, business name intact. This is every tenant until someone uploads one | N | Not Run |
+| DOC-069 | A document still prints when the image cannot be read (D172) | Stop the storage service (or remove the uploaded file), then print a bill and a quotation | Both print without the picture. Branding is decoration — a receipt is the record of money that already moved, and a quotation that 500s over a logo is the worse outcome | N | Not Run |
+| DOC-070 | The printed document opens on another machine (D172) | Print a quotation to PDF, then open it on a machine that cannot reach this server | The logo is still there. Images are inlined as `data:` URIs rather than URLs, because a quotation gets emailed and a recipient resolving `localhost:4000` finds their own machine | P | Not Run |
 | DOC-001 | Sale A4 document renders | Open printable invoice for a sale | Items, totals, payments, letterhead correct | P | Not Run |
 | DOC-002 | Customer block composes address | Sale for customer with street/city/state/zip/country | One joined "Bill to" address line; company + tax no. shown | P | Not Run |
 | DOC-003 | Walk-in shows placeholder party | Sale without customer | "Walk-in customer" block | P | Not Run |
@@ -953,7 +959,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD | 93 | SIMP | 8 |
 | PIMP | 18 | QB | 31 |
 | POS | 62 | SET | 36 |
-| PAY | 41 | DOC | 37 |
+| PAY | 41 | DOC | 43 |
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
@@ -963,7 +969,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 734 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 740 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 
